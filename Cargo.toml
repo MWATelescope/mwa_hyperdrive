@@ -1,0 +1,31 @@
+[package]
+name = "mwa_hyperdrive"
+version = "0.1.0"
+authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
+edition = "2018"
+license = "MPL-2.0"
+build = "build.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.dev]
+opt-level = 2
+
+[build-dependencies]
+bindgen = "0.53.2"
+cc = "1.0.50"
+
+[dependencies]
+anyhow = "1.0.26"
+byteorder = "1.3.4"
+fitsio = "0.15.0"
+fitsio-sys = "0.3.0"
+float-cmp = "0.6.0"
+indicatif = "0.14.0"
+lazy_static = "1.4.0"
+libc = "0.2.66"
+nom = "5.1.1"
+num = "0.2.1"
+rayon = "1.3.0"
+regex = "1.3.3"
+structopt = "0.3.11"
