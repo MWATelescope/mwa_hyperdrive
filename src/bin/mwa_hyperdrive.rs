@@ -17,8 +17,8 @@ use mwa_hyperdrive::*;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "mwa_hyperdrive", author)]
 enum Opt {
-    /// Run a WODEN-like simulation
-    Woden {
+    /// Simulate visibilities of a source list like WODEN
+    SimulateVis {
         /// Path to the source list used for sky modelling.
         #[structopt(short, long)]
         source_list: PathBuf,
@@ -28,11 +28,11 @@ enum Opt {
         metafits: PathBuf,
 
         /// The pointing-centre right ascension [degrees].
-        #[structopt(short, long, default_value = "50.67")]
+        #[structopt(short, long)]
         ra: f64,
 
         /// The pointing-centre declination [degrees].
-        #[structopt(short, long, default_value = "-37.2")]
+        #[structopt(short, long)]
         dec: f64,
 
         /// The fine-channel resolution [kHz].
@@ -72,7 +72,7 @@ enum Opt {
     },
 }
 
-fn woden(
+fn simulate_vis(
     context: Context,
     params: TimeFreqParams,
     source_list: PathBuf,
@@ -99,7 +99,7 @@ fn woden(
 
 fn main() -> Result<(), anyhow::Error> {
     match Opt::from_args() {
-        Opt::Woden {
+        Opt::SimulateVis {
             source_list,
             metafits,
             ra,
@@ -112,19 +112,43 @@ fn main() -> Result<(), anyhow::Error> {
             cpu,
             text,
         } => {
+            // Sanity checks.
+            if ra < 0.0 || ra > 360.0 {
+                bail!("--ra is not within 0 to 360!");
+            }
+            if dec > 90.0 || dec < -90.0 {
+                bail!("--dec is not within -90 to 90!");
+            }
+
             let bands = if num_bands.is_none() && bands.is_none() {
                 bail!("Neither --num_bands nor --bands were supplied!");
             } else if num_bands.is_none() {
-                bands.unwrap()
+                let bands = bands.unwrap();
+                // 0 cannot be in the band list.
+                if bands.contains(&0) {
+                    bail!("0 was specified in --bands; this isn't allowed!");
+                }
+                bands
             } else {
-                // Assume we start from 0.
-                (0..num_bands.unwrap()).collect()
+                // Assume we start from 1.
+                let bands: Vec<_> = (1..=num_bands.unwrap()).collect();
+                // The number of bands cannot be 0.
+                if bands.is_empty() {
+                    bail!("--num_bands cannot be 0!");
+                }
+                bands
             };
 
             // Use the metafits file.
             let mut metafits_fptr = fitsio::FitsFile::open(metafits)?;
             let context = Context::new(&mut metafits_fptr)?;
+
+            // Check that the fine-channel width is not too large.
+            if fine_channel_width as usize > context.coarse_channel_width / 1000 {
+                bail!("--fine_channel_width ({} kHz) is larger than this observation's coarse channel width ({} kHz)!", fine_channel_width, context.coarse_channel_width / 1000);
+            }
             let fine_channel_width = fine_channel_width * 1e3;
+
             let params = TimeFreqParams {
                 n_time_steps: steps as usize,
                 time_resolution: time_res,
@@ -133,7 +157,7 @@ fn main() -> Result<(), anyhow::Error> {
                 fine_channel_width,
             };
 
-            woden(
+            simulate_vis(
                 context,
                 params,
                 source_list,

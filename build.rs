@@ -24,7 +24,10 @@ fn main() {
     // Attempt to read HYPERDRIVE_CUDA_COMPUTE.
     let compute = match env::var("HYPERDRIVE_CUDA_COMPUTE") {
         Ok(c) => c,
-        Err(e) => panic!("Problem reading env. variable HYPERDRIVE_CUDA_COMPUTE ! {}", e),
+        Err(e) => panic!(
+            "Problem reading env. variable HYPERDRIVE_CUDA_COMPUTE ! {}",
+            e
+        ),
     };
     // Check that there's only two numeric characters.
     if compute.parse::<u16>().is_err() {
@@ -41,7 +44,7 @@ fn main() {
         .flag("-cudart=static")
         .flag("-gencode")
         // Using the specified HYPERDRIVE_CUDA_COMPUTE
-        .flag(format!("arch=compute_{c},code=sm_{c}", c=compute).as_str())
+        .flag(format!("arch=compute_{c},code=sm_{c}", c = compute).as_str())
         .define(
             // The DEBUG env. variable is set by cargo. If running "cargo build
             // --release", DEBUG is "false", otherwise "true". C/C++/CUDA like
@@ -59,8 +62,13 @@ fn main() {
         .compile("hyperdrive_cu");
 
     // Use the following search paths when linking.
-    println!("cargo:rustc-link-search=native=/usr/local/cuda/lib");
-    println!("cargo:rustc-link-search=native=/opt/cuda/lib");
+    // CUDA could be installed in a couple of places, and use "lib" or "lib64";
+    // specify all combinations.
+    for path in vec!["/usr/local/cuda", "/opt/cuda"] {
+        for lib_path in vec!["lib", "lib64"] {
+            println!("cargo:rustc-link-search=native={}/{}", path, lib_path);
+        }
+    }
     // Link with the dynamic cudart library
     println!("cargo:rustc-link-lib=cudart");
 }

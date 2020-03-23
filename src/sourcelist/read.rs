@@ -118,7 +118,8 @@ fn source_parser(s: &str) -> IResult<&str, Source> {
     let (s, components) = many1(component_parser)(s)?;
 
     let (s, _) = tag("ENDSOURCE")(s)?;
-    let (s, _) = newline(s)?;
+    // Trailing newlines are optional.
+    let (s, _) = many0(newline)(s)?;
 
     Ok((
         s,

@@ -69,7 +69,7 @@ pub fn vis_gen(
     pb.set_style(
         ProgressStyle::default_bar()
             .template(
-                "{msg}{percent}% [{bar:60.cyan/blue}] {pos}/{len} [{elapsed_precise}<{eta_precise}]",
+                "{msg}{percent}% [{bar:40.cyan/blue}] {pos}/{len} [{elapsed_precise}<{eta_precise}]",
             )
             .progress_chars("#>-"),
     );
@@ -266,8 +266,9 @@ fn cpu_vis_gen(
             .into_iter()
             .map(|fine_channel| {
                 // Calculate the wavelength for this fine channel, and scale
-                // the UVW coords with it.
-                let freq = (context.base_freq + *band as usize * context.coarse_channel_width)
+                // the UVW coords with it. Have to subtract 1, as we index MWA
+                // coarse bands from 1.
+                let freq = (context.base_freq + (*band - 1) as usize * context.coarse_channel_width)
                     as f64
                     + params.fine_channel_width * fine_channel as f64;
                 let wavelength = *VEL_C / freq;

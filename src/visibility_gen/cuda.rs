@@ -45,9 +45,10 @@ pub fn cuda_vis_gen(
         let mut uvw_scaled: Vec<Vec<UVW>> = (0..params.n_fine_channels)
             .into_par_iter()
             .map(|fine_channel| {
-                // Calculate the wavelength for this fine channel, and scale
-                // the UVW coords with it.
-                let freq = (context.base_freq + *band as usize * context.coarse_channel_width)
+                // Calculate the wavelength for this fine channel, and scale the
+                // UVW coords with it. Have to subtract 1, as we index MWA
+                // coarse bands from 1.
+                let freq = (context.base_freq + (*band - 1) as usize * context.coarse_channel_width)
                     as f64
                     + params.fine_channel_width * fine_channel as f64;
 
@@ -59,7 +60,7 @@ pub fn cuda_vis_gen(
         let mut fd_extrap: Vec<Vec<FluxDensity>> = (0..params.n_fine_channels)
             .into_par_iter()
             .map(|fine_channel| {
-                let freq = (context.base_freq + *band as usize * context.coarse_channel_width)
+                let freq = (context.base_freq + (*band - 1) as usize * context.coarse_channel_width)
                     as f64
                     + params.fine_channel_width * fine_channel as f64;
 
