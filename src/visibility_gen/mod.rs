@@ -10,10 +10,13 @@ use std::io::Write;
 
 use byteorder::{ByteOrder, LittleEndian};
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 
 use crate::constants::*;
+use crate::context::Context;
 use crate::coord::*;
-use crate::sourcelist::types::Source;
+use crate::sourcelist::estimate::calc_flux_ratio;
+use crate::sourcelist::types::{FluxDensity, Source};
 
 /// Parameters for visibility generation. Members of this struct might be
 /// different from a `Context` struct (e.g. such as `time_resolution`), which
@@ -98,8 +101,7 @@ pub fn vis_gen(
             }
             cuda::cuda_vis_gen(&context, &src, &params, &pc, &uvw_metres)
         } else {
-            // TODO: Implement CPU visibility generation.
-            unimplemented!("CPU-only visibility generation");
+            cpu_vis_gen(&context, &src, &params, &pc, &uvw_metres)
         };
 
         let (mut u_t, mut v_t, mut w_t) = UVW::decompose(uvw_metres);
@@ -236,4 +238,86 @@ fn write_binary_real_imag(
     }
 
     Ok(())
+}
+
+/// Calculate the visibility equation for every (u,v,w) and (l,m,n)
+/// combination. This is a CPU implementation of `cuda_vis_gen`, and does
+/// calculations in parallel.
+///
+/// On my Ryzen 9 3900X (12 hyper-threaded cores), this function is
+/// approximately 50x slower than `cuda_vis_gen` (using an NVIDIA GeForce RTX
+/// 2070).
+fn cpu_vis_gen(
+    context: &Context,
+    src: &Source,
+    params: &TimeFreqParams,
+    pc: &PC,
+    uvw_metres: &[UVW],
+) -> (Vec<f32>, Vec<f32>) {
+    // Generate UVW baselines for each fine-frequency channel in each coarse
+    // freq. band and calculate the expected flux densities at each frequency.
+    let n_visibilities = params.freq_bands.len() * params.n_fine_channels * context.n_baselines;
+
+    let mut real = Vec::with_capacity(n_visibilities);
+    let mut imag = Vec::with_capacity(n_visibilities);
+
+    for band in &params.freq_bands {
+        (0..params.n_fine_channels)
+            .into_iter()
+            .map(|fine_channel| {
+                // Calculate the wavelength for this fine channel, and scale
+                // the UVW coords with it.
+                let freq = (context.base_freq + *band as usize * context.coarse_channel_width)
+                    as f64
+                    + params.fine_channel_width * fine_channel as f64;
+                let wavelength = *VEL_C / freq;
+                let uvw: Vec<UVW> = uvw_metres
+                    .into_par_iter()
+                    .map(|v| *v / wavelength)
+                    .collect();
+
+                // Get the flux densities for each frequency.
+                let fds: Vec<FluxDensity> = src
+                    .components
+                    .par_iter()
+                    .map(|comp| {
+                        comp.flux_densities
+                            .iter()
+                            .map(|fd| *fd * calc_flux_ratio(freq, fd.freq, *DEFAULT_SPEC_INDEX))
+                            .collect::<Vec<FluxDensity>>()
+                    })
+                    .flatten()
+                    .collect();
+
+                // Get the (l,m,n) coordinates for each source component.
+                let lmn = src.get_lmn(&pc);
+
+                // Perform the visibility equation.
+                let mut r = Vec::with_capacity(params.n_fine_channels * context.n_baselines);
+                let mut i = Vec::with_capacity(params.n_fine_channels * context.n_baselines);
+                uvw.into_par_iter()
+                    .map(|bl| {
+                        lmn.par_iter()
+                            .zip(&fds)
+                            .fold(
+                                || (0.0, 0.0),
+                                // `bl` for baseline, `dc` for direction cosine.
+                                |acc, (dc, fd)| {
+                                    let arg =
+                                        *PI2 * (bl.u * dc.l + bl.v * dc.m + bl.w * (dc.n - 1.0));
+                                    (
+                                        acc.0 + (arg.cos() * fd.i) as f32,
+                                        acc.1 + (arg.sin() * fd.i) as f32,
+                                    )
+                                },
+                            )
+                            .reduce(|| (0.0, 0.0), |acc, (r, i)| (acc.0 + r, acc.1 + i))
+                    })
+                    .unzip_into_vecs(&mut r, &mut i);
+                real.append(&mut r);
+                imag.append(&mut i);
+            })
+            .for_each(drop);
+    }
+    (real, imag)
 }

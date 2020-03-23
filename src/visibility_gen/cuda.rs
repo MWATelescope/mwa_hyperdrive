@@ -19,6 +19,11 @@ use crate::sourcelist::{estimate::calc_flux_ratio, *};
 ///
 /// Currently only works with a single `Source` made from point-source
 /// components.
+///
+/// Note that results will be slightly different between runs of this function
+/// with the same settings; floating-point operations are not associative, and
+/// CUDA will add floats in an effectively random order, resulting in
+/// non-determinism.
 #[allow(clippy::many_single_char_names)]
 pub fn cuda_vis_gen(
     context: &Context,
