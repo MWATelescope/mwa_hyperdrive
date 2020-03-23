@@ -34,11 +34,9 @@ pub struct TimeFreqParams {
 
 /// Generate visibilities for a sky model by iterating over each time step
 /// defined in `params`, and write the results to a binary file per
-/// coarse-frequency band (this is the format of uvfits files, and matches the
-/// output of WODEN).
-///
-/// Some commented-out code is available which writes the same data to text
-/// files. TODO: Make this accessible via CLI args.
+/// coarse-frequency band, named "./hyperdrive_bandxx.bin" (this is the format
+/// of uvfits files, and matches the output of WODEN). If specified, data is
+/// also written to a text file named "./hyperdrive_bandxx.txt".
 ///
 /// Currently only works with a single `Source` made from point-source
 /// components.
@@ -48,6 +46,7 @@ pub fn vis_gen(
     params: &TimeFreqParams,
     mut pc: PC,
     cuda: bool,
+    text_file: bool,
 ) -> Result<(), std::io::Error> {
     // Because WODEN writes all `u` coordinates before writing all `v`, then
     // `w`, etc., we need to store all data before it can be written out. An
@@ -160,28 +159,27 @@ pub fn vis_gen(
             &imag,
         )?;
 
-        // // Write a text file.
-        // let file = File::create(format!("hyperdrive_band{:02}.txt", band))?;
-        // let mut buf = BufWriter::new(file);
-        // let unit = params.n_fine_channels * context.n_baselines;
-        // for time_step in 0..params.n_time_steps {
-        //     println!("time_step: {}, band_num: {}", time_step, band_num);
-        //     let coord_offset = time_step * context.n_baselines;
-        //     println!("coord_offset: {}", coord_offset);
-        //     let vis_offset = time_step * params.freq_bands.len() * unit + band_num * unit;
-        //     println!("vis_offset: {}\n", vis_offset);
-        //     for i in 0..unit {
-        //         writeln!(
-        //             buf,
-        //             "{:.7} {:.7} {:.7} {:.7} {:.7}",
-        //             u[coord_offset + (i % context.n_baselines)],
-        //             v[coord_offset + (i % context.n_baselines)],
-        //             w[coord_offset + (i % context.n_baselines)],
-        //             real[vis_offset + i],
-        //             imag[vis_offset + i]
-        //         )?;
-        //     }
-        // }
+        // Write a text file.
+        if text_file {
+            let file = File::create(format!("hyperdrive_band{:02}.txt", band))?;
+            let mut buf = BufWriter::new(file);
+            let unit = params.n_fine_channels * context.n_baselines;
+            for time_step in 0..params.n_time_steps {
+                let coord_offset = time_step * context.n_baselines;
+                let vis_offset = time_step * params.freq_bands.len() * unit + band_num * unit;
+                for i in 0..unit {
+                    writeln!(
+                        buf,
+                        "{:.7} {:.7} {:.7} {:.7} {:.7}",
+                        u[coord_offset + (i % context.n_baselines)],
+                        v[coord_offset + (i % context.n_baselines)],
+                        w[coord_offset + (i % context.n_baselines)],
+                        real[vis_offset + i],
+                        imag[vis_offset + i]
+                    )?;
+                }
+            }
+        }
     }
 
     Ok(())

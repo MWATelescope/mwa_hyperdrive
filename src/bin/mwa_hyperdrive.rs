@@ -59,6 +59,10 @@ enum Opt {
         /// Use the CPU for visibility generation.
         #[structopt(short, long)]
         cpu: bool,
+
+        /// Also write visibility data to text files.
+        #[structopt(long)]
+        text: bool,
     },
     /// Verify that a source list can be read by the hyperdrive.
     VerifySrclist {
@@ -75,6 +79,7 @@ fn woden(
     ra: f64,
     dec: f64,
     cuda: bool,
+    text_file: bool,
 ) -> Result<(), anyhow::Error> {
     // Read in the source list.
     let sources: Vec<Source> = {
@@ -87,7 +92,7 @@ fn woden(
     // Create a pointing centre struct using the specified RA and Dec.
     let pc = PC::new_from_ra(context.base_lst, ra, dec);
     // Generate the visibilities.
-    vis_gen(&context, &sources[0], &params, pc, cuda)?;
+    vis_gen(&context, &sources[0], &params, pc, cuda, text_file)?;
 
     Ok(())
 }
@@ -105,6 +110,7 @@ fn main() -> Result<(), anyhow::Error> {
             steps,
             time_res,
             cpu,
+            text,
         } => {
             let bands = if num_bands.is_none() && bands.is_none() {
                 bail!("Neither --num_bands nor --bands were supplied!");
@@ -134,6 +140,7 @@ fn main() -> Result<(), anyhow::Error> {
                 ra.to_radians(),
                 dec.to_radians(),
                 !cpu,
+                text,
             )?;
         }
         Opt::VerifySrclist { source_lists } => {
