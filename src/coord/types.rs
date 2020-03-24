@@ -92,7 +92,8 @@ pub struct PC {
 }
 
 impl PC {
-    /// Generate a `PC` using an hour angle `ha` and declination `dec`.
+    /// Generate a `PC` using an hour angle `ha` and declination `dec`. All
+    /// arguments have units of radians.
     ///
     /// As the pointing centre struct saves sine and cosine values, this `new`
     /// function exists to ease reduce programmer effort.
@@ -110,7 +111,7 @@ impl PC {
     }
 
     /// Similar to `PC::new_from_ra`, but takes a right ascension `ra` instead
-    /// of an hour angle.
+    /// of an hour angle. All arguments have units of radians.
     pub fn new_from_ra(lst: f64, ra: f64, dec: f64) -> Self {
         let ha = lst - ra;
         Self {
