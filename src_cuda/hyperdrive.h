@@ -20,8 +20,11 @@ typedef struct Context_s {
 typedef struct UVW_s {
     /// The number of baselines present.
     const unsigned int n_baselines;
-    /// The number of elements in each array.
-    const unsigned int n_elem;
+    /// The number of frequency channels (num. freq. bands * num. fine channels)
+    /// present.
+    const unsigned int n_channels;
+    /// The number of elements (visibilities) in each array.
+    const unsigned int n_vis;
     /// u-coordinates [dimensionless]
     const float *u;
     /// v-coordinates [dimensionless]
@@ -31,8 +34,8 @@ typedef struct UVW_s {
 } UVW_s;
 
 /// A struct representing a source's components. Assumes that there is one
-/// frequency and Stokes I, Q, U, V flux density per component, such that the
-/// length of `point_l` is `n_points` and `point_fd` is 4x `n_points`.
+/// (l,m,n) per component, and `n_channels` Stokes I flux densities per
+/// component.
 typedef struct Source_s {
     /// The number of point source components.
     const unsigned int n_points;
@@ -42,15 +45,15 @@ typedef struct Source_s {
     const float *point_m;
     /// n-coordinates [dimensionless]
     const float *point_n;
-    /// Flux densities of Stokes I, Q, U and V [Jy]. This array is four times
-    /// larger than `n_points`.
+    /// The number of frequency channels (num. freq. bands * num. fine channels)
+    /// present.
+    const unsigned int n_channels;
+    /// The point-source flux densities [Jy]. The length of this array should be
+    /// `n_points` * `n_channels`.
     const float *point_fd;
 } Source_s;
 
-/// A struct representing a source and its various components. Assumes that
-/// there is one frequency and Stokes I, Q, U, V flux density per component,
-/// such that the length of `point_freq` is `n_points` and `point_fd` is 4x
-/// `n_points`.
+/// A container struct for storing visibilities.
 typedef struct Visibilities_s {
     /// The number of visibilities.
     const unsigned int n_visibilities;

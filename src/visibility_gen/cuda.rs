@@ -6,13 +6,9 @@
 Generate visibilities using CUDA.
  */
 
-use rayon::prelude::*;
-
 use super::*;
-use crate::constants::*;
 use crate::context::Context;
-use crate::foreign::*;
-use crate::sourcelist::{estimate::calc_flux_ratio, *};
+use crate::foreign::{Source_s, UVW_s, Visibilities_s};
 
 /// For all coarse-band frequencies and their fine channels, generate
 /// visibilities for a sky model with CUDA, using the C function `vis_gen`.
@@ -29,82 +25,32 @@ pub fn cuda_vis_gen(
     context: &Context,
     src: &Source,
     params: &TimeFreqParams,
-    pc: &PC,
-    uvw_metres: &[UVW],
+    flux_densities: &[f32],
+    lmn: Vec<LMN>,
+    uvw: Vec<UVW>,
 ) -> (Vec<f32>, Vec<f32>) {
-    // Generate UVW baselines for each fine-frequency channel in each coarse
-    // freq. band and calculate the expected flux densities at each frequency.
+    let n_channels = params.freq_bands.len() * params.n_fine_channels;
     let n_visibilities = params.freq_bands.len() * params.n_fine_channels * context.n_baselines;
-    // Pre-allocate the arrays to be passed to C.
-    let mut uvw = Vec::with_capacity(n_visibilities);
-    let mut flux_densities = Vec::with_capacity(params.n_fine_channels * params.freq_bands.len());
-
-    // For each fine channel, scale all of the UVW coordinates and calculate
-    // the expected flux density.
-    for band in &params.freq_bands {
-        let mut uvw_scaled: Vec<Vec<UVW>> = (0..params.n_fine_channels)
-            .into_par_iter()
-            .map(|fine_channel| {
-                // Calculate the wavelength for this fine channel, and scale the
-                // UVW coords with it. Have to subtract 1, as we index MWA
-                // coarse bands from 1.
-                let freq = (context.base_freq + (*band - 1) as usize * context.coarse_channel_width)
-                    as f64
-                    + params.fine_channel_width * fine_channel as f64;
-
-                let wavelength = *VEL_C / freq;
-                uvw_metres.iter().map(|v| *v / wavelength).collect()
-            })
-            .collect();
-
-        let mut fd_extrap: Vec<Vec<FluxDensity>> = (0..params.n_fine_channels)
-            .into_par_iter()
-            .map(|fine_channel| {
-                let freq = (context.base_freq + (*band - 1) as usize * context.coarse_channel_width)
-                    as f64
-                    + params.fine_channel_width * fine_channel as f64;
-
-                src.components
-                    .iter()
-                    .map(|comp| {
-                        comp.flux_densities
-                            .iter()
-                            .map(|fd| *fd * calc_flux_ratio(freq, fd.freq, *DEFAULT_SPEC_INDEX))
-                            .collect::<Vec<FluxDensity>>()
-                    })
-                    .flatten()
-                    .collect()
-            })
-            .collect();
-
-        for (mut bl, mut fd) in uvw_scaled.drain(..).zip(fd_extrap.drain(..)) {
-            uvw.append(&mut bl);
-            for f in fd.drain(..) {
-                flux_densities.push(f.i as f32);
-                flux_densities.push(f.q as f32);
-                flux_densities.push(f.u as f32);
-                flux_densities.push(f.v as f32);
-            }
-        }
-    }
 
     // Convert `uvw` to be C compatible.
     let (u, v, w) = UVW::decompose(uvw);
     let uvw_s = Box::into_raw(Box::new(UVW_s {
         n_baselines: context.n_baselines as u32,
-        n_elem: n_visibilities as u32,
+        n_channels: n_channels as u32,
+        n_vis: n_visibilities as u32,
         u: u.as_ptr(),
         v: v.as_ptr(),
         w: w.as_ptr(),
     }));
 
     // Convert `src` to be C compatible.
-    let (l, m, n) = LMN::decompose(src.get_lmn(&pc));
+    let (l, m, n) = LMN::decompose(lmn);
     let src_s = Box::into_raw(Box::new(Source_s {
         n_points: src.components.len() as u32,
         point_l: l.as_ptr(),
         point_m: m.as_ptr(),
         point_n: n.as_ptr(),
+        n_channels: n_channels as u32,
         point_fd: flux_densities.as_ptr(),
     }));
 

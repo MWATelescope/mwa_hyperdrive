@@ -119,6 +119,7 @@ fn source_parser(s: &str) -> IResult<&str, Source> {
 
     let (s, _) = tag("ENDSOURCE")(s)?;
     // Trailing newlines are optional.
+    // TODO: Also handle any comments after a ENDSOURCE.
     let (s, _) = many0(newline)(s)?;
 
     Ok((

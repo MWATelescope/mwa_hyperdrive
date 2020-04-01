@@ -41,10 +41,12 @@ pub fn estimate_flux_density_at_freq(
         // If there's only one source component, then we must assume the
         // spectral index for extrapolation.
         if fds.len() == 1 {
-            eprintln!(
-                "estimate_flux_density_at_freq: WARNING: Component has only one flux density; extrapolating with spectral index {}",
-                *DEFAULT_SPEC_INDEX
-            );
+            // CHJ: Should we warn here? If so, it needs to be done better than
+            // just printing to stderr.
+            // eprintln!(
+            //     "estimate_flux_density_at_freq: WARNING: Component has only one flux density; extrapolating with spectral index {}",
+            //     *DEFAULT_SPEC_INDEX
+            // );
             (*DEFAULT_SPEC_INDEX, &fds[0])
         }
         // Otherwise, find the frequencies that bound the given frequency. As we

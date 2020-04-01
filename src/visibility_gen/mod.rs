@@ -15,8 +15,8 @@ use rayon::prelude::*;
 use crate::constants::*;
 use crate::context::Context;
 use crate::coord::*;
-use crate::sourcelist::estimate::calc_flux_ratio;
-use crate::sourcelist::types::{FluxDensity, Source};
+use crate::sourcelist::estimate::estimate_flux_density_at_freq;
+use crate::sourcelist::types::Source;
 
 /// Parameters for visibility generation. Members of this struct might be
 /// different from a `Context` struct (e.g. such as `time_resolution`), which
@@ -64,6 +64,35 @@ pub fn vis_gen(
     let mut real = Vec::with_capacity(total_num_visibilities);
     let mut imag = Vec::with_capacity(total_num_visibilities);
 
+    // Get the interpolated/extrapolated flux densities for each frequency. The
+    // flux densities of the source components do not change with time, and we
+    // know all of the frequencies in advance. Calculate them once here.
+    let mut flux_densities =
+        Vec::with_capacity(src.components.len() * params.freq_bands.len() * params.n_fine_channels);
+    for band in &params.freq_bands {
+        // Have to subtract 1, as we index MWA coarse bands from 1.
+        let base_freq =
+            (context.base_freq + (*band - 1) as usize * context.coarse_channel_width) as f64;
+        for fine_channel in 0..params.n_fine_channels {
+            let freq = base_freq + params.fine_channel_width * fine_channel as f64;
+            let mut fds = src
+                .components
+                .par_iter()
+                .map(|comp| estimate_flux_density_at_freq(comp, freq).and_then(|fd| Ok(fd.i as _)))
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>();
+            // Panic if the length of `fds` is not the same as
+            // `src.components`; this means that
+            // `estimate_flux_density_at_freq` failed in at least one case.
+            if fds.len() != src.components.len() {
+                panic!("cpu_vis_gen: At least one computation failed in \"estimate_flux_density_at_freq\"!");
+            }
+            flux_densities.append(&mut fds);
+        }
+    }
+    // Ensure that no memory is dangling.
+    flux_densities.shrink_to_fit();
+
     // Make a progress bar for the time steps.
     let pb = ProgressBar::new(params.n_time_steps as u64);
     pb.set_style(
@@ -82,8 +111,32 @@ pub fn vis_gen(
             context.base_lst
                 + (time_step as f64 + 0.5) * params.time_resolution * *SOLAR2SIDEREAL * *DS2R,
         );
+
+        // Get the (l,m,n) coordinates for each source component.
+        let lmn = src.get_lmn(&pc);
+
         // Get the UVW baselines with the new PC.
         let uvw_metres = UVW::get_baselines(&context.xyz, &pc);
+
+        // For each fine channel, scale all of the UVW coordinates by
+        // wavelength, and store the result in `uvw`.
+        let mut uvw = Vec::with_capacity(
+            params.freq_bands.len() * params.n_fine_channels * context.n_baselines,
+        );
+        for band in &params.freq_bands {
+            // Have to subtract 1, as we index MWA coarse bands from 1.
+            let base_freq =
+                (context.base_freq + (*band - 1) as usize * context.coarse_channel_width) as f64;
+            for fine_channel in 0..params.n_fine_channels {
+                let freq = base_freq + params.fine_channel_width * fine_channel as f64;
+                let wavelength = *VEL_C / freq;
+                let mut uvw_scaled = uvw_metres
+                    .par_iter()
+                    .map(|v| *v / wavelength)
+                    .collect::<Vec<_>>();
+                uvw.append(&mut uvw_scaled);
+            }
+        }
 
         pb.set_position(time_step as u64);
         let (mut real_t, mut imag_t) = if cuda {
@@ -99,9 +152,9 @@ pub fn vis_gen(
                     comps = src.components.len()
                 ));
             }
-            cuda::cuda_vis_gen(&context, &src, &params, &pc, &uvw_metres)
+            cuda::cuda_vis_gen(&context, &src, &params, &flux_densities, lmn, uvw)
         } else {
-            cpu_vis_gen(&context, &src, &params, &pc, &uvw_metres)
+            cpu_vis_gen(&context, &src, &params, &flux_densities, lmn, uvw)
         };
 
         let (mut u_t, mut v_t, mut w_t) = UVW::decompose(uvw_metres);
@@ -242,7 +295,8 @@ fn write_binary_real_imag(
 
 /// Calculate the visibility equation for every (u,v,w) and (l,m,n)
 /// combination. This is a CPU implementation of `cuda_vis_gen`, and does
-/// calculations in parallel.
+/// calculations in parallel. Currently only works with a single `Source` made
+/// from point-source components.
 ///
 /// On my Ryzen 9 3900X (12 hyper-threaded cores), this function is
 /// approximately 50x slower than `cuda_vis_gen` (using an NVIDIA GeForce RTX
@@ -251,74 +305,38 @@ fn cpu_vis_gen(
     context: &Context,
     src: &Source,
     params: &TimeFreqParams,
-    pc: &PC,
-    uvw_metres: &[UVW],
+    flux_densities: &[f32],
+    lmn: Vec<LMN>,
+    uvw: Vec<UVW>,
 ) -> (Vec<f32>, Vec<f32>) {
-    // Generate UVW baselines for each fine-frequency channel in each coarse
-    // freq. band and calculate the expected flux densities at each frequency.
+    // Perform the visibility equation over each UVW baseline and LMN triple.
     let n_visibilities = params.freq_bands.len() * params.n_fine_channels * context.n_baselines;
-
     let mut real = Vec::with_capacity(n_visibilities);
     let mut imag = Vec::with_capacity(n_visibilities);
 
-    for band in &params.freq_bands {
-        (0..params.n_fine_channels)
-            .into_iter()
-            .map(|fine_channel| {
-                // Calculate the wavelength for this fine channel, and scale
-                // the UVW coords with it. Have to subtract 1, as we index MWA
-                // coarse bands from 1.
-                let freq = (context.base_freq + (*band - 1) as usize * context.coarse_channel_width)
-                    as f64
-                    + params.fine_channel_width * fine_channel as f64;
-                let wavelength = *VEL_C / freq;
-                let uvw: Vec<UVW> = uvw_metres
-                    .into_par_iter()
-                    .map(|v| *v / wavelength)
-                    .collect();
-
-                // Get the flux densities for each frequency.
-                let fds: Vec<FluxDensity> = src
-                    .components
-                    .par_iter()
-                    .map(|comp| {
-                        comp.flux_densities
-                            .iter()
-                            .map(|fd| *fd * calc_flux_ratio(freq, fd.freq, *DEFAULT_SPEC_INDEX))
-                            .collect::<Vec<FluxDensity>>()
-                    })
-                    .flatten()
-                    .collect();
-
-                // Get the (l,m,n) coordinates for each source component.
-                let lmn = src.get_lmn(&pc);
-
-                // Perform the visibility equation.
-                let mut r = Vec::with_capacity(params.n_fine_channels * context.n_baselines);
-                let mut i = Vec::with_capacity(params.n_fine_channels * context.n_baselines);
-                uvw.into_par_iter()
-                    .map(|bl| {
-                        lmn.par_iter()
-                            .zip(&fds)
-                            .fold(
-                                || (0.0, 0.0),
-                                // `bl` for baseline, `dc` for direction cosine.
-                                |acc, (dc, fd)| {
-                                    let arg =
-                                        *PI2 * (bl.u * dc.l + bl.v * dc.m + bl.w * (dc.n - 1.0));
-                                    (
-                                        acc.0 + (arg.cos() * fd.i) as f32,
-                                        acc.1 + (arg.sin() * fd.i) as f32,
-                                    )
-                                },
-                            )
-                            .reduce(|| (0.0, 0.0), |acc, (r, i)| (acc.0 + r, acc.1 + i))
-                    })
-                    .unzip_into_vecs(&mut r, &mut i);
-                real.append(&mut r);
-                imag.append(&mut i);
-            })
-            .for_each(drop);
-    }
+    uvw.par_iter()
+        .enumerate()
+        // `bl` for baseline
+        .map(|(i_vis, bl)| {
+            lmn.iter()
+                .zip(
+                    // There's a flux density for each LMN triple, but we
+                    // need to get the right one.
+                    flux_densities
+                        .iter()
+                        .skip(i_vis / context.n_baselines * src.components.len()),
+                )
+                .fold(
+                    (0.0, 0.0),
+                    // `dc` for direction cosine, `fd` for flux density.
+                    |acc, (dc, fd)| {
+                        let arg = *PI2 * (bl.u * dc.l + bl.v * dc.m + bl.w * (dc.n - 1.0));
+                        let r = arg.cos() as f32 * fd;
+                        let i = arg.sin() as f32 * fd;
+                        (acc.0 + r, acc.1 + i)
+                    },
+                )
+        })
+        .unzip_into_vecs(&mut real, &mut imag);
     (real, imag)
 }

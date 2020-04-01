@@ -44,8 +44,10 @@ pub static ref DAYSEC: f64 = 86400.0;
 pub static ref DS2R: f64 = 7.272_205_216_643_04e-5;
 /// Hour angle to radians (15 / 180 * PI).
 pub static ref DH2R: f64 = 0.261_799_387_799_149_46;
+/// Ratio of a solar day to a sidereal day (24/23.9344696).
+pub static ref SOLAR2SIDEREAL: f64 = 1.002_737_811_911_354_6;
 /// Earth rotation rate in radians per UT1 second. Taken from ERFA.
-pub static ref SOLAR2SIDEREAL: f64 = 1.002_737_811_911_354_6 * *PI2 / *DAYSEC;
+pub static ref EARTH_ROTATION_RATE: f64 = *SOLAR2SIDEREAL * *PI2 / *DAYSEC;
 
 /// MWA latitude [degrees]
 pub static ref MWA_LAT_DEG: f64 = -26.703_319;

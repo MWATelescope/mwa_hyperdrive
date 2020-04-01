@@ -32,24 +32,27 @@ inline void gpu_assert(cudaError_t code, const char *file, int line, bool abort 
 #endif
 
 /// Kernel for calculating point-source visibilities. Uses `atomicAdd` to fold
-/// the values over baseline.
-__global__ void calc_point_vis(const unsigned int n_points, const unsigned int n_vis, float *d_point_fd, float *d_u,
-                               float *d_v, float *d_w, float *d_l, float *d_m, float *d_n, float *d_sum_vis_real,
+/// the values over source components.
+__global__ void calc_point_vis(const unsigned int n_baselines, const unsigned int n_points, const unsigned int n_vis,
+                               const float *d_u, const float *d_v, const float *d_w, const float *d_l, const float *d_m,
+                               const float *d_n, const float *d_point_fd, float *d_sum_vis_real,
                                float *d_sum_vis_imag) {
     const int i_vis = threadIdx.x + (blockDim.x * blockIdx.x);
     const int i_comp = threadIdx.y + (blockDim.y * blockIdx.y);
 
-    if ((i_vis > n_vis) || (i_comp > n_points))
+    if ((i_vis >= n_vis) || (i_comp >= n_points))
         return;
 
-    float u = d_u[i_vis];
-    float v = d_v[i_vis];
-    float w = d_w[i_vis];
-    float l = d_l[i_comp];
-    float m = d_m[i_comp];
-    float n = d_n[i_comp];
-    // Use only the Stokes I flux density.
-    float flux_density = d_point_fd[i_comp * 4];
+    // All present frequencies change every `n_baselines`.
+    const int i_freq = i_vis / n_baselines;
+
+    const float u = d_u[i_vis];
+    const float v = d_v[i_vis];
+    const float w = d_w[i_vis];
+    const float l = d_l[i_comp];
+    const float m = d_m[i_comp];
+    const float n = d_n[i_comp];
+    const float flux_density = d_point_fd[i_freq * n_points + i_comp];
 
     // Calculate -2 * PI * (u * l + v * m + w * (n - 1)). We don't use PI
     // explicitly; CUDA's sincospif does that.
@@ -57,7 +60,7 @@ __global__ void calc_point_vis(const unsigned int n_points, const unsigned int n
     // location on sky through wsclean without negative in front of 2pi.
     float real;
     float imag;
-    float temp = 2 * (u * l + v * m + w * (n - 1.0f));
+    const float temp = 2 * (u * l + v * m + w * (n - 1.0f));
     sincospif(temp, &imag, &real);
 
     atomicAdd(&d_sum_vis_real[i_vis], real * flux_density);
@@ -78,7 +81,7 @@ extern "C" int vis_gen(const UVW_s *uvw, const Source_s *src, Visibilities_s *vi
     float *d_u = NULL;
     float *d_v = NULL;
     float *d_w = NULL;
-    size_t size_baselines = uvw->n_elem * sizeof(float);
+    size_t size_baselines = uvw->n_vis * sizeof(float);
     cudaSoftCheck(cudaMalloc(&d_u, size_baselines));
     cudaSoftCheck(cudaMalloc(&d_v, size_baselines));
     cudaSoftCheck(cudaMalloc(&d_w, size_baselines));
@@ -97,6 +100,11 @@ extern "C" int vis_gen(const UVW_s *uvw, const Source_s *src, Visibilities_s *vi
     cudaSoftCheck(cudaMemcpy(d_m, src->point_m, size_points, cudaMemcpyHostToDevice));
     cudaSoftCheck(cudaMemcpy(d_n, src->point_n, size_points, cudaMemcpyHostToDevice));
 
+    float *d_point_fd = NULL;
+    size_t size_fds = size_points * src->n_channels;
+    cudaSoftCheck(cudaMalloc(&d_point_fd, size_fds));
+    cudaSoftCheck(cudaMemcpy(d_point_fd, src->point_fd, size_fds, cudaMemcpyHostToDevice));
+
     float *d_sum_vis_real = NULL;
     float *d_sum_vis_imag = NULL;
     size_t size_visibilities = vis->n_visibilities * sizeof(float);
@@ -107,26 +115,22 @@ extern "C" int vis_gen(const UVW_s *uvw, const Source_s *src, Visibilities_s *vi
 
     // Generate visibilities for the point sources.
     if (src->n_points > 0) {
-        float *d_point_fd = NULL;
-        cudaSoftCheck(cudaMalloc(&d_point_fd, size_points * 4));
-        cudaSoftCheck(cudaMemcpy(d_point_fd, src->point_fd, size_points * 4, cudaMemcpyHostToDevice));
-
         // Thread blocks are distributed by visibility (one visibility per
         // frequency and baseline; y) and point source component (y);
         threads.x = 64;
         threads.y = 16;
-        blocks.x = (int)ceilf((float)uvw->n_elem / (float)threads.x);
+        blocks.x = (int)ceilf((float)uvw->n_vis / (float)threads.x);
         blocks.y = (int)ceilf((float)src->n_points / (float)threads.y);
 
 #ifndef NDEBUG
-        printf("num. visibilities (uvw->n_elem): %d\nnum. components (src->n_points): %d\n", uvw->n_elem,
-               src->n_points);
-        printf("num. x blocks: %d\nnum. y blocks: %d\n", (int)ceilf((float)uvw->n_elem / (float)threads.x),
-               (int)ceilf((float)src->n_points / (float)threads.y));
+        printf("num. visibilities (uvw->n_elem): %u\n", uvw->n_vis);
+        printf("num. point source components (src->n_points): %u\n", src->n_points);
+        printf("num. x blocks (uvw->n_elem): %u\n", blocks.x);
+        printf("num. y blocks (src->n_points): %u\n", blocks.y);
 #endif
 
-        calc_point_vis<<<blocks, threads>>>(src->n_points, uvw->n_elem, d_point_fd, d_u, d_v, d_w, d_l, d_m, d_n,
-                                            d_sum_vis_real, d_sum_vis_imag);
+        calc_point_vis<<<blocks, threads>>>(uvw->n_baselines, src->n_points, uvw->n_vis, d_u, d_v, d_w, d_l, d_m, d_n,
+                                            d_point_fd, d_sum_vis_real, d_sum_vis_imag);
         cudaCheck(cudaPeekAtLastError());
         cudaSoftCheck(cudaFree(d_point_fd));
     } // if (num_points > 0)
