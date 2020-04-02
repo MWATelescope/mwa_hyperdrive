@@ -11,7 +11,7 @@ mod main_funcs;
 use main_funcs::*;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "mwa_hyperdrive", author)]
+#[structopt(author, about = HYPERDRIVE_VERSION.as_str())]
 enum Opt {
     /// Simulate visibilities of a source list like WODEN. Defaults are "CHIPS
     /// settings".

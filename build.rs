@@ -3,9 +3,32 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+// Use the "built" crate to generate some useful build-time information,
+// including the git hash and compiler version.
+fn write_built() {
+    use built::*;
+    let mut opts = Options::default();
+    opts.set_compiler(true)
+        .set_git(true)
+        .set_ci(false)
+        .set_env(false)
+        .set_dependencies(false)
+        .set_features(false)
+        .set_time(true)
+        .set_cfg(false);
+    built::write_built_file_with_opts(
+        &opts,
+        env::var("CARGO_MANIFEST_DIR").unwrap().as_ref(),
+        &Path::new(&env::var("OUT_DIR").unwrap()).join("built.rs"),
+    )
+    .expect("Failed to acquire build-time information");
+}
 
 fn main() {
+    write_built();
+
     // Build bindings to C/C++ functions.
     let bindings = bindgen::Builder::default()
         .header("src_cuda/vis_gen.h")

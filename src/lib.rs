@@ -18,6 +18,3 @@ pub use constants::*;
 pub use context::Context;
 pub use coord::types::*;
 pub use foreign::*;
-
-// Receive the generated bindings from bindgen in build.rs
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

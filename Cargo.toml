@@ -18,10 +18,12 @@ opt-level = 2
 
 [build-dependencies]
 bindgen = "0.53.2"
+built = "0.4"
 cc = "1.0.50"
 
 [dependencies]
 anyhow = "1.0.26"
+built = { version = "0.4.0", features = ["chrono", "git2"] }
 byteorder = "1.3.4"
 fitsio = "0.15.0"
 fitsio-sys = "0.3.0"
