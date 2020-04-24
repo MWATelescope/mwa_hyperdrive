@@ -1,0 +1,37 @@
+[package]
+name = "mwa_hyperdrive_srclist"
+version = "0.1.0"
+authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
+edition = "2021"
+rust-version = "1.56"
+license = "MPL-2.0"
+readme = "README.md"
+description = "Code for sky-model source lists"
+repository = "https://github.com/MWATelescope/mwa_hyperdrive"
+homepage = "https://github.com/MWATelescope/mwa_hyperdrive"
+exclude = [".github/*", "test_files/*"]
+
+[features]
+default = []
+cuda = ["mwa_hyperdrive_beam/cuda"]
+cuda-single = ["mwa_hyperdrive_beam/cuda-single"]
+cfitsio-static = ["mwa_hyperdrive_common/cfitsio-static"]
+erfa-static = ["mwa_hyperdrive_common/erfa-static"]
+hdf5-static = ["mwa_hyperdrive_beam/hdf5-static"]
+all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
+
+[dependencies]
+serde = { version = "1.0.103", features = ["derive"] }
+serde_yaml = "0.8.3"
+strum = "0.24.0"
+strum_macros = "0.24.0"
+
+mwa_hyperdrive_common = { path = "../common" }
+mwa_hyperdrive_beam =   { path = "../beam" }
+
+[dev-dependencies]
+approx = "0.5.0"
+indoc = "1.0.0"
+ndarray = { version = ">=0.15.4,<0.16", features = ["approx-0_5"] }
+serial_test = "0.5.0"
+tempfile = "3.3.0"

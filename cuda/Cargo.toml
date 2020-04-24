@@ -1,0 +1,22 @@
+[package]
+name = "mwa_hyperdrive_cuda"
+version = "0.0.0"
+authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
+edition = "2021"
+license = "MPL-2.0"
+
+[features]
+# Use single-precision floats. If this feature isn't enabled, then
+# double-precision floats are used.
+cuda-single = []
+# Link the CUDA library statically.
+static = []
+
+[dependencies]
+mwa_hyperdrive_common  = { path = "../common", features = ["cuda"] }
+mwa_hyperdrive_beam    = { path = "../beam", features = ["cuda"] }
+mwa_hyperdrive_srclist = { path = "../srclist" }
+
+[build-dependencies]
+cc = { version = "1.0.72", features = ["parallel"] }
+cfg-if = "1.0.0"

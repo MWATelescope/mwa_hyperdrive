@@ -2,99 +2,121 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use crate::*;
+//! Metadata on an observation.
 
-use fitsio::FitsFile;
+use hifitime::Epoch;
+use marlu::{RADec, XyzGeodetic};
+use ndarray::Array2;
+use vec1::Vec1;
 
-/// An observation context used throughout `hyperdrive.`
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
+
+/// MWA observation metadata.
 ///
-/// Frequencies are stored as integers to avoid floating-point issues.
-#[derive(Debug)]
-pub struct Context {
-    /// The base frequency of the observation [Hz]. For reasons unknown, its
-    /// calculation is insane.
-    pub base_freq: usize,
-    /// The total bandwidth of the observation [Hz]
-    pub bandwidth: usize,
-    /// The coarse channels used. These are typically 0 to 23.
-    pub coarse_channels: Vec<u8>,
-    /// The frequency width of a single coarse channel [Hz]
-    pub coarse_channel_width: usize,
-    /// The observation's frequency resolution [Hz]
-    pub fine_channel_width: usize,
-    /// The LST at the start of the observation [radians]
-    pub base_lst: f64,
-    /// The number of cross-correlation baselines
-    pub n_baselines: usize,
-    /// The XYZ baselines of the observations [metres]
-    pub xyz: Vec<XyzBaseline>,
-}
+/// This can be thought of the state and contents of the input data. It may not
+/// reflect its raw, non-preprocessed state, but this is all we can say about
+/// it.
+///
+/// Tile information is ordered according to the "Antenna" column in HDU 1 of
+/// the observation's metafits file.
+pub(crate) struct ObsContext {
+    /// The observation ID, which is also the observation's scheduled start GPS
+    /// time (but shouldn't be used for this purpose).
+    pub(crate) obsid: Option<u32>,
 
-impl Context {
-    /// Create a new `hyperdrive` observation `Context` from a metafits file.
-    pub fn new(metafits: &mut FitsFile) -> Result<Self, fitsio::errors::Error> {
-        let hdu = metafits.hdu(0)?;
-        let freq_centre = (hdu
-            .read_key::<String>(metafits, "FREQCENT")?
-            .parse::<f64>()
-            .expect("Couldn't parse FREQCENT from the metafits as f64")
-            * 1e6) as usize;
-        let fine_channel_width = (hdu
-            .read_key::<String>(metafits, "FINECHAN")?
-            .parse::<f64>()
-            .expect("Couldn't parse FINECHAN from the metafits as f64")
-            * 1e3) as usize;
-        let bandwidth = (hdu
-            .read_key::<String>(metafits, "BANDWDTH")?
-            .parse::<f64>()
-            .expect("Couldn't parse BANDWDTH from the metafits as f64")
-            * 1e6) as usize;
-        let base_freq = freq_centre - (bandwidth + fine_channel_width) / 2;
+    /// The unique timestamps in the observation. These are stored as `hifitime`
+    /// [Epoch] structs to help keep the code flexible. These include timestamps
+    /// that are deemed "flagged" by the observation.
+    pub(crate) timestamps: Vec1<Epoch>,
 
-        let coarse_channels: Vec<u8> = hdu
-            .read_key::<String>(metafits, "CHANSEL")?
-            .split(',')
-            .map(|s| {
-                s.parse()
-                    .expect("Failed to parse one of the channels in the metafits' CHANSEL")
-            })
-            .collect();
-        let coarse_channel_width = bandwidth / coarse_channels.len() as usize;
+    /// The *available* timestep indices of the input data. This does not
+    /// necessarily start at 0, and is not necessarily regular (e.g. a valid
+    /// vector could be [1, 2, 4]).
+    ///
+    /// Allowing the indices to non-regular means that we can represent input
+    /// data that also isn't regular; naively reading in a dataset with 2
+    /// timesteps that are separated by more than the time resolution of the
+    /// data would give misleading results.
+    pub(crate) all_timesteps: Vec1<usize>,
 
-        let base_lst = hdu
-            .read_key::<String>(metafits, "LST")?
-            .parse::<f64>()
-            .expect("Couldn't parse LST from the metafits as f64")
-            .to_radians();
+    /// The timestep indices of the input data that aren't totally flagged.
+    ///
+    /// This is allowed to be empty.
+    pub(crate) unflagged_timesteps: Vec<usize>,
 
-        let n_tiles = hdu
-            .read_key::<String>(metafits, "NINPUTS")?
-            .parse::<usize>()
-            .expect("Couldn't parse NINPUTS from the metafits as u32")
-            / 2;
-        let n_baselines = n_tiles / 2 * (n_tiles - 1);
+    /// The observation phase centre.
+    pub(super) phase_centre: RADec,
 
-        let xyz = XYZ::get_baselines_metafits(metafits)?;
+    /// The observation pointing centre.
+    ///
+    /// This is typically not used, but if available is nice to report.
+    pub(super) pointing_centre: Option<RADec>,
 
-        Ok(Context {
-            base_freq,
-            bandwidth,
-            coarse_channels,
-            coarse_channel_width,
-            fine_channel_width,
-            base_lst,
-            n_baselines,
-            xyz,
-        })
-    }
+    /// The names of each of the tiles used in the array.
+    pub(crate) tile_names: Vec1<String>,
 
-    /// Convert to a C-compatible struct.
-    pub fn convert(&self) -> *const Context_s {
-        // Return a pointer to a C Context_s struct.
-        Box::into_raw(Box::new(Context_s {
-            fine_channel_width: self.fine_channel_width as f64,
-            base_freq: self.base_freq as f64,
-            base_lst: self.base_lst as f64,
-        }))
-    }
+    /// The [XyzGeodetic] coordinates of all tiles in the array (all coordinates
+    /// are specified in \[metres\]). This includes tiles that have been flagged
+    /// in the input data.
+    pub(crate) tile_xyzs: Vec1<XyzGeodetic>,
+
+    /// The flagged tiles, either already missing data or suggested to be
+    /// flagged. Zero indexed.
+    pub(crate) flagged_tiles: Vec<usize>,
+
+    /// Are auto-correlations present in the visibility data?
+    pub(crate) autocorrelations_present: bool,
+
+    /// The dipole gains for each tile in the array. The first axis is unflagged
+    /// antenna, the second dipole index. These will typically all be of value
+    /// 1.0, except where a dipole is dead (0.0). If this is `None`, then it is
+    /// assumed that all tiles are live.
+    pub(crate) dipole_gains: Option<Array2<f64>>,
+
+    /// The time resolution of the supplied data \[seconds\]. This is not
+    /// necessarily the native time resolution of the original observation's
+    /// data, as it may have already been averaged. This is kept optional in
+    /// case in the input data doesn't report the resolution and has only one
+    /// timestep, and therefore no resolution.
+    pub(crate) time_res: Option<f64>,
+
+    /// The Earth longitude of the instrumental array \[radians\].
+    pub(crate) array_longitude_rad: Option<f64>,
+
+    /// The Earth latitude of the instrumental array \[radians\].
+    pub(crate) array_latitude_rad: Option<f64>,
+
+    /// The coarse channel numbers (typically 1 to 24) that are present in the
+    /// supplied data. This does not necessarily match the coarse channel
+    /// numbers present in the full observation, as the input data may only
+    /// reflect a fraction of it.
+    pub(crate) coarse_chan_nums: Vec<u32>,
+
+    /// The centre frequencies of each of the coarse channels in this
+    /// observation \[Hz\].
+    pub(crate) coarse_chan_freqs: Vec<f64>,
+
+    /// The number of fine-frequency channels per coarse channel. For 40 kHz
+    /// legacy MWA data, this is 32.
+    pub(crate) num_fine_chans_per_coarse_chan: usize,
+
+    /// The fine-channel resolution of the supplied data \[Hz\]. This is not
+    /// necessarily the fine-channel resolution of the original observation's
+    /// data; this data may have applied averaging to the original observation.
+    pub(crate) freq_res: Option<f64>,
+
+    /// All of the fine-channel frequencies within the data \[Hz\]. The values
+    /// reflect the frequencies at the *centre* of each channel.
+    ///
+    /// These are kept as ints to help some otherwise error-prone calculations
+    /// using floats. By using ints, we assume there is no sub-Hz structure.
+    pub(crate) fine_chan_freqs: Vec1<u64>,
+
+    /// The flagged fine channels for each baseline in the supplied data. Zero
+    /// indexed.
+    pub(crate) flagged_fine_chans: Vec<usize>,
+
+    /// The fine channels per coarse channel already flagged in the supplied
+    /// data. Zero indexed.
+    pub(crate) flagged_fine_chans_per_coarse_chan: Vec<usize>,
 }

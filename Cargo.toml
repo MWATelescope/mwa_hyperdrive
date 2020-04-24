@@ -1,34 +1,77 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.1.0"
-authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
-edition = "2018"
+version = "0.2.0-alpha.10"
+authors = [
+    "Christopher H. Jordan <christopherjordan87@gmail.com>",
+    "Derwent McElhinney <derwent.mcelhinney@curtin.edu.au>"
+]
+edition = "2021"
+rust-version = "1.58"
 license = "MPL-2.0"
-build = "build.rs"
+readme = "README.md"
+description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
+repository = "https://github.com/MWATelescope/mwa_hyperdrive"
+homepage = "https://github.com/MWATelescope/mwa_hyperdrive"
+exclude = [".github/*", "test_files/*"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [
+    ".",
+    "common",
+    "beam",
+    "cuda",
+    "srclist",
+]
+
+[profile.release]
+panic = "abort"
 
 [profile.dev]
 opt-level = 2
 
-[build-dependencies]
-bindgen = "0.53.2"
-cc = "1.0.50"
+[features]
+default = ["plotting"]
+# Use CUDA code with double-precision floats.
+cuda = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_beam/cuda", "mwa_hyperdrive_srclist/cuda"]
+# Use CUDA code with single-precision floats.
+cuda-single = ["cuda", "mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_beam/cuda-single", "mwa_hyperdrive_srclist/cuda-single"]
+# Enable plotting.
+plotting = ["plotters"]
+cfitsio-static = ["mwa_hyperdrive_common/cfitsio-static", "birli/cfitsio-static"]
+erfa-static = ["mwa_hyperdrive_common/erfa-static", "birli/erfa-static"]
+hdf5-static = ["mwa_hyperdrive_beam/hdf5-static", "mwa_hyperdrive_srclist/hdf5-static"]
+cuda-static = ["mwa_hyperdrive_common/cuda-static"]
+all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-anyhow = "1.0.26"
-byteorder = "1.3.4"
-fitsio = "0.15.0"
-fitsio-sys = "0.3.0"
-float-cmp = "0.6.0"
-indicatif = "0.14.0"
-lazy_static = "1.4.0"
-libc = "0.2.66"
-nom = "5.1.1"
-num = "0.2.1"
-rayon = "1.3.0"
-regex = "1.3.3"
-serde = { version = "1.0.105", features = ["derive"] }
-serde_json = "1.0.48"
-structopt = "0.3.11"
-toml = "0.5.6"
+birli = { version = "0.5.0", default_features = false }
+console = "0.15.0"
+crossbeam-channel = "0.5.0"
+crossbeam-utils = "0.8.7"
+glob = "0.3.0"
+regex = "1.4.6"
+scopeguard = "1.1.0"
+serde = { version = "1.0.103", features = ["derive"] }
+strum = "0.24.0"
+strum_macros = "0.24.0"
+vec1 = "1.5.0"
+
+plotters = { version = "0.3.1", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "point_series"], optional = true }
+
+mwa_hyperdrive_common =  { path = "common" }
+mwa_hyperdrive_beam =    { path = "beam" }
+mwa_hyperdrive_cuda =    { path = "cuda", optional = true }
+mwa_hyperdrive_srclist = { path = "srclist" }
+
+[dev-dependencies]
+approx = "0.5.0"
+assert_cmd = "2.0.0"
+criterion = "0.3.5"
+indoc = "1.0.0"
+ndarray = { version = ">=0.15.4,<0.16", features = ["approx-0_5"] }
+serial_test = "0.5.0"
+tempfile = "3.3.0"
+
+[[bench]]
+name = "bench"
+harness = false

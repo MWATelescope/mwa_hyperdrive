@@ -1,0 +1,74 @@
+---
+name: Generate Coverage report
+
+# Based on https://github.com/actions-rs/meta/blob/master/recipes/quickstart.md
+
+# Do this on every push, but don't double up on tags
+on:
+  push:
+    tags-ignore:
+      - '**'
+    pull_request:
+    branches:
+    - '**'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            tzdata \
+            build-essential \
+            pkg-config \
+            cmake \
+            curl \
+            git \
+            lcov \
+            libcfitsio-dev \
+            liberfa-dev \
+            libhdf5-dev \
+            libfreetype-dev \
+            libexpat1-dev \
+            ;
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Install nightly-2022-01-14 toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly-2022-01-14
+          override: true
+          components: llvm-tools-preview
+
+      - name: install cargo-llvm-cov
+        run: cargo +nightly-2022-01-14 install cargo-llvm-cov
+
+      - name: Get the beam HDF5 file
+        run: sudo curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o /mwa_full_embedded_element_pattern.h5
+
+      - name: Generate test lcov coverage into coverage/ dir
+        run: |
+          export PATH="${HOME}/.cargo/bin:${PATH}"
+          mkdir -p coverage
+          cargo +nightly-2022-01-14 llvm-cov --all-targets --workspace --exclude mwa_hyperdrive_cuda --no-default-features --locked --lcov --output-path coverage/coverage.lcov
+          # this uses the result of the previous run to generate a text summary
+          cargo +nightly-2022-01-14 llvm-cov --no-run
+        env:
+          MWA_BEAM_FILE: /mwa_full_embedded_element_pattern.h5
+
+      - name: Upload reports to codecov.io
+        uses: codecov/codecov-action@v2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

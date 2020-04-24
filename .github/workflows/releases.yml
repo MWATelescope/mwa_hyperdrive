@@ -1,0 +1,94 @@
+---
+name: Release
+
+# Do this on every tagged commit
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-linux-release:
+    name: Build release for Linux
+    runs-on: ubuntu-18.04
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            tzdata \
+            build-essential \
+            pkg-config \
+            cmake \
+            curl \
+            git \
+            ;
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Install CUDA
+        uses: Jimver/cuda-toolkit@v0.2.5
+        with:
+          cuda: '11.2.0'
+
+      - name: Build and Tar
+        run: |
+          curl https://raw.githubusercontent.com/HDFGroup/hdf5/develop/COPYING -o COPYING-hdf5
+          curl https://raw.githubusercontent.com/liberfa/erfa/master/LICENSE -o LICENSE-erfa
+          curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
+          cp .github/workflows/releases-readme.md README.md
+
+          cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static
+          mv target/release/hyperdrive .
+          tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3.tar.gz \
+          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
+          hyperdrive
+
+          cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static,cuda
+          mv target/release/hyperdrive .
+          tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-double.tar.gz \
+          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
+          hyperdrive
+
+          cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static,cuda-single
+          mv target/release/hyperdrive .
+          tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-single.tar.gz \
+          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
+          hyperdrive
+        env:
+          RUSTFLAGS: "-C target-cpu=x86-64-v3"
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v2
+        with:
+          name: linux.tar.gz
+          path: "*.tar.gz"
+          if-no-files-found: error
+
+  create-release:
+    name: Create a new release
+    runs-on: ubuntu-latest
+    needs: build-linux-release
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: linux.tar.gz
+
+      - name: Provide new release asset
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: |
+            *.tar.gz

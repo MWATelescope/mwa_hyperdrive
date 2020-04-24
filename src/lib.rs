@@ -2,22 +2,29 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Calibration software for the Murchison Widefield Array (MWA) radio telescope.
- */
+//! Calibration software for the Murchison Widefield Array (MWA) radio
+//! telescope.
 
+pub mod calibrate;
 pub mod constants;
-pub mod context;
-pub mod coord;
-pub mod foreign;
-pub mod sourcelist;
-pub mod visibility_gen;
+pub(crate) mod context;
+pub mod data_formats;
+pub(crate) mod error;
+pub(crate) mod flagging;
+pub(crate) mod glob;
+pub mod math;
+pub mod model;
+pub(crate) mod pfb_gains;
+pub mod simulate_vis;
+pub(crate) mod time;
+pub(crate) mod unit_parsing;
+
+mwa_hyperdrive_common::cfg_if::cfg_if! {
+    if #[cfg(test)] {
+        mod jones_test;
+        mod tests;
+    }
+}
 
 // Re-exports.
-pub use constants::*;
-pub use context::Context;
-pub use coord::types::*;
-pub use foreign::*;
-
-// Receive the generated bindings from bindgen in build.rs
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+pub use error::HyperdriveError;
