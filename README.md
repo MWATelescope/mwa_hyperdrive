@@ -12,7 +12,7 @@ Jack Line's [WODEN](https://github.com/JLBLine/WODEN).
 
 The help text containing all possible options can be seen with:
 
-    mwa_hyperdrive simulate-vis -h
+    hyperdrive simulate-vis -h
 
 While all options can be specified as command line arguments, they may also be
 specified as `.toml` or `.json` parameter files, e.g.
@@ -45,7 +45,7 @@ time_res = 8.0
 
 Run with:
 
-    mwa_hyperdrive simulate-vis </path/to/param/file.toml_or_json>
+    hyperdrive simulate-vis </path/to/param/file.toml_or_json>
 
 Any command-line arguments specified alongside a parameter file will *override*
 the parameter file's settings.
@@ -54,7 +54,7 @@ the parameter file's settings.
 To check if a source list is compatible with `hyperdrive`, the following can be
 used:
 
-    mwa_hyperdrive verify-srclist </path/to/srclist1> </path/to/srclist2>
+    hyperdrive verify-srclist </path/to/srclist1> </path/to/srclist2>
 
 ## Installation
 - Prerequisites
@@ -95,20 +95,27 @@ used:
 
 - Run the compiled binary
 
-    `./target/release/mwa_hyperdrive -h`
+    `./target/release/hyperdrive -h`
 
     A number of subcommands should present themselves, and the help text for
     each command should clarify usage.
 
-    On the same system, the `mwa_hyperdrive` binary can be copied and used
+    On the same system, the `hyperdrive` binary can be copied and used
     anywhere you like!
 
 ## Troubleshooting
 
-Run `mwa_hyperdrive` again, but this time with the debug build:
+Run `hyperdrive` again, but this time with the debug build:
 
     cargo build
-    ./target/debug/mwa_hyperdrive <your settings here>
+    ./target/debug/hyperdrive <your settings here>
 
 Report the version of the software used, your usage and the program output in a
 new GitHub issue.
+
+## FAQ
+- Naming convention
+
+    This project is called `mwa_hyperdrive` so that it cannot be confused with
+    other projects involving the word `hyperdrive`, but the binary is called
+    `hyperdrive` to help users' fingers.

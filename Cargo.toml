@@ -8,6 +8,11 @@ build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+# Name the executable "hyperdrive", rather than "mwa_hyperdrive".
+name = "hyperdrive"
+path = "src/main.rs"
+
 [profile.dev]
 opt-level = 2
 
