@@ -7,6 +7,8 @@ the MWA Real-Time System (RTS).
 
 ## Usage
 ### Visibility Simulation
+<details>
+
 `hyperdrive` can simulate MWA visibilities from a source catalogue, similar to
 Jack Line's [WODEN](https://github.com/JLBLine/WODEN).
 
@@ -49,28 +51,53 @@ Run with:
 
 Any command-line arguments specified alongside a parameter file will *override*
 the parameter file's settings.
+</details>
 
 ### Source list validation
+<details>
 To check if a source list is compatible with `hyperdrive`, the following can be
 used:
 
     hyperdrive verify-srclist </path/to/srclist1> </path/to/srclist2>
 
+Check the help text for more details.
+
+    hyperdrive verify-srclist -h
+
+More than one source list can be given at a time.
+</details>
+
 ## Installation
-- Prerequisites
+<details>
 
-    - A Rust compiler with a version >= 1.42.0
-      - Instructions for installing Rust are below
-    - [cfitsio](https://heasarc.gsfc.nasa.gov/docs/software/fitsio/)
-    - [CUDA](https://developer.nvidia.com/cuda-zone)
-      - As well as a GPU with compute capability >=2
+### Prerequisites
+<details>
 
-    Memory requirements can't be specified yet, as the code is still in
-    development.
+- A Rust compiler with a version >= 1.42.0
 
-- Install Rust
+  `https://www.rust-lang.org/tools/install`
 
-    `https://www.rust-lang.org/tools/install`
+- [cfitsio](https://heasarc.gsfc.nasa.gov/docs/software/fitsio/)
+
+- [CUDA](https://developer.nvidia.com/cuda-zone)
+
+  - As well as an NVIDIA GPU with compute capability >=2. See this
+    [list](https://developer.nvidia.com/cuda-gpus) to determine what compute
+    capability a GPU has.
+
+- libclang
+
+  This is a system library needed for some of `hyperdrive`'s dependencies.
+
+  On Ubuntu, this library is provided by the package `libclang-dev`.
+
+  On Arch, it is provided by the package `clang`.
+
+Memory requirements can't be specified yet, as the code is still in development.
+</details>
+
+### Hyperdrive-specific instructions
+<details>
 
 - Specify your GPU's compute capability
 
@@ -102,6 +129,8 @@ used:
 
     On the same system, the `hyperdrive` binary can be copied and used
     anywhere you like!
+</details>
+</details>
 
 ## Troubleshooting
 

@@ -110,7 +110,7 @@ impl PC {
         }
     }
 
-    /// Similar to `PC::new_from_ra`, but takes a right ascension `ra` instead
+    /// Similar to `PC::new_from_ha`, but takes a right ascension `ra` instead
     /// of an hour angle. All arguments have units of radians.
     pub fn new_from_ra(lst: f64, ra: f64, dec: f64) -> Self {
         let ha = lst - ra;
@@ -198,8 +198,8 @@ pub struct UVW {
 }
 
 impl UVW {
-    /// Convert all XYZ baselines to UVW, given a pointing centre
-    /// struct. Processing is done in parallel on the CPU.
+    /// Convert all `XyzBaseline`s to `UVW`, given a pointing centre struct
+    /// `PC`. Processing is done in parallel on the CPU.
     ///
     /// This is Equation 4.1 of: Interferometry and Synthesis in Radio
     /// Astronomy, Third Edition, Section 4: Geometrical Relationships,
@@ -265,8 +265,8 @@ impl std::ops::Div<f64> for UVW {
     }
 }
 
-/// The (x,y,z) coordinates of an antenna (a.k.a. station), or a baseline. All
-/// units are in metres.
+/// The (x,y,z) coordinates of an antenna (a.k.a. station). All units are in
+/// metres.
 ///
 /// This coordinate system is discussed at length in Interferometry and
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
@@ -333,11 +333,12 @@ impl XYZ {
         diffs
     }
 
-    /// For each XYZ pair listed in a metafits file, calculate a baseline.
+    /// For each `XYZ` pair listed in a metafits file, calculate a
+    /// `XyzBaseline`.
     ///
     /// Note that the baselines are ordered according to the metafits;
-    /// i.e. Tile104 is often the first tile listed, so the first baseline is
-    /// Tile104 and Tile103.
+    /// e.g. Tile104 is often the first tile listed, Tile103 second, so the
+    /// first baseline is between Tile104 and Tile103.
     pub fn get_baselines_metafits(
         metafits: &mut FitsFile,
     ) -> Result<Vec<XyzBaseline>, fitsio::errors::Error> {
@@ -504,7 +505,6 @@ mod tests {
         let xyz_bl = XYZ::get_xyz_baselines(&xyz);
         let pc = PC::new_from_ha(6.07181, 6.0163, -0.453121);
         let uvw = UVW::get_baselines(&xyz_bl, &pc);
-        println!("{:?}", uvw);
         let expected = UVW {
             u: 102.04605530570603,
             v: -1028.2293398297727,

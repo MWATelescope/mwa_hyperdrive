@@ -6,7 +6,7 @@ use crate::*;
 
 use fitsio::FitsFile;
 
-/// An observation context used throughout `hyperdrive.`
+/// An observation context used throughout `hyperdrive`.
 ///
 /// Frequencies are stored as integers to avoid floating-point issues.
 #[derive(Debug)]
@@ -26,7 +26,7 @@ pub struct Context {
     pub base_lst: f64,
     /// The number of cross-correlation baselines
     pub n_baselines: usize,
-    /// The XYZ baselines of the observations [metres]
+    /// The `XyzBaselines` of the observations [metres]
     pub xyz: Vec<XyzBaseline>,
 }
 
