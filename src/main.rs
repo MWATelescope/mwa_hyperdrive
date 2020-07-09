@@ -32,7 +32,7 @@ fn setup_logging(debug: bool) -> Result<(), fern::InitError> {
 }
 
 #[derive(StructOpt, Debug)]
-#[structopt(author, about = HYPERDRIVE_VERSION.as_str())]
+#[structopt(author, name = "hyperdrive", version = HYPERDRIVE_VERSION.as_str(), about)]
 enum Opt {
     /// Simulate visibilities of a source list like WODEN. Defaults are "CHIPS
     /// settings".

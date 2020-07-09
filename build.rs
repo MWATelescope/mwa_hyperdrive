@@ -3,9 +3,12 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
-fn bind_erfa() {
+fn bind_erfa(out_dir: &Path) {
     match pkg_config::probe_library("erfa") {
         Ok(lib) => {
             // Find erfa.h
@@ -25,7 +28,7 @@ fn bind_erfa() {
                 .whitelist_function("eraAe2hd")
                 .generate()
                 .expect("Unable to generate bindings")
-                .write_to_file(PathBuf::from(env::var("OUT_DIR").unwrap()).join("erfa.rs"))
+                .write_to_file(&out_dir.join("erfa.rs"))
                 .expect("Couldn't write bindings");
         }
         Err(_) => panic!("Couldn't find the ERFA library via pkg-config"),
@@ -34,26 +37,30 @@ fn bind_erfa() {
 
 // Use the "built" crate to generate some useful build-time information,
 // including the git hash and compiler version.
-fn write_built() {
-    use built::*;
-    let mut opts = Options::default();
+fn write_built(out_dir: &Path) {
+    let mut opts = built::Options::default();
     opts.set_compiler(true)
         .set_git(true)
+        .set_time(true)
         .set_ci(false)
         .set_env(false)
         .set_dependencies(false)
         .set_features(false)
-        .set_time(true)
         .set_cfg(false);
     built::write_built_file_with_opts(
         &opts,
         env::var("CARGO_MANIFEST_DIR").unwrap().as_ref(),
-        &Path::new(&env::var("OUT_DIR").unwrap()).join("built.rs"),
+        &out_dir.join("built.rs"),
     )
     .expect("Failed to acquire build-time information");
 }
 
 fn main() {
-    write_built();
-    bind_erfa();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR env. variable not defined!"));
+    let p = Path::new(&out_dir).join("rebuild_stamp");
+    File::create(&p).unwrap();
+    println!("cargo:rerun-if-changed={}", p.display());
+
+    write_built(&out_dir);
+    bind_erfa(&out_dir);
 }
