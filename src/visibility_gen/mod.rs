@@ -53,7 +53,7 @@ pub fn vis_gen(
     // alternative to this approach is to write out intermediate "per time, per
     // freq. band" files, but hopefully when we write directly to uvfits files,
     // this approach can go away.
-    let num_coords = params.n_time_steps * context.n_baselines as usize;
+    let num_coords = params.n_time_steps * context.xyz.len();
     let mut u = Vec::with_capacity(num_coords);
     let mut v = Vec::with_capacity(num_coords);
     let mut w = Vec::with_capacity(num_coords);
@@ -70,8 +70,9 @@ pub fn vis_gen(
     );
     for band in &params.freq_bands {
         // Have to subtract 1, as we index MWA coarse bands from 1.
-        let base_freq =
-            (context.base_freq + (*band - 1) as u64 * context.coarse_channel_width) as f64;
+        let base_freq = (context.base_freq
+            + (*band - 1) as u32 * context.mwalib.coarse_channel_width_hz)
+            as f64;
         for fine_channel in 0..params.n_fine_channels {
             let freq = base_freq + params.fine_channel_width * fine_channel as f64;
             let mut fds = src
@@ -121,14 +122,13 @@ pub fn vis_gen(
         // For each fine channel, scale all of the UVW coordinates by
         // wavelength, and store the result in `uvw`.
         let mut uvw = Vec::with_capacity(
-            params.freq_bands.len()
-                * params.n_fine_channels as usize
-                * context.n_baselines as usize,
+            params.freq_bands.len() * params.n_fine_channels as usize * context.xyz.len(),
         );
         for band in &params.freq_bands {
             // Have to subtract 1, as we index MWA coarse bands from 1.
-            let base_freq =
-                (context.base_freq + (*band - 1) as u64 * context.coarse_channel_width) as f64;
+            let base_freq = (context.base_freq
+                + (*band - 1) as u32 * context.mwalib.coarse_channel_width_hz)
+                as f64;
             for fine_channel in 0..params.n_fine_channels {
                 let freq = base_freq + params.fine_channel_width * fine_channel as f64;
                 let wavelength = *VEL_C / freq;
@@ -149,8 +149,8 @@ pub fn vis_gen(
     {comps} source components"#,
                     uvw = params.freq_bands.len() as u64
                         * params.n_fine_channels
-                        * context.n_baselines,
-                    bl = context.n_baselines,
+                        * context.xyz.len() as u64,
+                    bl = context.xyz.len(),
                     fc = params.n_fine_channels,
                     cb = params.freq_bands.len(),
                     comps = src.components.len()
@@ -179,21 +179,21 @@ pub fn vis_gen(
         write_binary_uvw(
             params.n_time_steps,
             params.n_fine_channels,
-            context.n_baselines,
+            context.xyz.len() as u64,
             &mut buf,
             &u,
         )?;
         write_binary_uvw(
             params.n_time_steps,
             params.n_fine_channels,
-            context.n_baselines,
+            context.xyz.len() as u64,
             &mut buf,
             &v,
         )?;
         write_binary_uvw(
             params.n_time_steps,
             params.n_fine_channels,
-            context.n_baselines,
+            context.xyz.len() as u64,
             &mut buf,
             &w,
         )?;
@@ -203,7 +203,7 @@ pub fn vis_gen(
             params.n_time_steps,
             params.freq_bands.len() as u64,
             params.n_fine_channels,
-            context.n_baselines,
+            context.xyz.len() as u64,
             band_num as u64,
             &mut buf,
             &real,
@@ -212,7 +212,7 @@ pub fn vis_gen(
             params.n_time_steps,
             params.freq_bands.len() as u64,
             params.n_fine_channels,
-            context.n_baselines,
+            context.xyz.len() as u64,
             band_num as u64,
             &mut buf,
             &imag,
@@ -222,17 +222,17 @@ pub fn vis_gen(
         if text_file {
             let file = File::create(format!("hyperdrive_band{:02}.txt", band))?;
             let mut buf = BufWriter::new(file);
-            let unit = (params.n_fine_channels * context.n_baselines) as usize;
+            let unit = params.n_fine_channels as usize * context.xyz.len();
             for time_step in 0..params.n_time_steps as usize {
-                let coord_offset = time_step * context.n_baselines as usize;
+                let coord_offset = time_step * context.xyz.len();
                 let vis_offset = time_step * params.freq_bands.len() * unit + band_num * unit;
                 for i in 0..unit {
                     writeln!(
                         buf,
                         "{:.7} {:.7} {:.7} {:.7} {:.7}",
-                        u[coord_offset + (i % context.n_baselines as usize)],
-                        v[coord_offset + (i % context.n_baselines as usize)],
-                        w[coord_offset + (i % context.n_baselines as usize)],
+                        u[coord_offset + (i % context.xyz.len())],
+                        v[coord_offset + (i % context.xyz.len())],
+                        w[coord_offset + (i % context.xyz.len())],
                         real[vis_offset + i],
                         imag[vis_offset + i]
                     )?;
@@ -314,8 +314,9 @@ fn cpu_vis_gen(
     uvw: Vec<UVW>,
 ) -> (Vec<f32>, Vec<f32>) {
     // Perform the visibility equation over each UVW baseline and LMN triple.
-    let n_visibilities =
-        params.freq_bands.len() * (params.n_fine_channels * context.n_baselines) as usize;
+    let n_baselines = context.xyz.len();
+    let n_components = src.components.len();
+    let n_visibilities = params.freq_bands.len() * params.n_fine_channels as usize * n_baselines;
     let mut real = Vec::with_capacity(n_visibilities);
     let mut imag = Vec::with_capacity(n_visibilities);
 
@@ -329,7 +330,7 @@ fn cpu_vis_gen(
                     // need to get the right one.
                     flux_densities
                         .iter()
-                        .skip(i_vis / context.n_baselines as usize * src.components.len()),
+                        .skip(i_vis / n_baselines * n_components),
                 )
                 .fold(
                     (0.0, 0.0),

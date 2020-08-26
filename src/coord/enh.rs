@@ -21,7 +21,13 @@ pub struct ENH {
 }
 
 impl ENH {
-    /// Convert ENH coordinates to local XYZ.
+    /// Convert coords in local topocentric East, North, Height units to 'local'
+    /// XYZ units. Local means Z points north, X points through the equator from
+    /// the geocenter along the local meridian and Y is East. This is like the
+    /// absolute system except that zero longitude is now the local meridian
+    /// rather than prime meridian. Latitude is geodetic, in radians. This is
+    /// what you want for constructing the local antenna positions in a UVFITS
+    /// antenna table.
     ///
     /// Taken from the third edition of Interferometry and Synthesis in Radio
     /// Astronomy, chapter 4: Geometrical Relationships, Polarimetry, and the

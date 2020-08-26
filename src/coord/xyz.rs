@@ -6,6 +6,8 @@
 Handle (x,y,z) coordinates of an antenna (a.k.a. station).
 */
 
+use mwalib::mwalibContext;
+
 use super::enh::ENH;
 use crate::*;
 
@@ -42,43 +44,6 @@ impl XYZ {
         self.to_enh(*MWA_LAT_RAD)
     }
 
-    /// Convert coords in local topocentric East, North, Height units to 'local'
-    /// XYZ units. Local means Z point north, X points through the equator from
-    /// the geocenter along the local meridian and Y is East. This is like the
-    /// absolute system except that zero longitude is now the local meridian
-    /// rather than prime meridian. Latitude is geodetic, in radians. This is
-    /// what you want for constructing the local antenna positions in a UVFITS
-    /// antenna table.
-    ///
-    /// Assumes that the array used is the MWA.
-    fn get_xyz_metafits(metafits: &mut FitsFile) -> Result<Vec<Self>, FitsError> {
-        // We assume this is MWA data, and that the second HDU (index 1 here)
-        // contains the ENH data. The data is stored as f32.
-        let hdu = fits_open_hdu!(metafits, 1)?;
-        let east: Vec<f32> = get_fits_col!(metafits, &hdu, "East")?;
-        let north: Vec<f32> = get_fits_col!(metafits, &hdu, "North")?;
-        let height: Vec<f32> = get_fits_col!(metafits, &hdu, "Height")?;
-
-        // Convert the coordinates. Do this as f64 for accuracy. We only need to
-        // take every second value, because every pair of rows corresponds to a
-        // single tile (the values are the same).
-        let xyz: Vec<_> = east
-            .iter()
-            .step_by(2)
-            .zip(north.iter().step_by(2))
-            .zip(height.iter().step_by(2))
-            .map(|((e, n), h)| {
-                ENH {
-                    e: *e as f64,
-                    n: *n as f64,
-                    h: *h as f64,
-                }
-                .to_xyz_mwa()
-            })
-            .collect();
-        Ok(xyz)
-    }
-
     /// For each XYZ pair, calculate a baseline.
     pub fn get_xyz_baselines(xyz: &[Self]) -> Vec<XyzBaseline> {
         // Assume that the length of `xyz` is the number of tiles.
@@ -93,17 +58,31 @@ impl XYZ {
         diffs
     }
 
-    /// For each `XYZ` pair listed in a metafits file, calculate a
+    /// For each RF input listed in an mwalib context, calculate a
     /// `XyzBaseline`.
     ///
-    /// Note that the baselines are ordered according to the metafits;
-    /// e.g. Tile104 is often the first tile listed, Tile103 second, so the
-    /// first baseline is between Tile104 and Tile103.
-    pub fn get_baselines_metafits(
-        metafits: &mut FitsFile,
-    ) -> Result<Vec<XyzBaseline>, mwalib::FitsError> {
-        let xyz = Self::get_xyz_metafits(metafits)?;
-        Ok(Self::get_xyz_baselines(&xyz))
+    /// Note that the RF inputs are ordered by antenna number, **not** the
+    /// "input"; e.g. in the metafits file, Tile104 is often the first tile
+    /// listed ("input" 0), Tile103 second ("input" 2), so the first baseline
+    /// would naively be between Tile104 and Tile103.
+    pub fn get_baselines_mwalib(mwalib: &mwalibContext) -> Vec<XyzBaseline> {
+        let mut xyz = Vec::with_capacity(mwalib.num_rf_inputs / 2);
+        for rf in &mwalib.rf_inputs {
+            // There is an RF input for both tile polarisations. The ENH
+            // coordinates are the same for both polarisations of a tile; ignore
+            // the RF input if it's associated with Y.
+            if rf.pol == Pol::Y {
+                continue;
+            }
+
+            let enh = ENH {
+                e: rf.east_m,
+                n: rf.north_m,
+                h: rf.height_m,
+            };
+            xyz.push(enh.to_xyz_mwa());
+        }
+        Self::get_xyz_baselines(&xyz)
     }
 }
 
