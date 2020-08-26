@@ -29,8 +29,9 @@ pub fn cuda_vis_gen(
     lmn: Vec<LMN>,
     uvw: Vec<UVW>,
 ) -> (Vec<f32>, Vec<f32>) {
-    let n_channels = params.freq_bands.len() * params.n_fine_channels;
-    let n_visibilities = params.freq_bands.len() * params.n_fine_channels * context.n_baselines;
+    let n_freq_bands = params.freq_bands.len() as u64;
+    let n_channels = n_freq_bands * params.n_fine_channels;
+    let n_visibilities = n_freq_bands * params.n_fine_channels * context.n_baselines;
 
     // Convert `uvw` to be C compatible.
     let (u, v, w) = UVW::decompose(uvw);
@@ -55,8 +56,8 @@ pub fn cuda_vis_gen(
     }));
 
     // Create a `visibilities_s` struct to pass into C.
-    let mut real = vec![0.0; n_visibilities];
-    let mut imag = vec![0.0; n_visibilities];
+    let mut real = vec![0.0; n_visibilities as usize];
+    let mut imag = vec![0.0; n_visibilities as usize];
     real.shrink_to_fit();
     imag.shrink_to_fit();
     let vis_s = Box::into_raw(Box::new(Visibilities_s {

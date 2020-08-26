@@ -19,8 +19,7 @@ use nom::{
 use super::error::ErrorKind;
 use super::types::flux_density::*;
 use super::types::source::*;
-use crate::constants::DH2R;
-use crate::coord::types::RADec;
+use crate::*;
 
 /// Parse any line that starts with a hash symbol (#), or has whitespace before
 /// a hash symbol. The result is discarded.
@@ -153,28 +152,28 @@ pub fn parse_source_list(contents: &str) -> Result<Vec<Source>, ErrorKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use float_cmp::approx_eq;
+    use approx::*;
 
     #[test]
     fn flux_density_parser_test_1() {
         let s = "FREQ 180e+6 0.0000105513 0 0 0\n";
         let (_, fd) = flux_density_parser(s).expect("Parser failed");
-        assert!(approx_eq!(f64, fd.freq, 180e6, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.i, 0.0000105513, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.q, 0.0, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.u, 0.0, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.v, 0.0, epsilon = 5e-7));
+        assert_abs_diff_eq!(fd.freq, 180e6, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.i, 0.0000105513, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.q, 0.0, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.u, 0.0, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.v, 0.0, epsilon = 5e-7);
     }
 
     #[test]
     fn flux_density_parser_test_2() {
         let s = "FREQ 165e+6 0.0002097382 0 0 0\n";
         let (_, fd) = flux_density_parser(s).expect("Parser failed");
-        assert!(approx_eq!(f64, fd.freq, 165e6, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.i, 0.0002097382, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.q, 0.0, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.u, 0.0, epsilon = 5e-7));
-        assert!(approx_eq!(f64, fd.v, 0.0, epsilon = 5e-7));
+        assert_abs_diff_eq!(fd.freq, 165e6, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.i, 0.0002097382, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.q, 0.0, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.u, 0.0, epsilon = 5e-7);
+        assert_abs_diff_eq!(fd.v, 0.0, epsilon = 5e-7);
     }
 
     #[test]
@@ -197,18 +196,8 @@ FREQ 165e+6 0.0002097382 0 0 0
 ENDCOMPONENT
 "#;
         let (_, c) = component_parser(s).expect("Parser failed");
-        assert!(approx_eq!(
-            f64,
-            c.radec.ra,
-            3.40182_f64 * *DH2R,
-            epsilon = 5e-7
-        ));
-        assert!(approx_eq!(
-            f64,
-            c.radec.dec,
-            (-37.5551_f64).to_radians(),
-            epsilon = 5e-7
-        ));
+        assert_abs_diff_eq!(c.radec.ra, 3.40182_f64 * *DH2R, epsilon = 5e-7);
+        assert_abs_diff_eq!(c.radec.dec, (-37.5551_f64).to_radians(), epsilon = 5e-7);
         assert_eq!(c.flux_densities.len(), 2);
     }
 
@@ -260,18 +249,16 @@ ENDSOURCE
         let (_, src) = source_parser(s).expect("Parser failed");
         assert_eq!(src.name, "testsrc");
         assert_eq!(src.components.len(), 2);
-        assert!(approx_eq!(
-            f64,
+        assert_abs_diff_eq!(
             src.components[0].radec.ra,
             0.3669956178046037,
             epsilon = 1e-10
-        ));
-        assert!(approx_eq!(
-            f64,
+        );
+        assert_abs_diff_eq!(
             src.components[1].flux_densities[0].i,
             0.0003097382,
             epsilon = 1e-10
-        ));
+        );
     }
 
     #[test]

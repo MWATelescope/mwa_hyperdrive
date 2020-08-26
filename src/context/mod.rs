@@ -4,8 +4,6 @@
 
 use crate::*;
 
-use fitsio::FitsFile;
-
 /// An observation context used throughout `hyperdrive`.
 ///
 /// Frequencies are stored as integers to avoid floating-point issues.
@@ -13,65 +11,57 @@ use fitsio::FitsFile;
 pub struct Context {
     /// The base frequency of the observation [Hz]. For reasons unknown, its
     /// calculation is insane.
-    pub base_freq: usize,
+    pub base_freq: u64,
     /// The total bandwidth of the observation [Hz]
-    pub bandwidth: usize,
+    pub bandwidth: u64,
     /// The coarse channels used. These are typically 0 to 23.
     pub coarse_channels: Vec<u8>,
     /// The frequency width of a single coarse channel [Hz]
-    pub coarse_channel_width: usize,
+    pub coarse_channel_width: u64,
     /// The observation's frequency resolution [Hz]
-    pub fine_channel_width: usize,
+    pub fine_channel_width: u64,
     /// The LST at the start of the observation [radians]
     pub base_lst: f64,
     /// The number of cross-correlation baselines
-    pub n_baselines: usize,
+    pub n_baselines: u64,
     /// The `XyzBaselines` of the observations [metres]
     pub xyz: Vec<XyzBaseline>,
 }
 
 impl Context {
     /// Create a new `hyperdrive` observation `Context` from a metafits file.
-    pub fn new(metafits: &mut FitsFile) -> Result<Self, fitsio::errors::Error> {
-        let hdu = metafits.hdu(0)?;
-        let freq_centre = (hdu
-            .read_key::<String>(metafits, "FREQCENT")?
-            .parse::<f64>()
-            .expect("Couldn't parse FREQCENT from the metafits as f64")
-            * 1e6) as usize;
-        let fine_channel_width = (hdu
-            .read_key::<String>(metafits, "FINECHAN")?
-            .parse::<f64>()
-            .expect("Couldn't parse FINECHAN from the metafits as f64")
-            * 1e3) as usize;
-        let bandwidth = (hdu
-            .read_key::<String>(metafits, "BANDWDTH")?
-            .parse::<f64>()
-            .expect("Couldn't parse BANDWDTH from the metafits as f64")
-            * 1e6) as usize;
+    pub fn new(metafits: &mut FitsFile) -> Result<Self, FitsError> {
+        let hdu = fits_open_hdu!(metafits, 0)?;
+        let freq_centre = {
+            let f: f64 = get_required_fits_key!(metafits, &hdu, "FREQCENT")?;
+            (f * 1e6) as u64
+        };
+        let fine_channel_width = {
+            let f: f64 = get_required_fits_key!(metafits, &hdu, "FINECHAN")?;
+            (f * 1e3) as u64
+        };
+        let bandwidth = {
+            let f: f64 = get_required_fits_key!(metafits, &hdu, "BANDWDTH")?;
+            (f * 1e6) as u64
+        };
         let base_freq = freq_centre - (bandwidth + fine_channel_width) / 2;
 
-        let coarse_channels: Vec<u8> = hdu
-            .read_key::<String>(metafits, "CHANSEL")?
+        let chansel: String = get_required_fits_key!(metafits, &hdu, "CHANSEL")?;
+        let coarse_channels: Vec<u8> = chansel
             .split(',')
             .map(|s| {
                 s.parse()
                     .expect("Failed to parse one of the channels in the metafits' CHANSEL")
             })
             .collect();
-        let coarse_channel_width = bandwidth / coarse_channels.len() as usize;
+        let coarse_channel_width = bandwidth / coarse_channels.len() as u64;
 
-        let base_lst = hdu
-            .read_key::<String>(metafits, "LST")?
-            .parse::<f64>()
-            .expect("Couldn't parse LST from the metafits as f64")
-            .to_radians();
-
-        let n_tiles = hdu
-            .read_key::<String>(metafits, "NINPUTS")?
-            .parse::<usize>()
-            .expect("Couldn't parse NINPUTS from the metafits as u32")
-            / 2;
+        let lst: f64 = get_required_fits_key!(metafits, &hdu, "LST")?;
+        let base_lst = lst.to_radians();
+        let n_tiles = {
+            let n: u64 = get_required_fits_key!(metafits, &hdu, "NINPUTS")?;
+            n / 2
+        };
         let n_baselines = n_tiles / 2 * (n_tiles - 1);
 
         let xyz = XYZ::get_baselines_metafits(metafits)?;
@@ -96,5 +86,49 @@ impl Context {
             base_freq: self.base_freq as f64,
             base_lst: self.base_lst as f64,
         }))
+    }
+}
+
+impl std::fmt::Display for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            r#"hyperdrive observation context:
+Obs. base freq.:      {bf} MHz
+Total obs. bandwidth: {bw} MHz
+Coarse channels:      {cc:?}
+Coarse channel width: {ccw} MHz
+Fine channel width:   {fcw} kHz
+Num. baselines:       {nbl}
+Base LST:             {lst} rad"#,
+            bf = self.base_freq as f64 / 1e6,
+            bw = self.bandwidth as f64 / 1e6,
+            cc = self.coarse_channels,
+            ccw = self.coarse_channel_width as f64 / 1e6,
+            fcw = self.fine_channel_width as f64 / 1e3,
+            lst = self.base_lst,
+            nbl = self.n_baselines,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_context_from_1065880128_metafits() -> Result<(), FitsError> {
+        let metafits = std::path::PathBuf::from("tests/1065880128.metafits");
+        let mut fptr = fits_open!(&metafits)?;
+        let c = Context::new(&mut fptr)?;
+        assert_eq!(c.base_freq, 167035000);
+        assert_eq!(c.bandwidth, 30720000);
+        assert_eq!(c.coarse_channel_width, 1280000);
+        assert_eq!(c.fine_channel_width, 40000);
+        assert_eq!(c.base_lst, 6.074823226561063);
+        assert_eq!(c.n_baselines, 8128);
+        assert_eq!(c.xyz.len(), 8128);
+
+        Ok(())
     }
 }

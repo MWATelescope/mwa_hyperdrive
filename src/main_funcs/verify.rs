@@ -4,7 +4,7 @@
 
 use super::*;
 use mwa_hyperdrive::sourcelist::read::parse_source_list;
-use mwa_hyperdrive::sourcelist::source::Source;
+use mwa_hyperdrive::*;
 
 pub(crate) fn verify_srclist(source_lists: Vec<PathBuf>) -> Result<(), anyhow::Error> {
     if source_lists.is_empty() {
@@ -19,13 +19,24 @@ pub(crate) fn verify_srclist(source_lists: Vec<PathBuf>) -> Result<(), anyhow::E
             parse_source_list(&contents)?
         };
 
-        println!("{}:", source_list.to_string_lossy());
+        println!("{}:", source_list.display());
         println!(
             "{} sources, {} components\n",
             sources.len(),
             sources.iter().map(|s| s.components.len()).sum::<usize>()
         );
     }
+
+    Ok(())
+}
+
+pub(crate) fn verify_simulate_vis_args(
+    cli_args: SimulateVisArgs,
+    param_file: Option<PathBuf>,
+) -> Result<(), anyhow::Error> {
+    let (params, context) = merge_cli_and_file_params(cli_args, param_file)?;
+    println!("{}", params);
+    println!("\n{}", context);
 
     Ok(())
 }

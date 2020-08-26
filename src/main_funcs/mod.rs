@@ -3,17 +3,16 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 pub(crate) mod simulate_vis;
-pub(crate) mod verify_srclist;
+pub(crate) mod verify;
 
 // Re-exports.
 use std::fs::File;
 use std::io::Read;
-use std::path::PathBuf;
 
 use anyhow::bail;
 
 pub(crate) use simulate_vis::*;
-pub(crate) use verify_srclist::*;
+pub(crate) use verify::*;
 
 // Add build-time information from the "built" crate.
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
@@ -29,7 +28,9 @@ lazy_static! {
         compiler = RUSTC_VERSION,
         time = BUILT_TIME_UTC
     );
-    // Ignore the RUSTDOC_VERSION; this line prevents a warning about
-    // `RUSTDOC_VERSION` being unused.
-    static ref _DOC: &'static str = RUSTDOC_VERSION;
+    // These lines prevent warnings about unused built-time variables.
+    static ref _RUSTDOC_VERSION: &'static str = RUSTDOC_VERSION;
+    static ref _GIT_DIRTY: Option<bool> = GIT_DIRTY;
+    static ref _GIT_HEAD_REF: Option<&'static str> = GIT_HEAD_REF;
+    static ref _GIT_COMMIT_HASH: Option<&'static str> = GIT_COMMIT_HASH;
 }

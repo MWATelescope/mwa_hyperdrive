@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use super::*;
-use crate::constants::*;
+use crate::*;
 
 /// Given two Stokes I flux densities and their frequencies, calculate the
 /// spectral index that fits them. The first argument is expected to be the flux
@@ -41,12 +41,10 @@ pub fn estimate_flux_density_at_freq(
         // If there's only one source component, then we must assume the
         // spectral index for extrapolation.
         if fds.len() == 1 {
-            // CHJ: Should we warn here? If so, it needs to be done better than
-            // just printing to stderr.
-            // eprintln!(
-            //     "estimate_flux_density_at_freq: WARNING: Component has only one flux density; extrapolating with spectral index {}",
-            //     *DEFAULT_SPEC_INDEX
-            // );
+            debug!(
+                "Component at RADec {} has only one flux density; extrapolating with spectral index {}",
+                &comp.radec, *DEFAULT_SPEC_INDEX
+            );
             (*DEFAULT_SPEC_INDEX, &fds[0])
         }
         // Otherwise, find the frequencies that bound the given frequency. As we
@@ -96,8 +94,8 @@ pub fn estimate_flux_density_at_freq(
 
             // Stop stupid spectral indices.
             if spec_index < *SPEC_INDEX_CAP {
-                eprintln!(
-                    "estimate_flux_density_at_freq: WARNING: Component had a spectral index {}; capping at {}",
+                warn!(
+                    "Component had a spectral index {}; capping at {}",
                     spec_index, *SPEC_INDEX_CAP
                 );
                 spec_index = *SPEC_INDEX_CAP;
@@ -128,8 +126,8 @@ pub fn estimate_flux_density_at_freq(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coord::types::RADec;
-    use float_cmp::approx_eq;
+    use crate::coord::RADec;
+    use approx::*;
 
     fn get_test_source_1() -> Source {
         Source {
@@ -200,24 +198,14 @@ mod tests {
             &source.components[0].flux_densities[1],
         );
         let expected = -0.5503397132132084;
-        assert!(
-            approx_eq!(f64, si, expected, epsilon = 1e-10),
-            "Calculated SI ({}) did not match expected SI ({})!",
-            si,
-            expected
-        );
+        assert_abs_diff_eq!(si, expected, epsilon = 1e-10);
 
         let si = calc_spec_index(
             &source.components[0].flux_densities[1],
             &source.components[0].flux_densities[2],
         );
         let expected = -1.0000000000000002;
-        assert!(
-            approx_eq!(f64, si, expected, epsilon = 1e-10),
-            "Calculated SI ({}) did not match expected SI ({})!",
-            si,
-            expected
-        );
+        assert_abs_diff_eq!(si, expected, epsilon = 1e-10);
 
         // This is an invalid usage of the `calc_spec_index`, but the invalidity
         // is not checked.
@@ -226,12 +214,7 @@ mod tests {
             &source.components[0].flux_densities[0],
         );
         let expected = -0.7369655941662062;
-        assert!(
-            approx_eq!(f64, si, expected, epsilon = 1e-10),
-            "Calculated SI ({}) did not match expected SI ({})!",
-            si,
-            expected
-        );
+        assert_abs_diff_eq!(si, expected, epsilon = 1e-10);
     }
 
     #[test]
@@ -243,12 +226,7 @@ mod tests {
             &source.components[0].flux_densities[1],
         );
         let expected = -3.321928094887362;
-        assert!(
-            approx_eq!(f64, si, expected, epsilon = 1e-10),
-            "Calculated SI ({}) did not match expected SI ({})!",
-            si,
-            expected
-        );
+        assert_abs_diff_eq!(si, expected, epsilon = 1e-10);
     }
 
     #[test]
@@ -258,12 +236,7 @@ mod tests {
         let spec_index = -0.6;
         let ratio = calc_flux_ratio(desired_freq, cat_freq, spec_index);
         let expected = 0.9620170425907598;
-        assert!(
-            approx_eq!(f64, ratio, expected, epsilon = 1e-10),
-            "Calculated freq. ratio ({}) did not match expected value ({})!",
-            ratio,
-            expected
-        );
+        assert_abs_diff_eq!(ratio, expected, epsilon = 1e-10);
     }
 
     #[test]
@@ -273,12 +246,7 @@ mod tests {
         let spec_index = -0.6;
         let ratio = calc_flux_ratio(desired_freq, cat_freq, spec_index);
         let expected = 1.0422644718599143;
-        assert!(
-            approx_eq!(f64, ratio, expected, epsilon = 1e-10),
-            "Calculated freq. ratio ({}) did not match expected value ({})!",
-            ratio,
-            expected
-        );
+        assert_abs_diff_eq!(ratio, expected, epsilon = 1e-10);
     }
 
     #[test]
@@ -303,18 +271,18 @@ mod tests {
         let fd = estimate_flux_density_at_freq(&source.components[0], 90.);
         assert!(fd.is_ok());
         let fd = fd.unwrap();
-        assert!(approx_eq!(f64, fd.i, 10.879426248455298, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.q, 7.615598373918708, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.u, 6.527655749073178, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.v, 1.0879426248455297, epsilon = 1e-10));
+        assert_abs_diff_eq!(fd.i, 10.879426248455298, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.q, 7.615598373918708, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.u, 6.527655749073178, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.v, 1.0879426248455297, epsilon = 1e-10);
 
         let fd = estimate_flux_density_at_freq(&source.components[0], 110.);
         assert!(fd.is_ok());
         let fd = fd.unwrap();
-        assert!(approx_eq!(f64, fd.i, 9.265862513558696, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.q, 6.486103759491087, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.u, 5.559517508135217, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.v, 0.9265862513558696, epsilon = 1e-10));
+        assert_abs_diff_eq!(fd.i, 9.265862513558696, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.q, 6.486103759491087, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.u, 5.559517508135217, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.v, 0.9265862513558696, epsilon = 1e-10);
     }
 
     #[test]
@@ -323,18 +291,18 @@ mod tests {
         let fd = estimate_flux_density_at_freq(&source.components[0], 90.);
         assert!(fd.is_ok());
         let fd = fd.unwrap();
-        assert!(approx_eq!(f64, fd.i, 10.596981209124532, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.q, 7.417886846387172, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.u, 6.358188725474719, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.v, 1.0596981209124532, epsilon = 1e-10));
+        assert_abs_diff_eq!(fd.i, 10.596981209124532, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.q, 7.417886846387172, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.u, 6.358188725474719, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.v, 1.0596981209124532, epsilon = 1e-10);
 
         let fd = estimate_flux_density_at_freq(&source.components[0], 210.);
         assert!(fd.is_ok());
         let fd = fd.unwrap();
-        assert!(approx_eq!(f64, fd.i, 5.7142857142857135, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.q, 3.8095238095238093, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.u, 2.8571428571428568, epsilon = 1e-10));
-        assert!(approx_eq!(f64, fd.v, 0.09523809523809523, epsilon = 1e-10));
+        assert_abs_diff_eq!(fd.i, 5.7142857142857135, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.q, 3.8095238095238093, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.u, 2.8571428571428568, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.v, 0.09523809523809523, epsilon = 1e-10);
     }
 
     #[test]
@@ -352,30 +320,10 @@ mod tests {
             *SPEC_INDEX_CAP,
         );
         let expected = source.components[0].flux_densities[1].clone() * freq_ratio_capped;
-        assert!(
-            approx_eq!(f64, fd.i, expected.i, epsilon = 1e-10),
-            "Stokes I FD ({}) did not match expected value ({})!",
-            fd.i,
-            expected.i,
-        );
-        assert!(
-            approx_eq!(f64, fd.q, expected.q, epsilon = 1e-10),
-            "Stokes Q FD ({}) did not match expected value ({})!",
-            fd.i,
-            expected.i,
-        );
-        assert!(
-            approx_eq!(f64, fd.u, expected.u, epsilon = 1e-10),
-            "Stokes U FD ({}) did not match expected value ({})!",
-            fd.i,
-            expected.i,
-        );
-        assert!(
-            approx_eq!(f64, fd.v, expected.v, epsilon = 1e-10),
-            "Stokes V FD ({}) did not match expected value ({})!",
-            fd.i,
-            expected.i,
-        );
+        assert_abs_diff_eq!(fd.i, expected.i, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.q, expected.q, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.u, expected.u, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.v, expected.v, epsilon = 1e-10);
 
         // Calculate the estimated flux density manually.
         // si should be -3.321928094887362 (this is also tested above).
@@ -384,12 +332,7 @@ mod tests {
             &source.components[0].flux_densities[1],
         );
         let expected_si = -3.321928094887362;
-        assert!(
-            approx_eq!(f64, si, expected_si, epsilon = 1e-10),
-            "Calculated SI ({}) did not match expected SI ({})!",
-            si,
-            expected_si,
-        );
+        assert_abs_diff_eq!(si, expected_si, epsilon = 1e-10);
         let freq_ratio = calc_flux_ratio(
             desired_freq,
             source.components[0].flux_densities[1].freq,

@@ -2,7 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-pub mod types;
+/*!
+Super module for all coordinate types.
+*/
+
+pub mod azel;
+pub mod enh;
+pub mod hadec;
+pub mod jones;
+pub mod lmn;
+pub mod pointing_centre;
+pub mod radec;
+pub mod uvw;
+pub mod xyz;
 
 // Re-exports.
-pub use types::*;
+pub use azel::AzEl;
+pub use hadec::HADec;
+pub use jones::*;
+pub use lmn::LMN;
+pub use pointing_centre::PointingCentre;
+pub use radec::RADec;
+pub use uvw::UVW;
+pub use xyz::{XyzBaseline, XYZ};

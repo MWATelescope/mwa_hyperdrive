@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use super::flux_density::FluxDensity;
-use crate::coord::types::*;
+use crate::coord::*;
 
 use rayon::prelude::*;
 
@@ -18,7 +18,7 @@ pub struct Source {
 impl Source {
     /// Calculate the (l,m,n) coordinates of each component's (RA,Dec). The
     /// calculation is done in parallel.
-    pub fn get_lmn(&self, pc: &PC) -> Vec<LMN> {
+    pub fn get_lmn(&self, pc: &PointingCentre) -> Vec<LMN> {
         self.components
             .par_iter()
             .map(|comp| comp.radec.to_lmn(&pc))

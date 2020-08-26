@@ -12,11 +12,8 @@ use byteorder::{ByteOrder, LittleEndian};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 
-use crate::constants::*;
-use crate::context::Context;
-use crate::coord::*;
 use crate::sourcelist::estimate::estimate_flux_density_at_freq;
-use crate::sourcelist::types::Source;
+use crate::*;
 
 /// Parameters for visibility generation. Members of this struct might be
 /// different from a `Context` struct (e.g. such as `time_resolution`), which
@@ -30,7 +27,7 @@ pub struct TimeFreqParams {
     /// The coarse-band channels to use.
     pub freq_bands: Vec<u8>,
     /// The number of fine channels per coarse band.
-    pub n_fine_channels: usize,
+    pub n_fine_channels: u64,
     /// The resolution of a single fine-frequency channel [Hz].
     pub fine_channel_width: f64,
 }
@@ -47,7 +44,7 @@ pub fn vis_gen(
     context: &crate::Context,
     src: &Source,
     params: &TimeFreqParams,
-    mut pc: PC,
+    mut pc: PointingCentre,
     cuda: bool,
     text_file: bool,
 ) -> Result<(), std::io::Error> {
@@ -56,36 +53,39 @@ pub fn vis_gen(
     // alternative to this approach is to write out intermediate "per time, per
     // freq. band" files, but hopefully when we write directly to uvfits files,
     // this approach can go away.
-    let num_coords = params.n_time_steps * context.n_baselines;
+    let num_coords = params.n_time_steps * context.n_baselines as usize;
     let mut u = Vec::with_capacity(num_coords);
     let mut v = Vec::with_capacity(num_coords);
     let mut w = Vec::with_capacity(num_coords);
-    let total_num_visibilities = num_coords * params.freq_bands.len() * params.n_fine_channels;
+    let total_num_visibilities =
+        num_coords as usize * params.freq_bands.len() * params.n_fine_channels as usize;
     let mut real = Vec::with_capacity(total_num_visibilities);
     let mut imag = Vec::with_capacity(total_num_visibilities);
 
     // Get the interpolated/extrapolated flux densities for each frequency. The
     // flux densities of the source components do not change with time, and we
     // know all of the frequencies in advance. Calculate them once here.
-    let mut flux_densities =
-        Vec::with_capacity(src.components.len() * params.freq_bands.len() * params.n_fine_channels);
+    let mut flux_densities = Vec::with_capacity(
+        src.components.len() * params.freq_bands.len() * params.n_fine_channels as usize,
+    );
     for band in &params.freq_bands {
         // Have to subtract 1, as we index MWA coarse bands from 1.
         let base_freq =
-            (context.base_freq + (*band - 1) as usize * context.coarse_channel_width) as f64;
+            (context.base_freq + (*band - 1) as u64 * context.coarse_channel_width) as f64;
         for fine_channel in 0..params.n_fine_channels {
             let freq = base_freq + params.fine_channel_width * fine_channel as f64;
             let mut fds = src
                 .components
                 .par_iter()
-                .map(|comp| estimate_flux_density_at_freq(comp, freq).and_then(|fd| Ok(fd.i as _)))
+                .map(|comp| estimate_flux_density_at_freq(comp, freq).map(|fd| fd.i as _))
                 .filter_map(Result::ok)
                 .collect::<Vec<_>>();
-            // Panic if the length of `fds` is not the same as
-            // `src.components`; this means that
-            // `estimate_flux_density_at_freq` failed in at least one case.
+            // Abort if the length of `fds` is not the same as `src.components`;
+            // this means that `estimate_flux_density_at_freq` failed in at
+            // least one case.
             if fds.len() != src.components.len() {
-                panic!("cpu_vis_gen: At least one computation failed in \"estimate_flux_density_at_freq\"!");
+                error!("At least one computation failed in \"estimate_flux_density_at_freq\"!");
+                std::process::exit(1);
             }
             flux_densities.append(&mut fds);
         }
@@ -121,12 +121,14 @@ pub fn vis_gen(
         // For each fine channel, scale all of the UVW coordinates by
         // wavelength, and store the result in `uvw`.
         let mut uvw = Vec::with_capacity(
-            params.freq_bands.len() * params.n_fine_channels * context.n_baselines,
+            params.freq_bands.len()
+                * params.n_fine_channels as usize
+                * context.n_baselines as usize,
         );
         for band in &params.freq_bands {
             // Have to subtract 1, as we index MWA coarse bands from 1.
             let base_freq =
-                (context.base_freq + (*band - 1) as usize * context.coarse_channel_width) as f64;
+                (context.base_freq + (*band - 1) as u64 * context.coarse_channel_width) as f64;
             for fine_channel in 0..params.n_fine_channels {
                 let freq = base_freq + params.fine_channel_width * fine_channel as f64;
                 let wavelength = *VEL_C / freq;
@@ -145,7 +147,9 @@ pub fn vis_gen(
                     r#"Running CUDA with:
     {uvw} UVW baselines ({bl} baselines * {fc} fine channels * {cb} coarse bands)
     {comps} source components"#,
-                    uvw = params.freq_bands.len() * params.n_fine_channels * context.n_baselines,
+                    uvw = params.freq_bands.len() as u64
+                        * params.n_fine_channels
+                        * context.n_baselines,
                     bl = context.n_baselines,
                     fc = params.n_fine_channels,
                     cb = params.freq_bands.len(),
@@ -197,19 +201,19 @@ pub fn vis_gen(
         // Write the visibilities.
         write_binary_real_imag(
             params.n_time_steps,
-            params.freq_bands.len(),
+            params.freq_bands.len() as u64,
             params.n_fine_channels,
             context.n_baselines,
-            band_num,
+            band_num as u64,
             &mut buf,
             &real,
         )?;
         write_binary_real_imag(
             params.n_time_steps,
-            params.freq_bands.len(),
+            params.freq_bands.len() as u64,
             params.n_fine_channels,
             context.n_baselines,
-            band_num,
+            band_num as u64,
             &mut buf,
             &imag,
         )?;
@@ -218,17 +222,17 @@ pub fn vis_gen(
         if text_file {
             let file = File::create(format!("hyperdrive_band{:02}.txt", band))?;
             let mut buf = BufWriter::new(file);
-            let unit = params.n_fine_channels * context.n_baselines;
-            for time_step in 0..params.n_time_steps {
-                let coord_offset = time_step * context.n_baselines;
+            let unit = (params.n_fine_channels * context.n_baselines) as usize;
+            for time_step in 0..params.n_time_steps as usize {
+                let coord_offset = time_step * context.n_baselines as usize;
                 let vis_offset = time_step * params.freq_bands.len() * unit + band_num * unit;
                 for i in 0..unit {
                     writeln!(
                         buf,
                         "{:.7} {:.7} {:.7} {:.7} {:.7}",
-                        u[coord_offset + (i % context.n_baselines)],
-                        v[coord_offset + (i % context.n_baselines)],
-                        w[coord_offset + (i % context.n_baselines)],
+                        u[coord_offset + (i % context.n_baselines as usize)],
+                        v[coord_offset + (i % context.n_baselines as usize)],
+                        w[coord_offset + (i % context.n_baselines as usize)],
                         real[vis_offset + i],
                         imag[vis_offset + i]
                     )?;
@@ -245,16 +249,16 @@ pub fn vis_gen(
 /// `n_time_steps` * `n_baselines`.
 fn write_binary_uvw(
     n_time_steps: usize,
-    n_fine_channels: usize,
-    n_baselines: usize,
+    n_fine_channels: u64,
+    n_baselines: u64,
     buf: &mut BufWriter<File>,
     coord: &[f32],
 ) -> Result<(), std::io::Error> {
     // Allocate a space for the bytes. 4 bytes per f32.
-    let mut bytes = vec![0; 4 * n_baselines];
+    let mut bytes = vec![0; 4 * n_baselines as usize];
     for time_step in 0..n_time_steps {
-        let i_start = time_step * n_baselines;
-        let i_end = (time_step + 1) * n_baselines;
+        let i_start = time_step * n_baselines as usize;
+        let i_end = (time_step + 1) * n_baselines as usize;
         // Read in the data as bytes.
         LittleEndian::write_f32_into(&coord[i_start..i_end], &mut bytes);
         // For each fine channel, write out the bytes.
@@ -271,20 +275,20 @@ fn write_binary_uvw(
 /// `n_fine_channels` * `n_baselines` * the number of freq. bands.
 fn write_binary_real_imag(
     n_time_steps: usize,
-    n_freq_bands: usize,
-    n_fine_channels: usize,
-    n_baselines: usize,
-    band_num: usize,
+    n_freq_bands: u64,
+    n_fine_channels: u64,
+    n_baselines: u64,
+    band_num: u64,
     buf: &mut BufWriter<File>,
     vis: &[f32],
 ) -> Result<(), std::io::Error> {
-    let unit = n_fine_channels * n_baselines;
+    let unit = (n_fine_channels * n_baselines) as usize;
     // Allocate a space for the bytes. 4 bytes per f32.
-    let mut bytes = vec![0; 4 * n_fine_channels * n_baselines];
+    let mut bytes = vec![0; 4 * (n_fine_channels * n_baselines) as usize];
     for time_step in 0..n_time_steps {
-        let offset = time_step * n_freq_bands * unit;
-        let i_start = offset + band_num * unit;
-        let i_end = offset + (band_num + 1) * unit;
+        let offset = time_step * n_freq_bands as usize * unit;
+        let i_start = offset + band_num as usize * unit;
+        let i_end = offset + (band_num + 1) as usize * unit;
         // Read in the data as bytes.
         LittleEndian::write_f32_into(&vis[i_start..i_end], &mut bytes);
         buf.write_all(&bytes)?;
@@ -310,7 +314,8 @@ fn cpu_vis_gen(
     uvw: Vec<UVW>,
 ) -> (Vec<f32>, Vec<f32>) {
     // Perform the visibility equation over each UVW baseline and LMN triple.
-    let n_visibilities = params.freq_bands.len() * params.n_fine_channels * context.n_baselines;
+    let n_visibilities =
+        params.freq_bands.len() * (params.n_fine_channels * context.n_baselines) as usize;
     let mut real = Vec::with_capacity(n_visibilities);
     let mut imag = Vec::with_capacity(n_visibilities);
 
@@ -324,7 +329,7 @@ fn cpu_vis_gen(
                     // need to get the right one.
                     flux_densities
                         .iter()
-                        .skip(i_vis / context.n_baselines * src.components.len()),
+                        .skip(i_vis / context.n_baselines as usize * src.components.len()),
                 )
                 .fold(
                     (0.0, 0.0),

@@ -53,7 +53,18 @@ Any command-line arguments specified alongside a parameter file will *override*
 the parameter file's settings.
 </details>
 
-### Source list validation
+### Validation
+#### Visibility simulation
+<details>
+To check if arguments could be used with `simulate-vis`, one could check with `verify-simulate-vis`:
+
+    hyperdrive verify-simulate-vis <args>
+
+If valid, this routine will print out the args as well as the observation
+context from the metafits file.
+</details>
+
+#### Source list
 <details>
 To check if a source list is compatible with `hyperdrive`, the following can be
 used:
