@@ -1,0 +1,29 @@
+name: Run tests
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+    container: nvidia/cuda:11.1-base
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+          apt update -y
+          DEBIAN_FRONTEND="noninteractive" apt-get -y install tzdata
+          apt install -y pkg-config curl git gcc llvm libclang-dev cuda-nvcc-11-1 libcfitsio-dev liberfa-dev
+
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . $HOME/.cargo/env
+          rustup update stable --no-self-update && rustup default stable
+          rustup target add x86_64-unknown-linux-gnu
+
+    - name: Run tests
+      run: |
+        . $HOME/.cargo/env
+        HYPERDRIVE_CUDA_COMPUTE=75 cargo test --all

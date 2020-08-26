@@ -6,11 +6,18 @@ Currently in heavy development. Aims to provide feature parity with and exceed
 the MWA Real-Time System (RTS).
 
 ## Usage
+### Calibration
+Work in progress!
+
+### Source lists
+See the README in the `mwa_hyperdrive_srclist` directory.
+
 ### Visibility Simulation
 <details>
 
 `hyperdrive` can simulate MWA visibilities from a source catalogue, similar to
-Jack Line's [WODEN](https://github.com/JLBLine/WODEN).
+Jack Line's [`WODEN`](https://github.com/JLBLine/WODEN), although `WODEN` should
+be instead of `hyperdrive` for this purpose.
 
 The help text containing all possible options can be seen with:
 
@@ -51,31 +58,16 @@ Run with:
 
 Any command-line arguments specified alongside a parameter file will *override*
 the parameter file's settings.
-</details>
 
-### Validation
-#### Visibility simulation
-<details>
-To check if arguments could be used with `simulate-vis`, one could check with `verify-simulate-vis`:
+#### Verification
+To check if arguments could be used with `simulate-vis`, one should check with
+the dry run option:
 
-    hyperdrive verify-simulate-vis <args>
+    hyperdrive simulate-vis --dry-run <args>
 
 If valid, this routine will print out the args as well as the observation
 context from the metafits file.
-</details>
 
-#### Source list
-<details>
-To check if a source list is compatible with `hyperdrive`, the following can be
-used:
-
-    hyperdrive verify-srclist </path/to/srclist1> </path/to/srclist2>
-
-Check the help text for more details.
-
-    hyperdrive verify-srclist -h
-
-More than one source list can be given at a time.
 </details>
 
 ## Installation
@@ -84,25 +76,40 @@ More than one source list can be given at a time.
 ### Prerequisites
 <details>
 
+- An NVIDIA GPU with compute capability >=2. See this
+  [list](https://developer.nvidia.com/cuda-gpus) to determine what compute
+  capability a GPU has.
+
 - A Rust compiler with a version >= 1.42.0
 
   `https://www.rust-lang.org/tools/install`
 
 - [cfitsio](https://heasarc.gsfc.nasa.gov/docs/software/fitsio/)
+  - Ubuntu: `libcfitsio-dev`
+  - Arch: `cfitsio`
+  - Library and include dirs can be specified manually with CFITSIO_LIB and
+    CFITSIO_INC
+  - If not specified, `pkg-config` is used to find the library.
+
+- [ERFA](https://github.com/liberfa/erfa)
+  - Ubuntu: `liberfa-dev`
+  - Arch: AUR package `erfa`
+  - The library dir can be specified manually with ERFA_LIB
+  - If not specified, `pkg-config` is used to find the library.
+  - Use `--features=erfa-static` to build the library automatically. Requires a
+    C compiler and `autoconf`.
 
 - [CUDA](https://developer.nvidia.com/cuda-zone)
-
-  - As well as an NVIDIA GPU with compute capability >=2. See this
-    [list](https://developer.nvidia.com/cuda-gpus) to determine what compute
-    capability a GPU has.
+  - Arch: `cuda`
+  - The library dir can be specified manually with CUDA_LIB
+  - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
 
 - libclang
+  - Ubuntu: `libclang-dev`
+  - Arch: `clang`
 
-  This is a system library needed for some of `hyperdrive`'s dependencies.
-
-  On Ubuntu, this library is provided by the package `libclang-dev`.
-
-  On Arch, it is provided by the package `clang`.
+To compile a library statically, use e.g. `ERFA_STATIC=1`. To compile all
+libraries statically, use `PKG_CONFIG_ALL_STATIC=1`.
 
 Memory requirements can't be specified yet, as the code is still in development.
 </details>
@@ -159,3 +166,7 @@ new GitHub issue.
     This project is called `mwa_hyperdrive` so that it cannot be confused with
     other projects involving the word `hyperdrive`, but the binary is called
     `hyperdrive` to help users' fingers.
+
+- `hyperdrive` source list format
+
+    See the README in the `mwa_hyperdrive_srclist` directory.
