@@ -20,7 +20,6 @@ pub mod visibility_gen;
 pub use constants::*;
 pub use context::Context;
 pub use coord::*;
-pub use foreign::*;
 pub use instrument::PrimaryBeam;
 pub(crate) use math::*;
 pub use sourcelist::flux_density::FluxDensity;

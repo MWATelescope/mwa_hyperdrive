@@ -1,0 +1,18 @@
+[package]
+name = "mwa_hyperdrive_cuda"
+version = "0.1.0"
+authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
+edition = "2018"
+license = "MPL-2.0"
+build = "build.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.dev]
+opt-level = 2
+
+[build-dependencies]
+bindgen = "0.55.1"
+cc = "1.0.59"
+
+[dependencies]

@@ -9,4 +9,8 @@ Foreign functions and interfaces from C, C++ and/or CUDA are automatically
 provided here by bindgen.
  */
 
-pub(crate) mod erfa;
+// Link hyperdrive_cu produced from build.rs
+#[link(name = "hyperdrive_cu", kind = "static")]
+
+// Receive the generated bindings from bindgen in build.rs
+include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

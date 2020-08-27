@@ -5,6 +5,7 @@
 use mwalib::mwalibContext;
 
 use crate::*;
+use mwa_hyperdrive_cuda::Context_s;
 
 /// An observation context used throughout `hyperdrive`.
 ///

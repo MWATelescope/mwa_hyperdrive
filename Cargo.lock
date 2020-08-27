@@ -598,7 +598,6 @@ dependencies = [
  "bindgen",
  "built",
  "byteorder",
- "cc",
  "chrono",
  "criterion",
  "fern",
@@ -606,8 +605,8 @@ dependencies = [
  "fitsio-sys",
  "indicatif",
  "lazy_static",
- "libc",
  "log",
+ "mwa_hyperdrive_cuda",
  "mwalib",
  "nom",
  "num",
@@ -619,6 +618,14 @@ dependencies = [
  "structopt",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "mwa_hyperdrive_cuda"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cc",
 ]
 
 [[package]]
@@ -1089,11 +1096,12 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.1.43"
+version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca8a50ef2360fbd1eeb0ecd46795a87a19024eb4b53c5dc916ca1fd95fe62438"
+checksum = "6db9e6914ab8b1ae1c260a4ae7a49b6c5611b40328a735b21862567685e73255"
 dependencies = [
  "libc",
+ "wasi",
  "winapi",
 ]
 
@@ -1197,6 +1205,12 @@ dependencies = [
  "winapi",
  "winapi-util",
 ]
+
+[[package]]
+name = "wasi"
+version = "0.10.0+wasi-snapshot-preview1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a143597ca7c7793eff794def352d41792a93c481eb1042423ff7ff72ba2c31f"
 
 [[package]]
 name = "wasm-bindgen"

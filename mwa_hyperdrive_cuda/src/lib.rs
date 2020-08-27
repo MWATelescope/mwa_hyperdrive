@@ -3,10 +3,8 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
-This module handles interfacing with C, C++ and/or CUDA.
-
-Foreign functions and interfaces from C, C++ and/or CUDA are automatically
-provided here by bindgen.
+CUDA code to be used by hyperdrive, contained within its own crate.
  */
 
-pub(crate) mod erfa;
+pub mod foreign;
+pub use foreign::*;

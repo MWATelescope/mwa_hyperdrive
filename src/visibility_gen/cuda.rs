@@ -8,7 +8,7 @@ Generate visibilities using CUDA.
 
 use super::*;
 use crate::context::Context;
-use crate::foreign::{Source_s, UVW_s, Visibilities_s};
+use mwa_hyperdrive_cuda::{vis_gen, Source_s, UVW_s, Visibilities_s};
 
 /// For all coarse-band frequencies and their fine channels, generate
 /// visibilities for a sky model with CUDA, using the C function `vis_gen`.
@@ -68,7 +68,7 @@ pub fn cuda_vis_gen(
 
     // Call CUDA.
     unsafe {
-        crate::foreign::vis_gen(uvw_s, src_s, vis_s);
+        vis_gen(uvw_s, src_s, vis_s);
         // Deallocate.
         Box::from_raw(uvw_s);
         Box::from_raw(src_s);
