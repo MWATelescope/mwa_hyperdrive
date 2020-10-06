@@ -6,6 +6,7 @@
 Code to read in cotter flags in .mwaf files.
  */
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use super::errors::*;
@@ -25,25 +26,28 @@ fn cfitsio_path_to_str<T: AsRef<Path>>(filename: &T) -> &str {
 }
 
 struct Mwaf {
-    /// The number of antennas as described by the mwaf file.
+    /// The number of channels as described by the mwaf file (NCHANS).
     num_channels: usize,
-    /// The number of antennas as described by the mwaf file.
-    num_ants: usize,
-    /// The number of antennas as described by the mwaf file.
+    /// The number of antennas as described by the mwaf file (NANTENNA).
+    num_antennas: usize,
+    /// The number of time steps as described by the mwaf file (NSCANS).
     num_time_steps: usize,
-    /// The number of bytes per row in the binary table containing cotter
-    /// flags. AKA NAXIS1.
+    /// The number of bytes per row in the binary table containing cotter flags
+    /// (NAXIS1).
     bytes_per_row: usize,
-    /// The number of rows in the binary table containing cotter flags. AKA
-    /// NAXIS2.
+    /// The number of rows in the binary table containing cotter flags (NAXIS2).
     num_rows: usize,
     /// The cotter flags. The bits are *not* unpacked into individual bytes.
     ///
     /// Example: Given a value of 192 (0b11000000), the first and second
     /// visibilities are flagged, and the following six visibilities are
     /// unflagged.
+    ///
+    /// The flags are listed in the "sensible" baseline order, e.g. ant1 ->
+    /// ant1, ant1 -> ant2, etc. Time is the slowest axis, then baseline, then
+    /// frequency.
     flags: Vec<u8>,
-    /// The gpubox number(s) that these flags apply to.
+    /// The gpubox number that these flags apply to.
     gpubox_num: u8,
     /// The version of cotter used to write the flags.
     cotter_version: String,
@@ -63,8 +67,9 @@ impl Mwaf {
         let hdu = fits_open_hdu!(&mut fptr, 0)?;
 
         let num_channels = get_required_fits_key!(&mut fptr, &hdu, "NCHANS")?;
-        let num_ants = get_required_fits_key!(&mut fptr, &hdu, "NANTENNA")?;
+        let num_antennas = get_required_fits_key!(&mut fptr, &hdu, "NANTENNA")?;
         let num_time_steps = get_required_fits_key!(&mut fptr, &hdu, "NSCANS")?;
+        let num_baselines = (num_antennas * (num_antennas + 1)) / 2;
         let gpubox_num = get_required_fits_key!(&mut fptr, &hdu, "GPUBOXNO")?;
         let cotter_version = get_required_fits_key!(&mut fptr, &hdu, "COTVER")?;
         let cotter_version_date = get_required_fits_key!(&mut fptr, &hdu, "COTVDATE")?;
@@ -73,19 +78,39 @@ impl Mwaf {
         let bytes_per_row = get_required_fits_key!(&mut fptr, &hdu, "NAXIS1")?;
         let num_rows = get_required_fits_key!(&mut fptr, &hdu, "NAXIS2")?;
 
-        // Visibility flags are encoded as bits. rust-fitsio only allows columns to
-        // be read in bigger types (such as u32, but not u8), even though the values
-        // will fit fine into u8s. So, read the column as u32, but promptly convert
-        // it to u8.
+        // Visibility flags are encoded as bits. rust-fitsio currently doesn't
+        // read this data in correctly, so use cfitsio via fitsio-sys.
         debug!("Reading the FLAGS column in {}", s);
-        let flags: Vec<u8> = {
-            let f: Vec<u32> = get_fits_col!(&mut fptr, &hdu, "FLAGS")?;
-            f.into_iter().map(|u| u as u8).collect()
+        let flags = {
+            let mut flags: Vec<u8> = vec![0; num_baselines * num_time_steps * bytes_per_row];
+            let mut status = 0;
+            unsafe {
+                fitsio_sys::ffgcvb(
+                    fptr.as_raw(),      /* I - FITS file pointer                       */
+                    1,                  /* I - number of column to read (1 = 1st col)  */
+                    1,                  /* I - first row to read (1 = 1st row)         */
+                    1,                  /* I - first vector element to read (1 = 1st)  */
+                    flags.len() as i64, /* I - number of values to read                */
+                    0,                  /* I - value for null pixels                   */
+                    flags.as_mut_ptr(), /* O - array of values that are read           */
+                    &mut 0,             /* O - set to 1 if any values are null; else 0 */
+                    &mut status,        /* IO - error status                           */
+                );
+            }
+            fitsio::errors::check_status(status).map_err(|e| FitsError::Fitsio {
+                fits_error: e,
+                fits_filename: s.to_string(),
+                hdu_num: 1,
+                source_file: file!().to_string(),
+                source_line: line!(),
+            })?;
+
+            flags
         };
 
         Ok(Self {
             num_channels,
-            num_ants,
+            num_antennas,
             num_time_steps,
             bytes_per_row,
             num_rows,
@@ -112,7 +137,7 @@ struct CotterFlagsTemp {
     /// Example: Given a value of 192 (0b11000000), the first and second
     /// visibilities are flagged, and the following six visibilities are
     /// unflagged.
-    flags: Vec<u8>,
+    flags: BTreeMap<u8, Vec<u8>>,
     /// The gpubox number that these flags apply to (usually between 1 and 24).
     gpubox_num: u8,
     /// The version of cotter used to write the flags.
@@ -124,17 +149,19 @@ struct CotterFlagsTemp {
 #[derive(Debug)]
 pub struct CotterFlags {
     pub num_time_steps: usize,
-    /// The total number of fine channels.
+    /// The total number of fine channels over all coarse bands.
     pub num_channels: usize,
     /// The number of baselines (auto- and cross-correlation).
     pub num_baselines: usize,
-    /// The visibility flags. Flags are encoded as bits, i.e. 0 for unflagged, 1 for flagged.
+    /// The visibility flags. These are separated by gpubox number. Flags are
+    /// encoded as bits, i.e. 0 for unflagged, 1 for flagged.
     ///
     /// Example: Given a value of 192 (0b11000000), the first and second
     /// visibilities are flagged, and the following six visibilities are
     /// unflagged.
-    pub flags: Vec<u8>,
+    pub flags: BTreeMap<u8, Vec<u8>>,
     /// The gpubox numbers that these flags apply to (usually between 1 and 24).
+    /// The values here should be used as keys for `flags`.
     pub gpubox_nums: Vec<u8>,
     /// The version of cotter used to write the flags.
     pub cotter_version: String,
@@ -147,38 +174,31 @@ impl CotterFlags {
         let m = Mwaf::unpack(file)?;
 
         // Check that things are consistent.
-        let num_baselines = m.num_ants * (m.num_ants + 1) / 2;
+        let num_baselines = m.num_antennas * (m.num_antennas + 1) / 2;
 
-        // Because we're using u32, there are 4x *fewer* bytes per row.
-        if 4 * m.num_rows != m.bytes_per_row * m.num_time_steps * num_baselines {
+        if m.num_rows != m.num_time_steps * num_baselines {
             return Err(MwafError::Inconsistent {
                 file: cfitsio_path_to_str(file).to_string(),
-                expected: "NAXIS1 * NSCANS * NANTENNA * (NANTENNA+1) / 2 = NAXIS2".to_string(),
-                found: format!(
-                    "{} * {} * {} = {}",
-                    m.bytes_per_row, m.num_time_steps, num_baselines, m.num_rows
-                ),
+                expected: "NSCANS * NANTENNA * (NANTENNA+1) / 2 = NAXIS2".to_string(),
+                found: format!("{} * {} = {}", m.num_time_steps, num_baselines, m.num_rows),
             });
         }
 
-        if m.bytes_per_row * m.num_rows / 4 != m.flags.len() {
+        if m.bytes_per_row * m.num_rows != m.flags.len() {
             return Err(MwafError::Inconsistent {
                 file: cfitsio_path_to_str(file).to_string(),
-                expected: "NAXIS1 * NAXIS2 / 4 = number of flags read".to_string(),
-                found: format!(
-                    "{} * {} / 4 = {}",
-                    m.bytes_per_row,
-                    m.num_rows,
-                    m.flags.len()
-                ),
+                expected: "NAXIS1 * NAXIS2 = number of flags read".to_string(),
+                found: format!("{} * {} = {}", m.bytes_per_row, m.num_rows, m.flags.len()),
             });
         }
 
+        let mut flags = BTreeMap::new();
+        flags.insert(m.gpubox_num, m.flags);
         Ok(Self {
             num_time_steps: m.num_time_steps,
             num_channels: m.num_channels,
             num_baselines,
-            flags: m.flags,
+            flags,
             gpubox_nums: vec![m.gpubox_num],
             cotter_version: m.cotter_version,
             cotter_version_date: m.cotter_version_date,
@@ -228,12 +248,12 @@ impl CotterFlags {
 
         // Take the last struct from the flags, and use it to compare with
         // everything else. If anything is inconsistent, we blow up.
-        let mut last = flags.pop().unwrap();
-        let mut all_flags: Vec<_> = Vec::with_capacity(flags.len() * last.flags.len());
+        let last = flags.pop().unwrap();
+        let mut all_flags = BTreeMap::new();
         let mut num_channels = 0;
         let mut gpubox_nums = Vec::with_capacity(flags.len());
 
-        for mut f in &mut flags.drain(..) {
+        for f in flags.into_iter() {
             if f.num_time_steps != last.num_time_steps {
                 return Err(MwafMergeError::Inconsistent {
                     gpubox1: f.gpubox_num,
@@ -289,13 +309,13 @@ impl CotterFlags {
             }
 
             // Pull out the data from f and amalgamate it.
-            all_flags.append(&mut f.flags);
+            all_flags.insert(f.gpubox_num, f.flags[&f.gpubox_num].clone());
             num_channels += f.num_channels;
             gpubox_nums.push(f.gpubox_num);
         }
 
         // Pull out data from the last struct.
-        all_flags.append(&mut last.flags);
+        all_flags.insert(last.gpubox_num, last.flags[&last.gpubox_num].clone());
         num_channels += last.num_channels;
         gpubox_nums.push(last.gpubox_num);
 
@@ -331,5 +351,114 @@ impl std::fmt::Display for CotterFlags {
             cv = self.cotter_version,
             cvd = self.cotter_version_date
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    fn deflate_gz<T: AsRef<Path>>(file: &T) -> NamedTempFile {
+        let mut temp = NamedTempFile::new().unwrap();
+        let mut gz = flate2::read::GzDecoder::new(std::fs::File::open(file).unwrap());
+        std::io::copy(&mut gz, &mut temp).unwrap();
+        temp
+    }
+
+    #[test]
+    fn test_1065880128_01_mwaf() {
+        // The mwaf file is gzipped to save space in git. gunzip it to a
+        // temporary spot.
+        let mwaf = deflate_gz(&"tests/1065880128_01.mwaf.gz");
+        let result = CotterFlags::new_from_mwaf(&mwaf);
+        assert!(result.is_ok());
+        let m = result.unwrap();
+
+        assert_eq!(m.num_time_steps, 224);
+        assert_eq!(m.num_channels, 32);
+        assert_eq!(m.num_baselines, 8256);
+        assert_eq!(m.flags[&1].len(), 7397376);
+        assert_eq!(m.gpubox_nums, vec![1]);
+
+        assert_eq!(m.flags[&1][0], 0);
+        assert_eq!(m.flags[&1][1], 0);
+        assert_eq!(m.flags[&1][2], 0);
+        assert_eq!(m.flags[&1][3], 0);
+        // These are the first two channels, middle channel, and last two
+        // channels flagged. 11000000 00000000 10000000 00000011
+        assert_eq!(m.flags[&1][4], 192);
+        assert_eq!(m.flags[&1][5], 0);
+        assert_eq!(m.flags[&1][6], 128);
+        assert_eq!(m.flags[&1][7], 3);
+
+        // Add every third channel. There are 32 channels, and the flags are
+        // stored as bytes (8 flags per byte), so we only want the first byte.
+        let mut chan_occupancy = 0;
+        for (i, &f) in m.flags[&1].iter().enumerate() {
+            if i % 4 == 0 {
+                chan_occupancy += ((f & 0x20) / 0x20) as u32;
+            }
+        }
+        assert_eq!(chan_occupancy, 155462);
+    }
+
+    #[test]
+    fn test_1065880128_02_mwaf() {
+        let mwaf = deflate_gz(&"tests/1065880128_02.mwaf.gz");
+        let result = CotterFlags::new_from_mwaf(&mwaf);
+        assert!(result.is_ok());
+        let m = result.unwrap();
+
+        assert_eq!(m.num_time_steps, 224);
+        assert_eq!(m.num_channels, 32);
+        assert_eq!(m.num_baselines, 8256);
+        assert_eq!(m.flags[&2].len(), 7397376);
+        assert_eq!(m.gpubox_nums, vec![2]);
+
+        assert_eq!(m.flags[&2][0], 0);
+        assert_eq!(m.flags[&2][1], 0);
+        assert_eq!(m.flags[&2][2], 0);
+        assert_eq!(m.flags[&2][3], 0);
+        assert_eq!(m.flags[&2][4], 192);
+        assert_eq!(m.flags[&2][5], 0);
+        assert_eq!(m.flags[&2][6], 128);
+        assert_eq!(m.flags[&2][7], 3);
+
+        let mut chan_occupancy = 0;
+        for (i, &f) in m.flags[&2].iter().enumerate() {
+            if i % 4 == 0 {
+                chan_occupancy += ((f & 0x20) / 0x20) as u32;
+            }
+        }
+        assert_eq!(chan_occupancy, 148897);
+    }
+
+    #[test]
+    fn test_merging_1065880128_mwafs() {
+        let result = CotterFlags::new_from_mwafs(&[
+            deflate_gz(&"tests/1065880128_01.mwaf.gz"),
+            deflate_gz(&"tests/1065880128_02.mwaf.gz"),
+        ]);
+        assert!(result.is_ok());
+        let m = result.unwrap();
+
+        assert_eq!(m.num_time_steps, 224);
+        assert_eq!(m.num_channels, 64);
+        assert_eq!(m.num_baselines, 8256);
+        assert_eq!(m.flags[&1].len(), 7397376);
+        assert_eq!(m.flags[&2].len(), 7397376);
+        assert_eq!(m.gpubox_nums, vec![1, 2]);
+
+        assert_ne!(m.flags[&1], m.flags[&2]);
+
+        assert_eq!(m.flags[&1][4], 192);
+        assert_eq!(m.flags[&1][5], 0);
+        assert_eq!(m.flags[&1][6], 128);
+        assert_eq!(m.flags[&1][7], 3);
+        assert_eq!(m.flags[&2][4], 192);
+        assert_eq!(m.flags[&2][5], 0);
+        assert_eq!(m.flags[&2][6], 128);
+        assert_eq!(m.flags[&2][7], 3);
     }
 }

@@ -177,6 +177,7 @@ mod tests {
         ];
 
         let diffs = XYZ::get_xyz_baselines(&xyz);
+        assert_eq!(diffs.len(), 6);
         for (exp, diff) in expected.iter().zip(diffs.iter()) {
             assert_abs_diff_eq!(exp.x, diff.x, epsilon = 1e-10);
             assert_abs_diff_eq!(exp.y, diff.y, epsilon = 1e-10);
