@@ -7,6 +7,7 @@ Code to read in cotter flags in .mwaf files.
  */
 
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use std::path::Path;
 
 use super::errors::*;
@@ -26,7 +27,9 @@ fn cfitsio_path_to_str<T: AsRef<Path>>(filename: &T) -> &str {
 }
 
 struct Mwaf {
-    /// The number of channels as described by the mwaf file (NCHANS).
+    /// The start time of the observation as described by the mwaf file (GPSTIME).
+    start_time_milli: u64,
+    /// The number of fine channels as described by the mwaf file (NCHANS).
     num_channels: usize,
     /// The number of antennas as described by the mwaf file (NANTENNA).
     num_antennas: usize,
@@ -66,6 +69,12 @@ impl Mwaf {
         let mut fptr = fits_open!(file)?;
         let hdu = fits_open_hdu!(&mut fptr, 0)?;
 
+        // We assume that GPSTIME is the scheduled start time of the
+        // observation, and that this is when the flags start.
+        let start_time_milli = {
+            let start_time: u64 = get_required_fits_key!(&mut fptr, &hdu, "GPSTIME")?;
+            start_time * 1000
+        };
         let num_channels = get_required_fits_key!(&mut fptr, &hdu, "NCHANS")?;
         let num_antennas = get_required_fits_key!(&mut fptr, &hdu, "NANTENNA")?;
         let num_time_steps = get_required_fits_key!(&mut fptr, &hdu, "NSCANS")?;
@@ -109,6 +118,7 @@ impl Mwaf {
         };
 
         Ok(Self {
+            start_time_milli,
             num_channels,
             num_antennas,
             num_time_steps,
@@ -127,6 +137,10 @@ impl Mwaf {
 /// instead of possibly many.
 #[derive(Debug)]
 struct CotterFlagsTemp {
+    /// The GPS time of the first scan.
+    pub start_time_milli: u64,
+    /// The number of time steps in the data (duration of observation /
+    /// integration time).
     num_time_steps: usize,
     /// The number of fine channels per coarse channel.
     num_channels: usize,
@@ -138,6 +152,13 @@ struct CotterFlagsTemp {
     /// visibilities are flagged, and the following six visibilities are
     /// unflagged.
     flags: BTreeMap<u8, Vec<u8>>,
+    /// The fractional amount that each channel is flagged.
+    ///
+    /// Each key is a gpubox number. Each value (which is a vector) has
+    /// `num_channels / flags.len()` elements (i.e. the number of fine channels
+    /// per coarse band), and each of those elements is between 0 (0% flagged)
+    /// and 1 (100% flagged).
+    pub occupancy: BTreeMap<u8, Vec<f32>>,
     /// The gpubox number that these flags apply to (usually between 1 and 24).
     gpubox_num: u8,
     /// The version of cotter used to write the flags.
@@ -148,6 +169,10 @@ struct CotterFlagsTemp {
 
 #[derive(Debug)]
 pub struct CotterFlags {
+    /// The GPS time of the first scan.
+    pub start_time_milli: u64,
+    /// The number of time steps in the data (duration of observation /
+    /// integration time).
     pub num_time_steps: usize,
     /// The total number of fine channels over all coarse bands.
     pub num_channels: usize,
@@ -160,6 +185,13 @@ pub struct CotterFlags {
     /// visibilities are flagged, and the following six visibilities are
     /// unflagged.
     pub flags: BTreeMap<u8, Vec<u8>>,
+    /// The fractional amount that each channel is flagged.
+    ///
+    /// Each key is a gpubox number. Each value (which is a vector) has
+    /// `num_channels / flags.len()` elements (i.e. the number of fine channels
+    /// per coarse band), and each of those elements is between 0 (0% flagged)
+    /// and 1 (100% flagged).
+    pub occupancy: BTreeMap<u8, Vec<f32>>,
     /// The gpubox numbers that these flags apply to (usually between 1 and 24).
     /// The values here should be used as keys for `flags`.
     pub gpubox_nums: Vec<u8>,
@@ -170,6 +202,8 @@ pub struct CotterFlags {
 }
 
 impl CotterFlags {
+    /// Create a `CotterFlags` struct from a cotter mwaf file. You should
+    /// probably also run the `trim` function on this struct.
     pub fn new_from_mwaf<T: AsRef<Path>>(file: &T) -> Result<Self, MwafError> {
         let m = Mwaf::unpack(file)?;
 
@@ -192,13 +226,19 @@ impl CotterFlags {
             });
         }
 
+        let mut occupancy = BTreeMap::new();
+        occupancy.insert(m.gpubox_num, get_occupancy(&m.flags, m.num_channels));
+
         let mut flags = BTreeMap::new();
         flags.insert(m.gpubox_num, m.flags);
+
         Ok(Self {
+            start_time_milli: m.start_time_milli,
             num_time_steps: m.num_time_steps,
             num_channels: m.num_channels,
             num_baselines,
             flags,
+            occupancy,
             gpubox_nums: vec![m.gpubox_num],
             cotter_version: m.cotter_version,
             cotter_version_date: m.cotter_version_date,
@@ -206,36 +246,34 @@ impl CotterFlags {
     }
 
     /// From many mwaf files, return a single `CotterFlags` struct with all
-    /// flags. The mwaf files are sorted by their internal gpubox file numbers,
-    /// to (hopefully) get the flags in the struct's vector in the correct
-    /// order.
+    /// flags. You should probably also run the `trim` function on this struct.
     pub fn new_from_mwafs<T: AsRef<Path>>(files: &[T]) -> Result<Self, MwafMergeError> {
         if files.is_empty() {
             return Err(MwafMergeError::NoFilesGiven);
         }
 
-        let mut unpacked = vec![];
+        let mut unpacked: Vec<CotterFlagsTemp> = Vec::with_capacity(files.len());
         for f in files {
             let n = Self::new_from_mwaf(f)?;
             // In an effort to keep things simple and make bad states
             // impossible, use a temp struct to represent the gpubox numbers as
             // a number.
             unpacked.push(CotterFlagsTemp {
+                start_time_milli: n.start_time_milli,
                 gpubox_num: n.gpubox_nums[0],
                 num_time_steps: n.num_time_steps,
                 num_channels: n.num_channels,
                 num_baselines: n.num_baselines,
                 flags: n.flags,
+                occupancy: n.occupancy,
                 cotter_version: n.cotter_version,
                 cotter_version_date: n.cotter_version_date,
-            });
+            })
         }
-        Ok(Self::merge(unpacked)?)
+        Self::merge(unpacked)
     }
 
-    /// Merge several `CotterFlags` together. The structs are sorted by their
-    /// internal gpubox file numbers, to (hopefully) get the flags in the
-    /// struct's vector in the correct order.
+    /// Merge several `CotterFlags` into a single struct.
     ///
     /// This function is private so it cannot be misused outside this module. If
     /// a user wants to flatten a bunch of mwaf files together, they should use
@@ -250,6 +288,7 @@ impl CotterFlags {
         // everything else. If anything is inconsistent, we blow up.
         let last = flags.pop().unwrap();
         let mut all_flags = BTreeMap::new();
+        let mut all_occupancies = BTreeMap::new();
         let mut num_channels = 0;
         let mut gpubox_nums = Vec::with_capacity(flags.len());
 
@@ -310,24 +349,80 @@ impl CotterFlags {
 
             // Pull out the data from f and amalgamate it.
             all_flags.insert(f.gpubox_num, f.flags[&f.gpubox_num].clone());
+            all_occupancies.insert(f.gpubox_num, f.occupancy[&f.gpubox_num].clone());
             num_channels += f.num_channels;
             gpubox_nums.push(f.gpubox_num);
         }
 
         // Pull out data from the last struct.
         all_flags.insert(last.gpubox_num, last.flags[&last.gpubox_num].clone());
+        all_occupancies.insert(last.gpubox_num, last.occupancy[&last.gpubox_num].clone());
         num_channels += last.num_channels;
         gpubox_nums.push(last.gpubox_num);
 
         Ok(Self {
+            start_time_milli: last.start_time_milli,
             num_time_steps: last.num_time_steps,
             num_channels,
             num_baselines: last.num_baselines,
             flags: all_flags,
+            occupancy: all_occupancies,
             gpubox_nums,
             cotter_version: last.cotter_version,
             cotter_version_date: last.cotter_version_date,
         })
+    }
+
+    /// Trim the cotter flags to match the times that are available in the
+    /// mwalib context.
+    ///
+    /// cotter appears to write flags for all integrations, even if no data was
+    /// being collected. This routine discards flags from times that mwalib does
+    /// not use (i.e. before OBSID+QUACKTIM and the last common time to all
+    /// gpubox files).
+    pub fn trim(&mut self, context: &mwalibContext) {
+        // Don't use "as i64", just in case something goes wrong.
+        let to_i64 = |n: u64| -> i64 {
+            n.try_into()
+                .unwrap_or_else(|_| panic!("Could not convert {} to i64", n))
+        };
+
+        let mwalib_start_time_milli =
+            to_i64((context.obsid as u64 * 1000) + context.quack_time_duration_milliseconds);
+        let mwalib_duration_milli = to_i64(context.duration_milliseconds);
+        let int_time_milli = to_i64(context.integration_time_milliseconds);
+
+        let cotter_start_time_milli = to_i64(self.start_time_milli);
+        let cotter_duration_milli = to_i64(self.num_time_steps as u64) * int_time_milli;
+
+        let start_trim_milli: i64 = mwalib_start_time_milli - cotter_start_time_milli;
+        let num_start_scans_to_trim = (start_trim_milli / int_time_milli) as usize;
+
+        let end_trim_milli = (cotter_start_time_milli + cotter_duration_milli)
+            - (mwalib_start_time_milli + mwalib_duration_milli);
+        let num_end_scans_to_trim = (end_trim_milli / int_time_milli) as usize;
+
+        // Remove the extraneous flags.
+        let step = self.num_baselines * self.num_channels / self.flags.len() / 8;
+        for f in self.flags.values_mut() {
+            // Remove flags from the start.
+            f.drain(..step * num_start_scans_to_trim);
+            // Remove flags from the end.
+            f.drain(
+                step * (self.num_time_steps - num_start_scans_to_trim - num_end_scans_to_trim)..,
+            );
+        }
+
+        // Update the occupancy of the flags.
+        for (&gpubox_num, f) in self.flags.iter() {
+            self.occupancy.insert(
+                gpubox_num,
+                get_occupancy(&f, self.num_channels / self.flags.len()),
+            );
+        }
+
+        self.num_time_steps = self.num_time_steps - num_start_scans_to_trim - num_end_scans_to_trim;
+        self.start_time_milli += start_trim_milli as u64;
     }
 }
 
@@ -340,23 +435,63 @@ impl std::fmt::Display for CotterFlags {
     num_channels: {nc},
     num_baselines: {nb},
     num_flags: {nf},
+    gpubox_nums: {gn:?},
     cotter_version: {cv},
     cotter_version_date: {cvd},
+    occupancy: {occ:?}
 }}
 "#,
             nts = self.num_time_steps,
             nc = self.num_channels,
             nb = self.num_baselines,
             nf = self.flags.len() * 32,
+            gn = self.gpubox_nums,
             cv = self.cotter_version,
-            cvd = self.cotter_version_date
+            cvd = self.cotter_version_date,
+            occ = self.occupancy,
         )
     }
+}
+
+/// Calculate the fraction that each channel is flagged. `num_channels` is the
+/// number of fine channels per coarse band.
+fn get_occupancy(flags: &[u8], num_channels: usize) -> Vec<f32> {
+    // Collapse the flags into a total number of flags per channel.
+    let mut total: Vec<u32> = vec![0; num_channels];
+    // The number of bytes to cover all channels. e.g. If we have 32 channels,
+    // then width should be 4, as there are 4 flag bytes.
+    let width = num_channels / 8;
+
+    // Inspired by Brian Crosse. Add each unique byte to a "histogram" of
+    // bytes, then unpack the bits from the bytes.
+    let mut histogram: [u32; 256];
+    for s in 0..width {
+        histogram = [0; 256];
+        for f in flags.iter().skip(s).step_by(width) {
+            histogram[*f as usize] += 1;
+        }
+        // Unpack the histogram.
+        for (v, h) in histogram.iter().enumerate() {
+            for bit in 0..8 {
+                if ((v >> bit) & 0x01) == 0x01 {
+                    total[7 * (s + 1) + s - bit] += h;
+                }
+            }
+        }
+    }
+
+    // Now normalise the totals, so they can be analysed as a fraction.
+    let total_samples = (flags.len() / width) as f32;
+    total
+        .into_iter()
+        .map(|t| t as f32 / total_samples)
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_abs_diff_eq;
     use tempfile::NamedTempFile;
 
     fn deflate_gz<T: AsRef<Path>>(file: &T) -> NamedTempFile {
@@ -392,15 +527,43 @@ mod tests {
         assert_eq!(m.flags[&1][6], 128);
         assert_eq!(m.flags[&1][7], 3);
 
-        // Add every third channel. There are 32 channels, and the flags are
-        // stored as bytes (8 flags per byte), so we only want the first byte.
-        let mut chan_occupancy = 0;
-        for (i, &f) in m.flags[&1].iter().enumerate() {
-            if i % 4 == 0 {
-                chan_occupancy += ((f & 0x20) / 0x20) as u32;
-            }
+        let expected = vec![
+            0.99999946,
+            0.99999946,
+            0.08406332,
+            0.08242058,
+            0.0813894,
+            0.080897875,
+            0.080609664,
+            0.08064265,
+            0.08067942,
+            0.0807097,
+            0.08074052,
+            0.08076053,
+            0.08071998,
+            0.08084758,
+            0.080910854,
+            0.0810601,
+            0.99999946,
+            0.08099088,
+            0.08082109,
+            0.080699965,
+            0.08065725,
+            0.0805026,
+            0.08050044,
+            0.08046691,
+            0.080403104,
+            0.08041392,
+            0.08044528,
+            0.08078865,
+            0.08164841,
+            0.08251683,
+            0.99999946,
+            0.99999946,
+        ];
+        for (&res, &exp) in m.occupancy[&1].iter().zip(expected.iter()) {
+            assert_abs_diff_eq!(res, exp);
         }
-        assert_eq!(chan_occupancy, 155462);
     }
 
     #[test]
@@ -425,13 +588,43 @@ mod tests {
         assert_eq!(m.flags[&2][6], 128);
         assert_eq!(m.flags[&2][7], 3);
 
-        let mut chan_occupancy = 0;
-        for (i, &f) in m.flags[&2].iter().enumerate() {
-            if i % 4 == 0 {
-                chan_occupancy += ((f & 0x20) / 0x20) as u32;
-            }
+        let expected = vec![
+            0.99999946,
+            0.99999946,
+            0.08051342,
+            0.07879118,
+            0.0775913,
+            0.077013254,
+            0.07664555,
+            0.07659635,
+            0.07666232,
+            0.07658445,
+            0.076587155,
+            0.07665853,
+            0.07662068,
+            0.076593645,
+            0.076794796,
+            0.0767391,
+            0.99999946,
+            0.0771652,
+            0.07753344,
+            0.07830885,
+            0.07831534,
+            0.07967312,
+            0.08014517,
+            0.08064157,
+            0.08073079,
+            0.08076215,
+            0.080983855,
+            0.08168518,
+            0.082425445,
+            0.08412713,
+            0.99999946,
+            0.99999946,
+        ];
+        for (&res, &exp) in m.occupancy[&2].iter().zip(expected.iter()) {
+            assert_abs_diff_eq!(res, exp);
         }
-        assert_eq!(chan_occupancy, 148897);
     }
 
     #[test]
@@ -451,6 +644,7 @@ mod tests {
         assert_eq!(m.gpubox_nums, vec![1, 2]);
 
         assert_ne!(m.flags[&1], m.flags[&2]);
+        assert_ne!(m.occupancy[&1], m.occupancy[&2]);
 
         assert_eq!(m.flags[&1][4], 192);
         assert_eq!(m.flags[&1][5], 0);
@@ -460,5 +654,166 @@ mod tests {
         assert_eq!(m.flags[&2][5], 0);
         assert_eq!(m.flags[&2][6], 128);
         assert_eq!(m.flags[&2][7], 3);
+    }
+
+    #[test]
+    fn test_trimming_1065880128_mwafs() {
+        let mut m = CotterFlags::new_from_mwafs(&[
+            deflate_gz(&"tests/1065880128_01.mwaf.gz"),
+            deflate_gz(&"tests/1065880128_02.mwaf.gz"),
+        ])
+        .unwrap();
+        assert_eq!(m.num_time_steps, 224);
+        assert_eq!(m.start_time_milli, 1065880128000);
+        assert_eq!(m.flags[&1].len(), 7397376);
+        assert_eq!(m.flags[&2].len(), 7397376);
+        assert_eq!(
+            m.flags[&2].len(),
+            m.num_baselines * m.num_time_steps * m.num_channels / m.flags.len() / 8
+        );
+
+        let expected = vec![
+            0.99999946,
+            0.99999946,
+            0.08051342,
+            0.07879118,
+            0.0775913,
+            0.077013254,
+            0.07664555,
+            0.07659635,
+            0.07666232,
+            0.07658445,
+            0.076587155,
+            0.07665853,
+            0.07662068,
+            0.076593645,
+            0.076794796,
+            0.0767391,
+            0.99999946,
+            0.0771652,
+            0.07753344,
+            0.07830885,
+            0.07831534,
+            0.07967312,
+            0.08014517,
+            0.08064157,
+            0.08073079,
+            0.08076215,
+            0.080983855,
+            0.08168518,
+            0.082425445,
+            0.08412713,
+            0.99999946,
+            0.99999946,
+        ];
+        for (&res, &exp) in m.occupancy[&2].iter().zip(expected.iter()) {
+            assert_abs_diff_eq!(res, exp);
+        }
+
+        let mut c = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
+        // 1065880128 actually has 109s of data as opposed to the scheduled
+        // 112s, but this is impossible to determine without its gpubox files.
+        // Because I don't want to include the gpubox files in hyperdrive for
+        // testing, we'll just put this here.
+        c.duration_milliseconds = 109000;
+
+        m.trim(&c);
+
+        assert_eq!(m.num_time_steps, 218);
+        assert_eq!(m.start_time_milli, 1065880128500);
+        assert_eq!(m.flags[&1].len(), 7199232);
+        assert_eq!(m.flags[&2].len(), 7199232);
+        assert_eq!(
+            m.flags[&2].len(),
+            m.num_baselines * m.num_time_steps * m.num_channels / m.flags.len() / 8
+        );
+
+        let expected = vec![
+            1.0,
+            1.0,
+            0.0595558,
+            0.057780053,
+            0.05655659,
+            0.05596708,
+            0.055591486,
+            0.055540368,
+            0.055607043,
+            0.05553148,
+            0.055530924,
+            0.055604264,
+            0.055568706,
+            0.05553648,
+            0.055742055,
+            0.05568594,
+            1.0,
+            0.056122653,
+            0.056501582,
+            0.057291113,
+            0.057304446,
+            0.058702372,
+            0.059183534,
+            0.059695814,
+            0.059788045,
+            0.05981249,
+            0.060048074,
+            0.060764816,
+            0.061518785,
+            0.06326064,
+            1.0,
+            1.0,
+        ];
+        for (&res, &exp) in m.occupancy[&2].iter().zip(expected.iter()) {
+            assert_abs_diff_eq!(res, exp);
+        }
+
+        // Trimming again shouldn't do anything.
+        m.trim(&c);
+
+        assert_eq!(m.num_time_steps, 218);
+        assert_eq!(m.start_time_milli, 1065880128500);
+        assert_eq!(m.flags[&1].len(), 7199232);
+        assert_eq!(m.flags[&2].len(), 7199232);
+        assert_eq!(
+            m.flags[&2].len(),
+            m.num_baselines * m.num_time_steps * m.num_channels / m.flags.len() / 8
+        );
+
+        let expected = vec![
+            1.0,
+            1.0,
+            0.0595558,
+            0.057780053,
+            0.05655659,
+            0.05596708,
+            0.055591486,
+            0.055540368,
+            0.055607043,
+            0.05553148,
+            0.055530924,
+            0.055604264,
+            0.055568706,
+            0.05553648,
+            0.055742055,
+            0.05568594,
+            1.0,
+            0.056122653,
+            0.056501582,
+            0.057291113,
+            0.057304446,
+            0.058702372,
+            0.059183534,
+            0.059695814,
+            0.059788045,
+            0.05981249,
+            0.060048074,
+            0.060764816,
+            0.061518785,
+            0.06326064,
+            1.0,
+            1.0,
+        ];
+        for (&res, &exp) in m.occupancy[&2].iter().zip(expected.iter()) {
+            assert_abs_diff_eq!(res, exp);
+        }
     }
 }

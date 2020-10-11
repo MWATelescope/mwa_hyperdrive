@@ -6,7 +6,6 @@ use serde::Deserialize;
 use structopt::StructOpt;
 use thiserror::Error;
 
-use super::*;
 use mwa_hyperdrive::sourcelist::read::parse_source_list;
 use mwa_hyperdrive::visibility_gen::{vis_gen, TimeFreqParams};
 use mwa_hyperdrive::*;

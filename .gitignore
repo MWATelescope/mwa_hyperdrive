@@ -1,2 +1,4 @@
 target
 *.o
+*gpubox*
+*.mwaf

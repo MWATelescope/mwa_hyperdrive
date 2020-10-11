@@ -8,9 +8,12 @@ use mwa_hyperdrive::*;
 
 // Modules only for use from main.
 mod main_funcs;
-use main_funcs::*;
+use main_funcs::calibrate::calibrate;
+use main_funcs::simulate_vis::*;
+use main_funcs::verify_srclist::*;
+use main_funcs::HYPERDRIVE_VERSION;
 
-fn setup_logging(debug: bool) -> Result<(), fern::InitError> {
+fn setup_logging(level: u8) -> Result<(), fern::InitError> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -21,10 +24,10 @@ fn setup_logging(debug: bool) -> Result<(), fern::InitError> {
                 message
             ))
         })
-        .level(if debug {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
+        .level(match level {
+            0 => log::LevelFilter::Info,
+            1 => log::LevelFilter::Debug,
+            _ => log::LevelFilter::Trace,
         })
         .chain(std::io::stdout())
         .apply()?;
@@ -54,9 +57,10 @@ enum Opt {
         #[structopt(long = "text")]
         write_to_text: bool,
 
-        /// Display more messages when running.
-        #[structopt(long)]
-        debug: bool,
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[structopt(short, long, parse(from_occurrences))]
+        verbosity: u8,
     },
 
     /// Verify the arguments that can be passed to "simulate-vis".
@@ -78,11 +82,26 @@ enum Opt {
         source_lists: Vec<PathBuf>,
     },
 
-    /// Testing RTS functionality
-    TestRts {
-        /// Path to the metafits file.
-        #[structopt(short, long, parse(from_os_str))]
-        metafits: PathBuf,
+    /// Calibrate the input data. WIP.
+    Calibrate {
+        // Share the arguments that could be passed in via a parameter file.
+        #[structopt(flatten)]
+        cli_args: mwa_hyperdrive::calibrate::args::CalibrateUserArgs,
+
+        /// All of the arguments to calibrate may be specified in a toml or json
+        /// file. Any CLI arguments override parameters set in the file.
+        #[structopt(name = "PARAMETER_FILE", parse(from_os_str))]
+        param_file: Option<PathBuf>,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[structopt(short, long, parse(from_occurrences))]
+        verbosity: u8,
+
+        /// Don't actually do calibration; just verify that data was correctly
+        /// ingested and print out high-level information.
+        #[structopt(short = "n", long)]
+        dry_run: bool,
     },
 }
 
@@ -93,9 +112,9 @@ fn main() -> Result<(), anyhow::Error> {
             param_file,
             cpu,
             write_to_text,
-            debug,
+            verbosity,
         } => {
-            setup_logging(debug).expect("Failed to initialize logging.");
+            setup_logging(verbosity).expect("Failed to initialize logging.");
             simulate_vis(cli_args, param_file, cpu, write_to_text)?
         }
 
@@ -106,15 +125,14 @@ fn main() -> Result<(), anyhow::Error> {
 
         Opt::VerifySrclist { source_lists } => verify_srclist(source_lists)?,
 
-        Opt::TestRts { metafits } => {
-            setup_logging(true).expect("Failed to initialize logging.");
-
-            let context = mwalibContext::new(&metafits, &[])?;
-            let beam = PrimaryBeam::default(instrument::BeamType::Mwa32T, 0, Pol::X, &context);
-            let scaling = instrument::BeamScaling::None;
-            let azel = AzEl::new(0.61086524, 1.4835299);
-            let j = instrument::tile_response(&beam, &azel, 180e6, &scaling, &[0.0; 16])?;
-            dbg!(j);
+        Opt::Calibrate {
+            cli_args,
+            param_file,
+            verbosity,
+            dry_run,
+        } => {
+            setup_logging(verbosity).expect("Failed to initialize logging.");
+            calibrate(cli_args, param_file, dry_run)?;
         }
     }
 

@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use super::*;
+use anyhow::bail;
+
+use super::simulate_vis::{merge_cli_and_file_params, SimulateVisArgs};
+
 use mwa_hyperdrive::sourcelist::read::parse_source_list;
 use mwa_hyperdrive::*;
 
