@@ -87,7 +87,7 @@ fn component_parser(s: &str) -> IResult<&str, SourceComponent> {
     Ok((
         s,
         SourceComponent {
-            radec: RADec::new(ra * *DH2R, dec.to_radians()),
+            radec: RADec::new(ra * DH2R, dec.to_radians()),
             flux_densities,
             ctype: ComponentType::Point,
         },
@@ -196,7 +196,7 @@ FREQ 165e+6 0.0002097382 0 0 0
 ENDCOMPONENT
 "#;
         let (_, c) = component_parser(s).expect("Parser failed");
-        assert_abs_diff_eq!(c.radec.ra, 3.40182_f64 * *DH2R, epsilon = 5e-7);
+        assert_abs_diff_eq!(c.radec.ra, 3.40182_f64 * DH2R, epsilon = 5e-7);
         assert_abs_diff_eq!(c.radec.dec, (-37.5551_f64).to_radians(), epsilon = 5e-7);
         assert_eq!(c.flux_densities.len(), 2);
     }

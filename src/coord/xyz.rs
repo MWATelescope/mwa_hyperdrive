@@ -41,7 +41,7 @@ impl XYZ {
 
     /// Convert local XYZ coordinates at the MWA's latitude to ENH coordinates.
     pub fn to_enh_mwa(&self) -> ENH {
-        self.to_enh(*MWA_LAT_RAD)
+        self.to_enh(MWA_LAT_RAD)
     }
 
     /// For each XYZ pair, calculate a baseline.

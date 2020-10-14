@@ -18,7 +18,7 @@ fn tile_response_from_dipoles(
 ) -> Jones {
     let mut out: Jones = [num::zero(), num::zero(), num::zero(), num::zero()];
 
-    let za = *PIBY2 - azel.el;
+    let za = FRAC_PI_2 - azel.el;
     let (s_za, c_za) = za.sin_cos();
 
     // RTS comment: set elements of the look-dir vector
@@ -33,7 +33,7 @@ fn tile_response_from_dipoles(
      */
     let beam_azel = beam.hadec.to_azel_mwa();
     let (s_beam_az, c_beam_az) = beam_azel.az.sin_cos();
-    let beam_za = *PIBY2 - beam_azel.el;
+    let beam_za = FRAC_PI_2 - beam_azel.el;
     let (s_beam_za, c_beam_za) = beam_za.sin_cos();
 
     // To save myself going cross-eyed, I'm using the RTS' nomenclature here.
@@ -43,7 +43,7 @@ fn tile_response_from_dipoles(
     let c_theta = c_beam_za;
     let s_psi = -s_beam_az;
     let c_psi = c_beam_az;
-    let multiplier = Complex::new(0.0, *R2C_SIGN * *PI2 / lambda);
+    let multiplier = Complex::new(0.0, R2C_SIGN * TAU / lambda);
 
     // Loop over each dipole. There are always 16 delays per tile.
     for (k, delay) in delays.iter().enumerate() {
@@ -76,8 +76,7 @@ fn tile_response_from_dipoles(
             BeamType::Mwa32T => (e, n, z),
         };
         let phase_shift = Complex::exp(
-            multiplier
-                * (dip_e * proj_e + dip_n * proj_n + dip_z * proj_z - *delay as f64 * *VEL_C),
+            multiplier * (dip_e * proj_e + dip_n * proj_n + dip_z * proj_z - *delay as f64 * VEL_C),
         );
 
         // Sum for p receptors.
@@ -120,7 +119,7 @@ pub(super) fn tile_response(
     scaling: &BeamScaling,
     delays: &[f32; 16],
 ) -> Result<Jones, InstrumentError> {
-    let lambda = *VEL_C / freq;
+    let lambda = VEL_C / freq;
     let mut dpl_resp = tile_response_from_dipoles(beam, azel, lambda, delays);
     let hadec = azel.to_hadec_mwa();
 
@@ -129,10 +128,10 @@ pub(super) fn tile_response(
     // to the ground plane, the separation should be used instead of the za.
     let ground_plane = {
         let sep = hadec.separation(&beam.hadec);
-        let gp = 2.0 * sin(*PI2 * MWA_DPL_HGT / lambda * cos(sep));
+        let gp = 2.0 * sin(TAU * MWA_DPL_HGT / lambda * cos(sep));
         match scaling {
             BeamScaling::None => gp,
-            BeamScaling::UnityTowardZenith => gp / (2.0 * sin(*PI2 * MWA_DPL_HGT / lambda)),
+            BeamScaling::UnityTowardZenith => gp / (2.0 * sin(TAU * MWA_DPL_HGT / lambda)),
             BeamScaling::UnityInLookDir => todo!(),
         }
     } / MWA_NUM_DIPOLES as f64;
@@ -184,7 +183,7 @@ mod tests {
     /// Match the RTS' behaviour with verified values.
     fn tile_response_32t() {
         let beam = get_random_beam(BeamType::Mwa32T);
-        let sample_dir = AzEl::new(0.61086524, *PIBY2 - 1.4835299);
+        let sample_dir = AzEl::new(0.61086524, FRAC_PI_2 - 1.4835299);
 
         let result = tile_response(&beam, &sample_dir, 180e6, &BeamScaling::None, &[0.0; 16]);
         assert!(result.is_ok());
@@ -206,7 +205,7 @@ mod tests {
     /// Match the RTS' behaviour with verified values.
     fn tile_response_full() {
         let beam = get_random_beam(BeamType::MwaCrossedDipolesOnGroundPlane);
-        let sample_dir = AzEl::new(0.61086524, *PIBY2 - 1.4835299);
+        let sample_dir = AzEl::new(0.61086524, FRAC_PI_2 - 1.4835299);
 
         let result = tile_response(&beam, &sample_dir, 180e6, &BeamScaling::None, &[0.0; 16]);
         assert!(result.is_ok());

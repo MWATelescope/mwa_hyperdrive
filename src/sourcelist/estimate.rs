@@ -43,9 +43,9 @@ pub fn estimate_flux_density_at_freq(
         if fds.len() == 1 {
             debug!(
                 "Component at RADec {} has only one flux density; extrapolating with spectral index {}",
-                &comp.radec, *DEFAULT_SPEC_INDEX
+                &comp.radec, DEFAULT_SPEC_INDEX
             );
-            (*DEFAULT_SPEC_INDEX, &fds[0])
+            (DEFAULT_SPEC_INDEX, &fds[0])
         }
         // Otherwise, find the frequencies that bound the given frequency. As we
         // assume that the input source components are sorted by frequency, we
@@ -93,12 +93,12 @@ pub fn estimate_flux_density_at_freq(
             let mut spec_index = calc_spec_index(&fds[smaller_comp_index], &fds[larger_comp_index]);
 
             // Stop stupid spectral indices.
-            if spec_index < *SPEC_INDEX_CAP {
+            if spec_index < SPEC_INDEX_CAP {
                 warn!(
                     "Component had a spectral index {}; capping at {}",
-                    spec_index, *SPEC_INDEX_CAP
+                    spec_index, SPEC_INDEX_CAP
                 );
-                spec_index = *SPEC_INDEX_CAP;
+                spec_index = SPEC_INDEX_CAP;
             }
 
             (
@@ -317,7 +317,7 @@ mod tests {
         let freq_ratio_capped = calc_flux_ratio(
             desired_freq,
             source.components[0].flux_densities[1].freq,
-            *SPEC_INDEX_CAP,
+            SPEC_INDEX_CAP,
         );
         let expected = source.components[0].flux_densities[1].clone() * freq_ratio_capped;
         assert_abs_diff_eq!(fd.i, expected.i, epsilon = 1e-10);

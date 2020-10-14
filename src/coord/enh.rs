@@ -43,7 +43,7 @@ impl ENH {
 
     /// Convert ENH coordinates to local XYZ for the MWA's latitude.
     pub fn to_xyz_mwa(&self) -> XYZ {
-        self.to_xyz(*MWA_LAT_RAD)
+        self.to_xyz(MWA_LAT_RAD)
     }
 }
 
@@ -60,8 +60,8 @@ mod tests {
             h: 375.212,
         };
         let xyz = ENH::to_xyz_mwa(&enh);
-        assert_abs_diff_eq!(xyz.x, 289.5692867016053, epsilon = 1e-10);
+        assert_abs_diff_eq!(xyz.x, 289.56928486613185, epsilon = 1e-10);
         assert_abs_diff_eq!(xyz.y, -585.675, epsilon = 1e-10);
-        assert_abs_diff_eq!(xyz.z, -259.3106516191025, epsilon = 1e-10);
+        assert_abs_diff_eq!(xyz.z, -259.3106536687549, epsilon = 1e-10);
     }
 }

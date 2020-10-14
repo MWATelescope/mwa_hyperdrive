@@ -145,13 +145,13 @@ impl PrimaryBeam {
     pub fn default_without_context(beam_type: BeamType, north: f64, east: f64) -> Self {
         // RTS comment: rotation parameters of the boresight of the tile
         // (un-phased beam centre).
-        let dec = *MWA_LAT_RAD
+        let dec = MWA_LAT_RAD
             + match beam_type {
-                BeamType::MwaCrossedDipolesOnGroundPlane => north / *EARTH_RADIUS,
+                BeamType::MwaCrossedDipolesOnGroundPlane => north / EARTH_RADIUS,
                 BeamType::Mwa32T => 0.0,
             };
         let ha = match beam_type {
-            BeamType::MwaCrossedDipolesOnGroundPlane => -east / *EARTH_RADIUS / cos(dec),
+            BeamType::MwaCrossedDipolesOnGroundPlane => -east / EARTH_RADIUS / cos(dec),
             BeamType::Mwa32T => 0.0,
         };
 

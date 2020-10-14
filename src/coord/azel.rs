@@ -45,7 +45,7 @@ impl AzEl {
     /// Convert the horizon coordinates to equatorial coordinates (Hour Angle
     /// and Declination) for the MWA's location.
     pub fn to_hadec_mwa(&self) -> HADec {
-        Self::to_hadec(&self, *crate::constants::MWA_LAT_RAD)
+        Self::to_hadec(&self, crate::constants::MWA_LAT_RAD)
     }
 }
 

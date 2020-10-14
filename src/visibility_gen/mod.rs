@@ -110,7 +110,7 @@ pub fn vis_gen(
         // Adjust the pointing centre by half a time step.
         pc.update(
             context.base_lst
-                + (time_step as f64 + 0.5) * params.time_resolution * *SOLAR2SIDEREAL * *DS2R,
+                + (time_step as f64 + 0.5) * params.time_resolution * SOLAR2SIDEREAL * DS2R,
         );
 
         // Get the (l,m,n) coordinates for each source component.
@@ -131,7 +131,7 @@ pub fn vis_gen(
                 as f64;
             for fine_channel in 0..params.n_fine_channels {
                 let freq = base_freq + params.fine_channel_width * fine_channel as f64;
-                let wavelength = *VEL_C / freq;
+                let wavelength = VEL_C / freq;
                 let mut uvw_scaled = uvw_metres
                     .par_iter()
                     .map(|v| *v / wavelength)
@@ -336,7 +336,7 @@ fn cpu_vis_gen(
                     (0.0, 0.0),
                     // `dc` for direction cosine, `fd` for flux density.
                     |acc, (dc, fd)| {
-                        let arg = *PI2 * (bl.u * dc.l + bl.v * dc.m + bl.w * (dc.n - 1.0));
+                        let arg = TAU * (bl.u * dc.l + bl.v * dc.m + bl.w * (dc.n - 1.0));
                         let r = arg.cos() as f32 * fd;
                         let i = arg.sin() as f32 * fd;
                         (acc.0 + r, acc.1 + i)

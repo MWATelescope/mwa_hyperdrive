@@ -58,7 +58,7 @@ impl HADec {
     /// Convert the equatorial coordinates to horizon coordinates (azimuth and
     /// elevation) for the MWA's location.
     pub fn to_azel_mwa(&self) -> AzEl {
-        Self::to_azel(&self, *crate::constants::MWA_LAT_RAD)
+        Self::to_azel(&self, crate::constants::MWA_LAT_RAD)
     }
 
     /// Calculate the distance between two sets of coordinates.
@@ -84,16 +84,16 @@ mod tests {
     fn to_azel() {
         let hd = HADec::new_degrees(1.0, -35.0);
         let ae = hd.to_azel_mwa();
-        assert_abs_diff_eq!(ae.az, 3.24030564977212, epsilon = 1e-10);
-        assert_abs_diff_eq!(ae.el, 1.4252215745805095, epsilon = 1e-10);
+        assert_abs_diff_eq!(ae.az, 3.240305654530152, epsilon = 1e-10);
+        assert_abs_diff_eq!(ae.el, 1.425221581624331, epsilon = 1e-10);
     }
 
     #[test]
     fn to_azel2() {
         let hd = HADec::new_degrees(23.0, -35.0);
         let ae = hd.to_azel_mwa();
-        assert_abs_diff_eq!(ae.az, 4.215504957074409, epsilon = 1e-10);
-        assert_abs_diff_eq!(ae.el, 1.1981324505048674, epsilon = 1e-10);
+        assert_abs_diff_eq!(ae.az, 4.215504972991079, epsilon = 1e-10);
+        assert_abs_diff_eq!(ae.el, 1.1981324538790032, epsilon = 1e-10);
     }
 
     #[test]
