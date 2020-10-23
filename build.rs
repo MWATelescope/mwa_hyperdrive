@@ -57,9 +57,14 @@ fn write_built(out_dir: &Path) {
 
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR env. variable not defined!"));
-    let p = Path::new(&out_dir).join("rebuild_stamp");
-    File::create(&p).unwrap();
-    println!("cargo:rerun-if-changed={}", p.display());
+
+    // This block of code forces hyperdrive to recompile its binaries everytime
+    // we do a release build.
+    if env::var("DEBUG").unwrap() == "false" {
+        let p = Path::new(&out_dir).join("rebuild_stamp");
+        File::create(&p).unwrap();
+        println!("cargo:rerun-if-changed={}", p.display());
+    }
 
     write_built(&out_dir);
     bind_erfa(&out_dir);
