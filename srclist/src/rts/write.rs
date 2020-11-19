@@ -98,7 +98,7 @@ pub fn write_source_list<T: std::io::Write>(
         writeln!(
             buf,
             "SOURCE {} {} {}",
-            name,
+            name.replace(' ', "_"),
             first_comp.radec.ra.to_degrees() / 15.0,
             first_comp.radec.dec.to_degrees()
         )?;

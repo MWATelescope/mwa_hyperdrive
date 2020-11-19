@@ -3,11 +3,11 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
- Useful constants.
+Useful constants.
 
- All constants *must* be double precision. `hyperdrive` should do as many
- calculations as possible in double precision before converting to a lower
- precision, if it is ever required.
+All constants *must* be double precision. `hyperdrive` should do as many
+calculations as possible in double precision before converting to a lower
+precision, if it is ever required.
 */
 
 use std::f64::consts::TAU;

@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::constants::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FluxDensity {
     /// The frequency that these flux densities apply to [Hz]
     pub freq: f64,
@@ -63,7 +63,7 @@ pub enum FluxDensityType {
         si: f64,
         /// Flux density (a)
         fd: FluxDensity,
-        /// Spectral curvature
+        /// Spectral curvature (q)
         q: f64,
     },
 }
@@ -193,10 +193,16 @@ impl FluxDensityType {
                 } * flux_ratio)
             }
 
-            FluxDensityType::PowerLaw { si, fd } => Ok(*fd * calc_flux_ratio(freq, fd.freq, *si)),
+            FluxDensityType::PowerLaw { si, fd } => {
+                let ratio = calc_flux_ratio(freq, fd.freq, *si);
+                let mut new_fd = *fd * ratio;
+                new_fd.freq = freq;
+                Ok(new_fd)
+            }
 
             FluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                let power_law_component = *fd * calc_flux_ratio(freq, fd.freq, *si);
+                let mut power_law_component = *fd * calc_flux_ratio(freq, fd.freq, *si);
+                power_law_component.freq = freq;
                 let curved_component = (q * (freq / fd.freq).ln().powi(2)).exp();
                 Ok(power_law_component * curved_component)
             }

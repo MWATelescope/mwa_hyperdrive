@@ -115,10 +115,10 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     }
 
                     // Validation and conversion.
-                    if hour_angle < 0.0 || hour_angle > 24.0 {
+                    if !(0.0..=24.0).contains(&hour_angle) {
                         return Err(ReadSourceListError::InvalidHa(hour_angle));
                     }
-                    if declination < -90.0 || declination > 90.0 {
+                    if !(-90.0..=90.0).contains(&declination) {
                         return Err(ReadSourceListError::InvalidDec(declination));
                     }
                     let radec = RADec::new(hour_angle * DH2R, declination.to_radians());
@@ -207,7 +207,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
 
                 // GAUSSIAN lines must have at least 4 elements (including
                 // GAUSSIAN).
-                let position_angle = match items.next() {
+                let mut position_angle = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteGaussianLine(line_num).into())
@@ -230,6 +230,11 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
                     );
+                }
+
+                // Ensure the position angle is positive.
+                if position_angle < 0.0 {
+                    position_angle += 360.0;
                 }
 
                 let comp_type = ComponentType::Gaussian {
@@ -258,7 +263,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
 
                 // SHAPELET2 lines must have at least 4 elements (including
                 // SHAPELET2).
-                let position_angle = match items.next() {
+                let mut position_angle = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteShapelet2Line(line_num).into())
@@ -281,6 +286,11 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
                     );
+                }
+
+                // Ensure the position angle is positive.
+                if position_angle < 0.0 {
+                    position_angle += 360.0;
                 }
 
                 let comp_type = ComponentType::Shapelet {

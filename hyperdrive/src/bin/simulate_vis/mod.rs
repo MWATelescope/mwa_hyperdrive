@@ -333,7 +333,7 @@ pub(crate) fn merge_cli_and_file_params(
     let ra = match cli_args.ra.or(file_params.ra) {
         None => return Err(ParamError::RaMissing),
         Some(ra) => {
-            if ra < 0.0 || ra > 360.0 {
+            if !(0.0..=360.0).contains(&ra) {
                 return Err(ParamError::RaInvalid);
             }
             ra
@@ -342,7 +342,7 @@ pub(crate) fn merge_cli_and_file_params(
     let dec = match cli_args.dec.or(file_params.dec) {
         None => return Err(ParamError::DecMissing),
         Some(dec) => {
-            if dec > 90.0 || dec < -90.0 {
+            if !(-90.0..=90.0).contains(&dec) {
                 return Err(ParamError::DecInvalid);
             }
             dec

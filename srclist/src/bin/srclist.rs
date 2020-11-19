@@ -139,6 +139,7 @@ fn parse_source_list_type(s: &str) -> Result<SourceListType, anyhow::Error> {
         "hyperdrive" => SourceListType::Hyperdrive,
         "rts" => SourceListType::Rts,
         "woden" => SourceListType::Woden,
+        "ao" => SourceListType::AO,
         _ => bail!(
             "Unrecognised source list type. Valid types are: {}",
             *SOURCE_LIST_TYPES_COMMA_SEPARATED
@@ -163,7 +164,7 @@ fn source_list_type_compatible_with_file_type(
             SourceListFileType::Json | SourceListFileType::Yaml => Ok(()),
             _ => exit(sl_type, file_type),
         },
-        SourceListType::Rts | SourceListType::Woden => match file_type {
+        SourceListType::Rts | SourceListType::Woden | SourceListType::AO => match file_type {
             SourceListFileType::Txt => Ok(()),
             _ => exit(sl_type, file_type),
         },
@@ -241,6 +242,14 @@ fn verify(
                 },
 
                 SourceListType::Woden => match woden::parse_source_list(&mut f) {
+                    Ok(sl) => sl,
+                    Err(e) => {
+                        println!("{}\n", e);
+                        continue;
+                    }
+                },
+
+                SourceListType::AO => match ao::parse_source_list(&mut f) {
                     Ok(sl) => sl,
                     Err(e) => {
                         println!("{}\n", e);
@@ -353,6 +362,11 @@ fn main() -> Result<(), anyhow::Error> {
                         Ok(sl) => sl,
                         Err(e) => bail!(e),
                     },
+
+                    SourceListType::AO => match ao::parse_source_list(&mut f) {
+                        Ok(sl) => sl,
+                        Err(e) => bail!(e),
+                    },
                 }
             };
 
@@ -384,6 +398,11 @@ fn main() -> Result<(), anyhow::Error> {
                 },
 
                 SourceListType::Woden => match woden::write_source_list(&mut f, &sl) {
+                    Ok(sl) => sl,
+                    Err(e) => bail!(e),
+                },
+
+                SourceListType::AO => match ao::write_source_list(&mut f, &sl) {
                     Ok(sl) => sl,
                     Err(e) => bail!(e),
                 },

@@ -110,7 +110,11 @@ pub fn write_source_list<T: std::io::Write>(
         writeln!(
             buf,
             "SOURCE {} P {} G {} S {} {}",
-            name, num_points, num_gaussians, num_shapelets, num_shapelet_coeffs
+            name.replace(' ', "_"),
+            num_points,
+            num_gaussians,
+            num_shapelets,
+            num_shapelet_coeffs
         )?;
 
         // Write out the components.

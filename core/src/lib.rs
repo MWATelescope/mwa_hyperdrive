@@ -10,9 +10,11 @@ structures and flux densities.
 pub mod constants;
 pub mod coord;
 pub mod flux_density;
+pub mod sexagesimal;
 pub mod source;
 
 // Re-exports.
 pub use coord::*;
 pub use flux_density::*;
+pub use sexagesimal::*;
 pub use source::*;

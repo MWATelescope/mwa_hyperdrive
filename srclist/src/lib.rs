@@ -6,6 +6,7 @@
 Code to handle sky-model source lists.
  */
 
+pub mod ao;
 pub mod error;
 pub mod hyperdrive;
 pub mod rts;
@@ -13,8 +14,12 @@ pub mod woden;
 
 use strum_macros::EnumIter;
 
+// Convenience re-exports.
+use std::collections::BTreeMap;
+
+use mwa_hyperdrive_core::constants::*;
+
 // Re-exports.
-pub use mwa_hyperdrive_core::constants::*;
 pub use mwa_hyperdrive_core::*;
 
 #[derive(Debug, EnumIter)]
@@ -29,6 +34,7 @@ pub enum SourceListType {
     Hyperdrive,
     Rts,
     Woden,
+    AO,
 }
 
 impl std::fmt::Display for SourceListFileType {
@@ -54,6 +60,7 @@ impl std::fmt::Display for SourceListType {
                 SourceListType::Hyperdrive => "hyperdrive",
                 SourceListType::Rts => "rts",
                 SourceListType::Woden => "woden",
+                SourceListType::AO => "ao",
             }
         )
     }

@@ -33,10 +33,16 @@ pub enum ReadSourceListError {
     Woden(#[from] ReadSourceListWodenError),
 
     #[error("{0}")]
+    AO(#[from] ReadSourceListAOError),
+
+    #[error("{0}")]
     Yaml(#[from] serde_yaml::Error),
 
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("{0}")]
+    Sexagesimal(#[from] mwa_hyperdrive_core::SexagesimalError),
 }
 
 /// Errors associated with reading in an RTS or WODEN source list.
@@ -170,11 +176,63 @@ pub enum ReadSourceListWodenError {
     NoShapeletSCoeffs(u32),
 }
 
-/// Errors associated with writing an RTS or WODEN source list.
+/// Errors associated with reading in a AO source list.
+#[derive(Error, Debug, PartialEq)]
+pub enum ReadSourceListAOError {
+    #[error("Source list line {0}: Incomplete name")]
+    IncompleteSourceLine(u32),
+
+    #[error("Source list line {0}: Source name not in quotes")]
+    NameNotQuoted(u32),
+
+    #[error("Source list line {line_num}: Unrecognised component type: {comp_type}")]
+    UnrecognisedComponentType { line_num: u32, comp_type: String },
+
+    #[error("Source list line {0}: Missing component type")]
+    MissingComponentType(u32),
+
+    #[error("Source list line {0}: Incomplete position")]
+    IncompletePositionLine(u32),
+
+    #[error("Source list line {0}: Incomplete shape")]
+    IncompleteShapeLine(u32),
+
+    #[error("Source list line {0}: Incomplete frequency")]
+    IncompleteFrequencyLine(u32),
+
+    #[error("Source list line {line_num}: Unhandled frequency units: {units}")]
+    UnhandledFrequencyUnits { line_num: u32, units: String },
+
+    #[error("Source list line {0}: Incomplete fluxdensity")]
+    IncompleteFluxDensityLine(u32),
+
+    #[error("Source list line {line_num}: Unhandled flux density units: {units}")]
+    UnhandledFluxDensityUnits { line_num: u32, units: String },
+
+    #[error("Source list line {0}: Incomplete spectral-index")]
+    IncompleteSpectralIndexLine(u32),
+
+    #[error("Source list line {0}: Missing opening curly brace")]
+    MissingOpeningCurly(u32),
+
+    #[error("Source list line {0}: Missing closing curly brace")]
+    MissingClosingCurly(u32),
+
+    #[error("Source list line {0}: Found sed, but did not find its end")]
+    MissingEndSed(u32),
+}
+
+/// Errors associated with writing out a source list.
 #[derive(Error, Debug)]
 pub enum WriteSourceListError {
     #[error("Source {0} has no components")]
     NoComponents(String),
+
+    #[error("Source list type {source_list_type} does not support {comp_type} components")]
+    UnsupportedComponentType {
+        source_list_type: String,
+        comp_type: String,
+    },
 
     #[error("Source list type {source_list_type} does not support {fd_type} flux densities")]
     UnsupportedFluxDensityType {
@@ -184,6 +242,9 @@ pub enum WriteSourceListError {
 
     #[error("{0}")]
     Estimate(#[from] mwa_hyperdrive_core::EstimateError),
+
+    #[error("{0}")]
+    Sexagesimal(#[from] mwa_hyperdrive_core::SexagesimalError),
 
     /// An IO error.
     #[error("{0}")]
