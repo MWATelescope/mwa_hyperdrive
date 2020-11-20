@@ -3,8 +3,8 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
-Handle the pointing centre coordinates.
-*/
+Handle pointing centre coordinates.
+ */
 
 use super::hadec::HADec;
 

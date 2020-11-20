@@ -93,21 +93,21 @@ mod tests {
 
     #[test]
     fn glob_cargo() {
-        let result = get_all_matches_from_glob("../Cargo*");
+        let result = get_all_matches_from_glob("./Cargo*");
         assert!(result.is_ok());
         let entries = result.unwrap();
-        assert!(&entries.contains(&PathBuf::from("../Cargo.lock")));
-        assert!(&entries.contains(&PathBuf::from("../Cargo.toml")));
+        assert!(&entries.contains(&PathBuf::from("Cargo.lock")));
+        assert!(&entries.contains(&PathBuf::from("Cargo.toml")));
     }
 
     #[test]
     fn glob_cargo_toml() {
-        let result = get_single_match_from_glob("../Cargo*");
+        let result = get_single_match_from_glob("./Cargo*");
         assert!(result.is_err());
 
-        let result = get_single_match_from_glob("Cargo*toml");
+        let result = get_single_match_from_glob("core/Cargo*");
         assert!(result.is_ok());
         let entry = result.unwrap();
-        assert_eq!(entry, PathBuf::from("Cargo.toml"));
+        assert_eq!(entry, PathBuf::from("core/Cargo.toml"));
     }
 }

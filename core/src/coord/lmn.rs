@@ -4,7 +4,7 @@
 
 /*!
 Handle interferometric direction-cosine coordinates.
-*/
+ */
 
 /// The (l,m,n) direction-cosine coordinates of a point. All units are in
 /// radians.

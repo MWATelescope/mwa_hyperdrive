@@ -127,18 +127,18 @@ mod tests {
         // Compare file contents. Do they match?
         let mut example = String::new();
         let mut just_written = String::new();
-        {
-            let f = File::open("examples/hyperdrive_srclist.yaml");
-            assert!(f.is_ok(), "{}", f.unwrap_err());
-            f.unwrap().read_to_string(&mut example).unwrap();
 
-            let f = File::open(&temp.path());
-            assert!(f.is_ok(), "{}", f.unwrap_err());
-            f.unwrap().read_to_string(&mut just_written).unwrap();
-            // Apparently there's a new line missing.
-            just_written.push('\n');
-        }
-        assert_eq!(example, just_written);
+        let f = File::open("examples/hyperdrive_srclist.yaml");
+        assert!(f.is_ok(), "{}", f.unwrap_err());
+        f.unwrap().read_to_string(&mut example).unwrap();
+
+        let f = File::open(&temp.path());
+        assert!(f.is_ok(), "{}", f.unwrap_err());
+        f.unwrap().read_to_string(&mut just_written).unwrap();
+
+        // Use trim to ignore any leading or trailing whitespace; we don't care
+        // about that when comparing contents.
+        assert_eq!(example.trim(), just_written.trim());
     }
 
     #[test]

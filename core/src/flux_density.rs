@@ -4,7 +4,7 @@
 
 /*!
 Flux density structures.
-*/
+ */
 
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};

@@ -4,7 +4,7 @@
 
 /*!
 Structures to describe sky-model sources and their components.
-*/
+ */
 
 use std::collections::BTreeMap;
 

@@ -4,7 +4,7 @@
 
 /*!
 Handle East, North and Height coordinates (typically associated with MWA tiles).
-*/
+ */
 
 use super::xyz::XYZ;
 use crate::constants::*;

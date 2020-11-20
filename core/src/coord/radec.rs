@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+/*!
+Handle (right ascension, declination) coordinates.
+ */
+
 use serde::{Deserialize, Serialize};
 
 use super::hadec::HADec;

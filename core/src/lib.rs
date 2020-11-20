@@ -5,7 +5,7 @@
 /*!
 Core code to describe coordinate transformations, sky-model source
 structures and flux densities.
-*/
+ */
 
 pub mod constants;
 pub mod coord;
@@ -18,3 +18,5 @@ pub use coord::*;
 pub use flux_density::*;
 pub use sexagesimal::*;
 pub use source::*;
+
+pub use mwalib;

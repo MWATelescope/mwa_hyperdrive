@@ -4,7 +4,7 @@
 
 /*!
 Handle (azimuth, elevation) coordinates.
-*/
+ */
 
 use super::hadec::HADec;
 

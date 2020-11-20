@@ -10,7 +10,7 @@ the MWA Real-Time System (RTS).
 Work in progress!
 
 ### Source lists
-See the README in the `mwa_hyperdrive_srclist` directory.
+See the README in the `srclist` directory.
 
 ### Visibility Simulation
 <details>
@@ -80,7 +80,7 @@ context from the metafits file.
   [list](https://developer.nvidia.com/cuda-gpus) to determine what compute
   capability a GPU has.
 
-- A Rust compiler with a version >= 1.42.0
+- A Rust compiler with a version >= 1.47.0
 
   `https://www.rust-lang.org/tools/install`
 

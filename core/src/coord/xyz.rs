@@ -3,8 +3,8 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
- Handle (x,y,z) coordinates of an antenna (a.k.a. station).
-*/
+Handle (x,y,z) coordinates of an antenna (a.k.a. station).
+ */
 
 use super::enh::ENH;
 use crate::constants::MWA_LAT_RAD;
