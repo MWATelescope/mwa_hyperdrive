@@ -139,7 +139,7 @@ impl Mwaf {
 #[derive(Debug)]
 struct CotterFlagsTemp {
     /// The GPS time of the first scan.
-    pub start_time_milli: u64,
+    start_time_milli: u64,
     /// The number of time steps in the data (duration of observation /
     /// integration time).
     num_time_steps: usize,
@@ -159,7 +159,7 @@ struct CotterFlagsTemp {
     /// `num_channels / flags.len()` elements (i.e. the number of fine channels
     /// per coarse band), and each of those elements is between 0 (0% flagged)
     /// and 1 (100% flagged).
-    pub occupancy: BTreeMap<u8, Vec<f32>>,
+    occupancy: BTreeMap<u8, Vec<f32>>,
     /// The gpubox number that these flags apply to (usually between 1 and 24).
     gpubox_num: u8,
     /// The version of cotter used to write the flags.
@@ -170,7 +170,7 @@ struct CotterFlagsTemp {
 
 #[derive(Debug)]
 pub struct CotterFlags {
-    /// The GPS time of the first scan.
+    /// The GPS time of the first scan [milliseconds].
     pub start_time_milli: u64,
     /// The number of time steps in the data (duration of observation /
     /// integration time).

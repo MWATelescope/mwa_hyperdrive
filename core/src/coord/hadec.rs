@@ -30,17 +30,17 @@ impl HADec {
     }
 
     /// Given a local sidereal time, make a new `RADec` struct from a `HADec`.
-    pub fn to_radec(&self, lst: f64) -> RADec {
+    pub fn to_radec(&self, lst_rad: f64) -> RADec {
         RADec {
-            ra: lst - self.ha,
+            ra: lst_rad - self.ha,
             dec: self.dec,
         }
     }
 
     /// Given a local sidereal time, make a new `HADec` struct from a `RADec`.
-    pub fn from_radec(radec: &RADec, lst: f64) -> Self {
+    pub fn from_radec(radec: &RADec, lst_rad: f64) -> Self {
         Self {
-            ha: lst - radec.ra,
+            ha: lst_rad - radec.ra,
             dec: radec.dec,
         }
     }

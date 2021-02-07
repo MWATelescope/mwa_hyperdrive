@@ -23,10 +23,10 @@ impl PointingCentre {
     ///
     /// As the pointing centre struct saves sine and cosine values, this `new`
     /// function exists to ease reduce programmer effort.
-    pub fn new_from_ha(lst: f64, ha: f64, dec: f64) -> Self {
+    pub fn new_from_ha(lst_rad: f64, ha_rad: f64, dec_rad: f64) -> Self {
         Self {
-            lst,
-            hadec: HADec::new(ha, dec),
+            lst: lst_rad,
+            hadec: HADec::new(ha_rad, dec_rad),
         }
     }
 
@@ -35,23 +35,26 @@ impl PointingCentre {
     ///
     /// As the pointing centre struct saves sine and cosine values, this `new`
     /// function exists to ease reduce programmer effort.
-    pub fn new_from_hadec(lst: f64, hadec: HADec) -> Self {
-        Self { lst, hadec }
+    pub fn new_from_hadec(lst_rad: f64, hadec: HADec) -> Self {
+        Self {
+            lst: lst_rad,
+            hadec,
+        }
     }
 
     /// Similar to `PointingCentre::new_from_ha`, but takes a right ascension
     /// `ra` instead of an hour angle. All arguments have units of radians.
-    pub fn new_from_ra(lst: f64, ra: f64, dec: f64) -> Self {
-        let ha = lst - ra;
+    pub fn new_from_ra(lst_rad: f64, ra_rad: f64, dec_rad: f64) -> Self {
+        let ha = lst_rad - ra_rad;
         Self {
-            lst,
-            hadec: HADec::new(ha, dec),
+            lst: lst_rad,
+            hadec: HADec::new(ha, dec_rad),
         }
     }
 
     /// Given a new LST, update self.
-    pub fn update(&mut self, lst: f64) {
-        self.hadec.ha += lst - self.lst;
-        self.lst = lst;
+    pub fn update(&mut self, lst_rad: f64) {
+        self.hadec.ha += lst_rad - self.lst;
+        self.lst = lst_rad;
     }
 }

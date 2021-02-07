@@ -76,8 +76,8 @@ fn calc_spec_index(fd1: &FluxDensity, fd2: &FluxDensity) -> f64 {
 }
 
 /// Given a spectral index, determine the flux-density ratio of two frequencies.
-fn calc_flux_ratio(desired_freq: f64, cat_freq: f64, spec_index: f64) -> f64 {
-    (desired_freq / cat_freq).powf(spec_index)
+fn calc_flux_ratio(desired_freq_hz: f64, cat_freq_hz: f64, spec_index: f64) -> f64 {
+    (desired_freq_hz / cat_freq_hz).powf(spec_index)
 }
 
 impl FluxDensityType {
@@ -90,7 +90,7 @@ impl FluxDensityType {
     ///
     /// The estimated flux density is based off of the Stokes I component, so
     /// any other Stokes parameters may be poorly estimated.
-    pub fn estimate_at_freq(&self, freq: f64) -> Result<FluxDensity, EstimateError> {
+    pub fn estimate_at_freq(&self, freq_hz: f64) -> Result<FluxDensity, EstimateError> {
         match self {
             FluxDensityType::List { fds } => {
                 if fds.is_empty() {
@@ -130,13 +130,13 @@ impl FluxDensityType {
                             // desired frequency.
 
                             // If this freq and the specified freq are the same...
-                            if (f - freq).abs() < 1e-3 {
+                            if (f - freq_hz).abs() < 1e-3 {
                                 // ... then just return the flux density information from
                                 // this frequency.
                                 return Ok(*fd);
                             }
                             // If this freq is smaller than the specified freq...
-                            else if f < freq {
+                            else if f < freq_hz {
                                 // Check if we've iterated to the last catalogue component -
                                 // if so, then we must extrapolate (i.e. the specified
                                 // freq. is bigger than all catalogue frequencies).
@@ -175,7 +175,7 @@ impl FluxDensityType {
                             spec_index,
                             // If our last component's frequency is smaller than the specified
                             // freq., then we should use that for flux densities.
-                            if fds[larger_comp_index].freq < freq {
+                            if fds[larger_comp_index].freq < freq_hz {
                                 &fds[larger_comp_index]
                             } else {
                                 &fds[smaller_comp_index]
@@ -185,25 +185,25 @@ impl FluxDensityType {
                 };
 
                 // Now scale the flux densities given the calculated spectral index.
-                let flux_ratio = calc_flux_ratio(freq, smaller_flux_density.freq, spec_index);
+                let flux_ratio = calc_flux_ratio(freq_hz, smaller_flux_density.freq, spec_index);
 
                 Ok(FluxDensity {
-                    freq,
+                    freq: freq_hz,
                     ..*smaller_flux_density
                 } * flux_ratio)
             }
 
             FluxDensityType::PowerLaw { si, fd } => {
-                let ratio = calc_flux_ratio(freq, fd.freq, *si);
+                let ratio = calc_flux_ratio(freq_hz, fd.freq, *si);
                 let mut new_fd = *fd * ratio;
-                new_fd.freq = freq;
+                new_fd.freq = freq_hz;
                 Ok(new_fd)
             }
 
             FluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                let mut power_law_component = *fd * calc_flux_ratio(freq, fd.freq, *si);
-                power_law_component.freq = freq;
-                let curved_component = (q * (freq / fd.freq).ln().powi(2)).exp();
+                let mut power_law_component = *fd * calc_flux_ratio(freq_hz, fd.freq, *si);
+                power_law_component.freq = freq_hz;
+                let curved_component = (q * (freq_hz / fd.freq).ln().powi(2)).exp();
                 Ok(power_law_component * curved_component)
             }
         }

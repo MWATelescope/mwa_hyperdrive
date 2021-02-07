@@ -13,7 +13,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 
 use crate::*;
-use mwa_hyperdrive_core::Source;
+use mwa_hyperdrive_core::{constants::*, Source};
 
 /// Parameters for visibility generation. Members of this struct might be
 /// different from a `Context` struct (e.g. such as `time_resolution`), which

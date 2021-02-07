@@ -19,23 +19,26 @@ pub struct AzEl {
 
 impl AzEl {
     /// Make a new `AzEl` struct from values in radians.
-    pub fn new(az: f64, el: f64) -> Self {
-        Self { az, el }
+    pub fn new(az_rad: f64, el_rad: f64) -> Self {
+        Self {
+            az: az_rad,
+            el: el_rad,
+        }
     }
 
     /// Make a new `AzEl` struct from values in degrees.
-    pub fn new_degrees(az: f64, el: f64) -> Self {
-        Self::new(az.to_radians(), el.to_radians())
+    pub fn new_degrees(az_deg: f64, el_deg: f64) -> Self {
+        Self::new(az_deg.to_radians(), el_deg.to_radians())
     }
 
     /// Convert the horizon coordinates to equatorial coordinates (Hour Angle
     /// and Declination), given the local latitude on Earth.
     ///
     /// Uses ERFA.
-    pub fn to_hadec(&self, latitude: f64) -> HADec {
+    pub fn to_hadec(&self, latitude_rad: f64) -> HADec {
         let mut ha = 0.0;
         let mut dec = 0.0;
-        unsafe { erfa_sys::eraAe2hd(self.az, self.el, latitude, &mut ha, &mut dec) }
+        unsafe { erfa_sys::eraAe2hd(self.az, self.el, latitude_rad, &mut ha, &mut dec) }
         HADec::new(ha, dec)
     }
 

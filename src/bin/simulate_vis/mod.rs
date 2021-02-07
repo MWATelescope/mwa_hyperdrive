@@ -275,13 +275,13 @@ pub(crate) fn merge_cli_and_file_params(
     debug!("Attempting to create a Context from the metafits...");
     let context = Context::new(&metafits, &[])?;
 
-    // Assign `fine_channel_width` from a specified `fine_channel_width` or
+    // Assign `fine_channel_width_hz` from a specified `fine_channel_width` or
     // `num_fine_channels`. The specified units are in kHz, but the output here
     // should be in Hz.
     debug!("Attempting to determine the fine channel width...");
     // Handle various combinations of --fine_channel_width and
     // --num_fine_channels, similar to --bands and --num_bands above.
-    let fine_channel_width = match (
+    let fine_channel_width_hz = match (
         cli_args.fine_channel_width.map(|f| f * 1e3),
         cli_args.num_fine_channels,
         file_params.fine_channel_width.map(|f| f * 1e3),
@@ -320,17 +320,17 @@ pub(crate) fn merge_cli_and_file_params(
             (context.mwalib.coarse_channel_width_hz / f_nfc as u32) as f64
         }
     };
-    if fine_channel_width < 0.0 || fine_channel_width.abs() < 1e-6 {
+    if fine_channel_width_hz < 0.0 || fine_channel_width_hz.abs() < 1e-6 {
         return Err(ParamError::FineChansWidthTooSmall);
     }
-    if fine_channel_width > context.mwalib.coarse_channel_width_hz as f64 {
+    if fine_channel_width_hz > context.mwalib.coarse_channel_width_hz as f64 {
         return Err(ParamError::FineChanWidthTooBig {
-            fcw: fine_channel_width / 1000.0,
+            fcw: fine_channel_width_hz / 1000.0,
             ccw: context.mwalib.coarse_channel_width_hz as u64 / 1000,
         });
     }
 
-    let ra = match cli_args.ra.or(file_params.ra) {
+    let ra_deg = match cli_args.ra.or(file_params.ra) {
         None => return Err(ParamError::RaMissing),
         Some(ra) => {
             if !(0.0..=360.0).contains(&ra) {
@@ -339,7 +339,7 @@ pub(crate) fn merge_cli_and_file_params(
             ra
         }
     };
-    let dec = match cli_args.dec.or(file_params.dec) {
+    let dec_deg = match cli_args.dec.or(file_params.dec) {
         None => return Err(ParamError::DecMissing),
         Some(dec) => {
             if !(-90.0..=90.0).contains(&dec) {
@@ -365,9 +365,9 @@ pub(crate) fn merge_cli_and_file_params(
             None => return Err(ParamError::SrclistMissing),
         },
         metafits,
-        ra,
-        dec,
-        fine_channel_width,
+        ra: ra_deg,
+        dec: dec_deg,
+        fine_channel_width: fine_channel_width_hz,
         bands,
         steps,
         time_res: cli_args
