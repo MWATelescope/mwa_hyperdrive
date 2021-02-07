@@ -11,7 +11,6 @@ pub mod constants;
 pub mod context;
 pub mod flagging;
 pub mod glob;
-pub mod instrument;
 pub(crate) mod math;
 pub mod visibility_gen;
 
@@ -19,7 +18,6 @@ pub mod visibility_gen;
 pub use constants::*;
 pub use context::Context;
 pub use flagging::cotter::CotterFlags;
-pub use instrument::PrimaryBeam;
 pub(crate) use math::*;
 pub use mwa_hyperdrive_core::*;
 pub use mwa_hyperdrive_srclist::flux_density::FluxDensity;
@@ -31,4 +29,4 @@ pub use std::path::{Path, PathBuf};
 // External re-exports.
 pub use log::{debug, error, info, trace, warn};
 pub use mwalib::*;
-use num::Complex;
+pub use num::complex::Complex64 as c64;

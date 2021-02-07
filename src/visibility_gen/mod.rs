@@ -329,8 +329,8 @@ fn cpu_vis_gen(
                     // `dc` for direction cosine, `fd` for flux density.
                     |acc, (dc, &fd)| {
                         let arg = TAU * (bl.u * dc.l + bl.v * dc.m + bl.w * (dc.n - 1.0));
-                        let (im, re) = arg.sin_cos();
-                        (acc.0 + re as f32 * fd, acc.1 + im as f32 * fd)
+                        let c = cexp(arg);
+                        (acc.0 + c.re as f32 * fd, acc.1 + c.im as f32 * fd)
                     },
                 )
         })

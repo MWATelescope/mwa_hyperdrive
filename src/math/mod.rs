@@ -6,7 +6,9 @@
 Some helper mathematics.
  */
 
-use num::complex::Complex64;
+#![allow(dead_code)]
+
+use crate::c64;
 
 // Make traditional trigonometry possible.
 pub fn sin(x: f64) -> f64 {
@@ -20,7 +22,7 @@ pub fn cos(x: f64) -> f64 {
 ///
 /// This function doesn't actually use complex numbers; it just returns the real
 /// and imag components from Euler's formula (i.e. e^{ix} = cos{x} + i sin{x}).
-pub fn cexp(x: f64) -> Complex64 {
+pub fn cexp(x: f64) -> c64 {
     let (s, c) = x.sin_cos();
-    Complex64::new(c, s)
+    c64::new(c, s)
 }
