@@ -35,11 +35,23 @@ impl Source {
     }
 
     /// Estimate the flux densities for each of a source's components given a
+    /// frequency.
+    pub fn get_flux_estimates(&self, freq_hz: f64) -> Result<Vec<FluxDensity>, EstimateError> {
+        self.components
+            .iter()
+            .map(|comp| comp.flux_type.estimate_at_freq(freq_hz))
+            .collect()
+    }
+
+    /// Estimate the flux densities for each of a source's components given a
     /// frequency. The calculation is done in parallel.
-    pub fn get_flux_estimates(&self, freq: f64) -> Result<Vec<FluxDensity>, EstimateError> {
+    pub fn get_flux_estimates_parallel(
+        &self,
+        freq_hz: f64,
+    ) -> Result<Vec<FluxDensity>, EstimateError> {
         self.components
             .par_iter()
-            .map(|comp| comp.flux_type.estimate_at_freq(freq))
+            .map(|comp| comp.flux_type.estimate_at_freq(freq_hz))
             .collect()
     }
 }

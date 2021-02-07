@@ -6,6 +6,8 @@
 Handle (azimuth, elevation) coordinates.
  */
 
+use std::f64::consts::FRAC_PI_2;
+
 use super::hadec::HADec;
 
 /// A struct containing an Azimuth and Elevation. All units are in radians.
@@ -29,6 +31,11 @@ impl AzEl {
     /// Make a new `AzEl` struct from values in degrees.
     pub fn new_degrees(az_deg: f64, el_deg: f64) -> Self {
         Self::new(az_deg.to_radians(), el_deg.to_radians())
+    }
+
+    /// Get the zenith angle in radians.
+    pub fn za(&self) -> f64 {
+        FRAC_PI_2 - self.el
     }
 
     /// Convert the horizon coordinates to equatorial coordinates (Hour Angle

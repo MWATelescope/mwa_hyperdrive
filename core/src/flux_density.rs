@@ -6,13 +6,14 @@
 Flux density structures.
  */
 
-use log::{debug, warn};
+use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::constants::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// At a frequency, four flux densities for each Stokes parameter.
 pub struct FluxDensity {
     /// The frequency that these flux densities apply to [Hz]
     pub freq: f64,
@@ -164,9 +165,10 @@ impl FluxDensityType {
 
                         // Stop stupid spectral indices.
                         if spec_index < SPEC_INDEX_CAP {
-                            warn!(
+                            trace!(
                                 "Component had a spectral index {}; capping at {}",
-                                spec_index, SPEC_INDEX_CAP
+                                spec_index,
+                                SPEC_INDEX_CAP
                             );
                             spec_index = SPEC_INDEX_CAP;
                         }

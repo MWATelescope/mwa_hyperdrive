@@ -76,7 +76,7 @@ pub fn vis_gen(
         for fine_channel in 0..params.n_fine_channels {
             let freq = base_freq + params.fine_channel_width * fine_channel as f64;
             let mut fds = src
-                .get_flux_estimates(freq)?
+                .get_flux_estimates_parallel(freq)?
                 .into_iter()
                 .map(|fd| fd.i as _)
                 .collect();

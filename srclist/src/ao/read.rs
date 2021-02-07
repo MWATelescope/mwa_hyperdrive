@@ -16,6 +16,8 @@ The code here is probably incomplete, but it should work for the majority of
 source lists.
  */
 
+use std::collections::BTreeMap;
+
 use mwa_hyperdrive_core::sexagesimal::*;
 
 use super::*;

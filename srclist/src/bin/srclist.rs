@@ -10,40 +10,18 @@ files, as well as convert between supported source list formats.
  */
 
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::bail;
 use log::{debug, warn};
-use structopt::StructOpt;
-use strum::IntoEnumIterator;
+use structopt::{clap::AppSettings, StructOpt};
 
-use mwa_hyperdrive_srclist::{hyperdrive, rts, woden, *};
+use mwa_hyperdrive_core::SourceList;
+use mwa_hyperdrive_srclist::{hyperdrive, read::*, rts, woden, *};
 
 // Put various help texts in here, so that all available source list types are
 // listed at compile time.
 lazy_static::lazy_static! {
-    static ref SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED: String = {
-        let mut variants: Vec<String> = vec![];
-        // Iterate over all of the enum variants for SourceListType.
-        for variant in SourceListFileType::iter() {
-            let s = format!("{}", variant);
-            // Each string has a trailing newline character.
-            variants.push(s.strip_suffix("\n").unwrap().to_string());
-        }
-        variants.join(", ")
-    };
-
-    static ref SOURCE_LIST_TYPES_COMMA_SEPARATED: String = {
-        let mut variants: Vec<String> = vec![];
-        // Iterate over all of the enum variants for SourceListType.
-        for variant in SourceListType::iter() {
-            let s = format!("{}", variant);
-            // Each string has a trailing newline character.
-            variants.push(s.strip_suffix("\n").unwrap().to_string());
-        }
-        variants.join(", ")
-    };
-
     static ref VERIFY_INPUT_TYPE_HELP: String =
         format!("The type of source lists being verified. This is only really useful if they are .txt files, because it's ambiguous if these are RTS or WODEN source lists. Currently supported types: {}",
                 *SOURCE_LIST_TYPES_COMMA_SEPARATED);
@@ -58,7 +36,7 @@ lazy_static::lazy_static! {
 }
 
 #[derive(StructOpt, Debug)]
-#[structopt(author, name = "hyperdrive srclist", about)]
+#[structopt(author, name = "hyperdrive srclist", about, global_settings = &[AppSettings::ColoredHelp, AppSettings::ArgRequiredElseHelp])]
 enum Args {
     /// Verify that source lists can be read by hyperdrive.
     Verify {
@@ -120,31 +98,6 @@ fn setup_logging(level: u8) -> Result<(), fern::InitError> {
         .chain(std::io::stdout())
         .apply()?;
     Ok(())
-}
-fn parse_file_type(file: &Path) -> Result<SourceListFileType, anyhow::Error> {
-    let ext = file.extension().and_then(|e| e.to_str());
-    Ok(match ext {
-        Some("json") => SourceListFileType::Json,
-        Some("yaml") => SourceListFileType::Yaml,
-        Some("txt") => SourceListFileType::Txt,
-        _ => bail!(
-            "Unrecognised source list file type. Valid types are: {}",
-            *SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED
-        ),
-    })
-}
-
-fn parse_source_list_type(s: &str) -> Result<SourceListType, anyhow::Error> {
-    Ok(match s {
-        "hyperdrive" => SourceListType::Hyperdrive,
-        "rts" => SourceListType::Rts,
-        "woden" => SourceListType::Woden,
-        "ao" => SourceListType::AO,
-        _ => bail!(
-            "Unrecognised source list type. Valid types are: {}",
-            *SOURCE_LIST_TYPES_COMMA_SEPARATED
-        ),
-    })
 }
 
 fn source_list_type_compatible_with_file_type(
@@ -333,42 +286,10 @@ fn main() -> Result<(), anyhow::Error> {
             source_list_type_compatible_with_file_type(&output_sl_type, &output_file_type)?;
 
             // Read the input source list.
-            let sl = {
-                debug!("Attempting to read source list");
-                let mut f = std::io::BufReader::new(File::open(&input_source_list)?);
-
-                match input_sl_type {
-                    SourceListType::Hyperdrive => match input_file_type {
-                        SourceListFileType::Json => match hyperdrive::source_list_from_json(&mut f)
-                        {
-                            Ok(sl) => sl,
-                            Err(e) => bail!(e),
-                        },
-                        SourceListFileType::Yaml => match hyperdrive::source_list_from_yaml(&mut f)
-                        {
-                            Ok(sl) => sl,
-                            Err(e) => bail!(e),
-                        },
-                        // Other enum variants get handled above.
-                        _ => unreachable!(),
-                    },
-
-                    SourceListType::Rts => match rts::parse_source_list(&mut f) {
-                        Ok(sl) => sl,
-                        Err(e) => bail!(e),
-                    },
-
-                    SourceListType::Woden => match woden::parse_source_list(&mut f) {
-                        Ok(sl) => sl,
-                        Err(e) => bail!(e),
-                    },
-
-                    SourceListType::AO => match ao::parse_source_list(&mut f) {
-                        Ok(sl) => sl,
-                        Err(e) => bail!(e),
-                    },
-                }
-            };
+            let sl = mwa_hyperdrive_srclist::read::read_source_list_file(
+                &input_source_list,
+                &input_sl_type,
+            )?;
 
             // Write the output source list.
             debug!("Attempting to write source list");
@@ -376,36 +297,17 @@ fn main() -> Result<(), anyhow::Error> {
 
             match output_sl_type {
                 SourceListType::Hyperdrive => match output_file_type {
-                    SourceListFileType::Json => {
-                        match hyperdrive::source_list_to_json(&mut f, &sl) {
-                            Ok(sl) => sl,
-                            Err(e) => bail!(e),
-                        }
-                    }
-                    SourceListFileType::Yaml => {
-                        match hyperdrive::source_list_to_yaml(&mut f, &sl) {
-                            Ok(sl) => sl,
-                            Err(e) => bail!(e),
-                        }
-                    }
+                    SourceListFileType::Json => hyperdrive::source_list_to_json(&mut f, &sl)?,
+                    SourceListFileType::Yaml => hyperdrive::source_list_to_yaml(&mut f, &sl)?,
                     // Other enum variants get handled above.
                     _ => unreachable!(),
                 },
 
-                SourceListType::Rts => match rts::write_source_list(&mut f, &sl) {
-                    Ok(sl) => sl,
-                    Err(e) => bail!(e),
-                },
+                SourceListType::Rts => rts::write_source_list(&mut f, &sl)?,
 
-                SourceListType::Woden => match woden::write_source_list(&mut f, &sl) {
-                    Ok(sl) => sl,
-                    Err(e) => bail!(e),
-                },
+                SourceListType::Woden => woden::write_source_list(&mut f, &sl)?,
 
-                SourceListType::AO => match ao::write_source_list(&mut f, &sl) {
-                    Ok(sl) => sl,
-                    Err(e) => bail!(e),
-                },
+                SourceListType::AO => ao::write_source_list(&mut f, &sl)?,
             };
 
             Ok(())

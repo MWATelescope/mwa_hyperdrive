@@ -121,6 +121,13 @@ mod tests {
             metafits: metafits_pb.to_str().map(|s| s.to_string()),
             gpuboxes: Some(gpuboxes),
             mwafs: Some(mwafs),
+            source_list: Some(
+                "tests/pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml".to_string(),
+            ),
+            num_sources: Some(1000),
+            veto_threshold: Some(0.01),
+            time_res: None,
+            freq_res: None,
         };
 
         (args, tmp_dir)
@@ -147,18 +154,18 @@ mod tests {
             .arg("calibrate")
             .arg(&format!("{}", toml_pb.display()))
             .ok();
-        assert!(cmd.is_err());
+        assert!(cmd.is_err(), "{:?}", cmd.unwrap());
         let (_, stderr) = get_cmd_output(cmd);
-        assert!(&stderr.contains("not yet implemented"));
+        assert!(&stderr.contains("not yet implemented"), "{}", stderr);
 
         let cmd = hyperdrive()
             .arg("calibrate")
             .arg(&format!("{}", toml_pb.display()))
             .arg("--dry-run")
             .ok();
-        assert!(cmd.is_ok());
+        assert!(cmd.is_ok(), "{}", cmd.unwrap_err());
         let (stdout, stderr) = get_cmd_output(cmd);
-        assert!(stderr.is_empty());
+        assert!(stderr.is_empty(), "{}", stderr);
         // From mwalib context output
         assert!(&stdout.contains("Actual UNIX start time:   1381844910"));
         // From the cotter flags

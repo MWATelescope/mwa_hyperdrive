@@ -1,5 +1,7 @@
-name: Run tests
+---
+name: Tests
 
+# Do this on every push
 on: [push, pull_request]
 
 env:
@@ -10,7 +12,10 @@ jobs:
     runs-on: ubuntu-18.04
     container: nvidia/cuda:11.1-base
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout sources
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
 
     - name: Install dependencies
       run: |
@@ -18,13 +23,18 @@ jobs:
           DEBIAN_FRONTEND="noninteractive" apt-get -y install tzdata
           apt install -y pkg-config curl git gcc llvm libclang-dev cuda-nvcc-11-1 libcfitsio-dev liberfa-dev
 
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          . $HOME/.cargo/env
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup target add x86_64-unknown-linux-gnu
+    - name: Install stable toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+
+    - name: Get the HDF5 file
+      run: curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o mwa_full_embedded_element_pattern.h5
 
     - name: Run tests
       run: |
-        . $HOME/.cargo/env
-        HYPERDRIVE_CUDA_COMPUTE=75 cargo test --all
+        MWA_BEAM_FILE=mwa_full_embedded_element_pattern.h5 \
+        HYPERDRIVE_CUDA_COMPUTE=75 \
+        cargo test --all

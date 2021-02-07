@@ -14,6 +14,7 @@ use common::{setup_logging, HYPERDRIVE_VERSION};
 use simulate_vis::*;
 
 #[derive(StructOpt, Debug)]
+// #[structopt(author, name = "hyperdrive", version = HYPERDRIVE_VERSION.as_str(), about, global_settings = &[AppSettings::ColoredHelp, AppSettings::ArgRequiredElseHelp])]
 #[structopt(author, name = "hyperdrive", version = HYPERDRIVE_VERSION.as_str(), about)]
 enum Args {
     /// Calibrate the input data. WIP.

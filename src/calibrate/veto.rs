@@ -1,0 +1,388 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+/*!
+Code to remove sources from a source list.
+
+Sources can be either because their position in the beam attenuates them
+sufficiently (veto), or we request a certain number of sources.
+ */
+
+use rayon::{iter::Either, prelude::*};
+use thiserror::Error;
+
+use crate::jones::*;
+use crate::*;
+use mwa_hyperdrive_core::*;
+
+/// This function mutates the input source list, removing any sources that have
+/// beam-attenuated flux densities less than the threshold, and/or remove
+/// sources that aren't in the top n sources specified by `num_sources`.
+///
+/// This is important for calibration, because a source might be too dim to be
+/// practically used, or its flux density might be too attenuated at its
+/// position in the beam (at the any observed frequency).
+///
+/// Assume an ideal array (all dipoles with unity gain). Also assume that the
+/// observation does not elapse enough time to shift sources into beam nulls
+/// compared to the obs start.
+pub fn veto_sources(
+    source_list: &mut SourceList,
+    context: &mwalib::mwalibContext,
+    beam: &mwa_hyperbeam::fee::FEEBeam,
+    num_sources: Option<usize>,
+    veto_threshold: f64,
+) -> Result<Vec<(String, f64)>, VetoError> {
+    // Based on an elevation cutoff and the specified veto_threshold, determine
+    // which sources should be removed (vetoed) from the source list.
+    let (vetoed_sources, mut not_vetoed_sources): (Vec<_>, Vec<_>) = source_list
+        .par_iter()
+        .partition_map(|(source_name, source)| {
+            // Are any of this source's components too low in elevation?
+            for comp in &source.components {
+                let azel = comp.radec.to_hadec(context.lst_radians).to_azel_mwa();
+                if azel.el < ELEVATION_LIMIT {
+                    trace!("A component of source {}'s elevation ({} radians) was below the limit ({} radians)",
+                           source_name,
+                           azel.el,
+                           ELEVATION_LIMIT);
+                    return Either::Left(source_name.clone());
+                }
+            }
+
+            // For this source, work out its smallest flux density at any of the
+            // observing frequencies. This is how we determine which sources are
+            // "best".
+            let mut smallest_fd = std::f64::INFINITY;
+
+            // Iterate over each frequency. Is the total flux density acceptable
+            // for each frequency?
+            for coarse_chan in &context.coarse_channels {
+                // `fd` is the sum of the source's component flux densities.
+                let mut fd = 0.0;
+
+                // Get the beam response at this source position and frequency.
+                let j = beam.calc_jones(
+                        context.azimuth_radians,
+                        context.zenith_angle_radians,
+                        coarse_chan.channel_centre_hz,
+                        // Use the ideal delays.
+                        &context.delays,
+                        &[1.0; 16],
+                    true)
+                    // unwrap is ugly, but an error would indicate a serious
+                    // problem with hyperbeam. The alternative is lots of
+                    // "and_then" control flow operators.
+                    .unwrap();
+
+                for source_fd in source
+                    .get_flux_estimates(coarse_chan.channel_centre_hz as _)
+                    .unwrap()
+                {
+                    fd += get_beam_attenuated_flux_density(&source_fd, &j);
+                }
+
+                if fd < veto_threshold {
+                    trace!(
+                        "Source {}'s brightness ({}) is less than the veto threshold ({})",
+                        source_name,
+                        fd,
+                        veto_threshold
+                    );
+                    return Either::Left(source_name.clone());
+                }
+                smallest_fd = fd.min(smallest_fd);
+            }
+
+            // If we got this far, the source should not be vetoed.
+            Either::Right((source_name.clone(), smallest_fd))
+        });
+
+    debug!(
+        "The following {} sources were vetoed from the source list: {:?}",
+        vetoed_sources.len(),
+        vetoed_sources
+    );
+    for name in vetoed_sources {
+        source_list.remove(&name);
+    }
+
+    // If there are fewer sources than requested after vetoing, we need to bail
+    // out.
+    if let Some(n) = num_sources {
+        if n > source_list.len() {
+            return Err(VetoError::TooFewSources {
+                requested: n,
+                available: source_list.len(),
+            });
+        }
+    }
+
+    // Sort the source list by flux density from brightest to dimmest.
+    //
+    // par_sort_unstable_by is a parallel sort. Don't let the "unstable"
+    // scare you; this just means it's the fastest kind of sort.
+    //
+    // The argument to par_sort_unstable_by compares two elements in
+    // not_vetoed_sources. We want to sort by the smallest flux densities of
+    // each source; that's the 2nd element of each tuple.
+    //
+    // The reverse comparison (b against a) is deliberate; we want the
+    // sources reverse-sorted by beam-attenuated flux density.
+    not_vetoed_sources.par_sort_unstable_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.1, b.1))
+    });
+
+    // If we were requested to use n number of sources, remove all sources after n.
+    if let Some(n) = num_sources {
+        for (source_name_to_be_removed, _) in not_vetoed_sources.iter().skip(n) {
+            source_list.remove(source_name_to_be_removed);
+        }
+    }
+
+    Ok(not_vetoed_sources)
+}
+
+// This function is isolated for testing.
+#[inline(always)]
+fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones) -> f64 {
+    // Form an ideal flux-density Jones matrix for each of the
+    // source components.
+    let i = [
+        c64::new(fd.i + fd.q, 0.0),
+        c64::new(fd.u, fd.v),
+        c64::new(fd.u, -fd.v),
+        c64::new(fd.i - fd.q, 0.0),
+    ];
+    // Calculate: J . I . J^H
+    // where J is the beam-response Jones matrix and I is the
+    // source's ideal Jones matrix.
+    let ji = a_x_b(&j, &i);
+    let jijh = a_x_bh(&ji, &j);
+    // Use the trace of `jijh` as the total source flux density.
+    // Using the determinant instead of the trace might be more
+    // realistic; uncomment the line below to do that.
+    jijh[0].norm() + jijh[3].norm()
+    // (jijh[0].norm() * jijh[3].norm()) - (jijh[1].norm() * jijh[2].norm())
+}
+
+#[derive(Error, Debug)]
+pub enum VetoError {
+    #[error("Tried to use {requested} sources, but only {available} sources were available after vetoing")]
+    TooFewSources { requested: usize, available: usize },
+
+    #[error("{0}")]
+    Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use approx::*;
+    // Need to use serial tests because HDF5 is stupid.
+    use serial_test::serial;
+
+    use mwalib::mwalibContext;
+
+    use mwa_hyperdrive_srclist::SourceListType;
+
+    #[test]
+    #[serial]
+    fn test_beam_attenuated_flux_density() {
+        let beam = mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap();
+        let context = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
+        let jones_pointing_centre = beam
+            .calc_jones(
+                context.azimuth_radians,
+                context.zenith_angle_radians,
+                180e6 as _,
+                &context.delays,
+                &[1.0; 16],
+                true,
+            )
+            .unwrap();
+        let radec_null = RADec::new_degrees(
+            context.ra_tile_pointing_degrees + 80.0,
+            context.dec_tile_pointing_degrees + 80.0,
+        );
+        let azel_null = radec_null.to_hadec(context.lst_radians).to_azel_mwa();
+        let jones_null = beam
+            .calc_jones(
+                azel_null.az,
+                azel_null.za(),
+                180e6 as _,
+                &context.delays,
+                &[1.0; 16],
+                true,
+            )
+            .unwrap();
+        let fd = FluxDensity {
+            freq: 180e6,
+            i: 1.0,
+            q: 0.0,
+            u: 0.0,
+            v: 0.0,
+        };
+        let bafd_pc = get_beam_attenuated_flux_density(&fd, &jones_pointing_centre);
+        assert_abs_diff_eq!(bafd_pc, 1.9867421166394585, epsilon = 1e-10);
+
+        let bafd_null = get_beam_attenuated_flux_density(&fd, &jones_null);
+        assert_abs_diff_eq!(bafd_null, 0.000000017940424114049793, epsilon = 1e-10);
+    }
+
+    fn get_params() -> (
+        mwalib::mwalibContext,
+        mwa_hyperbeam::fee::FEEBeam,
+        SourceList,
+    ) {
+        (
+            mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap(),
+            mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap(),
+            mwa_hyperdrive_srclist::read::read_source_list_file(
+                &PathBuf::from("tests/pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml"),
+                &SourceListType::Hyperdrive,
+            )
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    #[serial]
+    fn veto() {
+        let (context, beam, mut source_list) = get_params();
+        // For testing's sake, keep only the following sources. The first five
+        // are bright and won't get vetoed and the last three are dim.
+        let sources = &[
+            "J002549-260211",
+            "J004209-441404",
+            "J004616-420739",
+            "J010817-160418",
+            "J012027-152011",
+            "J000003-282416",
+            "J235959-294818",
+            "J000228-170810",
+        ];
+        let keys: Vec<String> = source_list.keys().cloned().collect();
+        for source_name in keys {
+            if !sources.contains(&source_name.as_str()) {
+                source_list.remove(source_name.as_str());
+            }
+        }
+
+        // Add some sources that are in beam nulls. Despite being very bright,
+        // they will be vetoed.
+        source_list.insert(
+            "bad_source1".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(330.0, -80.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
+        source_list.insert(
+            "bad_source2".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(30.0, -80.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
+        source_list.insert(
+            "bad_source3".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(285.0, 40.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
+
+        let result = veto_sources(&mut source_list, &context, &beam, None, 20.0);
+        assert!(result.is_ok());
+        result.unwrap();
+        // Only the first five are kept.
+        assert_eq!(
+            source_list.len(),
+            5,
+            "Expected only five sources to not get vetoed: {:#?}",
+            source_list.keys()
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn top_n_sources() {
+        let (context, beam, mut source_list) = get_params();
+        // For testing's sake, keep only the following sources.
+        let sources = &[
+            "J002549-260211",
+            "J004209-441404",
+            "J004616-420739",
+            "J010817-160418",
+            "J012027-152011",
+            "J013411-362913",
+            "J221425-170140",
+            "J225303-405744",
+            "J233426-412520",
+            "J235701-344532",
+        ];
+        let keys: Vec<String> = source_list.keys().cloned().collect();
+        for source_name in keys {
+            if !sources.contains(&source_name.as_str()) {
+                source_list.remove(source_name.as_str());
+            }
+        }
+
+        let result = veto_sources(&mut source_list, &context, &beam, Some(5), 0.1);
+        assert!(result.is_ok());
+        result.unwrap();
+        for &name in &[
+            "J004616-420739",
+            "J010817-160418",
+            "J221425-170140",
+            "J225303-405744",
+            "J233426-412520",
+        ] {
+            assert!(
+                &source_list.contains_key(name),
+                "Expected to find {} in the source list after vetoing",
+                name
+            );
+        }
+    }
+}

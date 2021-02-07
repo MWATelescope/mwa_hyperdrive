@@ -3,13 +3,13 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
- * This module tests the "calibrate" command-line interface in hyperdrive
- * *without* real data. It runs the program in various ways to hopefully ensure
- * that it continues to work as expected.
- *
- * These tests won't do much computation, because e.g. mwalib complains that the
- * gpubox files aren't real. But, we can still determine if our CLI-reading code
- * behaves as expected.
+This module tests the "calibrate" command-line interface in hyperdrive *without*
+real data. It runs the program in various ways to hopefully ensure that it
+continues to work as expected.
+
+These tests won't do much computation, because e.g. mwalib complains that the
+gpubox files aren't real. But, we can still determine if our CLI-reading code
+behaves as expected.
  */
 
 use super::*;
@@ -19,6 +19,10 @@ mod tests {
     use super::*;
     use mwa_hyperdrive::calibrate::args::CalibrateUserArgs;
 
+    /// This function creates a temporary working directory to test files. It
+    /// copies the existing metafits, mwaf and source list files to the temp
+    /// directory. The results of this function can be manipulated by each unit
+    /// test to test various configurations of files.
     fn get_args() -> (CalibrateUserArgs, TempDir) {
         // Make some dummy gpubox files.
         let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
@@ -49,10 +53,26 @@ mod tests {
             std::io::copy(&mut real_meta, &mut metafits_file).unwrap();
         }
 
+        // Copy the source list.
+        let (source_list_pb, mut source_list_file) = make_file_in_dir(
+            &"pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml",
+            tmp_dir.path(),
+        );
+        {
+            let mut real_source_list =
+                File::open("tests/pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml").unwrap();
+            std::io::copy(&mut real_source_list, &mut source_list_file).unwrap();
+        }
+
         let args = CalibrateUserArgs {
             metafits: metafits_pb.to_str().map(|s| s.to_string()),
             gpuboxes: Some(gpuboxes),
             mwafs: Some(mwafs),
+            source_list: Some(source_list_pb.display().to_string()),
+            num_sources: Some(1000),
+            veto_threshold: Some(0.01),
+            time_res: None,
+            freq_res: None,
         };
 
         (args, tmp_dir)
@@ -149,6 +169,7 @@ mod tests {
         args.metafits = Some(format!("*.metafits"));
         args.gpuboxes = Some(vec![format!("*gpubox*")]);
         args.mwafs = Some(vec![format!("*.mwaf")]);
+        args.source_list = Some("pumav3_*.yaml".to_string());
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
         serialise_args_toml(&args, &mut toml);

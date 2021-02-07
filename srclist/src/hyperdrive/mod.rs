@@ -34,7 +34,7 @@ pub(super) struct TmpComponent {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum TmpFluxDensityType {
+pub(super) enum TmpFluxDensityType {
     #[serde(rename = "list")]
     List(Vec<FluxDensity>),
 

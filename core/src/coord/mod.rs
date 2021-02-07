@@ -9,7 +9,6 @@ Super module for all coordinate types.
 pub mod azel;
 pub mod enh;
 pub mod hadec;
-pub mod jones;
 pub mod lmn;
 pub mod pointing_centre;
 pub mod radec;
@@ -19,7 +18,6 @@ pub mod xyz;
 // Re-exports.
 pub use azel::AzEl;
 pub use hadec::HADec;
-pub use jones::*;
 pub use lmn::LMN;
 pub use pointing_centre::PointingCentre;
 pub use radec::RADec;

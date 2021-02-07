@@ -7,23 +7,16 @@ Code to handle calibration.
  */
 
 pub mod args;
+pub mod params;
+pub mod veto;
 
-use serde::Serialize;
+use params::CalibrateParams;
 
-use crate::*;
+pub fn calibrate(mut params: CalibrateParams) -> Result<(), anyhow::Error> {
+    // How much time is available?
+    //
+    // Assume we're doing a DI step. How much data gets averaged together? Does
+    // this depend on baseline length?
 
-#[derive(Debug, Default, Serialize)]
-pub struct CalibrateParams {
-    /// Path to the metafits file.
-    pub metafits: PathBuf,
-
-    /// Paths to gpubox files.
-    pub gpuboxes: Vec<PathBuf>,
-
-    /// Optional paths to mwaf files.
-    pub mwafs: Option<Vec<PathBuf>>,
-}
-
-pub fn calibrate(_params: &CalibrateParams) -> Result<(), anyhow::Error> {
     todo!();
 }

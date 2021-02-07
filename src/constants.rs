@@ -12,4 +12,12 @@ precision, if it is ever required.
 
 pub use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-pub use mwa_hyperdrive_srclist::constants::*;
+/// Sources with beam-attenuated flux densities less than this value are
+/// discarded from sky-model source lists.
+pub const DEFAULT_VETO_THRESHOLD: f64 = 0.01;
+
+/// Sources with elevations less than this value are discarded from sky-model
+/// source lists.
+pub const ELEVATION_LIMIT: f64 = 0.0;
+
+pub use mwa_hyperdrive_core::constants::*;

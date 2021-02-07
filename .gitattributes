@@ -1,0 +1,5 @@
+*.json binary
+*.yaml binary
+*.fits binary
+*.metafits binary
+*.mwaf binary

@@ -9,18 +9,12 @@ Code to handle sky-model source lists.
 pub mod ao;
 pub mod error;
 pub mod hyperdrive;
+pub mod read;
 pub mod rts;
 pub mod woden;
 
+use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-
-// Convenience re-exports.
-use std::collections::BTreeMap;
-
-use mwa_hyperdrive_core::constants::*;
-
-// Re-exports.
-pub use mwa_hyperdrive_core::*;
 
 #[derive(Debug, EnumIter)]
 pub enum SourceListFileType {
@@ -35,6 +29,30 @@ pub enum SourceListType {
     Rts,
     Woden,
     AO,
+}
+
+lazy_static::lazy_static! {
+    pub static ref SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED: String = {
+        let mut variants: Vec<String> = vec![];
+        // Iterate over all of the enum variants for SourceListType.
+        for variant in SourceListFileType::iter() {
+            let s = format!("{}", variant);
+            // Each string has a trailing newline character.
+            variants.push(s.strip_suffix("\n").unwrap().to_string());
+        }
+        variants.join(", ")
+    };
+
+    pub static ref SOURCE_LIST_TYPES_COMMA_SEPARATED: String = {
+        let mut variants: Vec<String> = vec![];
+        // Iterate over all of the enum variants for SourceListType.
+        for variant in SourceListType::iter() {
+            let s = format!("{}", variant);
+            // Each string has a trailing newline character.
+            variants.push(s.strip_suffix("\n").unwrap().to_string());
+        }
+        variants.join(", ")
+    };
 }
 
 impl std::fmt::Display for SourceListFileType {
@@ -65,3 +83,9 @@ impl std::fmt::Display for SourceListType {
         )
     }
 }
+
+// Convenience imports.
+use mwa_hyperdrive_core::*;
+
+// External re-exports.
+pub use mwa_hyperdrive_core;

@@ -24,9 +24,11 @@ SHAPELET. Each component will have a corresponding GPARAMS or SPARAMS (nothing
 needed for a point source).
  */
 
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 
 use log::warn;
+use mwa_hyperdrive_core::constants::DH2R;
 
 use super::*;
 
@@ -287,7 +289,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 // FREQ lines must have at least 6 elements (including FREQ).
-                let freq_hz = match items.next() {
+                let freq = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListCommonError::IncompleteFluxLine(line_num).into())
@@ -325,7 +327,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 let fd = FluxDensity {
-                    freq: freq_hz,
+                    freq,
                     i: stokes_i,
                     q: stokes_q,
                     u: stokes_u,

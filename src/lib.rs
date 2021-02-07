@@ -20,7 +20,6 @@ pub use context::Context;
 pub use flagging::cotter::CotterFlags;
 pub(crate) use math::*;
 pub use mwa_hyperdrive_core::*;
-pub use mwa_hyperdrive_srclist::flux_density::FluxDensity;
 
 pub use std::fs::File;
 pub use std::io::Read;
@@ -29,4 +28,3 @@ pub use std::path::{Path, PathBuf};
 // External re-exports.
 pub use log::{debug, error, info, trace, warn};
 pub use mwalib::*;
-pub use num::complex::Complex64 as c64;

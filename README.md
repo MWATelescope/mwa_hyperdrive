@@ -6,6 +6,10 @@ Currently in heavy development. Aims to provide feature parity with and exceed
 the MWA Real-Time System (RTS).
 
 ## Usage
+The MWA_BEAM_FILE environment variable must be set and gives the path to the MWA
+FEE beam HDF5 file. See the README for
+[`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam) for more info.
+
 ### Calibration
 Work in progress!
 

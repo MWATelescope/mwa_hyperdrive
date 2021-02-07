@@ -10,6 +10,7 @@ structures and flux densities.
 pub mod constants;
 pub mod coord;
 pub mod flux_density;
+pub mod jones;
 pub mod sexagesimal;
 pub mod source;
 
@@ -20,3 +21,4 @@ pub use sexagesimal::*;
 pub use source::*;
 
 pub use mwalib;
+pub use num::complex::Complex64 as c64;

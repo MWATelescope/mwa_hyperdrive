@@ -10,9 +10,10 @@ use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::path::Path;
 
-use super::errors::*;
-use crate::*;
 use mwalib::{fitsio, fitsio_sys};
+
+use super::error::*;
+use crate::*;
 
 /// This monstrosity exists to nicely handle converting any type that can be
 /// represented as a `Path` into a string slice. This is kind of a hack, but a
