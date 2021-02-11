@@ -12,7 +12,7 @@ sufficiently (veto), or we request a certain number of sources.
 use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
 
-use crate::jones::*;
+use super::params::RankedSource;
 use crate::*;
 use mwa_hyperdrive_core::*;
 
@@ -33,7 +33,7 @@ pub fn veto_sources(
     beam: &mwa_hyperbeam::fee::FEEBeam,
     num_sources: Option<usize>,
     veto_threshold: f64,
-) -> Result<Vec<(String, f64)>, VetoError> {
+) -> Result<Vec<RankedSource>, VetoError> {
     // Based on an elevation cutoff and the specified veto_threshold, determine
     // which sources should be removed (vetoed) from the source list.
     let (vetoed_sources, mut not_vetoed_sources): (Vec<_>, Vec<_>) = source_list
@@ -63,7 +63,7 @@ pub fn veto_sources(
                 let mut fd = 0.0;
 
                 // Get the beam response at this source position and frequency.
-                let j = beam.calc_jones(
+                let j = Jones(beam.calc_jones(
                         context.azimuth_radians,
                         context.zenith_angle_radians,
                         coarse_chan.channel_centre_hz,
@@ -74,7 +74,7 @@ pub fn veto_sources(
                     // unwrap is ugly, but an error would indicate a serious
                     // problem with hyperbeam. The alternative is lots of
                     // "and_then" control flow operators.
-                    .unwrap();
+                    .unwrap());
 
                 for source_fd in source
                     .get_flux_estimates(coarse_chan.channel_centre_hz as _)
@@ -96,10 +96,13 @@ pub fn veto_sources(
             }
 
             // If we got this far, the source should not be vetoed.
-            Either::Right((source_name.clone(), smallest_fd))
+            Either::Right(RankedSource {
+                name: source_name.clone(),
+                flux_density: smallest_fd,
+            })
         });
 
-    debug!(
+    trace!(
         "The following {} sources were vetoed from the source list: {:?}",
         vetoed_sources.len(),
         vetoed_sources
@@ -131,14 +134,15 @@ pub fn veto_sources(
     // The reverse comparison (b against a) is deliberate; we want the
     // sources reverse-sorted by beam-attenuated flux density.
     not_vetoed_sources.par_sort_unstable_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.1, b.1))
+        b.flux_density
+            .partial_cmp(&a.flux_density)
+            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.flux_density, b.flux_density))
     });
 
     // If we were requested to use n number of sources, remove all sources after n.
     if let Some(n) = num_sources {
-        for (source_name_to_be_removed, _) in not_vetoed_sources.iter().skip(n) {
-            source_list.remove(source_name_to_be_removed);
+        for source_to_be_removed in not_vetoed_sources.iter().skip(n) {
+            source_list.remove(&source_to_be_removed.name);
         }
     }
 
@@ -150,17 +154,16 @@ pub fn veto_sources(
 fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones) -> f64 {
     // Form an ideal flux-density Jones matrix for each of the
     // source components.
-    let i = [
+    let i = Jones([
         c64::new(fd.i + fd.q, 0.0),
         c64::new(fd.u, fd.v),
         c64::new(fd.u, -fd.v),
         c64::new(fd.i - fd.q, 0.0),
-    ];
+    ]);
     // Calculate: J . I . J^H
     // where J is the beam-response Jones matrix and I is the
     // source's ideal Jones matrix.
-    let ji = a_x_b(&j, &i);
-    let jijh = a_x_bh(&ji, &j);
+    let jijh = j.mul(&i).mul_hermitian(&j);
     // Use the trace of `jijh` as the total source flux density.
     // Using the determinant instead of the trace might be more
     // realistic; uncomment the line below to do that.
@@ -194,8 +197,8 @@ mod tests {
     fn test_beam_attenuated_flux_density() {
         let beam = mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap();
         let context = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
-        let jones_pointing_centre = beam
-            .calc_jones(
+        let jones_pointing_centre = Jones(
+            beam.calc_jones(
                 context.azimuth_radians,
                 context.zenith_angle_radians,
                 180e6 as _,
@@ -203,14 +206,15 @@ mod tests {
                 &[1.0; 16],
                 true,
             )
-            .unwrap();
+            .unwrap(),
+        );
         let radec_null = RADec::new_degrees(
             context.ra_tile_pointing_degrees + 80.0,
             context.dec_tile_pointing_degrees + 80.0,
         );
         let azel_null = radec_null.to_hadec(context.lst_radians).to_azel_mwa();
-        let jones_null = beam
-            .calc_jones(
+        let jones_null = Jones(
+            beam.calc_jones(
                 azel_null.az,
                 azel_null.za(),
                 180e6 as _,
@@ -218,7 +222,8 @@ mod tests {
                 &[1.0; 16],
                 true,
             )
-            .unwrap();
+            .unwrap(),
+        );
         let fd = FluxDensity {
             freq: 180e6,
             i: 1.0,

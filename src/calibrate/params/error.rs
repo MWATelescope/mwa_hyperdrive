@@ -33,6 +33,9 @@ pub enum InvalidArgsError {
     #[error("The number of specified sources was 0, or the size of the source list was 0")]
     NoSources,
 
+    #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
+    NoSourcesAfterVeto,
+
     #[error("Cannot use {got}s as the calibration time resolution; this must be a multiple of the native resolution ({native}s)")]
     InvalidTimeResolution { got: f64, native: f64 },
 

@@ -21,7 +21,16 @@ use crate::calibrate::veto::veto_sources;
 use crate::flagging::cotter::CotterFlags;
 use crate::{glob::*, *};
 use mwa_hyperdrive_core::*;
-use mwa_hyperdrive_srclist::SourceListType;
+use mwa_hyperdrive_srclist::{SourceListFileType, SourceListType};
+
+/// A source's name as well as its apparent flux density.
+pub struct RankedSource {
+    /// The name of the source. This can be used as a key for a `SourceList`.
+    pub name: String,
+
+    /// The apparent flux density [Jy].
+    pub flux_density: f64,
+}
 
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {
@@ -40,7 +49,7 @@ pub struct CalibrateParams {
     /// A list of source names sorted by flux density (brightest to dimmest).
     ///
     /// `source_list` can't be sorted, so this is used to index the source list.
-    pub ranked_sources: Vec<(String, f64)>,
+    pub ranked_sources: Vec<RankedSource>,
 
     /// The target time resolution [seconds].
     ///
@@ -84,12 +93,12 @@ pub struct CalibrateParams {
     /// to be adjusted.
     timesteps: Vec<usize>,
 
-    /// The local sidereal time. This variable is kept in lockstep with
+    /// The local sidereal time [radians]. This variable is kept in lockstep with
     /// `timestep`.
     ///
     /// To prevent this variable from being misused, it is private. Getting or
     /// setting requires methods.
-    lst_radians: f64,
+    lst: f64,
 }
 
 impl CalibrateParams {
@@ -104,7 +113,7 @@ impl CalibrateParams {
         cotter_flags: Option<CotterFlags>,
         beam: mwa_hyperbeam::fee::FEEBeam,
         source_list: mwa_hyperdrive_core::SourceList,
-        ranked_sources: Vec<(String, f64)>,
+        ranked_sources: Vec<RankedSource>,
         time_res_seconds: Option<f64>,
         fine_chan_freq_res_hz: Option<f64>,
     ) -> Result<Self, InvalidArgsError> {
@@ -130,7 +139,7 @@ impl CalibrateParams {
 
         // Start at the first timestep.
         let timestep = 0;
-        let lst_radians = lst_from_timestep(timestep, &context, time_res);
+        let lst = lst_from_timestep(timestep, &context, time_res);
 
         Ok(Self {
             context,
@@ -142,7 +151,7 @@ impl CalibrateParams {
             timesteps,
             freq_res,
             timestep,
-            lst_radians,
+            lst,
         })
     }
 
@@ -278,12 +287,26 @@ impl CalibrateParams {
                 }
             };
 
-            // Read the source list file.
-            mwa_hyperdrive_srclist::read::read_source_list_file(
-                &sl_pb,
-                &SourceListType::Hyperdrive,
-            )?
+            // Read the source list file. If the type was manually specified,
+            // use that, otherwise guess from the file.
+            let sl_type = match &args.source_list_type {
+                Some(t) => mwa_hyperdrive_srclist::read::parse_source_list_type(&t)?,
+                None => match mwa_hyperdrive_srclist::read::parse_file_type(&sl_pb)? {
+                    SourceListFileType::Json | SourceListFileType::Yaml => {
+                        SourceListType::Hyperdrive
+                    }
+                    SourceListFileType::Txt => {
+                        warn!(
+                            "Assuming that {} is an RTS-style source list",
+                            sl_pb.display()
+                        );
+                        SourceListType::Rts
+                    }
+                },
+            };
+            mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, &sl_type)?
         };
+        debug!("Found {} sources", source_list.len());
 
         // Veto any sources that may be troublesome, and/or cap the total number
         // of sources. If the user doesn't specify how many source-list sources
@@ -299,9 +322,12 @@ impl CalibrateParams {
             args.num_sources,
             veto_threshold,
         )?;
-        debug!("Using {} sources", source_list.len());
+        info!("Using {} sources", source_list.len());
+        debug!("Using the following sources: {:?}", source_list.keys());
         if source_list.len() > 10000 {
             warn!("Using more than 10,000 sources!");
+        } else if source_list.is_empty() {
+            return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
 
         CalibrateParams::new(
@@ -322,13 +348,13 @@ impl CalibrateParams {
 
     /// Get the LST [radians].
     pub fn get_lst(&self) -> f64 {
-        self.lst_radians
+        self.lst
     }
 
     /// Increment the timestep and LST.
     pub fn next_timestep(&mut self) {
         self.timestep += 1;
-        self.lst_radians = lst_from_timestep(self.timestep, &self.context, self.time_res);
+        self.lst = lst_from_timestep(self.timestep, &self.context, self.time_res);
     }
 }
 

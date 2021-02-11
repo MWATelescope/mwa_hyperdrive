@@ -90,7 +90,7 @@ pub fn write_source_list<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
 ) -> Result<(), WriteSourceListError> {
-    for (name, source) in sl {
+    for (name, source) in sl.iter() {
         // Get the counts of each type of component.
         let mut num_points = 0;
         let mut num_gaussians = 0;

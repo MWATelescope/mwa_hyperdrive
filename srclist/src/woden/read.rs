@@ -24,7 +24,6 @@ SHAPELET. Each component will have a corresponding GPARAMS or SPARAMS (nothing
 needed for a point source).
  */
 
-use std::collections::BTreeMap;
 use std::convert::TryInto;
 
 use log::warn;
@@ -46,7 +45,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
     let mut num_shapelet_coeffs = 0;
     let mut source_name = String::new();
     let mut components: Vec<SourceComponent> = vec![];
-    let mut source_list: SourceList = BTreeMap::new();
+    let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
         string

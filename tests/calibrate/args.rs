@@ -69,6 +69,7 @@ mod tests {
             gpuboxes: Some(gpuboxes),
             mwafs: Some(mwafs),
             source_list: Some(source_list_pb.display().to_string()),
+            source_list_type: None,
             num_sources: Some(1000),
             veto_threshold: Some(0.01),
             time_res: None,

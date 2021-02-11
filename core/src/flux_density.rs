@@ -107,7 +107,7 @@ impl FluxDensityType {
                     // If there's only one source component, then we must assume the
                     // spectral index for extrapolation.
                     if fds.len() == 1 {
-                        debug!("Only one flux density in a component's list; extrapolating with spectral index {}", DEFAULT_SPEC_INDEX);
+                        trace!("Only one flux density in a component's list; extrapolating with spectral index {}", DEFAULT_SPEC_INDEX);
                         (DEFAULT_SPEC_INDEX, &fds[0])
                     }
                     // Otherwise, find the frequencies that bound the given frequency. As we

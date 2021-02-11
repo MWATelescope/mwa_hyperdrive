@@ -108,10 +108,6 @@ context from the metafits file.
   - The library dir can be specified manually with CUDA_LIB
   - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
 
-- libclang
-  - Ubuntu: `libclang-dev`
-  - Arch: `clang`
-
 To compile a library statically, use e.g. `ERFA_STATIC=1`. To compile all
 libraries statically, use `PKG_CONFIG_ALL_STATIC=1`.
 

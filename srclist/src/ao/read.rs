@@ -16,9 +16,7 @@ The code here is probably incomplete, but it should work for the majority of
 source lists.
  */
 
-use std::collections::BTreeMap;
-
-use mwa_hyperdrive_core::sexagesimal::*;
+use mwa_hyperdrive_core::{sexagesimal::*, SourceList};
 
 use super::*;
 
@@ -37,7 +35,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
     let mut measurement_made_fd = false;
     let mut source_name = String::new();
     let mut components: Vec<SourceComponent> = vec![];
-    let mut source_list: SourceList = BTreeMap::new();
+    let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
         string

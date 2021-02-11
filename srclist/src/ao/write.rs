@@ -16,7 +16,7 @@ pub fn write_source_list<T: std::io::Write>(
 ) -> Result<(), WriteSourceListError> {
     writeln!(buf, "skymodel fileformat 1.1")?;
 
-    for (name, source) in sl {
+    for (name, source) in sl.iter() {
         writeln!(buf, "source {{")?;
         writeln!(buf, "  name \"{}\"", name)?;
         for c in &source.components {

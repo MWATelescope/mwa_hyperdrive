@@ -6,16 +6,12 @@
 Structures to describe sky-model sources and their components.
  */
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 use crate::flux_density::EstimateError;
 use crate::*;
 
 use rayon::prelude::*;
-
-pub type SourceList = BTreeMap<String, Source>;
 
 #[derive(Clone, Debug, PartialEq)]
 /// A collection of components.

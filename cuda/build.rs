@@ -3,7 +3,6 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::env;
-use std::path::PathBuf;
 
 // This code is adapted from pkg-config-rs
 // (https://github.com/rust-lang/pkg-config-rs).
@@ -23,22 +22,6 @@ fn infer_static(name: &str) -> bool {
 }
 
 fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    // Build bindings to C/C++ functions.
-    let bindings = bindgen::Builder::default()
-        .header("src_cuda/vis_gen.h")
-        // Invalidate the built crate whenever any of the included header files
-        // changed.
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-        .generate()
-        .expect("Unable to generate bindings");
-
-    // Write the bindings to the $OUT_DIR/bindings.rs file.
-    bindings
-        .write_to_file(out_dir.join("bindings.rs"))
-        .expect("Couldn't write bindings!");
-
     // Attempt to read HYPERDRIVE_CUDA_COMPUTE.
     let compute = match env::var("HYPERDRIVE_CUDA_COMPUTE") {
         Ok(c) => c,

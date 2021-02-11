@@ -89,7 +89,7 @@ pub fn write_source_list<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
 ) -> Result<(), WriteSourceListError> {
-    for (name, source) in sl {
+    for (name, source) in sl.iter() {
         // Write out the first component as the RTS base source.
         let first_comp = match source.components.first() {
             Some(c) => c,

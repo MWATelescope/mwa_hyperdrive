@@ -15,7 +15,7 @@ use super::*;
 fn source_list_from_tmp_sl(
     mut tmp_sl: BTreeMap<String, Vec<TmpComponent>>,
 ) -> Result<SourceList, ReadSourceListError> {
-    let mut sl: SourceList = BTreeMap::new();
+    let mut sl = SourceList::new();
     for (name, tmp_comps) in tmp_sl.iter_mut() {
         let mut comps = Vec::with_capacity(tmp_comps.len());
 

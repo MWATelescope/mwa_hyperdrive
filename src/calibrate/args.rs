@@ -24,6 +24,11 @@ use crate::*;
 lazy_static::lazy_static! {
     static ref VETO_THRESHOLD_HELP: String =
         format!("The smallest possible beam-attenuated flux density any sky-model source is allowed to have. Default: {}", DEFAULT_VETO_THRESHOLD);
+
+    static ref SOURCE_LIST_TYPE_HELP: String =
+        format!(r#"The type of sky-model source list. Valid types are: {}
+
+If not specified, the program will assume .txt files are RTS type source lists"#, *mwa_hyperdrive_srclist::SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED);
 }
 
 /// Arguments that are exposed to users. All arguments should be optional.
@@ -47,6 +52,9 @@ pub struct CalibrateUserArgs {
     /// Path to the sky-model source list file.
     #[structopt(short, long)]
     pub source_list: Option<String>,
+
+    #[structopt(long, help = SOURCE_LIST_TYPE_HELP.as_str())]
+    pub source_list_type: Option<String>,
 
     /// The number of sources to use in the source list. The default is to use
     /// them all.
@@ -139,6 +147,7 @@ impl CalibrateUserArgs {
             gpuboxes: cli_args.gpuboxes.or(file_args.gpuboxes),
             mwafs: cli_args.mwafs.or(file_args.mwafs),
             source_list: cli_args.source_list.or(file_args.source_list),
+            source_list_type: cli_args.source_list_type.or(file_args.source_list_type),
             num_sources: cli_args.num_sources.or(file_args.num_sources),
             veto_threshold: cli_args.veto_threshold.or(file_args.veto_threshold),
             time_res: cli_args.time_res.or(file_args.time_res),

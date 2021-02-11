@@ -5,10 +5,7 @@ authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
 edition = "2018"
 license = "MPL-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
 
 [build-dependencies]
-bindgen = "0.55.*"
-cc = "1.0.*"
-
-[dependencies]
+cc = { version = "1.0.*", features = ["parallel"] }

@@ -29,6 +29,7 @@ pub fn parse_source_list_type(s: &str) -> Result<SourceListType, SourceListError
         "hyperdrive" => Ok(SourceListType::Hyperdrive),
         "rts" => Ok(SourceListType::Rts),
         "woden" => Ok(SourceListType::Woden),
+        "ao" => Ok(SourceListType::AO),
         _ => Err(SourceListError::InvalidSourceListType),
     }
 }
@@ -49,10 +50,17 @@ pub fn read_source_list_file(
             SourceListFileType::Yaml => {
                 hyperdrive::source_list_from_yaml(&mut f).map_err(|e| e.into())
             }
-            _ => Err(SourceListError::InvalidFormat {
-                sl_type: format!("{}", sl_type),
-                sl_file_type: format!("{}", sl_file_type),
-            }),
+            _ => {
+                // This is necessary, because .to_string() on a enum type
+                // appends a newline character. Why isn't there a mutating
+                // .trim_end()?
+                let sl_type_str = sl_type.to_string().trim_end().to_string();
+
+                Err(SourceListError::InvalidFormat {
+                    sl_type: sl_type_str,
+                    sl_file_type: sl_file_type.to_string(),
+                })
+            }
         },
 
         SourceListType::Rts => rts::parse_source_list(&mut f).map_err(|e| e.into()),
@@ -73,7 +81,7 @@ pub enum SourceListError {
     InvalidSourceListType,
 
     #[error(
-        "Attempted to read a {sl_type}-style source list from a {} file, but that is not handled"
+        "Attempted to read a {sl_type}-style source list from a {sl_file_type} file, but that is not handled"
     )]
     InvalidFormat {
         sl_type: String,

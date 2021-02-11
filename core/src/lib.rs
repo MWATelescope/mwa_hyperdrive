@@ -13,12 +13,15 @@ pub mod flux_density;
 pub mod jones;
 pub mod sexagesimal;
 pub mod source;
+pub mod source_list;
 
 // Re-exports.
 pub use coord::*;
 pub use flux_density::*;
+pub use jones::Jones;
 pub use sexagesimal::*;
 pub use source::*;
+pub use source_list::*;
 
 pub use mwalib;
 pub use num::complex::Complex64 as c64;

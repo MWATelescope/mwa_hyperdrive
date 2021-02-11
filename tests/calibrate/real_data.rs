@@ -124,6 +124,7 @@ mod tests {
             source_list: Some(
                 "tests/pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml".to_string(),
             ),
+            source_list_type: None,
             num_sources: Some(1000),
             veto_threshold: Some(0.01),
             time_res: None,

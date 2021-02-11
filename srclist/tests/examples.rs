@@ -91,7 +91,7 @@ mod tests {
             ],
         };
 
-        let mut sl = std::collections::BTreeMap::new();
+        let mut sl = SourceList::new();
         sl.insert("super_sweet_source1".to_string(), source1);
         sl.insert("super_sweet_source2".to_string(), source2);
         sl

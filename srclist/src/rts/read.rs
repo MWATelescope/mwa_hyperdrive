@@ -18,8 +18,6 @@ Keywords like SOURCE, COMPONENT, POINT etc. must be at the start of a line (i.e.
 no preceeding space).
  */
 
-use std::collections::BTreeMap;
-
 use log::warn;
 use mwa_hyperdrive_core::constants::DH2R;
 
@@ -39,7 +37,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
     let mut component_type_set = false;
     let mut source_name = String::new();
     let mut components: Vec<SourceComponent> = vec![];
-    let mut source_list: SourceList = BTreeMap::new();
+    let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
         string
