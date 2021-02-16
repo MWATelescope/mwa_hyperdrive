@@ -24,22 +24,55 @@ use mwa_hyperdrive_core::*;
 /// practically used, or its flux density might be too attenuated at its
 /// position in the beam (at the any observed frequency).
 ///
+/// If the input `source_list` has more sources than `num_sources`, then
+/// `source_cutoff_dist` is used to keep the number of calculations down (filter
+/// any sources that are more than that many degrees away). Otherwise, only
+/// sources that need to be vetoed due to their positions in the beam are
+/// vetoed.
+///
 /// Assume an ideal array (all dipoles with unity gain). Also assume that the
 /// observation does not elapse enough time to shift sources into beam nulls
 /// compared to the obs start.
-pub fn veto_sources(
+pub(crate) fn veto_sources(
     source_list: &mut SourceList,
     context: &mwalib::mwalibContext,
     beam: &mwa_hyperbeam::fee::FEEBeam,
     num_sources: Option<usize>,
+    source_dist_cutoff: f64,
     veto_threshold: f64,
 ) -> Result<Vec<RankedSource>, VetoError> {
-    // Based on an elevation cutoff and the specified veto_threshold, determine
-    // which sources should be removed (vetoed) from the source list.
+    // Do we need to consider the source distances?
+    let dist_cutoff: Option<f64> = {
+        match num_sources {
+            Some(n) => {
+                if source_list.len() < n {
+                    {
+                        debug!("The supplied source list has enough sources to satisfy the requested number of sources; no distance cutoff necessary");
+                        None
+                    }
+                } else {
+                    {
+                        debug!("The supplied source list has more sources than the requested number of sources; using a distance cutoff of {} degrees", source_dist_cutoff);
+                        Some(source_dist_cutoff.to_radians())
+                    }
+                }
+            }
+            None => {
+                debug!("The number of sources to use was not specified; using a distance cutoff of {} degrees to filter sources", source_dist_cutoff);
+                Some(source_dist_cutoff.to_radians())
+            }
+        }
+    };
+    let pc_radec = RADec::new_degrees(
+        context.ra_tile_pointing_degrees,
+        context.dec_tile_pointing_degrees,
+    );
+
     let (vetoed_sources, mut not_vetoed_sources): (Vec<_>, Vec<_>) = source_list
         .par_iter()
         .partition_map(|(source_name, source)| {
-            // Are any of this source's components too low in elevation?
+            // Are any of this source's components too low in elevation? Or too
+            // far from the pointing centre?
             for comp in &source.components {
                 let azel = comp.radec.to_hadec(context.lst_radians).to_azel_mwa();
                 if azel.el < ELEVATION_LIMIT {
@@ -48,6 +81,14 @@ pub fn veto_sources(
                            azel.el,
                            ELEVATION_LIMIT);
                     return Either::Left(source_name.clone());
+                } else if let Some(d) = dist_cutoff {
+                    if comp.radec.separation(&pc_radec) > d {
+                    trace!("A component of source {}'s elevation ({} radians) was too far from the pointing centre ({} radians)",
+                           source_name,
+                           azel.el,
+                           d);
+                    return Either::Left(source_name.clone());
+                    };
                 }
             }
 
@@ -74,7 +115,8 @@ pub fn veto_sources(
                     // unwrap is ugly, but an error would indicate a serious
                     // problem with hyperbeam. The alternative is lots of
                     // "and_then" control flow operators.
-                    .unwrap());
+                              .unwrap());
+                // TODO: Remove unwrap.
 
                 for source_fd in source
                     .get_flux_estimates(coarse_chan.channel_centre_hz as _)
@@ -107,8 +149,8 @@ pub fn veto_sources(
         vetoed_sources.len(),
         vetoed_sources
     );
-    for name in vetoed_sources {
-        source_list.remove(&name);
+    for name in &vetoed_sources {
+        source_list.remove(name);
     }
 
     // If there are fewer sources than requested after vetoing, we need to bail
@@ -185,7 +227,7 @@ mod tests {
     use super::*;
 
     use approx::*;
-    // Need to use serial tests because HDF5 is stupid.
+    // Need to use serial tests because HDF5 is not necessarily reentrant.
     use serial_test::serial;
 
     use mwalib::mwalibContext;
@@ -247,7 +289,9 @@ mod tests {
             mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap(),
             mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap(),
             mwa_hyperdrive_srclist::read::read_source_list_file(
-                &PathBuf::from("tests/pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml"),
+                &PathBuf::from(
+                    "tests/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
+                ),
                 &SourceListType::Hyperdrive,
             )
             .unwrap(),
@@ -262,13 +306,10 @@ mod tests {
         // are bright and won't get vetoed and the last three are dim.
         let sources = &[
             "J002549-260211",
-            "J004209-441404",
             "J004616-420739",
             "J010817-160418",
-            "J012027-152011",
-            "J000003-282416",
-            "J235959-294818",
-            "J000228-170810",
+            "J233426-412520",
+            "J235701-344532",
         ];
         let keys: Vec<String> = source_list.keys().cloned().collect();
         for source_name in keys {
@@ -337,7 +378,7 @@ mod tests {
             },
         );
 
-        let result = veto_sources(&mut source_list, &context, &beam, None, 20.0);
+        let result = veto_sources(&mut source_list, &context, &beam, None, 180.0, 20.0);
         assert!(result.is_ok());
         result.unwrap();
         // Only the first five are kept.
@@ -361,8 +402,6 @@ mod tests {
             "J010817-160418",
             "J012027-152011",
             "J013411-362913",
-            "J221425-170140",
-            "J225303-405744",
             "J233426-412520",
             "J235701-344532",
         ];
@@ -373,15 +412,15 @@ mod tests {
             }
         }
 
-        let result = veto_sources(&mut source_list, &context, &beam, Some(5), 0.1);
+        let result = veto_sources(&mut source_list, &context, &beam, Some(5), 180.0, 0.1);
         assert!(result.is_ok());
         result.unwrap();
         for &name in &[
+            "J002549-260211",
             "J004616-420739",
             "J010817-160418",
-            "J221425-170140",
-            "J225303-405744",
             "J233426-412520",
+            "J235701-344532",
         ] {
             assert!(
                 &source_list.contains_key(name),

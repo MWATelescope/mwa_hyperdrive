@@ -67,7 +67,7 @@ impl RADec {
         }
     }
 
-    /// Calculate the distance between two sets of coordinates.
+    /// Calculate the distance between two sets of coordinates (radians).
     ///
     /// Uses ERFA.
     pub fn separation(&self, b: &Self) -> f64 {

@@ -6,12 +6,16 @@ edition = "2018"
 license = "MPL-2.0"
 
 [features]
-default = []
+default = ["beam"]
+beam = ["mwa_hyperbeam", "dashmap"]
 erfa-static = ["erfa-sys/static"]
+hdf5-static = ["mwa_hyperbeam/hdf5-static"]
+all-static = ["erfa-static", "hdf5-static"]
 
 [dependencies]
 erfa-sys = "0.1.*"
 log = "0.4.*"
+ndarray = ">=0.13,<0.16"
 num = "0.3.*"
 rayon = ">=1.3,<1.6"
 serde = { version = "1.0.*", features = ["derive"] }
@@ -20,8 +24,10 @@ thiserror = "1.0.*"
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", tag = "v0.4.4" }
 mwalib = { path = "/home/chj/Software/personal/mwalib" }
 
-[dev-dependencies]
-approx = "0.4.*"
+dashmap = { version = "4.0.*", optional = true }
+mwa_hyperbeam = { version = "0.3.*", optional = true }
 
-[build-dependencies]
-pkg-config = "0.3.*"
+[dev-dependencies]
+approx = { version = "0.4.*", features = ["num-complex"] }
+ndarray = { version = ">=0.13,<0.16", features = ["approx"] }
+serial_test = "0.5.*"

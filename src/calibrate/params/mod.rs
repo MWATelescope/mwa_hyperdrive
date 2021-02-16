@@ -12,14 +12,19 @@ errors) can be neatly split.
  */
 
 pub mod error;
+pub(crate) mod freq;
+
 pub use error::*;
+pub(crate) use freq::*;
 
 use mwa_hyperbeam::fee::FEEBeam;
 use mwalib::mwalibContext;
+use ndarray::Array1;
 
 use crate::calibrate::veto::veto_sources;
 use crate::flagging::cotter::CotterFlags;
 use crate::{glob::*, *};
+use mwa_hyperdrive_core::jones::cache::JonesCache;
 use mwa_hyperdrive_core::*;
 use mwa_hyperdrive_srclist::{SourceListFileType, SourceListType};
 
@@ -35,21 +40,28 @@ pub struct RankedSource {
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {
     /// mwalib context struct.
-    pub context: mwalibContext,
+    pub(crate) context: mwalibContext,
 
     /// Optional paths to mwaf files.
-    pub cotter_flags: Option<CotterFlags>,
+    pub(crate) cotter_flags: Option<CotterFlags>,
 
     /// Beam struct.
-    pub beam: mwa_hyperbeam::fee::FEEBeam,
+    pub(crate) beam: mwa_hyperbeam::fee::FEEBeam,
 
     /// The sky-model source list.
-    pub source_list: mwa_hyperdrive_core::SourceList,
+    pub(crate) source_list: mwa_hyperdrive_core::SourceList,
 
     /// A list of source names sorted by flux density (brightest to dimmest).
     ///
     /// `source_list` can't be sorted, so this is used to index the source list.
-    pub ranked_sources: Vec<RankedSource>,
+    pub(crate) ranked_sources: Vec<RankedSource>,
+
+    /// The number of components in the source list. If all sources have only
+    /// one component, then this is equal to the length of the source list.
+    pub(crate) num_components: usize,
+
+    /// Channel- and frequency-related parameters required for calibration.
+    pub(crate) freq: FrequencyParams,
 
     /// The target time resolution [seconds].
     ///
@@ -59,18 +71,11 @@ pub struct CalibrateParams {
     /// In a perfect world, this variable would be an integer, but it's
     /// primarily used in floating-point calculations, so it's more convenient
     /// to store it as a float.
-    pub time_res: f64,
+    pub(crate) time_res: f64,
 
-    /// The target fine-channel frequency resolution [Hz].
-    ///
-    /// e.g. If the input data is in 40 kHz resolution and this variable was
-    /// 80e3 Hz, then we average 2 scans worth of frequency data for
-    /// calibration.
-    ///
-    /// In a perfect world, this variable would be an integer, but it's
-    /// primarily used in floating-point calculations, so it's more convenient
-    /// to store it as a float.
-    pub freq_res: f64,
+    /// A shared cache of Jones matrices. This field should be used to generate
+    /// Jones matrices and populate the cache.
+    pub(crate) jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache,
 
     /// The timestep index into the observation.
     ///
@@ -114,6 +119,7 @@ impl CalibrateParams {
         beam: mwa_hyperbeam::fee::FEEBeam,
         source_list: mwa_hyperdrive_core::SourceList,
         ranked_sources: Vec<RankedSource>,
+        fine_channel_flags: Vec<usize>,
         time_res_seconds: Option<f64>,
         fine_chan_freq_res_hz: Option<f64>,
     ) -> Result<Self, InvalidArgsError> {
@@ -141,17 +147,66 @@ impl CalibrateParams {
         let timestep = 0;
         let lst = lst_from_timestep(timestep, &context, time_res);
 
+        let mut fine_chan_freqs =
+            Vec::with_capacity(context.num_fine_channels_per_coarse * context.num_coarse_channels);
+        // TODO: I'm suspicious that the start channel freq is incorrect.
+        for cc in &context.coarse_channels {
+            let mut cc_freqs = Array1::range(
+                cc.channel_start_hz as f64,
+                cc.channel_end_hz as f64,
+                context.fine_channel_width_hz as f64,
+            )
+            .to_vec();
+            fine_chan_freqs.append(&mut cc_freqs);
+        }
+
+        let unflagged_fine_chan_freqs = fine_chan_freqs
+            .iter()
+            .zip(
+                (0..context.num_fine_channels_per_coarse)
+                    .into_iter()
+                    .cycle(),
+            )
+            .filter_map(|(&freq, chan_num)| {
+                if fine_channel_flags.contains(&chan_num) {
+                    None
+                } else {
+                    Some(freq)
+                }
+            })
+            .collect();
+        let num_unflagged_fine_chans_per_coarse_band =
+            context.num_fine_channels_per_coarse - fine_channel_flags.len();
+
+        let freq_struct = FrequencyParams {
+            res: freq_res,
+            num_fine_chans_per_coarse_band: context.num_fine_channels_per_coarse,
+            num_fine_chans: context.num_fine_channels_per_coarse * context.num_coarse_channels,
+            fine_chan_freqs,
+            num_unflagged_fine_chans_per_coarse_band,
+            num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
+                * context.num_coarse_channels,
+            unflagged_fine_chan_freqs,
+            fine_channel_flags,
+        };
+        let num_components = source_list
+            .values()
+            .fold(0, |a, src| a + src.components.len());
+        debug!("There are {} components across all sources", num_components);
+
         Ok(Self {
             context,
             cotter_flags,
             beam,
             source_list,
             ranked_sources,
+            num_components,
+            freq: freq_struct,
             time_res,
             timesteps,
-            freq_res,
             timestep,
             lst,
+            jones_cache: JonesCache::new(),
         })
     }
 
@@ -163,9 +218,9 @@ impl CalibrateParams {
     /// Source list vetoing is performed in this function, using the specified
     /// number of sources and/or the veto threshold.
     pub fn new_from_args(
-        args: &crate::calibrate::args::CalibrateUserArgs,
+        args: crate::calibrate::args::CalibrateUserArgs,
     ) -> Result<Self, InvalidArgsError> {
-        let metafits: PathBuf = match &args.metafits {
+        let metafits: PathBuf = match args.metafits {
             None => return Err(InvalidArgsError::NoMetafits),
             Some(m) => {
                 // The metafits argument could be a glob. If the specified
@@ -179,8 +234,9 @@ impl CalibrateParams {
                 }
             }
         };
+        debug!("Using metafits: {}", metafits.display());
 
-        let gpuboxes: Vec<PathBuf> = match &args.gpuboxes {
+        let gpuboxes: Vec<PathBuf> = match args.gpuboxes {
             None => return Err(InvalidArgsError::NoGpuboxes),
             Some(g) => {
                 match g.len() {
@@ -206,6 +262,7 @@ impl CalibrateParams {
                 }
             }
         };
+        debug!("Using gpubox files: {:#?}", gpuboxes);
 
         // Set up the beam (requires the MWA_BEAM_FILE variable to be set).
         debug!("Creating beam object");
@@ -215,18 +272,13 @@ impl CalibrateParams {
         let context = mwalibContext::new(&metafits, &gpuboxes)?;
 
         // mwaf files are optional; don't bail if none were specified.
+        debug!("Reading mwaf cotter flag files");
         let cotter_flags = {
-            let mwaf_pbs: Option<Vec<PathBuf>> = match &args.mwafs {
-                None => {
-                    warn!("No cotter flags files specified");
-                    None
-                }
+            let mwaf_pbs: Option<Vec<PathBuf>> = match args.mwafs {
+                None => None,
 
                 Some(m) => match m.len() {
-                    0 => {
-                        warn!("No cotter flags files specified");
-                        None
-                    }
+                    0 => None,
 
                     // If a single mwaf "file" was specified, and it isn't a real
                     // file, treat it as a glob and expand it to find matches.
@@ -271,14 +323,46 @@ impl CalibrateParams {
             }
         };
 
+        // Print some high-level information.
+        info!("Calibrating obsid {}", context.obsid);
+        info!("Using metafits: {}", context.metafits_filename);
+        info!("Using {} gpubox files", gpuboxes.len());
+        match &cotter_flags {
+            Some(_) => info!("Using supplied cotter flags"),
+            None => warn!("No cotter flags files specified"),
+        }
+
+        let fine_channel_flags: Vec<usize> = match args.fine_chan_flags {
+            Some(flags) => flags,
+            // If the flags aren't specified, use the observation's fine-channel
+            // frequency resolution to set them.
+            None => match context.fine_channel_width_hz {
+                // 10 kHz, 128 channels.
+                10000 => vec![
+                    0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127,
+                ],
+
+                // 20 kHz, 64 channels.
+                20000 => vec![0, 1, 2, 3, 32, 60, 61, 62, 63],
+
+                // 40 kHz, 32 channels.
+                40000 => vec![0, 1, 16, 30, 31],
+                f => return Err(InvalidArgsError::UnhandledFreqResolutionForFlags(f)),
+            },
+        };
+        info!(
+            "Fine-channel flags per coarse band: {:?}",
+            fine_channel_flags
+        );
+
         let mut source_list: SourceList = {
             // Handle the source list argument.
-            let sl_pb: PathBuf = match &args.source_list {
+            let sl_pb: PathBuf = match args.source_list {
                 None => return Err(InvalidArgsError::NoSourceList),
                 Some(sl) => {
                     // If the specified source list file can't be found, treat
                     // it as a glob and expand it to find a match.
-                    let pb = PathBuf::from(sl);
+                    let pb = PathBuf::from(&sl);
                     if pb.exists() {
                         pb
                     } else {
@@ -289,7 +373,7 @@ impl CalibrateParams {
 
             // Read the source list file. If the type was manually specified,
             // use that, otherwise guess from the file.
-            let sl_type = match &args.source_list_type {
+            let sl_type = match args.source_list_type {
                 Some(t) => mwa_hyperdrive_srclist::read::parse_source_list_type(&t)?,
                 None => match mwa_hyperdrive_srclist::read::parse_file_type(&sl_pb)? {
                     SourceListFileType::Json | SourceListFileType::Yaml => {
@@ -304,9 +388,15 @@ impl CalibrateParams {
                     }
                 },
             };
-            mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, &sl_type)?
+            match mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, &sl_type) {
+                Ok(sl) => sl,
+                Err(e) => {
+                    eprintln!("Error when trying to read source list:");
+                    return Err(InvalidArgsError::from(e));
+                }
+            }
         };
-        debug!("Found {} sources", source_list.len());
+        info!("Found {} sources from the source list", source_list.len());
 
         // Veto any sources that may be troublesome, and/or cap the total number
         // of sources. If the user doesn't specify how many source-list sources
@@ -314,16 +404,16 @@ impl CalibrateParams {
         if args.num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
-        let veto_threshold = args.veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD);
         let ranked_sources = veto_sources(
             &mut source_list,
             &context,
             &beam,
             args.num_sources,
-            veto_threshold,
+            args.source_dist_cutoff.unwrap_or(CUTOFF_DISTANCE),
+            args.veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
         info!("Using {} sources", source_list.len());
-        debug!("Using the following sources: {:?}", source_list.keys());
+        debug!("Using sources: {:#?}", source_list.keys());
         if source_list.len() > 10000 {
             warn!("Using more than 10,000 sources!");
         } else if source_list.is_empty() {
@@ -336,6 +426,7 @@ impl CalibrateParams {
             beam,
             source_list,
             ranked_sources,
+            fine_channel_flags,
             args.time_res,
             args.freq_res,
         )
@@ -378,12 +469,12 @@ mod tests {
     use super::*;
 
     use approx::*;
-    // Need to use serial tests because HDF5 is stupid.
+    // Need to use serial tests because HDF5 is not necessarily reentrant.
     use serial_test::serial;
 
     fn get_srclist() -> SourceList {
         mwa_hyperdrive_srclist::read::read_source_list_file(
-            &PathBuf::from("tests/pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml"),
+            &PathBuf::from("tests/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml"),
             &SourceListType::Hyperdrive,
         )
         .unwrap()
@@ -408,6 +499,7 @@ mod tests {
             srclist.clone(),
             // ranked_sources isn't tested.
             vec![],
+            vec![],
             None,
             None,
         );
@@ -416,7 +508,7 @@ mod tests {
         // The default time resolution should be 0.5s, as per the metafits.
         assert_abs_diff_eq!(params.time_res, 0.5, epsilon = 1e-10);
         // The default freq resolution should be 40kHz, as per the metafits.
-        assert_abs_diff_eq!(params.freq_res, 40e3, epsilon = 1e-10);
+        assert_abs_diff_eq!(params.freq.res, 40e3, epsilon = 1e-10);
 
         let (context, beam) = get_context_and_beam();
         let result = CalibrateParams::new(
@@ -425,6 +517,7 @@ mod tests {
             beam,
             srclist.clone(),
             // ranked_sources isn't tested.
+            vec![],
             vec![],
             // 1.0 should be a multiple of 0.5s
             Some(1.0),
@@ -445,6 +538,7 @@ mod tests {
             srclist.clone(),
             // ranked_sources isn't tested.
             vec![],
+            vec![],
             // 2.0 should be a multiple of 0.5s
             Some(2.0),
             None,
@@ -464,6 +558,7 @@ mod tests {
             srclist.clone(),
             // ranked_sources isn't tested.
             vec![],
+            vec![],
             None,
             // 80e3 should be a multiple of 40kHz
             Some(80e3),
@@ -473,7 +568,7 @@ mod tests {
             "Expected CalibrateParams to have been successfully created"
         );
         let params = result.unwrap();
-        assert_abs_diff_eq!(params.freq_res, 80e3, epsilon = 1e-10);
+        assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
 
         let (context, beam) = get_context_and_beam();
         let result = CalibrateParams::new(
@@ -482,6 +577,7 @@ mod tests {
             beam,
             srclist,
             // ranked_sources isn't tested.
+            vec![],
             vec![],
             None,
             // 200e3 should be a multiple of 40kHz
@@ -492,7 +588,7 @@ mod tests {
             "Expected CalibrateParams to have been successfully created"
         );
         let params = result.unwrap();
-        assert_abs_diff_eq!(params.freq_res, 200e3, epsilon = 1e-10);
+        assert_abs_diff_eq!(params.freq.res, 200e3, epsilon = 1e-10);
     }
 
     #[test]
@@ -507,6 +603,7 @@ mod tests {
             srclist.clone(),
             // ranked_sources isn't tested.
             vec![],
+            vec![],
             // 0.75 is not a multiple of 0.5s
             Some(0.75),
             None,
@@ -520,6 +617,7 @@ mod tests {
             beam,
             srclist,
             // ranked_sources isn't tested.
+            vec![],
             vec![],
             // 1.01 is not a multiple of 0.5s
             Some(1.01),
@@ -540,6 +638,7 @@ mod tests {
             srclist.clone(),
             // ranked_sources isn't tested.
             vec![],
+            vec![],
             None,
             // 10e3 is not a multiple of 40kHz
             Some(10e3),
@@ -553,6 +652,7 @@ mod tests {
             beam,
             srclist,
             // ranked_sources isn't tested.
+            vec![],
             vec![],
             None,
             // 50e3 is not a multiple of 40kHz

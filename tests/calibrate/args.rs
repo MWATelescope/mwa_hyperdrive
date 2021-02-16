@@ -12,12 +12,9 @@ gpubox files aren't real. But, we can still determine if our CLI-reading code
 behaves as expected.
  */
 
-use super::*;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use mwa_hyperdrive::calibrate::args::CalibrateUserArgs;
+    use mwa_hyperdrive_tests::*;
 
     /// This function creates a temporary working directory to test files. It
     /// copies the existing metafits, mwaf and source list files to the temp
@@ -55,12 +52,13 @@ mod tests {
 
         // Copy the source list.
         let (source_list_pb, mut source_list_file) = make_file_in_dir(
-            &"pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml",
+            &"srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
             tmp_dir.path(),
         );
         {
             let mut real_source_list =
-                File::open("tests/pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_2000.yaml").unwrap();
+                File::open("tests/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml")
+                    .unwrap();
             std::io::copy(&mut real_source_list, &mut source_list_file).unwrap();
         }
 
@@ -71,9 +69,11 @@ mod tests {
             source_list: Some(source_list_pb.display().to_string()),
             source_list_type: None,
             num_sources: Some(1000),
+            source_dist_cutoff: None,
             veto_threshold: Some(0.01),
             time_res: None,
             freq_res: None,
+            fine_chan_flags: None,
         };
 
         (args, tmp_dir)

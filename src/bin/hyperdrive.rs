@@ -6,11 +6,10 @@ use structopt::StructOpt;
 
 use mwa_hyperdrive::*;
 
-mod calibrate;
 mod common;
 mod simulate_vis;
-use calibrate::calibrate;
-use common::{setup_logging, HYPERDRIVE_VERSION};
+
+use common::*;
 use simulate_vis::*;
 
 #[derive(StructOpt, Debug)]
@@ -80,7 +79,31 @@ fn main() -> Result<(), anyhow::Error> {
             dry_run,
         } => {
             setup_logging(verbosity).expect("Failed to initialize logging.");
-            calibrate(cli_args, param_file, dry_run)?;
+
+            info!(
+                "hyperdrive calibrate, version {}",
+                env!("CARGO_PKG_VERSION"),
+            );
+            match GIT_HEAD_REF {
+                Some(hr) => {
+                    let dirty = GIT_DIRTY.unwrap_or(false);
+                    info!(
+                        "Compiled on git commit hash: {}{}",
+                        GIT_COMMIT_HASH.unwrap(),
+                        if dirty { " (dirty)" } else { "" }
+                    );
+                    info!("            git head ref: {}", hr);
+                }
+
+                None => info!("<no git info>"),
+            }
+            info!(
+                "Compiled at {} with compiler {}",
+                BUILT_TIME_UTC, RUSTC_VERSION
+            );
+            info!("");
+
+            mwa_hyperdrive::calibrate::calibrate(cli_args, param_file, dry_run)?;
         }
 
         Args::SimulateVis {

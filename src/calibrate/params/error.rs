@@ -4,12 +4,9 @@
 
 use thiserror::Error;
 
-use crate::mwalib;
+use mwa_hyperdrive_core::{mwa_hyperbeam, mwalib};
 
 /// Errors associated with setting up a `CalibrateParams` struct.
-#[derive(Error, Debug)]
-pub enum CalibrateParamsError {}
-
 #[derive(Error, Debug)]
 pub enum InvalidArgsError {
     #[error("No metafits file supplied")]
@@ -41,6 +38,9 @@ pub enum InvalidArgsError {
 
     #[error("Cannot use {got}s as the calibration frequency resolution; this must be a multiple of the native resolution ({native}s)")]
     InvalidFreqResolution { got: f64, native: f64 },
+
+    #[error("No fine-channel flags were specified, and no rule is in place for automatically flagging observations with a fine-channel resolution of {0} Hz")]
+    UnhandledFreqResolutionForFlags(u32),
 
     #[error("{0}")]
     Glob(#[from] crate::glob::GlobError),

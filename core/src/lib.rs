@@ -25,3 +25,6 @@ pub use source_list::*;
 
 pub use mwalib;
 pub use num::complex::Complex64 as c64;
+
+#[cfg(feature = "beam")]
+pub use mwa_hyperbeam;

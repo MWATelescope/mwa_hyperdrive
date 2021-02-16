@@ -3,24 +3,32 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 pub(crate) fn setup_logging(level: u8) -> Result<(), fern::InitError> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{}][{} line {}][{}] {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                record.target(),
-                record.line().unwrap_or(0),
-                record.level(),
-                message
-            ))
-        })
-        .level(match level {
-            0 => log::LevelFilter::Info,
-            1 => log::LevelFilter::Debug,
-            _ => log::LevelFilter::Trace,
-        })
-        .chain(std::io::stdout())
-        .apply()?;
+    let high_level_messages = fern::Dispatch::new().format(|out, message, record| {
+        out.finish(format_args!(
+            "[{}][{}] {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            record.level(),
+            message
+        ))
+    });
+    let low_level_messages = fern::Dispatch::new().format(|out, message, record| {
+        out.finish(format_args!(
+            "[{}][{} line {}][{}] {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            record.target(),
+            record.line().unwrap_or(0),
+            record.level(),
+            message
+        ))
+    });
+
+    let logger = match level {
+        0 => high_level_messages.level(log::LevelFilter::Info),
+        1 => high_level_messages.level(log::LevelFilter::Debug),
+        2 => low_level_messages.level(log::LevelFilter::Debug),
+        _ => low_level_messages.level(log::LevelFilter::Trace),
+    };
+    logger.chain(std::io::stdout()).apply()?;
     Ok(())
 }
 
@@ -48,6 +56,7 @@ Compiled on git commit hash: {hash}{dirty}
                 time = BUILT_TIME_UTC,
                 compiler = RUSTC_VERSION,
         );
+
     // These lines prevent warnings about unused built variables.
     static ref _RUSTDOC_VERSION: &'static str = RUSTDOC_VERSION;
     static ref _GIT_VERSION: Option<&'static str> = GIT_VERSION;
