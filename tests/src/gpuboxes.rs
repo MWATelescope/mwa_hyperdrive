@@ -5,42 +5,27 @@
 /*!
 This module provides functions for tests against real data.
 
-Any required gpubox files need to be in hyperdrive's "tests" directory. These
-could be symlinked from somewhere else for convenience. Because this data should
-not be expected to always be there (it occupies a large volume), any tests using
-these functions should have a
+The required gpubox and/or mwaf files need to be in hyperdrive's "tests"
+directory. These could be symlinked from somewhere else for convenience. Because
+this data should not be expected to always be there (it occupies a large
+volume), any tests using these functions should have a
 
 #[ignore]
 
-annotation on the test function. "Ignored" tests are with something like:
+annotation on the test function. "Ignored" tests are run with something like:
 
 `cargo test -- --ignored`
  */
 
 use super::*;
 
-pub struct MwaData {
-    /// The MWA observation GPS time.
-    pub obsid: u32,
-
-    /// The metafits file associated with the observation.
-    pub metafits: String,
-
-    /// Raw MWA gpubox files.
-    pub gpuboxes: Vec<String>,
-
-    /// cotter mwaf files. Can be empty.
-    pub mwafs: Vec<String>,
-
-    /// Sky-model source list.
-    pub source_list: Option<String>,
-}
-
-/// Get the calibration arguments associated with the 1065880128 observation.
+/// Get the calibration arguments associated with the 1065880128 observation
+/// (including gpubox files and mwaf files).
 pub fn get_1065880128() -> MwaData {
+    let mut meta = super::no_gpuboxes::get_1065880128_meta();
+
     let mut gpuboxes = vec![];
     let mut mwafs = vec![];
-    let mut srclist = String::new();
     // Ensure that the required files are there.
     for &f in &[
         "1065880128_20131015134830_gpubox01_00.fits",
@@ -115,7 +100,6 @@ pub fn get_1065880128() -> MwaData {
         "1065880128_22.mwaf",
         "1065880128_23.mwaf",
         "1065880128_24.mwaf",
-        "srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
     ] {
         let pathbuf = PathBuf::from(format!("tests/{}", f));
         assert!(
@@ -127,21 +111,10 @@ pub fn get_1065880128() -> MwaData {
             gpuboxes.push(path_to_string(&pathbuf));
         } else if f.contains("mwaf") {
             mwafs.push(path_to_string(&pathbuf));
-        } else if f.contains("srclist") {
-            srclist = path_to_string(&pathbuf);
         }
     }
 
-    // We already have the real metafits file in hyperdrive's git repo.
-    let metafits = "tests/1065880128.metafits";
-    let metafits_pb = PathBuf::from(&metafits);
-    assert!(metafits_pb.exists());
-
-    MwaData {
-        obsid: 1065880128,
-        metafits: metafits.to_string(),
-        gpuboxes,
-        mwafs,
-        source_list: Some(srclist),
-    }
+    meta.gpuboxes = gpuboxes;
+    meta.mwafs = mwafs;
+    meta
 }

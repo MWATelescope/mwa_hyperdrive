@@ -6,7 +6,8 @@
 Code for easing testing. This module should only be used during testing.
  */
 
-pub mod real_data;
+pub mod gpuboxes;
+pub mod no_gpuboxes;
 
 pub use std::fs::File;
 pub use std::io::Write;
@@ -19,6 +20,23 @@ pub use serial_test::serial;
 pub use tempfile::TempDir;
 
 pub use mwa_hyperdrive::calibrate::args::CalibrateUserArgs;
+
+pub struct MwaData {
+    /// The MWA observation GPS time.
+    pub obsid: u32,
+
+    /// The metafits file associated with the observation.
+    pub metafits: String,
+
+    /// Raw MWA gpubox files.
+    pub gpuboxes: Vec<String>,
+
+    /// cotter mwaf files. Can be empty.
+    pub mwafs: Vec<String>,
+
+    /// Sky-model source list.
+    pub source_list: Option<String>,
+}
 
 pub fn make_file_in_dir<T: AsRef<Path> + ?Sized>(filename: &T, dir: &Path) -> (PathBuf, File) {
     let mut path = dir.to_path_buf();

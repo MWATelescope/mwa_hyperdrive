@@ -73,6 +73,8 @@ mod tests {
             veto_threshold: Some(0.01),
             time_res: None,
             freq_res: None,
+            tile_flags: None,
+            ignore_metafits_flags: None,
             fine_chan_flags: None,
         };
 

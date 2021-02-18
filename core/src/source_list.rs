@@ -14,31 +14,16 @@ use crate::*;
 
 use rayon::prelude::*;
 
-#[derive(Debug, Clone)]
 /// A `BTreeMap` of source names for keys and `Source` structs for values.
 ///
 /// By making `SourceList` a new type (specifically, an anonymous struct),
 /// useful methods can be put onto it.
-// TODO: Implement the Iterator trait, so .iter() isn't needed to iterate!
-pub struct SourceList(pub BTreeMap<String, Source>);
-
-impl Deref for SourceList {
-    type Target = BTreeMap<String, Source>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for SourceList {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+#[derive(Debug, Clone, Default)]
+pub struct SourceList(BTreeMap<String, Source>);
 
 impl SourceList {
     pub fn new() -> Self {
-        Self(BTreeMap::new())
+        Self::default()
     }
 
     /// Get azimuth and zenith angle coordinates for all components of all
@@ -48,7 +33,7 @@ impl SourceList {
     /// Because `SourceList` is a `BTreeMap`, the order of the sources is always
     /// the same, so the (Az, ZA) coordinates returned from this function are
     /// 1:1 with sources and their components.
-    pub fn get_azza(&self, lst_rad: f64) -> (Vec<f64>, Vec<f64>) {
+    pub fn get_azza(&self, lst_rad: f64, latitude_rad: f64) -> (Vec<f64>, Vec<f64>) {
         let mut all_az = vec![];
         let mut all_za = vec![];
         let nested_az_za: Vec<(Vec<f64>, Vec<f64>)> = self
@@ -59,7 +44,7 @@ impl SourceList {
                     .components
                     .iter()
                     .map(|comp| {
-                        let azel = comp.radec.to_hadec(lst_rad).to_azel_mwa();
+                        let azel = comp.radec.to_hadec(lst_rad).to_azel(latitude_rad);
                         // Unpack the `AzEl` struct and make a tuple of azimuth and
                         // zenith angle.
                         (azel.az, azel.za())
@@ -77,11 +62,34 @@ impl SourceList {
         (all_az, all_za)
     }
 
-    pub fn iter(&self) -> std::collections::btree_map::Iter<String, Source> {
-        self.0.iter()
+    /// Get azimuth and zenith angle coordinates for all components of all
+    /// sources, assuming that the latitude is the MWA's latitude. See the
+    /// documentation for `SourceList::get_azza` for more details.
+    pub fn get_azza_mwa(&self, lst_rad: f64) -> (Vec<f64>, Vec<f64>) {
+        Self::get_azza(&self, lst_rad, crate::constants::MWA_LAT_RAD)
     }
+}
 
-    pub fn into_iter(self) -> std::collections::btree_map::IntoIter<String, Source> {
+impl Deref for SourceList {
+    type Target = BTreeMap<String, Source>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SourceList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl IntoIterator for SourceList {
+    type Item = (String, Source);
+    type IntoIter = std::collections::btree_map::IntoIter<String, Source>;
+
+    #[inline]
+    fn into_iter(self) -> std::collections::btree_map::IntoIter<String, Source> {
         self.0.into_iter()
     }
 }
@@ -90,13 +98,13 @@ impl SourceList {
 mod tests {
     use super::*;
     use approx::*;
-
+    use ndarray::arr1;
     use std::f64::consts::*;
 
     #[test]
     // Test that the (Az, ZA) coordinates retrieved from the `.get_azza()`
     // method of `SourceList` are correct and always in the same order.
-    fn test_get_azza() {
+    fn test_get_azza_mwa() {
         let mut sl = SourceList::new();
         // Use a common component. Only the `radec` part needs to be modified.
         let comp = SourceComponent {
@@ -149,7 +157,7 @@ mod tests {
         sl.insert("source_3".to_string(), s);
 
         let lst = 3.0 * FRAC_PI_4;
-        let (az, za) = sl.get_azza(lst);
+        let (az, za) = sl.get_azza_mwa(lst);
         let az_expected = [
             0.5284641294204054,
             0.4140207507698987,
@@ -170,12 +178,7 @@ mod tests {
             2.254528351516936,
             2.0543439118454256,
         ];
-
-        for (result, expected) in az.iter().zip(&az_expected) {
-            assert_abs_diff_eq!(&result, &expected, epsilon = 1e-10);
-        }
-        for (result, expected) in za.iter().zip(&za_expected) {
-            assert_abs_diff_eq!(&result, &expected, epsilon = 1e-10);
-        }
+        assert_abs_diff_eq!(arr1(&az), arr1(&az_expected), epsilon = 1e-10);
+        assert_abs_diff_eq!(arr1(&za), arr1(&za_expected), epsilon = 1e-10);
     }
 }

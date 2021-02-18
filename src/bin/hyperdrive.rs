@@ -80,10 +80,8 @@ fn main() -> Result<(), anyhow::Error> {
         } => {
             setup_logging(verbosity).expect("Failed to initialize logging.");
 
-            info!(
-                "hyperdrive calibrate, version {}",
-                env!("CARGO_PKG_VERSION"),
-            );
+            info!("hyperdrive calibrate");
+            info!("Version {}", env!("CARGO_PKG_VERSION"));
             match GIT_HEAD_REF {
                 Some(hr) => {
                     let dirty = GIT_DIRTY.unwrap_or(false);
@@ -97,10 +95,8 @@ fn main() -> Result<(), anyhow::Error> {
 
                 None => info!("<no git info>"),
             }
-            info!(
-                "Compiled at {} with compiler {}",
-                BUILT_TIME_UTC, RUSTC_VERSION
-            );
+            info!("            {}", BUILT_TIME_UTC);
+            info!("         with compiler {}", RUSTC_VERSION);
             info!("");
 
             mwa_hyperdrive::calibrate::calibrate(cli_args, param_file, dry_run)?;

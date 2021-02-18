@@ -12,7 +12,7 @@ the serde magic and write out a `SourceList`.
 
 use super::*;
 
-fn source_list_to_tmp_sl(sl: &SourceList) -> Result<TmpSourceList, WriteSourceListError> {
+fn source_list_to_tmp_sl(sl: &SourceList) -> TmpSourceList {
     let mut tmp_sl: BTreeMap<String, Vec<TmpComponent>> = BTreeMap::new();
 
     for (name, source) in sl.iter() {
@@ -61,7 +61,7 @@ fn source_list_to_tmp_sl(sl: &SourceList) -> Result<TmpSourceList, WriteSourceLi
         tmp_sl.insert(name.clone(), tmp_comps);
     }
 
-    Ok(tmp_sl)
+    tmp_sl
 }
 
 /// Write a `SourceList` to a yaml file.
@@ -69,7 +69,7 @@ pub fn source_list_to_yaml<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
 ) -> Result<(), WriteSourceListError> {
-    let tmp_sl = source_list_to_tmp_sl(sl)?;
+    let tmp_sl = source_list_to_tmp_sl(sl);
     serde_yaml::to_writer(buf, &tmp_sl)?;
     Ok(())
 }
@@ -79,7 +79,7 @@ pub fn source_list_to_json<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
 ) -> Result<(), WriteSourceListError> {
-    let tmp_sl = source_list_to_tmp_sl(sl)?;
+    let tmp_sl = source_list_to_tmp_sl(sl);
     serde_json::to_writer_pretty(buf, &tmp_sl)?;
     Ok(())
 }

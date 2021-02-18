@@ -104,7 +104,7 @@ pub(crate) fn veto_sources(
                 let mut fd = 0.0;
 
                 // Get the beam response at this source position and frequency.
-                let j = Jones(beam.calc_jones(
+                let j = Jones::from(beam.calc_jones(
                         context.azimuth_radians,
                         context.zenith_angle_radians,
                         coarse_chan.channel_centre_hz,
@@ -196,7 +196,7 @@ pub(crate) fn veto_sources(
 fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones) -> f64 {
     // Form an ideal flux-density Jones matrix for each of the
     // source components.
-    let i = Jones([
+    let i = Jones::from([
         c64::new(fd.i + fd.q, 0.0),
         c64::new(fd.u, fd.v),
         c64::new(fd.u, -fd.v),
@@ -205,7 +205,8 @@ fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones) -> f64 {
     // Calculate: J . I . J^H
     // where J is the beam-response Jones matrix and I is the
     // source's ideal Jones matrix.
-    let jijh = j.mul(&i).mul_hermitian(&j);
+    let ji = j.clone() * i;
+    let jijh = ji.mul_hermitian(&j);
     // Use the trace of `jijh` as the total source flux density.
     // Using the determinant instead of the trace might be more
     // realistic; uncomment the line below to do that.
@@ -239,7 +240,7 @@ mod tests {
     fn test_beam_attenuated_flux_density() {
         let beam = mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap();
         let context = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
-        let jones_pointing_centre = Jones(
+        let jones_pointing_centre = Jones::from(
             beam.calc_jones(
                 context.azimuth_radians,
                 context.zenith_angle_radians,
@@ -255,7 +256,7 @@ mod tests {
             context.dec_tile_pointing_degrees + 80.0,
         );
         let azel_null = radec_null.to_hadec(context.lst_radians).to_azel_mwa();
-        let jones_null = Jones(
+        let jones_null = Jones::from(
             beam.calc_jones(
                 azel_null.az,
                 azel_null.za(),

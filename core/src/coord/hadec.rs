@@ -49,10 +49,10 @@ impl HADec {
     /// elevation), given the local latitude on Earth.
     ///
     /// Uses ERFA.
-    pub fn to_azel(&self, latitude: f64) -> AzEl {
+    pub fn to_azel(&self, latitude_rad: f64) -> AzEl {
         let mut az = 0.0;
         let mut el = 0.0;
-        unsafe { erfa_sys::eraHd2ae(self.ha, self.dec, latitude, &mut az, &mut el) }
+        unsafe { erfa_sys::eraHd2ae(self.ha, self.dec, latitude_rad, &mut az, &mut el) }
         AzEl::new(az, el)
     }
 

@@ -42,6 +42,9 @@ pub enum InvalidArgsError {
     #[error("No fine-channel flags were specified, and no rule is in place for automatically flagging observations with a fine-channel resolution of {0} Hz")]
     UnhandledFreqResolutionForFlags(u32),
 
+    #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
+    InvalidTileFlag { got: usize, max: usize },
+
     #[error("{0}")]
     Glob(#[from] crate::glob::GlobError),
 

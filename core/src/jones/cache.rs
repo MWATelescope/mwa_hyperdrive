@@ -58,15 +58,17 @@ impl JonesHash {
 /// Given parameters that are needed for the beam code, `JonesCache` hashes them
 /// to see if they've been used before. If so, we can avoid re-calculating the
 /// same Jones matrix.
+#[derive(Default)]
 pub struct JonesCache(DashMap<JonesHash, Jones>);
 
 impl JonesCache {
     pub fn new() -> Self {
-        Self(DashMap::new())
+        Self::default()
     }
 
     /// Give beam parameters and retrieve a Jones matrix. If the matrix wasn't
     /// already in the cache, it is populated.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_jones(
         &self,
         beam: &FEEBeam,
@@ -89,6 +91,7 @@ impl JonesCache {
         // If the cache for this hash exists, we can return a copy of the Jones
         // matrix.
         if self.0.contains_key(&hash) {
+            // TODO: Can we avoid clone here?
             return Ok(self.0.get(&hash).unwrap().clone());
         }
 
@@ -102,6 +105,11 @@ impl JonesCache {
     /// Get the size of the cache.
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// Is the cache empty?
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     /// Clear the cache.

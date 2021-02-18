@@ -16,12 +16,10 @@ Derived from Torrance Hodgson's MWAjl:
 #[cfg(feature = "beam")]
 pub mod cache;
 
-use ndarray::Array1;
-
 use crate::c64;
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Jones(pub [c64; 4]);
+pub struct Jones([c64; 4]);
 
 const JONES_ZERO: Jones = Jones([c64::new(0.0, 0.0); 4]);
 
@@ -41,8 +39,7 @@ impl Jones {
         JONES_ZERO
     }
 
-    /// Convert the Rust array associated with a Jones matrix into an ndarray.
-    /// Useful for testing.
+    /// Multiply by a Jones matrix which gets Hermitian conjugated (J^H).
     ///
     /// # Examples
     ///
@@ -50,33 +47,23 @@ impl Jones {
     /// # use mwa_hyperdrive_core::c64;
     /// # use mwa_hyperdrive_core::jones::Jones;
     /// # use approx::assert_abs_diff_eq;
-    /// let a = Jones([
+    /// let i = Jones::identity();
+    /// let a = Jones::from([
     ///     c64::new(1.0, 2.0),
     ///     c64::new(3.0, 4.0),
     ///     c64::new(5.0, 6.0),
     ///     c64::new(7.0, 8.0),
     /// ]);
-    /// let hopefully_identity = a.inv() * a;
-    /// let expected = Jones::identity();
-    /// assert_abs_diff_eq!(hopefully_identity.to_array(), expected.to_array(), epsilon = 1e-10);
+    /// // A^H is the conjugate transpose.
+    /// let result = i.mul_hermitian(&a);
+    /// let expected = Jones::from([
+    ///     c64::new(1.0, -2.0),
+    ///     c64::new(5.0, -6.0),
+    ///     c64::new(3.0, -4.0),
+    ///     c64::new(7.0, -8.0),
+    /// ]);
+    /// assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
     /// ```
-    pub fn to_array(self) -> Array1<c64> {
-        Array1::from(self.0.to_vec())
-    }
-
-    /// Multiply by a Jones matrix and store the result in a new Jones matrix.
-    #[inline(always)]
-    pub fn mul(&self, b: &Self) -> Self {
-        let mut c = JONES_ZERO;
-        let a = self;
-        c[0] = a[0] * b[0] + a[1] * b[2];
-        c[1] = a[0] * b[1] + a[1] * b[3];
-        c[2] = a[2] * b[0] + a[3] * b[2];
-        c[3] = a[2] * b[1] + a[3] * b[3];
-        c
-    }
-
-    /// Multiply by a Jones matrix which gets Hermitian conjugated (J^H).
     #[inline(always)]
     pub fn mul_hermitian(&self, b: &Self) -> Self {
         let mut c = JONES_ZERO;
@@ -115,6 +102,12 @@ impl std::ops::Deref for Jones {
 impl std::ops::DerefMut for Jones {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl From<[c64; 4]> for Jones {
+    fn from(arr: [c64; 4]) -> Self {
+        Self(arr)
     }
 }
 
@@ -209,6 +202,22 @@ impl std::ops::Mul<Jones> for Jones {
     }
 }
 
+impl std::ops::Mul<&Jones> for Jones {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: &Jones) -> Self {
+        let mut c = JONES_ZERO;
+        let a = self.0;
+        let b = rhs;
+        c[0] = a[0] * b[0] + a[1] * b[2];
+        c[1] = a[0] * b[1] + a[1] * b[3];
+        c[2] = a[2] * b[0] + a[3] * b[2];
+        c[3] = a[2] * b[1] + a[3] * b[3];
+        c
+    }
+}
+
 impl std::ops::MulAssign<Jones> for Jones {
     #[inline(always)]
     fn mul_assign(&mut self, rhs: Jones) {
@@ -228,7 +237,7 @@ impl std::ops::Mul<f64> for Jones {
 
     #[inline(always)]
     fn mul(self, rhs: f64) -> Self {
-        let mut a = self.0.clone();
+        let mut a = self.0;
         a[0] *= rhs;
         a[1] *= rhs;
         a[2] *= rhs;
@@ -259,53 +268,88 @@ impl num::traits::Zero for Jones {
     }
 }
 
+impl approx::AbsDiffEq for Jones {
+    type Epsilon = f64;
+
+    #[inline]
+    fn default_epsilon() -> f64 {
+        f64::EPSILON
+    }
+
+    #[inline]
+    fn abs_diff_eq(&self, other: &Self, epsilon: f64) -> bool {
+        (self[0] - other[0]).norm() <= epsilon
+            && (self[1] - other[1]).norm() <= epsilon
+            && (self[2] - other[2]).norm() <= epsilon
+            && (self[3] - other[3]).norm() <= epsilon
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use approx::*;
+
+    fn one_through_eight() -> Jones {
+        Jones([
+            c64::new(1.0, 2.0),
+            c64::new(3.0, 4.0),
+            c64::new(5.0, 6.0),
+            c64::new(7.0, 8.0),
+        ])
+    }
+
+    #[test]
+    fn test_add() {
+        let a = one_through_eight();
+        let b = one_through_eight();
+        let c = a + b;
+        let expected_c = Jones([
+            c64::new(2.0, 4.0),
+            c64::new(6.0, 8.0),
+            c64::new(10.0, 12.0),
+            c64::new(14.0, 16.0),
+        ]);
+        assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_sub() {
+        let a = one_through_eight();
+        let b = one_through_eight();
+        let c = a - b;
+        let expected_c = Jones::zero();
+        assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
+    }
 
     #[test]
     fn test_mul() {
         let i = c64::new(1.0, 2.0);
         let a = Jones([i, i + 1.0, i + 2.0, i + 3.0]);
         let b = Jones([i * 2.0, i * 3.0, i * 4.0, i * 5.0]);
-        let c = a.mul(&b);
-        let expected_c = [
+        let c = a * &b;
+        let expected_c = Jones([
             c64::new(-14.0, 32.0),
             c64::new(-19.0, 42.0),
             c64::new(-2.0, 56.0),
             c64::new(-3.0, 74.0),
-        ];
-        for (result, expected) in c.iter().zip(expected_c.iter()) {
-            assert_abs_diff_eq!(result.re, expected.re, epsilon = 1e-10);
-            assert_abs_diff_eq!(result.im, expected.im, epsilon = 1e-10);
-        }
+        ]);
+        assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
     }
 
     #[test]
-    fn test_ops_mul() {
-        let i = c64::new(1.0, 2.0);
-        let a = Jones([i, i + 1.0, i + 2.0, i + 3.0]);
-        let b = Jones([i * 2.0, i * 3.0, i * 4.0, i * 5.0]);
-        let c1 = a.mul(&b);
-        let c2 = a * b;
-        for (expected, result) in c1.iter().zip(c2.iter()) {
-            assert_abs_diff_eq!(result.re, expected.re, epsilon = 1e-10);
-            assert_abs_diff_eq!(result.im, expected.im, epsilon = 1e-10);
-        }
-    }
-
-    #[test]
-    fn test_ops_mul_assign() {
+    fn test_mul_assign() {
         let i = c64::new(1.0, 2.0);
         let mut a = Jones([i, i + 1.0, i + 2.0, i + 3.0]);
         let b = Jones([i * 2.0, i * 3.0, i * 4.0, i * 5.0]);
-        let c1 = a.mul(&b);
         a *= b;
-        for (expected, result) in c1.iter().zip(a.iter()) {
-            assert_abs_diff_eq!(result.re, expected.re, epsilon = 1e-10);
-            assert_abs_diff_eq!(result.im, expected.im, epsilon = 1e-10);
-        }
+        let expected = Jones([
+            c64::new(-14.0, 32.0),
+            c64::new(-19.0, 42.0),
+            c64::new(-2.0, 56.0),
+            c64::new(-3.0, 74.0),
+        ]);
+        assert_abs_diff_eq!(a, expected, epsilon = 1e-10);
     }
 
     #[test]
@@ -319,16 +363,13 @@ mod tests {
         ]);
         // A^H is the conjugate transpose.
         let result = ident.mul_hermitian(&a);
-        let expected_c = [
+        let expected = Jones([
             c64::new(1.0, -2.0),
             c64::new(5.0, -6.0),
             c64::new(3.0, -4.0),
             c64::new(7.0, -8.0),
-        ];
-        for (res, exp) in result.iter().zip(expected_c.iter()) {
-            assert_abs_diff_eq!(res.re, exp.re, epsilon = 1e-10);
-            assert_abs_diff_eq!(res.im, exp.im, epsilon = 1e-10);
-        }
+        ]);
+        assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
     }
 
     #[test]
@@ -341,11 +382,7 @@ mod tests {
         ]);
         let result = a.inv() * a;
         let expected = JONES_IDENTITY;
-        assert_abs_diff_eq!(result.to_array(), expected.to_array(), epsilon = 1e-10);
-        // for (res, exp) in result.iter().zip(expected.iter()) {
-        //     assert_abs_diff_eq!(res.re, exp.re, epsilon = 1e-10);
-        //     assert_abs_diff_eq!(res.im, exp.im, epsilon = 1e-10);
-        // }
+        assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
     }
 
     #[test]

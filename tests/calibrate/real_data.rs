@@ -14,9 +14,7 @@ cargo test -- --ignored
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use mwa_hyperdrive_tests::real_data::*;
+    use mwa_hyperdrive_tests::gpuboxes::*;
     use mwa_hyperdrive_tests::*;
 
     fn args_1065880128() -> (CalibrateUserArgs, TempDir) {
@@ -34,6 +32,8 @@ mod tests {
             veto_threshold: Some(0.01),
             time_res: None,
             freq_res: None,
+            tile_flags: None,
+            ignore_metafits_flags: None,
             fine_chan_flags: None,
         };
         (args, tmp_dir)

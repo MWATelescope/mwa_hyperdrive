@@ -8,5 +8,3 @@ Integration tests for calibration.
 
 mod args;
 mod real_data;
-
-use mwa_hyperdrive_tests::real_data::get_1065880128;

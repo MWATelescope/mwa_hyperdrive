@@ -23,7 +23,7 @@ use crate::*;
 
 lazy_static::lazy_static! {
     static ref SOURCE_DIST_CUTOFF_HELP: String =
-        format!("The sky-model source cutoff distance (degrees). This is only used if the input sky-model source list has more sources than specified by num_sources. Default: {}", CUTOFF_DISTANCE);
+        format!("The sky-model source cutoff distance (degrees). This is only used if the input sky-model source list has more sources than specified by num-sources. Default: {}", CUTOFF_DISTANCE);
 
     static ref VETO_THRESHOLD_HELP: String =
         format!("The smallest possible beam-attenuated flux density any sky-model source is allowed to have. Default: {}", DEFAULT_VETO_THRESHOLD);
@@ -31,7 +31,7 @@ lazy_static::lazy_static! {
     static ref SOURCE_LIST_TYPE_HELP: String =
         format!(r#"The type of sky-model source list. Valid types are: {}
 
-If not specified, the program will assume .txt files are RTS type source lists"#, *mwa_hyperdrive_srclist::SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED);
+If not specified, the program will assume .txt files are RTS-type source lists"#, *mwa_hyperdrive_srclist::SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED);
 }
 
 /// Arguments that are exposed to users. All arguments should be optional.
@@ -74,17 +74,30 @@ pub struct CalibrateUserArgs {
     #[structopt(long, help = VETO_THRESHOLD_HELP.as_str())]
     pub veto_threshold: Option<f64>,
 
-    /// The calibration time resolution. This must be a multiple of the
-    /// observation's native time resolution. If not supplied, then the
+    /// The calibration time resolution (seconds). This must be a multiple of
+    /// the observation's native time resolution. If not supplied, then the
     /// observation's native time resolution is used.
     #[structopt(short, long)]
     pub time_res: Option<f64>,
 
-    /// The calibration fine-channel frequency resolution. This must be a
+    /// The calibration fine-channel frequency resolution (Hz). This must be a
     /// multiple of the observation's native frequency resolution. If not
     /// supplied, then the observation's native frequency resolution is used.
     #[structopt(short, long)]
     pub freq_res: Option<f64>,
+
+    /// Additional tiles to be flagged. These values correspond to values in the
+    /// "Antenna" column of HDU 1 in the metafits file, e.g. 0 3 127. These
+    /// values should also be the same as FHD tile flags.
+    ///
+    /// If tile-flags and ignore-metafits-flags are specified, then the only
+    /// tile flags come from tile-flags.
+    #[structopt(long)]
+    pub tile_flags: Option<Vec<usize>>,
+
+    /// If specified, pretend that all tiles are unflagged in the metafits file.
+    #[structopt(long)]
+    pub ignore_metafits_flags: Option<bool>,
 
     /// The fine channels to be flagged in each coarse band. e.g. 0 1 16 30 31
     ///
@@ -101,6 +114,9 @@ impl CalibrateUserArgs {
     /// those in the file.
     ///
     /// The argument to this function is the `Path` to the arguments file.
+    ///
+    /// This function should only ever merge arguments, and not try to make
+    /// sense of them.
     pub(crate) fn merge(self, arg_file: Option<PathBuf>) -> Result<Self, CalibrateArgsError> {
         // Make it abundantly clear that "self" should be considered the
         // command-line arguments.
@@ -167,12 +183,16 @@ impl CalibrateUserArgs {
             veto_threshold: cli_args.veto_threshold.or(file_args.veto_threshold),
             time_res: cli_args.time_res.or(file_args.time_res),
             freq_res: cli_args.freq_res.or(file_args.freq_res),
+            tile_flags: cli_args.tile_flags.or(file_args.tile_flags),
+            ignore_metafits_flags: cli_args
+                .ignore_metafits_flags
+                .or(file_args.ignore_metafits_flags),
             fine_chan_flags: cli_args.fine_chan_flags.or(file_args.fine_chan_flags),
         })
     }
 
-    pub fn to_params(self) -> Result<CalibrateParams, InvalidArgsError> {
-        CalibrateParams::new_from_args(self)
+    pub fn into_params(self) -> Result<CalibrateParams, InvalidArgsError> {
+        CalibrateParams::from_args(self)
     }
 }
 

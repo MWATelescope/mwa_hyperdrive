@@ -10,6 +10,9 @@ pub mod args;
 pub mod params;
 pub mod veto;
 
+use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::hash::{Hash, Hasher};
+
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
@@ -26,7 +29,7 @@ pub fn calibrate(
     debug!("Merging command-line arguments with the parameter file");
     let args = cli_args.merge(args_file)?;
     debug!("{:#?}", &args);
-    let params = args.to_params()?;
+    let params = args.into_params()?;
 
     if dry_run {
         return Ok(());
@@ -61,7 +64,8 @@ pub fn calibrate(
     // TODO: RTS SetSourceSpectra. Needed?
 
     // mwa_rts.c, line 1719
-    let (gains, derivatives) = init_calibrator_gains(&params)?;
+    let tile_gains = init_calibrator_gains(&params)?;
+    dbg!(&tile_gains.gains.shape());
 
     // TODO: "start processing at"
 
@@ -72,15 +76,61 @@ pub fn calibrate(
     todo!();
 }
 
-/// Get derivatives of the gain Jones matrices for each tile, each frequency,
-/// each calibrator; the resulting 3-dimensional array is indexed by tile,
-/// unflagged fine-channel and calibrator number. This function assumes that the
-/// latitude is the MWA site latitude.
+pub(crate) struct TileGains {
+    /// The RTS calls this TileGainMatrices, which is a field of cal_context_t.
+    gains: Array3<Jones>,
+
+    /// The RTS calls this JinvJ0, which is a field of each
+    /// source_info_t.src_info0 element.
+    ratios: Array3<Jones>,
+
+    /// The RTS calls this dJinvJ0dt, which is a field of each
+    /// source_info_t.src_info0 element.
+    derivatives: Array3<Jones>,
+}
+
+#[derive(Debug)]
+struct TileConfig<'a> {
+    /// The tile antenna numbers that this configuration applies to.
+    antennas: Vec<usize>,
+
+    /// The delays of this configuration.
+    delays: &'a [u32],
+
+    /// The amps of this configuration.
+    amps: &'a [f64],
+}
+
+impl<'a> TileConfig<'a> {
+    /// Make a new `TileConfig`.
+    fn new(antenna: u32, delays: &'a [u32], amps: &'a [f64]) -> Self {
+        Self {
+            antennas: vec![antenna as _],
+            delays,
+            amps,
+        }
+    }
+
+    /// From tile delays and amplitudes, generate a hash. Useful to identify if
+    /// this `TileConfig` matches another.
+    fn hash(delays: &[u32], amps: &[f64]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        delays.hash(&mut hasher);
+        // We can't hash f64 values, so convert them to ints. Multiply by a big
+        // number to get away from integer rounding.
+        let to_int = |x: f64| (x * 1e8) as u32;
+        for &a in amps {
+            to_int(a).hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+}
+
+/// TODO: Why are these arrays needed? Update docs with info.
+/// This function assumes that the latitude is the MWA site latitude.
 ///
 /// The RTS calls this function "SetCalibratorMatrices".
-pub(crate) fn init_calibrator_gains(
-    params: &CalibrateParams,
-) -> Result<(Array3<Jones>, Array3<Jones>), FEEBeamError> {
+pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGains, FEEBeamError> {
     debug!("Running init_calibrator_gains");
 
     // Use `dt` to determine the forward-difference derivative.
@@ -91,49 +141,74 @@ pub(crate) fn init_calibrator_gains(
 
     // Get azimuth and zenith angle calibrator positions at the current LST, as well as LST + `dt`.
     let (az, za) = {
-        let (mut az, mut za) = params.source_list.get_azza(lst);
+        let (mut az, mut za) = params.source_list.get_azza_mwa(lst);
         // Get the "forward" coords by altering the LST.
-        let (mut az_forward, mut za_forward) = params.source_list.get_azza(lst + dt);
+        let (mut az_forward, mut za_forward) = params.source_list.get_azza_mwa(lst + dt);
         // Combine.
         az.append(&mut az_forward);
         za.append(&mut za_forward);
         (az, za)
     };
 
-    // Preallocate output arrays. There are two mwalib rf_inputs for each tile
-    // (Pols X and Y), but we only need one per tile; filter the other one.
-    // Ignore tile flags.
+    // As most of the tiles likely have the same configuration (all the same
+    // delays and amps), we can be much more efficient with computation here by
+    // only iterating over tile configurations, rather than just all tiles.
+    // There are two mwalib rf_inputs for each tile (Pols X and Y), but we only
+    // need one per tile; filter the other one.
+    let mut tile_configs: HashMap<u64, TileConfig> = HashMap::new();
+    for tile in params
+        .context
+        .rf_inputs
+        .iter()
+        .filter(|&rf| !params.tile_flags.contains(&(rf.antenna as _)))
+        .filter(|&rf| rf.pol == mwa_hyperdrive_core::mwalib::Pol::Y)
+    {
+        let h = TileConfig::hash(&tile.dipole_delays, &tile.dipole_gains);
+        match tile_configs.get_mut(&h) {
+            None => {
+                tile_configs.insert(
+                    h,
+                    TileConfig::new(tile.antenna, &tile.dipole_delays, &tile.dipole_gains),
+                );
+            }
+            Some(c) => {
+                c.antennas.push(tile.antenna as _);
+            }
+        };
+    }
+
+    // Preallocate output arrays.
     let mut tile_gain_matrices = Array3::zeros((
-        params.context.num_rf_inputs / 2,
+        params.num_unflagged_tiles,
         params.context.num_coarse_channels,
         az.len() / 2,
     ));
-    let mut jones_derivative = Array3::zeros((
-        params.context.num_rf_inputs / 2,
+    let mut ratios = Array3::zeros((
+        params.num_unflagged_tiles,
         params.freq.num_unflagged_fine_chans,
         az.len() / 2,
     ));
+    let mut jones_derivatives = Array3::zeros((
+        params.num_unflagged_tiles,
+        params.freq.num_unflagged_fine_chans,
+        az.len() / 2,
+    ));
+    // Inverse Jones matrices are only done once per coarse band. As we've got
+    // coordinates at time=now and time=now+dt in `az`, we only take half of the
+    // length of `az`.
+    let mut jones_inverse = Array2::zeros((params.context.coarse_channels.len(), az.len() / 2));
 
     // Iterate over all tiles.
-    for (mut gain_axis0, (mut deriv_axis0, tile)) in tile_gain_matrices.outer_iter_mut().zip(
-        jones_derivative.outer_iter_mut().zip(
-            params
-                .context
-                .rf_inputs
-                .iter()
-                .filter(|&rf| rf.pol == mwa_hyperdrive_core::mwalib::Pol::Y),
-        ),
-    ) {
+    for tile_config in tile_configs.values() {
         // For this tile, get inverse Jones matrices for each of the coarse-band
         // channel centre frequencies.
-        let mut jones_inverse = Array2::zeros((params.context.coarse_channels.len(), az.len() / 2));
         for (cc_index, (mut inv_row, cc)) in jones_inverse
             .outer_iter_mut()
             .zip(params.context.coarse_channels.iter())
             .enumerate()
         {
             let mut band_jones_matrices_results: Vec<Result<Jones, FEEBeamError>> =
-                Vec::with_capacity(az.len());
+                Vec::with_capacity(az.len() / 2);
             az.par_iter()
                 .zip(za.par_iter())
                 // Only use the coordinates at time=now.
@@ -144,8 +219,8 @@ pub(crate) fn init_calibrator_gains(
                         a,
                         z,
                         cc.channel_centre_hz,
-                        &tile.dipole_delays,
-                        &tile.dipole_gains,
+                        &tile_config.delays,
+                        &tile_config.amps,
                         true,
                     )
                 })
@@ -154,22 +229,25 @@ pub(crate) fn init_calibrator_gains(
             let band_jones_matrices: Vec<Jones> = band_jones_matrices_results
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?;
-            let arr = Array1::from(band_jones_matrices);
+            let mut arr = Array1::from(band_jones_matrices);
             // Keep the current Jones matrices in the tile gain array.
-            gain_axis0.slice_mut(s![cc_index, ..]).assign(&arr);
+            for &a in &tile_config.antennas {
+                // With respect to antenna number, we need to know how many
+                // tiles were flagged before this one when indexing into arrays.
+                let num_ignored = params.count_flagged_before_this_ant(a);
+                tile_gain_matrices
+                    .slice_mut(s![a - num_ignored, cc_index, ..])
+                    .assign(&arr);
+            }
 
             // Invert, and put the results into the big array outside this loop.
-            let inv_arr = arr.mapv_into(|j| j.inv());
-            inv_row.assign(&inv_arr);
+            arr.map_inplace(|j| *j = j.inv());
+            inv_row.assign(&arr);
         }
 
         // Iterate over all fine-channel frequencies, except those that have
         // been flagged.
-        for (freq_index, (mut deriv_axis1, &freq)) in deriv_axis0
-            .outer_iter_mut()
-            .zip(params.freq.unflagged_fine_chan_freqs.iter())
-            .enumerate()
-        {
+        for (freq_index, &freq) in params.freq.unflagged_fine_chan_freqs.iter().enumerate() {
             let freq_int = freq as _;
             // Finally, iterate over all of the calibrators and put their Jones
             // matrices into `freq_results`.
@@ -183,8 +261,8 @@ pub(crate) fn init_calibrator_gains(
                         a,
                         z,
                         freq_int,
-                        &tile.dipole_delays,
-                        &tile.dipole_gains,
+                        &tile_config.delays,
+                        &tile_config.amps,
                         true,
                     )
                 })
@@ -193,7 +271,7 @@ pub(crate) fn init_calibrator_gains(
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?;
             // Because `az` and `za` have coordinates for time=now and
-            // time=now+dt, the results need to be split.
+            // time=now+dt, the results in `jones_matrices` need to be split.
             //
             // I haven't tested, but I suppose that having the beam code run in
             // parallel over more coordinates at once is more efficient than
@@ -201,27 +279,51 @@ pub(crate) fn init_calibrator_gains(
             // and zenith angle.
             let second_half = jones_matrices.split_off(az.len() / 2);
 
-            // Get the "derivatives" of the Jones matrices. Because we're doing
-            // a forward-difference derivative, the derivatives are most
-            // accurate at (`lst` + `dt`) / 2, which is what we want.
+            // Take the Jones matrices for time=now.
             let j = Array1::from(jones_matrices);
-            let jf = Array1::from(second_half);
-            let mut forward_diff = (jf - j) * inv_dt;
 
-            // Multiply all of the derivative Jones matrices by the inverses we
-            // made before. There's only one inverse per coarse channel, so
-            // divide our fine-channel freq. index by the number of fine
-            // channels per coarse band.
-            forward_diff *= &jones_inverse.slice(s![
+            // Multiply these Jones matrices by the inverses calculated above,
+            // and store them in ratios. There's only one inverse per coarse
+            // channel, so divide our fine-channel freq. index by the number of
+            // fine channels per coarse band.
+            let inv = &jones_inverse.slice(s![
                 freq_index / params.freq.num_unflagged_fine_chans_per_coarse_band,
                 ..
             ]);
+            let j_ji = &j * inv;
+            for &a in &tile_config.antennas {
+                let num_ignored = params.count_flagged_before_this_ant(a);
 
-            deriv_axis1.assign(&forward_diff);
+                ratios
+                    .slice_mut(s![a - num_ignored, freq_index, ..])
+                    .assign(&j_ji);
+            }
+
+            // Get the "derivatives" of the Jones matrices. Because we're doing
+            // a forward-difference derivative, the derivatives are most
+            // accurate at (`lst` + `dt`) / 2, which is what we want.
+            let mut jf = Array1::from(second_half);
+            jf -= &j;
+            jf.map_inplace(|j| *j *= inv_dt);
+
+            // Multiply all of the derivative Jones matrices by the inverses we
+            // made before, and finally write the derivatives out.
+            jf *= inv;
+
+            for &a in &tile_config.antennas {
+                let num_ignored = params.count_flagged_before_this_ant(a);
+                jones_derivatives
+                    .slice_mut(s![a - num_ignored, freq_index, ..])
+                    .assign(&jf);
+            }
         }
     }
 
-    Ok((tile_gain_matrices, jones_derivative))
+    Ok(TileGains {
+        gains: tile_gain_matrices,
+        ratios,
+        derivatives: jones_derivatives,
+    })
 }
 
 #[cfg(test)]
@@ -233,7 +335,7 @@ mod tests {
     // Need to use serial tests because HDF5 is not necessarily reentrant.
     use serial_test::serial;
 
-    use mwa_hyperdrive_tests::real_data::get_1065880128;
+    use mwa_hyperdrive_tests::gpuboxes::get_1065880128;
 
     #[test]
     #[serial]
@@ -248,66 +350,159 @@ mod tests {
             num_sources: Some(2),
             ..Default::default()
         };
-        let params_result = args.to_params();
+        let params_result = args.into_params();
         let p = match params_result {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
         let gains_result = init_calibrator_gains(&p);
-        assert!(gains_result.is_ok(), "{}", gains_result.unwrap_err());
-        let (gains, derivatives) = gains_result.unwrap();
+        let tile_gains = match gains_result {
+            Ok(g) => g,
+            Err(e) => panic!("{}", e),
+        };
 
         // I have verified the following expected values by hand.
-        let gains_first = gains[[0, 0, 0]].clone().to_array();
-        let expected = Jones([
+        let gains_first = &tile_gains.gains[[0, 0, 0]];
+        let expected = Jones::from([
             c64::new(0.10625779960743599, -0.17678576491610976),
             c64::new(-0.11160131182106525, 0.18690780521243516),
             c64::new(-0.08298426576454786, 0.18751089642798635),
             c64::new(-0.0870924046375585, 0.20068612239381686),
-        ])
-        .to_array();
-        assert_abs_diff_eq!(gains_first, expected, epsilon = 1e-6);
+        ]);
+        assert_abs_diff_eq!(gains_first, &expected, epsilon = 1e-6);
 
-        let deriv_first = derivatives[[0, 0, 0]].clone().to_array();
-        let expected = Jones([
+        let deriv_first = &tile_gains.derivatives[[0, 0, 0]];
+        let expected = Jones::from([
             c64::new(2.495081778732375, 0.07011887175255788),
             c64::new(0.8121040317440963, 0.10307629690448622),
             c64::new(-1.024387891504313, 0.13896843126971453),
             c64::new(2.3336948299029334, 0.2281966033903234),
-        ])
-        .to_array();
-        assert_abs_diff_eq!(deriv_first, expected, epsilon = 1e-6);
+        ]);
+        assert_abs_diff_eq!(deriv_first, &expected, epsilon = 1e-6);
 
-        let gains_last = gains[[
-            p.context.num_rf_inputs / 2 - 1,
+        // Last element.
+        let gains_last = &tile_gains.gains[[
+            p.num_unflagged_tiles - 1,
             p.context.num_coarse_channels - 1,
             p.num_components - 1,
-        ]]
-        .clone()
-        .to_array();
-        let expected = Jones([
+        ]];
+        let expected = Jones::from([
             c64::new(-0.005084727989539419, -0.0704341368156501),
             c64::new(0.0039433832003488035, 0.23718716527090428),
             c64::new(0.026142832997526944, 0.20136231764776708),
             c64::new(0.004834506081806902, 0.055337977604798756),
-        ])
-        .to_array();
-        assert_abs_diff_eq!(gains_last, expected, epsilon = 1e-6);
+        ]);
+        assert_abs_diff_eq!(gains_last, &expected, epsilon = 1e-6);
 
-        let deriv_last = derivatives[[
-            p.context.num_rf_inputs / 2 - 1,
+        let deriv_last = &tile_gains.derivatives[[
+            p.num_unflagged_tiles - 1,
             p.freq.num_unflagged_fine_chans - 1,
             p.num_components - 1,
-        ]]
-        .clone()
-        .to_array();
-        let expected = Jones([
+        ]];
+        let expected = Jones::from([
             c64::new(-3.405833189967276, 0.06699365583072117),
             c64::new(3.041232553385687, 0.3000911159366356),
             c64::new(-2.3227179898202306, 0.22650136803513143),
             c64::new(-3.135968295274456, 0.6280481197895815),
-        ])
-        .to_array();
-        assert_abs_diff_eq!(deriv_last, expected, epsilon = 1e-6);
+        ]);
+        assert_abs_diff_eq!(deriv_last, &expected, epsilon = 1e-6);
+
+        // The ratios are all identity matrices. This would not be the case if
+        // there was more frequency information per coarse channel in the FEE
+        // beam code.
+        let expected = Jones::identity();
+        for axis0 in tile_gains.ratios.outer_iter() {
+            for axis1 in axis0.outer_iter() {
+                for j in &axis1 {
+                    assert_abs_diff_eq!(j, &expected, epsilon = 1e-6);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_init_calibrator_gains2() {
+        let data = get_1065880128();
+        let args = CalibrateUserArgs {
+            metafits: Some(data.metafits),
+            gpuboxes: Some(data.gpuboxes),
+            mwafs: Some(data.mwafs),
+            source_list: data.source_list,
+            num_sources: Some(2),
+            // Flag all but the first and last tile; the results should be the same
+            // as that of test_init_calibrator_gains.
+            tile_flags: Some((1..=126).collect()),
+            ..Default::default()
+        };
+        let params_result = args.into_params();
+        let p = match params_result {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
+        let gains_result = init_calibrator_gains(&p);
+        let tile_gains = match gains_result {
+            Ok(g) => g,
+            Err(e) => panic!("{}", e),
+        };
+
+        // I have verified the following expected values by hand.
+        let gains_first = &tile_gains.gains[[0, 0, 0]];
+        let expected = Jones::from([
+            c64::new(0.10625779960743599, -0.17678576491610976),
+            c64::new(-0.11160131182106525, 0.18690780521243516),
+            c64::new(-0.08298426576454786, 0.18751089642798635),
+            c64::new(-0.0870924046375585, 0.20068612239381686),
+        ]);
+        assert_abs_diff_eq!(gains_first, &expected, epsilon = 1e-6);
+
+        let deriv_first = &tile_gains.derivatives[[0, 0, 0]];
+        let expected = Jones::from([
+            c64::new(2.495081778732375, 0.07011887175255788),
+            c64::new(0.8121040317440963, 0.10307629690448622),
+            c64::new(-1.024387891504313, 0.13896843126971453),
+            c64::new(2.3336948299029334, 0.2281966033903234),
+        ]);
+        assert_abs_diff_eq!(deriv_first, &expected, epsilon = 1e-6);
+
+        // Last element.
+        let gains_last = &tile_gains.gains[[
+            p.num_unflagged_tiles - 1,
+            p.context.num_coarse_channels - 1,
+            p.num_components - 1,
+        ]];
+        let expected = Jones::from([
+            c64::new(-0.005084727989539419, -0.0704341368156501),
+            c64::new(0.0039433832003488035, 0.23718716527090428),
+            c64::new(0.026142832997526944, 0.20136231764776708),
+            c64::new(0.004834506081806902, 0.055337977604798756),
+        ]);
+        assert_abs_diff_eq!(gains_last, &expected, epsilon = 1e-6);
+
+        let deriv_last = &tile_gains.derivatives[[
+            p.num_unflagged_tiles - 1,
+            p.freq.num_unflagged_fine_chans - 1,
+            p.num_components - 1,
+        ]];
+        let expected = Jones::from([
+            c64::new(-3.405833189967276, 0.06699365583072117),
+            c64::new(3.041232553385687, 0.3000911159366356),
+            c64::new(-2.3227179898202306, 0.22650136803513143),
+            c64::new(-3.135968295274456, 0.6280481197895815),
+        ]);
+        assert_abs_diff_eq!(deriv_last, &expected, epsilon = 1e-6);
+
+        // The ratios are all identity matrices. This would not be the case if
+        // there was more frequency information per coarse channel in the FEE
+        // beam code.
+        let expected = Jones::identity();
+        for axis0 in tile_gains.ratios.outer_iter() {
+            for axis1 in axis0.outer_iter() {
+                for j in &axis1 {
+                    assert_abs_diff_eq!(j, &expected, epsilon = 1e-6);
+                }
+            }
+        }
     }
 }
