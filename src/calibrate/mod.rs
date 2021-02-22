@@ -73,6 +73,23 @@ pub fn calibrate(
 
     // TODO: Load existing calibration solutions. This should be higher up; fail fast.
 
+    // TODO: Set "AlignmentFluxDensity" and "NewDIMatrices" (line 1988
+    // mwa_rts.c). Is this just the estimated Stokes I FD of all components? Do
+    // I need to track all estimated FDs?
+
+    // TODO: PrecessZenithtoJ2000
+    // Jesus Christ. Do I need this? Surely I can just multiply the visibilities
+    // by e^{2pi i w}?
+
+    // CalcMinIntegTime
+    // Might be useful. I think it actually calculates the max integration time,
+    // not the min - classic.
+
+    // TODO: Load data!
+    // import_uvfits_single is where the RTS reads gpubox files.
+    // _importuvfits_set_uvdata_visgroup is where the actual fits data gets read.
+    // VI_FillVisibilityData accumulates the visibilities (?)
+
     todo!();
 }
 
@@ -232,11 +249,9 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
             let mut arr = Array1::from(band_jones_matrices);
             // Keep the current Jones matrices in the tile gain array.
             for &a in &tile_config.antennas {
-                // With respect to antenna number, we need to know how many
-                // tiles were flagged before this one when indexing into arrays.
-                let num_ignored = params.count_flagged_before_this_ant(a);
+                let i = params.get_ant_index(a);
                 tile_gain_matrices
-                    .slice_mut(s![a - num_ignored, cc_index, ..])
+                    .slice_mut(s![i, cc_index, ..])
                     .assign(&arr);
             }
 
@@ -292,11 +307,8 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
             ]);
             let j_ji = &j * inv;
             for &a in &tile_config.antennas {
-                let num_ignored = params.count_flagged_before_this_ant(a);
-
-                ratios
-                    .slice_mut(s![a - num_ignored, freq_index, ..])
-                    .assign(&j_ji);
+                let i = params.get_ant_index(a);
+                ratios.slice_mut(s![i, freq_index, ..]).assign(&j_ji);
             }
 
             // Get the "derivatives" of the Jones matrices. Because we're doing
@@ -311,9 +323,9 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
             jf *= inv;
 
             for &a in &tile_config.antennas {
-                let num_ignored = params.count_flagged_before_this_ant(a);
+                let i = params.get_ant_index(a);
                 jones_derivatives
-                    .slice_mut(s![a - num_ignored, freq_index, ..])
+                    .slice_mut(s![i, freq_index, ..])
                     .assign(&jf);
             }
         }

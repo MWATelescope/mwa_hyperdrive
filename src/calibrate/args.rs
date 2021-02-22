@@ -86,9 +86,9 @@ pub struct CalibrateUserArgs {
     #[structopt(short, long)]
     pub freq_res: Option<f64>,
 
-    /// Additional tiles to be flagged. These values correspond to values in the
-    /// "Antenna" column of HDU 1 in the metafits file, e.g. 0 3 127. These
-    /// values should also be the same as FHD tile flags.
+    /// Additional tiles to be flagged (zero indexed). These values correspond
+    /// to values in the "Antenna" column of HDU 1 in the metafits file, e.g. 0
+    /// 3 127. These values should also be the same as FHD tile flags.
     ///
     /// If tile-flags and ignore-metafits-flags are specified, then the only
     /// tile flags come from tile-flags.

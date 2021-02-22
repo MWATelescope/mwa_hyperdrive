@@ -46,7 +46,7 @@ pub struct CalibrateParams {
     pub(crate) cotter_flags: Option<CotterFlags>,
 
     /// Which tiles are flagged? These values correspond to those from the
-    /// "Antenna" column in HDU 1 of the metafits file.
+    /// "Antenna" column in HDU 1 of the metafits file. Zero indexed.
     pub(crate) tile_flags: Vec<usize>,
 
     /// How many tiles are unflagged?
@@ -243,6 +243,7 @@ impl CalibrateParams {
 
                 // 40 kHz, 32 channels.
                 40000 => vec![0, 1, 16, 30, 31],
+
                 f => return Err(InvalidArgsError::UnhandledFreqResolutionForFlags(f)),
             },
         };
@@ -496,9 +497,24 @@ impl CalibrateParams {
         self.lst = lst_from_timestep(self.timestep, &self.context, self.time_res);
     }
 
-    /// In terms of antenna number, how many tiles are flagged before this one?
-    pub(crate) fn count_flagged_before_this_ant(&self, ant: usize) -> usize {
-        self.tile_flags.iter().filter(|&f| f < &ant).count()
+    /// Get the antenna index from the antenna number.
+    ///
+    /// Consider an array with 3 antennas. If all are being used, then an
+    /// "antenna array" would have a dimension of size 3. But, if one of those
+    /// antennas is flagged, then this array would have only a size of 2.
+    /// Naively using antenna number 3 (index 2) to index into the array would
+    /// obviously be a problem when considering flagged antennas; that's what
+    /// this function is for.
+    ///
+    /// This function will panic if the antenna number is in the tile flags.
+    pub(crate) fn get_ant_index(&self, ant_number: usize) -> usize {
+        if self.tile_flags.contains(&ant_number) {
+            panic!(
+                "Tried to get the antenna index for antenna number {}, but that antenna is flagged",
+                ant_number
+            );
+        }
+        ant_number - self.tile_flags.iter().filter(|&f| f < &ant_number).count()
     }
 }
 
@@ -750,16 +766,17 @@ mod tests {
         assert!(params.tile_flags.contains(&82));
         assert!(params.tile_flags.contains(&123));
         assert_eq!(params.num_unflagged_tiles, 123);
-        assert_eq!(params.count_flagged_before_this_ant(1), 0);
-        assert_eq!(params.count_flagged_before_this_ant(2), 1);
-        assert_eq!(params.count_flagged_before_this_ant(3), 2);
-        assert_eq!(params.count_flagged_before_this_ant(4), 3);
-        assert_eq!(params.count_flagged_before_this_ant(127), 5);
+        assert_eq!(params.get_ant_index(0), 0);
+        assert_eq!(params.get_ant_index(4), 1);
+        assert_eq!(params.get_ant_index(5), 2);
+        assert_eq!(params.get_ant_index(6), 3);
+        assert_eq!(params.get_ant_index(127), 122);
     }
 
     #[test]
     #[serial]
     fn test_new_params_tile_flags_fail() {
+        // Tile number 128 doesn't exist.
         let data = get_1065880128_meta();
         let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
@@ -776,6 +793,34 @@ mod tests {
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
         );
+    }
+
+    #[test]
+    #[serial]
+    #[should_panic]
+    fn test_new_params_tile_flags_fail2() {
+        // Try to get an antenna index for a tile that is flagged (should
+        // panic).
+        let data = get_1065880128_meta();
+        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+            .expect("Failed to create mwalib context");
+        let args = CalibrateUserArgs {
+            metafits: Some(data.metafits),
+            gpuboxes: Some(data.gpuboxes),
+            mwafs: Some(data.mwafs),
+            source_list: data.source_list,
+            tile_flags: Some(vec![1, 2]),
+            ..Default::default()
+        };
+        let result = CalibrateParams::new(args, context);
+        assert!(
+            result.is_ok(),
+            "Expected CalibrateParams to have been successfully created"
+        );
+
+        let params = result.unwrap();
+        // Should panic.
+        assert_eq!(params.get_ant_index(1), 1);
     }
 
     // astropy doesn't exactly agree with the numbers below, I think because the
