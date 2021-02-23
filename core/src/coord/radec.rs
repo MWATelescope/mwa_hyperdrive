@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use super::hadec::HADec;
 use super::lmn::LMN;
-use super::pointing_centre::PointingCentre;
 
 /// A struct containing a Right Ascension and Declination. All units are in
 /// radians.
@@ -54,12 +53,11 @@ impl RADec {
     ///
     /// Derived using "Coordinate transformations" on page 388 of Synthesis
     /// Imaging in Radio Astronomy II.
-    pub fn to_lmn(&self, pc: &PointingCentre) -> LMN {
-        let pc_radec = pc.hadec.to_radec(pc.lst);
-        let d_ra = self.ra - pc_radec.ra;
+    pub fn to_lmn(&self, pointing: &RADec) -> LMN {
+        let d_ra = self.ra - pointing.ra;
         let (s_d_ra, c_d_ra) = d_ra.sin_cos();
         let (s_dec, c_dec) = self.dec.sin_cos();
-        let (pc_s_dec, pc_c_dec) = pc_radec.dec.sin_cos();
+        let (pc_s_dec, pc_c_dec) = pointing.dec.sin_cos();
         LMN {
             l: c_dec * s_d_ra,
             m: s_dec * pc_c_dec - c_dec * pc_s_dec * c_d_ra,
@@ -89,8 +87,8 @@ mod tests {
     #[test]
     fn test_to_lmn() {
         let radec = RADec::new_degrees(62.0, -27.5);
-        let pc = PointingCentre::new_from_ra(0.0, 60_f64.to_radians(), (-27.0_f64).to_radians());
-        let lmn = radec.to_lmn(&pc);
+        let pointing = RADec::new_degrees(60.0, -27.0);
+        let lmn = radec.to_lmn(&pointing);
         let expected = LMN {
             l: 0.03095623164758603,
             m: -0.008971846102111436,

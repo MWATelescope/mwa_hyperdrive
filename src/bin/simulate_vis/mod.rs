@@ -423,18 +423,13 @@ pub(crate) fn simulate_vis(
         parse_source_list(&mut f)?
     };
 
-    // Create a pointing centre struct using the specified RA and Dec.
-    let pc = PointingCentre::new_from_ra(
-        context.base_lst,
-        args.ra.to_radians(),
-        args.dec.to_radians(),
-    );
+    let pointing = RADec::new_degrees(args.ra, args.dec).to_hadec(context.base_lst);
     // Generate the visibilities.
     vis_gen(
         &context,
         sl.iter().next().unwrap().1,
         &params,
-        pc,
+        pointing,
         !cpu,
         text,
     )?;

@@ -41,13 +41,32 @@ impl Context {
 
         let base_lst = mwalib.lst_degrees.to_radians();
 
-        let xyz = XYZ::get_baselines_mwalib(&mwalib);
+        // Because mwalib provides the baselines in the order of antenna number,
+        // the results won't match WODEN. Sort xyz by input number.
+        let mut xyz = Vec::with_capacity(mwalib.num_rf_inputs / 2);
+        let mut rf_inputs = mwalib.rf_inputs.clone();
+        rf_inputs.sort_unstable_by(|a, b| a.input.cmp(&b.input));
+        for rf in rf_inputs {
+            // There is an RF input for both tile polarisations. The ENH
+            // coordinates are the same for both polarisations of a tile; ignore
+            // the RF input if it's associated with Y.
+            if rf.pol == mwalib::Pol::Y {
+                continue;
+            }
+
+            let enh = mwa_hyperdrive_core::coord::enh::ENH {
+                e: rf.east_m,
+                n: rf.north_m,
+                h: rf.height_m,
+            };
+            xyz.push(enh.to_xyz_mwa());
+        }
 
         Ok(Context {
             mwalib,
             base_freq,
             base_lst,
-            xyz,
+            xyz: XYZ::get_xyz_baselines(&xyz),
         })
     }
 

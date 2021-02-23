@@ -6,7 +6,7 @@
 Handle UVW coordinates.
  */
 
-use super::pointing_centre::PointingCentre;
+use super::hadec::HADec;
 use super::xyz::XyzBaseline;
 
 use rayon::prelude::*;
@@ -24,15 +24,15 @@ pub struct UVW {
 }
 
 impl UVW {
-    /// Convert all `XyzBaseline`s to `UVW`, given a pointing centre struct
-    /// `PointingCentre`. Processing is done in parallel on the CPU.
+    /// Convert all `XyzBaseline`s to `UVW`, given the pointing centre.
+    /// Processing is done in parallel on the CPU.
     ///
     /// This is Equation 4.1 of: Interferometry and Synthesis in Radio
     /// Astronomy, Third Edition, Section 4: Geometrical Relationships,
     /// Polarimetry, and the Measurement Equation.
-    pub fn get_baselines(xyz: &[XyzBaseline], pc: &PointingCentre) -> Vec<Self> {
-        let (pc_s_ha, pc_c_ha) = pc.hadec.ha.sin_cos();
-        let (pc_s_dec, pc_c_dec) = pc.hadec.dec.sin_cos();
+    pub fn get_baselines(xyz: &[XyzBaseline], pointing: &HADec) -> Vec<Self> {
+        let (pc_s_ha, pc_c_ha) = pointing.ha.sin_cos();
+        let (pc_s_dec, pc_c_dec) = pointing.dec.sin_cos();
         xyz.par_iter()
             .map(|l| Self {
                 u: pc_s_ha * l.x + pc_c_ha * l.y,
@@ -114,8 +114,8 @@ mod tests {
             },
         ];
         let xyz_bl = XYZ::get_xyz_baselines(&xyz);
-        let pc = PointingCentre::new_from_ha(6.07181, 6.0163, -0.453121);
-        let uvw = UVW::get_baselines(&xyz_bl, &pc);
+        let pointing = HADec::new(6.0163, -0.453121);
+        let uvw = UVW::get_baselines(&xyz_bl, &pointing);
         let expected = UVW {
             u: 102.04605530570603,
             v: -1028.2293398297727,

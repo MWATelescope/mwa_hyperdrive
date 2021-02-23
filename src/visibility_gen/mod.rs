@@ -44,7 +44,7 @@ pub fn vis_gen(
     context: &crate::Context,
     src: &Source,
     params: &TimeFreqParams,
-    mut pc: PointingCentre,
+    mut pointing: HADec,
     cuda: bool,
     text_file: bool,
 ) -> Result<(), anyhow::Error> {
@@ -98,18 +98,19 @@ pub fn vis_gen(
 
     // Iterate over time. This allows minimal re-calculation of the pointing
     // centre, and is more efficient at generating visibilities.
+    let mut lst = context.base_lst;
     for time_step in 0..params.n_time_steps {
-        // Adjust the pointing centre by half a time step.
-        pc.update(
-            context.base_lst
-                + (time_step as f64 + 0.5) * params.time_resolution * SOLAR2SIDEREAL * DS2R,
-        );
+        // Adjust the pointing centre to be in the middle of each time step.
+        let lst_inc =
+            if time_step == 0 { 0.5 } else { 1.0 } * params.time_resolution * SOLAR2SIDEREAL * DS2R;
+        lst += lst_inc;
+        pointing.ha += lst_inc;
 
         // Get the (l,m,n) coordinates for each source component.
-        let lmn = src.get_lmn(&pc);
+        let lmn = src.get_lmn(&pointing.to_radec(lst));
 
-        // Get the UVW baselines with the new PC.
-        let uvw_metres = UVW::get_baselines(&context.xyz, &pc);
+        // Get the UVW baselines with the new pointing.
+        let uvw_metres = UVW::get_baselines(&context.xyz, &pointing);
 
         // For each fine channel, scale all of the UVW coordinates by
         // wavelength, and store the result in `uvw`.

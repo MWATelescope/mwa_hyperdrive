@@ -23,10 +23,10 @@ pub struct Source {
 impl Source {
     /// Calculate the (l,m,n) coordinates of each component's (RA,Dec). The
     /// calculation is done in parallel.
-    pub fn get_lmn(&self, pc: &PointingCentre) -> Vec<LMN> {
+    pub fn get_lmn(&self, pointing: &RADec) -> Vec<LMN> {
         self.components
             .par_iter()
-            .map(|comp| comp.radec.to_lmn(&pc))
+            .map(|comp| comp.radec.to_lmn(&pointing))
             .collect()
     }
 
