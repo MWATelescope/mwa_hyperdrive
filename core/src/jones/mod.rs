@@ -39,6 +39,39 @@ impl Jones {
         JONES_ZERO
     }
 
+    /// From an input Jones matrix, get a copy that has been Hermitian
+    /// conjugated (J^H).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use mwa_hyperdrive_core::c64;
+    /// # use mwa_hyperdrive_core::jones::Jones;
+    /// # use approx::assert_abs_diff_eq;
+    /// let j = Jones::from([
+    ///     c64::new(1.0, 2.0),
+    ///     c64::new(3.0, 4.0),
+    ///     c64::new(5.0, 6.0),
+    ///     c64::new(7.0, 8.0),
+    /// ]);
+    /// let jh = j.h();
+    /// let expected = Jones::from([
+    ///     c64::new(1.0, -2.0),
+    ///     c64::new(5.0, -6.0),
+    ///     c64::new(3.0, -4.0),
+    ///     c64::new(7.0, -8.0),
+    /// ]);
+    /// assert_abs_diff_eq!(jh, expected, epsilon = 1e-10);
+    /// ```
+    pub fn h(&self) -> Self {
+        Self::from([
+            self[0].conj(),
+            self[2].conj(),
+            self[1].conj(),
+            self[3].conj(),
+        ])
+    }
+
     /// Multiply by a Jones matrix which gets Hermitian conjugated (J^H).
     ///
     /// # Examples
@@ -66,13 +99,9 @@ impl Jones {
     /// ```
     #[inline(always)]
     pub fn mul_hermitian(&self, b: &Self) -> Self {
-        let mut c = JONES_ZERO;
-        let a = self;
-        c[0] = a[0] * b[0].conj() + a[1] * b[1].conj();
-        c[1] = a[0] * b[2].conj() + a[1] * b[3].conj();
-        c[2] = a[2] * b[0].conj() + a[3] * b[1].conj();
-        c[3] = a[2] * b[2].conj() + a[3] * b[3].conj();
-        c
+        let mut a = self.clone();
+        a *= b.h();
+        a
     }
 
     /// Get the inverse of the Jones matrix (J^I).

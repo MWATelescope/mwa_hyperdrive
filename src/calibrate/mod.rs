@@ -26,9 +26,10 @@ pub fn calibrate(
     args_file: Option<PathBuf>,
     dry_run: bool,
 ) -> Result<(), anyhow::Error> {
-    debug!("Merging command-line arguments with the parameter file");
+    debug!("Merging command-line arguments with the argument file");
     let args = cli_args.merge(args_file)?;
     debug!("{:#?}", &args);
+    debug!("Converting arguments into calibration parameters");
     let params = args.into_params()?;
 
     if dry_run {
@@ -85,7 +86,7 @@ pub fn calibrate(
     // Might be useful. I think it actually calculates the max integration time,
     // not the min - classic.
 
-    // TODO: Load data!
+    // TODO: Load data! Birli's job.
     // import_uvfits_single is where the RTS reads gpubox files.
     // _importuvfits_set_uvdata_visgroup is where the actual fits data gets read.
     // VI_FillVisibilityData accumulates the visibilities (?)
@@ -169,9 +170,10 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
 
     // As most of the tiles likely have the same configuration (all the same
     // delays and amps), we can be much more efficient with computation here by
-    // only iterating over tile configurations, rather than just all tiles.
-    // There are two mwalib rf_inputs for each tile (Pols X and Y), but we only
-    // need one per tile; filter the other one.
+    // only iterating over tile configurations (that is, unique combinations of
+    // amplitudes/delays), rather than just all tiles. There are two mwalib
+    // rf_inputs for each tile (Pols X and Y), but we only need one per tile;
+    // filter the other one.
     let mut tile_configs: HashMap<u64, TileConfig> = HashMap::new();
     for tile in params
         .context
@@ -193,6 +195,7 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
             }
         };
     }
+    dbg!(&tile_configs.len());
 
     // Preallocate output arrays.
     let mut tile_gain_matrices = Array3::zeros((
