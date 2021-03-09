@@ -7,4 +7,4 @@ Integration tests for calibration.
  */
 
 mod args;
-mod real_data;
+mod full_obsids;

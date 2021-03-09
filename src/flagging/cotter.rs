@@ -382,7 +382,7 @@ impl CotterFlags {
     /// being collected. This routine discards flags from times that mwalib does
     /// not use (i.e. before OBSID+QUACKTIM and the last common time to all
     /// gpubox files).
-    pub fn trim(&mut self, context: &mwalibContext) {
+    pub fn trim(&mut self, context: &MetafitsContext) {
         // Don't use "as i64", just in case something goes wrong.
         let to_i64 = |n: u64| -> i64 {
             n.try_into()
@@ -390,9 +390,9 @@ impl CotterFlags {
         };
 
         let mwalib_start_time_milli =
-            to_i64((context.obsid as u64 * 1000) + context.quack_time_duration_milliseconds);
-        let mwalib_duration_milli = to_i64(context.duration_milliseconds);
-        let int_time_milli = to_i64(context.integration_time_milliseconds);
+            to_i64((context.obs_id as u64 * 1000) + context.quack_time_duration_ms);
+        let mwalib_duration_milli = to_i64(context.sched_duration_ms);
+        let int_time_milli = to_i64(context.corr_int_time_ms);
 
         let cotter_start_time_milli = to_i64(self.start_time_milli);
         let cotter_duration_milli = to_i64(self.num_time_steps as u64) * int_time_milli;
@@ -507,7 +507,7 @@ mod tests {
     fn test_1065880128_01_mwaf() {
         // The mwaf file is gzipped to save space in git. gunzip it to a
         // temporary spot.
-        let mwaf = deflate_gz(&"tests/1065880128_01.mwaf.gz");
+        let mwaf = deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz");
         let result = CotterFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok());
         let m = result.unwrap();
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn test_1065880128_02_mwaf() {
-        let mwaf = deflate_gz(&"tests/1065880128_02.mwaf.gz");
+        let mwaf = deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz");
         let result = CotterFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok());
         let m = result.unwrap();
@@ -632,8 +632,8 @@ mod tests {
     #[test]
     fn test_merging_1065880128_mwafs() {
         let result = CotterFlags::new_from_mwafs(&[
-            deflate_gz(&"tests/1065880128_01.mwaf.gz"),
-            deflate_gz(&"tests/1065880128_02.mwaf.gz"),
+            deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz"),
+            deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz"),
         ]);
         assert!(result.is_ok());
         let m = result.unwrap();
@@ -661,8 +661,8 @@ mod tests {
     #[test]
     fn test_trimming_1065880128_mwafs() {
         let mut m = CotterFlags::new_from_mwafs(&[
-            deflate_gz(&"tests/1065880128_01.mwaf.gz"),
-            deflate_gz(&"tests/1065880128_02.mwaf.gz"),
+            deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz"),
+            deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz"),
         ])
         .unwrap();
         assert_eq!(m.num_time_steps, 224);
@@ -712,12 +712,12 @@ mod tests {
             assert_abs_diff_eq!(res, exp);
         }
 
-        let mut c = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
+        let mut c = MetafitsContext::new(&"tests/1065880128/1065880128.metafits").unwrap();
         // 1065880128 actually has 109s of data as opposed to the scheduled
         // 112s, but this is impossible to determine without its gpubox files.
         // Because I don't want to include the gpubox files in hyperdrive for
-        // testing, we'll just put this here.
-        c.duration_milliseconds = 109000;
+        // testing (at least for all tests), we'll just put this here.
+        c.sched_duration_ms = 109000;
 
         m.trim(&c);
 

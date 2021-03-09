@@ -6,8 +6,8 @@
 Code for easing testing. This module should only be used during testing.
  */
 
-pub mod gpuboxes;
-pub mod no_gpuboxes;
+pub mod full_obsids;
+pub mod reduced_obsids;
 
 pub use std::fs::File;
 pub use std::io::Write;

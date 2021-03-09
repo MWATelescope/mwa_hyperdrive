@@ -9,6 +9,8 @@ Sources can be either because their position in the beam attenuates them
 sufficiently (veto), or we request a certain number of sources.
  */
 
+// use mwalib::{coarse_channel::CoarseChannel, MetafitsContext};
+use mwalib::{CoarseChannel, MetafitsContext};
 use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
 
@@ -22,7 +24,7 @@ use mwa_hyperdrive_core::*;
 ///
 /// This is important for calibration, because a source might be too dim to be
 /// practically used, or its flux density might be too attenuated at its
-/// position in the beam (at the any observed frequency).
+/// position in the beam (at any observed frequency).
 ///
 /// If the input `source_list` has more sources than `num_sources`, then
 /// `source_cutoff_dist` is used to keep the number of calculations down (filter
@@ -35,13 +37,15 @@ use mwa_hyperdrive_core::*;
 /// compared to the obs start.
 pub(crate) fn veto_sources(
     source_list: &mut SourceList,
-    context: &mwalib::mwalibContext,
+    metafits: &MetafitsContext,
+    coarse_chans: &[CoarseChannel],
     beam: &mwa_hyperbeam::fee::FEEBeam,
     num_sources: Option<usize>,
     source_dist_cutoff: f64,
     veto_threshold: f64,
 ) -> Result<Vec<RankedSource>, VetoError> {
-    // Do we need to consider the source distances?
+    // Do we need to consider the source distances? Determine this from the
+    // final number of sources requested.
     let dist_cutoff: Option<f64> = {
         match num_sources {
             Some(n) => {
@@ -64,8 +68,8 @@ pub(crate) fn veto_sources(
         }
     };
     let pc_radec = RADec::new_degrees(
-        context.ra_tile_pointing_degrees,
-        context.dec_tile_pointing_degrees,
+        metafits.ra_tile_pointing_degrees,
+        metafits.dec_tile_pointing_degrees,
     );
 
     let (vetoed_sources, mut not_vetoed_sources): (Vec<_>, Vec<_>) = source_list
@@ -74,7 +78,7 @@ pub(crate) fn veto_sources(
             // Are any of this source's components too low in elevation? Or too
             // far from the pointing centre?
             for comp in &source.components {
-                let azel = comp.radec.to_hadec(context.lst_radians).to_azel_mwa();
+                let azel = comp.radec.to_hadec(metafits.lst_rad).to_azel_mwa();
                 if azel.el < ELEVATION_LIMIT {
                     trace!("A component of source {}'s elevation ({} radians) was below the limit ({} radians)",
                            source_name,
@@ -99,17 +103,17 @@ pub(crate) fn veto_sources(
 
             // Iterate over each frequency. Is the total flux density acceptable
             // for each frequency?
-            for coarse_chan in &context.coarse_channels {
+            for coarse_chan in coarse_chans {
                 // `fd` is the sum of the source's component flux densities.
                 let mut fd = 0.0;
 
                 // Get the beam response at this source position and frequency.
                 let j = Jones::from(beam.calc_jones(
-                        context.azimuth_radians,
-                        context.zenith_angle_radians,
-                        coarse_chan.channel_centre_hz,
+                        metafits.az_rad,
+                        metafits.za_rad,
+                        coarse_chan.chan_centre_hz,
                         // Use the ideal delays.
-                        &context.delays,
+                        &metafits.delays,
                         &[1.0; 16],
                     true)
                     // unwrap is ugly, but an error would indicate a serious
@@ -119,7 +123,7 @@ pub(crate) fn veto_sources(
                 // TODO: Remove unwrap.
 
                 for source_fd in source
-                    .get_flux_estimates(coarse_chan.channel_centre_hz as _)
+                    .get_flux_estimates(coarse_chan.chan_centre_hz as _)
                     .unwrap()
                 {
                     fd += get_beam_attenuated_flux_density(&source_fd, &j);
@@ -231,37 +235,53 @@ mod tests {
     // Need to use serial tests because HDF5 is not necessarily reentrant.
     use serial_test::serial;
 
-    use mwalib::mwalibContext;
-
     use mwa_hyperdrive_srclist::SourceListType;
+    use mwalib::CorrelatorVersion;
+
+    fn get_params() -> (
+        mwalib::MetafitsContext,
+        mwa_hyperbeam::fee::FEEBeam,
+        SourceList,
+    ) {
+        (
+            MetafitsContext::new(&"tests/1065880128/1065880128.metafits").unwrap(),
+            mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap(),
+            mwa_hyperdrive_srclist::read::read_source_list_file(
+                &PathBuf::from(
+                    "tests/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
+                ),
+                &SourceListType::Hyperdrive,
+            )
+            .unwrap(),
+        )
+    }
 
     #[test]
     #[serial]
     fn test_beam_attenuated_flux_density() {
-        let beam = mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap();
-        let context = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
+        let (metafits, beam, _) = get_params();
         let jones_pointing_centre = Jones::from(
             beam.calc_jones(
-                context.azimuth_radians,
-                context.zenith_angle_radians,
+                metafits.az_rad,
+                metafits.za_rad,
                 180e6 as _,
-                &context.delays,
+                &metafits.delays,
                 &[1.0; 16],
                 true,
             )
             .unwrap(),
         );
         let radec_null = RADec::new_degrees(
-            context.ra_tile_pointing_degrees + 80.0,
-            context.dec_tile_pointing_degrees + 80.0,
+            metafits.ra_tile_pointing_degrees + 80.0,
+            metafits.dec_tile_pointing_degrees + 80.0,
         );
-        let azel_null = radec_null.to_hadec(context.lst_radians).to_azel_mwa();
+        let azel_null = radec_null.to_hadec(metafits.lst_rad).to_azel_mwa();
         let jones_null = Jones::from(
             beam.calc_jones(
                 azel_null.az,
                 azel_null.za(),
                 180e6 as _,
-                &context.delays,
+                &metafits.delays,
                 &[1.0; 16],
                 true,
             )
@@ -281,28 +301,10 @@ mod tests {
         assert_abs_diff_eq!(bafd_null, 0.000000017940424114049793, epsilon = 1e-10);
     }
 
-    fn get_params() -> (
-        mwalib::mwalibContext,
-        mwa_hyperbeam::fee::FEEBeam,
-        SourceList,
-    ) {
-        (
-            mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap(),
-            mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap(),
-            mwa_hyperdrive_srclist::read::read_source_list_file(
-                &PathBuf::from(
-                    "tests/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
-                ),
-                &SourceListType::Hyperdrive,
-            )
-            .unwrap(),
-        )
-    }
-
     #[test]
     #[serial]
     fn veto() {
-        let (context, beam, mut source_list) = get_params();
+        let (metafits, beam, mut source_list) = get_params();
         // For testing's sake, keep only the following sources. The first five
         // are bright and won't get vetoed and the last three are dim.
         let sources = &[
@@ -379,7 +381,17 @@ mod tests {
             },
         );
 
-        let result = veto_sources(&mut source_list, &context, &beam, None, 180.0, 20.0);
+        let result = veto_sources(
+            &mut source_list,
+            &metafits,
+            &metafits
+                .get_expected_coarse_channels(CorrelatorVersion::Legacy)
+                .unwrap(),
+            &beam,
+            None,
+            180.0,
+            20.0,
+        );
         assert!(result.is_ok());
         result.unwrap();
         // Only the first five are kept.
@@ -394,7 +406,7 @@ mod tests {
     #[test]
     #[serial]
     fn top_n_sources() {
-        let (context, beam, mut source_list) = get_params();
+        let (metafits, beam, mut source_list) = get_params();
         // For testing's sake, keep only the following sources.
         let sources = &[
             "J002549-260211",
@@ -413,7 +425,17 @@ mod tests {
             }
         }
 
-        let result = veto_sources(&mut source_list, &context, &beam, Some(5), 180.0, 0.1);
+        let result = veto_sources(
+            &mut source_list,
+            &metafits,
+            &metafits
+                .get_expected_coarse_channels(CorrelatorVersion::Legacy)
+                .unwrap(),
+            &beam,
+            Some(5),
+            180.0,
+            0.1,
+        );
         assert!(result.is_ok());
         result.unwrap();
         for &name in &[

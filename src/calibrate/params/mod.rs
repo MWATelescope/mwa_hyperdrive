@@ -18,7 +18,7 @@ pub use error::*;
 pub(crate) use freq::*;
 
 use mwa_hyperbeam::fee::FEEBeam;
-use mwalib::mwalibContext;
+use mwalib::CorrelatorContext;
 use ndarray::Array1;
 
 use crate::calibrate::veto::veto_sources;
@@ -40,7 +40,7 @@ pub struct RankedSource {
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {
     /// mwalib context struct.
-    pub(crate) context: mwalibContext,
+    pub(crate) context: CorrelatorContext,
 
     /// If provided, information on RFI flags.
     pub(crate) cotter_flags: Option<CotterFlags>,
@@ -128,7 +128,7 @@ impl CalibrateParams {
     /// number of sources and/or the veto threshold.
     fn new(
         args: crate::calibrate::args::CalibrateUserArgs,
-        context: mwalibContext,
+        context: CorrelatorContext,
     ) -> Result<Self, InvalidArgsError> {
         // Set up the beam (requires the MWA_BEAM_FILE variable to be set).
         debug!("Creating beam object");
@@ -169,10 +169,10 @@ impl CalibrateParams {
 
                 // The cotter flags are available for all times. Make them match
                 // only those we'll use according to mwalib.
-                f.trim(&context);
+                f.trim(&context.metafits_context);
 
                 // Ensure that there is a mwaf file for each specified gpubox file.
-                for cc in &context.coarse_channels {
+                for cc in &context.coarse_chans {
                     if !f.gpubox_nums.contains(&(cc.gpubox_number as u8)) {
                         return Err(InvalidArgsError::GpuboxFileMissingMwafFile(
                             cc.gpubox_number,
@@ -199,11 +199,12 @@ impl CalibrateParams {
                 // necessary.
                 let mut meta_tile_flags = vec![];
                 for rf in context
+                    .metafits_context
                     .rf_inputs
                     .iter()
                     .filter(|rf| rf.pol == mwalib::Pol::Y)
                 {
-                    let a = rf.antenna as usize;
+                    let a = rf.ant as usize;
                     if rf.flagged && !tile_flags.contains(&a) {
                         meta_tile_flags.push(a);
                         tile_flags.push(a);
@@ -215,7 +216,7 @@ impl CalibrateParams {
         // Sort the tile flags.
         tile_flags.sort_unstable();
         // Validate.
-        let num_tiles = context.rf_inputs.len() / 2;
+        let num_tiles = context.metafits_context.rf_inputs.len() / 2;
         debug!("There are {} total tiles", num_tiles);
         let num_unflagged_tiles = num_tiles - tile_flags.len();
         for &f in &tile_flags {
@@ -232,7 +233,7 @@ impl CalibrateParams {
             Some(flags) => flags,
             // If the flags aren't specified, use the observation's fine-channel
             // frequency resolution to set them.
-            None => match context.fine_channel_width_hz {
+            None => match context.metafits_context.corr_fine_chan_width_hz {
                 // 10 kHz, 128 channels.
                 10000 => vec![
                     0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127,
@@ -249,8 +250,11 @@ impl CalibrateParams {
         };
 
         // Print some high-level information.
-        info!("Calibrating obsid {}", context.obsid);
-        info!("Using metafits: {}", context.metafits_filename);
+        info!("Calibrating obsid {}", context.metafits_context.obs_id);
+        info!(
+            "Using metafits: {}",
+            context.metafits_context.metafits_filename
+        );
         info!("Using {} gpubox files", context.num_gpubox_files);
         match &cotter_flags {
             Some(_) => info!("Using supplied cotter flags"),
@@ -313,7 +317,8 @@ impl CalibrateParams {
         }
         let ranked_sources = veto_sources(
             &mut source_list,
-            &context,
+            &context.metafits_context,
+            &context.coarse_chans,
             &beam,
             args.num_sources,
             args.source_dist_cutoff.unwrap_or(CUTOFF_DISTANCE),
@@ -334,7 +339,7 @@ impl CalibrateParams {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
 
-        let native_time_res = context.integration_time_milliseconds as f64 / 1e3;
+        let native_time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
         let time_res = args.time_res.unwrap_or(native_time_res);
         if time_res % native_time_res != 0.0 {
             return Err(InvalidArgsError::InvalidTimeResolution {
@@ -345,7 +350,7 @@ impl CalibrateParams {
         let num_time_steps_to_average = time_res / native_time_res;
         let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
 
-        let native_freq_res = context.fine_channel_width_hz as f64;
+        let native_freq_res = context.metafits_context.corr_fine_chan_width_hz as f64;
         let freq_res = args.freq_res.unwrap_or(native_freq_res);
         if freq_res % native_freq_res != 0.0 {
             return Err(InvalidArgsError::InvalidFreqResolution {
@@ -358,14 +363,16 @@ impl CalibrateParams {
         let timestep = 0;
         let lst = lst_from_timestep(timestep, &context, time_res);
 
-        let mut fine_chan_freqs =
-            Vec::with_capacity(context.num_fine_channels_per_coarse * context.num_coarse_channels);
+        let mut fine_chan_freqs = Vec::with_capacity(
+            context.metafits_context.num_corr_fine_chans_per_coarse
+                * context.metafits_context.num_coarse_chans,
+        );
         // TODO: I'm suspicious that the start channel freq is incorrect.
-        for cc in &context.coarse_channels {
+        for cc in &context.coarse_chans {
             let mut cc_freqs = Array1::range(
-                cc.channel_start_hz as f64,
-                cc.channel_end_hz as f64,
-                context.fine_channel_width_hz as f64,
+                cc.chan_start_hz as f64,
+                cc.chan_end_hz as f64,
+                context.metafits_context.corr_fine_chan_width_hz as f64,
             )
             .to_vec();
             fine_chan_freqs.append(&mut cc_freqs);
@@ -374,7 +381,7 @@ impl CalibrateParams {
         let unflagged_fine_chan_freqs = fine_chan_freqs
             .iter()
             .zip(
-                (0..context.num_fine_channels_per_coarse)
+                (0..context.metafits_context.num_corr_fine_chans_per_coarse)
                     .into_iter()
                     .cycle(),
             )
@@ -387,16 +394,17 @@ impl CalibrateParams {
             })
             .collect();
         let num_unflagged_fine_chans_per_coarse_band =
-            context.num_fine_channels_per_coarse - fine_channel_flags.len();
+            context.metafits_context.num_corr_fine_chans_per_coarse - fine_channel_flags.len();
 
         let freq_struct = FrequencyParams {
             res: freq_res,
-            num_fine_chans_per_coarse_band: context.num_fine_channels_per_coarse,
-            num_fine_chans: context.num_fine_channels_per_coarse * context.num_coarse_channels,
+            num_fine_chans_per_coarse_band: context.metafits_context.num_corr_fine_chans_per_coarse,
+            num_fine_chans: context.metafits_context.num_corr_fine_chans_per_coarse
+                * context.num_coarse_chans,
             fine_chan_freqs,
             num_unflagged_fine_chans_per_coarse_band,
             num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
-                * context.num_coarse_channels,
+                * context.num_coarse_chans,
             unflagged_fine_chan_freqs,
             fine_channel_flags,
         };
@@ -473,7 +481,7 @@ impl CalibrateParams {
         debug!("Using gpubox files: {:#?}", gpuboxes);
 
         debug!("Creating mwalib context");
-        let context = mwalibContext::new(&metafits, &gpuboxes)?;
+        let context = CorrelatorContext::new(&metafits, &gpuboxes)?;
 
         // Plug up the missing parts of the arguments.
         args.metafits = None;
@@ -518,26 +526,27 @@ impl CalibrateParams {
     }
 }
 
-/// Get the LST (in radians) from a timestep.
+/// Get the LST (in radians) from a timestep. `time_res_seconds` refers to the
+/// target time resolution of calibration, *not* the observation's time
+/// resolution.
 ///
-/// The LST is calculated for the middle of the timestep, not the start.
-fn lst_from_timestep(timestep: usize, context: &mwalibContext, time_res_seconds: f64) -> f64 {
-    let start_lst = context.lst_degrees.to_radians();
+/// The LST is calculated for the middle of the timestep, not the start of it.
+fn lst_from_timestep(timestep: usize, context: &CorrelatorContext, time_res_seconds: f64) -> f64 {
+    let start_lst = context.metafits_context.lst_rad;
     // Convert to i64 to prevent trying to subtract a u64 from a smaller u64.
-    let diff_in_start_time = (context.start_unix_time_milliseconds as i64
-        - context.scheduled_start_unix_time_milliseconds as i64)
+    let diff_in_start_time = (context.start_unix_time_ms as i64
+        - context.metafits_context.sched_start_unix_time_ms as i64)
         as f64
         / 1e3;
-    let offset = diff_in_start_time / time_res_seconds;
-    let factor = time_res_seconds * SOLAR2SIDEREAL * DS2R;
-    start_lst + factor * (offset + (timestep as f64 + 0.5))
+    let factor = SOLAR2SIDEREAL * DS2R;
+    start_lst + factor * (diff_in_start_time + time_res_seconds * (timestep as f64 + 0.5))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::calibrate::args::CalibrateUserArgs;
-    use mwa_hyperdrive_tests::{gpuboxes::*, no_gpuboxes::*};
+    use mwa_hyperdrive_tests::{full_obsids::*, reduced_obsids::*};
 
     use approx::*;
     // Need to use serial tests because HDF5 is not necessarily reentrant.
@@ -546,8 +555,8 @@ mod tests {
     #[test]
     #[serial]
     fn test_new_params() {
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
@@ -556,11 +565,12 @@ mod tests {
             source_list: data.source_list,
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
-        assert!(result.is_ok());
-        let params = result.unwrap();
-        // The default time resolution should be 0.5s, as per the metafits.
-        assert_abs_diff_eq!(params.time_res, 0.5, epsilon = 1e-10);
+        let params = match CalibrateParams::new(args, context) {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
+        // The default time resolution should be 2.0s, as per the metafits.
+        assert_abs_diff_eq!(params.time_res, 2.0);
         // The default freq resolution should be 40kHz, as per the metafits.
         assert_abs_diff_eq!(params.freq.res, 40e3, epsilon = 1e-10);
     }
@@ -568,62 +578,58 @@ mod tests {
     #[test]
     #[serial]
     fn test_new_params_time_averaging() {
-        // The native time resolution is 0.5s.
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        // The native time resolution is 2.0s.
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
             mwafs: Some(data.mwafs),
             source_list: data.source_list,
-            // 1.0 should be a multiple of 0.5s
-            time_res: Some(1.0),
+            // 4.0 should be a multiple of 2.0s
+            time_res: Some(4.0),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
-        assert!(
-            result.is_ok(),
-            "Expected CalibrateParams to have been successfully created"
-        );
-        let params = result.unwrap();
-        assert_abs_diff_eq!(params.time_res, 1.0, epsilon = 1e-10);
+        let params = match CalibrateParams::new(args, context) {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
+        assert_abs_diff_eq!(params.time_res, 4.0);
 
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
             mwafs: Some(data.mwafs),
             source_list: data.source_list,
-            // 2.0 should be a multiple of 0.5s
-            time_res: Some(2.0),
+            // 8.0 should be a multiple of 2.0s
+            time_res: Some(8.0),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
-        assert!(
-            result.is_ok(),
-            "Expected CalibrateParams to have been successfully created"
-        );
-        let params = result.unwrap();
-        assert_abs_diff_eq!(params.time_res, 2.0, epsilon = 1e-10);
+        let params = match CalibrateParams::new(args, context) {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
+        assert_abs_diff_eq!(params.time_res, 8.0);
     }
 
     #[test]
     #[serial]
     fn test_new_params_time_averaging_fail() {
-        // The native time resolution is 0.5s.
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        // The native time resolution is 2.0s.
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
             mwafs: Some(data.mwafs),
             source_list: data.source_list,
-            // 1.01 is not a multiple of 0.5s
-            time_res: Some(1.01),
+            // 2.01 is not a multiple of 2.0s
+            time_res: Some(2.01),
             ..Default::default()
         };
         let result = CalibrateParams::new(args, context);
@@ -632,16 +638,16 @@ mod tests {
             "Expected CalibrateParams to have not been successfully created"
         );
 
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
             mwafs: Some(data.mwafs),
             source_list: data.source_list,
-            // 0.75 is not a multiple of 0.5s
-            time_res: Some(0.75),
+            // 3.0 is not a multiple of 2.0s
+            time_res: Some(3.0),
             ..Default::default()
         };
         let result = CalibrateParams::new(args, context);
@@ -655,8 +661,8 @@ mod tests {
     #[serial]
     fn test_new_params_freq_averaging() {
         // The native freq. resolution is 40kHz.
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
@@ -667,16 +673,14 @@ mod tests {
             freq_res: Some(80e3),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
-        assert!(
-            result.is_ok(),
-            "Expected CalibrateParams to have been successfully created"
-        );
-        let params = result.unwrap();
+        let params = match CalibrateParams::new(args, context) {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
         assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
 
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
@@ -687,12 +691,10 @@ mod tests {
             freq_res: Some(200e3),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
-        assert!(
-            result.is_ok(),
-            "Expected CalibrateParams to have been successfully created"
-        );
-        let params = result.unwrap();
+        let params = match CalibrateParams::new(args, context) {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
         assert_abs_diff_eq!(params.freq.res, 200e3, epsilon = 1e-10);
     }
 
@@ -700,8 +702,8 @@ mod tests {
     #[serial]
     fn test_new_params_freq_averaging_fail() {
         // The native freq. resolution is 40kHz.
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
@@ -718,8 +720,8 @@ mod tests {
             "Expected CalibrateParams to have not been successfully created"
         );
 
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
@@ -740,59 +742,32 @@ mod tests {
     #[test]
     #[serial]
     fn test_new_params_tile_flags() {
-        // 1065880128 has two flagged tiles in its metafits (82 and 123).
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        // 1090008640 has no flagged tiles in its metafits.
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
             mwafs: Some(data.mwafs),
             source_list: data.source_list,
+            // Manually flag antennas 1, 2 and 3.
             tile_flags: Some(vec![1, 2, 3]),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
-        assert!(
-            result.is_ok(),
-            "Expected CalibrateParams to have been successfully created"
-        );
-
-        let params = result.unwrap();
-        assert_eq!(params.tile_flags.len(), 5);
+        let params = match CalibrateParams::new(args, context) {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
+        assert_eq!(params.tile_flags.len(), 3);
         assert!(params.tile_flags.contains(&1));
         assert!(params.tile_flags.contains(&2));
         assert!(params.tile_flags.contains(&3));
-        assert!(params.tile_flags.contains(&82));
-        assert!(params.tile_flags.contains(&123));
-        assert_eq!(params.num_unflagged_tiles, 123);
+        assert_eq!(params.num_unflagged_tiles, 125);
         assert_eq!(params.get_ant_index(0), 0);
         assert_eq!(params.get_ant_index(4), 1);
         assert_eq!(params.get_ant_index(5), 2);
         assert_eq!(params.get_ant_index(6), 3);
-        assert_eq!(params.get_ant_index(127), 122);
-    }
-
-    #[test]
-    #[serial]
-    fn test_new_params_tile_flags_fail() {
-        // Tile number 128 doesn't exist.
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            tile_flags: Some(vec![1, 128]),
-            ..Default::default()
-        };
-        let result = CalibrateParams::new(args, context);
-        assert!(
-            result.is_err(),
-            "Expected CalibrateParams to have not been successfully created"
-        );
     }
 
     #[test]
@@ -801,8 +776,8 @@ mod tests {
     fn test_new_params_tile_flags_fail2() {
         // Try to get an antenna index for a tile that is flagged (should
         // panic).
-        let data = get_1065880128_meta();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let data = get_1090008640();
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
@@ -812,13 +787,10 @@ mod tests {
             tile_flags: Some(vec![1, 2]),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
-        assert!(
-            result.is_ok(),
-            "Expected CalibrateParams to have been successfully created"
-        );
-
-        let params = result.unwrap();
+        let params = match CalibrateParams::new(args, context) {
+            Ok(p) => p,
+            Err(e) => panic!("{}", e),
+        };
         // Should panic.
         assert_eq!(params.get_ant_index(1), 1);
     }
@@ -828,37 +800,48 @@ mod tests {
     // it should be. But, it's all very close.
     #[test]
     fn test_lst_from_mwalib_timestep_native() {
-        let context = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
-        let time_res = context.integration_time_milliseconds as f64 / 1e3;
+        // Obsid 1090008640 actually starts at 1090008641.
+        let data = get_1090008640();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
         let new_lst = lst_from_timestep(0, &context, time_res);
-        // gpstime 1065880128.75
-        assert_abs_diff_eq!(new_lst, 6.074877917424663, epsilon = 1e-10);
+        // gpstime 1090008642
+        assert_abs_diff_eq!(new_lst, 6.262123690318563, epsilon = 1e-10);
 
         let new_lst = lst_from_timestep(1, &context, time_res);
-        // gpstime 1065880129.25
-        assert_abs_diff_eq!(new_lst, 6.074914378000397, epsilon = 1e-10);
+        // gpstime 1090008644
+        assert_abs_diff_eq!(new_lst, 6.26226953263562, epsilon = 1e-10);
     }
 
     #[test]
     fn test_lst_from_mwalib_timestep_averaged() {
-        let context = mwalibContext::new(&"tests/1065880128.metafits", &[]).unwrap();
-        // The native time res. is 0.5s, let's make our target 2s here.
-        let time_res = 2.0;
+        let data = get_1090008640();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        // The native time res. is 2.0s, let's make our target 4.0s here.
+        let time_res = 4.0;
         let new_lst = lst_from_timestep(0, &context, time_res);
-        // gpstime 1065880129.5
-        assert_abs_diff_eq!(new_lst, 6.074932608288263, epsilon = 1e-10);
+        // gpstime 1090008643
+        assert_abs_diff_eq!(new_lst, 6.2621966114770915, epsilon = 1e-10);
 
         let new_lst = lst_from_timestep(1, &context, time_res);
-        // gpstime 1065880131.5
-        assert_abs_diff_eq!(new_lst, 6.075078450591198, epsilon = 1e-10);
+        // gpstime 1090008647
+        assert_abs_diff_eq!(new_lst, 6.262488296111205, epsilon = 1e-10);
     }
+
+    // The following tests use full MWA data.
 
     #[test]
     #[serial]
     #[ignore]
     fn test_new_params_real_data() {
         let data = get_1065880128();
-        let context = mwalibContext::new(&data.metafits, &data.gpuboxes)
+        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
             .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
@@ -872,5 +855,42 @@ mod tests {
             result.is_ok(),
             "Expected CalibrateParams to have been successfully created"
         );
+    }
+
+    #[test]
+    #[ignore]
+    fn test_lst_from_mwalib_timestep_native_real() {
+        let data = get_1065880128();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+        let new_lst = lst_from_timestep(0, &context, time_res);
+        // gpstime 1065880126.25
+        assert_abs_diff_eq!(new_lst, 6.074695614533638, epsilon = 1e-10);
+
+        let new_lst = lst_from_timestep(1, &context, time_res);
+        // gpstime 1065880126.75
+        assert_abs_diff_eq!(new_lst, 6.074732075112903, epsilon = 1e-10);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_lst_from_mwalib_timestep_averaged_real() {
+        let data = get_1065880128();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        // The native time res. is 0.5s, let's make our target 2s here.
+        let time_res = 2.0;
+        let new_lst = lst_from_timestep(0, &context, time_res);
+        // gpstime 1065880127
+        assert_abs_diff_eq!(new_lst, 6.074750305402534, epsilon = 1e-10);
+
+        let new_lst = lst_from_timestep(1, &context, time_res);
+        // gpstime 1065880129
+        assert_abs_diff_eq!(new_lst, 6.074896147719591, epsilon = 1e-10);
     }
 }

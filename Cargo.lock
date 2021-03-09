@@ -975,7 +975,9 @@ dependencies = [
 
 [[package]]
 name = "mwalib"
-version = "0.4.4"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2989fa6e9521eef184f0c00be90b8c0885e33057792ac4d0bb6ac0b4c9748904"
 dependencies = [
  "cbindgen",
  "chrono",
@@ -1357,9 +1359,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.3.9"
+version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c3780fcf44b193bc4d09f36d2a3c87b251da4a046c87795a0d35f4f927ad8e6"
+checksum = "d9251239e129e16308e70d853559389de218ac275b515068abc96829d05b948a"
 dependencies = [
  "aho-corasick",
  "memchr",

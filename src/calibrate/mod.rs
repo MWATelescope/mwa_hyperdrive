@@ -177,9 +177,10 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
     let mut tile_configs: HashMap<u64, TileConfig> = HashMap::new();
     for tile in params
         .context
+        .metafits_context
         .rf_inputs
         .iter()
-        .filter(|&rf| !params.tile_flags.contains(&(rf.antenna as _)))
+        .filter(|&rf| !params.tile_flags.contains(&(rf.ant as _)))
         .filter(|&rf| rf.pol == mwa_hyperdrive_core::mwalib::Pol::Y)
     {
         let h = TileConfig::hash(&tile.dipole_delays, &tile.dipole_gains);
@@ -187,11 +188,11 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
             None => {
                 tile_configs.insert(
                     h,
-                    TileConfig::new(tile.antenna, &tile.dipole_delays, &tile.dipole_gains),
+                    TileConfig::new(tile.ant, &tile.dipole_delays, &tile.dipole_gains),
                 );
             }
             Some(c) => {
-                c.antennas.push(tile.antenna as _);
+                c.antennas.push(tile.ant as _);
             }
         };
     }
@@ -200,7 +201,7 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
     // Preallocate output arrays.
     let mut tile_gain_matrices = Array3::zeros((
         params.num_unflagged_tiles,
-        params.context.num_coarse_channels,
+        params.context.num_coarse_chans,
         az.len() / 2,
     ));
     let mut ratios = Array3::zeros((
@@ -216,7 +217,7 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
     // Inverse Jones matrices are only done once per coarse band. As we've got
     // coordinates at time=now and time=now+dt in `az`, we only take half of the
     // length of `az`.
-    let mut jones_inverse = Array2::zeros((params.context.coarse_channels.len(), az.len() / 2));
+    let mut jones_inverse = Array2::zeros((params.context.coarse_chans.len(), az.len() / 2));
 
     // Iterate over all tiles.
     for tile_config in tile_configs.values() {
@@ -224,7 +225,7 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
         // channel centre frequencies.
         for (cc_index, (mut inv_row, cc)) in jones_inverse
             .outer_iter_mut()
-            .zip(params.context.coarse_channels.iter())
+            .zip(params.context.coarse_chans.iter())
             .enumerate()
         {
             let mut band_jones_matrices_results: Vec<Result<Jones, FEEBeamError>> =
@@ -238,7 +239,7 @@ pub(crate) fn init_calibrator_gains(params: &CalibrateParams) -> Result<TileGain
                         &params.beam,
                         a,
                         z,
-                        cc.channel_centre_hz,
+                        cc.chan_centre_hz,
                         &tile_config.delays,
                         &tile_config.amps,
                         true,
@@ -350,7 +351,7 @@ mod tests {
     // Need to use serial tests because HDF5 is not necessarily reentrant.
     use serial_test::serial;
 
-    use mwa_hyperdrive_tests::gpuboxes::get_1065880128;
+    use mwa_hyperdrive_tests::full_obsids::get_1065880128;
 
     #[test]
     #[serial]
@@ -398,7 +399,7 @@ mod tests {
         // Last element.
         let gains_last = &tile_gains.gains[[
             p.num_unflagged_tiles - 1,
-            p.context.num_coarse_channels - 1,
+            p.context.num_coarse_chans - 1,
             p.num_components - 1,
         ]];
         let expected = Jones::from([
@@ -484,7 +485,7 @@ mod tests {
         // Last element.
         let gains_last = &tile_gains.gains[[
             p.num_unflagged_tiles - 1,
-            p.context.num_coarse_channels - 1,
+            p.context.num_coarse_chans - 1,
             p.num_components - 1,
         ]];
         let expected = Jones::from([

@@ -310,23 +310,23 @@ pub(crate) fn merge_cli_and_file_params(
             if c_nfc == 0 {
                 return Err(ParamError::FineChansZero);
             }
-            (context.mwalib.coarse_channel_width_hz / c_nfc as u32) as f64
+            (context.mwalib.metafits_context.coarse_chan_width_hz / c_nfc as u32) as f64
         }
 
         (None, None, None, Some(f_nfc)) => {
             if f_nfc == 0 {
                 return Err(ParamError::FineChansZero);
             }
-            (context.mwalib.coarse_channel_width_hz / f_nfc as u32) as f64
+            (context.mwalib.metafits_context.coarse_chan_width_hz / f_nfc as u32) as f64
         }
     };
     if fine_channel_width_hz < 0.0 || fine_channel_width_hz.abs() < 1e-6 {
         return Err(ParamError::FineChansWidthTooSmall);
     }
-    if fine_channel_width_hz > context.mwalib.coarse_channel_width_hz as f64 {
+    if fine_channel_width_hz > context.mwalib.metafits_context.coarse_chan_width_hz as f64 {
         return Err(ParamError::FineChanWidthTooBig {
             fcw: fine_channel_width_hz / 1000.0,
-            ccw: context.mwalib.coarse_channel_width_hz as u64 / 1000,
+            ccw: context.mwalib.metafits_context.coarse_chan_width_hz as u64 / 1000,
         });
     }
 
@@ -410,7 +410,7 @@ pub(crate) fn simulate_vis(
         n_time_steps: args.steps as usize,
         time_resolution: args.time_res,
         freq_bands: args.bands,
-        n_fine_channels: context.mwalib.coarse_channel_width_hz as u64
+        n_fine_channels: context.mwalib.metafits_context.coarse_chan_width_hz as u64
             / args.fine_channel_width as u64,
         fine_channel_width: args.fine_channel_width,
     };

@@ -71,7 +71,7 @@ pub fn vis_gen(
     for band in &params.freq_bands {
         // Have to subtract 1, as we index MWA coarse bands from 1.
         let base_freq = (context.base_freq
-            + (*band - 1) as u32 * context.mwalib.coarse_channel_width_hz)
+            + (*band - 1) as u32 * context.mwalib.metafits_context.coarse_chan_width_hz)
             as f64;
         for fine_channel in 0..params.n_fine_channels {
             let freq = base_freq + params.fine_channel_width * fine_channel as f64;
@@ -120,7 +120,7 @@ pub fn vis_gen(
         for band in &params.freq_bands {
             // Have to subtract 1, as we index MWA coarse bands from 1.
             let base_freq = (context.base_freq
-                + (*band - 1) as u32 * context.mwalib.coarse_channel_width_hz)
+                + (*band - 1) as u32 * context.mwalib.metafits_context.coarse_chan_width_hz)
                 as f64;
             for fine_channel in 0..params.n_fine_channels {
                 let freq = base_freq + params.fine_channel_width * fine_channel as f64;

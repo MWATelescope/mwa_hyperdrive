@@ -20,6 +20,11 @@ mod tests {
     /// copies the existing metafits, mwaf and source list files to the temp
     /// directory. The results of this function can be manipulated by each unit
     /// test to test various configurations of files.
+    ///
+    /// hyperdrive will ultimately always fail when attempting to use the
+    /// arguments coming out of this function, because the gpubox files it
+    /// creates are empty. But, these arguments can be useful to test other
+    /// aspects of argument handling.
     fn get_args() -> (CalibrateUserArgs, TempDir) {
         // Make some dummy gpubox files.
         let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
@@ -37,7 +42,7 @@ mod tests {
         let mut mwafs = vec![];
         for &f in &["1065880128_01.mwaf", "1065880128_02.mwaf"] {
             let (mwaf_pb, mut mwaf_file) = make_file_in_dir(f, tmp_dir.path());
-            let real_filename = format!("tests/{}.gz", f);
+            let real_filename = format!("tests/1065880128/{}.gz", f);
             deflate_gz(&real_filename, &mut mwaf_file);
             mwafs.push(path_to_string(&mwaf_pb));
         }
@@ -46,7 +51,7 @@ mod tests {
         let (metafits_pb, mut metafits_file) =
             make_file_in_dir(&"1065880128.metafits", tmp_dir.path());
         {
-            let mut real_meta = File::open("tests/1065880128.metafits").unwrap();
+            let mut real_meta = File::open("tests/1065880128/1065880128.metafits").unwrap();
             std::io::copy(&mut real_meta, &mut metafits_file).unwrap();
         }
 
@@ -56,9 +61,10 @@ mod tests {
             tmp_dir.path(),
         );
         {
-            let mut real_source_list =
-                File::open("tests/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml")
-                    .unwrap();
+            let mut real_source_list = File::open(
+                "tests/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
+            )
+            .unwrap();
             std::io::copy(&mut real_source_list, &mut source_list_file).unwrap();
         }
 

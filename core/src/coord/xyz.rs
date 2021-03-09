@@ -89,7 +89,7 @@ impl XYZ {
     /// "input"; e.g. in the metafits file, Tile104 is often the first tile
     /// listed ("input" 0), Tile103 second ("input" 2), so the first baseline
     /// would naively be between Tile104 and Tile103.
-    pub fn get_baselines_mwalib(context: &mwalib::mwalibContext) -> Vec<XyzBaseline> {
+    pub fn get_baselines_mwalib(context: &mwalib::MetafitsContext) -> Vec<XyzBaseline> {
         let mut xyz = Vec::with_capacity(context.num_rf_inputs / 2);
         for rf in &context.rf_inputs {
             // There is an RF input for both tile polarisations. The ENH
