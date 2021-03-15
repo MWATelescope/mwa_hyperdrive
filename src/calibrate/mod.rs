@@ -91,6 +91,15 @@ pub fn calibrate(
     // _importuvfits_set_uvdata_visgroup is where the actual fits data gets read.
     // VI_FillVisibilityData accumulates the visibilities (?)
 
+    // The XYZ coordinates of all of the baselines does not change with time for
+    // the observation.
+    let xyz = XYZ::get_baselines_mwalib(&params.context.metafits_context);
+
+    for t in params.get_timesteps() {
+        let lst = params.get_lst();
+        let uvw = UVW::get_baselines(&xyz, params.get_pointing());
+    }
+
     todo!();
 }
 

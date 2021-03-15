@@ -98,19 +98,25 @@ pub struct CalibrateParams {
     /// setting requires methods.
     timestep: usize,
 
-    /// The observation timesteps, respecting the target time resolution.
-    ///
-    /// If time_res is the same as the observations native resolution, then
-    /// these timesteps are the same as mwalib's timesteps. Otherwise, they need
-    /// to be adjusted.
-    timesteps: Vec<usize>,
-
     /// The local sidereal time [radians]. This variable is kept in lockstep with
     /// `timestep`.
     ///
     /// To prevent this variable from being misused, it is private. Getting or
     /// setting requires methods.
     lst: f64,
+
+    /// The current pointing.
+    ///
+    /// To prevent this variable from being misused, it is private. Getting or
+    /// setting requires methods.
+    pointing: HADec,
+
+    /// The observation timesteps, respecting the target time resolution.
+    ///
+    /// If time_res is the same as the observations native resolution, then
+    /// these timesteps are the same as mwalib's timesteps. Otherwise, they need
+    /// to be adjusted.
+    timesteps: Vec<usize>,
 }
 
 impl CalibrateParams {
@@ -362,6 +368,7 @@ impl CalibrateParams {
         // Start at the first timestep.
         let timestep = 0;
         let lst = lst_from_timestep(timestep, &context, time_res);
+        let pointing = pointing_from_timestep(timestep, &context, time_res);
 
         let mut fine_chan_freqs = Vec::with_capacity(
             context.metafits_context.num_corr_fine_chans_per_coarse
@@ -424,6 +431,7 @@ impl CalibrateParams {
             timestep,
             lst,
             jones_cache: JonesCache::new(),
+            pointing,
         })
     }
 
@@ -489,14 +497,24 @@ impl CalibrateParams {
         CalibrateParams::new(args, context)
     }
 
-    // /// Get the timestep needed to read in data.
-    // pub fn get_timestep(&self) -> usize {
-    //     self.timestep
-    // }
+    /// Get the current timestep.
+    pub fn get_timestep(&self) -> usize {
+        self.timestep
+    }
 
-    /// Get the LST [radians].
+    /// Get all of the available timesteps.
+    pub fn get_timesteps(&self) -> &[usize] {
+        &self.timesteps
+    }
+
+    /// Get the current LST [radians].
     pub(crate) fn get_lst(&self) -> f64 {
         self.lst
+    }
+
+    /// Get the current pointing.
+    pub(crate) fn get_pointing(&self) -> &HADec {
+        &self.pointing
     }
 
     /// Increment the timestep and LST.
@@ -526,6 +544,21 @@ impl CalibrateParams {
     }
 }
 
+/// Get the difference between when the observation actually starts and when it
+/// was scheduled to start [seconds].
+///
+/// MWA observations don't necessarily start when they should! mwalib provides
+/// the information needed to determine when the observation *actually* starts,
+/// and with this value, other values such as the start LST can be determined.
+/// mwalib determines the true start time based on the timesteps available in
+/// the gpubox files.
+fn get_diff_in_start_time(context: &CorrelatorContext) -> f64 {
+    // Convert to i64 to prevent trying to subtract a u64 from a smaller u64.
+    (context.start_unix_time_ms as i64 - context.metafits_context.sched_start_unix_time_ms as i64)
+        as f64
+        / 1e3
+}
+
 /// Get the LST (in radians) from a timestep. `time_res_seconds` refers to the
 /// target time resolution of calibration, *not* the observation's time
 /// resolution.
@@ -533,13 +566,43 @@ impl CalibrateParams {
 /// The LST is calculated for the middle of the timestep, not the start of it.
 fn lst_from_timestep(timestep: usize, context: &CorrelatorContext, time_res_seconds: f64) -> f64 {
     let start_lst = context.metafits_context.lst_rad;
-    // Convert to i64 to prevent trying to subtract a u64 from a smaller u64.
-    let diff_in_start_time = (context.start_unix_time_ms as i64
-        - context.metafits_context.sched_start_unix_time_ms as i64)
-        as f64
-        / 1e3;
     let factor = SOLAR2SIDEREAL * DS2R;
-    start_lst + factor * (diff_in_start_time + time_res_seconds * (timestep as f64 + 0.5))
+    start_lst
+        + factor * (get_diff_in_start_time(context) + time_res_seconds * (timestep as f64 + 0.5))
+}
+
+/// Get the pointing from a timestep. `time_res_seconds` refers to the target
+/// time resolution of calibration, *not* the observation's time resolution.
+///
+/// The pointing is calculated for the middle of the timestep, not the start of
+/// it.
+fn pointing_from_timestep(
+    timestep: usize,
+    context: &CorrelatorContext,
+    time_res_seconds: f64,
+) -> HADec {
+    let start_lst = context.metafits_context.lst_rad;
+    let true_start_lst = lst_from_timestep(timestep, context, time_res_seconds);
+    let lst_diff = true_start_lst - start_lst;
+
+    let mut pointing = HADec::from_radec(
+        &RADec::new_degrees(
+            context
+                .metafits_context
+                // If the phase centre isn't specified, this is probably a
+                // "drift" observation. Use the tile pointing instead.
+                // TODO: Let the user override this.
+                .ra_phase_center_degrees
+                .unwrap_or(context.metafits_context.ra_tile_pointing_degrees),
+            context
+                .metafits_context
+                .dec_phase_center_degrees
+                .unwrap_or(context.metafits_context.dec_tile_pointing_degrees),
+        ),
+        context.metafits_context.lst_rad,
+    );
+    pointing.ha += lst_diff;
+    pointing
 }
 
 #[cfg(test)]
@@ -834,6 +897,46 @@ mod tests {
         assert_abs_diff_eq!(new_lst, 6.262488296111205, epsilon = 1e-10);
     }
 
+    #[test]
+    fn test_pointing_from_timestep_native() {
+        // Obsid 1090008640 actually starts at 1090008641.
+        let data = get_1090008640();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+        let pointing = pointing_from_timestep(0, &context, time_res);
+        // gpstime 1090008642
+        assert_abs_diff_eq!(pointing.ha, 6.262123690318563, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+
+        let pointing = pointing_from_timestep(1, &context, time_res);
+        // gpstime 1090008644
+        assert_abs_diff_eq!(pointing.ha, 6.26226953263562, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_pointing_from_timestep_averaged() {
+        let data = get_1090008640();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        // The native time res. is 2.0s, let's make our target 4.0s here.
+        let time_res = 4.0;
+        let pointing = pointing_from_timestep(0, &context, time_res);
+        // gpstime 1090008643
+        assert_abs_diff_eq!(pointing.ha, 6.2621966114770915, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+
+        let pointing = pointing_from_timestep(1, &context, time_res);
+        // gpstime 1090008647
+        assert_abs_diff_eq!(pointing.ha, 6.262488296111205, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    }
+
     // The following tests use full MWA data.
 
     #[test]
@@ -859,7 +962,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_lst_from_mwalib_timestep_native_real() {
+    fn test_lst_from_timestep_native_real() {
         let data = get_1065880128();
         let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
             Ok(c) => c,
@@ -877,7 +980,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_lst_from_mwalib_timestep_averaged_real() {
+    fn test_lst_from_timestep_averaged_real() {
         let data = get_1065880128();
         let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
             Ok(c) => c,
@@ -892,5 +995,44 @@ mod tests {
         let new_lst = lst_from_timestep(1, &context, time_res);
         // gpstime 1065880129
         assert_abs_diff_eq!(new_lst, 6.074896147719591, epsilon = 1e-10);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_pointing_from_timestep_native_real() {
+        let data = get_1065880128();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+        let pointing = pointing_from_timestep(0, &context, time_res);
+        assert_abs_diff_eq!(pointing.ha, 6.074695614533638, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+
+        let pointing = pointing_from_timestep(1, &context, time_res);
+        assert_abs_diff_eq!(pointing.ha, 6.074732075112903, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_pointing_from_timestep_averaged_real() {
+        let data = get_1065880128();
+        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+            Ok(c) => c,
+            Err(e) => panic!("{}", e),
+        };
+        // The native time res. is 0.5s, let's make our target 2s here.
+        let time_res = 2.0;
+        let pointing = pointing_from_timestep(0, &context, time_res);
+        // gpstime 1065880127
+        assert_abs_diff_eq!(pointing.ha, 6.074750305402534, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+
+        let pointing = pointing_from_timestep(1, &context, time_res);
+        // gpstime 1065880129
+        assert_abs_diff_eq!(pointing.ha, 6.074896147719591, epsilon = 1e-10);
+        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
     }
 }
