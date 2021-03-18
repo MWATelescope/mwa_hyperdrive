@@ -60,6 +60,9 @@ pub enum InvalidArgsError {
     #[error("mwalib error: {0}")]
     Mwalib(#[from] mwalib::MwalibError),
 
+    #[error("hyperbeam init error: {0}")]
+    HyperbeamInit(#[from] mwa_hyperbeam::fee::InitFEEBeamError),
+
     #[error("hyperbeam error: {0}")]
     Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
 

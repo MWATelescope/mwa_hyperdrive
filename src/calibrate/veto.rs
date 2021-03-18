@@ -72,6 +72,10 @@ pub(crate) fn veto_sources(
         metafits.dec_tile_pointing_degrees,
     );
 
+    // We want to store the flux densities for each source at the "mean
+    // frequency". Store the middle coarse channel number to achieve this later.
+    let middle_coarse_chan = coarse_chans[coarse_chans.len() / 2].corr_chan_number;
+
     let (vetoed_sources, mut not_vetoed_sources): (Vec<_>, Vec<_>) = source_list
         .par_iter()
         .partition_map(|(source_name, source)| {
@@ -101,6 +105,9 @@ pub(crate) fn veto_sources(
             // "best".
             let mut smallest_fd = std::f64::INFINITY;
 
+            // `cc_fds` are the flux densities for each coarse channel.
+            let mut cc_fds = vec![];
+
             // Iterate over each frequency. Is the total flux density acceptable
             // for each frequency?
             for coarse_chan in coarse_chans {
@@ -127,6 +134,7 @@ pub(crate) fn veto_sources(
                     .unwrap()
                 {
                     fd += get_beam_attenuated_flux_density(&source_fd, &j);
+                    cc_fds.push(source_fd);
                 }
 
                 if fd < veto_threshold {
@@ -142,10 +150,13 @@ pub(crate) fn veto_sources(
             }
 
             // If we got this far, the source should not be vetoed.
-            Either::Right(RankedSource {
-                name: source_name.clone(),
-                flux_density: smallest_fd,
-            })
+            Either::Right(RankedSource::new( source_name.to_owned(),
+                 smallest_fd,
+                 cc_fds,
+                 source,
+                 // Use the centre observation frequency.
+                 metafits.centre_freq_hz as f64,
+            ).unwrap())
         });
 
     trace!(
@@ -180,9 +191,9 @@ pub(crate) fn veto_sources(
     // The reverse comparison (b against a) is deliberate; we want the
     // sources reverse-sorted by beam-attenuated flux density.
     not_vetoed_sources.par_sort_unstable_by(|a, b| {
-        b.flux_density
-            .partial_cmp(&a.flux_density)
-            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.flux_density, b.flux_density))
+        b.apparent_fd
+            .partial_cmp(&a.apparent_fd)
+            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.apparent_fd, b.apparent_fd))
     });
 
     // If we were requested to use n number of sources, remove all sources after n.

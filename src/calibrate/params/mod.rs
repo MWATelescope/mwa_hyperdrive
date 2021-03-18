@@ -13,9 +13,11 @@ errors) can be neatly split.
 
 pub mod error;
 pub(crate) mod freq;
+pub(crate) mod ranked_source;
 
 pub use error::*;
 pub(crate) use freq::*;
+pub(crate) use ranked_source::*;
 
 use mwa_hyperbeam::fee::FEEBeam;
 use mwalib::CorrelatorContext;
@@ -27,15 +29,6 @@ use crate::{glob::*, *};
 use mwa_hyperdrive_core::jones::cache::JonesCache;
 use mwa_hyperdrive_core::*;
 use mwa_hyperdrive_srclist::{SourceListFileType, SourceListType};
-
-/// A source's name as well as its apparent flux density.
-pub struct RankedSource {
-    /// The name of the source. This can be used as a key for a `SourceList`.
-    pub name: String,
-
-    /// The apparent flux density [Jy].
-    pub flux_density: f64,
-}
 
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {

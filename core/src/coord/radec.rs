@@ -4,8 +4,12 @@
 
 /*!
 Handle (right ascension, declination) coordinates.
+TODO: Should RA always be positive?
  */
 
+use std::f64::consts::*;
+
+use log::warn;
 use serde::{Deserialize, Serialize};
 
 use super::hadec::HADec;
@@ -48,6 +52,80 @@ impl RADec {
         }
     }
 
+    /// From a collection of `RADec` coordinates and weights, find the average
+    /// `RADec` position. The lengths of both collection must be the same to get
+    /// sensible results. Not providing any `RADec` coordinates will make this
+    /// function panic.
+    ///
+    /// This function accounts for Right Ascension coordinates that range over
+    /// 360 degrees.
+    pub fn weighted_average(radec: &[Self], weights: &[f64]) -> RADec {
+        // Accounting for the 360 degree branch cut.
+        let any_less_than_90 = radec.iter().any(|c| (0.0..FRAC_PI_4).contains(&c.ra));
+        let any_between_90_270 = radec
+            .iter()
+            .any(|c| (FRAC_PI_4..3.0 * FRAC_PI_4).contains(&c.ra));
+        let any_greater_than_270 = radec.iter().any(|c| (3.0 * FRAC_PI_4..TAU).contains(&c.ra));
+        let new_cutoff = match (any_less_than_90, any_between_90_270, any_greater_than_270) {
+            // User is misusing the code!
+            (false, false, false) => panic!("No RADec coordinates were provided"),
+
+            // Easy ones.
+            (true, false, false) => 0.0,
+            (false, true, false) => 0.0,
+            (false, false, true) => 0.0,
+            (false, true, true) => 0.0,
+            (true, true, false) => 0.0,
+
+            // Surrounding 0 or 360.
+            (true, false, true) => PI,
+
+            // Danger zone.
+            (true, true, true) => {
+                warn!("Attempting to find the average RADec over a collection of coordinates that span many RAs!");
+                0.0
+            }
+        };
+
+        // Don't forget the cos(dec) term!
+        let average_dec = {
+            let (dec_sum, count) = radec
+                .iter()
+                .fold((0.0, 0), |acc, c| (acc.0 + c.dec, acc.1 + 1));
+            // If count == 1, then we set the "average_dec" to 0. This way,
+            // cos(0) = 1, and when we multiply the RA by cos(dec), we'll get
+            // the unaltered RA; seeing as we only have one RA, we shouldn't
+            // alter it.
+            if count == 1 {
+                0.0
+            } else {
+                dec_sum / count as f64
+            }
+        };
+
+        let mut ra_sum = 0.0;
+        let mut dec_sum = 0.0;
+        let mut weight_sum = 0.0;
+        for (c, w) in radec.iter().zip(weights.iter()) {
+            let ra = if c.ra > new_cutoff {
+                c.ra - 2.0 * new_cutoff
+            } else {
+                c.ra
+            };
+            ra_sum += ra * w;
+            dec_sum += c.dec * w;
+            weight_sum += w;
+        }
+        ra_sum *= average_dec.cos();
+        let mut weighted_pos = RADec::new(ra_sum / weight_sum, dec_sum / weight_sum);
+        // Keep the RA positive.
+        if weighted_pos.ra < 0.0 {
+            weighted_pos.ra += TAU;
+        }
+
+        weighted_pos
+    }
+
     /// Get the (l,m,n) direction cosines from these coordinates. All arguments
     /// are in radians.
     ///
@@ -82,7 +160,7 @@ impl std::fmt::Display for RADec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use approx::*;
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn test_to_lmn() {
@@ -97,5 +175,62 @@ mod tests {
         assert_abs_diff_eq!(lmn.l, expected.l, epsilon = 1e-10);
         assert_abs_diff_eq!(lmn.m, expected.m, epsilon = 1e-10);
         assert_abs_diff_eq!(lmn.n, expected.n, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_weighted_pos() {
+        // Only the src variable matters here; the rest of the variables aren't
+        // used when constructing `RankedSource`.
+
+        // Simple case: both components have a weight of 1.0.
+        let c1 = RADec::new_degrees(10.0, 9.0);
+        let w1 = 1.0;
+        let c2 = RADec::new_degrees(11.0, 10.0);
+        let w2 = 1.0;
+        let weighted_pos = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        assert_abs_diff_eq!(
+            weighted_pos.ra,
+            10.5_f64.to_radians() * 9.5_f64.to_radians().cos()
+        );
+        assert_abs_diff_eq!(weighted_pos.dec, 9.5_f64.to_radians());
+
+        // Complex case: both components have different weights.
+        let w1 = 3.0;
+        let weighted_pos = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        assert_abs_diff_eq!(
+            weighted_pos.ra,
+            10.25_f64.to_radians() * 9.5_f64.to_radians().cos()
+        );
+        assert_abs_diff_eq!(weighted_pos.dec, 9.25_f64.to_radians());
+    }
+
+    #[test]
+    // This time, make the coordinates go across the 360 degree branch cut.
+    fn test_weighted_pos2() {
+        let c1 = RADec::new_degrees(10.0, 9.0);
+        let w1 = 1.0;
+        let c2 = RADec::new_degrees(359.0, 10.0);
+        let w2 = 1.0;
+        let weighted_pos = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        assert_abs_diff_eq!(
+            weighted_pos.ra,
+            4.5_f64.to_radians() * 9.5_f64.to_radians().cos()
+        );
+        assert_abs_diff_eq!(weighted_pos.dec, 9.5_f64.to_radians());
+    }
+
+    #[test]
+    fn test_weighted_pos_single() {
+        let c = RADec::new(0.5, 0.75);
+        let w = 1.0;
+        let weighted_pos = RADec::weighted_average(&[c], &[w]);
+        assert_abs_diff_eq!(weighted_pos.ra, 0.5);
+        assert_abs_diff_eq!(weighted_pos.dec, 0.75);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_weighted_pos_empty() {
+        let _weighted_pos = RADec::weighted_average(&[], &[1.0]);
     }
 }
