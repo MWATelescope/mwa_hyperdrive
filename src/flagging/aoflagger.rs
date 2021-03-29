@@ -3,21 +3,23 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
-Code to read in cotter flags in .mwaf files.
+Code to read in AOFlagger flags in .mwaf files.
  */
 
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::path::Path;
 
-use mwalib::{fitsio, fitsio_sys};
+use log::{debug, error};
+use mwa_hyperdrive_core::mwalib;
+use mwalib::*;
 
 use super::error::*;
-use crate::*;
 
 /// This monstrosity exists to nicely handle converting any type that can be
 /// represented as a `Path` into a string slice. This is kind of a hack, but a
 /// necessary one, because cfitsio can't handle UTF-8 characters.
+// TODO: Use a result type, you animal.
 fn cfitsio_path_to_str<T: AsRef<Path>>(filename: &T) -> &str {
     match filename.as_ref().to_str() {
         None => {
@@ -37,12 +39,12 @@ struct Mwaf {
     num_antennas: usize,
     /// The number of time steps as described by the mwaf file (NSCANS).
     num_time_steps: usize,
-    /// The number of bytes per row in the binary table containing cotter flags
+    /// The number of bytes per row in the binary table containing AOF flags
     /// (NAXIS1).
     bytes_per_row: usize,
-    /// The number of rows in the binary table containing cotter flags (NAXIS2).
+    /// The number of rows in the binary table containing AOF flags (NAXIS2).
     num_rows: usize,
-    /// The cotter flags. The bits are *not* unpacked into individual bytes.
+    /// The AOFlagger flags. The bits are *not* unpacked into individual bytes.
     ///
     /// Example: Given a value of 192 (0b11000000), the first and second
     /// visibilities are flagged, and the following six visibilities are
@@ -62,7 +64,7 @@ struct Mwaf {
 
 impl Mwaf {
     /// A helper function to unpack and parse the contents of an mwaf file. It is
-    /// not exposed publicly; use `CotterFlags::new_from_mwaf` to perform additional
+    /// not exposed publicly; use `AOFlags::new_from_mwaf` to perform additional
     /// checks on the contents before returning to the caller.
     fn unpack<T: AsRef<Path>>(file: &T) -> Result<Self, FitsError> {
         // Get the metadata written with the flags.
@@ -112,7 +114,7 @@ impl Mwaf {
                 fits_error: e,
                 fits_filename: s.to_string(),
                 hdu_num: 1,
-                source_file: file!().to_string(),
+                source_file: file!(),
                 source_line: line!(),
             })?;
 
@@ -135,10 +137,10 @@ impl Mwaf {
 }
 
 /// In an effort to keep things simple and make bad states impossible, use a
-/// temp struct instead of `CotterFlags`, so we can represent a single mwaf file
+/// temp struct instead of `AOFlags`, so we can represent a single mwaf file
 /// instead of possibly many.
 #[derive(Debug)]
-struct CotterFlagsTemp {
+struct AOFlagsTemp {
     /// The GPS time of the first scan.
     start_time_milli: u64,
     /// The number of time steps in the data (duration of observation /
@@ -170,7 +172,7 @@ struct CotterFlagsTemp {
 }
 
 #[derive(Debug)]
-pub struct CotterFlags {
+pub struct AOFlags {
     /// The GPS time of the first scan [milliseconds].
     pub start_time_milli: u64,
     /// The number of time steps in the data (duration of observation /
@@ -203,8 +205,8 @@ pub struct CotterFlags {
     pub cotter_version_date: String,
 }
 
-impl CotterFlags {
-    /// Create a `CotterFlags` struct from a cotter mwaf file. You should
+impl AOFlags {
+    /// Create a `AOFlags` struct from a cotter mwaf file. You should
     /// probably also run the `trim` function on this struct.
     pub fn new_from_mwaf<T: AsRef<Path>>(file: &T) -> Result<Self, MwafError> {
         let m = Mwaf::unpack(file)?;
@@ -247,20 +249,20 @@ impl CotterFlags {
         })
     }
 
-    /// From many mwaf files, return a single `CotterFlags` struct with all
+    /// From many mwaf files, return a single `AOFlags` struct with all
     /// flags. You should probably also run the `trim` function on this struct.
     pub fn new_from_mwafs<T: AsRef<Path>>(files: &[T]) -> Result<Self, MwafMergeError> {
         if files.is_empty() {
             return Err(MwafMergeError::NoFilesGiven);
         }
 
-        let mut unpacked: Vec<CotterFlagsTemp> = Vec::with_capacity(files.len());
+        let mut unpacked: Vec<AOFlagsTemp> = Vec::with_capacity(files.len());
         for f in files {
             let n = Self::new_from_mwaf(f)?;
             // In an effort to keep things simple and make bad states
             // impossible, use a temp struct to represent the gpubox numbers as
             // a number.
-            unpacked.push(CotterFlagsTemp {
+            unpacked.push(AOFlagsTemp {
                 start_time_milli: n.start_time_milli,
                 gpubox_num: n.gpubox_nums[0],
                 num_time_steps: n.num_time_steps,
@@ -275,12 +277,12 @@ impl CotterFlags {
         Self::merge(unpacked)
     }
 
-    /// Merge several `CotterFlags` into a single struct.
+    /// Merge several `AOFlags` into a single struct.
     ///
     /// This function is private so it cannot be misused outside this module. If
     /// a user wants to flatten a bunch of mwaf files together, they should use
-    /// `CotterFlags::new_from_mwafs`.
-    fn merge(mut flags: Vec<CotterFlagsTemp>) -> Result<Self, MwafMergeError> {
+    /// `AOFlags::new_from_mwafs`.
+    fn merge(mut flags: Vec<AOFlagsTemp>) -> Result<Self, MwafMergeError> {
         // Sort by the gpubox number. Because this function is private and only
         // called by `Self::new_from_mwafs`, we can be sure that each of these
         // gpubox_num vectors contains only a single number.
@@ -428,11 +430,11 @@ impl CotterFlags {
     }
 }
 
-impl std::fmt::Display for CotterFlags {
+impl std::fmt::Display for AOFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            r#"CotterFlags {{
+            r#"AOFlags {{
     num_time_steps: {nts},
     num_channels: {nc},
     num_baselines: {nb},
@@ -508,7 +510,7 @@ mod tests {
         // The mwaf file is gzipped to save space in git. gunzip it to a
         // temporary spot.
         let mwaf = deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz");
-        let result = CotterFlags::new_from_mwaf(&mwaf);
+        let result = AOFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok());
         let m = result.unwrap();
 
@@ -571,7 +573,7 @@ mod tests {
     #[test]
     fn test_1065880128_02_mwaf() {
         let mwaf = deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz");
-        let result = CotterFlags::new_from_mwaf(&mwaf);
+        let result = AOFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok());
         let m = result.unwrap();
 
@@ -631,7 +633,7 @@ mod tests {
 
     #[test]
     fn test_merging_1065880128_mwafs() {
-        let result = CotterFlags::new_from_mwafs(&[
+        let result = AOFlags::new_from_mwafs(&[
             deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz"),
             deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz"),
         ]);
@@ -660,7 +662,7 @@ mod tests {
 
     #[test]
     fn test_trimming_1065880128_mwafs() {
-        let mut m = CotterFlags::new_from_mwafs(&[
+        let mut m = AOFlags::new_from_mwafs(&[
             deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz"),
             deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz"),
         ])

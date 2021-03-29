@@ -2,8 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+pub mod context;
+#[cfg(cuda)]
 mod cuda;
 
+use std::f64::consts::TAU;
 use std::fs::File;
 use std::io::BufWriter;
 use std::io::Write;
@@ -12,8 +15,9 @@ use byteorder::{ByteOrder, LittleEndian};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 
-use crate::*;
-use mwa_hyperdrive_core::{constants::*, Source};
+use crate::{constants::*, math::cexp};
+use context::Context;
+use mwa_hyperdrive_core::*;
 
 /// Parameters for visibility generation. Members of this struct might be
 /// different from a `Context` struct (e.g. such as `time_resolution`), which
@@ -41,7 +45,7 @@ pub struct TimeFreqParams {
 /// Currently only works with a single `Source` made from point-source
 /// components.
 pub fn vis_gen(
-    context: &crate::Context,
+    context: &context::Context,
     src: &Source,
     params: &TimeFreqParams,
     mut pointing: HADec,
@@ -135,21 +139,30 @@ pub fn vis_gen(
 
         pb.set_position(time_step as u64);
         let (mut real_t, mut imag_t) = if cuda {
-            if time_step == 0 {
-                pb.println(format!(
-                    r#"Running CUDA with:
+            // Should only reach here if code calling this function hasn't
+            // already aborted!
+            #[cfg(not(cuda))]
+            {
+                panic!("Tried to run CUDA code without CUDA-support being compiled!");
+            }
+            #[cfg(cuda)]
+            {
+                if time_step == 0 {
+                    pb.println(format!(
+                        r#"Running CUDA with:
     {uvw} UVW baselines ({bl} baselines * {fc} fine channels * {cb} coarse bands)
     {comps} source components"#,
-                    uvw = params.freq_bands.len() as u64
-                        * params.n_fine_channels
-                        * context.xyz.len() as u64,
-                    bl = context.xyz.len(),
-                    fc = params.n_fine_channels,
-                    cb = params.freq_bands.len(),
-                    comps = src.components.len()
-                ));
+                        uvw = params.freq_bands.len() as u64
+                            * params.n_fine_channels
+                            * context.xyz.len() as u64,
+                        bl = context.xyz.len(),
+                        fc = params.n_fine_channels,
+                        cb = params.freq_bands.len(),
+                        comps = src.components.len()
+                    ));
+                }
+                cuda::cuda_vis_gen(&context, &src, &params, &flux_densities, lmn, uvw)
             }
-            cuda::cuda_vis_gen(&context, &src, &params, &flux_densities, lmn, uvw)
         } else {
             cpu_vis_gen(&context, &src, &params, &flux_densities, lmn, uvw)
         };

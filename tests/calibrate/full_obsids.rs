@@ -26,15 +26,9 @@ mod tests {
             gpuboxes: Some(data.gpuboxes),
             mwafs: Some(data.mwafs),
             source_list: data.source_list,
-            source_list_type: None,
             num_sources: Some(50),
-            source_dist_cutoff: None,
             veto_threshold: Some(0.01),
-            time_res: None,
-            freq_res: None,
-            tile_flags: None,
-            ignore_metafits_flags: None,
-            fine_chan_flags: None,
+            ..Default::default()
         };
         (args, tmp_dir)
     }

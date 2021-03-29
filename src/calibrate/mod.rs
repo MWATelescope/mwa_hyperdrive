@@ -12,30 +12,104 @@ pub mod veto;
 
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
+use crossbeam_channel::bounded;
+use crossbeam_utils::thread::scope;
+use log::{debug, info};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use crate::*;
-use mwa_hyperdrive_core::jones::Jones;
 use mwa_hyperdrive_core::mwa_hyperbeam::fee::FEEBeamError;
 use params::CalibrateParams;
 
-pub fn calibrate(
-    cli_args: args::CalibrateUserArgs,
-    args_file: Option<PathBuf>,
-    dry_run: bool,
-) -> Result<(), anyhow::Error> {
-    debug!("Merging command-line arguments with the argument file");
-    let args = cli_args.merge(args_file)?;
-    debug!("{:#?}", &args);
-    debug!("Converting arguments into calibration parameters");
-    let params = args.into_params()?;
+/// Direction independent calibration.
+pub fn di_cal(params: &CalibrateParams) -> Result<(), anyhow::Error> {
+    let timestep_indices = params.input_data.get_timestep_indices();
+    // TODO: I'm a bad man.
+    // let total_num_tiles = params.input_data.get_total_num_tiles();
+    let total_num_tiles = 128;
+    let num_fine_freq_chans = params.input_data.get_freq_context().fine_chan_freqs.len();
+    let num_polarisations = 4;
+    // The output Jones matrices. We wrap them in an Arc<Mutex<_>> to allow
+    // multiple threads to mutate it in parallel.
+    let shape = (
+        timestep_indices.len(),
+        total_num_tiles,
+        num_fine_freq_chans,
+        num_polarisations,
+    );
+    debug!(
+        "Shape of DI Jones matrices array: {:?} ({} MiB)",
+        shape,
+        [
+            timestep_indices.len(),
+            total_num_tiles,
+            num_fine_freq_chans,
+            num_polarisations
+        ]
+        .iter()
+        .product::<usize>()
+        // 64 bytes per Jones matrix, 1024 * 1024 == 1 MiB.
+        * 64 / 1024
+            / 1024
+    );
+    let out = Arc::new(Mutex::new(Array4::from_elem(shape, Jones::identity())));
 
-    if dry_run {
-        return Ok(());
-    }
+    // TODO: Let the use decide how many threads to use.
+    let num_threads = rayon::current_num_threads();
 
+    // Set up our producer (sender) thread and worker (receiver) threads.
+    // TODO: Adjust the buffer size.
+    let (sx, rx) = bounded(10);
+    scope(|scope| {
+        scope.spawn(move |_| {
+            // Producer.
+            for t in timestep_indices.to_owned() {
+                // let vis = params.input_data.read(1..2)?;
+                let vis = params.input_data.read(t..t + 1).unwrap();
+                let msg = t - timestep_indices.start;
+                sx.send(Box::new(msg)).unwrap();
+                dbg!(t);
+            }
+
+            // By dropping the send channel, we signal to the receivers that
+            // there is no more incoming data, and they can stop waiting.
+            drop(sx);
+        });
+
+        // Workers.
+        for i in 0..num_threads {
+            let thread_id = i.clone();
+            // Get a thread-local receive channel and reference to the output
+            // Jones matrices.
+            let rx = rx.clone();
+            let out = out.clone();
+            scope.spawn(move |_| {
+                // Iterate on the receive channel forever. This terminates when
+                // there is no data in the channel, and the sender has
+                // been dropped.
+                for msg_box in rx.iter() {
+                    let msg = *msg_box;
+                    println!("Thread {}: Got {:?}", thread_id, msg);
+
+                    // sleep(Duration::from_secs(3));
+                    let mut arr = out.lock().unwrap();
+                    arr[[msg, 0, 0, 0]] = Jones::identity() * msg as f64;
+                }
+            });
+        }
+    })
+    .unwrap();
+
+    dbg!(&params.tile_flags);
+
+    Ok(())
+}
+
+pub fn calibrate(params: CalibrateParams) -> Result<(), anyhow::Error> {
     // How much time is available?
     //
     // Assume we're doing a DI step. How much data gets averaged together? Does
@@ -89,7 +163,7 @@ pub fn calibrate(
 
     // The XYZ coordinates of all of the baselines does not change with time for
     // the observation.
-    let xyz = XYZ::get_baselines_mwalib(&params.context.metafits_context);
+    // let xyz = XYZ::get_baselines_mwalib(&params.context.metafits_context);
 
     // for t in params.get_timesteps() {
     //     let lst = params.get_lst();

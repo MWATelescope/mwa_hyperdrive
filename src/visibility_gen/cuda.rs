@@ -6,8 +6,9 @@
 Generate visibilities using CUDA.
  */
 
+use super::context::Context;
 use super::*;
-use crate::context::Context;
+
 use mwa_hyperdrive_cuda::{vis_gen, Source_s, UVW_s, Visibilities_s};
 
 /// For all coarse-band frequencies and their fine channels, generate

@@ -13,18 +13,27 @@ errors) can be neatly split.
 
 pub mod error;
 pub(crate) mod freq;
+mod helpers;
 pub(crate) mod ranked_source;
 
 pub use error::*;
 pub(crate) use freq::*;
+use helpers::*;
 pub(crate) use ranked_source::*;
 
+use std::collections::HashSet;
+use std::path::PathBuf;
+
+use log::{debug, info, warn};
 use mwa_hyperbeam::fee::FEEBeam;
-use mwalib::CorrelatorContext;
+use mwalib::{CorrelatorContext, MWA_LONGITUDE_RADIANS};
 use ndarray::Array1;
+use permissions::is_readable;
+use regex::internal::Input;
+use rubbl_casatables::{Table, TableOpenMode};
 
 use crate::calibrate::veto::veto_sources;
-use crate::flagging::cotter::CotterFlags;
+use crate::data_formats::*;
 use crate::{glob::*, *};
 use mwa_hyperdrive_core::jones::cache::JonesCache;
 use mwa_hyperdrive_core::*;
@@ -32,18 +41,8 @@ use mwa_hyperdrive_srclist::{SourceListFileType, SourceListType};
 
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {
-    /// mwalib context struct.
-    pub(crate) context: CorrelatorContext,
-
-    /// If provided, information on RFI flags.
-    pub(crate) cotter_flags: Option<CotterFlags>,
-
-    /// Which tiles are flagged? These values correspond to those from the
-    /// "Antenna" column in HDU 1 of the metafits file. Zero indexed.
-    pub(crate) tile_flags: Vec<usize>,
-
-    /// How many tiles are unflagged?
-    pub(crate) num_unflagged_tiles: usize,
+    /// Interface to the MWA data, and metadata on the input data.
+    pub(crate) input_data: Box<dyn InputData>,
 
     /// Beam struct.
     pub(crate) beam: mwa_hyperbeam::fee::FEEBeam,
@@ -59,6 +58,17 @@ pub struct CalibrateParams {
     /// The number of components in the source list. If all sources have only
     /// one component, then this is equal to the length of the source list.
     pub(crate) num_components: usize,
+
+    /// Which tiles are flagged? This field contains flags that are
+    /// user-specified as well as whatever was already flagged in the supplied
+    /// data.
+    ///
+    /// These values correspond to those from the "Antenna" column in HDU 1 of
+    /// the metafits file. Zero indexed.
+    pub(crate) tile_flags: Vec<usize>,
+
+    /// Which tiles are unflagged?
+    pub(crate) unflagged_tiles: Vec<usize>,
 
     /// Channel- and frequency-related parameters required for calibration.
     pub(crate) freq: FrequencyParams,
@@ -89,7 +99,7 @@ pub struct CalibrateParams {
     ///
     /// To prevent this variable from being misused, it is private. Getting or
     /// setting requires methods.
-    timestep: usize,
+    // timestep: usize,
 
     /// The local sidereal time [radians]. This variable is kept in lockstep with
     /// `timestep`.
@@ -103,167 +113,182 @@ pub struct CalibrateParams {
     /// To prevent this variable from being misused, it is private. Getting or
     /// setting requires methods.
     pointing: HADec,
-
-    /// The observation timesteps, respecting the target time resolution.
-    ///
-    /// If time_res is the same as the observations native resolution, then
-    /// these timesteps are the same as mwalib's timesteps. Otherwise, they need
-    /// to be adjusted.
-    timesteps: Vec<usize>,
+    // /// The observation timestep indices, respecting the target time resolution.
+    // ///
+    // /// If time_res is the same as the observations native resolution, then
+    // /// these timesteps are the same as mwalib's timesteps. Otherwise, they need
+    // /// to be adjusted.
+    // timesteps: Vec<usize>,
 }
 
 impl CalibrateParams {
-    /// Create a new params struct from arguments and an existing mwalib
-    /// context. This function is intentionally private; it should only be
-    /// directly used for testing. The only way for a caller to create a
-    /// `CalibrateParams` is with `CalibrateParams::from_args`, which requires
-    /// the presence of gpubox files. To allow testing *without* gpubox files,
-    /// this function does any work not required by the gpubox files.
+    /// Create a new params struct from arguments.
     ///
     /// If the time or frequency resolution aren't specified, they default to
     /// the observation's native resolution.
     ///
     /// Source list vetoing is performed in this function, using the specified
     /// number of sources and/or the veto threshold.
-    fn new(
-        args: crate::calibrate::args::CalibrateUserArgs,
-        context: CorrelatorContext,
-    ) -> Result<Self, InvalidArgsError> {
+    pub(crate) fn new(args: super::args::CalibrateUserArgs) -> Result<Self, InvalidArgsError> {
         // Set up the beam (requires the MWA_BEAM_FILE variable to be set).
         debug!("Creating beam object");
         let beam = FEEBeam::new_from_env()?;
 
-        // mwaf files are optional; don't bail if none were specified.
-        debug!("Reading mwaf cotter flag files");
-        let cotter_flags = {
-            let mwaf_pbs: Option<Vec<PathBuf>> = match args.mwafs {
-                None => None,
+        // Handle input data. We expect one of three possibilities:
+        // - gpubox files, a metafits files, and maybe mwaf files,
+        // - a measurement set, or
+        // - uvfits files.
+        // If none or multiple of these possibilities are met, then we must fail.
+        let mut input_data: Box<dyn InputData> = match (
+            args.metafits,
+            args.gpuboxes,
+            args.mwafs,
+            args.ms,
+            args.uvfits,
+        ) {
+            // Valid input for reading raw data.
+            (Some(meta), Some(gpuboxes), mwafs, None, None) => {
+                let input_data = RawData::new(
+                    &meta,
+                    &gpuboxes,
+                    mwafs.as_deref(),
+                    args.ignore_metafits_flags.unwrap_or_default(),
+                    args.dont_flag_fine_channels.unwrap_or_default(),
+                )?;
 
-                Some(m) => match m.len() {
-                    0 => None,
-
-                    // If a single mwaf "file" was specified, and it isn't a real
-                    // file, treat it as a glob and expand it to find matches.
-                    1 => {
-                        let pb = PathBuf::from(&m[0]);
-                        if pb.exists() {
-                            Some(vec![pb])
-                        } else {
-                            let entries = get_all_matches_from_glob(&m[0])?;
-                            if entries.is_empty() {
-                                return Err(InvalidArgsError::SingleMwafNotAFileOrGlob);
-                            } else {
-                                Some(entries)
-                            }
-                        }
-                    }
-
-                    _ => Some(m.iter().map(PathBuf::from).collect()),
-                },
-            };
-
-            // If some mwaf files were given, unpack them.
-            if let Some(m) = mwaf_pbs {
-                let mut f = CotterFlags::new_from_mwafs(&m)?;
-
-                // The cotter flags are available for all times. Make them match
-                // only those we'll use according to mwalib.
-                f.trim(&context.metafits_context);
-
-                // Ensure that there is a mwaf file for each specified gpubox file.
-                for cc in &context.coarse_chans {
-                    if !f.gpubox_nums.contains(&(cc.gpubox_number as u8)) {
-                        return Err(InvalidArgsError::GpuboxFileMissingMwafFile(
-                            cc.gpubox_number,
-                        ));
-                    }
+                // Print some high-level information.
+                info!("Calibrating obsid {}", input_data.get_obsid());
+                info!("Using metafits: {}", meta);
+                info!("Using {} gpubox files", gpuboxes.len());
+                match mwafs {
+                    Some(_) => info!("Using supplied mwaf flags"),
+                    None => warn!("No mwaf flags files supplied"),
                 }
 
-                Some(f)
-            } else {
-                None
+                Box::new(input_data)
             }
+
+            // Valid input for reading a measurement set.
+            (None, None, None, Some(ms), None) => {
+                let input_data = MS::new(&ms)?;
+                info!(
+                    "Calibrating obsid {} from measurement set {}",
+                    input_data.get_obsid(),
+                    PathBuf::from(ms).canonicalize()?.display()
+                );
+                Box::new(input_data)
+            }
+
+            // Valid input for reading uvfits files.
+            // TODO: Probably need a metafits here.
+            (None, None, None, None, Some(uvfits_strs)) => {
+                todo!();
+
+                // let mut uvfits_pbs = Vec::with_capacity(uvfits_strs.len());
+                // for s in uvfits_strs {
+                //     let pb = PathBuf::from(s);
+                //     // Check that the file actually exists and is readable.
+                //     if !pb.exists() || !is_readable(&pb)? {
+                //         return Err(InvalidArgsError::BadFile(pb));
+                //     }
+                //     uvfits_pbs.push(pb);
+                // }
+                // InputData::Uvfits { paths: uvfits_pbs }
+            }
+
+            _ => return Err(InvalidArgsError::InvalidDataInput),
         };
 
-        // Assign the tile flags. Need to handle explicit user input as well as
-        // whether to use the metafits file or not.
-        let mut tile_flags: Vec<usize> = match args.tile_flags {
-            Some(flags) => flags,
-            None => vec![],
+        // Assign the tile flags. Add tiles that have already been flagged by
+        // the input data.
+        let mut tile_flags_set: HashSet<usize> = match args.tile_flags {
+            Some(flags) => flags.into_iter().collect(),
+            None => HashSet::new(),
         };
-        match args.ignore_metafits_flags {
-            Some(true) => debug!("NOT using metafits tile flags"),
-            _ => {
-                // Iterate over the RF inputs, and add the tile flags if
-                // necessary.
-                let mut meta_tile_flags = vec![];
-                for rf in context
-                    .metafits_context
-                    .rf_inputs
-                    .iter()
-                    .filter(|rf| rf.pol == mwalib::Pol::Y)
-                {
-                    let a = rf.ant as usize;
-                    if rf.flagged && !tile_flags.contains(&a) {
-                        meta_tile_flags.push(a);
-                        tile_flags.push(a);
-                    }
-                }
-                debug!("Using metafits tile flags; found {:?}", &meta_tile_flags);
-            }
+        for &obs_tile_flag in input_data.get_tile_flags() {
+            tile_flags_set.insert(obs_tile_flag);
         }
-        // Sort the tile flags.
+        let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
         tile_flags.sort_unstable();
-        // Validate.
-        let num_tiles = context.metafits_context.rf_inputs.len() / 2;
-        debug!("There are {} total tiles", num_tiles);
-        let num_unflagged_tiles = num_tiles - tile_flags.len();
-        for &f in &tile_flags {
-            if f > num_tiles - 1 {
-                return Err(InvalidArgsError::InvalidTileFlag {
-                    got: f,
-                    max: num_tiles - 1,
-                });
-            }
+        // The length of the tile XYZ collection is the number of tiles in the
+        // array, even if some tiles are flagged.
+        let unflagged_tiles = (0..input_data.get_tile_xyz().len())
+            .into_iter()
+            .filter(|ant| tile_flags.contains(ant))
+            .collect();
+        info!("Tile flags: {:?}", tile_flags);
+
+        // Assign the per-coarse-channel fine-channel flags.
+        let mut fine_chan_flags_set: HashSet<usize> = match args.fine_chan_flags {
+            Some(flags) => flags.into_iter().collect(),
+            None => HashSet::new(),
+        };
+        for &obs_fine_chan_flag in input_data.get_fine_chan_flags() {
+            fine_chan_flags_set.insert(obs_fine_chan_flag);
         }
-        debug!("There are {} unflagged tiles", num_unflagged_tiles);
+        let mut fine_chan_flags: Vec<usize> = fine_chan_flags_set.into_iter().collect();
+        fine_chan_flags.sort_unstable();
+        info!("Fine-channel flags per coarse band: {:?}", fine_chan_flags);
+        debug!(
+            "Observation's fine-channel flags per coarse band: {:?}",
+            input_data.get_fine_chan_flags()
+        );
 
-        let fine_channel_flags: Vec<usize> = match args.fine_chan_flags {
-            Some(flags) => flags,
-            // If the flags aren't specified, use the observation's fine-channel
-            // frequency resolution to set them.
-            None => match context.metafits_context.corr_fine_chan_width_hz {
-                // 10 kHz, 128 channels.
-                10000 => vec![
-                    0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127,
-                ],
-
-                // 20 kHz, 64 channels.
-                20000 => vec![0, 1, 2, 3, 32, 60, 61, 62, 63],
-
-                // 40 kHz, 32 channels.
-                40000 => vec![0, 1, 16, 30, 31],
-
-                f => return Err(InvalidArgsError::UnhandledFreqResolutionForFlags(f)),
-            },
+        let first_timestep = input_data.get_timesteps()[0];
+        let lst = unsafe {
+            let gmst = erfa_sys::eraGmst06(
+                erfa_sys::ERFA_DJM0,
+                first_timestep.as_mjd_utc_days(),
+                erfa_sys::ERFA_DJM0,
+                first_timestep.as_mjd_utc_days(),
+            );
+            (gmst + MWA_LONGITUDE_RADIANS) % TAU
         };
 
-        // Print some high-level information.
-        info!("Calibrating obsid {}", context.metafits_context.obs_id);
-        info!(
-            "Using metafits: {}",
-            context.metafits_context.metafits_filename
-        );
-        info!("Using {} gpubox files", context.num_gpubox_files);
-        match &cotter_flags {
-            Some(_) => info!("Using supplied cotter flags"),
-            None => warn!("No cotter flags files specified"),
+        // Set up frequency information.
+        let obs_freq_info = input_data.get_freq_context();
+        let native_freq_res = obs_freq_info.native_fine_chan_width;
+        let freq_res = args.freq_res.unwrap_or(native_freq_res);
+        if freq_res % native_freq_res != 0.0 {
+            return Err(InvalidArgsError::InvalidFreqResolution {
+                got: freq_res,
+                native: native_freq_res,
+            });
         }
-        info!("Tile flags: {:?}", &tile_flags);
-        info!(
-            "Fine-channel flags per coarse band: {:?}",
-            fine_channel_flags
-        );
+
+        let obs_fine_chan_flags = input_data.get_freq_context();
+        let num_fine_chans_per_coarse_band =
+            obs_freq_info.fine_chan_freqs.len() / obs_freq_info.coarse_chan_freqs.len();
+        let num_unflagged_fine_chans_per_coarse_band =
+            num_fine_chans_per_coarse_band - fine_chan_flags.len();
+        let unflagged_fine_chan_freqs: Vec<f64> = obs_freq_info
+            .fine_chan_freqs
+            .iter()
+            .zip(
+                (0..obs_freq_info.num_fine_chans_per_coarse_chan)
+                    .into_iter()
+                    .cycle(),
+            )
+            .filter_map(|(&freq, chan_num)| {
+                if fine_chan_flags.contains(&chan_num) {
+                    None
+                } else {
+                    Some(freq)
+                }
+            })
+            .collect();
+        let freq_struct = FrequencyParams {
+            res: freq_res,
+            num_fine_chans_per_coarse_band,
+            num_fine_chans: obs_freq_info.fine_chan_freqs.len(),
+            fine_chan_freqs: obs_freq_info.fine_chan_freqs.clone(),
+            num_unflagged_fine_chans_per_coarse_band,
+            num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
+                * obs_freq_info.coarse_chan_freqs.len(),
+            // TODO
+            unflagged_fine_chan_freqs: vec![],
+            fine_chan_flags,
+        };
 
         let mut source_list: SourceList = {
             // Handle the source list argument.
@@ -314,10 +339,14 @@ impl CalibrateParams {
         if args.num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
+        dbg!(&obs_freq_info.coarse_chan_freqs);
+        let pointing = input_data.get_pointing().to_owned();
         let ranked_sources = veto_sources(
             &mut source_list,
-            &context.metafits_context,
-            &context.coarse_chans,
+            &pointing,
+            lst,
+            input_data.get_ideal_delays(),
+            &obs_freq_info.coarse_chan_freqs,
             &beam,
             args.num_sources,
             args.source_dist_cutoff.unwrap_or(CUTOFF_DISTANCE),
@@ -338,7 +367,7 @@ impl CalibrateParams {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
 
-        let native_time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+        let native_time_res = input_data.get_native_time_res();
         let time_res = args.time_res.unwrap_or(native_time_res);
         if time_res % native_time_res != 0.0 {
             return Err(InvalidArgsError::InvalidTimeResolution {
@@ -346,159 +375,37 @@ impl CalibrateParams {
                 native: native_time_res,
             });
         }
-        let num_time_steps_to_average = time_res / native_time_res;
-        let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
-
-        let native_freq_res = context.metafits_context.corr_fine_chan_width_hz as f64;
-        let freq_res = args.freq_res.unwrap_or(native_freq_res);
-        if freq_res % native_freq_res != 0.0 {
-            return Err(InvalidArgsError::InvalidFreqResolution {
-                got: freq_res,
-                native: native_freq_res,
-            });
-        }
-
-        // Start at the first timestep.
-        let timestep = 0;
-        let lst = lst_from_timestep(timestep, &context, time_res);
-        let pointing = pointing_from_timestep(timestep, &context, time_res);
-
-        let mut fine_chan_freqs = Vec::with_capacity(
-            context.metafits_context.num_corr_fine_chans_per_coarse
-                * context.metafits_context.num_coarse_chans,
-        );
-        // TODO: I'm suspicious that the start channel freq is incorrect.
-        for cc in &context.coarse_chans {
-            let mut cc_freqs = Array1::range(
-                cc.chan_start_hz as f64,
-                cc.chan_end_hz as f64,
-                context.metafits_context.corr_fine_chan_width_hz as f64,
-            )
-            .to_vec();
-            fine_chan_freqs.append(&mut cc_freqs);
-        }
-
-        let unflagged_fine_chan_freqs = fine_chan_freqs
-            .iter()
-            .zip(
-                (0..context.metafits_context.num_corr_fine_chans_per_coarse)
-                    .into_iter()
-                    .cycle(),
-            )
-            .filter_map(|(&freq, chan_num)| {
-                if fine_channel_flags.contains(&chan_num) {
-                    None
-                } else {
-                    Some(freq)
-                }
-            })
-            .collect();
-        let num_unflagged_fine_chans_per_coarse_band =
-            context.metafits_context.num_corr_fine_chans_per_coarse - fine_channel_flags.len();
-
-        let freq_struct = FrequencyParams {
-            res: freq_res,
-            num_fine_chans_per_coarse_band: context.metafits_context.num_corr_fine_chans_per_coarse,
-            num_fine_chans: context.metafits_context.num_corr_fine_chans_per_coarse
-                * context.num_coarse_chans,
-            fine_chan_freqs,
-            num_unflagged_fine_chans_per_coarse_band,
-            num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
-                * context.num_coarse_chans,
-            unflagged_fine_chan_freqs,
-            fine_channel_flags,
-        };
+        // let num_time_steps_to_average = time_res / native_time_res;
+        // let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
 
         Ok(Self {
-            context,
-            cotter_flags,
-            tile_flags,
-            num_unflagged_tiles,
+            input_data,
             beam,
             source_list,
             ranked_sources,
             num_components,
+            tile_flags,
+            unflagged_tiles,
             freq: freq_struct,
             time_res,
-            timesteps,
-            timestep,
-            lst,
             jones_cache: JonesCache::new(),
-            pointing,
+            // timestep,
+            lst,
+            // TODO: Should this be RADec or HADec?
+            pointing: pointing.to_hadec(lst),
+            // timesteps,
         })
     }
 
-    /// Create a new params struct from user arguments.
-    ///
-    /// Most of the work is delegated to `CalibrateParams::new`; this function
-    /// requires the presence of gpubox files, whereas `new` does not. However,
-    /// `new` is not publicly visible; it is only used so we can test the code
-    /// without needing gpubox files.
-    pub fn from_args(
-        mut args: crate::calibrate::args::CalibrateUserArgs,
-    ) -> Result<Self, InvalidArgsError> {
-        let metafits: PathBuf = match args.metafits {
-            None => return Err(InvalidArgsError::NoMetafits),
-            Some(m) => {
-                // The metafits argument could be a glob. If the specified
-                // metafits file can't be found, treat it as a glob and expand
-                // it to find a match.
-                let pb = PathBuf::from(&m);
-                if pb.exists() {
-                    pb
-                } else {
-                    get_single_match_from_glob(&m)?
-                }
-            }
-        };
-        debug!("Using metafits: {}", metafits.display());
+    // /// Get the current timestep.
+    // pub fn get_timestep(&self) -> usize {
+    //     self.timestep
+    // }
 
-        let gpuboxes: Vec<PathBuf> = match args.gpuboxes {
-            None => return Err(InvalidArgsError::NoGpuboxes),
-            Some(g) => {
-                match g.len() {
-                    0 => return Err(InvalidArgsError::NoGpuboxes),
-
-                    // If a single gpubox file was specified, and it isn't a real
-                    // file, treat it as a glob and expand it to find matches.
-                    1 => {
-                        let pb = PathBuf::from(&g[0]);
-                        if pb.exists() {
-                            vec![pb]
-                        } else {
-                            let entries = get_all_matches_from_glob(&g[0])?;
-                            if entries.is_empty() {
-                                return Err(InvalidArgsError::SingleGpuboxNotAFileOrGlob);
-                            } else {
-                                entries
-                            }
-                        }
-                    }
-
-                    _ => g.iter().map(PathBuf::from).collect(),
-                }
-            }
-        };
-        debug!("Using gpubox files: {:#?}", gpuboxes);
-
-        debug!("Creating mwalib context");
-        let context = CorrelatorContext::new(&metafits, &gpuboxes)?;
-
-        // Plug up the missing parts of the arguments.
-        args.metafits = None;
-        args.gpuboxes = None;
-        CalibrateParams::new(args, context)
-    }
-
-    /// Get the current timestep.
-    pub fn get_timestep(&self) -> usize {
-        self.timestep
-    }
-
-    /// Get all of the available timesteps.
-    pub fn get_timesteps(&self) -> &[usize] {
-        &self.timesteps
-    }
+    // /// Get all of the available timesteps.
+    // pub fn get_timesteps(&self) -> &[usize] {
+    //     &self.timesteps
+    // }
 
     /// Get the current LST [radians].
     pub(crate) fn get_lst(&self) -> f64 {
@@ -510,11 +417,11 @@ impl CalibrateParams {
         &self.pointing
     }
 
-    /// Increment the timestep and LST.
-    pub(crate) fn next_timestep(&mut self) {
-        self.timestep += 1;
-        self.lst = lst_from_timestep(self.timestep, &self.context, self.time_res);
-    }
+    // /// Increment the timestep and LST.
+    // pub(crate) fn next_timestep(&mut self) {
+    //     self.timestep += 1;
+    //     self.lst = lst_from_timestep(self.timestep, &self.context, self.time_res);
+    // }
 
     /// Get the antenna index from the antenna number.
     ///
@@ -612,8 +519,6 @@ mod tests {
     #[serial]
     fn test_new_params() {
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -621,7 +526,7 @@ mod tests {
             source_list: data.source_list,
             ..Default::default()
         };
-        let params = match CalibrateParams::new(args, context) {
+        let params = match CalibrateParams::new(args) {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -636,8 +541,6 @@ mod tests {
     fn test_new_params_time_averaging() {
         // The native time resolution is 2.0s.
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -647,15 +550,13 @@ mod tests {
             time_res: Some(4.0),
             ..Default::default()
         };
-        let params = match CalibrateParams::new(args, context) {
+        let params = match CalibrateParams::new(args) {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
         assert_abs_diff_eq!(params.time_res, 4.0);
 
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -665,7 +566,7 @@ mod tests {
             time_res: Some(8.0),
             ..Default::default()
         };
-        let params = match CalibrateParams::new(args, context) {
+        let params = match CalibrateParams::new(args) {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -677,8 +578,6 @@ mod tests {
     fn test_new_params_time_averaging_fail() {
         // The native time resolution is 2.0s.
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -688,15 +587,13 @@ mod tests {
             time_res: Some(2.01),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
+        let result = CalibrateParams::new(args);
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
         );
 
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -706,7 +603,7 @@ mod tests {
             time_res: Some(3.0),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
+        let result = CalibrateParams::new(args);
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
@@ -718,8 +615,6 @@ mod tests {
     fn test_new_params_freq_averaging() {
         // The native freq. resolution is 40kHz.
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -729,15 +624,13 @@ mod tests {
             freq_res: Some(80e3),
             ..Default::default()
         };
-        let params = match CalibrateParams::new(args, context) {
+        let params = match CalibrateParams::new(args) {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
         assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
 
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -747,7 +640,7 @@ mod tests {
             freq_res: Some(200e3),
             ..Default::default()
         };
-        let params = match CalibrateParams::new(args, context) {
+        let params = match CalibrateParams::new(args) {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -759,8 +652,6 @@ mod tests {
     fn test_new_params_freq_averaging_fail() {
         // The native freq. resolution is 40kHz.
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -770,15 +661,13 @@ mod tests {
             freq_res: Some(10e3),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
+        let result = CalibrateParams::new(args);
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
         );
 
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -788,7 +677,7 @@ mod tests {
             freq_res: Some(79e3),
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
+        let result = CalibrateParams::new(args);
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
@@ -800,8 +689,6 @@ mod tests {
     fn test_new_params_tile_flags() {
         // 1090008640 has no flagged tiles in its metafits.
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -811,7 +698,7 @@ mod tests {
             tile_flags: Some(vec![1, 2, 3]),
             ..Default::default()
         };
-        let params = match CalibrateParams::new(args, context) {
+        let params = match CalibrateParams::new(args) {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -833,8 +720,6 @@ mod tests {
         // Try to get an antenna index for a tile that is flagged (should
         // panic).
         let data = get_1090008640();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -843,7 +728,7 @@ mod tests {
             tile_flags: Some(vec![1, 2]),
             ..Default::default()
         };
-        let params = match CalibrateParams::new(args, context) {
+        let params = match CalibrateParams::new(args) {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -937,8 +822,6 @@ mod tests {
     #[ignore]
     fn test_new_params_real_data() {
         let data = get_1065880128();
-        let context = CorrelatorContext::new(&data.metafits, &data.gpuboxes)
-            .expect("Failed to create mwalib context");
         let args = CalibrateUserArgs {
             metafits: Some(data.metafits),
             gpuboxes: Some(data.gpuboxes),
@@ -946,7 +829,7 @@ mod tests {
             source_list: data.source_list,
             ..Default::default()
         };
-        let result = CalibrateParams::new(args, context);
+        let result = CalibrateParams::new(args);
         assert!(
             result.is_ok(),
             "Expected CalibrateParams to have been successfully created"

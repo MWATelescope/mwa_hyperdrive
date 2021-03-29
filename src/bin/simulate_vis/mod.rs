@@ -2,15 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::io::BufReader;
+use std::fs::File;
+use std::io::{BufReader, Read};
+use std::path::PathBuf;
 
+use log::{debug, warn};
 use serde::Deserialize;
 use structopt::StructOpt;
 use thiserror::Error;
 
 use mwa_hyperdrive::visibility_gen::{vis_gen, TimeFreqParams};
-use mwa_hyperdrive::*;
-use mwa_hyperdrive_srclist::woden::parse_source_list;
+use mwa_hyperdrive_core::RADec;
+use mwa_hyperdrive_srclist::{woden::parse_source_list, SourceList};
 
 /// Contains all the arguments needed to do visibility simulation.
 #[derive(Debug)]
@@ -153,7 +156,7 @@ pub(crate) enum ParamError {
     TimeStepsInvalid,
 
     #[error("{0}")]
-    Mwalib(#[from] MwalibError),
+    Mwalib(#[from] mwa_hyperdrive_core::mwalib::MwalibError),
 
     #[error("Generic IO error: {0}")]
     IO(#[from] std::io::Error),
@@ -178,7 +181,7 @@ Valid extensions are .toml and .json"
 pub(crate) fn merge_cli_and_file_params(
     cli_args: SimulateVisArgs,
     param_file: Option<PathBuf>,
-) -> Result<(SimulateVisConcrete, Context), ParamError> {
+) -> Result<(SimulateVisConcrete, crate::visibility_gen::context::Context), ParamError> {
     // If available, read in the parameter file. Otherwise, all fields are
     // `None`.
     let file_params: SimulateVisArgs = if let Some(fp) = param_file {
@@ -273,7 +276,7 @@ pub(crate) fn merge_cli_and_file_params(
     };
 
     debug!("Attempting to create a Context from the metafits...");
-    let context = Context::new(&metafits, &[])?;
+    let context = crate::visibility_gen::context::Context::new(&metafits, &[])?;
 
     // Assign `fine_channel_width_hz` from a specified `fine_channel_width` or
     // `num_fine_channels`. The specified units are in kHz, but the output here

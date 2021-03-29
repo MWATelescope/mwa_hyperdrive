@@ -49,5 +49,5 @@ pub(crate) struct FrequencyParams {
     /// The fine channels to be flagged in each coarse band. e.g. For a 40 kHz
     /// observation, there are 32 fine channels, and the default flags would be:
     /// 0 1 16 30 31
-    pub(crate) fine_channel_flags: Vec<usize>,
+    pub(crate) fine_chan_flags: Vec<usize>,
 }

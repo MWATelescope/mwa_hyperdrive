@@ -4,7 +4,7 @@
 
 use thiserror::Error;
 
-use crate::*;
+use crate::mwalib::FitsError;
 
 #[derive(Error, Debug)]
 /// Error type associated with mwaf files.

@@ -73,15 +73,9 @@ mod tests {
             gpuboxes: Some(gpuboxes),
             mwafs: Some(mwafs),
             source_list: Some(source_list_pb.display().to_string()),
-            source_list_type: None,
             num_sources: Some(1000),
-            source_dist_cutoff: None,
             veto_threshold: Some(0.01),
-            time_res: None,
-            freq_res: None,
-            tile_flags: None,
-            ignore_metafits_flags: None,
-            fine_chan_flags: None,
+            ..Default::default()
         };
 
         (args, tmp_dir)

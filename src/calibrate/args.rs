@@ -13,7 +13,9 @@ errors) can be neatly split.
 
 use std::fs::File;
 use std::io::Read;
+use std::path::PathBuf;
 
+use log::debug;
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 use thiserror::Error;
@@ -51,6 +53,14 @@ pub struct CalibrateUserArgs {
     /// Paths to mwaf files.
     #[structopt(long)]
     pub mwafs: Option<Vec<String>>,
+
+    /// Path to the measurement set.
+    #[structopt(long = "ms")]
+    pub ms: Option<String>,
+
+    /// Paths to uvfits files.
+    #[structopt(long)]
+    pub uvfits: Option<Vec<String>>,
 
     /// Path to the sky-model source list file.
     #[structopt(short, long)]
@@ -96,8 +106,14 @@ pub struct CalibrateUserArgs {
     pub tile_flags: Option<Vec<usize>>,
 
     /// If specified, pretend that all tiles are unflagged in the metafits file.
+    /// Applies only when reading in raw data.
     #[structopt(long)]
     pub ignore_metafits_flags: Option<bool>,
+
+    /// If specified, don't flag channel edges and the DC channel when reading
+    /// in raw data. Applies only when reading in raw data.
+    #[structopt(long)]
+    pub dont_flag_fine_channels: Option<bool>,
 
     /// The fine channels to be flagged in each coarse band. e.g. 0 1 16 30 31
     ///
@@ -117,7 +133,7 @@ impl CalibrateUserArgs {
     ///
     /// This function should only ever merge arguments, and not try to make
     /// sense of them.
-    pub(crate) fn merge(self, arg_file: Option<PathBuf>) -> Result<Self, CalibrateArgsError> {
+    pub fn merge(self, arg_file: Option<PathBuf>) -> Result<Self, CalibrateArgsError> {
         // Make it abundantly clear that "self" should be considered the
         // command-line arguments.
         let cli_args = self;
@@ -176,6 +192,8 @@ impl CalibrateUserArgs {
             metafits: cli_args.metafits.or(file_args.metafits),
             gpuboxes: cli_args.gpuboxes.or(file_args.gpuboxes),
             mwafs: cli_args.mwafs.or(file_args.mwafs),
+            ms: cli_args.ms.or(file_args.ms),
+            uvfits: cli_args.uvfits.or(file_args.uvfits),
             source_list: cli_args.source_list.or(file_args.source_list),
             source_list_type: cli_args.source_list_type.or(file_args.source_list_type),
             num_sources: cli_args.num_sources.or(file_args.num_sources),
@@ -187,12 +205,15 @@ impl CalibrateUserArgs {
             ignore_metafits_flags: cli_args
                 .ignore_metafits_flags
                 .or(file_args.ignore_metafits_flags),
+            dont_flag_fine_channels: cli_args
+                .dont_flag_fine_channels
+                .or(file_args.dont_flag_fine_channels),
             fine_chan_flags: cli_args.fine_chan_flags.or(file_args.fine_chan_flags),
         })
     }
 
     pub fn into_params(self) -> Result<CalibrateParams, InvalidArgsError> {
-        CalibrateParams::from_args(self)
+        CalibrateParams::new(self)
     }
 }
 

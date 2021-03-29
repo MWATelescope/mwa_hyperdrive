@@ -9,8 +9,7 @@ Sources can be either because their position in the beam attenuates them
 sufficiently (veto), or we request a certain number of sources.
  */
 
-// use mwalib::{coarse_channel::CoarseChannel, MetafitsContext};
-use mwalib::{CoarseChannel, MetafitsContext};
+use log::{debug, trace, warn};
 use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
 
@@ -32,18 +31,29 @@ use mwa_hyperdrive_core::*;
 /// sources that need to be vetoed due to their positions in the beam are
 /// vetoed.
 ///
+/// `coarse_chan_freqs`: The centre frequencies of each of the coarse channels
+/// of this observation [Hz].
+///
 /// Assume an ideal array (all dipoles with unity gain). Also assume that the
 /// observation does not elapse enough time to shift sources into beam nulls
 /// compared to the obs start.
 pub(crate) fn veto_sources(
     source_list: &mut SourceList,
-    metafits: &MetafitsContext,
-    coarse_chans: &[CoarseChannel],
+    pointing: &RADec,
+    lst_rad: f64,
+    delays: &[u32],
+    coarse_chan_freqs: &[f64],
     beam: &mwa_hyperbeam::fee::FEEBeam,
     num_sources: Option<usize>,
     source_dist_cutoff: f64,
     veto_threshold: f64,
 ) -> Result<Vec<RankedSource>, VetoError> {
+    let pointing_azel = pointing.to_hadec(lst_rad).to_azel_mwa();
+
+    // We want to store the flux densities for each source at the "mean
+    // frequency". Store the middle coarse channel number to achieve this later.
+    let average_freq = coarse_chan_freqs.iter().sum::<f64>() / coarse_chan_freqs.len() as f64;
+
     // Do we need to consider the source distances? Determine this from the
     // final number of sources requested.
     let dist_cutoff: Option<f64> = {
@@ -62,19 +72,11 @@ pub(crate) fn veto_sources(
                 }
             }
             None => {
-                debug!("The number of sources to use was not specified; using a distance cutoff of {} degrees to filter sources", source_dist_cutoff);
+                warn!("The number of sources to use was not specified; using a distance cutoff of {} degrees to filter sources", source_dist_cutoff);
                 Some(source_dist_cutoff.to_radians())
             }
         }
     };
-    let pc_radec = RADec::new_degrees(
-        metafits.ra_tile_pointing_degrees,
-        metafits.dec_tile_pointing_degrees,
-    );
-
-    // We want to store the flux densities for each source at the "mean
-    // frequency". Store the middle coarse channel number to achieve this later.
-    let middle_coarse_chan = coarse_chans[coarse_chans.len() / 2].corr_chan_number;
 
     let (vetoed_sources, mut not_vetoed_sources): (Vec<_>, Vec<_>) = source_list
         .par_iter()
@@ -82,7 +84,7 @@ pub(crate) fn veto_sources(
             // Are any of this source's components too low in elevation? Or too
             // far from the pointing centre?
             for comp in &source.components {
-                let azel = comp.radec.to_hadec(metafits.lst_rad).to_azel_mwa();
+                let azel = comp.radec.to_hadec(lst_rad).to_azel_mwa();
                 if azel.el < ELEVATION_LIMIT {
                     trace!("A component of source {}'s elevation ({} radians) was below the limit ({} radians)",
                            source_name,
@@ -90,7 +92,7 @@ pub(crate) fn veto_sources(
                            ELEVATION_LIMIT);
                     return Either::Left(source_name.clone());
                 } else if let Some(d) = dist_cutoff {
-                    if comp.radec.separation(&pc_radec) > d {
+                    if comp.radec.separation(&pointing) > d {
                     trace!("A component of source {}'s elevation ({} radians) was too far from the pointing centre ({} radians)",
                            source_name,
                            azel.el,
@@ -110,17 +112,16 @@ pub(crate) fn veto_sources(
 
             // Iterate over each frequency. Is the total flux density acceptable
             // for each frequency?
-            for coarse_chan in coarse_chans {
+            for &cc_freq in coarse_chan_freqs {
                 // `fd` is the sum of the source's component flux densities.
                 let mut fd = 0.0;
 
                 // Get the beam response at this source position and frequency.
                 let j = Jones::from(beam.calc_jones(
-                        metafits.az_rad,
-                        metafits.za_rad,
-                        coarse_chan.chan_centre_hz,
-                        // Use the ideal delays.
-                        &metafits.delays,
+                        pointing_azel.az,
+                        pointing_azel.za(),
+                        cc_freq as _,
+                        delays,
                         &[1.0; 16],
                     true)
                     // unwrap is ugly, but an error would indicate a serious
@@ -130,7 +131,7 @@ pub(crate) fn veto_sources(
                 // TODO: Remove unwrap.
 
                 for source_fd in source
-                    .get_flux_estimates(coarse_chan.chan_centre_hz as _)
+                    .get_flux_estimates(cc_freq)
                     .unwrap()
                 {
                     fd += get_beam_attenuated_flux_density(&source_fd, &j);
@@ -154,8 +155,7 @@ pub(crate) fn veto_sources(
                  smallest_fd,
                  cc_fds,
                  source,
-                 // Use the centre observation frequency.
-                 metafits.centre_freq_hz as f64,
+                 average_freq
             ).unwrap())
         });
 
@@ -241,6 +241,8 @@ pub enum VetoError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mwalib::MetafitsContext;
+    use std::path::PathBuf;
 
     use approx::*;
     // Need to use serial tests because HDF5 is not necessarily reentrant.

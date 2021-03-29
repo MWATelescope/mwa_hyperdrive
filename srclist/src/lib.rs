@@ -89,3 +89,4 @@ use mwa_hyperdrive_core::*;
 
 // External re-exports.
 pub use mwa_hyperdrive_core;
+pub use mwa_hyperdrive_core::SourceList;

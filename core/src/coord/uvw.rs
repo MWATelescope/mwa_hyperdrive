@@ -113,7 +113,7 @@ mod tests {
                 z: 665.2348852011041,
             },
         ];
-        let xyz_bl = XYZ::get_xyz_baselines(&xyz);
+        let xyz_bl = XYZ::get_baselines(&xyz);
         let pointing = HADec::new(6.0163, -0.453121);
         let uvw = UVW::get_baselines(&xyz_bl, &pointing);
         let expected = UVW {

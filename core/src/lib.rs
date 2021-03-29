@@ -23,8 +23,9 @@ pub use sexagesimal::*;
 pub use source::*;
 pub use source_list::*;
 
+pub use erfa_sys;
 pub use mwalib;
-pub use num::complex::Complex64 as c64;
+pub use num::complex::{Complex32 as c32, Complex64 as c64};
 
 #[cfg(feature = "beam")]
 pub use mwa_hyperbeam;

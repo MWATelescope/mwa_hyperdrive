@@ -69,7 +69,7 @@ impl XYZ {
     }
 
     /// For each XYZ pair, calculate a baseline.
-    pub fn get_xyz_baselines(xyz: &[Self]) -> Vec<XyzBaseline> {
+    pub fn get_baselines(xyz: &[Self]) -> Vec<XyzBaseline> {
         // Assume that the length of `xyz` is the number of tiles.
         let n_tiles = xyz.len();
         let n_baselines = (n_tiles * (n_tiles - 1)) / 2;
@@ -82,14 +82,14 @@ impl XYZ {
         diffs
     }
 
-    /// For each RF input listed in an mwalib context, calculate a
-    /// `XyzBaseline`.
+    /// For each tile listed in an mwalib context, calculate a `XYZ` geocentric
+    /// coordinate.
     ///
     /// Note that the RF inputs are ordered by antenna number, **not** the
     /// "input"; e.g. in the metafits file, Tile104 is often the first tile
     /// listed ("input" 0), Tile103 second ("input" 2), so the first baseline
     /// would naively be between Tile104 and Tile103.
-    pub fn get_baselines_mwalib(context: &mwalib::MetafitsContext) -> Vec<XyzBaseline> {
+    pub fn get_tiles_mwalib(context: &mwalib::MetafitsContext) -> Vec<Self> {
         let mut xyz = Vec::with_capacity(context.num_rf_inputs / 2);
         for rf in &context.rf_inputs {
             // There is an RF input for both tile polarisations. The ENH
@@ -106,7 +106,17 @@ impl XYZ {
             };
             xyz.push(enh.to_xyz_mwa());
         }
-        Self::get_xyz_baselines(&xyz)
+        xyz
+    }
+
+    /// For each tile listed in an mwalib context, calculate a `XyzBaseline`.
+    ///
+    /// Note that the RF inputs are ordered by antenna number, **not** the
+    /// "input"; e.g. in the metafits file, Tile104 is often the first tile
+    /// listed ("input" 0), Tile103 second ("input" 2), so the first baseline
+    /// would naively be between Tile104 and Tile103.
+    pub fn get_baselines_mwalib(context: &mwalib::MetafitsContext) -> Vec<XyzBaseline> {
+        Self::get_baselines(&Self::get_tiles_mwalib(context))
     }
 }
 
@@ -200,7 +210,7 @@ mod tests {
             },
         ];
 
-        let diffs = XYZ::get_xyz_baselines(&xyz);
+        let diffs = XYZ::get_baselines(&xyz);
         assert_eq!(diffs.len(), 6);
         for (exp, diff) in expected.iter().zip(diffs.iter()) {
             assert_abs_diff_eq!(exp.x, diff.x, epsilon = 1e-10);

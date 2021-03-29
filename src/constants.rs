@@ -70,4 +70,11 @@ pub const EMPIRICAL_GAINS_40KHZ: [f64; 32] = [
     1.0519857, 1.02483081, 0.96454596, 0.86071928, 0.71382954, 0.5, 0.5,
 ];
 
+/// This is the number of seconds from 1900 Jan 1 and 1980 Jan 5. The GPS epoch
+/// is 1980 Jan 5, but hifitime uses 1900 for everything; subtracting this
+/// number from the result of hifitime::Epoch::as_gpst_seconds gives the
+/// expected GPS time.
+pub const HIFITIME_GPS_FACTOR: f64 =
+    hifitime::SECONDS_PER_YEAR * 80.0 + hifitime::SECONDS_PER_DAY * 4.0;
+
 pub use mwa_hyperdrive_core::constants::*;
