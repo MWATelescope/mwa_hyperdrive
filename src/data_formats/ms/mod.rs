@@ -6,7 +6,7 @@
 Code to interface with CASA measurement sets.
  */
 
-pub mod error;
+pub(crate) mod error;
 mod helpers;
 
 pub use error::*;
@@ -19,27 +19,25 @@ use std::path::{Path, PathBuf};
 use log::{debug, warn};
 use ndarray::prelude::*;
 
-use super::{error::*, *};
+use super::*;
 use crate::constants::HIFITIME_GPS_FACTOR;
-use crate::context::{Context, FreqContext};
+use crate::context::{FreqContext, ObsContext};
 use crate::glob::get_single_match_from_glob;
-use mwa_hyperdrive_core::{c32, RADec, XyzBaseline, XYZ};
+use mwa_hyperdrive_core::{RADec, XYZ};
 
 pub(crate) struct MS {
-    /// The path to the measurement set on disk.
-    ms: PathBuf,
+    /// Observation metadata.
+    obs_context: ObsContext,
 
-    /// Metadata on the observation.
-    context: Context,
+    /// Frequency metadata.
+    freq_context: FreqContext,
 
     // MS-specific things follow.
-    /// The timestep indices of the MS that contain not-totally-flagged data.
-    /// When reading in a new timestep's data, these indices should be
-    /// multiplied by `step` to get the amount of rows to stride in the main
-    /// table.
-    timestep_indices: Range<usize>,
+    /// The path to the measurement set on disk.
+    pub(crate) ms: PathBuf,
 
-    /// The "stride" of the data, i.e. num. baselines.
+    /// The "stride" of the data, i.e. the number of rows (baselines) before the
+    /// time index changes.
     step: usize,
 }
 
@@ -93,9 +91,9 @@ impl MS {
                 Ok(())
             })
             .unwrap();
-        let xyz = casacore_positions_to_local_xyz(casacore_positions.view())?;
-        let total_num_tiles = xyz.len();
-        debug!("There are {} total tiles", xyz.len());
+        let tile_xyz = casacore_positions_to_local_xyz(casacore_positions.view())?;
+        let total_num_tiles = tile_xyz.len();
+        debug!("There are {} total tiles", total_num_tiles);
 
         // Get the observation's flagged tiles. cotter doesn't populate the
         // ANTENNA table with this information; it looks like all tiles are
@@ -107,7 +105,7 @@ impl MS {
         let mut tile_flags = vec![];
         let mut autocorrelations_present = false;
         let mut last_antenna_num = -1;
-        for i in 0..xyz.len() {
+        for i in 0..total_num_tiles {
             let antenna1_cell: i32 = main_table.get_cell("ANTENNA1", i as u64).unwrap();
             if antenna1_cell > 0 {
                 break;
@@ -206,10 +204,12 @@ impl MS {
         // set is not empty at the start of this function.
         debug!(
             "First good GPS timestep: {}",
+            // Need to remove a number from the result of .as_gpst_seconds(), as
+            // it goes from the 1900 epoch, not the expected 1980 epoch.
             timesteps.first().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR
         );
         debug!(
-            "Last good GPS timestep: {}",
+            "Last good GPS timestep:  {}",
             timesteps.iter().last().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR
         );
 
@@ -228,6 +228,7 @@ impl MS {
         let total_bandwidth_hz: f64 = spectral_window_table
             .get_cell("TOTAL_BANDWIDTH", 0)
             .unwrap();
+        debug!("MS total bandwidth: {} Hz", total_bandwidth_hz);
 
         // Note the "subband" is CASA nomenclature. MWA tends to use coarse
         // channel instead.
@@ -242,12 +243,14 @@ impl MS {
                 .map(|cc_num| (cc_num + 1) as _)
                 .collect()
         };
+        debug!("MS coarse channels: {:?}", &coarse_chan_nums);
 
         // Get other metadata.
         let mut observation_table = read_table(&ms, Some("OBSERVATION"))?;
         let obsid: u32 = observation_table
             .get_cell::<f64>("MWA_GPS_TIME", 0)
             .unwrap() as _;
+        debug!("MS obsid: {}", obsid);
 
         let mut mwa_tile_pointing_table = read_table(&ms, Some("MWA_TILE_POINTING"))?;
         let delays: Vec<u32> = {
@@ -256,20 +259,29 @@ impl MS {
                 .unwrap();
             delays_signed.into_iter().map(|d| d as _).collect()
         };
+        debug!("MS dipole delays: {:?}", &delays);
 
-        let mut context = Context::new(
-            obsid,
-            timesteps,
-            native_time_res,
-            pointing,
-            delays,
-            xyz,
-            tile_flags,
-            vec![], // Populate this properly soon!
+        let coarse_chan_width = total_bandwidth_hz / coarse_chan_nums.len() as f64;
+        // TODO: Check that the length is enough.
+        let native_fine_chan_width = fine_chan_freqs_hz[1] - fine_chan_freqs_hz[0];
+        let num_fine_chans_per_coarse_chan =
+            (total_bandwidth_hz / coarse_chan_nums.len() as f64 / native_fine_chan_width).round()
+                as _;
+        let coarse_chan_freqs: Vec<f64> = fine_chan_freqs_hz
+            .chunks_exact(num_fine_chans_per_coarse_chan)
+            // round is OK because these values are Hz, and we're not ever
+            // looking at sub-Hz resolution.
+            .map(|chunk| chunk[chunk.len() / 2].round())
+            .collect();
+        let freq_context = FreqContext {
             coarse_chan_nums,
-            total_bandwidth_hz,
-            fine_chan_freqs_hz,
-        );
+            coarse_chan_freqs,
+            coarse_chan_width,
+            total_bandwidth: total_bandwidth_hz,
+            fine_chan_freqs: fine_chan_freqs_hz,
+            num_fine_chans_per_coarse_chan,
+            native_fine_chan_width,
+        };
 
         // Get the observation's flagged channels.
         // TODO: Detect Birli.
@@ -285,6 +297,7 @@ impl MS {
             // For whatever reason, the CLI_COMMAND column needs to be accessed as a
             // vector, even though it only has one element.
             let cli_command: Vec<String> = history_table.get_cell_as_vec("CLI_COMMAND", 0).unwrap();
+            debug!("cotter CLI command: {:?}", cli_command);
 
             // cotter CLI args are *always* split by whitespace; no equals
             // symbol allowed.
@@ -302,6 +315,7 @@ impl MS {
                 Some(_) => ew_iter.next().unwrap().parse::<f64>().unwrap() * 1e3, // kHz -> Hz;
                 None => 80e3,
             };
+            debug!("cotter -edgewidth (Hz): {}", edgewidth);
             // If -noflagdcchannels is specified, then the centre channel of
             // each coarse channel is not flagged. Without this flag, the centre
             // channels are flagged.
@@ -309,8 +323,8 @@ impl MS {
                 Some(_) => true,
                 None => false,
             };
+            debug!("cotter -noflagdcchannels: {}", noflagdcchannels);
 
-            let freq_context = context.get_freq_context();
             let num_edge_channels = (edgewidth / freq_context.native_fine_chan_width).round() as _;
             let mut fine_chan_flags = vec![];
             for ec in 0..num_edge_channels {
@@ -325,19 +339,44 @@ impl MS {
         } else {
             panic!("Not using a cotter MS!");
         };
-        context.fine_chan_flags = fine_chan_flags;
+
+        let baseline_xyz = XYZ::get_baselines(&tile_xyz);
+
+        let obs_context = ObsContext {
+            obsid,
+            timesteps,
+            timestep_indices,
+            native_time_res,
+            pointing,
+            delays,
+            tile_xyz,
+            baseline_xyz,
+            tile_flags,
+            fine_chan_flags,
+        };
 
         Ok(Self {
+            obs_context,
+            freq_context,
             ms,
-            context,
-            timestep_indices,
             step,
         })
     }
 }
 
 impl InputData for MS {
+    fn get_obs_context(&self) -> &ObsContext {
+        &self.obs_context
+    }
+
+    fn get_freq_context(&self) -> &FreqContext {
+        &self.freq_context
+    }
+
     fn read(&self, time_range: Range<usize>) -> Result<Vec<Visibilities>, ReadInputDataError> {
+        /// When reading in a new timestep's data, these indices should be
+        /// multiplied by `step` to get the amount of rows to stride in the main
+        /// table.
         let row_range = (time_range.start * self.step) as u64..(time_range.end * self.step) as u64;
         debug!("Reading row range {:?} from the MS", row_range);
         let mut main_table = read_table(&self.ms, None).unwrap();
@@ -354,49 +393,5 @@ impl InputData for MS {
             })
             .unwrap();
         Ok(visibilities)
-    }
-
-    fn get_obsid(&self) -> u32 {
-        self.context.get_obsid()
-    }
-
-    fn get_timesteps(&self) -> &[hifitime::Epoch] {
-        self.context.get_timesteps()
-    }
-
-    fn get_timestep_indices(&self) -> &Range<usize> {
-        &self.timestep_indices
-    }
-
-    fn get_native_time_res(&self) -> f64 {
-        self.context.get_native_time_res()
-    }
-
-    fn get_pointing(&self) -> &RADec {
-        self.context.get_pointing()
-    }
-
-    fn get_freq_context(&self) -> &FreqContext {
-        self.context.get_freq_context()
-    }
-
-    fn get_tile_xyz(&self) -> &[XYZ] {
-        self.context.get_tile_xyz()
-    }
-
-    fn get_baseline_xyz(&self) -> &[XyzBaseline] {
-        self.context.get_baseline_xyz()
-    }
-
-    fn get_ideal_delays(&self) -> &[u32] {
-        self.context.get_delays()
-    }
-
-    fn get_tile_flags(&self) -> &[usize] {
-        &self.context.get_tile_flags()
-    }
-
-    fn get_fine_chan_flags(&self) -> &[usize] {
-        &self.context.get_fine_chan_flags()
     }
 }

@@ -3,8 +3,12 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 pub mod context;
-#[cfg(cuda)]
+#[cfg(feature = "cuda")]
 mod cuda;
+mod error;
+
+use context::Context;
+pub use error::VisibilityGenerationError;
 
 use std::f64::consts::TAU;
 use std::fs::File;
@@ -16,7 +20,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 
 use crate::{constants::*, math::cexp};
-use context::Context;
 use mwa_hyperdrive_core::*;
 
 /// Parameters for visibility generation. Members of this struct might be
@@ -51,7 +54,7 @@ pub fn vis_gen(
     mut pointing: HADec,
     cuda: bool,
     text_file: bool,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), VisibilityGenerationError> {
     // Because WODEN writes all `u` coordinates before writing all `v`, then
     // `w`, etc., we need to store all data before it can be written out. An
     // alternative to this approach is to write out intermediate "per time, per
@@ -74,9 +77,8 @@ pub fn vis_gen(
     );
     for band in &params.freq_bands {
         // Have to subtract 1, as we index MWA coarse bands from 1.
-        let base_freq = (context.base_freq
-            + (*band - 1) as u32 * context.mwalib.metafits_context.coarse_chan_width_hz)
-            as f64;
+        let base_freq =
+            (context.base_freq + (*band - 1) as u32 * context.mwalib.coarse_chan_width_hz) as f64;
         for fine_channel in 0..params.n_fine_channels {
             let freq = base_freq + params.fine_channel_width * fine_channel as f64;
             let mut fds = src
@@ -124,7 +126,7 @@ pub fn vis_gen(
         for band in &params.freq_bands {
             // Have to subtract 1, as we index MWA coarse bands from 1.
             let base_freq = (context.base_freq
-                + (*band - 1) as u32 * context.mwalib.metafits_context.coarse_chan_width_hz)
+                + (*band - 1) as u32 * context.mwalib.coarse_chan_width_hz)
                 as f64;
             for fine_channel in 0..params.n_fine_channels {
                 let freq = base_freq + params.fine_channel_width * fine_channel as f64;
@@ -141,11 +143,9 @@ pub fn vis_gen(
         let (mut real_t, mut imag_t) = if cuda {
             // Should only reach here if code calling this function hasn't
             // already aborted!
-            #[cfg(not(cuda))]
-            {
-                panic!("Tried to run CUDA code without CUDA-support being compiled!");
-            }
-            #[cfg(cuda)]
+            #[cfg(not(feature = "cuda"))]
+            panic!("Tried to run CUDA code without CUDA-support being compiled!");
+            #[cfg(feature = "cuda")]
             {
                 if time_step == 0 {
                     pb.println(format!(

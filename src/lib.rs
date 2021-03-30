@@ -7,15 +7,18 @@ Calibration software for the Murchison Widefield Array (MWA) radio telescope.
  */
 
 pub mod calibrate;
-pub mod visibility_gen;
+pub mod simulate_vis;
 
 pub(crate) mod constants;
 pub(crate) mod context;
 pub(crate) mod data_formats;
+pub(crate) mod error;
 pub(crate) mod flagging;
 pub(crate) mod glob;
 pub(crate) mod math;
+pub(crate) mod visibility_gen;
 
 // Re-exports.
 pub(crate) use constants::*;
+pub use error::HyperdriveError;
 pub(crate) use mwa_hyperdrive_core::*;

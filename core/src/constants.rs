@@ -21,7 +21,7 @@ pub const R2C_SIGN: f64 = -1.0;
 
 // Things that should never change.
 
-/// Speed of light [metres/second]
+/// Speed of light \[metres/second\]
 pub const VEL_C: f64 = erfa_sys::ERFA_CMPS;
 
 /// Seconds per day
@@ -34,14 +34,14 @@ pub const DH2R: f64 = 15.0 / 180.0 * PI;
 pub const SOLAR2SIDEREAL: f64 = 24.0 / 23.9344696;
 /// Earth rotation rate in radians per UT1 second.
 pub const EARTH_ROTATION_RATE: f64 = SOLAR2SIDEREAL * TAU / DAYSEC;
-/// Radius of the Earth [metres]
+/// Radius of the Earth \[metres\]
 // This was taken from the RTS. The IAU value is 6378100; maybe the extra 40m
 // are for the MWA's location? TODO: Check.
 pub const EARTH_RADIUS: f64 = 6378140.0;
 
-/// MWA latitude [degrees]
+/// MWA latitude \[degrees\]
 pub const MWA_LAT_DEG: f64 = -26.703_319;
-/// MWA latitude [radians]
+/// MWA latitude \[radians\]
 pub const MWA_LAT_RAD: f64 = mwalib::MWA_LATITUDE_RADIANS;
 // TODO: Take the sin and cos of MWA_LAT_RAD when Rust's const functionality is
 // more mature.

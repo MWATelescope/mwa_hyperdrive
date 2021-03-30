@@ -71,21 +71,21 @@ pub enum ComponentType {
 
     #[serde(rename = "gaussian")]
     Gaussian {
-        /// Major axis size [radians]
+        /// Major axis size \[radians\]
         maj: f64,
-        /// Minor axis size [radians]
+        /// Minor axis size \[radians\]
         min: f64,
-        /// Position angle [radians]
+        /// Position angle \[radians\]
         pa: f64,
     },
 
     #[serde(rename = "shapelet")]
     Shapelet {
-        /// Major axis size [radians]
+        /// Major axis size \[radians\]
         maj: f64,
-        /// Minor axis size [radians]
+        /// Minor axis size \[radians\]
         min: f64,
-        /// Position angle [radians]
+        /// Position angle \[radians\]
         pa: f64,
         /// Shapelet coefficients
         coeffs: Vec<ShapeletCoeff>,

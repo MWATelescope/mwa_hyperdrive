@@ -3,18 +3,14 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 mod common;
-mod simulate_vis;
-
 use common::*;
-use simulate_vis::*;
 
 use std::path::PathBuf;
 
-use anyhow::bail;
 use log::{debug, info};
 use structopt::{clap::AppSettings, StructOpt};
 
-use mwa_hyperdrive::*;
+use mwa_hyperdrive::{calibrate::calibrate, simulate_vis::simulate_vis, *};
 
 #[derive(StructOpt, Debug)]
 #[structopt(author, name = "hyperdrive", version = HYPERDRIVE_VERSION.as_str(), about, global_settings = &[AppSettings::ColoredHelp, AppSettings::ArgRequiredElseHelp])]
@@ -46,14 +42,15 @@ enum Args {
     SimulateVis {
         // Share the arguments that could be passed in via a parameter file.
         #[structopt(flatten)]
-        cli_args: SimulateVisArgs,
+        cli_args: mwa_hyperdrive::simulate_vis::SimulateVisArgs,
 
         /// All of the arguments to simulate-vis may be specified in a toml or
         /// json file. Any CLI arguments override parameters set in the file.
         #[structopt(name = "PARAMETER_FILE", parse(from_os_str))]
         param_file: Option<PathBuf>,
 
-        /// Use the CPU for visibility generation.
+        /// Use the CPU for visibility generation. This is deliberately made
+        /// non-default, because using a GPU is much faster.
         #[structopt(short, long)]
         cpu: bool,
 
@@ -73,7 +70,17 @@ enum Args {
     },
 }
 
-fn main() -> Result<(), anyhow::Error> {
+fn main() {
+    // Stolen from BurntSushi. We don't return Result from main because it
+    // prints the debug representation of the error. The code below prints the
+    // "display" or human readable representation of the error.
+    if let Err(e) = try_main() {
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+}
+
+fn try_main() -> Result<(), HyperdriveError> {
     // Set up logging.
     let args = Args::from_args();
     let verbosity = match args {
@@ -114,10 +121,12 @@ fn main() -> Result<(), anyhow::Error> {
             verbosity: _,
             dry_run,
         } => {
-            use mwa_hyperdrive::calibrate::*;
-
-            debug!("Merging command-line arguments with the argument file");
-            let args = cli_args.merge(args_file)?;
+            let args = if let Some(f) = args_file {
+                debug!("Merging command-line arguments with the argument file");
+                cli_args.merge(&f)?
+            } else {
+                cli_args
+            };
             debug!("{:#?}", &args);
             debug!("Converting arguments into calibration parameters");
             let parameters = args.into_params()?;
@@ -127,7 +136,7 @@ fn main() -> Result<(), anyhow::Error> {
                 return Ok(());
             }
 
-            di_cal(&parameters)?;
+            calibrate(&parameters)?;
 
             info!("hyperdrive calibrate complete.");
         }
@@ -141,10 +150,11 @@ fn main() -> Result<(), anyhow::Error> {
             dry_run,
         } => {
             // Handle requesting CUDA if CUDA isn't available.
-            #[cfg(not(cuda))]
+            #[cfg(not(feature = "cuda"))]
             if !cpu {
-                bail!("Requested GPU processing, but the CUDA feature was not enabled when hyperdrive was compiled.")
+                return Err(HyperdriveError::NoGpuCompiled);
             }
+
             simulate_vis(cli_args, param_file, cpu, write_to_text, dry_run)?
         }
     }

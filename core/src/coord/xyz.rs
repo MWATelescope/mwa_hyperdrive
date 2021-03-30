@@ -17,11 +17,11 @@ use crate::constants::MWA_LAT_RAD;
 /// Relationships, Polarimetry, and the Measurement Equation.
 #[derive(Clone, Copy, Debug)]
 pub struct XYZ {
-    /// x-coordinate [meters]
+    /// x-coordinate \[meters\]
     pub x: f64,
-    /// y-coordinate [meters]
+    /// y-coordinate \[meters\]
     pub y: f64,
-    /// z-coordinate [meters]
+    /// z-coordinate \[meters\]
     pub z: f64,
 }
 

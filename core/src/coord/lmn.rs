@@ -14,11 +14,11 @@ Handle interferometric direction-cosine coordinates.
 /// Relationships, Polarimetry, and the Measurement Equation.
 #[derive(Debug)]
 pub struct LMN {
-    /// l-coordinate [radians]
+    /// l-coordinate \[radians\]
     pub l: f64,
-    /// m-coordinate [radians]
+    /// m-coordinate \[radians\]
     pub m: f64,
-    /// n-coordinate [radians]
+    /// n-coordinate \[radians\]
     pub n: f64,
 }
 

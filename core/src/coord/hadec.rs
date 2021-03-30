@@ -12,9 +12,9 @@ use super::radec::RADec;
 /// A struct containing an Hour Angle and Declination. All units are in radians.
 #[derive(Clone, Copy, Debug)]
 pub struct HADec {
-    /// Hour angle [radians]
+    /// Hour angle \[radians\]
     pub ha: f64,
-    /// Declination [radians]
+    /// Declination \[radians\]
     pub dec: f64,
 }
 

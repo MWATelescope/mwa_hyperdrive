@@ -10,7 +10,6 @@ else, so the `RankedSource` type here helps calibration by providing a
 beam-attenuated flux density, as well as other things.
  */
 
-use crate::math::cos;
 use mwa_hyperdrive_core::*;
 
 /// A source's name as well as its apparent flux density.

@@ -11,14 +11,12 @@ this terminology, the code to handle arguments and parameters (and associated
 errors) can be neatly split.
  */
 
-pub mod error;
+pub(crate) mod error;
 pub(crate) mod freq;
-mod helpers;
 pub(crate) mod ranked_source;
 
 pub use error::*;
 pub(crate) use freq::*;
-use helpers::*;
 pub(crate) use ranked_source::*;
 
 use std::collections::HashSet;
@@ -27,10 +25,7 @@ use std::path::PathBuf;
 use log::{debug, info, warn};
 use mwa_hyperbeam::fee::FEEBeam;
 use mwalib::{CorrelatorContext, MWA_LONGITUDE_RADIANS};
-use ndarray::Array1;
 use permissions::is_readable;
-use regex::internal::Input;
-use rubbl_casatables::{Table, TableOpenMode};
 
 use crate::calibrate::veto::veto_sources;
 use crate::data_formats::*;
@@ -139,7 +134,7 @@ impl CalibrateParams {
         // - a measurement set, or
         // - uvfits files.
         // If none or multiple of these possibilities are met, then we must fail.
-        let mut input_data: Box<dyn InputData> = match (
+        let input_data: Box<dyn InputData> = match (
             args.metafits,
             args.gpuboxes,
             args.mwafs,
@@ -157,8 +152,9 @@ impl CalibrateParams {
                 )?;
 
                 // Print some high-level information.
-                info!("Calibrating obsid {}", input_data.get_obsid());
-                info!("Using metafits: {}", meta);
+                let obs_context = input_data.get_obs_context();
+                info!("Calibrating obsid {}", obs_context.obsid);
+                info!("Using metafits: {}", PathBuf::from(meta).display());
                 info!("Using {} gpubox files", gpuboxes.len());
                 match mwafs {
                     Some(_) => info!("Using supplied mwaf flags"),
@@ -173,14 +169,14 @@ impl CalibrateParams {
                 let input_data = MS::new(&ms)?;
                 info!(
                     "Calibrating obsid {} from measurement set {}",
-                    input_data.get_obsid(),
-                    PathBuf::from(ms).canonicalize()?.display()
+                    input_data.get_obs_context().obsid,
+                    input_data.ms.canonicalize()?.display()
                 );
                 Box::new(input_data)
             }
 
             // Valid input for reading uvfits files.
-            // TODO: Probably need a metafits here.
+            // TODO: Might need a metafits here.
             (None, None, None, None, Some(uvfits_strs)) => {
                 todo!();
 
@@ -199,20 +195,23 @@ impl CalibrateParams {
             _ => return Err(InvalidArgsError::InvalidDataInput),
         };
 
+        let obs_context = input_data.get_obs_context();
+        let freq_context = input_data.get_freq_context();
+
         // Assign the tile flags. Add tiles that have already been flagged by
         // the input data.
         let mut tile_flags_set: HashSet<usize> = match args.tile_flags {
             Some(flags) => flags.into_iter().collect(),
             None => HashSet::new(),
         };
-        for &obs_tile_flag in input_data.get_tile_flags() {
+        for &obs_tile_flag in &obs_context.tile_flags {
             tile_flags_set.insert(obs_tile_flag);
         }
         let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
         tile_flags.sort_unstable();
         // The length of the tile XYZ collection is the number of tiles in the
         // array, even if some tiles are flagged.
-        let unflagged_tiles = (0..input_data.get_tile_xyz().len())
+        let unflagged_tiles = (0..obs_context.tile_xyz.len())
             .into_iter()
             .filter(|ant| tile_flags.contains(ant))
             .collect();
@@ -223,7 +222,7 @@ impl CalibrateParams {
             Some(flags) => flags.into_iter().collect(),
             None => HashSet::new(),
         };
-        for &obs_fine_chan_flag in input_data.get_fine_chan_flags() {
+        for &obs_fine_chan_flag in &obs_context.fine_chan_flags {
             fine_chan_flags_set.insert(obs_fine_chan_flag);
         }
         let mut fine_chan_flags: Vec<usize> = fine_chan_flags_set.into_iter().collect();
@@ -231,10 +230,10 @@ impl CalibrateParams {
         info!("Fine-channel flags per coarse band: {:?}", fine_chan_flags);
         debug!(
             "Observation's fine-channel flags per coarse band: {:?}",
-            input_data.get_fine_chan_flags()
+            obs_context.fine_chan_flags
         );
 
-        let first_timestep = input_data.get_timesteps()[0];
+        let first_timestep = obs_context.timesteps[0];
         let lst = unsafe {
             let gmst = erfa_sys::eraGmst06(
                 erfa_sys::ERFA_DJM0,
@@ -246,8 +245,7 @@ impl CalibrateParams {
         };
 
         // Set up frequency information.
-        let obs_freq_info = input_data.get_freq_context();
-        let native_freq_res = obs_freq_info.native_fine_chan_width;
+        let native_freq_res = freq_context.native_fine_chan_width;
         let freq_res = args.freq_res.unwrap_or(native_freq_res);
         if freq_res % native_freq_res != 0.0 {
             return Err(InvalidArgsError::InvalidFreqResolution {
@@ -256,16 +254,15 @@ impl CalibrateParams {
             });
         }
 
-        let obs_fine_chan_flags = input_data.get_freq_context();
         let num_fine_chans_per_coarse_band =
-            obs_freq_info.fine_chan_freqs.len() / obs_freq_info.coarse_chan_freqs.len();
+            freq_context.fine_chan_freqs.len() / freq_context.coarse_chan_freqs.len();
         let num_unflagged_fine_chans_per_coarse_band =
             num_fine_chans_per_coarse_band - fine_chan_flags.len();
-        let unflagged_fine_chan_freqs: Vec<f64> = obs_freq_info
+        let unflagged_fine_chan_freqs: Vec<f64> = freq_context
             .fine_chan_freqs
             .iter()
             .zip(
-                (0..obs_freq_info.num_fine_chans_per_coarse_chan)
+                (0..freq_context.num_fine_chans_per_coarse_chan)
                     .into_iter()
                     .cycle(),
             )
@@ -280,11 +277,11 @@ impl CalibrateParams {
         let freq_struct = FrequencyParams {
             res: freq_res,
             num_fine_chans_per_coarse_band,
-            num_fine_chans: obs_freq_info.fine_chan_freqs.len(),
-            fine_chan_freqs: obs_freq_info.fine_chan_freqs.clone(),
+            num_fine_chans: freq_context.fine_chan_freqs.len(),
+            fine_chan_freqs: freq_context.fine_chan_freqs.clone(),
             num_unflagged_fine_chans_per_coarse_band,
             num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
-                * obs_freq_info.coarse_chan_freqs.len(),
+                * freq_context.coarse_chan_freqs.len(),
             // TODO
             unflagged_fine_chan_freqs: vec![],
             fine_chan_flags,
@@ -339,14 +336,14 @@ impl CalibrateParams {
         if args.num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
-        dbg!(&obs_freq_info.coarse_chan_freqs);
-        let pointing = input_data.get_pointing().to_owned();
+        dbg!(&freq_context.coarse_chan_freqs);
+        let pointing = obs_context.pointing.to_owned();
         let ranked_sources = veto_sources(
             &mut source_list,
             &pointing,
             lst,
-            input_data.get_ideal_delays(),
-            &obs_freq_info.coarse_chan_freqs,
+            &obs_context.delays,
+            &freq_context.coarse_chan_freqs,
             &beam,
             args.num_sources,
             args.source_dist_cutoff.unwrap_or(CUTOFF_DISTANCE),
@@ -367,7 +364,7 @@ impl CalibrateParams {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
 
-        let native_time_res = input_data.get_native_time_res();
+        let native_time_res = obs_context.native_time_res;
         let time_res = args.time_res.unwrap_or(native_time_res);
         if time_res % native_time_res != 0.0 {
             return Err(InvalidArgsError::InvalidTimeResolution {
@@ -407,15 +404,15 @@ impl CalibrateParams {
     //     &self.timesteps
     // }
 
-    /// Get the current LST [radians].
-    pub(crate) fn get_lst(&self) -> f64 {
-        self.lst
-    }
+    // /// Get the current LST [radians].
+    // pub(crate) fn get_lst(&self) -> f64 {
+    //     self.lst
+    // }
 
-    /// Get the current pointing.
-    pub(crate) fn get_pointing(&self) -> &HADec {
-        &self.pointing
-    }
+    // /// Get the current pointing.
+    // pub(crate) fn get_pointing(&self) -> &HADec {
+    //     &self.pointing
+    // }
 
     // /// Increment the timestep and LST.
     // pub(crate) fn next_timestep(&mut self) {

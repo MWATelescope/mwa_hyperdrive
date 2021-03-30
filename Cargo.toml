@@ -26,7 +26,6 @@ cfitsio-static = ["mwa_hyperdrive_core/cfitsio-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 
 [dependencies]
-anyhow = "1.0.38"
 byteorder = "1.4.2"
 chrono = "0.4.19"
 crossbeam-channel = "0.5.*"

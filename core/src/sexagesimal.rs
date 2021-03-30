@@ -9,7 +9,7 @@ Code for handling sexagesimal conversion.
 use thiserror::Error;
 
 /// Convert a sexagesimal-formatted string delimited by colons to a float
-/// [degrees]. The input is assumed to be in "degrees minutes seconds".
+/// \[degrees\]. The input is assumed to be in "degrees minutes seconds".
 ///
 /// # Examples
 ///
@@ -47,7 +47,7 @@ pub fn sexagesimal_dms_to_degrees(d: f64, m: f64, s: f64) -> f64 {
 }
 
 /// Convert a sexagesimal-formatted string in "degrees minutes seconds" to a
-/// float [degrees].
+/// float \[degrees\].
 ///
 /// # Examples
 ///
@@ -89,7 +89,7 @@ pub fn sexagesimal_dms_string_to_degrees(dms: &str) -> Result<f64, SexagesimalEr
 }
 
 /// Convert a sexagesimal-formatted string in "hours minutes seconds" to a
-/// float [degrees].
+/// float \[degrees\].
 ///
 /// # Examples
 ///

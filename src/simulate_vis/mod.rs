@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+pub(crate) mod error;
+
+pub use error::SimulateVisError;
+
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
@@ -11,13 +15,13 @@ use serde::Deserialize;
 use structopt::StructOpt;
 use thiserror::Error;
 
-use mwa_hyperdrive::visibility_gen::{vis_gen, TimeFreqParams};
-use mwa_hyperdrive_core::RADec;
+use crate::visibility_gen::{vis_gen, TimeFreqParams};
+use mwa_hyperdrive_core::{mwalib, RADec};
 use mwa_hyperdrive_srclist::{woden::parse_source_list, SourceList};
 
 /// Contains all the arguments needed to do visibility simulation.
 #[derive(Debug)]
-pub struct SimulateVisConcrete {
+pub(crate) struct SimulateVisConcrete {
     /// Path to the source list used for sky modelling.
     pub source_list: PathBuf,
 
@@ -44,9 +48,12 @@ pub struct SimulateVisConcrete {
 }
 
 // These values should match the defaults reported in the struct below.
-pub static DEFAULT_FINE_CHANNEL_WIDTH: f64 = 80.0;
-pub static DEFAULT_NUM_TIME_STEPS: u8 = 14;
-pub static DEFAULT_TIME_RES: f64 = 8.0;
+/// Default fine-channel width (a.k.a. frequency resolution) \[kHz\].
+pub const DEFAULT_FINE_CHANNEL_WIDTH: f64 = 80.0;
+/// Default number of time steps.
+pub const DEFAULT_NUM_TIME_STEPS: u8 = 14;
+/// Default time resolution \[seconds\].
+pub const DEFAULT_TIME_RES: f64 = 8.0;
 
 #[derive(StructOpt, Debug, Default, Deserialize)]
 pub struct SimulateVisArgs {
@@ -58,19 +65,19 @@ pub struct SimulateVisArgs {
     #[structopt(short, long, parse(from_str))]
     metafits: Option<PathBuf>,
 
-    /// The pointing-centre right ascension [degrees].
+    /// The pointing-centre right ascension \[degrees\].
     #[structopt(short, long)]
     ra: Option<f64>,
 
-    /// The pointing-centre declination [degrees].
+    /// The pointing-centre declination \[degrees\].
     #[structopt(short, long)]
     dec: Option<f64>,
 
-    /// The number of fine channels per coarse band [default: 16].
+    /// The number of fine channels per coarse band \[default: 16\].
     #[structopt(long)]
     num_fine_channels: Option<u16>,
 
-    /// The fine-channel resolution [kHz] [default: 80].
+    /// The fine-channel resolution \[kHz\] \[default: 80\].
     #[structopt(short, long)]
     fine_channel_width: Option<f64>,
 
@@ -83,11 +90,11 @@ pub struct SimulateVisArgs {
     #[structopt(short, long)]
     bands: Option<Vec<u8>>,
 
-    /// The number of time steps used from the metafits epoch [default: 14].
+    /// The number of time steps used from the metafits epoch \[default: 14\].
     #[structopt(long)]
     steps: Option<u8>,
 
-    /// The time resolution [seconds] [default: 8.0].
+    /// The time resolution \[seconds\] \[default: 8.0\].
     #[structopt(short, long)]
     time_res: Option<f64>,
 }
@@ -118,7 +125,7 @@ Metafits file:      {m}"#,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum ParamError {
+pub enum ParamError {
     #[error("Neither --num-bands nor --bands were supplied!")]
     BandsMissing,
 
@@ -156,7 +163,7 @@ pub(crate) enum ParamError {
     TimeStepsInvalid,
 
     #[error("{0}")]
-    Mwalib(#[from] mwa_hyperdrive_core::mwalib::MwalibError),
+    Mwalib(#[from] mwalib::MwalibError),
 
     #[error("Generic IO error: {0}")]
     IO(#[from] std::io::Error),
@@ -276,7 +283,7 @@ pub(crate) fn merge_cli_and_file_params(
     };
 
     debug!("Attempting to create a Context from the metafits...");
-    let context = crate::visibility_gen::context::Context::new(&metafits, &[])?;
+    let context = crate::visibility_gen::context::Context::new(&metafits)?;
 
     // Assign `fine_channel_width_hz` from a specified `fine_channel_width` or
     // `num_fine_channels`. The specified units are in kHz, but the output here
@@ -313,23 +320,23 @@ pub(crate) fn merge_cli_and_file_params(
             if c_nfc == 0 {
                 return Err(ParamError::FineChansZero);
             }
-            (context.mwalib.metafits_context.coarse_chan_width_hz / c_nfc as u32) as f64
+            (context.mwalib.coarse_chan_width_hz / c_nfc as u32) as f64
         }
 
         (None, None, None, Some(f_nfc)) => {
             if f_nfc == 0 {
                 return Err(ParamError::FineChansZero);
             }
-            (context.mwalib.metafits_context.coarse_chan_width_hz / f_nfc as u32) as f64
+            (context.mwalib.coarse_chan_width_hz / f_nfc as u32) as f64
         }
     };
     if fine_channel_width_hz < 0.0 || fine_channel_width_hz.abs() < 1e-6 {
         return Err(ParamError::FineChansWidthTooSmall);
     }
-    if fine_channel_width_hz > context.mwalib.metafits_context.coarse_chan_width_hz as f64 {
+    if fine_channel_width_hz > context.mwalib.coarse_chan_width_hz as f64 {
         return Err(ParamError::FineChanWidthTooBig {
             fcw: fine_channel_width_hz / 1000.0,
-            ccw: context.mwalib.metafits_context.coarse_chan_width_hz as u64 / 1000,
+            ccw: context.mwalib.coarse_chan_width_hz as u64 / 1000,
         });
     }
 
@@ -392,13 +399,13 @@ pub(crate) fn merge_cli_and_file_params(
 /// instead.
 ///
 /// This function assumes that the input source list is WODEN style.
-pub(crate) fn simulate_vis(
+pub fn simulate_vis(
     cli_args: SimulateVisArgs,
     param_file: Option<PathBuf>,
     cpu: bool,
     text: bool,
     dry_run: bool,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), SimulateVisError> {
     let (args, context) = merge_cli_and_file_params(cli_args, param_file)?;
 
     if dry_run {
@@ -413,7 +420,7 @@ pub(crate) fn simulate_vis(
         n_time_steps: args.steps as usize,
         time_resolution: args.time_res,
         freq_bands: args.bands,
-        n_fine_channels: context.mwalib.metafits_context.coarse_chan_width_hz as u64
+        n_fine_channels: context.mwalib.coarse_chan_width_hz as u64
             / args.fine_channel_width as u64,
         fine_channel_width: args.fine_channel_width,
     };

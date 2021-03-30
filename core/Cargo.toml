@@ -27,5 +27,5 @@ dashmap = { version = "4.0.*", optional = true }
 mwa_hyperbeam = { version = "0.3.*", optional = true }
 
 [dev-dependencies]
-ndarray = { version = ">=0.13,<0.16", features = ["approx"] }
+ndarray = { version = ">=0.13,<0.15", features = ["approx"] }
 serial_test = "0.5.*"

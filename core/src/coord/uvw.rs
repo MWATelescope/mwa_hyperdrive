@@ -15,11 +15,11 @@ use rayon::prelude::*;
 /// with units of metres.
 #[derive(Clone, Copy, Debug)]
 pub struct UVW {
-    /// u-coordinate [meters]
+    /// u-coordinate \[meters\]
     pub u: f64,
-    /// v-coordinate [meters]
+    /// v-coordinate \[meters\]
     pub v: f64,
-    /// w-coordinate [meters]
+    /// w-coordinate \[meters\]
     pub w: f64,
 }
 

@@ -13,7 +13,7 @@ errors) can be neatly split.
 
 use std::fs::File;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -133,29 +133,34 @@ impl CalibrateUserArgs {
     ///
     /// This function should only ever merge arguments, and not try to make
     /// sense of them.
-    pub fn merge(self, arg_file: Option<PathBuf>) -> Result<Self, CalibrateArgsError> {
+    pub fn merge<T: AsRef<Path>>(self, arg_file: &T) -> Result<Self, CalibrateArgsError> {
         // Make it abundantly clear that "self" should be considered the
         // command-line arguments.
         let cli_args = self;
 
-        // If available, read in the parameter file.
-        let file_args: Self = if let Some(pf) = &arg_file {
+        // Read in the file arguments.
+        let file_args: Self = {
+            let file_args_path = PathBuf::from(arg_file.as_ref());
             debug!(
-                "Found a argument file {}; attempting to parse...",
-                pf.display()
+                "Attempting to parse argument file {} ...",
+                file_args_path.display()
             );
 
             let mut contents = String::new();
-            match pf.extension().and_then(|e| e.to_str()) {
+            let file_args_extension = file_args_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase());
+            match file_args_extension.as_deref() {
                 Some("toml") => {
                     debug!("Parsing toml file...");
-                    let mut fh = File::open(&pf)?;
+                    let mut fh = File::open(&arg_file)?;
                     fh.read_to_string(&mut contents)?;
                     match toml::from_str(&contents) {
                         Ok(p) => p,
                         Err(e) => {
                             return Err(CalibrateArgsError::TomlDecode {
-                                file: pf.display().to_string(),
+                                file: file_args_path.display().to_string(),
                                 err: e.to_string(),
                             })
                         }
@@ -164,13 +169,13 @@ impl CalibrateUserArgs {
 
                 Some("json") => {
                     debug!("Parsing json file...");
-                    let mut fh = File::open(&pf)?;
+                    let mut fh = File::open(&arg_file)?;
                     fh.read_to_string(&mut contents)?;
                     match serde_json::from_str(&contents) {
                         Ok(p) => p,
                         Err(e) => {
                             return Err(CalibrateArgsError::JsonDecode {
-                                file: pf.display().to_string(),
+                                file: file_args_path.display().to_string(),
                                 err: e.to_string(),
                             })
                         }
@@ -179,12 +184,10 @@ impl CalibrateUserArgs {
 
                 _ => {
                     return Err(CalibrateArgsError::UnrecognisedArgFileExt(
-                        pf.display().to_string(),
+                        file_args_path.display().to_string(),
                     ))
                 }
             }
-        } else {
-            Self::default()
         };
 
         // Merge all the arguments, preferring the CLI args when available.

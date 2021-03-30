@@ -12,11 +12,11 @@ use crate::constants::*;
 /// East, North and Height coordinates.
 #[derive(Debug)]
 pub struct ENH {
-    /// East [metres]
+    /// East \[metres\]
     pub e: f64,
-    /// North [metres]
+    /// North \[metres\]
     pub n: f64,
-    /// Height [metres]
+    /// Height \[metres\]
     pub h: f64,
 }
 

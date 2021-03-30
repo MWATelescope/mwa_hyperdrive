@@ -7,12 +7,16 @@ Code to handle calibration.
  */
 
 pub mod args;
-pub mod params;
-pub mod veto;
+pub(crate) mod error;
+pub(crate) mod params;
+pub(crate) mod predict;
+pub(crate) mod veto;
+
+pub use error::CalibrateError;
+use params::CalibrateParams;
 
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::bounded;
@@ -23,93 +27,10 @@ use rayon::prelude::*;
 
 use crate::*;
 use mwa_hyperdrive_core::mwa_hyperbeam::fee::FEEBeamError;
-use params::CalibrateParams;
 
-/// Direction independent calibration.
-pub fn di_cal(params: &CalibrateParams) -> Result<(), anyhow::Error> {
-    let timestep_indices = params.input_data.get_timestep_indices();
-    // TODO: I'm a bad man.
-    // let total_num_tiles = params.input_data.get_total_num_tiles();
-    let total_num_tiles = 128;
-    let num_fine_freq_chans = params.input_data.get_freq_context().fine_chan_freqs.len();
-    let num_polarisations = 4;
-    // The output Jones matrices. We wrap them in an Arc<Mutex<_>> to allow
-    // multiple threads to mutate it in parallel.
-    let shape = (
-        timestep_indices.len(),
-        total_num_tiles,
-        num_fine_freq_chans,
-        num_polarisations,
-    );
-    debug!(
-        "Shape of DI Jones matrices array: {:?} ({} MiB)",
-        shape,
-        [
-            timestep_indices.len(),
-            total_num_tiles,
-            num_fine_freq_chans,
-            num_polarisations
-        ]
-        .iter()
-        .product::<usize>()
-        // 64 bytes per Jones matrix, 1024 * 1024 == 1 MiB.
-        * 64 / 1024
-            / 1024
-    );
-    let out = Arc::new(Mutex::new(Array4::from_elem(shape, Jones::identity())));
+pub fn calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
+    di_cal(params)?;
 
-    // TODO: Let the use decide how many threads to use.
-    let num_threads = rayon::current_num_threads();
-
-    // Set up our producer (sender) thread and worker (receiver) threads.
-    // TODO: Adjust the buffer size.
-    let (sx, rx) = bounded(10);
-    scope(|scope| {
-        scope.spawn(move |_| {
-            // Producer.
-            for t in timestep_indices.to_owned() {
-                // let vis = params.input_data.read(1..2)?;
-                let vis = params.input_data.read(t..t + 1).unwrap();
-                let msg = t - timestep_indices.start;
-                sx.send(Box::new(msg)).unwrap();
-                dbg!(t);
-            }
-
-            // By dropping the send channel, we signal to the receivers that
-            // there is no more incoming data, and they can stop waiting.
-            drop(sx);
-        });
-
-        // Workers.
-        for i in 0..num_threads {
-            let thread_id = i.clone();
-            // Get a thread-local receive channel and reference to the output
-            // Jones matrices.
-            let rx = rx.clone();
-            let out = out.clone();
-            scope.spawn(move |_| {
-                // Iterate on the receive channel forever. This terminates when
-                // there is no data in the channel, and the sender has
-                // been dropped.
-                for msg_box in rx.iter() {
-                    let msg = *msg_box;
-                    println!("Thread {}: Got {:?}", thread_id, msg);
-
-                    // sleep(Duration::from_secs(3));
-                    let mut arr = out.lock().unwrap();
-                    arr[[msg, 0, 0, 0]] = Jones::identity() * msg as f64;
-                }
-            });
-        }
-    })
-    .unwrap();
-
-    dbg!(&params.tile_flags);
-
-    Ok(())
-}
-
-pub fn calibrate(params: CalibrateParams) -> Result<(), anyhow::Error> {
     // How much time is available?
     //
     // Assume we're doing a DI step. How much data gets averaged together? Does
@@ -170,7 +91,97 @@ pub fn calibrate(params: CalibrateParams) -> Result<(), anyhow::Error> {
     //     let uvw = UVW::get_baselines(&xyz, params.get_pointing());
     // }
 
-    todo!();
+    Ok(())
+}
+
+/// Direction-independent calibration.
+///
+/// This code "borrows" heavily from Torrance Hodgson's excellent Julia code at
+/// https://github.com/torrance/MWAjl
+pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
+    let obs_context = params.input_data.get_obs_context();
+    let obs_freq_context = params.input_data.get_freq_context();
+
+    let total_num_tiles = obs_context.tile_xyz.len();
+    let num_fine_freq_chans = obs_freq_context.fine_chan_freqs.len();
+    let num_polarisations = 4;
+
+    // The shape of the array containing output Jones matrices.
+    let shape = (
+        // TODO: Let the user determine this.
+        1,
+        total_num_tiles,
+        num_fine_freq_chans,
+        num_polarisations,
+    );
+    debug!(
+        "Shape of DI Jones matrices array: {:?} ({} MiB)",
+        shape,
+        [
+            1,
+            total_num_tiles,
+            num_fine_freq_chans,
+            num_polarisations
+        ]
+        .iter()
+        .product::<usize>()
+        // 64 bytes per Jones matrix, 1024 * 1024 == 1 MiB.
+        * 64 / 1024
+            / 1024
+    );
+    // The output Jones matrices. We wrap them in an Arc<Mutex<_>> to allow
+    // multiple threads to mutate it in parallel.
+    let out = Arc::new(Mutex::new(Array4::from_elem(shape, Jones::identity())));
+
+    // TODO: Let the use decide how many threads to use.
+    let num_threads = rayon::current_num_threads();
+
+    // Set up our producer (sender) thread and worker (receiver) threads.
+    // TODO: Adjust the buffer size.
+    let (sx, rx) = bounded(10);
+    scope(|scope| {
+        scope.spawn(move |_| {
+            // Producer.
+            for t in obs_context.timestep_indices.to_owned() {
+                // let vis = params.input_data.read(1..2)?;
+                let vis = params.input_data.read(t..t + 1).unwrap();
+                let msg = t - obs_context.timestep_indices.start;
+                sx.send(Box::new(msg)).unwrap();
+                dbg!(t);
+            }
+
+            // By dropping the send channel, we signal to the receivers that
+            // there is no more incoming data, and they can stop waiting.
+            drop(sx);
+        });
+
+        // Workers.
+        for i in 0..num_threads {
+            let thread_id = i;
+            // Get a thread-local receive channel and reference to the output
+            // Jones matrices.
+            let rx = rx.clone();
+            let out = out.clone();
+            scope.spawn(move |_| {
+                // Iterate on the receive channel forever. This terminates when
+                // there is no data in the channel, and the sender has
+                // been dropped.
+                for msg_box in rx.iter() {
+                    let msg = *msg_box;
+                    println!("Worker thread {}: Got {:?}", thread_id, msg);
+
+                    // sleep(Duration::from_secs(3));
+                    let mut arr = out.lock().unwrap();
+                    arr[[msg, 0, 0, 0]] = Jones::identity() * msg as f64;
+                }
+            });
+        }
+    })
+    .unwrap();
+
+    dbg!(&params.tile_flags);
+
+    Ok(())
 }
 
 #[derive(Debug)]

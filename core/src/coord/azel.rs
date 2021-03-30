@@ -13,9 +13,9 @@ use super::hadec::HADec;
 /// A struct containing an Azimuth and Elevation. All units are in radians.
 #[derive(Clone, Copy, Debug)]
 pub struct AzEl {
-    /// Hour angle [radians]
+    /// Hour angle \[radians\]
     pub az: f64,
-    /// Declination [radians]
+    /// Declination \[radians\]
     pub el: f64,
 }
 

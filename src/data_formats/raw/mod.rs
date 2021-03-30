@@ -6,10 +6,9 @@
 Code to handle reading from raw MWA files.
  */
 
-pub mod error;
+pub(crate) mod error;
 
 pub use error::*;
-use hifitime::Epoch;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -18,18 +17,23 @@ use log::{debug, warn};
 use ndarray::prelude::*;
 
 use super::*;
+use crate::context::{FreqContext, ObsContext};
 use crate::flagging::aoflagger::AOFlags;
 use crate::glob::*;
 use crate::mwalib::{CorrelatorContext, Pol};
-use mwa_hyperdrive_core::{c32, RADec, XyzBaseline, XYZ};
-
-use super::InputData;
-use crate::context::FreqContext;
+use mwa_hyperdrive_core::{RADec, XYZ};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawData {
+    /// Observation metadata.
+    obs_context: ObsContext,
+
+    /// Frequency metadata.
+    freq_context: FreqContext,
+
+    // Raw-data-specific things follow.
     /// The interface to the raw data via mwalib.
-    context: CorrelatorContext,
+    pub(crate) mwalib_context: CorrelatorContext,
 
     // TODO: Rename to something more general. Don't need actual AOFlagger flags.
     /// AOFlagger flags.
@@ -38,40 +42,6 @@ pub(crate) struct RawData {
     /// not supply flags, then `aoflags` may contain no flags, or just
     /// default channel flags (the edges and centre channel, for example).
     aoflags: Option<AOFlags>,
-
-    timesteps: Vec<hifitime::Epoch>,
-
-    /// The phase centre at the start of the observation.
-    pointing: RADec,
-
-    /// The geocentric `XYZ` coordinates of all tiles in the array. This
-    /// includes tiles that have been flagged in the input data.
-    tile_xyz: Vec<XYZ>,
-
-    /// The `XyzBaselines` of the observations [metres]. This does not change
-    /// over time; it is determined only by the telescope's tile layout.
-    baseline_xyz: Vec<XyzBaseline>,
-
-    /// The dipole delays listed in the header of the observation's metafits
-    /// file. If these are all 32, then this indicates possible problems with
-    /// the observation.
-    listed_delays: Vec<u32>,
-
-    /// The ideal dipole delays of each MWA tile in the observation (i.e. no values of 32).
-    ideal_delays: Vec<u32>,
-
-    /// The tiles already flagged in the supplied data. These values correspond
-    /// to those from the "Antenna" column in HDU 1 of the metafits file. Zero
-    /// indexed.
-    tile_flags: Vec<usize>,
-
-    /// Which fine-frequency channels per coarse band are flagged? This is empty
-    /// only if the user used `ignore_metafits_tile_flags` when creating this
-    /// instance of `RawData`. Otherwise, 80 kHz is flagged at the edges as well
-    /// as the centre channel. Zero indexed.
-    fine_chan_flags: Vec<usize>,
-
-    freq_context: super::FreqContext,
 }
 
 impl RawData {
@@ -122,13 +92,13 @@ impl RawData {
         debug!("Using gpubox files: {:#?}", gpubox_pbs);
 
         debug!("Creating mwalib context");
-        let context = CorrelatorContext::new(&meta_pb, &gpubox_pbs)?;
-        let num_tiles = context.metafits_context.rf_inputs.len() / 2;
+        let mwalib_context = CorrelatorContext::new(&meta_pb, &gpubox_pbs)?;
+        let num_tiles = mwalib_context.metafits_context.rf_inputs.len() / 2;
         debug!("There are {} total tiles", num_tiles);
 
         let mut tile_flags_set = HashSet::new();
         if !ignore_metafits_tile_flags {
-            for flagged_meta_file in context
+            for flagged_meta_file in mwalib_context
                 .metafits_context
                 .rf_inputs
                 .iter()
@@ -152,14 +122,17 @@ impl RawData {
 
         // There's a chance that some or all tiles are flagged due to their
         // delays. Any delay == 32 is an indication that a dipole is "dead".
-        let listed_delays = context.metafits_context.delays.clone();
+        let listed_delays = mwalib_context.metafits_context.delays.clone();
         // TODO: This should probably fail instead of throw a warning. All the
         // user to proceed if they acknowledge the warning.
         debug!("Listed observation dipole delays: {:?}", &listed_delays);
-        if listed_delays.iter().all(|&d| d == 32) {
+        let bad_obs = if listed_delays.iter().all(|&d| d == 32) {
             warn!("This observation has been flagged as \"do not use\", according to the metafits delays!");
-        }
-        let ideal_delays = if listed_delays.iter().all(|&d| d == 32) {
+            true
+        } else {
+            false
+        };
+        let ideal_delays = if listed_delays.iter().all(|&d| d != 32) {
             listed_delays.clone()
         } else {
             // Even if DELAYS is all 32, the ideal delays are listed in HDU 2 of the
@@ -167,7 +140,7 @@ impl RawData {
             // inputs until we have all non-32 delays.
 
             let mut ideal_delays = vec![32; 16];
-            for rf in context
+            for rf in mwalib_context
                 .metafits_context
                 .rf_inputs
                 .iter()
@@ -192,6 +165,9 @@ impl RawData {
             ideal_delays
         };
         debug!("Ideal observation dipole delays: {:?}", &ideal_delays);
+        if bad_obs {
+            warn!("Using {:?} as dipole delays", &ideal_delays);
+        }
 
         let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
         tile_flags.sort_unstable();
@@ -216,7 +192,7 @@ impl RawData {
         } else {
             // If the flags aren't specified, use the observation's fine-channel
             // frequency resolution to set them.
-            match context.metafits_context.corr_fine_chan_width_hz {
+            match mwalib_context.metafits_context.corr_fine_chan_width_hz {
                 // 10 kHz, 128 channels.
                 10000 => vec![
                     0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127,
@@ -238,10 +214,10 @@ impl RawData {
 
             // The cotter flags are available for all times. Make them
             // match only those we'll use according to mwalib.
-            f.trim(&context.metafits_context);
+            f.trim(&mwalib_context.metafits_context);
 
             // Ensure that there is a mwaf file for each specified gpubox file.
-            for cc in &context.coarse_chans {
+            for cc in &mwalib_context.coarse_chans {
                 if !f.gpubox_nums.contains(&(cc.gpubox_number as u8)) {
                     return Err(NewRawError::GpuboxFileMissingMwafFile(cc.gpubox_number));
                 }
@@ -251,7 +227,7 @@ impl RawData {
             None
         };
 
-        let timesteps: Vec<Epoch> = context
+        let timesteps: Vec<hifitime::Epoch> = mwalib_context
             .timesteps
             .iter()
             .map(|t| {
@@ -264,7 +240,7 @@ impl RawData {
                     + 19.0
                     + hifitime::SECONDS_PER_YEAR * 80.0
                     + hifitime::SECONDS_PER_DAY * 4.0;
-                Epoch::from_tai_seconds(tai)
+                hifitime::Epoch::from_tai_seconds(tai)
             })
             .collect::<Vec<_>>();
 
@@ -272,121 +248,100 @@ impl RawData {
         // let pointing = pointing_from_timestep(timestep, &context, time_res);
 
         // Populate a frequency context struct.
-        let native_freq_res = context.metafits_context.corr_fine_chan_width_hz as f64;
+        let native_freq_res = mwalib_context.metafits_context.corr_fine_chan_width_hz as f64;
         let mut fine_chan_freqs = Vec::with_capacity(
-            context.metafits_context.num_corr_fine_chans_per_coarse
-                * context.metafits_context.num_coarse_chans,
+            mwalib_context
+                .metafits_context
+                .num_corr_fine_chans_per_coarse
+                * mwalib_context.metafits_context.num_coarse_chans,
         );
         // TODO: I'm suspicious that the start channel freq is incorrect.
-        for cc in &context.coarse_chans {
+        for cc in &mwalib_context.coarse_chans {
             let mut cc_freqs = Array1::range(
                 cc.chan_start_hz as f64,
                 cc.chan_end_hz as f64,
-                context.metafits_context.corr_fine_chan_width_hz as f64,
+                mwalib_context.metafits_context.corr_fine_chan_width_hz as f64,
             )
             .to_vec();
             fine_chan_freqs.append(&mut cc_freqs);
         }
 
         let freq_context = FreqContext {
-            coarse_chan_nums: context
+            coarse_chan_nums: mwalib_context
                 .coarse_chans
                 .iter()
                 .map(|cc| cc.corr_chan_number as u32)
                 .collect(),
-            coarse_chan_freqs: context
+            coarse_chan_freqs: mwalib_context
                 .coarse_chans
                 .iter()
                 .map(|cc| cc.chan_centre_hz as f64)
                 .collect(),
-            coarse_chan_width: context.coarse_chans.iter().next().unwrap().chan_width_hz as f64,
-            total_bandwidth: context
+            coarse_chan_width: mwalib_context
+                .coarse_chans
+                .iter()
+                .next()
+                .unwrap()
+                .chan_width_hz as f64,
+            total_bandwidth: mwalib_context
                 .coarse_chans
                 .iter()
                 .map(|cc| cc.chan_width_hz as f64)
                 .sum(),
             fine_chan_freqs,
-            num_fine_chans_per_coarse_chan: context.metafits_context.num_corr_fine_chans_per_coarse,
-            native_fine_chan_width: context.metafits_context.corr_fine_chan_width_hz as f64,
+            num_fine_chans_per_coarse_chan: mwalib_context
+                .metafits_context
+                .num_corr_fine_chans_per_coarse,
+            native_fine_chan_width: mwalib_context.metafits_context.corr_fine_chan_width_hz as f64,
         };
 
         let pointing = RADec::new(
-            context
+            mwalib_context
                 .metafits_context
                 .ra_phase_center_degrees
-                .unwrap_or(context.metafits_context.ra_tile_pointing_degrees)
+                .unwrap_or(mwalib_context.metafits_context.ra_tile_pointing_degrees)
                 .to_radians(),
-            context
+            mwalib_context
                 .metafits_context
                 .dec_phase_center_degrees
-                .unwrap_or(context.metafits_context.dec_tile_pointing_degrees)
+                .unwrap_or(mwalib_context.metafits_context.dec_tile_pointing_degrees)
                 .to_radians(),
         );
-        let tile_xyz = XYZ::get_tiles_mwalib(&context.metafits_context);
+        let tile_xyz = XYZ::get_tiles_mwalib(&mwalib_context.metafits_context);
         let baseline_xyz = XYZ::get_baselines(&tile_xyz);
 
-        Ok(Self {
-            context,
-            aoflags,
+        let obs_context = ObsContext {
+            obsid: mwalib_context.metafits_context.obs_id,
             timesteps,
+            timestep_indices: 0..mwalib_context.timesteps.len(),
+            native_time_res: mwalib_context.metafits_context.corr_int_time_ms as f64 / 1e3,
             pointing,
+            delays: ideal_delays,
             tile_xyz,
             baseline_xyz,
-            listed_delays,
-            ideal_delays,
             tile_flags,
             fine_chan_flags,
+        };
+
+        Ok(Self {
+            obs_context,
             freq_context,
+            mwalib_context,
+            aoflags,
         })
     }
 }
 
 impl InputData for RawData {
-    fn read(&self, time_range: Range<usize>) -> Result<Vec<Visibilities>, ReadInputDataError> {
-        todo!();
-    }
-
-    fn get_obsid(&self) -> u32 {
-        self.context.metafits_context.obs_id
-    }
-
-    fn get_timesteps(&self) -> &[hifitime::Epoch] {
-        &self.timesteps
-    }
-
-    fn get_timestep_indices(&self) -> &Range<usize> {
-        todo!()
-    }
-
-    fn get_native_time_res(&self) -> f64 {
-        self.context.metafits_context.corr_int_time_ms as f64 / 1e3
-    }
-
-    fn get_pointing(&self) -> &RADec {
-        &self.pointing
+    fn get_obs_context(&self) -> &ObsContext {
+        &self.obs_context
     }
 
     fn get_freq_context(&self) -> &FreqContext {
         &self.freq_context
     }
 
-    fn get_tile_xyz(&self) -> &[XYZ] {
-        &self.tile_xyz
-    }
-
-    fn get_baseline_xyz(&self) -> &[XyzBaseline] {
-        &self.baseline_xyz
-    }
-
-    fn get_ideal_delays(&self) -> &[u32] {
-        &self.ideal_delays
-    }
-
-    fn get_tile_flags(&self) -> &[usize] {
-        &self.tile_flags
-    }
-
-    fn get_fine_chan_flags(&self) -> &[usize] {
-        &self.fine_chan_flags
+    fn read(&self, time_range: Range<usize>) -> Result<Vec<Visibilities>, ReadInputDataError> {
+        todo!();
     }
 }

@@ -15,15 +15,15 @@ use crate::constants::*;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 /// At a frequency, four flux densities for each Stokes parameter.
 pub struct FluxDensity {
-    /// The frequency that these flux densities apply to [Hz]
+    /// The frequency that these flux densities apply to \[Hz\]
     pub freq: f64,
-    /// The flux density of Stokes I [Jy]
+    /// The flux density of Stokes I \[Jy\]
     pub i: f64,
-    /// The flux density of Stokes Q [Jy]
+    /// The flux density of Stokes Q \[Jy\]
     pub q: f64,
-    /// The flux density of Stokes U [Jy]
+    /// The flux density of Stokes U \[Jy\]
     pub u: f64,
-    /// The flux density of Stokes V [Jy]
+    /// The flux density of Stokes V \[Jy\]
     pub v: f64,
 }
 

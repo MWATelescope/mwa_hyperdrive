@@ -19,9 +19,9 @@ use super::lmn::LMN;
 /// radians.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RADec {
-    /// Right ascension [radians]
+    /// Right ascension \[radians\]
     pub ra: f64,
-    /// Declination [radians]
+    /// Declination \[radians\]
     pub dec: f64,
 }
 
