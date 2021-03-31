@@ -9,8 +9,8 @@ Handle (x,y,z) coordinates of an antenna (a.k.a. station).
 use super::enh::ENH;
 use crate::constants::MWA_LAT_RAD;
 
-/// The (x,y,z) coordinates of an antenna (a.k.a. station). All units are in
-/// metres.
+/// The (x,y,z) coordinates of an antenna (a.k.a. tile or station). All units
+/// are in metres.
 ///
 /// This coordinate system is discussed at length in Interferometry and
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
@@ -139,11 +139,11 @@ impl std::ops::Sub<XYZ> for XYZ {
 /// Relationships, Polarimetry, and the Measurement Equation.
 #[derive(Clone, Copy, Debug)]
 pub struct XyzBaseline {
-    /// x-coordinate [meters]
+    /// x-coordinate \[meters\]
     pub x: f64,
-    /// y-coordinate [meters]
+    /// y-coordinate \[meters\]
     pub y: f64,
-    /// z-coordinate [meters]
+    /// z-coordinate \[meters\]
     pub z: f64,
 }
 

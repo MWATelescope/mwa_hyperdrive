@@ -8,6 +8,7 @@ Errors associated with interacting with CASA measurement sets.
 
 use std::path::PathBuf;
 
+use mwa_hyperdrive_core::mwalib::MwalibError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -29,6 +30,9 @@ pub enum NewMSError {
     // Casacore(#[from] rubbl_casatables::CasacoreError),
     #[error("{0}")]
     Glob(#[from] crate::glob::GlobError),
+
+    #[error("{0}")]
+    Mwalib(#[from] MwalibError),
 }
 
 #[derive(Error, Debug)]

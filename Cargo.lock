@@ -1036,7 +1036,6 @@ dependencies = [
 name = "mwa_hyperdrive_srclist"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "approx",
  "fern",
  "indoc",

@@ -12,6 +12,9 @@ precision, if it is ever required.
 
 pub use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
+/// The number of cross-correlation polarisations. Is this ever not 4?
+pub const NUM_POLARISATIONS: usize = 4;
+
 /// Sources with beam-attenuated flux densities less than this value are
 /// discarded from sky-model source lists.
 pub const DEFAULT_VETO_THRESHOLD: f64 = 0.01;

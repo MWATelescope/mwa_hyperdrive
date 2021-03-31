@@ -8,6 +8,8 @@ Metadata on an observation.
 
 use std::ops::Range;
 
+use ndarray::Array2;
+
 use mwa_hyperdrive_core::{RADec, XyzBaseline, XYZ};
 
 /// Observation metadata.
@@ -60,6 +62,10 @@ pub(crate) struct ObsContext {
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
     pub(crate) fine_chan_flags: Vec<usize>,
+
+    /// The dipole gains for each tile in the array. These will typically all be
+    /// of value 1.0, except where a dipole is dead (0.0).
+    pub(crate) dipole_gains: Array2<f64>,
 }
 
 /// Metadata on an observation's frequency setup.

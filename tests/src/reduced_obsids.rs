@@ -5,15 +5,17 @@
 /*!
 This module provides functions for tests against observations that occupy a
 small amount of data. These tests are useful as it allows hyperdrive to perform
-units tests without requiring real MWA data.
+units tests without requiring MWA data for a full observation.
  */
 
 use super::*;
 
+use mwa_hyperdrive::calibrate::args::CalibrateUserArgs;
+
 /// Get the calibration arguments associated with the obsid 1090008640. This
 /// observational data is inside the hyperdrive git repo, but has been reduced;
 /// there are only 3 coarse bands and 3 timesteps.
-pub fn get_1090008640() -> MwaData {
+pub fn get_1090008640() -> CalibrateUserArgs {
     // Ensure that the required files are there.
     let metafits = PathBuf::from("tests/1090008640/1090008640.metafits");
     assert!(
@@ -47,11 +49,23 @@ pub fn get_1090008640() -> MwaData {
         srclist.display()
     );
 
-    MwaData {
-        obsid: 1090008640,
-        metafits: metafits.display().to_string(),
-        gpuboxes,
-        mwafs: vec![],
+    CalibrateUserArgs {
+        metafits: Some(metafits.display().to_string()),
+        gpuboxes: Some(gpuboxes),
         source_list: Some(srclist.display().to_string()),
+        ..Default::default()
     }
+}
+
+/// Get the calibration arguments associated with the obsid 1090008640. This
+/// observational data is inside the hyperdrive git repo, but has been reduced;
+/// there is only 1 coarse band and 3 timesteps.
+pub fn get_1090008640_smallest() -> CalibrateUserArgs {
+    // We can just use the other function and remove all but the first gpubox
+    // file.
+    let mut args = get_1090008640();
+    let gpuboxes: Option<Vec<String>> = args.gpuboxes;
+    let first = gpuboxes.unwrap()[0].clone();
+    args.gpuboxes = Some(vec![first]);
+    args
 }

@@ -60,8 +60,7 @@ __global__ void calc_point_vis(const unsigned int n_baselines, const unsigned in
     // location on sky through wsclean without negative in front of 2pi.
     float real;
     float imag;
-    const float temp = 2 * (u * l + v * m + w * (n - 1.0f));
-    sincospif(temp, &imag, &real);
+    sincospif(2 * (u * l + v * m + w * (n - 1.0f)), &imag, &real);
 
     atomicAdd(&d_sum_vis_real[i_vis], real * flux_density);
     atomicAdd(&d_sum_vis_imag[i_vis], imag * flux_density);

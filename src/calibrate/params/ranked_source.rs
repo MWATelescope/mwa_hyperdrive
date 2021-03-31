@@ -119,9 +119,14 @@ mod tests {
         };
         assert_abs_diff_eq!(
             ranked_source.weighted_pos.ra,
-            10.5_f64.to_radians() * cos(9.5_f64.to_radians())
+            10.5_f64.to_radians(),
+            epsilon = 1e-10
         );
-        assert_abs_diff_eq!(ranked_source.weighted_pos.dec, 9.5_f64.to_radians());
+        assert_abs_diff_eq!(
+            ranked_source.weighted_pos.dec,
+            9.5_f64.to_radians(),
+            epsilon = 1e-10
+        );
 
         // Complex case: both components have different Stokes I FDs. Modify the
         // FD of the first component.
@@ -136,8 +141,13 @@ mod tests {
             };
         assert_abs_diff_eq!(
             ranked_source.weighted_pos.ra,
-            10.25_f64.to_radians() * cos(9.5_f64.to_radians())
+            10.25_f64.to_radians(),
+            epsilon = 1e-10
         );
-        assert_abs_diff_eq!(ranked_source.weighted_pos.dec, 9.25_f64.to_radians());
+        assert_abs_diff_eq!(
+            ranked_source.weighted_pos.dec,
+            9.25_f64.to_radians(),
+            epsilon = 1e-10
+        );
     }
 }

@@ -8,7 +8,7 @@ associated functions.
  */
 
 /// Channel- and frequency-related parameters required for calibration.
-pub(crate) struct FrequencyParams {
+pub struct FrequencyParams {
     /// The target fine-channel frequency resolution [Hz].
     ///
     /// e.g. If the input data is in 40 kHz resolution and this variable was
@@ -18,7 +18,7 @@ pub(crate) struct FrequencyParams {
     /// In a perfect world, this variable would be an integer, but it's
     /// primarily used in floating-point calculations, so it's more convenient
     /// to store it as a float.
-    pub(crate) res: f64,
+    pub res: f64,
 
     /// The number of fine-frequency channels per coarse band. For 40 kHz data,
     /// this is 32.

@@ -23,7 +23,7 @@ use super::*;
 use crate::constants::HIFITIME_GPS_FACTOR;
 use crate::context::{FreqContext, ObsContext};
 use crate::glob::get_single_match_from_glob;
-use mwa_hyperdrive_core::{RADec, XYZ};
+use mwa_hyperdrive_core::{mwalib, RADec, XYZ};
 
 pub(crate) struct MS {
     /// Observation metadata.
@@ -47,7 +47,7 @@ impl MS {
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
     // pub(crate) fn new<T: AsRef<Path>>(ms: &T) -> Result<impl InputData, NewMSError> {
-    pub(crate) fn new<T: AsRef<Path>>(ms: &T) -> Result<Self, NewMSError> {
+    pub(crate) fn new<T: AsRef<Path>>(ms: &T, metafits: Option<&T>) -> Result<Self, NewMSError> {
         // The ms argument could be a glob. If the specified argument can't be
         // found as a file, treat it as a glob and expand it to find a match.
         let ms = {
@@ -342,6 +342,40 @@ impl MS {
 
         let baseline_xyz = XYZ::get_baselines(&tile_xyz);
 
+        // Get dead dipole information. When interacting with beam code, use a
+        // gain of 0 for dead dipoles, and 1 for all others. cotter doesn't
+        // supply this information; if the user provided a metafits file, we can
+        // use that, otherwise we must assume all dipoles are alive.
+        let dipole_gains: Array2<f64> = match (cotter, metafits) {
+            (true, None) => {
+                warn!("cotter does not supply dead dipole information; without a metafits file, we must assume all dipoles are alive");
+                // Do we ever not have 16 dipoles?
+                Array2::from_elem((total_num_tiles, 16), 1.0)
+            }
+
+            (true, Some(m)) => {
+                let mwalib = mwalib::MetafitsContext::new(m)?;
+                let mut dipole_gains = Array2::from_elem(
+                    (
+                        mwalib.rf_inputs.len() / 2,
+                        mwalib.rf_inputs[0].dipole_gains.len(),
+                    ),
+                    1.0,
+                );
+                for (mut dipole_gains_for_one_tile, rf_input) in dipole_gains.outer_iter_mut().zip(
+                    mwalib
+                        .rf_inputs
+                        .iter()
+                        .filter(|rf_input| rf_input.pol == mwalib::Pol::Y),
+                ) {
+                    dipole_gains_for_one_tile.assign(&ArrayView1::from(&rf_input.dipole_gains));
+                }
+                dipole_gains
+            }
+
+            (none, _) => todo!(),
+        };
+
         let obs_context = ObsContext {
             obsid,
             timesteps,
@@ -353,6 +387,7 @@ impl MS {
             baseline_xyz,
             tile_flags,
             fine_chan_flags,
+            dipole_gains,
         };
 
         Ok(Self {

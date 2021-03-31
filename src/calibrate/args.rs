@@ -7,7 +7,7 @@ Handling of calibration arguments.
 
 Strategy: Users give arguments to hyperdrive (handled by calibrate::args).
 hyperdrive turns arguments into parameters (handled by calibrate::params). Using
-this terminology, the code to handle arguments and parameters (and associated
+this paradigm, the code to handle arguments and parameters (and associated
 errors) can be neatly split.
  */
 
@@ -232,6 +232,6 @@ pub enum CalibrateArgsError {
     #[error("Couldn't decode json structure from {file}:\n{err}")]
     JsonDecode { file: String, err: String },
 
-    #[error("{0}")]
+    #[error("IO error when trying to read argument file: {0}")]
     IO(#[from] std::io::Error),
 }

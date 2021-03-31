@@ -9,16 +9,18 @@ It's not ideal to use LAPACK for matrix multiplies or inverses, because it is
 not possible to optimise only for 2x2 matrices. Here, we supply the math for
 these special cases.
 
-Derived from Torrance Hodgson's MWAjl:
-// https://github.com/torrance/MWAjl/blob/master/src/matrix2x2.jl
+Parts of the code are derived from Torrance Hodgson's MWAjl:
+https://github.com/torrance/MWAjl/blob/master/src/matrix2x2.jl
  */
 
 #[cfg(feature = "beam")]
 pub mod cache;
 
+use num::Complex;
+
 use crate::c64;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct Jones([c64; 4]);
 
 const JONES_ZERO: Jones = Jones([c64::new(0.0, 0.0); 4]);
@@ -31,11 +33,11 @@ const JONES_IDENTITY: Jones = Jones([
 ]);
 
 impl Jones {
-    pub fn identity() -> Jones {
+    pub fn identity() -> Self {
         JONES_IDENTITY
     }
 
-    pub fn zero() -> Jones {
+    pub fn zero() -> Self {
         JONES_ZERO
     }
 
@@ -63,6 +65,7 @@ impl Jones {
     /// ]);
     /// assert_abs_diff_eq!(jh, expected, epsilon = 1e-10);
     /// ```
+    #[inline(always)]
     pub fn h(&self) -> Self {
         Self::from([
             self[0].conj(),
@@ -108,6 +111,7 @@ impl Jones {
     ///
     /// Ideally, J^I . J = I. However it's possible that J is singular, in which
     /// case the contents of J^I are all NaN.
+    #[inline(always)]
     pub fn inv(&self) -> Self {
         let mut inv = JONES_ZERO;
         let a = self;
@@ -117,6 +121,44 @@ impl Jones {
         inv[2] = -inv_det * a[2];
         inv[3] = inv_det * a[0];
         inv
+    }
+
+    /// Calculate J1 . A . J2^H, but with J1 and J2 multiplied as an outer
+    /// product, and A is a 4-element vector.
+    // See Jack's thorough analysis here:
+    // https://github.com/JLBLine/polarisation_tests_for_FEE
+    #[inline(always)]
+    #[rustfmt::skip]
+    pub fn outer_mul(j1: Jones, a: [c64; 4], j2: Jones) -> [c64; 4] {
+        let g1x = j1[0];
+        let g1y = j1[3];
+        let g2x = j2[0].conj();
+        let g2y = j2[3].conj();
+        let d1x = j1[1];
+        let d1y = j1[2];
+        let d2x = j2[1].conj();
+        let d2y = j2[2].conj();
+        [
+            (g1x * g2x + d1x * d2x) * a[0]
+          + (g1x * g2x - d1x * d2x) * a[1]
+          + (g1x * d2x + d1x * g2x) * a[2]
+          + (g1x * d2x - d1x * g2x) * a[3] * Complex::i(),
+
+            (g1x * d2y + d1x * g2y) * a[0]
+          + (g1x * d2y - d1x * g2y) * a[1]
+          + (g1x * g2y + d1x * d2y) * a[2]
+          + (g1x * g2y - d1x * d2y) * a[3] * Complex::i(),
+
+            (d1y * g2x + g1y * d2x) * a[0]
+          + (d1y * g2x - g1y * d2x) * a[1]
+          + (d1y * d2x + g1y * g2x) * a[2]
+          + (d1y * d2x - g1y * g2x) * a[3] * Complex::i(),
+
+            (d1y * d2y + g1y * g2y) * a[0]
+          + (d1y * d2y - g1y * g2y) * a[1]
+          + (d1y * g2y + g1y * d2y) * a[2]
+          + (d1y * g2y - g1y * d2y) * a[3] * Complex::i(),
+        ]
     }
 }
 
@@ -157,6 +199,7 @@ impl std::ops::Add<Jones> for Jones {
 }
 
 impl std::ops::AddAssign<Jones> for Jones {
+    #[inline(always)]
     fn add_assign(&mut self, rhs: Jones) {
         self[0] += rhs[0];
         self[1] += rhs[1];
@@ -182,6 +225,7 @@ impl std::ops::Sub<Jones> for Jones {
 }
 
 impl std::ops::SubAssign<Jones> for Jones {
+    #[inline(always)]
     fn sub_assign(&mut self, rhs: Jones) {
         self[0] -= rhs[0];
         self[1] -= rhs[1];
@@ -207,6 +251,7 @@ impl std::ops::Sub<&Jones> for Jones {
 }
 
 impl std::ops::SubAssign<&Jones> for Jones {
+    #[inline(always)]
     fn sub_assign(&mut self, rhs: &Jones) {
         self[0] -= rhs[0];
         self[1] -= rhs[1];
@@ -285,6 +330,30 @@ impl std::ops::MulAssign<f64> for Jones {
     }
 }
 
+impl std::ops::Mul<c64> for Jones {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: c64) -> Self {
+        let mut a = self.0;
+        a[0] *= rhs;
+        a[1] *= rhs;
+        a[2] *= rhs;
+        a[3] *= rhs;
+        Jones(a)
+    }
+}
+
+impl std::ops::MulAssign<c64> for Jones {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: c64) {
+        self[0] *= rhs;
+        self[1] *= rhs;
+        self[2] *= rhs;
+        self[3] *= rhs;
+    }
+}
+
 impl num::traits::Zero for Jones {
     #[inline]
     fn zero() -> Self {
@@ -300,7 +369,6 @@ impl num::traits::Zero for Jones {
 impl approx::AbsDiffEq for Jones {
     type Epsilon = f64;
 
-    #[inline]
     fn default_epsilon() -> f64 {
         f64::EPSILON
     }
@@ -426,5 +494,32 @@ mod tests {
             assert!(j.re.is_nan());
             assert!(j.im.is_nan());
         }
+    }
+
+    #[test]
+    fn test_outer_mul() {
+        let j1 = Jones([
+            c64::new(1.0, 0.0),
+            c64::new(2.0, 0.0),
+            c64::new(3.0, 0.0),
+            c64::new(4.0, 0.0),
+        ]);
+        let j2 = Jones([
+            c64::new(1.0, 0.0),
+            c64::new(2.0, 0.0),
+            c64::new(3.0, 0.0),
+            c64::new(4.0, 0.0),
+        ]);
+        let a = [c64::new(1.0, 0.0); 4];
+        let result = Jones::outer_mul(j1, a, j2);
+        let expected = [
+            c64::new(5.0 - 3.0 + 4.0, 0.0),
+            c64::new(11.0 - 5.0 + 10.0, -2.0),
+            c64::new(11.0 - 5.0 + 10.0, 2.0),
+            c64::new(25.0 - 7.0 + 24.0, 0.0),
+        ];
+        // Pretend that the result of the computation is `Jones` so we can use
+        // assert_abs_diff_eq.
+        assert_abs_diff_eq!(Jones::from(result), Jones::from(expected), epsilon = 1e-10);
     }
 }

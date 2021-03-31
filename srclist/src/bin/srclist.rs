@@ -12,9 +12,9 @@ files, as well as convert between supported source list formats.
 use std::fs::File;
 use std::path::PathBuf;
 
-use anyhow::bail;
 use log::{debug, warn};
 use structopt::{clap::AppSettings, StructOpt};
+use thiserror::Error;
 
 use mwa_hyperdrive_core::SourceList;
 use mwa_hyperdrive_srclist::{hyperdrive, read::*, rts, woden, *};
@@ -103,22 +103,22 @@ fn setup_logging(level: u8) -> Result<(), fern::InitError> {
 fn source_list_type_compatible_with_file_type(
     sl_type: &SourceListType,
     file_type: &SourceListFileType,
-) -> Result<(), anyhow::Error> {
+) {
     let exit = |slt, ft| {
-        bail!(
+        eprintln!(
             "Source list type {:?} cannot be read from or written to a file type {:?}",
-            slt,
-            ft
-        )
+            slt, ft
+        );
+        std::process::exit(1);
     };
 
     match sl_type {
         SourceListType::Hyperdrive => match file_type {
-            SourceListFileType::Json | SourceListFileType::Yaml => Ok(()),
+            SourceListFileType::Json | SourceListFileType::Yaml => (),
             _ => exit(sl_type, file_type),
         },
         SourceListType::Rts | SourceListType::Woden | SourceListType::AO => match file_type {
-            SourceListFileType::Txt => Ok(()),
+            SourceListFileType::Txt => (),
             _ => exit(sl_type, file_type),
         },
     }
@@ -133,9 +133,10 @@ fn source_list_type_compatible_with_file_type(
 fn verify(
     source_lists: Vec<PathBuf>,
     source_list_type: Option<SourceListType>,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), SourceListError> {
     if source_lists.is_empty() {
-        bail!("No source lists were supplied!");
+        eprintln!("No source lists were supplied!");
+        std::process::exit(1);
     }
 
     for source_list in source_lists {
@@ -156,10 +157,7 @@ fn verify(
         };
 
         // Check that the source list type is compatible with the file type.
-        match source_list_type_compatible_with_file_type(&sl_type, &file_type) {
-            Ok(()) => (),
-            Err(e) => println!("{}\n", e),
-        }
+        source_list_type_compatible_with_file_type(&sl_type, &file_type);
 
         let sl: SourceList = {
             let mut f = std::io::BufReader::new(File::open(&source_list)?);
@@ -222,7 +220,17 @@ fn verify(
     Ok(())
 }
 
-fn main() -> Result<(), anyhow::Error> {
+fn main() {
+    // Stolen from BurntSushi. We don't return Result from main because it
+    // prints the debug representation of the error. The code below prints the
+    // "display" or human readable representation of the error.
+    if let Err(e) = try_main() {
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+}
+
+fn try_main() -> Result<(), SrclistError> {
     match Args::from_args() {
         Args::Verify {
             source_lists,
@@ -232,7 +240,7 @@ fn main() -> Result<(), anyhow::Error> {
             setup_logging(verbosity).expect("Failed to initialize logging.");
 
             let input_sl_type = input_type.map(|t| parse_source_list_type(&t).unwrap());
-            verify(source_lists, input_sl_type)
+            verify(source_lists, input_sl_type)?;
         }
 
         Args::Convert {
@@ -282,8 +290,8 @@ fn main() -> Result<(), anyhow::Error> {
 
             // Check that the source list types are compatible with
             // corresponding file types.
-            source_list_type_compatible_with_file_type(&input_sl_type, &input_file_type)?;
-            source_list_type_compatible_with_file_type(&output_sl_type, &output_file_type)?;
+            source_list_type_compatible_with_file_type(&input_sl_type, &input_file_type);
+            source_list_type_compatible_with_file_type(&output_sl_type, &output_file_type);
 
             // Read the input source list.
             let sl = mwa_hyperdrive_srclist::read::read_source_list_file(
@@ -309,8 +317,20 @@ fn main() -> Result<(), anyhow::Error> {
 
                 SourceListType::AO => ao::write_source_list(&mut f, &sl)?,
             };
-
-            Ok(())
         }
     }
+
+    Ok(())
+}
+
+#[derive(Error, Debug)]
+enum SrclistError {
+    #[error("{0}")]
+    SourceList(#[from] SourceListError),
+
+    #[error("{0}")]
+    WriteSourceList(#[from] error::WriteSourceListError),
+
+    #[error("{0}")]
+    IO(#[from] std::io::Error),
 }

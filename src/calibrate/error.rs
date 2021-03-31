@@ -9,11 +9,16 @@ Error type for all calibration-related errors.
 use thiserror::Error;
 
 use super::params::InvalidArgsError;
+use mwa_hyperdrive_core::{mwa_hyperbeam, EstimateError};
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {
     #[error("{0}")]
     InvalidArgs(#[from] InvalidArgsError),
-    // #[error("{0}")]
-    // Calibrate
+
+    #[error("{0}")]
+    Estimate(#[from] EstimateError),
+
+    #[error("{0}")]
+    Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
 }

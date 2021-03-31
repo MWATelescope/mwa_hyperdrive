@@ -3,9 +3,10 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 pub mod context;
+mod error;
+
 #[cfg(feature = "cuda")]
 mod cuda;
-mod error;
 
 use context::Context;
 pub use error::VisibilityGenerationError;
@@ -113,7 +114,7 @@ pub fn vis_gen(
         pointing.ha += lst_inc;
 
         // Get the (l,m,n) coordinates for each source component.
-        let lmn = src.get_lmn(&pointing.to_radec(lst));
+        let lmn = src.get_lmn_parallel(&pointing.to_radec(lst));
 
         // Get the UVW baselines with the new pointing.
         let uvw_metres = UVW::get_baselines(&context.xyz, &pointing);

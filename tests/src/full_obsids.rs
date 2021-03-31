@@ -21,7 +21,7 @@ use super::*;
 
 /// Get the calibration arguments associated with the 1065880128 observation
 /// (including gpubox files and mwaf files).
-pub fn get_1065880128() -> MwaData {
+pub fn get_1065880128() -> CalibrateUserArgs {
     let metafits = PathBuf::from("tests/1065880128/1065880128.metafits");
     assert!(
         metafits.exists(),
@@ -128,11 +128,11 @@ pub fn get_1065880128() -> MwaData {
         srclist.display()
     );
 
-    MwaData {
-        obsid: 1065880128,
-        metafits: metafits.display().to_string(),
-        gpuboxes,
-        mwafs,
+    CalibrateUserArgs {
+        metafits: Some(metafits.display().to_string()),
+        gpuboxes: Some(gpuboxes),
+        mwafs: Some(mwafs),
         source_list: Some(srclist.display().to_string()),
+        ..Default::default()
     }
 }

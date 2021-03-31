@@ -21,9 +21,17 @@ pub struct Source {
 }
 
 impl Source {
+    /// Calculate the (l,m,n) coordinates of each component's (RA,Dec).
+    pub fn get_lmn(&self, pointing: &RADec) -> Vec<LMN> {
+        self.components
+            .iter()
+            .map(|comp| comp.radec.to_lmn(&pointing))
+            .collect()
+    }
+
     /// Calculate the (l,m,n) coordinates of each component's (RA,Dec). The
     /// calculation is done in parallel.
-    pub fn get_lmn(&self, pointing: &RADec) -> Vec<LMN> {
+    pub fn get_lmn_parallel(&self, pointing: &RADec) -> Vec<LMN> {
         self.components
             .par_iter()
             .map(|comp| comp.radec.to_lmn(&pointing))

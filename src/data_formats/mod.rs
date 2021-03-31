@@ -33,13 +33,13 @@ pub(crate) trait InputData: Sync + Send {
 /// well as the weight of the visibility.
 pub(crate) struct Vis {
     /// Real component.
-    re: f32,
+    pub(crate) re: f32,
 
     /// Imaginary component.
-    im: f32,
+    pub(crate) im: f32,
 
     /// Weight.
-    w: f32,
+    pub(crate) w: f32,
 }
 
 pub(crate) enum VisType {

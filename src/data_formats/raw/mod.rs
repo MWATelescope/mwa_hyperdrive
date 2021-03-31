@@ -93,13 +93,13 @@ impl RawData {
 
         debug!("Creating mwalib context");
         let mwalib_context = CorrelatorContext::new(&meta_pb, &gpubox_pbs)?;
-        let num_tiles = mwalib_context.metafits_context.rf_inputs.len() / 2;
+        let metafits_context = &mwalib_context.metafits_context;
+        let num_tiles = metafits_context.rf_inputs.len() / 2;
         debug!("There are {} total tiles", num_tiles);
 
         let mut tile_flags_set = HashSet::new();
         if !ignore_metafits_tile_flags {
-            for flagged_meta_file in mwalib_context
-                .metafits_context
+            for flagged_meta_file in metafits_context
                 .rf_inputs
                 .iter()
                 .filter(|rf| rf.pol == Pol::Y && rf.flagged)
@@ -122,7 +122,7 @@ impl RawData {
 
         // There's a chance that some or all tiles are flagged due to their
         // delays. Any delay == 32 is an indication that a dipole is "dead".
-        let listed_delays = mwalib_context.metafits_context.delays.clone();
+        let listed_delays = metafits_context.delays.clone();
         // TODO: This should probably fail instead of throw a warning. All the
         // user to proceed if they acknowledge the warning.
         debug!("Listed observation dipole delays: {:?}", &listed_delays);
@@ -140,8 +140,7 @@ impl RawData {
             // inputs until we have all non-32 delays.
 
             let mut ideal_delays = vec![32; 16];
-            for rf in mwalib_context
-                .metafits_context
+            for rf in metafits_context
                 .rf_inputs
                 .iter()
                 .filter(|rf| rf.pol == Pol::Y)
@@ -192,7 +191,7 @@ impl RawData {
         } else {
             // If the flags aren't specified, use the observation's fine-channel
             // frequency resolution to set them.
-            match mwalib_context.metafits_context.corr_fine_chan_width_hz {
+            match metafits_context.corr_fine_chan_width_hz {
                 // 10 kHz, 128 channels.
                 10000 => vec![
                     0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127,
@@ -214,7 +213,7 @@ impl RawData {
 
             // The cotter flags are available for all times. Make them
             // match only those we'll use according to mwalib.
-            f.trim(&mwalib_context.metafits_context);
+            f.trim(&metafits_context);
 
             // Ensure that there is a mwaf file for each specified gpubox file.
             for cc in &mwalib_context.coarse_chans {
@@ -248,19 +247,16 @@ impl RawData {
         // let pointing = pointing_from_timestep(timestep, &context, time_res);
 
         // Populate a frequency context struct.
-        let native_freq_res = mwalib_context.metafits_context.corr_fine_chan_width_hz as f64;
+        let native_freq_res = metafits_context.corr_fine_chan_width_hz as f64;
         let mut fine_chan_freqs = Vec::with_capacity(
-            mwalib_context
-                .metafits_context
-                .num_corr_fine_chans_per_coarse
-                * mwalib_context.metafits_context.num_coarse_chans,
+            metafits_context.num_corr_fine_chans_per_coarse * metafits_context.num_coarse_chans,
         );
         // TODO: I'm suspicious that the start channel freq is incorrect.
         for cc in &mwalib_context.coarse_chans {
             let mut cc_freqs = Array1::range(
                 cc.chan_start_hz as f64,
                 cc.chan_end_hz as f64,
-                mwalib_context.metafits_context.corr_fine_chan_width_hz as f64,
+                metafits_context.corr_fine_chan_width_hz as f64,
             )
             .to_vec();
             fine_chan_freqs.append(&mut cc_freqs);
@@ -289,38 +285,51 @@ impl RawData {
                 .map(|cc| cc.chan_width_hz as f64)
                 .sum(),
             fine_chan_freqs,
-            num_fine_chans_per_coarse_chan: mwalib_context
-                .metafits_context
-                .num_corr_fine_chans_per_coarse,
-            native_fine_chan_width: mwalib_context.metafits_context.corr_fine_chan_width_hz as f64,
+            num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
+            native_fine_chan_width: metafits_context.corr_fine_chan_width_hz as f64,
         };
 
         let pointing = RADec::new(
-            mwalib_context
-                .metafits_context
+            metafits_context
                 .ra_phase_center_degrees
-                .unwrap_or(mwalib_context.metafits_context.ra_tile_pointing_degrees)
+                .unwrap_or(metafits_context.ra_tile_pointing_degrees)
                 .to_radians(),
-            mwalib_context
-                .metafits_context
+            metafits_context
                 .dec_phase_center_degrees
-                .unwrap_or(mwalib_context.metafits_context.dec_tile_pointing_degrees)
+                .unwrap_or(metafits_context.dec_tile_pointing_degrees)
                 .to_radians(),
         );
-        let tile_xyz = XYZ::get_tiles_mwalib(&mwalib_context.metafits_context);
+        let tile_xyz = XYZ::get_tiles_mwalib(&metafits_context);
         let baseline_xyz = XYZ::get_baselines(&tile_xyz);
 
+        let mut dipole_gains = Array2::from_elem(
+            (
+                metafits_context.rf_inputs.len() / 2,
+                metafits_context.rf_inputs[0].dipole_gains.len(),
+            ),
+            1.0,
+        );
+        for (mut dipole_gains_for_one_tile, rf_input) in dipole_gains.outer_iter_mut().zip(
+            metafits_context
+                .rf_inputs
+                .iter()
+                .filter(|rf_input| rf_input.pol == Pol::Y),
+        ) {
+            dipole_gains_for_one_tile.assign(&ArrayView1::from(&rf_input.dipole_gains));
+        }
+
         let obs_context = ObsContext {
-            obsid: mwalib_context.metafits_context.obs_id,
+            obsid: metafits_context.obs_id,
             timesteps,
             timestep_indices: 0..mwalib_context.timesteps.len(),
-            native_time_res: mwalib_context.metafits_context.corr_int_time_ms as f64 / 1e3,
+            native_time_res: metafits_context.corr_int_time_ms as f64 / 1e3,
             pointing,
             delays: ideal_delays,
             tile_xyz,
             baseline_xyz,
             tile_flags,
             fine_chan_flags,
+            dipole_gains,
         };
 
         Ok(Self {

@@ -28,13 +28,13 @@ pub(crate) struct SimulateVisConcrete {
     /// Path to the metafits file.
     pub metafits: PathBuf,
 
-    /// The pointing-centre right ascension [degrees].
+    /// The pointing-centre right ascension \[degrees\].
     pub ra: f64,
 
-    /// The pointing-centre declination [degrees].
+    /// The pointing-centre declination \[degrees\].
     pub dec: f64,
 
-    /// The fine-channel resolution [Hz].
+    /// The fine-channel resolution \[Hz\].
     pub fine_channel_width: f64,
 
     /// The MWA coarse bands used. Cannot contain 0.
@@ -43,7 +43,7 @@ pub(crate) struct SimulateVisConcrete {
     /// The number of time steps used from the metafits epoch.
     pub steps: u8,
 
-    /// The time resolution [seconds].
+    /// The time resolution \[seconds\].
     pub time_res: f64,
 }
 

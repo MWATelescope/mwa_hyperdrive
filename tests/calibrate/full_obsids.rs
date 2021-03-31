@@ -18,18 +18,11 @@ mod tests {
     use mwa_hyperdrive_tests::*;
 
     fn args_1065880128() -> (CalibrateUserArgs, TempDir) {
-        let data = get_1065880128();
+        let mut args = get_1065880128();
         let tmp_dir = TempDir::new().expect("couldn't make a temp dir");
 
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            num_sources: Some(50),
-            veto_threshold: Some(0.01),
-            ..Default::default()
-        };
+        args.num_sources = Some(50);
+        args.veto_threshold = Some(0.01);
         (args, tmp_dir)
     }
 

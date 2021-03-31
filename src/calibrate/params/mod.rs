@@ -60,13 +60,13 @@ pub struct CalibrateParams {
     ///
     /// These values correspond to those from the "Antenna" column in HDU 1 of
     /// the metafits file. Zero indexed.
-    pub(crate) tile_flags: Vec<usize>,
+    pub tile_flags: Vec<usize>,
 
     /// Which tiles are unflagged?
-    pub(crate) unflagged_tiles: Vec<usize>,
+    pub unflagged_tiles: Vec<usize>,
 
     /// Channel- and frequency-related parameters required for calibration.
-    pub(crate) freq: FrequencyParams,
+    pub freq: FrequencyParams,
 
     /// The target time resolution [seconds].
     ///
@@ -76,7 +76,7 @@ pub struct CalibrateParams {
     /// In a perfect world, this variable would be an integer, but it's
     /// primarily used in floating-point calculations, so it's more convenient
     /// to store it as a float.
-    pub(crate) time_res: f64,
+    pub time_res: f64,
 
     /// A shared cache of Jones matrices. This field should be used to generate
     /// Jones matrices and populate the cache.
@@ -165,8 +165,9 @@ impl CalibrateParams {
             }
 
             // Valid input for reading a measurement set.
-            (None, None, None, Some(ms), None) => {
-                let input_data = MS::new(&ms)?;
+            (meta, None, None, Some(ms), None) => {
+                // let input_data = MS::new(&ms, meta.as_deref())?;
+                let input_data = MS::new(&ms, meta.as_ref())?;
                 info!(
                     "Calibrating obsid {} from measurement set {}",
                     input_data.get_obs_context().obsid,
@@ -209,11 +210,12 @@ impl CalibrateParams {
         }
         let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
         tile_flags.sort_unstable();
-        // The length of the tile XYZ collection is the number of tiles in the
-        // array, even if some tiles are flagged.
-        let unflagged_tiles = (0..obs_context.tile_xyz.len())
+        // The length of the tile XYZ collection is the total number of tiles in
+        // the array, even if some tiles are flagged.
+        let total_num_tiles = obs_context.tile_xyz.len();
+        let unflagged_tiles = (0..total_num_tiles)
             .into_iter()
-            .filter(|ant| tile_flags.contains(ant))
+            .filter(|ant| !tile_flags.contains(ant))
             .collect();
         info!("Tile flags: {:?}", tile_flags);
 
@@ -274,6 +276,7 @@ impl CalibrateParams {
                 }
             })
             .collect();
+        dbg!(&unflagged_fine_chan_freqs);
         let freq_struct = FrequencyParams {
             res: freq_res,
             num_fine_chans_per_coarse_band,
@@ -282,8 +285,7 @@ impl CalibrateParams {
             num_unflagged_fine_chans_per_coarse_band,
             num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
                 * freq_context.coarse_chan_freqs.len(),
-            // TODO
-            unflagged_fine_chan_freqs: vec![],
+            unflagged_fine_chan_freqs,
             fine_chan_flags,
         };
 
@@ -430,7 +432,7 @@ impl CalibrateParams {
     /// this function is for.
     ///
     /// This function will panic if the antenna number is in the tile flags.
-    pub(crate) fn get_ant_index(&self, ant_number: usize) -> usize {
+    pub fn get_ant_index(&self, ant_number: usize) -> usize {
         if self.tile_flags.contains(&ant_number) {
             panic!(
                 "Tried to get the antenna index for antenna number {}, but that antenna is flagged",
@@ -505,7 +507,6 @@ fn pointing_from_timestep(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calibrate::args::CalibrateUserArgs;
     use mwa_hyperdrive_tests::{full_obsids::*, reduced_obsids::*};
 
     use approx::*;
@@ -515,15 +516,8 @@ mod tests {
     #[test]
     #[serial]
     fn test_new_params() {
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            ..Default::default()
-        };
-        let params = match CalibrateParams::new(args) {
+        let args = get_1090008640_smallest();
+        let params = match args.into_params() {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -537,33 +531,19 @@ mod tests {
     #[serial]
     fn test_new_params_time_averaging() {
         // The native time resolution is 2.0s.
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 4.0 should be a multiple of 2.0s
-            time_res: Some(4.0),
-            ..Default::default()
-        };
-        let params = match CalibrateParams::new(args) {
+        let mut args = get_1090008640_smallest();
+        // 4.0 should be a multiple of 2.0s
+        args.time_res = Some(4.0);
+        let params = match args.into_params() {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
         assert_abs_diff_eq!(params.time_res, 4.0);
 
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 8.0 should be a multiple of 2.0s
-            time_res: Some(8.0),
-            ..Default::default()
-        };
-        let params = match CalibrateParams::new(args) {
+        let mut args = get_1090008640();
+        // 8.0 should be a multiple of 2.0s
+        args.time_res = Some(8.0);
+        let params = match args.into_params() {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -574,33 +554,19 @@ mod tests {
     #[serial]
     fn test_new_params_time_averaging_fail() {
         // The native time resolution is 2.0s.
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 2.01 is not a multiple of 2.0s
-            time_res: Some(2.01),
-            ..Default::default()
-        };
-        let result = CalibrateParams::new(args);
+        let mut args = get_1090008640_smallest();
+        // 2.01 is not a multiple of 2.0s
+        args.time_res = Some(2.01);
+        let result = args.into_params();
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
         );
 
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 3.0 is not a multiple of 2.0s
-            time_res: Some(3.0),
-            ..Default::default()
-        };
-        let result = CalibrateParams::new(args);
+        let mut args = get_1090008640_smallest();
+        // 3.0 is not a multiple of 2.0s
+        args.time_res = Some(3.0);
+        let result = args.into_params();
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
@@ -611,33 +577,19 @@ mod tests {
     #[serial]
     fn test_new_params_freq_averaging() {
         // The native freq. resolution is 40kHz.
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 80e3 should be a multiple of 40kHz
-            freq_res: Some(80e3),
-            ..Default::default()
-        };
-        let params = match CalibrateParams::new(args) {
+        let mut args = get_1090008640_smallest();
+        // 80e3 should be a multiple of 40kHz
+        args.freq_res = Some(80e3);
+        let params = match args.into_params() {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
         assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
 
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 200e3 should be a multiple of 40kHz
-            freq_res: Some(200e3),
-            ..Default::default()
-        };
-        let params = match CalibrateParams::new(args) {
+        let mut args = get_1090008640_smallest();
+        // 200e3 should be a multiple of 40kHz
+        args.freq_res = Some(200e3);
+        let params = match args.into_params() {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -648,33 +600,20 @@ mod tests {
     #[serial]
     fn test_new_params_freq_averaging_fail() {
         // The native freq. resolution is 40kHz.
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 10e3 is not a multiple of 40kHz
-            freq_res: Some(10e3),
-            ..Default::default()
-        };
-        let result = CalibrateParams::new(args);
+        let mut args = get_1090008640_smallest();
+        // 10e3 is not a multiple of 40kHz
+        args.freq_res = Some(10e3);
+        let result = args.into_params();
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
         );
 
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // 79e3 is not a multiple of 40kHz
-            freq_res: Some(79e3),
-            ..Default::default()
-        };
-        let result = CalibrateParams::new(args);
+        let mut args = get_1090008640_smallest();
+
+        // 79e3 is not a multiple of 40kHz
+        args.freq_res = Some(79e3);
+        let result = args.into_params();
         assert!(
             result.is_err(),
             "Expected CalibrateParams to have not been successfully created"
@@ -685,17 +624,11 @@ mod tests {
     #[serial]
     fn test_new_params_tile_flags() {
         // 1090008640 has no flagged tiles in its metafits.
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            // Manually flag antennas 1, 2 and 3.
-            tile_flags: Some(vec![1, 2, 3]),
-            ..Default::default()
-        };
-        let params = match CalibrateParams::new(args) {
+        let mut args = get_1090008640_smallest();
+
+        // Manually flag antennas 1, 2 and 3.
+        args.tile_flags = Some(vec![1, 2, 3]);
+        let params = match args.into_params() {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -703,7 +636,7 @@ mod tests {
         assert!(params.tile_flags.contains(&1));
         assert!(params.tile_flags.contains(&2));
         assert!(params.tile_flags.contains(&3));
-        assert_eq!(params.num_unflagged_tiles, 125);
+        assert_eq!(params.unflagged_tiles.len(), 125);
         assert_eq!(params.get_ant_index(0), 0);
         assert_eq!(params.get_ant_index(4), 1);
         assert_eq!(params.get_ant_index(5), 2);
@@ -713,19 +646,12 @@ mod tests {
     #[test]
     #[serial]
     #[should_panic]
-    fn test_new_params_tile_flags_fail2() {
+    fn test_new_params_tile_flags_fail() {
         // Try to get an antenna index for a tile that is flagged (should
         // panic).
-        let data = get_1090008640();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            tile_flags: Some(vec![1, 2]),
-            ..Default::default()
-        };
-        let params = match CalibrateParams::new(args) {
+        let mut args = get_1090008640_smallest();
+        args.tile_flags = Some(vec![1, 2]);
+        let params = match args.into_params() {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
@@ -739,8 +665,9 @@ mod tests {
     #[test]
     fn test_lst_from_mwalib_timestep_native() {
         // Obsid 1090008640 actually starts at 1090008641.
-        let data = get_1090008640();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1090008640();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };
@@ -756,8 +683,9 @@ mod tests {
 
     #[test]
     fn test_lst_from_mwalib_timestep_averaged() {
-        let data = get_1090008640();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1090008640();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };
@@ -775,8 +703,9 @@ mod tests {
     #[test]
     fn test_pointing_from_timestep_native() {
         // Obsid 1090008640 actually starts at 1090008641.
-        let data = get_1090008640();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1090008640();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };
@@ -794,8 +723,9 @@ mod tests {
 
     #[test]
     fn test_pointing_from_timestep_averaged() {
-        let data = get_1090008640();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1090008640();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };
@@ -818,15 +748,8 @@ mod tests {
     #[serial]
     #[ignore]
     fn test_new_params_real_data() {
-        let data = get_1065880128();
-        let args = CalibrateUserArgs {
-            metafits: Some(data.metafits),
-            gpuboxes: Some(data.gpuboxes),
-            mwafs: Some(data.mwafs),
-            source_list: data.source_list,
-            ..Default::default()
-        };
-        let result = CalibrateParams::new(args);
+        let args = get_1065880128();
+        let result = args.into_params();
         assert!(
             result.is_ok(),
             "Expected CalibrateParams to have been successfully created"
@@ -836,8 +759,9 @@ mod tests {
     #[test]
     #[ignore]
     fn test_lst_from_timestep_native_real() {
-        let data = get_1065880128();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1065880128();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };
@@ -854,8 +778,9 @@ mod tests {
     #[test]
     #[ignore]
     fn test_lst_from_timestep_averaged_real() {
-        let data = get_1065880128();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1065880128();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };
@@ -873,8 +798,9 @@ mod tests {
     #[test]
     #[ignore]
     fn test_pointing_from_timestep_native_real() {
-        let data = get_1065880128();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1065880128();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };
@@ -891,8 +817,9 @@ mod tests {
     #[test]
     #[ignore]
     fn test_pointing_from_timestep_averaged_real() {
-        let data = get_1065880128();
-        let context = match CorrelatorContext::new(&data.metafits, &data.gpuboxes) {
+        let args = get_1065880128();
+        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+        {
             Ok(c) => c,
             Err(e) => panic!("{}", e),
         };

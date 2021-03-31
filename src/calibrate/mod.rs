@@ -26,7 +26,6 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use crate::*;
-use mwa_hyperdrive_core::mwa_hyperbeam::fee::FEEBeamError;
 
 pub fn calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
     di_cal(params)?;
@@ -104,15 +103,15 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
     let total_num_tiles = obs_context.tile_xyz.len();
     let num_fine_freq_chans = obs_freq_context.fine_chan_freqs.len();
-    let num_polarisations = 4;
 
     // The shape of the array containing output Jones matrices.
     let shape = (
-        // TODO: Let the user determine this.
+        // TODO: Let the user determine this -- using all timesteps at once for
+        // now.
         1,
         total_num_tiles,
         num_fine_freq_chans,
-        num_polarisations,
+        NUM_POLARISATIONS,
     );
     debug!(
         "Shape of DI Jones matrices array: {:?} ({} MiB)",
@@ -121,7 +120,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
             1,
             total_num_tiles,
             num_fine_freq_chans,
-            num_polarisations
+            NUM_POLARISATIONS
         ]
         .iter()
         .product::<usize>()
@@ -133,7 +132,34 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     // multiple threads to mutate it in parallel.
     let out = Arc::new(Mutex::new(Array4::from_elem(shape, Jones::identity())));
 
-    // TODO: Let the use decide how many threads to use.
+    // As most of the tiles likely have the same configuration (all the same
+    // delays and amps), we can be much more efficient with computation by
+    // computing over only unique tile configurations (that is, unique
+    // combinations of amplitudes/delays).
+    let mut tile_configs: HashMap<u64, TileConfig> = HashMap::new();
+    // for tile in params
+    //     .get_obs_context()
+    //     .
+    //     .rf_inputs
+    //     .iter()
+    //     .filter(|&rf| !params.tile_flags.contains(&(rf.ant as _)))
+    //     .filter(|&rf| rf.pol == mwa_hyperdrive_core::mwalib::Pol::Y)
+    // {
+    //     let h = TileConfig::hash(&tile.dipole_delays, &tile.dipole_gains);
+    //     match tile_configs.get_mut(&h) {
+    //         None => {
+    //             tile_configs.insert(
+    //                 h,
+    //                 TileConfig::new(tile.ant, &tile.dipole_delays, &tile.dipole_gains),
+    //             );
+    //         }
+    //         Some(c) => {
+    //             c.antennas.push(tile.ant as _);
+    //         }
+    //     };
+    // }
+
+    // TODO: Let the user decide how many threads to use.
     let num_threads = rayon::current_num_threads();
 
     // Set up our producer (sender) thread and worker (receiver) threads.
@@ -185,20 +211,20 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 }
 
 #[derive(Debug)]
-struct TileConfig<'a> {
+pub(crate) struct TileConfig<'a> {
     /// The tile antenna numbers that this configuration applies to.
-    antennas: Vec<usize>,
+    pub(crate) antennas: Vec<usize>,
 
     /// The delays of this configuration.
-    delays: &'a [u32],
+    pub(crate) delays: &'a [u32],
 
     /// The amps of this configuration.
-    amps: &'a [f64],
+    pub(crate) amps: &'a [f64],
 }
 
 impl<'a> TileConfig<'a> {
     /// Make a new `TileConfig`.
-    fn new(antenna: u32, delays: &'a [u32], amps: &'a [f64]) -> Self {
+    pub(crate) fn new(antenna: u32, delays: &'a [u32], amps: &'a [f64]) -> Self {
         Self {
             antennas: vec![antenna as _],
             delays,
@@ -208,7 +234,7 @@ impl<'a> TileConfig<'a> {
 
     /// From tile delays and amplitudes, generate a hash. Useful to identify if
     /// this `TileConfig` matches another.
-    fn hash(delays: &[u32], amps: &[f64]) -> u64 {
+    pub(crate) fn hash(delays: &[u32], amps: &[f64]) -> u64 {
         let mut hasher = DefaultHasher::new();
         delays.hash(&mut hasher);
         // We can't hash f64 values, so convert them to ints. Multiply by a big
