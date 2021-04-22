@@ -71,6 +71,13 @@ pub struct SourceComponent {
     pub flux_type: FluxDensityType,
 }
 
+impl SourceComponent {
+    /// Estimate the flux density of this component at a frequency.
+    pub fn estimate_at_freq(&self, freq_hz: f64) -> Result<FluxDensity, EstimateError> {
+        self.flux_type.estimate_at_freq(freq_hz)
+    }
+}
+
 /// Source types supported by hyperdrive.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ComponentType {

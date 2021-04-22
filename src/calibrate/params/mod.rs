@@ -12,20 +12,21 @@ errors) can be neatly split.
  */
 
 pub(crate) mod error;
+mod filenames;
 pub(crate) mod freq;
 pub(crate) mod ranked_source;
 
 pub use error::*;
+use filenames::InputDataTypes;
 pub(crate) use freq::*;
 pub(crate) use ranked_source::*;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use mwa_hyperbeam::fee::FEEBeam;
-use mwalib::{CorrelatorContext, MWA_LONGITUDE_RADIANS};
-use permissions::is_readable;
+use mwalib::CorrelatorContext;
 
 use crate::calibrate::veto::veto_sources;
 use crate::data_formats::*;
@@ -81,39 +82,28 @@ pub struct CalibrateParams {
     /// A shared cache of Jones matrices. This field should be used to generate
     /// Jones matrices and populate the cache.
     pub(crate) jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache,
-
-    /// The timestep index into the observation.
-    ///
-    /// This is used to map to mwalib timesteps. hyperdrive's timesteps must be
-    /// different, because hyperdrive might be doing time averaging, whereas
-    /// mwalib has no notion of that.
-    ///
-    /// The first timestep does not necessarily correspond to the scheduled
-    /// start of the observation; mwalib may ignore the start of the observation
-    /// because e.g. not all data is available.
-    ///
-    /// To prevent this variable from being misused, it is private. Getting or
-    /// setting requires methods.
-    // timestep: usize,
-
-    /// The local sidereal time [radians]. This variable is kept in lockstep with
-    /// `timestep`.
-    ///
-    /// To prevent this variable from being misused, it is private. Getting or
-    /// setting requires methods.
-    lst: f64,
-
-    /// The current pointing.
-    ///
-    /// To prevent this variable from being misused, it is private. Getting or
-    /// setting requires methods.
-    pointing: HADec,
     // /// The observation timestep indices, respecting the target time resolution.
     // ///
     // /// If time_res is the same as the observations native resolution, then
     // /// these timesteps are the same as mwalib's timesteps. Otherwise, they need
     // /// to be adjusted.
     // timesteps: Vec<usize>,
+    /// Given two antenna numbers, get the unflagged baseline number. e.g. If
+    /// antenna 1 (i.e. the second antenna) is flagged, then the first baseline
+    /// (i.e. 0) is between antenna 0 and antenna 2.
+    ///
+    /// This exists because some tiles may be flagged, so some baselines may be
+    /// flagged.
+    pub(crate) tile_to_baseline_map: HashMap<(usize, usize), usize>,
+
+    /// Given an unflagged baseline number, get the antenna number pair that
+    /// contribute to it. e.g. If antenna 1 (i.e. the second antenna) is
+    /// flagged, then the first baseline (i.e. 0) is between antenna 0 and
+    /// antenna 2.
+    ///
+    /// This exists because some tiles may be flagged, so some baselines may be
+    /// flagged.
+    pub(crate) baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 }
 
 impl CalibrateParams {
@@ -125,54 +115,60 @@ impl CalibrateParams {
     /// Source list vetoing is performed in this function, using the specified
     /// number of sources and/or the veto threshold.
     pub(crate) fn new(args: super::args::CalibrateUserArgs) -> Result<Self, InvalidArgsError> {
-        // Set up the beam (requires the MWA_BEAM_FILE variable to be set).
-        debug!("Creating beam object");
-        let beam = FEEBeam::new_from_env()?;
-
         // Handle input data. We expect one of three possibilities:
-        // - gpubox files, a metafits files, and maybe mwaf files,
-        // - a measurement set, or
+        // - gpubox files, a metafits file (and maybe mwaf files),
+        // - a measurement set (and maybe a metafits file), or
         // - uvfits files.
         // If none or multiple of these possibilities are met, then we must fail.
+        let input_data_types = match args.data {
+            Some(strings) => InputDataTypes::new(&strings)?,
+            None => return Err(InvalidArgsError::NoInputData),
+        };
         let input_data: Box<dyn InputData> = match (
-            args.metafits,
-            args.gpuboxes,
-            args.mwafs,
-            args.ms,
-            args.uvfits,
+            input_data_types.metafits,
+            input_data_types.gpuboxes,
+            input_data_types.mwafs,
+            input_data_types.ms,
+            input_data_types.uvfits,
         ) {
             // Valid input for reading raw data.
             (Some(meta), Some(gpuboxes), mwafs, None, None) => {
-                let input_data = RawData::new(
-                    &meta,
-                    &gpuboxes,
-                    mwafs.as_deref(),
-                    args.ignore_metafits_flags.unwrap_or_default(),
-                    args.dont_flag_fine_channels.unwrap_or_default(),
-                )?;
+                todo!();
+                // let input_data = RawData::new(
+                //     &meta,
+                //     &gpuboxes,
+                //     mwafs.as_deref(),
+                //     args.ignore_metafits_flags.unwrap_or_default(),
+                //     args.dont_flag_fine_channels.unwrap_or_default(),
+                // )?;
 
-                // Print some high-level information.
-                let obs_context = input_data.get_obs_context();
-                info!("Calibrating obsid {}", obs_context.obsid);
-                info!("Using metafits: {}", PathBuf::from(meta).display());
-                info!("Using {} gpubox files", gpuboxes.len());
-                match mwafs {
-                    Some(_) => info!("Using supplied mwaf flags"),
-                    None => warn!("No mwaf flags files supplied"),
-                }
+                // // Print some high-level information.
+                // let obs_context = input_data.get_obs_context();
+                // info!("Calibrating obsid {}", obs_context.obsid);
+                // info!("Using metafits: {}", PathBuf::from(meta).display());
+                // info!("Using {} gpubox files", gpuboxes.len());
+                // match mwafs {
+                //     Some(_) => info!("Using supplied mwaf flags"),
+                //     None => warn!("No mwaf flags files supplied"),
+                // }
 
-                Box::new(input_data)
+                // Box::new(input_data)
             }
 
             // Valid input for reading a measurement set.
             (meta, None, None, Some(ms), None) => {
-                // let input_data = MS::new(&ms, meta.as_deref())?;
                 let input_data = MS::new(&ms, meta.as_ref())?;
-                info!(
-                    "Calibrating obsid {} from measurement set {}",
-                    input_data.get_obs_context().obsid,
-                    input_data.ms.canonicalize()?.display()
-                );
+                match input_data.get_obs_context().obsid {
+                    Some(o) => info!(
+                        "Calibrating obsid {} from measurement set {}",
+                        o,
+                        input_data.ms.canonicalize()?.display()
+                    ),
+                    None => info!(
+                        "Calibrating measurement set {}",
+                        input_data.ms.canonicalize()?.display()
+                    ),
+                }
                 Box::new(input_data)
             }
 
@@ -196,15 +192,29 @@ impl CalibrateParams {
             _ => return Err(InvalidArgsError::InvalidDataInput),
         };
 
+        let beam = if args.no_beam.unwrap_or_default() {
+            todo!();
+        } else {
+            trace!("Creating beam object");
+            if let Some(bf) = args.beam_file {
+                // Set up the beam struct from the specified beam file.
+                FEEBeam::new(&bf)?
+            } else {
+                // Set up the beam struct from the MWA_BEAM_FILE environment
+                // variable.
+                FEEBeam::new_from_env()?
+            }
+        };
+
         let obs_context = input_data.get_obs_context();
         let freq_context = input_data.get_freq_context();
 
-        // Assign the tile flags. Add tiles that have already been flagged by
-        // the input data.
+        // Assign the tile flags.
         let mut tile_flags_set: HashSet<usize> = match args.tile_flags {
             Some(flags) => flags.into_iter().collect(),
             None => HashSet::new(),
         };
+        // Add tiles that have already been flagged by the input data.
         for &obs_tile_flag in &obs_context.tile_flags {
             tile_flags_set.insert(obs_tile_flag);
         }
@@ -213,38 +223,52 @@ impl CalibrateParams {
         // The length of the tile XYZ collection is the total number of tiles in
         // the array, even if some tiles are flagged.
         let total_num_tiles = obs_context.tile_xyz.len();
-        let unflagged_tiles = (0..total_num_tiles)
+        let unflagged_tiles: Vec<usize> = (0..total_num_tiles)
             .into_iter()
             .filter(|ant| !tile_flags.contains(ant))
             .collect();
         info!("Tile flags: {:?}", tile_flags);
 
         // Assign the per-coarse-channel fine-channel flags.
-        let mut fine_chan_flags_set: HashSet<usize> = match args.fine_chan_flags {
+        // TODO: Rename "coarse band" to "coarse channel".
+        let mut fine_chan_flags_per_coarse_band: HashSet<usize> =
+            match args.fine_chan_flags_per_coarse_band {
+                Some(flags) => flags.into_iter().collect(),
+                None => HashSet::new(),
+            };
+        for &obs_fine_chan_flag in &obs_context.fine_chan_flags_per_coarse_band {
+            fine_chan_flags_per_coarse_band.insert(obs_fine_chan_flag);
+        }
+        {
+            let mut fine_chan_flags_per_coarse_band_vec =
+                fine_chan_flags_per_coarse_band.iter().collect::<Vec<_>>();
+            fine_chan_flags_per_coarse_band_vec.sort_unstable();
+            info!(
+                "Fine-channel flags per coarse band: {:?}",
+                fine_chan_flags_per_coarse_band_vec
+            );
+        }
+        debug!(
+            "Observation's fine-channel flags per coarse band: {:?}",
+            obs_context.fine_chan_flags_per_coarse_band
+        );
+
+        // Determine all of the fine-channel flags.
+        let mut fine_chan_flags: HashSet<usize> = match args.fine_chan_flags {
             Some(flags) => flags.into_iter().collect(),
             None => HashSet::new(),
         };
-        for &obs_fine_chan_flag in &obs_context.fine_chan_flags {
-            fine_chan_flags_set.insert(obs_fine_chan_flag);
+        for (i, _) in freq_context.coarse_chan_nums.iter().enumerate() {
+            // Add the per-coarse-channel flags to the observation-wide flags.
+            for f in &fine_chan_flags_per_coarse_band {
+                fine_chan_flags.insert(f + freq_context.num_fine_chans_per_coarse_chan * i);
+            }
         }
-        let mut fine_chan_flags: Vec<usize> = fine_chan_flags_set.into_iter().collect();
-        fine_chan_flags.sort_unstable();
-        info!("Fine-channel flags per coarse band: {:?}", fine_chan_flags);
-        debug!(
-            "Observation's fine-channel flags per coarse band: {:?}",
-            obs_context.fine_chan_flags
-        );
-
-        let first_timestep = obs_context.timesteps[0];
-        let lst = unsafe {
-            let gmst = erfa_sys::eraGmst06(
-                erfa_sys::ERFA_DJM0,
-                first_timestep.as_mjd_utc_days(),
-                erfa_sys::ERFA_DJM0,
-                first_timestep.as_mjd_utc_days(),
-            );
-            (gmst + MWA_LONGITUDE_RADIANS) % TAU
-        };
+        {
+            let mut fine_chan_flags_vec = fine_chan_flags.iter().collect::<Vec<_>>();
+            fine_chan_flags_vec.sort_unstable();
+            debug!("All fine-channel flags: {:?}", fine_chan_flags_vec);
+        }
 
         // Set up frequency information.
         let native_freq_res = freq_context.native_fine_chan_width;
@@ -259,32 +283,26 @@ impl CalibrateParams {
         let num_fine_chans_per_coarse_band =
             freq_context.fine_chan_freqs.len() / freq_context.coarse_chan_freqs.len();
         let num_unflagged_fine_chans_per_coarse_band =
-            num_fine_chans_per_coarse_band - fine_chan_flags.len();
-        let unflagged_fine_chan_freqs: Vec<f64> = freq_context
-            .fine_chan_freqs
-            .iter()
-            .zip(
-                (0..freq_context.num_fine_chans_per_coarse_chan)
-                    .into_iter()
-                    .cycle(),
-            )
-            .filter_map(|(&freq, chan_num)| {
-                if fine_chan_flags.contains(&chan_num) {
-                    None
-                } else {
-                    Some(freq)
-                }
-            })
-            .collect();
-        dbg!(&unflagged_fine_chan_freqs);
+            num_fine_chans_per_coarse_band - fine_chan_flags_per_coarse_band.len();
+        let (unflagged_fine_chans, unflagged_fine_chan_freqs): (Vec<usize>, Vec<f64>) =
+            freq_context
+                .fine_chan_freqs
+                .iter()
+                .zip((0..freq_context.fine_chan_freqs.len()).into_iter())
+                .filter_map(|(&freq, chan_num)| {
+                    if fine_chan_flags.contains(&chan_num) {
+                        None
+                    } else {
+                        Some((chan_num, freq.round()))
+                    }
+                })
+                .unzip();
         let freq_struct = FrequencyParams {
             res: freq_res,
-            num_fine_chans_per_coarse_band,
-            num_fine_chans: freq_context.fine_chan_freqs.len(),
-            fine_chan_freqs: freq_context.fine_chan_freqs.clone(),
             num_unflagged_fine_chans_per_coarse_band,
             num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
                 * freq_context.coarse_chan_freqs.len(),
+            unflagged_fine_chans,
             unflagged_fine_chan_freqs,
             fine_chan_flags,
         };
@@ -322,7 +340,7 @@ impl CalibrateParams {
                     }
                 },
             };
-            match mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, &sl_type) {
+            match mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, sl_type) {
                 Ok(sl) => sl,
                 Err(e) => {
                     eprintln!("Error when trying to read source list:");
@@ -330,20 +348,30 @@ impl CalibrateParams {
                 }
             }
         };
+        // let mut gauss_names = vec![];
+        // for (name, comps) in source_list.iter().map(|(name, s)| (name, &s.components)) {
+        //     for c in comps {
+        //         match c.comp_type {
+        //             ComponentType::Gaussian { .. } => gauss_names.push(name.clone()),
+        //             _ => (),
+        //         }
+        //     }
+        // }
+        // for name in gauss_names {
+        //     source_list.remove(&name);
+        // }
         info!("Found {} sources in the source list", source_list.len());
-
         // Veto any sources that may be troublesome, and/or cap the total number
         // of sources. If the user doesn't specify how many source-list sources
         // to use, then all sources are used.
         if args.num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
-        dbg!(&freq_context.coarse_chan_freqs);
         let pointing = obs_context.pointing.to_owned();
         let ranked_sources = veto_sources(
             &mut source_list,
             &pointing,
-            lst,
+            obs_context.lst0,
             &obs_context.delays,
             &freq_context.coarse_chan_freqs,
             &beam,
@@ -359,14 +387,14 @@ impl CalibrateParams {
             source_list.len(),
             num_components
         );
-        debug!("Using sources: {:#?}", source_list.keys());
+        debug!("Using sources: {:?}", source_list.keys());
         if source_list.len() > 10000 {
             warn!("Using more than 10,000 sources!");
         } else if source_list.is_empty() {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
 
-        let native_time_res = obs_context.native_time_res;
+        let native_time_res = obs_context.time_res;
         let time_res = args.time_res.unwrap_or(native_time_res);
         if time_res % native_time_res != 0.0 {
             return Err(InvalidArgsError::InvalidTimeResolution {
@@ -376,6 +404,28 @@ impl CalibrateParams {
         }
         // let num_time_steps_to_average = time_res / native_time_res;
         // let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
+
+        let (tile_to_baseline_map, baseline_to_tile_map) = {
+            let mut tile_to_baseline_map = HashMap::new();
+            let mut baseline_to_tile_map = HashMap::new();
+            let mut bl = 0;
+            for ant1 in 0..unflagged_tiles.len() {
+                if tile_flags.contains(&ant1) {
+                    continue;
+                }
+                for ant2 in (ant1 + 1)..unflagged_tiles.len() {
+                    if tile_flags.contains(&ant2) {
+                        continue;
+                    }
+                    tile_to_baseline_map.insert((ant1, ant2), bl);
+                    baseline_to_tile_map.insert(bl, (ant1, ant2));
+                    bl += 1;
+                }
+            }
+            (tile_to_baseline_map, baseline_to_tile_map)
+        };
+
+        dbg!(&freq_context.coarse_chan_freqs);
 
         Ok(Self {
             input_data,
@@ -388,11 +438,8 @@ impl CalibrateParams {
             freq: freq_struct,
             time_res,
             jones_cache: JonesCache::new(),
-            // timestep,
-            lst,
-            // TODO: Should this be RADec or HADec?
-            pointing: pointing.to_hadec(lst),
-            // timesteps,
+            tile_to_baseline_map,
+            baseline_to_tile_map,
         })
     }
 
@@ -432,7 +479,7 @@ impl CalibrateParams {
     /// this function is for.
     ///
     /// This function will panic if the antenna number is in the tile flags.
-    pub fn get_ant_index(&self, ant_number: usize) -> usize {
+    pub(crate) fn get_ant_index(&self, ant_number: usize) -> usize {
         if self.tile_flags.contains(&ant_number) {
             panic!(
                 "Tried to get the antenna index for antenna number {}, but that antenna is flagged",
@@ -507,7 +554,7 @@ fn pointing_from_timestep(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mwa_hyperdrive_tests::{full_obsids::*, reduced_obsids::*};
+    use crate::tests::{full_obsids::*, reduced_obsids::*};
 
     use approx::*;
     // Need to use serial tests because HDF5 is not necessarily reentrant.
@@ -659,88 +706,88 @@ mod tests {
         assert_eq!(params.get_ant_index(1), 1);
     }
 
-    // astropy doesn't exactly agree with the numbers below, I think because the
-    // LST listed in MWA metafits files doesn't agree with what astropy thinks
-    // it should be. But, it's all very close.
-    #[test]
-    fn test_lst_from_mwalib_timestep_native() {
-        // Obsid 1090008640 actually starts at 1090008641.
-        let args = get_1090008640();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
-        let new_lst = lst_from_timestep(0, &context, time_res);
-        // gpstime 1090008642
-        assert_abs_diff_eq!(new_lst, 6.262123690318563, epsilon = 1e-10);
+    // // astropy doesn't exactly agree with the numbers below, I think because the
+    // // LST listed in MWA metafits files doesn't agree with what astropy thinks
+    // // it should be. But, it's all very close.
+    // #[test]
+    // fn test_lst_from_mwalib_timestep_native() {
+    //     // Obsid 1090008640 actually starts at 1090008641.
+    //     let args = get_1090008640();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+    //     let new_lst = lst_from_timestep(0, &context, time_res);
+    //     // gpstime 1090008642
+    //     assert_abs_diff_eq!(new_lst, 6.262123690318563, epsilon = 1e-10);
 
-        let new_lst = lst_from_timestep(1, &context, time_res);
-        // gpstime 1090008644
-        assert_abs_diff_eq!(new_lst, 6.26226953263562, epsilon = 1e-10);
-    }
+    //     let new_lst = lst_from_timestep(1, &context, time_res);
+    //     // gpstime 1090008644
+    //     assert_abs_diff_eq!(new_lst, 6.26226953263562, epsilon = 1e-10);
+    // }
 
-    #[test]
-    fn test_lst_from_mwalib_timestep_averaged() {
-        let args = get_1090008640();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        // The native time res. is 2.0s, let's make our target 4.0s here.
-        let time_res = 4.0;
-        let new_lst = lst_from_timestep(0, &context, time_res);
-        // gpstime 1090008643
-        assert_abs_diff_eq!(new_lst, 6.2621966114770915, epsilon = 1e-10);
+    // #[test]
+    // fn test_lst_from_mwalib_timestep_averaged() {
+    //     let args = get_1090008640();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     // The native time res. is 2.0s, let's make our target 4.0s here.
+    //     let time_res = 4.0;
+    //     let new_lst = lst_from_timestep(0, &context, time_res);
+    //     // gpstime 1090008643
+    //     assert_abs_diff_eq!(new_lst, 6.2621966114770915, epsilon = 1e-10);
 
-        let new_lst = lst_from_timestep(1, &context, time_res);
-        // gpstime 1090008647
-        assert_abs_diff_eq!(new_lst, 6.262488296111205, epsilon = 1e-10);
-    }
+    //     let new_lst = lst_from_timestep(1, &context, time_res);
+    //     // gpstime 1090008647
+    //     assert_abs_diff_eq!(new_lst, 6.262488296111205, epsilon = 1e-10);
+    // }
 
-    #[test]
-    fn test_pointing_from_timestep_native() {
-        // Obsid 1090008640 actually starts at 1090008641.
-        let args = get_1090008640();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
-        let pointing = pointing_from_timestep(0, &context, time_res);
-        // gpstime 1090008642
-        assert_abs_diff_eq!(pointing.ha, 6.262123690318563, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // #[test]
+    // fn test_pointing_from_timestep_native() {
+    //     // Obsid 1090008640 actually starts at 1090008641.
+    //     let args = get_1090008640();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+    //     let pointing = pointing_from_timestep(0, &context, time_res);
+    //     // gpstime 1090008642
+    //     assert_abs_diff_eq!(pointing.ha, 6.262123690318563, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
 
-        let pointing = pointing_from_timestep(1, &context, time_res);
-        // gpstime 1090008644
-        assert_abs_diff_eq!(pointing.ha, 6.26226953263562, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
-    }
+    //     let pointing = pointing_from_timestep(1, &context, time_res);
+    //     // gpstime 1090008644
+    //     assert_abs_diff_eq!(pointing.ha, 6.26226953263562, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // }
 
-    #[test]
-    fn test_pointing_from_timestep_averaged() {
-        let args = get_1090008640();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        // The native time res. is 2.0s, let's make our target 4.0s here.
-        let time_res = 4.0;
-        let pointing = pointing_from_timestep(0, &context, time_res);
-        // gpstime 1090008643
-        assert_abs_diff_eq!(pointing.ha, 6.2621966114770915, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // #[test]
+    // fn test_pointing_from_timestep_averaged() {
+    //     let args = get_1090008640();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     // The native time res. is 2.0s, let's make our target 4.0s here.
+    //     let time_res = 4.0;
+    //     let pointing = pointing_from_timestep(0, &context, time_res);
+    //     // gpstime 1090008643
+    //     assert_abs_diff_eq!(pointing.ha, 6.2621966114770915, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
 
-        let pointing = pointing_from_timestep(1, &context, time_res);
-        // gpstime 1090008647
-        assert_abs_diff_eq!(pointing.ha, 6.262488296111205, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
-    }
+    //     let pointing = pointing_from_timestep(1, &context, time_res);
+    //     // gpstime 1090008647
+    //     assert_abs_diff_eq!(pointing.ha, 6.262488296111205, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // }
 
     // The following tests use full MWA data.
 
@@ -756,83 +803,83 @@ mod tests {
         );
     }
 
-    #[test]
-    #[ignore]
-    fn test_lst_from_timestep_native_real() {
-        let args = get_1065880128();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
-        let new_lst = lst_from_timestep(0, &context, time_res);
-        // gpstime 1065880126.25
-        assert_abs_diff_eq!(new_lst, 6.074695614533638, epsilon = 1e-10);
+    // #[test]
+    // #[ignore]
+    // fn test_lst_from_timestep_native_real() {
+    //     let args = get_1065880128();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+    //     let new_lst = lst_from_timestep(0, &context, time_res);
+    //     // gpstime 1065880126.25
+    //     assert_abs_diff_eq!(new_lst, 6.074695614533638, epsilon = 1e-10);
 
-        let new_lst = lst_from_timestep(1, &context, time_res);
-        // gpstime 1065880126.75
-        assert_abs_diff_eq!(new_lst, 6.074732075112903, epsilon = 1e-10);
-    }
+    //     let new_lst = lst_from_timestep(1, &context, time_res);
+    //     // gpstime 1065880126.75
+    //     assert_abs_diff_eq!(new_lst, 6.074732075112903, epsilon = 1e-10);
+    // }
 
-    #[test]
-    #[ignore]
-    fn test_lst_from_timestep_averaged_real() {
-        let args = get_1065880128();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        // The native time res. is 0.5s, let's make our target 2s here.
-        let time_res = 2.0;
-        let new_lst = lst_from_timestep(0, &context, time_res);
-        // gpstime 1065880127
-        assert_abs_diff_eq!(new_lst, 6.074750305402534, epsilon = 1e-10);
+    // #[test]
+    // #[ignore]
+    // fn test_lst_from_timestep_averaged_real() {
+    //     let args = get_1065880128();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     // The native time res. is 0.5s, let's make our target 2s here.
+    //     let time_res = 2.0;
+    //     let new_lst = lst_from_timestep(0, &context, time_res);
+    //     // gpstime 1065880127
+    //     assert_abs_diff_eq!(new_lst, 6.074750305402534, epsilon = 1e-10);
 
-        let new_lst = lst_from_timestep(1, &context, time_res);
-        // gpstime 1065880129
-        assert_abs_diff_eq!(new_lst, 6.074896147719591, epsilon = 1e-10);
-    }
+    //     let new_lst = lst_from_timestep(1, &context, time_res);
+    //     // gpstime 1065880129
+    //     assert_abs_diff_eq!(new_lst, 6.074896147719591, epsilon = 1e-10);
+    // }
 
-    #[test]
-    #[ignore]
-    fn test_pointing_from_timestep_native_real() {
-        let args = get_1065880128();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
-        let pointing = pointing_from_timestep(0, &context, time_res);
-        assert_abs_diff_eq!(pointing.ha, 6.074695614533638, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // #[test]
+    // #[ignore]
+    // fn test_pointing_from_timestep_native_real() {
+    //     let args = get_1065880128();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
+    //     let pointing = pointing_from_timestep(0, &context, time_res);
+    //     assert_abs_diff_eq!(pointing.ha, 6.074695614533638, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
 
-        let pointing = pointing_from_timestep(1, &context, time_res);
-        assert_abs_diff_eq!(pointing.ha, 6.074732075112903, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
-    }
+    //     let pointing = pointing_from_timestep(1, &context, time_res);
+    //     assert_abs_diff_eq!(pointing.ha, 6.074732075112903, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // }
 
-    #[test]
-    #[ignore]
-    fn test_pointing_from_timestep_averaged_real() {
-        let args = get_1065880128();
-        let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-        {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e),
-        };
-        // The native time res. is 0.5s, let's make our target 2s here.
-        let time_res = 2.0;
-        let pointing = pointing_from_timestep(0, &context, time_res);
-        // gpstime 1065880127
-        assert_abs_diff_eq!(pointing.ha, 6.074750305402534, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // #[test]
+    // #[ignore]
+    // fn test_pointing_from_timestep_averaged_real() {
+    //     let args = get_1065880128();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     // The native time res. is 0.5s, let's make our target 2s here.
+    //     let time_res = 2.0;
+    //     let pointing = pointing_from_timestep(0, &context, time_res);
+    //     // gpstime 1065880127
+    //     assert_abs_diff_eq!(pointing.ha, 6.074750305402534, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
 
-        let pointing = pointing_from_timestep(1, &context, time_res);
-        // gpstime 1065880129
-        assert_abs_diff_eq!(pointing.ha, 6.074896147719591, epsilon = 1e-10);
-        assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
-    }
+    //     let pointing = pointing_from_timestep(1, &context, time_res);
+    //     // gpstime 1065880129
+    //     assert_abs_diff_eq!(pointing.ha, 6.074896147719591, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(pointing.dec, -0.47123889803846897, epsilon = 1e-10);
+    // }
 }

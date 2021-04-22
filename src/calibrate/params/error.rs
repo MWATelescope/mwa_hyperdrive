@@ -12,6 +12,9 @@ use mwa_hyperdrive_core::mwa_hyperbeam;
 #[derive(Error, Debug)]
 pub enum InvalidArgsError {
     // TODO: List supported combinations.
+    #[error("No input data was given!")]
+    NoInputData,
+
     #[error("Either no input data was given, or an invalid combination of formats was given.")]
     InvalidDataInput,
 
@@ -37,14 +40,16 @@ pub enum InvalidArgsError {
     InvalidTileFlag { got: usize, max: usize },
 
     #[error("{0}")]
+    InputFile(#[from] super::filenames::InputFileError),
+
+    #[error("{0}")]
     Glob(#[from] crate::glob::GlobError),
 
     // /// Error associated with making a new instance of the `InputData` trait.
     // #[error("{0}")]
     // NewInputData(#[from] crate::data_formats::NewInputDataError),
-    #[error("{0}")]
-    RawData(#[from] crate::data_formats::raw::NewRawError),
-
+    // #[error("{0}")]
+    // RawData(#[from] crate::data_formats::raw::NewRawError),
     #[error("{0}")]
     MS(#[from] crate::data_formats::ms::NewMSError),
 

@@ -26,13 +26,13 @@ enum Args {
         #[structopt(name = "ARGUMENTS_FILE", parse(from_os_str))]
         args_file: Option<PathBuf>,
 
-        /// The verbosity of the program. The default is to print high-level
-        /// information.
+        /// The verbosity of the program. Increase by specifying multiple times
+        /// (e.g. -vv). The default is to print only high-level information.
         #[structopt(short, long, parse(from_occurrences))]
         verbosity: u8,
 
-        /// Don't actually do calibration; just verify that data was correctly
-        /// ingested and print out high-level information.
+        /// Don't actually do calibration; just verify that arguments were
+        /// correctly ingested and print out high-level information.
         #[structopt(short = "n", long)]
         dry_run: bool,
     },
@@ -75,7 +75,7 @@ fn main() {
     // prints the debug representation of the error. The code below prints the
     // "display" or human readable representation of the error.
     if let Err(e) = try_main() {
-        eprintln!("{}", e);
+        eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 }
@@ -136,7 +136,7 @@ fn try_main() -> Result<(), HyperdriveError> {
                 return Ok(());
             }
 
-            calibrate(&parameters)?;
+            calibrate(parameters)?;
 
             info!("hyperdrive calibrate complete.");
         }

@@ -13,8 +13,7 @@ pub use error::VisibilityGenerationError;
 
 use std::f64::consts::TAU;
 use std::fs::File;
-use std::io::BufWriter;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 
 use byteorder::{ByteOrder, LittleEndian};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -52,7 +51,7 @@ pub fn vis_gen(
     context: &context::Context,
     src: &Source,
     params: &TimeFreqParams,
-    mut pointing: HADec,
+    pointing: RADec,
     cuda: bool,
     text_file: bool,
 ) -> Result<(), VisibilityGenerationError> {
@@ -103,6 +102,9 @@ pub fn vis_gen(
             .progress_chars("#>-"),
     );
 
+    // Get the (l,m,n) coordinates for each source component.
+    let lmn = src.get_lmn_parallel(&pointing);
+
     // Iterate over time. This allows minimal re-calculation of the pointing
     // centre, and is more efficient at generating visibilities.
     let mut lst = context.base_lst;
@@ -111,10 +113,7 @@ pub fn vis_gen(
         let lst_inc =
             if time_step == 0 { 0.5 } else { 1.0 } * params.time_resolution * SOLAR2SIDEREAL * DS2R;
         lst += lst_inc;
-        pointing.ha += lst_inc;
-
-        // Get the (l,m,n) coordinates for each source component.
-        let lmn = src.get_lmn_parallel(&pointing.to_radec(lst));
+        let pointing = pointing.to_hadec(lst);
 
         // Get the UVW baselines with the new pointing.
         let uvw_metres = UVW::get_baselines(&context.xyz, &pointing);
@@ -162,16 +161,17 @@ pub fn vis_gen(
                         comps = src.components.len()
                     ));
                 }
-                cuda::cuda_vis_gen(&context, &src, &params, &flux_densities, lmn, uvw)
+                cuda::cuda_vis_gen(&context, &src, &params, &flux_densities, &lmn, uvw)
             }
         } else {
-            cpu_vis_gen(&context, &src, &params, &flux_densities, lmn, uvw)
+            cpu_vis_gen(&context, &src, &params, &flux_densities, &lmn, uvw)
         };
 
-        let (mut u_t, mut v_t, mut w_t) = UVW::decompose(uvw_metres);
-        u.append(&mut u_t);
-        v.append(&mut v_t);
-        w.append(&mut w_t);
+        for uvw in uvw_metres.into_iter() {
+            u.push(uvw.u as _);
+            v.push(uvw.v as _);
+            w.push(uvw.w as _);
+        }
         real.append(&mut real_t);
         imag.append(&mut imag_t);
     }
@@ -317,7 +317,7 @@ fn cpu_vis_gen(
     src: &Source,
     params: &TimeFreqParams,
     flux_densities: &[f32],
-    lmn: Vec<LMN>,
+    lmn: &[LMN],
     uvw: Vec<UVW>,
 ) -> (Vec<f32>, Vec<f32>) {
     // Perform the visibility equation over each UVW baseline and LMN triple.

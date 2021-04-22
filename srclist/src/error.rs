@@ -19,7 +19,7 @@ pub enum ReadSourceListError {
     #[error("Source {source_name}: The sum of all Stokes {stokes_comp} flux densities was negative ({sum})")]
     InvalidFluxDensitySum {
         sum: f64,
-        stokes_comp: String,
+        stokes_comp: &'static str,
         source_name: String,
     },
 
@@ -43,6 +43,9 @@ pub enum ReadSourceListError {
 
     #[error("{0}")]
     Sexagesimal(#[from] mwa_hyperdrive_core::SexagesimalError),
+
+    #[error("IO error: {0}")]
+    IO(#[from] std::io::Error),
 }
 
 /// Errors associated with reading in an RTS or WODEN source list.
@@ -62,10 +65,16 @@ pub enum ReadSourceListCommonError {
     NestedComponents(u32),
 
     #[error("Source list line {0}: Found {keyword} outside of a SOURCE context")]
-    OutsideSource { line_num: u32, keyword: String },
+    OutsideSource {
+        line_num: u32,
+        keyword: &'static str,
+    },
 
     #[error("Source list line {0}: Found {keyword} outside of a COMPONENT context")]
-    OutsideComponent { line_num: u32, keyword: String },
+    OutsideComponent {
+        line_num: u32,
+        keyword: &'static str,
+    },
 
     #[error("Source list line {0}: Found ENDSOURCE but we're not reading a source")]
     EarlyEndSource(u32),
@@ -158,7 +167,7 @@ pub enum ReadSourceListWodenError {
         line_num: u32,
         expected: u32,
         got: u32,
-        comp_type: String,
+        comp_type: &'static str,
     },
 
     #[error(
@@ -230,14 +239,14 @@ pub enum WriteSourceListError {
 
     #[error("Source list type {source_list_type} does not support {comp_type} components")]
     UnsupportedComponentType {
-        source_list_type: String,
-        comp_type: String,
+        source_list_type: &'static str,
+        comp_type: &'static str,
     },
 
     #[error("Source list type {source_list_type} does not support {fd_type} flux densities")]
     UnsupportedFluxDensityType {
-        source_list_type: String,
-        fd_type: String,
+        source_list_type: &'static str,
+        fd_type: &'static str,
     },
 
     #[error("{0}")]

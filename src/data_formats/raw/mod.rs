@@ -284,6 +284,10 @@ impl RawData {
                 .iter()
                 .map(|cc| cc.chan_width_hz as f64)
                 .sum(),
+            fine_chan_range: 0..mwalib_context.coarse_chans.len()
+                * mwalib_context
+                    .metafits_context
+                    .num_corr_fine_chans_per_coarse,
             fine_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
             native_fine_chan_width: metafits_context.corr_fine_chan_width_hz as f64,
@@ -350,7 +354,11 @@ impl InputData for RawData {
         &self.freq_context
     }
 
-    fn read(&self, time_range: Range<usize>) -> Result<Vec<Visibilities>, ReadInputDataError> {
+    fn read(
+        &self,
+        time_range: &Range<usize>,
+        freq_range: &Range<usize>,
+    ) -> Result<Vec<Visibilities>, ReadInputDataError> {
         todo!();
     }
 }

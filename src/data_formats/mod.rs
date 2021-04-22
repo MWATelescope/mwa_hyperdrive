@@ -6,61 +6,105 @@
 Code to handle reading from and writing to various data container formats.
  */
 
-pub(crate) mod error;
+mod error;
 pub(crate) mod ms;
-pub(crate) mod raw;
+// pub(crate) mod raw;
 
-pub use error::ReadInputDataError;
+pub(crate) use error::ReadInputDataError;
 pub(crate) use ms::MS;
-pub(crate) use raw::RawData;
+// pub(crate) use raw::RawData;
 
-use std::ops::Range;
+use std::collections::{HashMap, HashSet};
 
 use ndarray::prelude::*;
+use num::{Complex, Float};
 
 use crate::context::{FreqContext, ObsContext};
+use mwa_hyperdrive_core::{c32, c64, InstrumentalStokes, UVW};
 
 pub(crate) trait InputData: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
 
     fn get_freq_context(&self) -> &FreqContext;
 
-    /// TODO: What does this do? Read all baselines? Read all freqs?
-    fn read(&self, time_range: Range<usize>) -> Result<Vec<Visibilities>, ReadInputDataError>;
+    /// Read all frequencies and baselines for a single timestep into the
+    /// `data_array` (similarly for the weights), and return the [UVW]
+    /// coordinates associated with the baselines.
+    fn read(
+        &self,
+        data_array: ArrayViewMut2<Vis<f32>>,
+        timestep: usize,
+        baseline_map: &HashMap<(usize, usize), usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(Vec<UVW>, Array2<f32>), ReadInputDataError>;
 }
 
-/// Three floats corresponding to the real and imag parts of a visibility, as
-/// well as the weight of the visibility.
-pub(crate) struct Vis {
-    /// Real component.
-    pub(crate) re: f32,
-
-    /// Imaginary component.
-    pub(crate) im: f32,
-
-    /// Weight.
-    pub(crate) w: f32,
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Vis<F: Float> {
+    /// XX
+    pub(crate) xx: Complex<F>,
+    /// XY
+    pub(crate) xy: Complex<F>,
+    /// YX
+    pub(crate) yx: Complex<F>,
+    /// YY
+    pub(crate) yy: Complex<F>,
 }
 
-pub(crate) enum VisType {
-    /// Visibilities are ordered [time][freq][baseline][pol].
-    TimeFreqBlPol,
-
-    /// Visibilities are ordered [freq][time][baseline][pol].
-    FreqTimeBlPol,
+impl<F: Float> Vis<F> {
+    #[inline]
+    pub(crate) fn from_fd_and_phase(fd: InstrumentalStokes, phase: c64) -> Self {
+        let product = fd * phase;
+        Self {
+            xx: Complex::new(
+                F::from(product.xx.re).unwrap(),
+                F::from(product.xx.im).unwrap(),
+            ),
+            xy: Complex::new(
+                F::from(product.xy.re).unwrap(),
+                F::from(product.xy.im).unwrap(),
+            ),
+            yx: Complex::new(
+                F::from(product.yx.re).unwrap(),
+                F::from(product.yx.im).unwrap(),
+            ),
+            yy: Complex::new(
+                F::from(product.yy.re).unwrap(),
+                F::from(product.yy.im).unwrap(),
+            ),
+        }
+    }
 }
-/// A struct containing visibilities, as well as information about them.
-///
-/// It is assumed that all available baselines are included, as well as all
-/// polarisations (XX, XY, YX, YY). Any baselines that should be flagged need to
-/// be handled after this struct is created.
-pub(crate) struct Visibilities {
-    /// The ndarray of visibilities. The other struct fields detail the axes.
-    pub(crate) vis: Array4<Vis>,
 
-    /// How are the visibilities arranged?
-    pub(crate) vis_type: VisType,
+impl From<[c32; 4]> for Vis<f32> {
+    fn from(arr: [c32; 4]) -> Self {
+        Self {
+            xx: arr[0],
+            xy: arr[1],
+            yx: arr[2],
+            yy: arr[3],
+        }
+    }
+}
 
-    /// The frequency range for these visibilities (Hz, exclusive).
-    pub(crate) freq_range: Range<f64>,
+impl<F: Float> std::ops::AddAssign<Vis<F>> for Vis<F> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.xx = self.xx + rhs.xx;
+        self.xy = self.xy + rhs.xy;
+        self.yx = self.yx + rhs.yx;
+        self.yy = self.yy + rhs.yy;
+    }
+}
+
+impl<F: Float> std::ops::Mul<F> for Vis<F> {
+    type Output = Self;
+
+    fn mul(self, rhs: F) -> Self {
+        let mut out = self.clone();
+        out.xx = self.xx * rhs;
+        out.xy = self.xy * rhs;
+        out.yx = self.yx * rhs;
+        out.yy = self.yy * rhs;
+        out
+    }
 }

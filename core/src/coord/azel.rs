@@ -76,4 +76,11 @@ mod tests {
         assert_abs_diff_eq!(hd.ha, -0.185499449332533, epsilon = 1e-10);
         assert_abs_diff_eq!(hd.dec, -0.12732312479328656, epsilon = 1e-10);
     }
+
+    #[test]
+    fn test_za() {
+        let ae = AzEl::new(0.261700, 0.785400);
+        let za = ae.za();
+        assert_abs_diff_eq!(za, 0.7853963268, epsilon = 1e-10);
+    }
 }

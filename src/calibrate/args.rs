@@ -33,34 +33,19 @@ lazy_static::lazy_static! {
     static ref SOURCE_LIST_TYPE_HELP: String =
         format!(r#"The type of sky-model source list. Valid types are: {}
 
-If not specified, the program will assume .txt files are RTS-type source lists"#, *mwa_hyperdrive_srclist::SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED);
+If not specified, the program will assume .txt files are RTS-type source lists"#, *mwa_hyperdrive_srclist::SOURCE_LIST_TYPES_COMMA_SEPARATED);
 }
 
 /// Arguments that are exposed to users. All arguments should be optional.
 ///
 /// These are digested by hyperdrive and used to eventually populate
-/// `CalibrateParams`, which is used throughout hyperdrive.
+/// `CalibrateParams`, which is used throughout hyperdrive's calibrate.
 #[derive(StructOpt, Debug, Default, Serialize, Deserialize)]
 pub struct CalibrateUserArgs {
-    /// Path to the metafits file.
+    /// Paths to input data files to be calibrated. These can include a metafits
+    /// file, gpubox files, mwaf files, a measurement set and/or uvfits files.
     #[structopt(short, long)]
-    pub metafits: Option<String>,
-
-    /// Paths to gpubox files.
-    #[structopt(short, long)]
-    pub gpuboxes: Option<Vec<String>>,
-
-    /// Paths to mwaf files.
-    #[structopt(long)]
-    pub mwafs: Option<Vec<String>>,
-
-    /// Path to the measurement set.
-    #[structopt(long = "ms")]
-    pub ms: Option<String>,
-
-    /// Paths to uvfits files.
-    #[structopt(long)]
-    pub uvfits: Option<Vec<String>>,
+    pub data: Option<Vec<String>>,
 
     /// Path to the sky-model source list file.
     #[structopt(short, long)]
@@ -84,43 +69,55 @@ pub struct CalibrateUserArgs {
     #[structopt(long, help = VETO_THRESHOLD_HELP.as_str())]
     pub veto_threshold: Option<f64>,
 
-    /// The calibration time resolution (seconds). This must be a multiple of
+    /// The calibration time resolution [seconds]. This must be a multiple of
     /// the observation's native time resolution. If not supplied, then the
     /// observation's native time resolution is used.
     #[structopt(short, long)]
     pub time_res: Option<f64>,
 
-    /// The calibration fine-channel frequency resolution (Hz). This must be a
+    /// The calibration fine-channel frequency resolution [Hz]. This must be a
     /// multiple of the observation's native frequency resolution. If not
     /// supplied, then the observation's native frequency resolution is used.
     #[structopt(short, long)]
     pub freq_res: Option<f64>,
 
-    /// Additional tiles to be flagged (zero indexed). These values correspond
-    /// to values in the "Antenna" column of HDU 1 in the metafits file, e.g. 0
-    /// 3 127. These values should also be the same as FHD tile flags.
-    ///
-    /// If tile-flags and ignore-metafits-flags are specified, then the only
-    /// tile flags come from tile-flags.
+    /// Additional tiles to be flagged. These values correspond to values in the
+    /// "Antenna" column of HDU 1 in the metafits file, e.g. 0 3 127. These
+    /// values should also be the same as FHD tile flags.
     #[structopt(long)]
     pub tile_flags: Option<Vec<usize>>,
 
     /// If specified, pretend that all tiles are unflagged in the metafits file.
-    /// Applies only when reading in raw data.
+    /// Applies only when reading in data from gpubox files.
     #[structopt(long)]
     pub ignore_metafits_flags: Option<bool>,
 
     /// If specified, don't flag channel edges and the DC channel when reading
-    /// in raw data. Applies only when reading in raw data.
+    /// in data from gpubox files.
     #[structopt(long)]
     pub dont_flag_fine_channels: Option<bool>,
 
     /// The fine channels to be flagged in each coarse band. e.g. 0 1 16 30 31
+    /// are typical for 40 kHz data.
     ///
     /// If this is not specified, it defaults to flagging the centre channel, as
     /// well as 80 kHz (or as close to this as possible) at the edges.
     #[structopt(long)]
+    pub fine_chan_flags_per_coarse_band: Option<Vec<usize>>,
+
+    /// The fine channels to be flagged across the whole observation band. e.g.
+    /// 0 767 are the first and last fine channels for 40 kHz data.
+    #[structopt(long)]
     pub fine_chan_flags: Option<Vec<usize>>,
+
+    /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
+    /// provided with the MWA_BEAM_FILE environment variable.
+    #[structopt(long)]
+    pub beam_file: Option<String>,
+
+    /// Don't apply the beam response when generating a sky model.
+    #[structopt(long)]
+    pub no_beam: Option<bool>,
 }
 
 impl CalibrateUserArgs {
@@ -192,11 +189,7 @@ impl CalibrateUserArgs {
 
         // Merge all the arguments, preferring the CLI args when available.
         Ok(Self {
-            metafits: cli_args.metafits.or(file_args.metafits),
-            gpuboxes: cli_args.gpuboxes.or(file_args.gpuboxes),
-            mwafs: cli_args.mwafs.or(file_args.mwafs),
-            ms: cli_args.ms.or(file_args.ms),
-            uvfits: cli_args.uvfits.or(file_args.uvfits),
+            data: cli_args.data.or(file_args.data),
             source_list: cli_args.source_list.or(file_args.source_list),
             source_list_type: cli_args.source_list_type.or(file_args.source_list_type),
             num_sources: cli_args.num_sources.or(file_args.num_sources),
@@ -211,7 +204,12 @@ impl CalibrateUserArgs {
             dont_flag_fine_channels: cli_args
                 .dont_flag_fine_channels
                 .or(file_args.dont_flag_fine_channels),
+            fine_chan_flags_per_coarse_band: cli_args
+                .fine_chan_flags_per_coarse_band
+                .or(file_args.fine_chan_flags_per_coarse_band),
             fine_chan_flags: cli_args.fine_chan_flags.or(file_args.fine_chan_flags),
+            beam_file: cli_args.beam_file.or(file_args.beam_file),
+            no_beam: cli_args.no_beam.or(file_args.no_beam),
         })
     }
 

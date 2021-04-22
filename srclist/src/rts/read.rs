@@ -9,7 +9,7 @@ RTS sources always have a "base source", which can be thought of as a
 non-optional component. Coordinates are hour angle and declination, which have
 units of decimal hours (i.e. 0 - 24) and degrees, respectively.
 
-Gaussian and shapelet sizes are specified in arcminutes, whereas position angles
+Gaussian and shapelet sizes are specified in arcseconds, whereas position angles
 are in degrees. All frequencies are in Hz, and all flux densities are in Jy.
 
 All flux densities are specified in the "list" style, and all have units of Jy.
@@ -19,9 +19,9 @@ no preceeding space).
  */
 
 use log::warn;
-use mwa_hyperdrive_core::constants::DH2R;
 
 use super::*;
+use crate::constants::DH2R;
 
 /// Parse a buffer containing an RTS-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -56,7 +56,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
         }
     };
 
-    while buf.read_line(&mut line).expect("IO error") > 0 {
+    while buf.read_line(&mut line)? > 0 {
         line_num += 1;
 
         // Handle lines that aren't intended to parsed (comments and blank
@@ -139,7 +139,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "FREQ".to_string(),
+                        keyword: "FREQ",
                     }
                     .into());
                 }
@@ -201,7 +201,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "GAUSSIAN".to_string(),
+                        keyword: "GAUSSIAN",
                     }
                     .into());
                 }
@@ -214,13 +214,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListRtsError::IncompleteGaussianLine(line_num).into())
                     }
                 };
-                let maj_arcmin = match items.next() {
+                let maj_arcsec = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteGaussianLine(line_num).into())
                     }
                 };
-                let min_arcmin = match items.next() {
+                let min_arcsec = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteGaussianLine(line_num).into())
@@ -239,8 +239,8 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 let comp_type = ComponentType::Gaussian {
-                    maj: (maj_arcmin / 60.0).to_radians(),
-                    min: (min_arcmin / 60.0).to_radians(),
+                    maj: maj_arcsec.to_radians() / 3600.0,
+                    min: min_arcsec.to_radians() / 3600.0,
                     pa: position_angle.to_radians(),
                 };
 
@@ -257,7 +257,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "SHAPELET2".to_string(),
+                        keyword: "SHAPELET2",
                     }
                     .into());
                 }
@@ -270,13 +270,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListRtsError::IncompleteShapelet2Line(line_num).into())
                     }
                 };
-                let maj_arcmin = match items.next() {
+                let maj_arcsec = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteShapelet2Line(line_num).into())
                     }
                 };
-                let min_arcmin = match items.next() {
+                let min_arcsec = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteShapelet2Line(line_num).into())
@@ -295,8 +295,8 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 let comp_type = ComponentType::Shapelet {
-                    maj: (maj_arcmin / 60.0).to_radians(),
-                    min: (min_arcmin / 60.0).to_radians(),
+                    maj: maj_arcsec.to_radians() / 3600.0,
+                    min: min_arcsec.to_radians() / 3600.0,
                     pa: position_angle.to_radians(),
                     coeffs: vec![],
                 };
@@ -315,7 +315,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "SHAPELET".to_string(),
+                        keyword: "SHAPELET",
                     }
                     .into());
                 }
@@ -340,7 +340,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "COEFF".to_string(),
+                        keyword: "COEFF",
                     }
                     .into());
                 }
@@ -398,7 +398,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "COMPONENT".to_string(),
+                        keyword: "COMPONENT",
                     }
                     .into());
                 }
@@ -550,25 +550,25 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if sum_i < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_i,
-                        stokes_comp: "I".to_string(),
+                        stokes_comp: "I",
                         source_name,
                     });
                 } else if sum_q < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_q,
-                        stokes_comp: "Q".to_string(),
+                        stokes_comp: "Q",
                         source_name,
                     });
                 } else if sum_u < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_u,
-                        stokes_comp: "U".to_string(),
+                        stokes_comp: "U",
                         source_name,
                     });
                 } else if sum_v < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_v,
-                        stokes_comp: "V".to_string(),
+                        stokes_comp: "V",
                         source_name,
                     });
                 }

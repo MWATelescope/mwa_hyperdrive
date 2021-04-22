@@ -16,9 +16,8 @@ The code here is probably incomplete, but it should work for the majority of
 source lists.
  */
 
-use mwa_hyperdrive_core::{sexagesimal::*, SourceList};
-
 use super::*;
+use mwa_hyperdrive_core::sexagesimal::*;
 
 /// Parse a buffer containing an AO-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -46,7 +45,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
             })
     };
 
-    while buf.read_line(&mut line).expect("IO error") > 0 {
+    while buf.read_line(&mut line)? > 0 {
         line_num += 1;
 
         // Handle lines that aren't intended to parsed (comments and blank
@@ -73,7 +72,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "name".to_string(),
+                        keyword: "name",
                     }
                     .into());
                 } else {
@@ -90,7 +89,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "name".to_string(),
+                        keyword: "name",
                     }
                     .into());
                 }
@@ -117,14 +116,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "type".to_string(),
+                        keyword: "type",
                     }
                     .into());
                 }
                 if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "type".to_string(),
+                        keyword: "type",
                     }
                     .into());
                 }
@@ -157,14 +156,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "position".to_string(),
+                        keyword: "position",
                     }
                     .into());
                 }
                 if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "position".to_string(),
+                        keyword: "position",
                     }
                     .into());
                 }
@@ -205,14 +204,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "shape".to_string(),
+                        keyword: "shape",
                     }
                     .into());
                 }
                 if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "shape".to_string(),
+                        keyword: "shape",
                     }
                     .into());
                 }
@@ -267,14 +266,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "frequency".to_string(),
+                        keyword: "frequency",
                     }
                     .into());
                 }
                 if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "frequency".to_string(),
+                        keyword: "frequency",
                     }
                     .into());
                 }
@@ -337,14 +336,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "fluxdensity".to_string(),
+                        keyword: "fluxdensity",
                     }
                     .into());
                 }
                 if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "fluxdensity".to_string(),
+                        keyword: "fluxdensity",
                     }
                     .into());
                 }
@@ -442,14 +441,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "spectral-index".to_string(),
+                        keyword: "spectral-index",
                     }
                     .into());
                 }
                 if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "spectral-index".to_string(),
+                        keyword: "spectral-index",
                     }
                     .into());
                 }
@@ -558,25 +557,25 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     if sum_i < 0.0 {
                         return Err(ReadSourceListError::InvalidFluxDensitySum {
                             sum: sum_i,
-                            stokes_comp: "I".to_string(),
+                            stokes_comp: "I",
                             source_name,
                         });
                     } else if sum_q < 0.0 {
                         return Err(ReadSourceListError::InvalidFluxDensitySum {
                             sum: sum_q,
-                            stokes_comp: "Q".to_string(),
+                            stokes_comp: "Q",
                             source_name,
                         });
                     } else if sum_u < 0.0 {
                         return Err(ReadSourceListError::InvalidFluxDensitySum {
                             sum: sum_u,
-                            stokes_comp: "U".to_string(),
+                            stokes_comp: "U",
                             source_name,
                         });
                     } else if sum_v < 0.0 {
                         return Err(ReadSourceListError::InvalidFluxDensitySum {
                             sum: sum_v,
-                            stokes_comp: "V".to_string(),
+                            stokes_comp: "V",
                             source_name,
                         });
                     }

@@ -199,7 +199,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "COMPONENT".to_string(),
+                        keyword: "COMPONENT",
                     }
                     .into());
                 }
@@ -276,13 +276,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "FREQ".to_string(),
+                        keyword: "FREQ",
                     }
                     .into());
                 } else if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "FREQ".to_string(),
+                        keyword: "FREQ",
                     }
                     .into());
                 }
@@ -344,13 +344,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "GPARAMS".to_string(),
+                        keyword: "GPARAMS",
                     }
                     .into());
                 } else if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "GPARAMS".to_string(),
+                        keyword: "GPARAMS",
                     }
                     .into());
                 }
@@ -411,13 +411,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "SPARAMS".to_string(),
+                        keyword: "SPARAMS",
                     }
                     .into());
                 } else if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "SPARAMS".to_string(),
+                        keyword: "SPARAMS",
                     }
                     .into());
                 }
@@ -479,13 +479,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if !in_source {
                     return Err(ReadSourceListCommonError::OutsideSource {
                         line_num,
-                        keyword: "SCOEFF".to_string(),
+                        keyword: "SCOEFF",
                     }
                     .into());
                 } else if !in_component {
                     return Err(ReadSourceListCommonError::OutsideComponent {
                         line_num,
-                        keyword: "SCOEFF".to_string(),
+                        keyword: "SCOEFF",
                     }
                     .into());
                 }
@@ -630,7 +630,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         line_num,
                         expected: num_points,
                         got: read_num_points,
-                        comp_type: "POINT".to_string(),
+                        comp_type: "POINT",
                     }
                     .into());
                 }
@@ -639,7 +639,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         line_num,
                         expected: num_gaussians,
                         got: read_num_gaussians,
-                        comp_type: "GAUSSIAN".to_string(),
+                        comp_type: "GAUSSIAN",
                     }
                     .into());
                 }
@@ -648,7 +648,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         line_num,
                         expected: num_shapelets,
                         got: read_num_shapelets,
-                        comp_type: "SHAPELET".to_string(),
+                        comp_type: "SHAPELET",
                     }
                     .into());
                 }
@@ -663,25 +663,25 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if sum_i < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_i,
-                        stokes_comp: "I".to_string(),
+                        stokes_comp: "I",
                         source_name,
                     });
                 } else if sum_q < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_q,
-                        stokes_comp: "Q".to_string(),
+                        stokes_comp: "Q",
                         source_name,
                     });
                 } else if sum_u < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_u,
-                        stokes_comp: "U".to_string(),
+                        stokes_comp: "U",
                         source_name,
                     });
                 } else if sum_v < 0.0 {
                     return Err(ReadSourceListError::InvalidFluxDensitySum {
                         sum: sum_v,
-                        stokes_comp: "V".to_string(),
+                        stokes_comp: "V",
                         source_name,
                     });
                 }

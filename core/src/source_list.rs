@@ -10,8 +10,7 @@ components.
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
-use crate::*;
-
+use crate::{constants::MWA_LAT_RAD, *};
 use rayon::prelude::*;
 
 /// A `BTreeMap` of source names for keys and `Source` structs for values.
@@ -26,47 +25,69 @@ impl SourceList {
         Self::default()
     }
 
-    /// Get azimuth and zenith angle coordinates for all components of all
-    /// sources. Useful for interfacing with beam code. The sources are iterated
-    /// in parallel.
+    /// Get azimuth and elevation coordinates for all components of all sources.
+    /// Useful for interfacing with beam code.
     ///
-    /// Because `SourceList` is a `BTreeMap`, the order of the sources is always
-    /// the same, so the (Az, ZA) coordinates returned from this function are
-    /// 1:1 with sources and their components.
-    pub fn get_azza(&self, lst_rad: f64, latitude_rad: f64) -> (Vec<f64>, Vec<f64>) {
-        let mut all_az = vec![];
-        let mut all_za = vec![];
-        let nested_az_za: Vec<(Vec<f64>, Vec<f64>)> = self
-            .par_iter()
+    /// Because [SourceList] is a [BTreeMap], the order of the sources is always
+    /// the same, so the [AzEl] coordinates returned from this function are 1:1
+    /// with sources and their components.
+    pub fn get_azel(&self, lst_rad: f64, latitude_rad: f64) -> Vec<AzEl> {
+        self.iter()
             // For each source, get all of its component's (Az, ZA) coordinates.
-            .map(|(_, src)| {
-                let (az, za): (Vec<_>, Vec<_>) = src
-                    .components
-                    .iter()
-                    .map(|comp| {
-                        let azel = comp.radec.to_hadec(lst_rad).to_azel(latitude_rad);
-                        // Unpack the `AzEl` struct and make a tuple of azimuth and
-                        // zenith angle.
-                        (azel.az, azel.za())
-                    })
-                    .unzip();
-                (az, za)
-            })
-            .collect();
-
-        for (mut az, mut za) in nested_az_za {
-            all_az.append(&mut az);
-            all_za.append(&mut za);
-        }
-
-        (all_az, all_za)
+            .map(|(_, src)| &src.components)
+            .flatten()
+            .map(|comp| comp.radec.to_hadec(lst_rad).to_azel(latitude_rad))
+            .collect()
     }
 
-    /// Get azimuth and zenith angle coordinates for all components of all
-    /// sources, assuming that the latitude is the MWA's latitude. See the
-    /// documentation for `SourceList::get_azza` for more details.
-    pub fn get_azza_mwa(&self, lst_rad: f64) -> (Vec<f64>, Vec<f64>) {
-        Self::get_azza(&self, lst_rad, crate::constants::MWA_LAT_RAD)
+    /// Get azimuth and elevation coordinates for all components of all sources,
+    /// assuming that the latitude is the MWA's latitude. See the documentation
+    /// for `SourceList::get_azel` for more details.
+    pub fn get_azel_mwa(&self, lst_rad: f64) -> Vec<AzEl> {
+        Self::get_azel(&self, lst_rad, MWA_LAT_RAD)
+    }
+
+    /// Get azimuth and elevation coordinates for all components of all sources.
+    /// Useful for interfacing with beam code. The sources are iterated in
+    /// parallel.
+    ///
+    /// Because [SourceList] is a [BTreeMap], the order of the sources is always
+    /// the same, so the [AzEl] coordinates returned from this function are 1:1
+    /// with sources and their components.
+    pub fn get_azel_parallel(&self, lst_rad: f64, latitude_rad: f64) -> Vec<AzEl> {
+        self.par_iter()
+            // For each source, get all of its component's (Az, ZA) coordinates.
+            .map(|(_, src)| &src.components)
+            .flatten()
+            .map(|comp| comp.radec.to_hadec(lst_rad).to_azel(latitude_rad))
+            .collect()
+    }
+
+    /// Get azimuth and elevation coordinates for all components of all sources,
+    /// assuming that the latitude is the MWA's latitude. See the documentation
+    /// for `SourceList::get_azel` for more details. The sources are iterated in
+    /// parallel.
+    pub fn get_azel_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
+        Self::get_azel_parallel(&self, lst_rad, MWA_LAT_RAD)
+    }
+
+    /// Get the LMN coordinates for all components of all sources.
+    pub fn get_lmns(&self, pointing: &RADec) -> Vec<LMN> {
+        self.iter()
+            .map(|(_, src)| &src.components)
+            .flatten()
+            .map(|comp| comp.radec.to_lmn(&pointing))
+            .collect()
+    }
+
+    /// Get the LMN coordinates for all components of all sources. The sources are iterated
+    /// in parallel.
+    pub fn get_lmns_parallel(&self, pointing: &RADec) -> Vec<LMN> {
+        self.par_iter()
+            .map(|(_, src)| &src.components)
+            .flatten()
+            .map(|comp| comp.radec.to_lmn(&pointing))
+            .collect()
     }
 }
 
@@ -157,7 +178,7 @@ mod tests {
         sl.insert("source_3".to_string(), s);
 
         let lst = 3.0 * FRAC_PI_4;
-        let (az, za) = sl.get_azza_mwa(lst);
+        let azel = sl.get_azel_mwa_parallel(lst);
         let az_expected = [
             0.5284641294204054,
             0.4140207507698987,
@@ -178,7 +199,15 @@ mod tests {
             2.254528351516936,
             2.0543439118454256,
         ];
-        assert_abs_diff_eq!(arr1(&az), arr1(&az_expected), epsilon = 1e-10);
-        assert_abs_diff_eq!(arr1(&za), arr1(&za_expected), epsilon = 1e-10);
+        assert_abs_diff_eq!(
+            arr1(&azel.iter().map(|ae| ae.az).collect::<Vec<_>>()),
+            arr1(&az_expected),
+            epsilon = 1e-10
+        );
+        assert_abs_diff_eq!(
+            arr1(&azel.iter().map(|ae| ae.za()).collect::<Vec<_>>()),
+            arr1(&za_expected),
+            epsilon = 1e-10
+        );
     }
 }

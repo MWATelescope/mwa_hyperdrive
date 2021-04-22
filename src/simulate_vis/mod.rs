@@ -433,7 +433,7 @@ pub fn simulate_vis(
         parse_source_list(&mut f)?
     };
 
-    let pointing = RADec::new_degrees(args.ra, args.dec).to_hadec(context.base_lst);
+    let pointing = RADec::new_degrees(args.ra, args.dec);
     // Generate the visibilities.
     vis_gen(
         &context,

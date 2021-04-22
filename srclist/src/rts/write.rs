@@ -19,8 +19,8 @@ fn write_comp_type<T: std::io::Write>(
             buf,
             "GAUSSIAN {} {} {}",
             pa.to_degrees(),
-            maj.to_degrees() * 60.0,
-            min.to_degrees() * 60.0
+            maj.to_degrees() * 3600.0,
+            min.to_degrees() * 3600.0
         )?,
 
         ComponentType::Shapelet {
@@ -76,8 +76,8 @@ fn write_flux_type<T: std::io::Write>(
 
         FluxDensityType::CurvedPowerLaw { .. } => {
             return Err(WriteSourceListError::UnsupportedFluxDensityType {
-                source_list_type: "RTS".to_string(),
-                fd_type: "curved power law".to_string(),
+                source_list_type: "RTS",
+                fd_type: "curved power law",
             })
         }
     }

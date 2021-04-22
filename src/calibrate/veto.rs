@@ -101,9 +101,9 @@ pub(crate) fn veto_sources(
                     };
                 }
 
-                // TODO: Remove!                
+                // TODO: Remove!
                 match &comp.comp_type {
-                    ComponentType::Point => (),
+                    ComponentType::Point | ComponentType::Gaussian { .. } => (),
                     ct => {
                         warn!("Ignoring component type {:?}", ct);
                         return Either::Left(source_name.clone())
@@ -168,6 +168,10 @@ pub(crate) fn veto_sources(
             ).unwrap())
         });
 
+    debug!(
+        "{} sources were vetoed from the source list",
+        vetoed_sources.len()
+    );
     trace!(
         "The following {} sources were vetoed from the source list: {:?}",
         vetoed_sources.len(),
@@ -217,7 +221,7 @@ pub(crate) fn veto_sources(
 
 // This function is isolated for testing.
 #[inline(always)]
-fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones) -> f64 {
+fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones<f64>) -> f64 {
     // Form an ideal flux-density Jones matrix for each of the
     // source components.
     let i = Jones::from([
@@ -251,14 +255,12 @@ pub enum VetoError {
 mod tests {
     use super::*;
     use crate::mwalib::MetafitsContext;
+    use mwa_hyperdrive_srclist::SourceListType;
     use std::path::PathBuf;
 
     use approx::*;
     // Need to use serial tests because HDF5 is not necessarily reentrant.
     use serial_test::serial;
-
-    use mwa_hyperdrive_srclist::SourceListType;
-    use mwalib::CorrelatorVersion;
 
     fn get_params() -> (
         mwalib::MetafitsContext,
@@ -272,7 +274,7 @@ mod tests {
                 &PathBuf::from(
                     "tests/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
                 ),
-                &SourceListType::Hyperdrive,
+                SourceListType::Hyperdrive,
             )
             .unwrap(),
         )

@@ -77,8 +77,8 @@ fn write_flux_type<T: std::io::Write>(
 
         FluxDensityType::CurvedPowerLaw { .. } => {
             return Err(WriteSourceListError::UnsupportedFluxDensityType {
-                source_list_type: "WODEN".to_string(),
-                fd_type: "curved power law".to_string(),
+                source_list_type: "WODEN",
+                fd_type: "curved power law",
             })
         }
     }

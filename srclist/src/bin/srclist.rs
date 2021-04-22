@@ -296,7 +296,7 @@ fn try_main() -> Result<(), SrclistError> {
             // Read the input source list.
             let sl = mwa_hyperdrive_srclist::read::read_source_list_file(
                 &input_source_list,
-                &input_sl_type,
+                input_sl_type,
             )?;
 
             // Write the output source list.

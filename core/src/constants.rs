@@ -26,13 +26,13 @@ pub const VEL_C: f64 = erfa_sys::ERFA_CMPS;
 
 /// Seconds per day
 pub const DAYSEC: f64 = erfa_sys::ERFA_DAYSEC;
-/// Seconds of time to radians.
+/// Seconds of time to radians (7.272205216643039903848712e-5).
 pub const DS2R: f64 = erfa_sys::ERFA_DS2R;
 /// Hour angle to radians (15 / 180 * PI).
 pub const DH2R: f64 = 15.0 / 180.0 * PI;
-/// Ratio of a solar day to a sidereal day (24/23.9344696).
+/// Ratio of a solar day to a sidereal day (24/23.9344696 = 1.002737909).
 pub const SOLAR2SIDEREAL: f64 = 24.0 / 23.9344696;
-/// Earth rotation rate in radians per UT1 second.
+/// Earth rotation rate in radians per UT1 second ().
 pub const EARTH_ROTATION_RATE: f64 = SOLAR2SIDEREAL * TAU / DAYSEC;
 /// Radius of the Earth \[metres\]
 // This was taken from the RTS. The IAU value is 6378100; maybe the extra 40m

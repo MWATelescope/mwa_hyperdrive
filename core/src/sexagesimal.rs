@@ -132,7 +132,7 @@ pub fn sexagesimal_hms_string_to_degrees(hms: &str) -> Result<f64, SexagesimalEr
 }
 
 pub fn sexagesimal_hms_to_float(h: f64, m: f64, s: f64) -> f64 {
-    sexagesimal_dms_to_degrees(15.0 * h, m, s)
+    sexagesimal_dms_to_degrees(15.0 * h, 15.0 * m, 15.0 * s)
 }
 
 /// Convert a number in degrees to a sexagesimal-formatted string in "degrees
@@ -173,8 +173,15 @@ pub fn degrees_to_sexagesimal_dms(f: f64) -> String {
 /// assert_eq!(hms, "-11h49m01.0628s");
 /// ```
 pub fn degrees_to_sexagesimal_hms(f: f64) -> String {
-    let (negative, f_abs) = if f < 0.0 { (true, f.abs()) } else { (false, f) };
-    let hours = (f_abs / 15.0).floor();
+    let (negative, f_abs) = if f < 0.0 {
+        (true, f.abs() / 15.0)
+    } else {
+        (false, f / 15.0)
+    };
+    // let hours = (f_abs / 15.0).floor();
+    // let minutes = (f_abs - f_abs.floor()) * 60.0;
+    // let seconds = (minutes - minutes.floor()) * 60.0;
+    let hours = f_abs.floor();
     let minutes = (f_abs - f_abs.floor()) * 60.0;
     let seconds = (minutes - minutes.floor()) * 60.0;
 
@@ -199,7 +206,7 @@ pub enum SexagesimalError {
     #[error("Did not find 'h' when attempting to read sexagesigmal string: {0}")]
     MissingH(String),
 
-    #[error("Did not find 'h' when attempting to read sexagesigmal string: {0}")]
+    #[error("Did not find 'd' when attempting to read sexagesigmal string: {0}")]
     MissingD(String),
 
     #[error("Did not find 'm' when attempting to read sexagesigmal string: {0}")]

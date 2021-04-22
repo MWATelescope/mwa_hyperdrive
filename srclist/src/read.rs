@@ -14,8 +14,9 @@ use thiserror::Error;
 
 use crate::*;
 
-pub fn parse_file_type(file: &Path) -> Result<SourceListFileType, SourceListError> {
-    let ext = file.extension().and_then(|e| e.to_str());
+pub fn parse_file_type<T: AsRef<Path>>(file: T) -> Result<SourceListFileType, SourceListError> {
+    let file_pb = file.as_ref().to_path_buf();
+    let ext = file_pb.extension().and_then(|e| e.to_str());
     match ext {
         Some("json") => Ok(SourceListFileType::Json),
         Some("yaml") => Ok(SourceListFileType::Yaml),
@@ -34,12 +35,12 @@ pub fn parse_source_list_type(s: &str) -> Result<SourceListType, SourceListError
     }
 }
 
-pub fn read_source_list_file(
-    file: &Path,
-    sl_type: &SourceListType,
+pub fn read_source_list_file<T: AsRef<Path>>(
+    file: T,
+    sl_type: SourceListType,
 ) -> Result<SourceList, SourceListError> {
     debug!("Attempting to read source list");
-    let sl_file_type = parse_file_type(file)?;
+    let sl_file_type = parse_file_type(&file)?;
     let mut f = std::io::BufReader::new(File::open(&file)?);
 
     match sl_type {

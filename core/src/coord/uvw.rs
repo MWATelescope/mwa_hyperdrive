@@ -41,43 +41,17 @@ impl UVW {
             })
             .collect()
     }
+}
 
-    /// Copy the contents of a slice of `UVW` structs to U, V, and W
-    /// vectors.
-    pub fn split(uvw: &[Self]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-        let length = uvw.len();
-        let mut u = Vec::with_capacity(length);
-        let mut v = Vec::with_capacity(length);
-        let mut w = Vec::with_capacity(length);
-        for elem in uvw {
-            u.push(elem.u as f32);
-            v.push(elem.v as f32);
-            w.push(elem.w as f32);
-        }
-        // Ensure that the capacity of the vectors matches their length.
-        u.shrink_to_fit();
-        v.shrink_to_fit();
-        w.shrink_to_fit();
-        (u, v, w)
-    }
+impl std::ops::Mul<f64> for UVW {
+    type Output = Self;
 
-    /// Convert a vector of rust `UVW` structs to U, V, and W vectors. Useful
-    /// for FFI.
-    pub fn decompose(mut uvw: Vec<Self>) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-        let length = uvw.len();
-        let mut u = Vec::with_capacity(length);
-        let mut v = Vec::with_capacity(length);
-        let mut w = Vec::with_capacity(length);
-        for elem in uvw.drain(..) {
-            u.push(elem.u as f32);
-            v.push(elem.v as f32);
-            w.push(elem.w as f32);
+    fn mul(self, rhs: f64) -> Self {
+        UVW {
+            u: self.u * rhs,
+            v: self.v * rhs,
+            w: self.w * rhs,
         }
-        // Ensure that the capacity of the vectors matches their length.
-        u.shrink_to_fit();
-        v.shrink_to_fit();
-        w.shrink_to_fit();
-        (u, v, w)
     }
 }
 
@@ -98,6 +72,30 @@ mod tests {
     use super::*;
     use crate::coord::xyz::XYZ;
     use approx::*;
+
+    #[test]
+    fn test_uvw_mul() {
+        let uvw = UVW {
+            u: 1.0,
+            v: 2.0,
+            w: 3.0,
+        } * 3.0;
+        assert_abs_diff_eq!(uvw.u, 3.0);
+        assert_abs_diff_eq!(uvw.v, 6.0);
+        assert_abs_diff_eq!(uvw.w, 9.0);
+    }
+
+    #[test]
+    fn test_uvw_div() {
+        let uvw = UVW {
+            u: 3.0,
+            v: 6.0,
+            w: 9.0,
+        } / 3.0;
+        assert_abs_diff_eq!(uvw.u, 1.0);
+        assert_abs_diff_eq!(uvw.v, 2.0);
+        assert_abs_diff_eq!(uvw.w, 3.0);
+    }
 
     #[test]
     fn get_uvw_baselines_test() {

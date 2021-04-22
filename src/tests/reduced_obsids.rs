@@ -10,12 +10,12 @@ units tests without requiring MWA data for a full observation.
 
 use super::*;
 
-use mwa_hyperdrive::calibrate::args::CalibrateUserArgs;
+use crate::calibrate::args::CalibrateUserArgs;
 
 /// Get the calibration arguments associated with the obsid 1090008640. This
 /// observational data is inside the hyperdrive git repo, but has been reduced;
 /// there are only 3 coarse bands and 3 timesteps.
-pub fn get_1090008640() -> CalibrateUserArgs {
+pub(crate) fn get_1090008640() -> CalibrateUserArgs {
     // Ensure that the required files are there.
     let metafits = PathBuf::from("tests/1090008640/1090008640.metafits");
     assert!(
@@ -49,10 +49,11 @@ pub fn get_1090008640() -> CalibrateUserArgs {
         srclist.display()
     );
 
+    let mut data = vec![path_to_string(&metafits)];
+    data.append(&mut gpuboxes);
     CalibrateUserArgs {
-        metafits: Some(metafits.display().to_string()),
-        gpuboxes: Some(gpuboxes),
-        source_list: Some(srclist.display().to_string()),
+        data: Some(data),
+        source_list: Some(path_to_string(&srclist)),
         ..Default::default()
     }
 }
@@ -60,12 +61,13 @@ pub fn get_1090008640() -> CalibrateUserArgs {
 /// Get the calibration arguments associated with the obsid 1090008640. This
 /// observational data is inside the hyperdrive git repo, but has been reduced;
 /// there is only 1 coarse band and 3 timesteps.
-pub fn get_1090008640_smallest() -> CalibrateUserArgs {
+pub(crate) fn get_1090008640_smallest() -> CalibrateUserArgs {
     // We can just use the other function and remove all but the first gpubox
     // file.
     let mut args = get_1090008640();
-    let gpuboxes: Option<Vec<String>> = args.gpuboxes;
-    let first = gpuboxes.unwrap()[0].clone();
-    args.gpuboxes = Some(vec![first]);
+    // let gpuboxes: Option<Vec<String>> = args.gpuboxes;
+    // let first = gpuboxes.unwrap()[0].clone();
+    // args.gpuboxes = Some(vec![first]);
+    args.data = Some(args.data.unwrap().into_iter().take(2).collect());
     args
 }

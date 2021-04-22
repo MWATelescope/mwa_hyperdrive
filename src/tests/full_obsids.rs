@@ -128,11 +128,12 @@ pub fn get_1065880128() -> CalibrateUserArgs {
         srclist.display()
     );
 
+    let mut data = vec![path_to_string(&metafits)];
+    data.append(&mut gpuboxes);
+    data.append(&mut mwafs);
     CalibrateUserArgs {
-        metafits: Some(metafits.display().to_string()),
-        gpuboxes: Some(gpuboxes),
-        mwafs: Some(mwafs),
-        source_list: Some(srclist.display().to_string()),
+        data: Some(data),
+        source_list: Some(path_to_string(&srclist)),
         ..Default::default()
     }
 }

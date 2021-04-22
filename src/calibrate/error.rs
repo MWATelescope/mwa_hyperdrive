@@ -9,7 +9,8 @@ Error type for all calibration-related errors.
 use thiserror::Error;
 
 use super::params::InvalidArgsError;
-use mwa_hyperdrive_core::{mwa_hyperbeam, EstimateError};
+use crate::data_formats::ReadInputDataError;
+use mwa_hyperdrive_core::{mwa_hyperbeam, mwalib, EstimateError};
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {
@@ -20,5 +21,14 @@ pub enum CalibrateError {
     Estimate(#[from] EstimateError),
 
     #[error("{0}")]
+    Read(#[from] ReadInputDataError),
+
+    #[error("{0}")]
     Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
+
+    #[error("cfitsio error: {0}")]
+    Fitsio(#[from] mwalib::fitsio::errors::Error),
+
+    #[error("IO error: {0}")]
+    IO(#[from] std::io::Error),
 }

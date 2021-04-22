@@ -6,11 +6,14 @@
 Flux density structures.
  */
 
+mod error;
+mod instrumental;
+pub use error::*;
+pub use instrumental::*;
+
 use log::trace;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
-use crate::c64;
 use crate::constants::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -108,7 +111,7 @@ impl FluxDensityType {
                     // If there's only one source component, then we must assume the
                     // spectral index for extrapolation.
                     if fds.len() == 1 {
-                        trace!("Only one flux density in a component's list; extrapolating with spectral index {}", DEFAULT_SPEC_INDEX);
+                        // trace!("Only one flux density in a component's list; extrapolating with spectral index {}", DEFAULT_SPEC_INDEX);
                         (DEFAULT_SPEC_INDEX, &fds[0])
                     }
                     // Otherwise, find the frequencies that bound the given frequency. As we
@@ -209,37 +212,6 @@ impl FluxDensityType {
                 let curved_component = (q * (freq_hz / fd.freq).ln().powi(2)).exp();
                 Ok(power_law_component * curved_component)
             }
-        }
-    }
-}
-
-/// Instrumental Stokes flux densities.
-// TODO: Make generic over c32 and c64.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct InstrumentalStokes {
-    /// XX \[Jy\]
-    pub xx: c64,
-    /// XY \[Jy\]
-    pub xy: c64,
-    /// YX \[Jy\]
-    pub yx: c64,
-    /// YY \[Jy\]
-    pub yy: c64,
-}
-
-impl InstrumentalStokes {
-    pub fn to_array(self) -> [c64; 4] {
-        [self.xx, self.xy, self.yx, self.yy]
-    }
-}
-
-impl From<FluxDensity> for InstrumentalStokes {
-    fn from(fd: FluxDensity) -> Self {
-        Self {
-            xx: c64::new(fd.i + fd.q, 0.0),
-            xy: c64::new(fd.u, fd.v),
-            yx: c64::new(fd.u, -fd.v),
-            yy: c64::new(fd.i - fd.q, 0.0),
         }
     }
 }
@@ -585,13 +557,4 @@ mod tests {
         assert_abs_diff_ne!(new_fd.u, norm_power_law.u);
         assert_abs_diff_ne!(new_fd.v, norm_power_law.v);
     }
-}
-
-#[derive(Error, Debug, PartialEq)]
-pub enum EstimateError {
-    #[error("Tried to estimate a flux density for a component, but it had no flux densities")]
-    NoFluxDensities,
-
-    #[error("The list of flux densities used for estimation were not sorted:\n{0:#?}")]
-    FluxDensityListNotSorted(Vec<FluxDensity>),
 }

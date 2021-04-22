@@ -10,25 +10,20 @@ calculations as possible in double precision before converting to a lower
 precision, if it is ever required.
  */
 
-pub use std::f64::consts::{FRAC_PI_2, PI, TAU};
-
-/// The number of cross-correlation polarisations. Is this ever not 4?
-pub const NUM_POLARISATIONS: usize = 4;
-
 /// Sources with beam-attenuated flux densities less than this value are
 /// discarded from sky-model source lists.
-pub const DEFAULT_VETO_THRESHOLD: f64 = 0.01;
+pub(crate) const DEFAULT_VETO_THRESHOLD: f64 = 0.01;
 
 /// Sources with elevations less than this value are discarded from sky-model
 /// source lists.
-pub const ELEVATION_LIMIT: f64 = 0.0;
+pub(crate) const ELEVATION_LIMIT: f64 = 0.0;
 
 /// Sources that are separated by more than this value (degrees) from the
 /// pointing are discarded from sky-model source lists.
-pub const CUTOFF_DISTANCE: f64 = 30.0;
+pub(crate) const CUTOFF_DISTANCE: f64 = 30.0;
 
 /// Alan Levine's gains from PFB simulations. Taken from RTS source code.
-pub const LEVINE_GAINS_40KHZ: [f64; 32] = [
+pub(crate) const LEVINE_GAINS_40KHZ: [f64; 32] = [
     0.5173531193404733,
     0.5925143901943901,
     0.7069509925949563,
@@ -66,18 +61,21 @@ pub const LEVINE_GAINS_40KHZ: [f64; 32] = [
 /// Gains from empirical averaging of RTS BP solution points using "Anish" PFB
 /// gains for 1062363808 and backing out corrections to flatten average coarse
 /// channel.
-pub const EMPIRICAL_GAINS_40KHZ: [f64; 32] = [
+pub(crate) const EMPIRICAL_GAINS_40KHZ: [f64; 32] = [
     0.5, 0.5, 0.67874855, 0.83576969, 0.95187049, 1.0229769, 1.05711736, 1.06407012, 1.06311151,
     1.06089592, 1.0593481, 1.06025714, 1.06110822, 1.05893943, 1.05765503, 1.05601938, 0.5,
     1.05697461, 1.05691842, 1.05688129, 1.05623901, 1.05272663, 1.05272112, 1.05551337, 1.05724941,
     1.0519857, 1.02483081, 0.96454596, 0.86071928, 0.71382954, 0.5, 0.5,
 ];
 
+/// a.k.a. 2 * sqrt(2 log(2)).
+pub(crate) const SQRT_8_LOG_2: f64 = 2.3548200450309493;
+
 /// This is the number of seconds from 1900 Jan 1 and 1980 Jan 5. The GPS epoch
 /// is 1980 Jan 5, but hifitime uses 1900 for everything; subtracting this
 /// number from the result of hifitime::Epoch::as_gpst_seconds gives the
 /// expected GPS time.
-pub const HIFITIME_GPS_FACTOR: f64 =
+pub(crate) const HIFITIME_GPS_FACTOR: f64 =
     hifitime::SECONDS_PER_YEAR * 80.0 + hifitime::SECONDS_PER_DAY * 4.0;
 
-pub use mwa_hyperdrive_core::constants::*;
+pub(crate) use mwa_hyperdrive_core::constants::*;

@@ -18,6 +18,9 @@ pub(crate) mod glob;
 pub(crate) mod math;
 pub(crate) mod visibility_gen;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 // Re-exports.
 pub(crate) use constants::*;
 pub use error::HyperdriveError;

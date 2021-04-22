@@ -14,7 +14,7 @@ behaves as expected.
 
 #[cfg(test)]
 mod tests {
-    use mwa_hyperdrive_tests::*;
+    use crate::tests::*;
 
     /// This function creates a temporary working directory to test files. It
     /// copies the existing metafits, mwaf and source list files to the temp
@@ -68,11 +68,12 @@ mod tests {
             std::io::copy(&mut real_source_list, &mut source_list_file).unwrap();
         }
 
+        let mut data = vec![path_to_string(&metafits_pb)];
+        data.append(&mut gpuboxes);
+        data.append(&mut mwafs);
         let args = CalibrateUserArgs {
-            metafits: metafits_pb.to_str().map(|s| s.to_string()),
-            gpuboxes: Some(gpuboxes),
-            mwafs: Some(mwafs),
-            source_list: Some(source_list_pb.display().to_string()),
+            data: Some(data),
+            source_list: Some(path_to_string(&source_list_pb)),
             num_sources: Some(1000),
             veto_threshold: Some(0.01),
             ..Default::default()

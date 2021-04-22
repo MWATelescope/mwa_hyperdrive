@@ -8,7 +8,7 @@ use mwa_hyperdrive_core::{mwalib, XyzBaseline, XYZ};
 use mwalib::*;
 
 #[cfg(feature = "cuda")]
-use mwa_hyperdrive_cuda::Context_s;
+use mwa_hyperdrive_cuda::Context_c;
 
 /// An observation context used throughout `hyperdrive`.
 ///
@@ -73,17 +73,6 @@ impl Context {
             base_lst,
             xyz: XYZ::get_baselines(&xyz),
         })
-    }
-
-    /// Convert to a C-compatible struct.
-    #[cfg(feature = "cuda")]
-    pub fn convert(&self) -> *const Context_s {
-        // Return a pointer to a C Context_s struct.
-        Box::into_raw(Box::new(Context_s {
-            fine_channel_width: self.mwalib.corr_fine_chan_width_hz as f64,
-            base_freq: self.base_freq as f64,
-            base_lst: self.base_lst as f64,
-        }))
     }
 }
 

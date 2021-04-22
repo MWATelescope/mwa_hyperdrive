@@ -6,4 +6,5 @@
 
 #include "hyperdrive.h"
 
-void vis_gen(const UVW_s *uvw, const Source_s *src, Visibilities_s *vis);
+void vis_gen(const UVW_c *uvw, const Source_c *src, struct Vis_c *vis, unsigned int n_channels,
+             unsigned int n_baselines);

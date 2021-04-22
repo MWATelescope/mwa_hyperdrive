@@ -27,8 +27,8 @@ pub fn write_source_list<T: std::io::Write>(
                 ComponentType::Gaussian { maj, min, pa } => ("gaussian", Some((maj, min, pa))),
                 ComponentType::Shapelet { .. } => {
                     return Err(WriteSourceListError::UnsupportedComponentType {
-                        source_list_type: "AO".to_string(),
-                        comp_type: "shapelet".to_string(),
+                        source_list_type: "AO",
+                        comp_type: "shapelet",
                     })
                 }
             };
@@ -63,7 +63,6 @@ pub fn write_source_list<T: std::io::Write>(
                     )?;
                     writeln!(buf, "      spectral-index {{ {} 0.00 }}", si)?;
                     writeln!(buf, "    }}")?;
-                    writeln!(buf, "  }}")?;
                 }
 
                 FluxDensityType::List { fds } => {
@@ -76,17 +75,17 @@ pub fn write_source_list<T: std::io::Write>(
                             fd.i, fd.q, fd.u, fd.v
                         )?;
                         writeln!(buf, "    }}")?;
-                        writeln!(buf, "  }}")?;
                     }
                 }
 
                 FluxDensityType::CurvedPowerLaw { .. } => {
                     return Err(WriteSourceListError::UnsupportedFluxDensityType {
-                        source_list_type: "AO".to_string(),
-                        fd_type: "curved power law".to_string(),
+                        source_list_type: "AO",
+                        fd_type: "curved power law",
                     })
                 }
             }
+            writeln!(buf, "  }}")?;
         }
 
         writeln!(buf, "}}")?;

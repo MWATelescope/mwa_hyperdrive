@@ -16,33 +16,25 @@ https://github.com/torrance/MWAjl/blob/master/src/matrix2x2.jl
 #[cfg(feature = "beam")]
 pub mod cache;
 
-use num::Complex;
+use std::ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Sub, SubAssign};
 
-use crate::c64;
+use num::{traits::NumAssign, Complex, Float, Num};
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub struct Jones([c64; 4]);
+pub struct Jones<F: Float + Num>([Complex<F>; 4]);
 
-const JONES_ZERO: Jones = Jones([c64::new(0.0, 0.0); 4]);
-
-const JONES_IDENTITY: Jones = Jones([
-    c64::new(1.0, 0.0),
-    c64::new(0.0, 0.0),
-    c64::new(0.0, 0.0),
-    c64::new(1.0, 0.0),
-]);
-
-impl Jones {
+impl<F: Float> Jones<F> {
     pub fn identity() -> Self {
-        JONES_IDENTITY
-    }
-
-    pub fn zero() -> Self {
-        JONES_ZERO
+        Self::from([
+            Complex::new(F::one(), F::zero()),
+            Complex::new(F::zero(), F::zero()),
+            Complex::new(F::zero(), F::zero()),
+            Complex::new(F::one(), F::zero()),
+        ])
     }
 
     /// From an input Jones matrix, get a copy that has been Hermitian
-    /// conjugated (J^H).
+    /// conjugated (`J^H`).
     ///
     /// # Examples
     ///
@@ -75,7 +67,7 @@ impl Jones {
         ])
     }
 
-    /// Multiply by a Jones matrix which gets Hermitian conjugated (J^H).
+    /// Multiply by a Jones matrix which gets Hermitian conjugated (`J^H`).
     ///
     /// # Examples
     ///
@@ -90,7 +82,7 @@ impl Jones {
     ///     c64::new(5.0, 6.0),
     ///     c64::new(7.0, 8.0),
     /// ]);
-    /// // A^H is the conjugate transpose.
+    /// // `A^H` is the conjugate transpose.
     /// let result = i.mul_hermitian(&a);
     /// let expected = Jones::from([
     ///     c64::new(1.0, -2.0),
@@ -102,34 +94,55 @@ impl Jones {
     /// ```
     #[inline(always)]
     pub fn mul_hermitian(&self, b: &Self) -> Self {
-        let mut a = self.clone();
-        a *= b.h();
-        a
+        self.clone() * b.h()
     }
 
-    /// Get the inverse of the Jones matrix (J^I).
+    /// "Divide" two Jones matrices. Another way of looking at what this
+    /// function does is solving `C` in `C B = A`, i.e.
     ///
-    /// Ideally, J^I . J = I. However it's possible that J is singular, in which
-    /// case the contents of J^I are all NaN.
+    /// `C B = A`
+    ///
+    /// `C B B^-1 = A B^-1`
+    ///
+    /// `C = A / B`
+    ///
+    /// If B is singular, all the results' elements are NaN.
+    #[inline(always)]
+    pub fn div(&self, b: &Self) -> Self {
+        let inv_det = Complex::new(F::one(), F::zero()) / (b[0] * b[3] - b[1] * b[2]);
+        Self::from([
+            (self[0] * b[3] - self[1] * b[2]) * inv_det,
+            (self[1] * b[0] - self[0] * b[1]) * inv_det,
+            (self[2] * b[3] - self[3] * b[2]) * inv_det,
+            (self[3] * b[0] - self[2] * b[1]) * inv_det,
+        ])
+    }
+
+    /// Get the inverse of the Jones matrix (`J^I`).
+    ///
+    /// Ideally, `J^I . J = I`. However it's possible that `J` is singular, in
+    /// which case the contents of `J^I` are all NaN.
     #[inline(always)]
     pub fn inv(&self) -> Self {
-        let mut inv = JONES_ZERO;
-        let a = self;
-        let inv_det = 1.0 / (a[0] * a[3] - a[1] * a[2]);
-        inv[0] = inv_det * a[3];
-        inv[1] = -inv_det * a[1];
-        inv[2] = -inv_det * a[2];
-        inv[3] = inv_det * a[0];
-        inv
+        let inv_det = Complex::new(F::one(), F::zero()) / (self[0] * self[3] - self[1] * self[2]);
+        Self::from([
+            inv_det * self[3],
+            -inv_det * self[1],
+            -inv_det * self[2],
+            inv_det * self[0],
+        ])
     }
 
-    /// Calculate J1 . A . J2^H, but with J1 and J2 multiplied as an outer
-    /// product, and A is a 4-element vector.
+    /// Calculate `J1 . A . J2^H`, but with `J1` and `J2` multiplied as an outer
+    /// product, and `A` is a 4-element vector.
+    ///
+    /// The `J2` should not be Hermitian conjugated! This is done by the
+    /// function.
     // See Jack's thorough analysis here:
     // https://github.com/JLBLine/polarisation_tests_for_FEE
     #[inline(always)]
     #[rustfmt::skip]
-    pub fn outer_mul(j1: Jones, a: [c64; 4], j2: Jones) -> [c64; 4] {
+    pub fn outer_mul(j1: &Self, a: &[F; 4], j2: &Self) -> [Complex<F>; 4] {
         let g1x = j1[0];
         let g1y = j1[3];
         let g2x = j2[0].conj();
@@ -160,47 +173,80 @@ impl Jones {
           + (d1y * g2y - g1y * d2y) * a[3] * Complex::i(),
         ]
     }
+
+    /// Call [`Complex::norm_sqr()`] on each element of a Jones matrix.
+    #[inline(always)]
+    pub fn norm_sqr(&self) -> [F; 4] {
+        [
+            self[0].norm_sqr(),
+            self[1].norm_sqr(),
+            self[2].norm_sqr(),
+            self[3].norm_sqr(),
+        ]
+    }
+
+    pub fn axb(a: &Self, b: &Self) -> Self {
+        a.clone() * b
+    }
+
+    pub fn axbh(a: &Self, b: &Self) -> Self {
+        a.clone() * b.h()
+    }
 }
 
-impl std::ops::Deref for Jones {
-    type Target = [c64; 4];
+impl<F: Float + NumAssign> Jones<F> {
+    pub fn plus_axb(c: &mut Self, a: &Self, b: &Self) {
+        c[0] += a[0] * b[0] + a[1] * b[2];
+        c[1] += a[0] * b[1] + a[1] * b[3];
+        c[2] += a[2] * b[0] + a[3] * b[2];
+        c[3] += a[2] * b[1] + a[3] * b[3];
+    }
+
+    pub fn plus_ahxb(c: &mut Self, a: &Self, b: &Self) {
+        c[0] += a[0].conj() * b[0] + a[2].conj() * b[2];
+        c[1] += a[0].conj() * b[1] + a[2].conj() * b[3];
+        c[2] += a[1].conj() * b[0] + a[3].conj() * b[2];
+        c[3] += a[1].conj() * b[1] + a[3].conj() * b[3];
+    }
+}
+
+impl<F: Float> Deref for Jones<F> {
+    type Target = [Complex<F>; 4];
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl std::ops::DerefMut for Jones {
+impl<F: Float> DerefMut for Jones<F> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl From<[c64; 4]> for Jones {
-    fn from(arr: [c64; 4]) -> Self {
+impl<F: Float> From<[Complex<F>; 4]> for Jones<F> {
+    fn from(arr: [Complex<F>; 4]) -> Self {
         Self(arr)
     }
 }
 
-impl std::ops::Add<Jones> for Jones {
+impl<F: Float> Add<Jones<F>> for Jones<F> {
     type Output = Self;
 
     #[inline(always)]
-    fn add(self, rhs: Jones) -> Self {
-        let mut c = JONES_ZERO;
-        let a = self.0;
-        let b = rhs;
-        c[0] = a[0] + b[0];
-        c[1] = a[1] + b[1];
-        c[2] = a[2] + b[2];
-        c[3] = a[3] + b[3];
-        c
+    fn add(self, rhs: Self) -> Self {
+        Self::from([
+            self[0] + rhs[0],
+            self[1] + rhs[1],
+            self[2] + rhs[2],
+            self[3] + rhs[3],
+        ])
     }
 }
 
-impl std::ops::AddAssign<Jones> for Jones {
+impl<F: Float + NumAssign> AddAssign<Jones<F>> for Jones<F> {
     #[inline(always)]
-    fn add_assign(&mut self, rhs: Jones) {
+    fn add_assign(&mut self, rhs: Self) {
         self[0] += rhs[0];
         self[1] += rhs[1];
         self[2] += rhs[2];
@@ -208,25 +254,61 @@ impl std::ops::AddAssign<Jones> for Jones {
     }
 }
 
-impl std::ops::Sub<Jones> for Jones {
-    type Output = Self;
-
+impl<F: Float + NumAssign> AddAssign<&Jones<F>> for Jones<F> {
     #[inline(always)]
-    fn sub(self, rhs: Jones) -> Self {
-        let mut c = JONES_ZERO;
-        let a = self.0;
-        let b = rhs;
-        c[0] = a[0] - b[0];
-        c[1] = a[1] - b[1];
-        c[2] = a[2] - b[2];
-        c[3] = a[3] - b[3];
-        c
+    fn add_assign(&mut self, rhs: &Self) {
+        self[0] += rhs[0];
+        self[1] += rhs[1];
+        self[2] += rhs[2];
+        self[3] += rhs[3];
     }
 }
 
-impl std::ops::SubAssign<Jones> for Jones {
+impl<F: Float> Sub<Jones<F>> for Jones<F> {
+    type Output = Self;
+
     #[inline(always)]
-    fn sub_assign(&mut self, rhs: Jones) {
+    fn sub(self, rhs: Self) -> Self {
+        Self::from([
+            self[0] - rhs[0],
+            self[1] - rhs[1],
+            self[2] - rhs[2],
+            self[3] - rhs[3],
+        ])
+    }
+}
+
+impl<F: Float> Sub<&Jones<F>> for Jones<F> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: &Self) -> Self {
+        Self::from([
+            self[0] - rhs[0],
+            self[1] - rhs[1],
+            self[2] - rhs[2],
+            self[3] - rhs[3],
+        ])
+    }
+}
+
+impl<F: Float> Sub<&mut Jones<F>> for Jones<F> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: &mut Self) -> Self {
+        Self::from([
+            self[0] - rhs[0],
+            self[1] - rhs[1],
+            self[2] - rhs[2],
+            self[3] - rhs[3],
+        ])
+    }
+}
+
+impl<F: Float + NumAssign> SubAssign<Jones<F>> for Jones<F> {
+    #[inline(always)]
+    fn sub_assign(&mut self, rhs: Self) {
         self[0] -= rhs[0];
         self[1] -= rhs[1];
         self[2] -= rhs[2];
@@ -234,25 +316,9 @@ impl std::ops::SubAssign<Jones> for Jones {
     }
 }
 
-impl std::ops::Sub<&Jones> for Jones {
-    type Output = Self;
-
+impl<F: Float + NumAssign> SubAssign<&Jones<F>> for Jones<F> {
     #[inline(always)]
-    fn sub(self, rhs: &Jones) -> Self {
-        let mut c = JONES_ZERO;
-        let a = self.0;
-        let b = rhs;
-        c[0] = a[0] - b[0];
-        c[1] = a[1] - b[1];
-        c[2] = a[2] - b[2];
-        c[3] = a[3] - b[3];
-        c
-    }
-}
-
-impl std::ops::SubAssign<&Jones> for Jones {
-    #[inline(always)]
-    fn sub_assign(&mut self, rhs: &Jones) {
+    fn sub_assign(&mut self, rhs: &Self) {
         self[0] -= rhs[0];
         self[1] -= rhs[1];
         self[2] -= rhs[2];
@@ -260,69 +326,55 @@ impl std::ops::SubAssign<&Jones> for Jones {
     }
 }
 
-impl std::ops::Mul<Jones> for Jones {
+impl<F: Float> Mul<F> for Jones<F> {
     type Output = Self;
 
     #[inline(always)]
-    fn mul(self, rhs: Jones) -> Self {
-        let mut c = JONES_ZERO;
-        let a = self.0;
-        let b = rhs;
-        c[0] = a[0] * b[0] + a[1] * b[2];
-        c[1] = a[0] * b[1] + a[1] * b[3];
-        c[2] = a[2] * b[0] + a[3] * b[2];
-        c[3] = a[2] * b[1] + a[3] * b[3];
-        c
+    fn mul(self, rhs: F) -> Self {
+        Jones::from([self[0] * rhs, self[1] * rhs, self[2] * rhs, self[3] * rhs])
     }
 }
 
-impl std::ops::Mul<&Jones> for Jones {
+impl<F: Float> Mul<Complex<F>> for Jones<F> {
     type Output = Self;
 
     #[inline(always)]
-    fn mul(self, rhs: &Jones) -> Self {
-        let mut c = JONES_ZERO;
-        let a = self.0;
-        let b = rhs;
-        c[0] = a[0] * b[0] + a[1] * b[2];
-        c[1] = a[0] * b[1] + a[1] * b[3];
-        c[2] = a[2] * b[0] + a[3] * b[2];
-        c[3] = a[2] * b[1] + a[3] * b[3];
-        c
+    fn mul(self, rhs: Complex<F>) -> Self {
+        Jones::from([self[0] * rhs, self[1] * rhs, self[2] * rhs, self[3] * rhs])
     }
 }
 
-impl std::ops::MulAssign<Jones> for Jones {
-    #[inline(always)]
-    fn mul_assign(&mut self, rhs: Jones) {
-        let mut c = JONES_ZERO;
-        let a = self.0;
-        let b = rhs;
-        c[0] = a[0] * b[0] + a[1] * b[2];
-        c[1] = a[0] * b[1] + a[1] * b[3];
-        c[2] = a[2] * b[0] + a[3] * b[2];
-        c[3] = a[2] * b[1] + a[3] * b[3];
-        self.0 = *c;
-    }
-}
-
-impl std::ops::Mul<f64> for Jones {
+impl<F: Float> Mul<Jones<F>> for Jones<F> {
     type Output = Self;
 
     #[inline(always)]
-    fn mul(self, rhs: f64) -> Self {
-        let mut a = self.0;
-        a[0] *= rhs;
-        a[1] *= rhs;
-        a[2] *= rhs;
-        a[3] *= rhs;
-        Jones(a)
+    fn mul(self, rhs: Self) -> Self {
+        Self::from([
+            self[0] * rhs[0] + self[1] * rhs[2],
+            self[0] * rhs[1] + self[1] * rhs[3],
+            self[2] * rhs[0] + self[3] * rhs[2],
+            self[2] * rhs[1] + self[3] * rhs[3],
+        ])
     }
 }
 
-impl std::ops::MulAssign<f64> for Jones {
+impl<F: Float> Mul<&Jones<F>> for Jones<F> {
+    type Output = Self;
+
     #[inline(always)]
-    fn mul_assign(&mut self, rhs: f64) {
+    fn mul(self, rhs: &Self) -> Self {
+        Self::from([
+            self[0] * rhs[0] + self[1] * rhs[2],
+            self[0] * rhs[1] + self[1] * rhs[3],
+            self[2] * rhs[0] + self[3] * rhs[2],
+            self[2] * rhs[1] + self[3] * rhs[3],
+        ])
+    }
+}
+
+impl<F: Float + NumAssign> MulAssign<F> for Jones<F> {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: F) {
         self[0] *= rhs;
         self[1] *= rhs;
         self[2] *= rhs;
@@ -330,23 +382,9 @@ impl std::ops::MulAssign<f64> for Jones {
     }
 }
 
-impl std::ops::Mul<c64> for Jones {
-    type Output = Self;
-
+impl<F: Float + NumAssign> MulAssign<Complex<F>> for Jones<F> {
     #[inline(always)]
-    fn mul(self, rhs: c64) -> Self {
-        let mut a = self.0;
-        a[0] *= rhs;
-        a[1] *= rhs;
-        a[2] *= rhs;
-        a[3] *= rhs;
-        Jones(a)
-    }
-}
-
-impl std::ops::MulAssign<c64> for Jones {
-    #[inline(always)]
-    fn mul_assign(&mut self, rhs: c64) {
+    fn mul_assign(&mut self, rhs: Complex<F>) {
         self[0] *= rhs;
         self[1] *= rhs;
         self[2] *= rhs;
@@ -354,27 +392,51 @@ impl std::ops::MulAssign<c64> for Jones {
     }
 }
 
-impl num::traits::Zero for Jones {
+impl<F: Float + MulAssign> MulAssign<Jones<F>> for Jones<F> {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: Self) {
+        self.0 = [
+            self[0] * rhs[0] + self[1] * rhs[2],
+            self[0] * rhs[1] + self[1] * rhs[3],
+            self[2] * rhs[0] + self[3] * rhs[2],
+            self[2] * rhs[1] + self[3] * rhs[3],
+        ];
+    }
+}
+
+impl<F: Float + MulAssign> MulAssign<&Jones<F>> for Jones<F> {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: &Self) {
+        self.0 = [
+            self[0] * rhs[0] + self[1] * rhs[2],
+            self[0] * rhs[1] + self[1] * rhs[3],
+            self[2] * rhs[0] + self[3] * rhs[2],
+            self[2] * rhs[1] + self[3] * rhs[3],
+        ];
+    }
+}
+
+impl<F: Float> num::traits::Zero for Jones<F> {
     #[inline]
     fn zero() -> Self {
-        Jones::zero()
+        Self::from([Complex::new(F::zero(), F::zero()); 4])
     }
 
     #[inline]
     fn is_zero(&self) -> bool {
-        *self == Jones::zero()
+        *self == Self::zero()
     }
 }
 
-impl approx::AbsDiffEq for Jones {
-    type Epsilon = f64;
+impl<F: Float> approx::AbsDiffEq for Jones<F> {
+    type Epsilon = F;
 
-    fn default_epsilon() -> f64 {
-        f64::EPSILON
+    fn default_epsilon() -> F {
+        F::epsilon()
     }
 
     #[inline]
-    fn abs_diff_eq(&self, other: &Self, epsilon: f64) -> bool {
+    fn abs_diff_eq(&self, other: &Self, epsilon: F) -> bool {
         (self[0] - other[0]).norm() <= epsilon
             && (self[1] - other[1]).norm() <= epsilon
             && (self[2] - other[2]).norm() <= epsilon
@@ -385,9 +447,10 @@ impl approx::AbsDiffEq for Jones {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{c32, c64};
     use approx::*;
 
-    fn one_through_eight() -> Jones {
+    fn one_through_eight() -> Jones<f64> {
         Jones([
             c64::new(1.0, 2.0),
             c64::new(3.0, 4.0),
@@ -415,7 +478,7 @@ mod tests {
         let a = one_through_eight();
         let b = one_through_eight();
         let c = a - b;
-        let expected_c = Jones::zero();
+        let expected_c = Jones::default();
         assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
     }
 
@@ -451,7 +514,7 @@ mod tests {
 
     #[test]
     fn test_mul_hermitian() {
-        let ident = JONES_IDENTITY;
+        let ident = Jones::identity();
         let a = Jones([
             c64::new(1.0, 2.0),
             c64::new(3.0, 4.0),
@@ -470,6 +533,63 @@ mod tests {
     }
 
     #[test]
+    fn test_div() {
+        let a = Jones([
+            c64::new(1.0, 0.0),
+            c64::new(2.0, 0.0),
+            c64::new(3.0, 0.0),
+            c64::new(4.0, 0.0),
+        ]);
+        let b = Jones([
+            c64::new(2.0, 0.0),
+            c64::new(3.0, 0.0),
+            c64::new(4.0, 0.0),
+            c64::new(5.0, 0.0),
+        ]);
+        let expected = Jones([
+            c64::new(1.5, 0.0),
+            c64::new(-0.5, 0.0),
+            c64::new(0.5, 0.0),
+            c64::new(0.5, 0.0),
+        ]);
+        assert_abs_diff_eq!(a.div(&b), expected, epsilon = 1e-10);
+
+        let a = Jones([
+            c32::new(-1295920.9, -1150667.5),
+            c32::new(-1116357.0, 1234393.3),
+            c32::new(-4028358.8, -281923.3),
+            c32::new(-325126.38, 3929351.3),
+        ]);
+        let b = Jones([
+            c32::new(1377080.5, 0.0),
+            c32::new(5765.743, -1371240.9),
+            c32::new(5765.743, 1371240.9),
+            c32::new(1365932.0, 0.0),
+        ]);
+        let expected = Jones([
+            c32::new(-107.08988, -72.43006),
+            c32::new(72.34611, -106.29652),
+            c32::new(-169.56223, 57.398113),
+            c32::new(-57.14347, -167.58751),
+        ]);
+        assert_abs_diff_eq!(a.div(&b), expected, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn test_div_singular() {
+        let a = Jones([
+            c64::new(1.0, 0.0),
+            c64::new(2.0, 0.0),
+            c64::new(2.0, 0.0),
+            c64::new(4.0, 0.0),
+        ]);
+        for j in a.div(&a).iter() {
+            assert!(j.re.is_nan());
+            assert!(j.im.is_nan());
+        }
+    }
+
+    #[test]
     fn test_inv() {
         let a = Jones([
             c64::new(1.0, 2.0),
@@ -478,7 +598,7 @@ mod tests {
             c64::new(7.0, 8.0),
         ]);
         let result = a.inv() * a;
-        let expected = JONES_IDENTITY;
+        let expected = Jones::identity();
         assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
     }
 
@@ -510,8 +630,8 @@ mod tests {
             c64::new(3.0, 0.0),
             c64::new(4.0, 0.0),
         ]);
-        let a = [c64::new(1.0, 0.0); 4];
-        let result = Jones::outer_mul(j1, a, j2);
+        let a = [1.0; 4];
+        let result = Jones::outer_mul(&j1, &a, &j2);
         let expected = [
             c64::new(5.0 - 3.0 + 4.0, 0.0),
             c64::new(11.0 - 5.0 + 10.0, -2.0),
@@ -521,5 +641,65 @@ mod tests {
         // Pretend that the result of the computation is `Jones` so we can use
         // assert_abs_diff_eq.
         assert_abs_diff_eq!(Jones::from(result), Jones::from(expected), epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_axb() {
+        let i = c64::new(1.0, 2.0);
+        let a = Jones([i, i + 1.0, i + 2.0, i + 3.0]);
+        let b = Jones([i * 2.0, i * 3.0, i * 4.0, i * 5.0]);
+        let c = Jones::axb(&a, &b);
+        let expected_c = Jones([
+            c64::new(-14.0, 32.0),
+            c64::new(-19.0, 42.0),
+            c64::new(-2.0, 56.0),
+            c64::new(-3.0, 74.0),
+        ]);
+        assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_axbh() {
+        let i = c64::new(1.0, 2.0);
+        let a = Jones([i, i + 1.0, i + 2.0, i + 3.0]);
+        let b = Jones([i * 2.0, i * 3.0, i * 4.0, i * 5.0]);
+        let c = Jones::axbh(&a, &b);
+        let expected_c = Jones([
+            c64::new(-14.0, 32.0),
+            c64::new(-19.0, 42.0),
+            c64::new(-2.0, 56.0),
+            c64::new(-3.0, 74.0),
+        ]);
+        assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_plus_axb() {
+        let a = one_through_eight();
+        let b = one_through_eight();
+        let mut c = Jones::default();
+        Jones::plus_axb(&mut c, &a, &b);
+        let expected_c = Jones([
+            c64::new(2.0, 4.0),
+            c64::new(6.0, 8.0),
+            c64::new(10.0, 12.0),
+            c64::new(14.0, 16.0),
+        ]);
+        assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_plus_ahxb() {
+        let a = one_through_eight();
+        let b = one_through_eight();
+        let mut c = Jones::default();
+        Jones::plus_ahxb(&mut c, &a, &b);
+        let expected_c = Jones([
+            c64::new(2.0, 0.0),
+            c64::new(8.0, -2.0),
+            c64::new(8.0, -2.0),
+            c64::new(14.0, 0.0),
+        ]);
+        assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
     }
 }

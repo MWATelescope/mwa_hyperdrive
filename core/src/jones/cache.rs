@@ -59,7 +59,7 @@ impl JonesHash {
 /// to see if they've been used before. If so, we can avoid re-calculating the
 /// same Jones matrix.
 #[derive(Default)]
-pub struct JonesCache(DashMap<JonesHash, Jones>);
+pub struct JonesCache(DashMap<JonesHash, Jones<f64>>);
 
 impl JonesCache {
     pub fn new() -> Self {
@@ -78,7 +78,7 @@ impl JonesCache {
         delays: &[u32],
         amps: &[f64],
         norm_to_zenith: bool,
-    ) -> Result<Jones, FEEBeamError> {
+    ) -> Result<Jones<f64>, FEEBeamError> {
         // The FEE beam is defined only on coarse-band frequencies. For this
         // reason, rather than making a unique has for every single different
         // frequency, round specified frequency (`freq_hz`) to the nearest

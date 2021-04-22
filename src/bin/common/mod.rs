@@ -25,7 +25,7 @@ pub(crate) fn setup_logging(level: u8) -> Result<(), fern::InitError> {
     let logger = match level {
         0 => high_level_messages.level(log::LevelFilter::Info),
         1 => high_level_messages.level(log::LevelFilter::Debug),
-        2 => low_level_messages.level(log::LevelFilter::Debug),
+        2 => high_level_messages.level(log::LevelFilter::Trace),
         _ => low_level_messages.level(log::LevelFilter::Trace),
     };
     logger.chain(std::io::stdout()).apply()?;

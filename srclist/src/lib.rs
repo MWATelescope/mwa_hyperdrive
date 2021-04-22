@@ -23,7 +23,7 @@ pub enum SourceListFileType {
     Txt,
 }
 
-#[derive(Debug, Clone, EnumIter)]
+#[derive(Debug, Clone, Copy, EnumIter)]
 pub enum SourceListType {
     Hyperdrive,
     Rts,
