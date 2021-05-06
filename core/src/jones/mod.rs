@@ -20,6 +20,8 @@ use std::ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Sub, SubAssign};
 
 use num::{traits::NumAssign, Complex, Float, Num};
 
+use crate::FluxDensity;
+
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct Jones<F: Float + Num>([Complex<F>; 4]);
 
@@ -35,28 +37,6 @@ impl<F: Float> Jones<F> {
 
     /// From an input Jones matrix, get a copy that has been Hermitian
     /// conjugated (`J^H`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use mwa_hyperdrive_core::c64;
-    /// # use mwa_hyperdrive_core::jones::Jones;
-    /// # use approx::assert_abs_diff_eq;
-    /// let j = Jones::from([
-    ///     c64::new(1.0, 2.0),
-    ///     c64::new(3.0, 4.0),
-    ///     c64::new(5.0, 6.0),
-    ///     c64::new(7.0, 8.0),
-    /// ]);
-    /// let jh = j.h();
-    /// let expected = Jones::from([
-    ///     c64::new(1.0, -2.0),
-    ///     c64::new(5.0, -6.0),
-    ///     c64::new(3.0, -4.0),
-    ///     c64::new(7.0, -8.0),
-    /// ]);
-    /// assert_abs_diff_eq!(jh, expected, epsilon = 1e-10);
-    /// ```
     #[inline(always)]
     pub fn h(&self) -> Self {
         Self::from([
@@ -68,30 +48,6 @@ impl<F: Float> Jones<F> {
     }
 
     /// Multiply by a Jones matrix which gets Hermitian conjugated (`J^H`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use mwa_hyperdrive_core::c64;
-    /// # use mwa_hyperdrive_core::jones::Jones;
-    /// # use approx::assert_abs_diff_eq;
-    /// let i = Jones::identity();
-    /// let a = Jones::from([
-    ///     c64::new(1.0, 2.0),
-    ///     c64::new(3.0, 4.0),
-    ///     c64::new(5.0, 6.0),
-    ///     c64::new(7.0, 8.0),
-    /// ]);
-    /// // `A^H` is the conjugate transpose.
-    /// let result = i.mul_hermitian(&a);
-    /// let expected = Jones::from([
-    ///     c64::new(1.0, -2.0),
-    ///     c64::new(5.0, -6.0),
-    ///     c64::new(3.0, -4.0),
-    ///     c64::new(7.0, -8.0),
-    /// ]);
-    /// assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
-    /// ```
     #[inline(always)]
     pub fn mul_hermitian(&self, b: &Self) -> Self {
         self.clone() * b.h()
@@ -131,47 +87,6 @@ impl<F: Float> Jones<F> {
             -inv_det * self[2],
             inv_det * self[0],
         ])
-    }
-
-    /// Calculate `J1 . A . J2^H`, but with `J1` and `J2` multiplied as an outer
-    /// product, and `A` is a 4-element vector.
-    ///
-    /// The `J2` should not be Hermitian conjugated! This is done by the
-    /// function.
-    // See Jack's thorough analysis here:
-    // https://github.com/JLBLine/polarisation_tests_for_FEE
-    #[inline(always)]
-    #[rustfmt::skip]
-    pub fn outer_mul(j1: &Self, a: &[F; 4], j2: &Self) -> [Complex<F>; 4] {
-        let g1x = j1[0];
-        let g1y = j1[3];
-        let g2x = j2[0].conj();
-        let g2y = j2[3].conj();
-        let d1x = j1[1];
-        let d1y = j1[2];
-        let d2x = j2[1].conj();
-        let d2y = j2[2].conj();
-        [
-            (g1x * g2x + d1x * d2x) * a[0]
-          + (g1x * g2x - d1x * d2x) * a[1]
-          + (g1x * d2x + d1x * g2x) * a[2]
-          + (g1x * d2x - d1x * g2x) * a[3] * Complex::i(),
-
-            (g1x * d2y + d1x * g2y) * a[0]
-          + (g1x * d2y - d1x * g2y) * a[1]
-          + (g1x * g2y + d1x * d2y) * a[2]
-          + (g1x * g2y - d1x * d2y) * a[3] * Complex::i(),
-
-            (d1y * g2x + g1y * d2x) * a[0]
-          + (d1y * g2x - g1y * d2x) * a[1]
-          + (d1y * d2x + g1y * g2x) * a[2]
-          + (d1y * d2x - g1y * g2x) * a[3] * Complex::i(),
-
-            (d1y * d2y + g1y * g2y) * a[0]
-          + (d1y * d2y - g1y * g2y) * a[1]
-          + (d1y * g2y + g1y * d2y) * a[2]
-          + (d1y * g2y - g1y * d2y) * a[3] * Complex::i(),
-        ]
     }
 
     /// Call [`Complex::norm_sqr()`] on each element of a Jones matrix.
@@ -428,6 +343,55 @@ impl<F: Float> num::traits::Zero for Jones<F> {
     }
 }
 
+impl From<Jones<f32>> for Jones<f64> {
+    #[inline]
+    fn from(j_c32: Jones<f32>) -> Self {
+        Self::from([
+            Complex::new(j_c32[0].re as _, j_c32[0].im as _),
+            Complex::new(j_c32[1].re as _, j_c32[1].im as _),
+            Complex::new(j_c32[2].re as _, j_c32[2].im as _),
+            Complex::new(j_c32[3].re as _, j_c32[3].im as _),
+        ])
+    }
+}
+
+impl From<Jones<f64>> for Jones<f32> {
+    #[inline]
+    fn from(j_c64: Jones<f64>) -> Self {
+        Self::from([
+            Complex::new(j_c64[0].re as _, j_c64[0].im as _),
+            Complex::new(j_c64[1].re as _, j_c64[1].im as _),
+            Complex::new(j_c64[2].re as _, j_c64[2].im as _),
+            Complex::new(j_c64[3].re as _, j_c64[3].im as _),
+        ])
+    }
+}
+
+impl From<FluxDensity> for Jones<f64> {
+    #[inline]
+    fn from(fd: FluxDensity) -> Self {
+        Self::from([
+            Complex::new(fd.i + fd.q, 0.0),
+            Complex::new(fd.u, fd.v),
+            Complex::new(fd.u, -fd.v),
+            Complex::new(fd.i - fd.q, 0.0),
+        ])
+    }
+}
+
+impl From<&FluxDensity> for Jones<f64> {
+    #[inline]
+    fn from(fd: &FluxDensity) -> Self {
+        Self::from([
+            Complex::new(fd.i + fd.q, 0.0),
+            Complex::new(fd.u, fd.v),
+            Complex::new(fd.u, -fd.v),
+            Complex::new(fd.i - fd.q, 0.0),
+        ])
+    }
+}
+
+#[cfg(test)]
 impl<F: Float> approx::AbsDiffEq for Jones<F> {
     type Epsilon = F;
 
@@ -617,33 +581,6 @@ mod tests {
     }
 
     #[test]
-    fn test_outer_mul() {
-        let j1 = Jones([
-            c64::new(1.0, 0.0),
-            c64::new(2.0, 0.0),
-            c64::new(3.0, 0.0),
-            c64::new(4.0, 0.0),
-        ]);
-        let j2 = Jones([
-            c64::new(1.0, 0.0),
-            c64::new(2.0, 0.0),
-            c64::new(3.0, 0.0),
-            c64::new(4.0, 0.0),
-        ]);
-        let a = [1.0; 4];
-        let result = Jones::outer_mul(&j1, &a, &j2);
-        let expected = [
-            c64::new(5.0 - 3.0 + 4.0, 0.0),
-            c64::new(11.0 - 5.0 + 10.0, -2.0),
-            c64::new(11.0 - 5.0 + 10.0, 2.0),
-            c64::new(25.0 - 7.0 + 24.0, 0.0),
-        ];
-        // Pretend that the result of the computation is `Jones` so we can use
-        // assert_abs_diff_eq.
-        assert_abs_diff_eq!(Jones::from(result), Jones::from(expected), epsilon = 1e-10);
-    }
-
-    #[test]
     fn test_axb() {
         let i = c64::new(1.0, 2.0);
         let a = Jones([i, i + 1.0, i + 2.0, i + 3.0]);
@@ -665,10 +602,10 @@ mod tests {
         let b = Jones([i * 2.0, i * 3.0, i * 4.0, i * 5.0]);
         let c = Jones::axbh(&a, &b);
         let expected_c = Jones([
-            c64::new(-14.0, 32.0),
-            c64::new(-19.0, 42.0),
-            c64::new(-2.0, 56.0),
-            c64::new(-3.0, 74.0),
+            c64::new(28.0, -6.0),
+            c64::new(50.0, -10.0),
+            c64::new(38.0, -26.0),
+            c64::new(68.0, -46.0),
         ]);
         assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
     }
@@ -680,10 +617,10 @@ mod tests {
         let mut c = Jones::default();
         Jones::plus_axb(&mut c, &a, &b);
         let expected_c = Jones([
-            c64::new(2.0, 4.0),
-            c64::new(6.0, 8.0),
-            c64::new(10.0, 12.0),
-            c64::new(14.0, 16.0),
+            c64::new(-12.0, 42.0),
+            c64::new(-16.0, 62.0),
+            c64::new(-20.0, 98.0),
+            c64::new(-24.0, 150.0),
         ]);
         assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
     }
@@ -695,11 +632,43 @@ mod tests {
         let mut c = Jones::default();
         Jones::plus_ahxb(&mut c, &a, &b);
         let expected_c = Jones([
-            c64::new(2.0, 0.0),
-            c64::new(8.0, -2.0),
-            c64::new(8.0, -2.0),
-            c64::new(14.0, 0.0),
+            c64::new(66.0, 0.0),
+            c64::new(94.0, -4.0),
+            c64::new(94.0, 4.0),
+            c64::new(138.0, 0.0),
         ]);
         assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_from_flux_density() {
+        let fd = FluxDensity {
+            freq: 170e6,
+            i: 0.058438801501144624,
+            q: -0.3929914018344019,
+            u: -0.3899498110659575,
+            v: -0.058562589895788,
+        };
+        let result = Jones::from(fd);
+        assert_abs_diff_eq!(result[0], c64::new(fd.i + fd.q, 0.0));
+        assert_abs_diff_eq!(result[1], c64::new(fd.u, fd.v));
+        assert_abs_diff_eq!(result[2], c64::new(fd.u, -fd.v));
+        assert_abs_diff_eq!(result[3], c64::new(fd.i - fd.q, 0.0));
+    }
+
+    #[test]
+    fn test_from_flux_density_borrowed() {
+        let fd = FluxDensity {
+            freq: 170e6,
+            i: 0.058438801501144624,
+            q: -0.3929914018344019,
+            u: -0.3899498110659575,
+            v: -0.058562589895788,
+        };
+        let result = Jones::from(&fd);
+        assert_abs_diff_eq!(result[0], c64::new(fd.i + fd.q, 0.0));
+        assert_abs_diff_eq!(result[1], c64::new(fd.u, fd.v));
+        assert_abs_diff_eq!(result[2], c64::new(fd.u, -fd.v));
+        assert_abs_diff_eq!(result[3], c64::new(fd.i - fd.q, 0.0));
     }
 }

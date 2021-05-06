@@ -23,41 +23,37 @@ pub enum SourceListFileType {
     Txt,
 }
 
-#[derive(Debug, Clone, Copy, EnumIter)]
+#[derive(Debug, Clone, Copy, EnumIter, PartialEq)]
 pub enum SourceListType {
     Hyperdrive,
     Rts,
     Woden,
     AO,
+    Unspecified,
 }
 
 lazy_static::lazy_static! {
-    pub static ref SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED: String = {
-        let mut variants: Vec<String> = vec![];
-        // Iterate over all of the enum variants for SourceListType.
-        for variant in SourceListFileType::iter() {
-            let s = format!("{}", variant);
-            // Each string has a trailing newline character.
-            variants.push(s.strip_suffix("\n").unwrap().to_string());
-        }
-        variants.join(", ")
+    pub static ref SOURCE_LIST_TYPES_COMMA_SEPARATED: String = {
+        // Iterate over all of the enum variants for SourceListType and join
+        // them in a comma-separated string. Ignore the "Unspecified" enum
+        // variant.
+        SourceListType::iter()
+            .filter(|&ft| ft != SourceListType::Unspecified)
+            .map(|ft| ft.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
-    pub static ref SOURCE_LIST_TYPES_COMMA_SEPARATED: String = {
-        let mut variants: Vec<String> = vec![];
-        // Iterate over all of the enum variants for SourceListType.
-        for variant in SourceListType::iter() {
-            let s = format!("{}", variant);
-            // Each string has a trailing newline character.
-            variants.push(s.strip_suffix("\n").unwrap().to_string());
-        }
-        variants.join(", ")
+    pub static ref SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED: String = {
+        // Iterate over all of the enum variants for SourceListFileType and join
+        // them in a comma-separated string.
+        SourceListFileType::iter().map(|ft| ft.to_string()).collect::<Vec<_>>().join(", ")
     };
 }
 
 impl std::fmt::Display for SourceListFileType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
+        write!(
             f,
             "{}",
             match &self {
@@ -71,7 +67,7 @@ impl std::fmt::Display for SourceListFileType {
 
 impl std::fmt::Display for SourceListType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
+        write!(
             f,
             "{}",
             match &self {
@@ -79,6 +75,7 @@ impl std::fmt::Display for SourceListType {
                 SourceListType::Rts => "rts",
                 SourceListType::Woden => "woden",
                 SourceListType::AO => "ao",
+                SourceListType::Unspecified => "unspecified",
             }
         )
     }

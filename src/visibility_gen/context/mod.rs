@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_new_context_from_1090008640_metafits() -> Result<(), MwalibError> {
-        let metafits = PathBuf::from("tests/1090008640/1090008640.metafits");
+        let metafits = PathBuf::from("test_files/1090008640/1090008640.metafits");
         let c = Context::new(&metafits)?;
         assert_eq!(c.base_freq, 167035000);
         assert_eq!(c.base_lst, 6.261977848001506);

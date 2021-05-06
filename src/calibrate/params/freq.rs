@@ -8,6 +8,7 @@ associated functions.
  */
 
 use std::collections::HashSet;
+
 /// Channel- and frequency-related parameters required for calibration.
 pub struct FrequencyParams {
     /// The target fine-channel frequency resolution \[Hz\].
@@ -30,8 +31,15 @@ pub struct FrequencyParams {
     pub(crate) num_unflagged_fine_chans: usize,
 
     /// The fine channels that have not been flagged.
-    pub(crate) unflagged_fine_chans: Vec<usize>,
+    pub(crate) unflagged_fine_chans: HashSet<usize>,
 
+    // /// Given an unflagged fine-channel number/index, get the fine-channel
+    // /// number that it corresponds to. e.g. If fine channels 0 and 1 are
+    // /// flagged, then the first unflagged fine channel corresponds to fine
+    // /// channel 2.
+    // ///
+    // /// This exists because some fine channels may be flagged.
+    // pub(crate) chan_index_to_chan_number: HashMap<usize, usize>,
     /// The frequencies of each of the observation's unflagged fine channels
     /// \[Hz\].
     pub(crate) unflagged_fine_chan_freqs: Vec<f64>,

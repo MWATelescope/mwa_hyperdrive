@@ -43,6 +43,17 @@ pub enum MSError {
     #[error("When reading in measurment set, ERFA function eraGd2gc failed to convert geodetic coordinates to geocentric. Is something wrong with your ANTENNA/POSITION column?")]
     Geodetic2Geocentric,
 
+    #[error("Row {row_index} did not have 3 UVW elements!")]
+    NotThreeUVW { row_index: u64 },
+
+    #[error("MS {array_type} from {row_index} did not have expected {expected_len} elements on axis {axis_num}!")]
+    BadArraySize {
+        array_type: &'static str,
+        row_index: u64,
+        expected_len: usize,
+        axis_num: usize,
+    },
+
     #[error("Error when trying to interface with measurement set: {0}")]
     RubblError(String),
 }

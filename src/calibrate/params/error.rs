@@ -39,17 +39,21 @@ pub enum InvalidArgsError {
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
     InvalidTileFlag { got: usize, max: usize },
 
+    #[error("Cannot write calibration solutions to a file type '{ext}'. Supported formats are fits and bin")]
+    OutputSolutionsFileType { ext: String },
+
+    #[error("Cannot write to the specified calibration solutions file '{file}'. Do you have write permissions set?")]
+    OutputSolutionsFileNotWritable { file: String },
+
     #[error("{0}")]
     InputFile(#[from] super::filenames::InputFileError),
 
     #[error("{0}")]
     Glob(#[from] crate::glob::GlobError),
 
-    // /// Error associated with making a new instance of the `InputData` trait.
-    // #[error("{0}")]
-    // NewInputData(#[from] crate::data_formats::NewInputDataError),
-    // #[error("{0}")]
-    // RawData(#[from] crate::data_formats::raw::NewRawError),
+    #[error("{0}")]
+    RawData(#[from] crate::data_formats::raw::NewRawError),
+
     #[error("{0}")]
     MS(#[from] crate::data_formats::ms::NewMSError),
 

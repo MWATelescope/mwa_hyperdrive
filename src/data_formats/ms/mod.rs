@@ -18,12 +18,13 @@ use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
 use ndarray::prelude::*;
+use rayon::prelude::*;
 
 use super::*;
 use crate::constants::HIFITIME_GPS_FACTOR;
 use crate::context::{FreqContext, ObsContext};
 use crate::glob::get_single_match_from_glob;
-use mwa_hyperdrive_core::{c32, erfa_sys, mwalib, RADec, XYZ};
+use mwa_hyperdrive_core::{c32, erfa_sys, mwalib, Jones, RADec, XYZ};
 
 pub(crate) struct MS {
     /// Observation metadata.
@@ -75,10 +76,7 @@ impl MS {
         let cotter = {
             // TODO: Allow rubbl to read table keywords, otherwise this will
             // match Birli too.
-            match read_table(&ms, Some("MWA_TILE_POINTING")) {
-                Ok(_) => true,
-                Err(_) => false,
-            }
+            read_table(&ms, Some("MWA_TILE_POINTING")).is_ok()
         };
         // let table_keywords = main_table.table_keyword_names().unwrap();
         // let cotter = table_keywords.contains(&"MWA_COTTER_VERSION".to_string());
@@ -170,7 +168,7 @@ impl MS {
                         (i * step + if autocorrelations_present { 1 } else { 0 }) as u64,
                     )
                     .unwrap();
-                match (first, last, vis_flags.into_iter().all(|f| f == true)) {
+                match (first, last, vis_flags.into_iter().all(|f| f)) {
                     (None, _, false) => first = Some(i),
                     (Some(_), None, true) => last = Some(i),
                     _ => (),
@@ -219,24 +217,25 @@ impl MS {
         };
 
         let timesteps: Vec<hifitime::Epoch> = utc_timesteps
-            .into_iter()
-            // casacore keeps the stores the times as centroids, i.e. if data is
-            // accessed for a 2s slice, then the time associated with the data
-            // is at +1s (the middle of the slice). Also undo the multiply by
-            // 1e3.
-            .map(|utc| casacore_utc_to_epoch(utc as f64 / 1e3 - time_res / 2.0))
+            .into_par_iter()
+            // casacore keeps the stores the times as centroids, so no
+            // correction is needed. Undo the multiply by 1e3 on `utc`.
+            .map(|utc| casacore_utc_to_epoch(utc as f64 / 1e3))
             .collect();
         // unwrap should be fine here, because we insist that the measurement
         // set is not empty at the start of this function.
         debug!(
             "First good GPS timestep: {}",
             // Need to remove a number from the result of .as_gpst_seconds(), as
-            // it goes from the 1900 epoch, not the expected 1980 epoch.
-            timesteps.first().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR
+            // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
+            // expect GPS timestamps to be "leading edge", not centroids.
+            timesteps.first().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR - time_res / 2.0
         );
         debug!(
             "Last good GPS timestep:  {}",
-            timesteps.iter().last().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR
+            timesteps.iter().last().unwrap().as_gpst_seconds()
+                - HIFITIME_GPS_FACTOR
+                - time_res / 2.0
         );
 
         // Now that we have the timesteps, we can get the first LST. As
@@ -244,13 +243,13 @@ impl MS {
         // to be adjusted according to timewidth.
         let first_timestep_mjd = timesteps[0].as_mjd_utc_days();
         let lst0 = unsafe {
-            let gmst = erfa_sys::eraGmst06(
+            let gst = erfa_sys::eraGst06a(
                 erfa_sys::ERFA_DJM0,
                 first_timestep_mjd,
                 erfa_sys::ERFA_DJM0,
                 first_timestep_mjd,
             );
-            (gmst + mwalib::MWA_LONGITUDE_RADIANS) % TAU
+            (gst + mwalib::MWA_LONGITUDE_RADIANS) % TAU
         };
 
         // Get the observation phase centre.
@@ -354,7 +353,7 @@ impl MS {
 
         // Get the observation's flagged channels per coarse band.
         // TODO: Detect Birli.
-        let fine_chan_flags_per_coarse_band = if cotter {
+        let fine_chan_flags_per_coarse_chan = if cotter {
             // cotter doesn't list this conveniently. It's possible to inspect
             // the FLAG column in the main ms table, but, that would use huge
             // amount of IO, and there's no guarantee that any cell of that
@@ -388,10 +387,7 @@ impl MS {
             // If -noflagdcchannels is specified, then the centre channel of
             // each coarse channel is not flagged. Without this flag, the centre
             // channels are flagged.
-            let noflagdcchannels = match str_iter.find(|&s| s.contains("-noflagdcchannels")) {
-                Some(_) => true,
-                None => false,
-            };
+            let noflagdcchannels = str_iter.any(|s| s.contains("-noflagdcchannels"));
             debug!("cotter -noflagdcchannels: {}", noflagdcchannels);
 
             let num_edge_channels = (edgewidth / freq_context.native_fine_chan_width).round() as _;
@@ -463,7 +459,7 @@ impl MS {
             tile_xyz,
             baseline_xyz,
             tile_flags,
-            fine_chan_flags_per_coarse_band,
+            fine_chan_flags_per_coarse_chan,
             num_unflagged_tiles,
             num_unflagged_baselines: num_unflagged_tiles * (num_unflagged_tiles - 1) / 2,
             dipole_gains,
@@ -489,9 +485,9 @@ impl InputData for MS {
 
     fn read(
         &self,
-        mut data_array: ArrayViewMut2<Vis<f32>>,
+        mut data_array: ArrayViewMut2<Jones<f32>>,
         timestep: usize,
-        tile_to_baseline_map: &HashMap<(usize, usize), usize>,
+        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(Vec<UVW>, Array2<f32>), ReadInputDataError> {
         // When reading in a new timestep's data, these indices should be
@@ -501,7 +497,7 @@ impl InputData for MS {
         let row_range_end = (timestep + 1) * self.step;
         let row_range = row_range_start as u64..row_range_end as u64;
         trace!(
-            "Reading timestep {} (row range {:?}) from the MS",
+            "Reading timestep {:<3} (row range {:?}) from the MS",
             timestep,
             row_range
         );
@@ -510,6 +506,7 @@ impl InputData for MS {
         let mut out_weights = Array2::from_elem(data_array.dim(), 0.0);
 
         let mut main_table = read_table(&self.ms, None).unwrap();
+        let mut row_index = row_range.start;
         main_table
             .for_each_row_in_range(row_range, |row| {
                 // Antenna numbers are zero indexed.
@@ -517,19 +514,19 @@ impl InputData for MS {
                 let ant2: i32 = row.get_cell("ANTENNA2").unwrap();
                 // If this ant1-ant2 pair is in the baseline map, then the
                 // baseline is not flagged, and we should proceed.
-                if let Some(&bl) = tile_to_baseline_map.get(&(ant1 as usize, ant2 as usize)) {
+                if let Some(&bl) =
+                    tile_to_unflagged_baseline_map.get(&(ant1 as usize, ant2 as usize))
+                {
                     // TODO: Filter on UVW lengths, as specified by the user.
                     let uvw: Vec<f64> = row.get_cell("UVW").unwrap();
-                    // Use unsafe to stop Rust from doing bounds checks on uvw
-                    // indices. If uvw has less than 3 elements, then something
-                    // is seriously wrong with the MS.
-                    unsafe {
-                        uvws.push(UVW {
-                            u: *uvw.get_unchecked(0),
-                            v: *uvw.get_unchecked(1),
-                            w: *uvw.get_unchecked(2),
-                        });
+                    if uvw.len() < 3 {
+                        return Err(MSError::NotThreeUVW { row_index }.into());
                     }
+                    uvws.push(UVW {
+                        u: uvw[0],
+                        v: uvw[1],
+                        w: uvw[2],
+                    });
                     // The data array is arranged [frequency][instrumental_pol].
                     let data: Array2<c32> = row.get_cell("DATA").unwrap();
                     // The weight array is arranged
@@ -547,65 +544,108 @@ impl InputData for MS {
                     // any globally-flagged fine channels. Use an int to index
                     // unflagged fine channel (outer_freq_chan_index).
                     let mut outer_freq_chan_index: usize = 0;
-                    data.outer_iter()
+                    for (freq_chan, ((data_freq_axis, weights_freq_axis), flags_freq_axis)) in data
+                        .outer_iter()
                         .zip(data_weights.outer_iter())
                         .zip(flags.outer_iter())
                         .enumerate()
-                        .for_each(
-                            |(
-                                freq_chan,
-                                ((data_freq_axis, weights_freq_axis), flags_freq_axis),
-                            )| {
-                                if !flagged_fine_chans.contains(&freq_chan) {
-                                    // If we're running in debug mode, assert that the
-                                    // lengths of our arrays are sensible.
-                                    debug_assert_eq!(data_freq_axis.len(), 4);
-                                    debug_assert_eq!(weights_freq_axis.len(), 4);
-                                    debug_assert_eq!(flags_freq_axis.len(), 4);
-                                    debug_assert!(data_array.len_of(Axis(0)) >= bl);
-                                    debug_assert!(
-                                        data_array.len_of(Axis(1)) >= outer_freq_chan_index
-                                    );
-
-                                    // Skip bounds checks again.
-                                    unsafe {
-                                        // This is a reference to the visibility in the
-                                        // output data array.
-                                        let data_array_elem =
-                                            data_array.uget_mut((bl, outer_freq_chan_index));
-                                        // These are the components of the input data's
-                                        // visibility.
-                                        let data_xx_elem = data_freq_axis.uget(0);
-                                        let data_xy_elem = data_freq_axis.uget(1);
-                                        let data_yx_elem = data_freq_axis.uget(2);
-                                        let data_yy_elem = data_freq_axis.uget(3);
-                                        // This is the corresponding weight of the
-                                        // visibility. It is the same for all
-                                        // polarisations.
-                                        let weight = weights_freq_axis.uget(0);
-                                        // Get the element of the output weights
-                                        // array, and write to it.
-                                        let weight_elem =
-                                            out_weights.uget_mut((bl, outer_freq_chan_index));
-                                        *weight_elem = *weight;
-                                        // The corresponding flag.
-                                        let flag = flags_freq_axis.uget(0);
-                                        // Adjust the weight by the flag.
-                                        if *flag {
-                                            *weight_elem = 0.0
-                                        };
-                                        // Multiply the input data visibility by the
-                                        // weight and mutate the output data array.
-                                        data_array_elem.xx = *data_xx_elem * *weight_elem;
-                                        data_array_elem.xy = *data_xy_elem * *weight_elem;
-                                        data_array_elem.yx = *data_yx_elem * *weight_elem;
-                                        data_array_elem.yy = *data_yy_elem * *weight_elem;
+                    {
+                        if !flagged_fine_chans.contains(&freq_chan) {
+                            // Ensure that all arrays have appropriate
+                            // sizes.
+                            // We have to panic here because of the way Rubbl
+                            // does error handling.
+                            if data_freq_axis.len() != 4 {
+                                panic!(
+                                    "{}",
+                                    MSError::BadArraySize {
+                                        array_type: "data",
+                                        row_index,
+                                        expected_len: 4,
+                                        axis_num: 1,
                                     }
-                                    outer_freq_chan_index += 1;
-                                }
-                            },
-                        );
+                                );
+                            }
+                            if weights_freq_axis.len() != 4 {
+                                panic!(
+                                    "{}",
+                                    MSError::BadArraySize {
+                                        array_type: "weights",
+                                        row_index,
+                                        expected_len: 4,
+                                        axis_num: 1,
+                                    }
+                                );
+                            }
+                            if flags_freq_axis.len() != 4 {
+                                panic!(
+                                    "{}",
+                                    MSError::BadArraySize {
+                                        array_type: "flags",
+                                        row_index,
+                                        expected_len: 4,
+                                        axis_num: 1,
+                                    }
+                                );
+                            }
+                            if data_array.len_of(Axis(0)) < bl {
+                                panic!(
+                                    "{}",
+                                    ReadInputDataError::BadArraySize {
+                                        array_type: "data",
+                                        expected_len: bl,
+                                        axis_num: 0,
+                                    }
+                                );
+                            }
+                            if data_array.len_of(Axis(1)) < outer_freq_chan_index {
+                                panic!(
+                                    "{}",
+                                    ReadInputDataError::BadArraySize {
+                                        array_type: "data",
+                                        expected_len: outer_freq_chan_index,
+                                        axis_num: 1,
+                                    }
+                                );
+                            }
+
+                            // This is a reference to the visibility in
+                            // the output data array.
+                            let data_array_elem =
+                                data_array.get_mut((bl, outer_freq_chan_index)).unwrap();
+                            // These are the components of the input
+                            // data's visibility.
+                            let data_xx_elem: &c32 = data_freq_axis.get(0).unwrap();
+                            let data_xy_elem = data_freq_axis.get(1).unwrap();
+                            let data_yx_elem = data_freq_axis.get(2).unwrap();
+                            let data_yy_elem = data_freq_axis.get(3).unwrap();
+                            // This is the corresponding weight of the
+                            // visibility. It is the same for all
+                            // polarisations.
+                            let weight = weights_freq_axis.get(0).unwrap();
+                            // Get the element of the output weights
+                            // array, and write to it.
+                            let weight_elem =
+                                out_weights.get_mut((bl, outer_freq_chan_index)).unwrap();
+                            *weight_elem = *weight;
+                            // The corresponding flag.
+                            let flag = flags_freq_axis.get(0).unwrap();
+                            // Adjust the weight by the flag.
+                            if *flag {
+                                *weight_elem = 0.0
+                            };
+                            // Multiply the input data visibility by the
+                            // weight and mutate the output data array.
+                            data_array_elem[0] = *data_xx_elem * *weight_elem;
+                            data_array_elem[1] = *data_xy_elem * *weight_elem;
+                            data_array_elem[2] = *data_yx_elem * *weight_elem;
+                            data_array_elem[3] = *data_yy_elem * *weight_elem;
+
+                            outer_freq_chan_index += 1;
+                        }
+                    }
                 }
+                row_index += 1;
                 Ok(())
             })
             .unwrap();

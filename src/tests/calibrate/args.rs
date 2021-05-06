@@ -42,7 +42,7 @@ mod tests {
         let mut mwafs = vec![];
         for &f in &["1065880128_01.mwaf", "1065880128_02.mwaf"] {
             let (mwaf_pb, mut mwaf_file) = make_file_in_dir(f, tmp_dir.path());
-            let real_filename = format!("tests/1065880128/{}.gz", f);
+            let real_filename = format!("test_files/1065880128/{}.gz", f);
             deflate_gz(&real_filename, &mut mwaf_file);
             mwafs.push(path_to_string(&mwaf_pb));
         }
@@ -51,7 +51,7 @@ mod tests {
         let (metafits_pb, mut metafits_file) =
             make_file_in_dir(&"1065880128.metafits", tmp_dir.path());
         {
-            let mut real_meta = File::open("tests/1065880128/1065880128.metafits").unwrap();
+            let mut real_meta = File::open("test_files/1065880128/1065880128.metafits").unwrap();
             std::io::copy(&mut real_meta, &mut metafits_file).unwrap();
         }
 
@@ -62,7 +62,7 @@ mod tests {
         );
         {
             let mut real_source_list = File::open(
-                "tests/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
+                "test_files/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
             )
             .unwrap();
             std::io::copy(&mut real_source_list, &mut source_list_file).unwrap();
@@ -86,6 +86,7 @@ mod tests {
     /// Make a toml parameter file with all of the absolute paths to files.
     fn toml_file_absolute_paths() {
         let (args, tmp_dir) = get_args();
+        dbg!(&args);
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
         serialise_args_toml(&args, &mut toml);
@@ -96,6 +97,7 @@ mod tests {
         // The command fails because mwalib can't read the fake gpubox files.
         assert!(cmd.is_err());
         let (_, stderr) = get_cmd_output(cmd);
+        dbg!(&stderr);
         assert!(&stderr.contains("mwalib error:"));
         assert!(&stderr.contains("tried to move past end of file"));
     }
@@ -125,9 +127,11 @@ mod tests {
         let (mut args, tmp_dir) = get_args();
         let tmp_dir_str = path_to_string(tmp_dir.path());
 
-        args.metafits = Some(format!("{}/*.metafits", tmp_dir_str));
-        args.gpuboxes = Some(vec![format!("{}/*gpubox*", tmp_dir_str)]);
-        args.mwafs = Some(vec![format!("{}/*.mwaf", tmp_dir_str)]);
+        args.data = Some(vec![
+            format!("{}/*.metafits", tmp_dir_str),
+            format!("{}/*gpubox*", tmp_dir_str),
+            format!("{}/*.mwaf", tmp_dir_str),
+        ]);
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
         serialise_args_toml(&args, &mut toml);
@@ -148,9 +152,11 @@ mod tests {
         let (mut args, tmp_dir) = get_args();
         let tmp_dir_str = path_to_string(tmp_dir.path());
 
-        args.metafits = Some(format!("{}/*.metafits", tmp_dir_str));
-        args.gpuboxes = Some(vec![format!("{}/*gpubox*", tmp_dir_str)]);
-        args.mwafs = Some(vec![format!("{}/*.mwaf", tmp_dir_str)]);
+        args.data = Some(vec![
+            format!("{}/*.metafits", tmp_dir_str),
+            format!("{}/*gpubox*", tmp_dir_str),
+            format!("{}/*.mwaf", tmp_dir_str),
+        ]);
 
         let (json_pb, mut json) = make_file_in_dir(&"calibrate.json", tmp_dir.path());
         serialise_args_json(&args, &mut json);
@@ -170,9 +176,11 @@ mod tests {
     fn toml_file_relative_globs() {
         let (mut args, tmp_dir) = get_args();
 
-        args.metafits = Some(format!("*.metafits"));
-        args.gpuboxes = Some(vec![format!("*gpubox*")]);
-        args.mwafs = Some(vec![format!("*.mwaf")]);
+        args.data = Some(vec![
+            format!("*.metafits"),
+            format!("*gpubox*"),
+            format!("*.mwaf"),
+        ]);
         args.source_list = Some("pumav3_*.yaml".to_string());
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
@@ -194,9 +202,11 @@ mod tests {
     fn json_file_relative_globs() {
         let (mut args, tmp_dir) = get_args();
 
-        args.metafits = Some(format!("*.metafits"));
-        args.gpuboxes = Some(vec![format!("*gpubox*")]);
-        args.mwafs = Some(vec![format!("*.mwaf")]);
+        args.data = Some(vec![
+            format!("*.metafits"),
+            format!("*gpubox*"),
+            format!("*.mwaf"),
+        ]);
 
         let (json_pb, mut json) = make_file_in_dir(&"calibrate.json", tmp_dir.path());
         serialise_args_json(&args, &mut json);
@@ -216,41 +226,11 @@ mod tests {
     // works fine. We can do more tests with only toml.
 
     #[test]
-    /// Make a toml parameter file with too many file globs.
-    fn param_file_multiple_globs() {
-        let (mut args, tmp_dir) = get_args();
-
-        args.metafits = Some(format!("*.metafits"));
-        // Even though the first glob is valid, hyperdrive will fail (via
-        // mwalib), because it only handles globs when there is a single element
-        // in the vector; hyperdrive will treat these strings as real file
-        // paths, and mwalib blows up when it can't access them.
-        args.gpuboxes = Some(vec![format!("*gpubox*"), format!("*asdf*")]);
-        args.mwafs = Some(vec![format!("*.mwaf")]);
-
-        let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
-        serialise_args_toml(&args, &mut toml);
-
-        let cmd = hyperdrive()
-            .current_dir(tmp_dir.path())
-            .arg("calibrate")
-            .arg(&format!("{}", toml_pb.display()))
-            .ok();
-        assert!(cmd.is_err());
-        let (_, stderr) = get_cmd_output(cmd);
-        assert!(
-            &stderr.contains("mwalib error: Could not identify the gpubox filename structure for")
-        );
-    }
-
-    #[test]
-    /// Make a toml parameter file without the metafits.
+    /// Make a toml parameter file without a metafits file.
     fn param_file_missing_metafits() {
         let (mut args, tmp_dir) = get_args();
 
-        args.metafits = None;
-        args.gpuboxes = Some(vec![format!("*gpubox*")]);
-        args.mwafs = Some(vec![format!("*.mwaf")]);
+        args.data = Some(vec!["*gpubox*".to_string(), "*.mwaf".to_string()]);
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
         serialise_args_toml(&args, &mut toml);
@@ -279,13 +259,10 @@ mod tests {
     }
 
     #[test]
-    /// Make a toml parameter file without the gpubox files.
+    /// Make a toml parameter file without gpubox files.
     fn param_file_missing_gpuboxes() {
         let (mut args, tmp_dir) = get_args();
-
-        args.metafits = Some(format!("*.metafits"));
-        args.gpuboxes = None;
-        args.mwafs = Some(vec![format!("*.mwaf")]);
+        args.data = Some(vec!["*.metafits".to_string(), "*.mwaf".to_string()]);
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
         serialise_args_toml(&args, &mut toml);
@@ -314,13 +291,11 @@ mod tests {
     }
 
     #[test]
-    /// Make a toml parameter file without the mwaf files.
+    /// Make a toml parameter file without mwaf files.
     fn param_file_missing_mwafs() {
         let (mut args, tmp_dir) = get_args();
 
-        args.metafits = Some(format!("*.metafits"));
-        args.gpuboxes = Some(vec![format!("*gpubox*")]);
-        args.mwafs = None;
+        args.data = Some(vec!["*.metafits".to_string(), "*gpubox*".to_string()]);
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
         serialise_args_toml(&args, &mut toml);

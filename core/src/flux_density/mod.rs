@@ -7,11 +7,8 @@ Flux density structures.
  */
 
 mod error;
-mod instrumental;
 pub use error::*;
-pub use instrumental::*;
 
-use log::trace;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
@@ -169,11 +166,11 @@ impl FluxDensityType {
 
                         // Stop stupid spectral indices.
                         if spec_index < SPEC_INDEX_CAP {
-                            trace!(
-                                "Component had a spectral index {}; capping at {}",
-                                spec_index,
-                                SPEC_INDEX_CAP
-                            );
+                            // trace!(
+                            //     "Component had a spectral index {}; capping at {}",
+                            //     spec_index,
+                            //     SPEC_INDEX_CAP
+                            // );
                             spec_index = SPEC_INDEX_CAP;
                         }
 

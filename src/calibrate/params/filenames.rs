@@ -2,19 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+/*!
+Code to parse filenames.
+
+`InputDataTypes` is the struct to be used here. It is constructed from a
+slice of string filenames, and it enforces things like allowing only one
+metafits file to be present.
+ */
+
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-use permissions::is_readable;
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
 use crate::glob::{get_all_matches_from_glob, GlobError};
 
 lazy_static::lazy_static! {
-    static ref RE_METAFITS: Regex =
-        RegexBuilder::new(r"\.metafits$")
-            .case_insensitive(true).build().unwrap();
-
     // gpubox files should not be renamed in any way! This includes the case of
     // the letters in the filename. mwalib should complain if this is not the
     // case.
@@ -25,18 +29,6 @@ lazy_static::lazy_static! {
     static ref RE_MWAX: Regex =
         RegexBuilder::new(r"\d{10}_\d{8}(.)?\d{6}_ch\d{3}_\d{3}\.fits$")
             .case_insensitive(false).build().unwrap();
-
-    static ref RE_MWAF: Regex =
-        RegexBuilder::new(r"\.mwaf$")
-                .case_insensitive(true).build().unwrap();
-
-    static ref RE_MS: Regex =
-        RegexBuilder::new(r"\.ms$")
-            .case_insensitive(true).build().unwrap();
-
-    static ref RE_UVFITS: Regex =
-        RegexBuilder::new(r"\.uvfits$")
-            .case_insensitive(true).build().unwrap();
 }
 
 #[derive(Debug)]
@@ -112,10 +104,16 @@ fn exists_and_is_readable(file: &Path) -> Result<(), InputFileError> {
     if !file.exists() {
         return Err(InputFileError::DoesNotExist(file.display().to_string()));
     }
-    match is_readable(file) {
-        Ok(true) => (),
-        Ok(false) => return Err(InputFileError::CouldNotRead(file.display().to_string())),
-        Err(e) => return Err(InputFileError::IO(file.display().to_string(), e)),
+    match OpenOptions::new()
+        .read(true)
+        .open(file)
+        .map_err(|io_error| io_error.kind())
+    {
+        Ok(_) => (),
+        Err(std::io::ErrorKind::PermissionDenied) => {
+            return Err(InputFileError::CouldNotRead(file.display().to_string()))
+        }
+        Err(e) => return Err(InputFileError::IO(file.display().to_string(), e.into())),
     }
 
     Ok(())
@@ -135,16 +133,18 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         Err(InputFileError::DoesNotExist(f)) => {
             match get_all_matches_from_glob(file) {
                 Ok(glob_results) => {
+                    // If there were no glob matches, then just return the
+                    // original error (the file does not exist).
+                    if glob_results.is_empty() {
+                        return Err(InputFileError::DoesNotExist(f));
+                    }
+
                     // Iterate over all glob results, adding them to the file
                     // types.
                     for pb in glob_results {
                         file_checker(file_types, pb.display().to_string().as_str())?;
                     }
                 }
-
-                // If there were no glob matches, then just return the original
-                // error (the file does not exist).
-                Err(GlobError::NoMatches { .. }) => return Err(InputFileError::DoesNotExist(f)),
 
                 // Propagate all other errors.
                 Err(e) => return Err(InputFileError::from(e)),
@@ -155,19 +155,19 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         Err(e) => return Err(e),
     };
     match (
-        RE_METAFITS.is_match(file),
+        file.ends_with(".metafits"),
         RE_GPUBOX.is_match(file),
         RE_MWAX.is_match(file),
-        RE_MWAF.is_match(file),
-        RE_MS.is_match(file),
-        RE_UVFITS.is_match(file),
+        file.ends_with(".mwaf"),
+        file.ends_with(".ms"),
+        file.ends_with(".uvfits"),
     ) {
-        (true, _, _, _, _, _) => file_types.metafits.push(file_pb),
-        (_, true, _, _, _, _) => file_types.gpuboxes.push(file_pb),
-        (_, _, true, _, _, _) => file_types.gpuboxes.push(file_pb),
-        (_, _, _, true, _, _) => file_types.mwafs.push(file_pb),
-        (_, _, _, _, true, _) => file_types.ms.push(file_pb),
-        (_, _, _, _, _, true) => file_types.uvfits.push(file_pb),
+        (true, false, false, false, false, false) => file_types.metafits.push(file_pb),
+        (false, true, false, false, false, false) => file_types.gpuboxes.push(file_pb),
+        (false, false, true, false, false, false) => file_types.gpuboxes.push(file_pb),
+        (false, false, false, true, false, false) => file_types.mwafs.push(file_pb),
+        (false, false, false, false, true, false) => file_types.ms.push(file_pb),
+        (false, false, false, false, false, true) => file_types.uvfits.push(file_pb),
         _ => return Err(InputFileError::NotRecognised(file.to_string())),
     }
 
@@ -196,4 +196,152 @@ pub enum InputFileError {
 
     #[error("IO error when attempting to read file '{0}': {1}")]
     IO(String, std::io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::{Builder, TempDir, TempPath};
+
+    fn make_new_dir() -> TempDir {
+        TempDir::new().unwrap()
+    }
+
+    fn make_file(dir: &Path, suffix: &str) -> TempPath {
+        Builder::new()
+            .prefix("asdf")
+            .suffix(suffix)
+            .rand_bytes(1)
+            .tempfile_in(dir)
+            .unwrap()
+            .into_temp_path()
+    }
+
+    fn make_metafits(dir: &Path) -> TempPath {
+        make_file(dir, ".metafits")
+    }
+
+    fn make_ms(dir: &Path) -> TempPath {
+        make_file(dir, ".ms")
+    }
+
+    fn make_uvfits(dir: &Path) -> TempPath {
+        make_file(dir, ".uvfits")
+    }
+
+    fn make_legacy_gpubox(dir: &Path) -> TempPath {
+        Builder::new()
+            .prefix("1065880128_01234567890123_gpubox01_00")
+            .suffix(".fits")
+            .rand_bytes(1)
+            .tempfile_in(dir)
+            .unwrap()
+            .into_temp_path()
+    }
+
+    // The regex we use to match MWAX gpuboxes is too strict to have random
+    // characters. Make a file normally in the TempDir. It will get deleted when
+    // the TempDir is dropped.
+    fn make_mwax_gpubox(dir: &Path) -> PathBuf {
+        let file_path = dir.join("1247842824_20190722150006_ch113_000.fits");
+        std::fs::File::create(&file_path).unwrap();
+        file_path
+    }
+
+    #[test]
+    fn test_non_existent_file() {
+        let result = exists_and_is_readable(&PathBuf::from("/does/not/exist.metafits"));
+        assert!(result.is_err());
+        match result {
+            Err(InputFileError::DoesNotExist(_)) => (),
+            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Ok(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_unreadable_file() {
+        let result = exists_and_is_readable(&PathBuf::from("/etc/shadow"));
+        assert!(result.is_err());
+        match result {
+            Err(InputFileError::CouldNotRead(_)) => (),
+            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Ok(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_unrecognised_file() {
+        let mut input = InputDataTypesTemp::default();
+        // Is /tmp always present?
+        let result = file_checker(&mut input, "/tmp");
+        assert!(result.is_err());
+        match result {
+            Err(InputFileError::NotRecognised(_)) => (),
+            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Ok(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_non_existent_file2() {
+        let mut input = InputDataTypesTemp::default();
+        let result = file_checker(&mut input, "/does/not/exist.metafits");
+        assert!(result.is_err());
+        match result {
+            Err(InputFileError::DoesNotExist(_)) => (),
+            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Ok(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_found_metafits() {
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let metafits = make_metafits(dir.path());
+        let result = file_checker(&mut input, metafits.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.metafits.len(), 1);
+    }
+
+    #[test]
+    fn test_found_ms() {
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let ms = make_ms(dir.path());
+        let result = file_checker(&mut input, ms.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.ms.len(), 1);
+    }
+
+    #[test]
+    fn test_found_uvfits() {
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let uvfits = make_uvfits(dir.path());
+        let result = file_checker(&mut input, uvfits.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.uvfits.len(), 1);
+    }
+
+    #[test]
+    fn test_found_legacy_gpubox() {
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let gpubox = make_legacy_gpubox(dir.path());
+        let result = file_checker(&mut input, gpubox.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.gpuboxes.len(), 1);
+    }
+
+    #[test]
+    fn test_found_mwax_gpubox() {
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let gpubox = make_mwax_gpubox(dir.path());
+        let result = file_checker(&mut input, gpubox.to_str().unwrap());
+        assert!(result.is_ok(), "{}", result.unwrap_err());
+        assert_eq!(input.gpuboxes.len(), 1);
+    }
 }

@@ -14,7 +14,7 @@ use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
 
 use super::params::RankedSource;
-use crate::*;
+use crate::{beam::Beam, *};
 use mwa_hyperdrive_core::*;
 
 /// This function mutates the input source list, removing any sources that have
@@ -43,7 +43,7 @@ pub(crate) fn veto_sources(
     lst_rad: f64,
     delays: &[u32],
     coarse_chan_freqs: &[f64],
-    beam: &mwa_hyperbeam::fee::FEEBeam,
+    beam: &Box<dyn Beam>,
     num_sources: Option<usize>,
     source_dist_cutoff: f64,
     veto_threshold: f64,
@@ -78,7 +78,7 @@ pub(crate) fn veto_sources(
         }
     };
 
-    let (vetoed_sources, mut not_vetoed_sources): (Vec<_>, Vec<_>) = source_list
+    let (vetoed_sources, not_vetoed_sources): (Vec<Result<String, VetoError>>, Vec<Result<RankedSource, EstimateError>>) = source_list
         .par_iter()
         .partition_map(|(source_name, source)| {
             // Are any of this source's components too low in elevation? Or too
@@ -90,24 +90,15 @@ pub(crate) fn veto_sources(
                            source_name,
                            azel.el,
                            ELEVATION_LIMIT);
-                    return Either::Left(source_name.clone());
+                    return Either::Left(Ok(source_name.clone()));
                 } else if let Some(d) = dist_cutoff {
                     if comp.radec.separation(&pointing) > d {
                     trace!("A component of source {}'s elevation ({} radians) was too far from the pointing centre ({} radians)",
                            source_name,
                            azel.el,
                            d);
-                    return Either::Left(source_name.clone());
+                    return Either::Left(Ok(source_name.clone()));
                     };
-                }
-
-                // TODO: Remove!
-                match &comp.comp_type {
-                    ComponentType::Point | ComponentType::Gaussian { .. } => (),
-                    ct => {
-                        warn!("Ignoring component type {:?}", ct);
-                        return Either::Left(source_name.clone())
-                    },
                 }
             }
 
@@ -126,23 +117,23 @@ pub(crate) fn veto_sources(
                 let mut fd = 0.0;
 
                 // Get the beam response at this source position and frequency.
-                let j = Jones::from(beam.calc_jones(
+                let j = match beam.calc_jones(
                         pointing_azel.az,
                         pointing_azel.za(),
                         cc_freq as _,
                         delays,
                         &[1.0; 16],
-                    true)
-                    // unwrap is ugly, but an error would indicate a serious
-                    // problem with hyperbeam. The alternative is lots of
-                    // "and_then" control flow operators.
-                              .unwrap());
-                // TODO: Remove unwrap.
+                    true) {
+                        Ok(j) => j,
+                        Err(e) => return Either::Left(Err(e.into())),
+                    };
 
-                for source_fd in source
-                    .get_flux_estimates(cc_freq)
-                    .unwrap()
-                {
+                let source_fds = match source.get_flux_estimates(cc_freq) {
+                    Ok(fds) => fds,
+                    Err(e) => return Either::Left(Err(e.into())),
+                };
+
+                for source_fd in source_fds {
                     fd += get_beam_attenuated_flux_density(&source_fd, &j);
                     cc_fds.push(source_fd);
                 }
@@ -154,19 +145,26 @@ pub(crate) fn veto_sources(
                         fd,
                         veto_threshold
                     );
-                    return Either::Left(source_name.clone());
+                    return Either::Left(Ok(source_name.clone()));
                 }
                 smallest_fd = fd.min(smallest_fd);
             }
 
             // If we got this far, the source should not be vetoed.
-            Either::Right(RankedSource::new( source_name.to_owned(),
-                 smallest_fd,
-                 cc_fds,
-                 source,
-                 average_freq
-            ).unwrap())
+            let ranked_source  = RankedSource::new(source_name.to_owned(),
+            smallest_fd,
+            cc_fds,
+            source,
+            average_freq
+            );
+            Either::Right(ranked_source)
         });
+
+    // Handle potential errors while vetoing (such as the beam code failing).
+    let vetoed_sources = vetoed_sources.into_iter().collect::<Result<Vec<_>, _>>()?;
+    let mut not_vetoed_sources = not_vetoed_sources
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
 
     debug!(
         "{} sources were vetoed from the source list",
@@ -219,20 +217,17 @@ pub(crate) fn veto_sources(
     Ok(not_vetoed_sources)
 }
 
+/// Convert a Stokes flux densities into instrumental flux densities, and
+/// multiply by a beam-response Jones matrix. Return the sum of the response XX
+/// and YY flux densities as the "beam attenuated flux density".
 // This function is isolated for testing.
 #[inline(always)]
 fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones<f64>) -> f64 {
-    // Form an ideal flux-density Jones matrix for each of the
-    // source components.
-    let i = Jones::from([
-        c64::new(fd.i + fd.q, 0.0),
-        c64::new(fd.u, fd.v),
-        c64::new(fd.u, -fd.v),
-        c64::new(fd.i - fd.q, 0.0),
-    ]);
+    // Get the instrumental flux densities as a Jones matrix.
+    let i = Jones::from(fd);
     // Calculate: J . I . J^H
-    // where J is the beam-response Jones matrix and I is the
-    // source's ideal Jones matrix.
+    // where J is the beam-response Jones matrix and I are the instrumental flux
+    // densities.
     let ji = j.clone() * i;
     let jijh = ji.mul_hermitian(&j);
     // Use the trace of `jijh` as the total source flux density.
@@ -248,69 +243,55 @@ pub enum VetoError {
     TooFewSources { requested: usize, available: usize },
 
     #[error("{0}")]
-    Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
+    Beam(#[from] crate::beam::BeamError),
+
+    #[error("{0}")]
+    Estimate(#[from] mwa_hyperdrive_core::flux_density::EstimateError),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mwalib::MetafitsContext;
-    use mwa_hyperdrive_srclist::SourceListType;
-    use std::path::PathBuf;
-
-    use approx::*;
-    // Need to use serial tests because HDF5 is not necessarily reentrant.
-    use serial_test::serial;
-
-    fn get_params() -> (
-        mwalib::MetafitsContext,
-        mwa_hyperbeam::fee::FEEBeam,
-        SourceList,
-    ) {
-        (
-            MetafitsContext::new(&"tests/1065880128/1065880128.metafits").unwrap(),
-            mwa_hyperbeam::fee::FEEBeam::new_from_env().unwrap(),
-            mwa_hyperdrive_srclist::read::read_source_list_file(
-                &PathBuf::from(
-                    "tests/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
-                ),
-                SourceListType::Hyperdrive,
-            )
-            .unwrap(),
-        )
-    }
+    use crate::tests::*;
+    use reduced_obsids::get_1090008640_smallest;
 
     #[test]
     #[serial]
     fn test_beam_attenuated_flux_density() {
-        let (metafits, beam, _) = get_params();
-        let jones_pointing_centre = Jones::from(
-            beam.calc_jones(
-                metafits.az_rad,
-                metafits.za_rad,
+        let mut args = get_1090008640_smallest();
+        args.no_beam = Some(false);
+        let params = args.into_params().unwrap();
+        let obs_context = params.input_data.get_obs_context();
+        let pointing = &obs_context.pointing;
+        let pointing_azel = pointing.to_hadec(obs_context.lst0).to_azel_mwa();
+
+        let jones_pointing_centre = params
+            .beam
+            .calc_jones(
+                pointing_azel.az,
+                pointing_azel.za(),
                 180e6 as _,
-                &metafits.delays,
+                &obs_context.delays,
                 &[1.0; 16],
                 true,
             )
-            .unwrap(),
-        );
+            .unwrap();
         let radec_null = RADec::new_degrees(
-            metafits.ra_tile_pointing_degrees + 80.0,
-            metafits.dec_tile_pointing_degrees + 80.0,
+            pointing.ra.to_degrees() + 80.0,
+            pointing.dec.to_degrees() + 80.0,
         );
-        let azel_null = radec_null.to_hadec(metafits.lst_rad).to_azel_mwa();
-        let jones_null = Jones::from(
-            beam.calc_jones(
+        let azel_null = radec_null.to_hadec(obs_context.lst0).to_azel_mwa();
+        let jones_null = params
+            .beam
+            .calc_jones(
                 azel_null.az,
                 azel_null.za(),
                 180e6 as _,
-                &metafits.delays,
+                &obs_context.delays,
                 &[1.0; 16],
                 true,
             )
-            .unwrap(),
-        );
+            .unwrap();
         let fd = FluxDensity {
             freq: 180e6,
             i: 1.0,
@@ -319,161 +300,159 @@ mod tests {
             v: 0.0,
         };
         let bafd_pc = get_beam_attenuated_flux_density(&fd, &jones_pointing_centre);
-        assert_abs_diff_eq!(bafd_pc, 1.9867421166394585, epsilon = 1e-10);
+        assert_abs_diff_eq!(bafd_pc, 1.9822859522655294, epsilon = 1e-10);
 
         let bafd_null = get_beam_attenuated_flux_density(&fd, &jones_null);
-        assert_abs_diff_eq!(bafd_null, 0.000000017940424114049793, epsilon = 1e-10);
+        assert_abs_diff_eq!(bafd_null, 0.0000000005317170873153842, epsilon = 1e-10);
     }
 
-    // #[test]
-    // #[serial]
-    // fn veto() {
-    //     let (metafits, beam, mut source_list) = get_params();
-    //     // For testing's sake, keep only the following sources. The first five
-    //     // are bright and won't get vetoed and the last three are dim.
-    //     let sources = &[
-    //         "J002549-260211",
-    //         "J004616-420739",
-    //         "J010817-160418",
-    //         "J233426-412520",
-    //         "J235701-344532",
-    //     ];
-    //     let keys: Vec<String> = source_list.keys().cloned().collect();
-    //     for source_name in keys {
-    //         if !sources.contains(&source_name.as_str()) {
-    //             source_list.remove(source_name.as_str());
-    //         }
-    //     }
+    #[test]
+    #[serial]
+    fn veto() {
+        // let (metafits, beam, mut source_list) = get_params();
+        let mut args = get_1090008640_smallest();
+        args.no_beam = Some(false);
+        let mut params = args.into_params().unwrap();
+        let obs_context = params.input_data.get_obs_context();
+        // For testing's sake, keep only the following bright sources.
+        let sources = &[
+            "J002549-260211",
+            "J004616-420739",
+            "J233426-412520",
+            "J235701-344532",
+        ];
+        let keys: Vec<String> = params.source_list.keys().cloned().collect();
+        for source_name in keys {
+            if !sources.contains(&source_name.as_str()) {
+                params.source_list.remove(source_name.as_str());
+            }
+        }
 
-    //     // Add some sources that are in beam nulls. Despite being very bright,
-    //     // they will be vetoed.
-    //     source_list.insert(
-    //         "bad_source1".to_string(),
-    //         Source {
-    //             components: vec![SourceComponent {
-    //                 radec: RADec::new_degrees(330.0, -80.0),
-    //                 comp_type: ComponentType::Point,
-    //                 flux_type: FluxDensityType::PowerLaw {
-    //                     si: -0.8,
-    //                     fd: FluxDensity {
-    //                         freq: 180e6,
-    //                         i: 10.0,
-    //                         q: 0.0,
-    //                         u: 0.0,
-    //                         v: 0.0,
-    //                     },
-    //                 },
-    //             }],
-    //         },
-    //     );
-    //     source_list.insert(
-    //         "bad_source2".to_string(),
-    //         Source {
-    //             components: vec![SourceComponent {
-    //                 radec: RADec::new_degrees(30.0, -80.0),
-    //                 comp_type: ComponentType::Point,
-    //                 flux_type: FluxDensityType::PowerLaw {
-    //                     si: -0.8,
-    //                     fd: FluxDensity {
-    //                         freq: 180e6,
-    //                         i: 10.0,
-    //                         q: 0.0,
-    //                         u: 0.0,
-    //                         v: 0.0,
-    //                     },
-    //                 },
-    //             }],
-    //         },
-    //     );
-    //     source_list.insert(
-    //         "bad_source3".to_string(),
-    //         Source {
-    //             components: vec![SourceComponent {
-    //                 radec: RADec::new_degrees(285.0, 40.0),
-    //                 comp_type: ComponentType::Point,
-    //                 flux_type: FluxDensityType::PowerLaw {
-    //                     si: -0.8,
-    //                     fd: FluxDensity {
-    //                         freq: 180e6,
-    //                         i: 10.0,
-    //                         q: 0.0,
-    //                         u: 0.0,
-    //                         v: 0.0,
-    //                     },
-    //                 },
-    //             }],
-    //         },
-    //     );
+        // Add some sources that are in beam nulls. Despite being very bright,
+        // they should be vetoed.
+        params.source_list.insert(
+            "bad_source1".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(330.0, -80.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
+        params.source_list.insert(
+            "bad_source2".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(30.0, -80.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
+        params.source_list.insert(
+            "bad_source3".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(285.0, 40.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
 
-    //     let result = veto_sources(
-    //         &mut source_list,
-    //         &metafits,
-    //         &metafits
-    //             .get_expected_coarse_channels(CorrelatorVersion::Legacy)
-    //             .unwrap(),
-    //         &beam,
-    //         None,
-    //         180.0,
-    //         20.0,
-    //     );
-    //     assert!(result.is_ok());
-    //     result.unwrap();
-    //     // Only the first five are kept.
-    //     assert_eq!(
-    //         source_list.len(),
-    //         5,
-    //         "Expected only five sources to not get vetoed: {:#?}",
-    //         source_list.keys()
-    //     );
-    // }
+        let result = veto_sources(
+            &mut params.source_list,
+            &obs_context.pointing,
+            obs_context.lst0,
+            &obs_context.delays,
+            &params.input_data.get_freq_context().coarse_chan_freqs,
+            &params.beam,
+            None,
+            180.0,
+            20.0,
+        );
+        assert!(result.is_ok());
+        result.unwrap();
+        // Only the first four are kept.
+        assert_eq!(
+            params.source_list.len(),
+            4,
+            "Expected only five sources to not get vetoed: {:#?}",
+            params.source_list.keys()
+        );
+    }
 
-    // #[test]
-    // #[serial]
-    // fn top_n_sources() {
-    //     let (metafits, beam, mut source_list) = get_params();
-    //     // For testing's sake, keep only the following sources.
-    //     let sources = &[
-    //         "J002549-260211",
-    //         "J004209-441404",
-    //         "J004616-420739",
-    //         "J010817-160418",
-    //         "J012027-152011",
-    //         "J013411-362913",
-    //         "J233426-412520",
-    //         "J235701-344532",
-    //     ];
-    //     let keys: Vec<String> = source_list.keys().cloned().collect();
-    //     for source_name in keys {
-    //         if !sources.contains(&source_name.as_str()) {
-    //             source_list.remove(source_name.as_str());
-    //         }
-    //     }
+    #[test]
+    #[serial]
+    fn top_n_sources() {
+        let mut args = get_1090008640_smallest();
+        args.no_beam = Some(false);
+        let mut params = args.into_params().unwrap();
+        let obs_context = params.input_data.get_obs_context();
 
-    //     let result = veto_sources(
-    //         &mut source_list,
-    //         &metafits,
-    //         &metafits
-    //             .get_expected_coarse_channels(CorrelatorVersion::Legacy)
-    //             .unwrap(),
-    //         &beam,
-    //         Some(5),
-    //         180.0,
-    //         0.1,
-    //     );
-    //     assert!(result.is_ok());
-    //     result.unwrap();
-    //     for &name in &[
-    //         "J002549-260211",
-    //         "J004616-420739",
-    //         "J010817-160418",
-    //         "J233426-412520",
-    //         "J235701-344532",
-    //     ] {
-    //         assert!(
-    //             &source_list.contains_key(name),
-    //             "Expected to find {} in the source list after vetoing",
-    //             name
-    //         );
-    //     }
-    // }
+        // For testing's sake, keep only the following sources.
+        let sources = &[
+            "J000042-342358",
+            "J000045-272248",
+            "J000105-165921",
+            "J000143-305731",
+            "J000217-253912",
+            "J000245-302825",
+        ];
+        let keys: Vec<String> = params.source_list.keys().cloned().collect();
+        for source_name in keys {
+            if !sources.contains(&source_name.as_str()) {
+                params.source_list.remove(source_name.as_str());
+            }
+        }
+
+        let result = veto_sources(
+            &mut params.source_list,
+            &obs_context.pointing,
+            obs_context.lst0,
+            &obs_context.delays,
+            &params.input_data.get_freq_context().coarse_chan_freqs,
+            &params.beam,
+            Some(3),
+            180.0,
+            0.1,
+        );
+        assert!(result.is_ok(), "{:?}", result.unwrap_err());
+        result.unwrap();
+        for &name in &["J000042-342358", "J000105-165921", "J000143-305731"] {
+            assert!(
+                &params.source_list.contains_key(name),
+                "Expected to find {} in the source list after vetoing",
+                name
+            );
+        }
+    }
 }

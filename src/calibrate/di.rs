@@ -10,23 +10,15 @@ https://github.com/torrance/MWAjl
 */
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
 
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
 use log::{debug, info, trace};
-use mwalib::fitsio::{
-    images::{ImageDescription, ImageType},
-    FitsFile,
-};
 use ndarray::prelude::*;
 use num::Complex;
 use rayon::prelude::*;
 
-use super::{predict, CalibrateError, CalibrateParams};
-use crate::data_formats::*;
+use super::{predict, solutions::write_solutions, CalibrateError, CalibrateParams};
 use crate::*;
 
 /// Do all the steps required for direction-independent calibration; read the
@@ -51,7 +43,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 params.freq.unflagged_fine_chan_freqs.len(),
             ),
             // [0.0; 4],
-            InstrumentalStokes::default(),
+            Jones::default(),
         );
         let components = params
             .source_list
@@ -64,11 +56,6 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 .zip(params.freq.unflagged_fine_chan_freqs.iter())
             {
                 *comp_fd = comp.estimate_at_freq(*freq)?.into();
-                // let fd = comp.estimate_at_freq(*freq)?;
-                //             comp_fd[0] = fd.i;
-                //             comp_fd[1] = fd.q;
-                //             comp_fd[2] = fd.u;
-                //             comp_fd[3] = fd.v;
             }
         }
         // Flip the array axes; this makes things simpler later.
@@ -104,11 +91,20 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     let timesteps = &params.input_data.get_obs_context().timestep_indices;
     let vis_shape = (
         timesteps.end - timesteps.start,
-        params.baseline_to_tile_map.len(),
+        params.unflagged_baseline_to_tile_map.len(),
         params.freq.unflagged_fine_chans.len(),
     );
-    let mut vis_data: Array3<Vis<f32>> = Array3::from_elem(vis_shape, Vis::default());
-    let mut vis_model: Array3<Vis<f32>> = Array3::from_elem(vis_shape, Vis::default());
+    let mut vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::default());
+    let mut vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::default());
+    debug!(
+        "Shape of data and model arrays: ({} timesteps, {} baselines, {} channels) ({} MiB each)",
+        vis_shape.0,
+        vis_shape.1,
+        vis_shape.2,
+        vis_shape.0 * vis_shape.1 * vis_shape.2 * std::mem::size_of::<Jones<f32>>()
+        // 1024 * 1024 == 1 MiB.
+        / 1024 / 1024
+    );
 
     // As most of the tiles likely have the same configuration (all the same
     // delays and amps), we can be much more efficient with computation by
@@ -157,15 +153,13 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
         // Producer (input data reading thread).
         scope.spawn(move |_| {
-            // for ((timestep, vis_data_slice), vis_model_slice) in (2..4)
-            //     .into_iter()
             for ((timestep, vis_data_slice), vis_model_slice) in
                 timesteps.clone().zip(vis_data_slices).zip(vis_model_slices)
             {
                 let read_result = params.input_data.read(
                     vis_data_slice,
                     timestep,
-                    &params.tile_to_baseline_map,
+                    &params.tile_to_unflagged_baseline_map,
                     &params.freq.fine_chan_flags,
                 );
                 let read_failed = read_result.is_err();
@@ -271,50 +265,19 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         return Err(err_msg);
     }
 
-    // let mut asdf = Array3::from_elem((uvwss.len(), uvwss[0].len(), 3), 0.0);
-    // for (axis0, mut asdf) in uvwss.iter().zip(asdf.outer_iter_mut()) {
-    //     for (axis1, mut asdf) in axis0.iter().zip(asdf.outer_iter_mut()) {
-    //         asdf[[0]] = axis1.u;
-    //         asdf[[1]] = axis1.v;
-    //         asdf[[2]] = axis1.w;
-    //     }
-    // }
-    // ndarray_npy::write_npy("/tmp/weights.npy", &asdf).unwrap();
-    // std::process::exit(1);
-
     info!("Finished reading data and predicting a model against it.");
-    // ndarray_npy::write_npy("/tmp/model_xx_re.npy", &vis_model.mapv(|v| v.xx.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/model_xx_im.npy", &vis_model.mapv(|v| v.xx.im)).unwrap();
-    // ndarray_npy::write_npy("/tmp/model_xy_re.npy", &vis_model.mapv(|v| v.xy.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/model_xy_im.npy", &vis_model.mapv(|v| v.xy.im)).unwrap();
-    // ndarray_npy::write_npy("/tmp/model_yx_re.npy", &vis_model.mapv(|v| v.yx.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/model_yx_im.npy", &vis_model.mapv(|v| v.yx.im)).unwrap();
-    // ndarray_npy::write_npy("/tmp/model_yy_re.npy", &vis_model.mapv(|v| v.yy.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/model_yy_im.npy", &vis_model.mapv(|v| v.yy.im)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_xx_re.npy", &vis_data.mapv(|v| v.xx.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_xx_im.npy", &vis_data.mapv(|v| v.xx.im)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_xy_re.npy", &vis_data.mapv(|v| v.xy.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_xy_im.npy", &vis_data.mapv(|v| v.xy.im)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_yx_re.npy", &vis_data.mapv(|v| v.yx.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_yx_im.npy", &vis_data.mapv(|v| v.yx.im)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_yy_re.npy", &vis_data.mapv(|v| v.yy.re)).unwrap();
-    // ndarray_npy::write_npy("/tmp/data_yy_im.npy", &vis_data.mapv(|v| v.yy.im)).unwrap();
-    // std::process::exit(1);
-
-    // TODO: Split the data and model arrays by frequency and send them to
-    // workers.
 
     let timeblock_len = timesteps.end - timesteps.start;
+    // TODO: Let the user determine this -- using all timesteps at once for now.
     let num_timeblocks = 1;
+    let mut chanblocks = params.freq.unflagged_fine_chans.iter().collect::<Vec<_>>();
+    chanblocks.sort_unstable();
 
     // The shape of the array containing output Jones matrices.
-    let shape = (
-        // TODO: Let the user determine this -- using all timesteps at once for
-        // now.
-        num_timeblocks,
-        params.unflagged_tiles.len(),
-        params.freq.unflagged_fine_chans.len(),
-    );
+    let obs_context = params.input_data.get_obs_context();
+    let total_num_tiles = obs_context.tile_xyz.len();
+    let num_unflagged_tiles = obs_context.num_unflagged_tiles;
+    let shape = (num_timeblocks, num_unflagged_tiles, chanblocks.len());
     debug!(
         "Shape of DI Jones matrices array: {:?} ({} MiB)",
         shape,
@@ -332,152 +295,96 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         false,
     );
 
-    // TODO: Implement timeblocks and chanblocks. For now, there's only one
-    // timeblock which spans all available times, and chanblocks == fine chans.
-    // for timeblock in 0..1 {
-    // for chanblock in 0..params.freq.unflagged_fine_chans.len() {
-    // let di_jones_slices: Vec<_> = (0..1)
-    //     .into_iter()
-    //     .zip(0..params.freq.unflagged_fine_chans.len())
-    //     .into_iter()
-    //     .map(|(timeblock, chanblock)| {
-    //         &mut di_jones.slice_mut(s![timeblock, .., chanblock..chanblock + 1])
-    //     })
-    //     .collect();
-    // di_jones_slices
-    // .iter()
-    // .enumerate()
-    // .map(|(timeblock, di_jones)| {
+    // For each timeblock, calibrate all chanblocks in parallel.
     (0..num_timeblocks)
         .into_iter()
         .zip(di_jones.outer_iter_mut())
-        .for_each(|(timeblock, mut di_jones)| {
-            let di_jones_slices: Vec<_> = (0..params.freq.unflagged_fine_chans.len())
-                .into_iter()
-                .map(|chanblock| di_jones.slice_mut(s![.., chanblock..chanblock + 1]))
-                .collect();
-            (0..params.freq.unflagged_fine_chans.len())
-                .into_par_iter()
-                .zip(di_jones_slices.into_par_iter())
-                .for_each(|(chanblock, di_jones)| {
-                    trace!("timeblock {}, chanblock {}", timeblock, chanblock);
-                    calibrate(
+        .for_each(|(timeblock, di_jones)| {
+            info!("Calibrating timeblock {}", timeblock);
+            let mut di_jones_rev = di_jones.reversed_axes();
+            chanblocks
+                .par_iter()
+                .zip(di_jones_rev.outer_iter_mut())
+                .enumerate()
+                .for_each(|(chanblock_index, (&&chanblock, di_jones))| {
+                    let cal_result = calibrate(
                         vis_data.slice(s![
                             timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
                             ..,
-                            chanblock..chanblock + 1
+                            chanblock_index..chanblock_index + 1
                         ]),
                         vis_model.slice(s![
                             timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
                             ..,
-                            chanblock..chanblock + 1
+                            chanblock_index..chanblock_index + 1
                         ]),
-                        // di_jones.slice_mut(s![.., chanblock..chanblock + 1]),
                         di_jones,
-                        &params.baseline_to_tile_map,
+                        &params.unflagged_baseline_to_unflagged_tile_map,
+                        params.max_iterations,
+                        params.stop_threshold,
+                        params.min_threshold,
                     );
+
+                    let start_str = format!("chanblock {:<3}", chanblock);
+                    if num_unflagged_tiles - cal_result.num_failed <= 4 {
+                        info!(
+                            "{}: failed    ({:<2}): Too many antenna solutions failed ({})",
+                            start_str, cal_result.num_iterations, cal_result.num_failed
+                        );
+                    } else if cal_result.max_precision > params.min_threshold {
+                        info!(
+                            "{}: failed    ({:<2}): {:.5e} > {:e}",
+                            start_str,
+                            cal_result.num_iterations,
+                            cal_result.max_precision,
+                            params.min_threshold,
+                        );
+                    } else if cal_result.max_precision > params.stop_threshold {
+                        info!(
+                            "{}: converged ({:<2}): {:e} > {:.5e} > {:e}",
+                            start_str,
+                            cal_result.num_iterations,
+                            params.min_threshold,
+                            cal_result.max_precision,
+                            params.stop_threshold
+                        );
+                    } else {
+                        info!(
+                            "{}: converged ({:<2}): {:e} > {:.5e}",
+                            start_str,
+                            cal_result.num_iterations,
+                            params.stop_threshold,
+                            cal_result.max_precision
+                        );
+                    }
                 });
         });
-    // for timeblock in 0..1 {
-    //     (0..params.freq.unflagged_fine_chans.len())
-    //         .into_iter()
-    //         .for_each(|chanblock| {
-    //             trace!("timeblock {}, chanblock {}", timeblock, chanblock);
-    //             calibrate(
-    //                 vis_data.slice(s![.., .., chanblock..chanblock + 1]),
-    //                 vis_model.slice(s![.., .., chanblock..chanblock + 1]),
-    //                 di_jones.slice_mut(s![timeblock, .., chanblock..chanblock + 1]),
-    //                 &params.baseline_to_tile_map,
-    //             );
-    //         });
-    // }
 
     // Write out the solutions.
-    let total_num_tiles = params.input_data.get_obs_context().tile_xyz.len();
     let num_fine_freq_chans = params.input_data.get_freq_context().fine_chan_freqs.len();
-
-    let fits_file = std::path::PathBuf::from("hyperdrive_solutions.fits");
-    if fits_file.exists() {
-        std::fs::remove_file(&fits_file)?;
-    }
-    let mut fptr = FitsFile::create(&fits_file).open()?;
-    // Four elements for each Jones matrix, and we need to double the last axis,
-    // because we can't write complex numbers directly to FITS files; instead,
-    // we write each real and imag float as individual floats.
-    let dim = [1, total_num_tiles, num_fine_freq_chans, 4 * 2];
-    let image_description = ImageDescription {
-        data_type: ImageType::Float,
-        dimensions: &dim,
-    };
-    let hdu = fptr.create_image("SOLUTIONS".to_string(), &image_description)?;
-
-    // Fill the fits file with NaN before overwriting with our solved solutions.
-    // We have to be tricky with what gets written out, because `di_jones`
-    // doesn't necessarily have the same shape as the output.
-    let mut fits_image_data = vec![f32::NAN; dim.iter().product()];
-    let mut bin_file = BufWriter::new(File::create("hyperdrive_solutions.bin")?);
-    // 8 floats, 8 bytes per float.
-    let mut buf = [0; 8 * 8];
-    bin_file.write_all(b"MWAOCAL")?;
-    bin_file.write_u8(0)?;
-    bin_file.write_i32::<LittleEndian>(0)?;
-    bin_file.write_i32::<LittleEndian>(0)?;
-    bin_file.write_i32::<LittleEndian>(di_jones.len_of(Axis(0)) as _)?;
-    bin_file.write_i32::<LittleEndian>(total_num_tiles as _)?;
-    bin_file.write_i32::<LittleEndian>(num_fine_freq_chans as _)?;
-    bin_file.write_i32::<LittleEndian>(4)?;
-    // TODO: Use real timestamps.
-    bin_file.write_f64::<LittleEndian>(0.0)?;
-    bin_file.write_f64::<LittleEndian>(1.0)?;
-
-    for (timestep, di_jones_per_time) in di_jones.outer_iter().enumerate() {
-        let mut unflagged_tile_index = 0;
-        for tile in 0..total_num_tiles {
-            let mut unflagged_chan_index = 0;
-            for chan in 0..num_fine_freq_chans {
-                if params.freq.unflagged_fine_chans.contains(&chan) {
-                    let one_dim_index = timestep * dim[1] * dim[2] * dim[3]
-                        + tile * dim[2] * dim[3]
-                        + chan * dim[3];
-                    // Invert the Jones matrices so that they can be applied as
-                    // J D J^H
-                    let j = di_jones_per_time[[unflagged_tile_index, unflagged_chan_index]].inv();
-                    fits_image_data[one_dim_index + 0] = j[0].re;
-                    fits_image_data[one_dim_index + 1] = j[0].im;
-                    fits_image_data[one_dim_index + 2] = j[1].re;
-                    fits_image_data[one_dim_index + 3] = j[1].im;
-                    fits_image_data[one_dim_index + 4] = j[2].re;
-                    fits_image_data[one_dim_index + 5] = j[2].im;
-                    fits_image_data[one_dim_index + 6] = j[3].re;
-                    fits_image_data[one_dim_index + 7] = j[3].im;
-
-                    LittleEndian::write_f64_into(
-                        &[
-                            j[0].re as _,
-                            j[0].im as _,
-                            j[1].re as _,
-                            j[1].im as _,
-                            j[2].re as _,
-                            j[2].im as _,
-                            j[3].re as _,
-                            j[3].im as _,
-                        ],
-                        &mut buf,
-                    );
-                    bin_file.write_all(&buf)?;
-
-                    unflagged_chan_index += 1;
-                } else {
-                    LittleEndian::write_f64_into(&[f64::NAN; 8], &mut buf);
-                    bin_file.write_all(&buf)?;
-                }
-            }
-            unflagged_tile_index += 1;
-        }
-    }
-    hdu.write_image(&mut fptr, &fits_image_data)?;
+    trace!("Writing solutions...");
+    write_solutions(
+        &params.output_solutions_filename,
+        di_jones.view(),
+        num_timeblocks,
+        total_num_tiles,
+        num_fine_freq_chans,
+        &params.tile_flags,
+        &params.freq.unflagged_fine_chans,
+    )?;
+    info!(
+        "Calibration solutions written to {}",
+        &params.output_solutions_filename.display()
+    );
 
     Ok(())
+}
+
+struct CalibrationResult {
+    num_iterations: usize,
+    converged: bool,
+    max_precision: f32,
+    num_failed: usize,
 }
 
 /// Calibrate the antennas of the array by comparing the observed input data
@@ -486,28 +393,25 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 /// This function is intended to be run in parallel; for that reason, no
 /// parallel code is inside this function.
 fn calibrate(
-    data: ArrayView3<Vis<f32>>,
-    model: ArrayView3<Vis<f32>>,
-    mut di_jones: ArrayViewMut2<Jones<f32>>,
-    baseline_to_tile_map: &HashMap<usize, (usize, usize)>,
-) -> (usize, bool) {
-    let mut new_jones: Array2<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
-    let mut top: Array2<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
-    let mut bot: Array2<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
+    data: ArrayView3<Jones<f32>>,
+    model: ArrayView3<Jones<f32>>,
+    mut di_jones: ArrayViewMut1<Jones<f32>>,
+    unflagged_baseline_to_unflagged_tile_map: &HashMap<usize, (usize, usize)>,
+    max_iterations: usize,
+    stop_threshold: f32,
+    min_threshold: f32,
+) -> CalibrationResult {
+    let mut new_jones: Array1<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
+    let mut top: Array1<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
+    let mut bot: Array1<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
     // The convergence precisions per antenna. They are stored per polarisation
     // for programming convenience, but really only we're interested in the
     // largest value in the entire array.
-    let mut precisions: Array2<f32> =
-        Array::from_elem((di_jones.len_of(Axis(0)), 4), f32::default());
-    let mut failed: Array1<bool> = Array1::from_elem(di_jones.len_of(Axis(0)), false);
+    let mut precisions: Array2<f32> = Array::from_elem((di_jones.len(), 4), f32::default());
+    let mut failed: Array1<bool> = Array1::from_elem(di_jones.len(), false);
 
     // Shortcuts.
     let num_unflagged_tiles = di_jones.len_of(Axis(0));
-
-    // TODO: Don't hard code!
-    let tols = (1e-5, 1e-8);
-    let max_iterations = 50;
-    // let max_iterations = 100;
 
     let mut iteration = 0;
     while iteration < max_iterations {
@@ -520,7 +424,7 @@ fn calibrate(
             data,
             model,
             di_jones.view(),
-            baseline_to_tile_map,
+            unflagged_baseline_to_unflagged_tile_map,
             top.view_mut(),
             bot.view_mut(),
         );
@@ -541,12 +445,9 @@ fn calibrate(
                     .zip(new_jones.iter_mut())
                     .zip(top.iter())
                     .zip(bot.iter())
-                    .enumerate()
-                    .for_each(|(freq, (((di_jones, new_jones), top), bot))| {
+                    .for_each(|(((di_jones, new_jones), top), bot)| {
                         *new_jones = top.div(&bot);
                         if new_jones.iter().any(|f| f.is_nan()) {
-                            dbg!(&top, &bot, &top.div(&bot), freq, iteration);
-                            std::process::exit(1);
                             *failed = true;
                             *di_jones = Jones::default();
                             *new_jones = Jones::default();
@@ -567,14 +468,6 @@ fn calibrate(
             // Update the DI Jones matrices, and for each pair of Jones matrices
             // in new_jones and di_jones, form a maximum "distance" between
             // elements of the Jones matrices.
-            // let distances = (&new_jones - &di_jones)
-            //     .mapv(|v| v.norm_sqr().into_iter().sum() / 4.0)
-            //     .mean_axis(Axis(0));
-            // // di_jones = 0.5 * (di_jones + new_jones)
-            // di_jones += &new_jones;
-            // di_jones *= 0.5;
-
-            // let mut biggest_distance: f64 = 0.0;
             di_jones
                 .outer_iter_mut()
                 .zip(new_jones.outer_iter())
@@ -598,7 +491,7 @@ fn calibrate(
                 });
 
             // Stop iterating if we have reached the stop threshold.
-            if precisions.iter().all(|&v| v < tols.1) {
+            if precisions.iter().all(|&v| v < stop_threshold) {
                 break;
             }
         } else {
@@ -630,56 +523,48 @@ fn calibrate(
                 .max(antenna_precision[[2]])
                 .max(antenna_precision[[3]])
         });
-    // let max_distance: f64 = distances
-    // .iter()
-    // .zip(failed.iter())
-    // .filter(|(_, &failed)| !failed)
-    // .fold(0.0, |acc, (&antenna_precision, _)| {
-    //     acc.max(antenna_precision)
-    // });
-    // dbg!(&distances, max_distance);
-    // dbg!(max_distance);
-    // std::process::exit(1);
+
     let num_failed = failed.iter().filter(|&&f| f).count();
     let converged = {
         // First, if only 4 or fewer antennas remain, mark the solution as
         // trash.
         if num_unflagged_tiles - num_failed <= 4 {
-            info!("Too many antenna solutions failed ({}) after {} iterations, setting solution block as failed", num_failed, iteration);
             di_jones.fill(Jones::from([Complex::new(f32::NAN, 0.0); 4]));
             false
         }
-        // Second, if we never reached the minimum threshold level, mark the entire solution as failed
-        else if max_precision > tols.0 {
-            info!("Solution block failed to converge after {} iterations, setting as failed for all antennas (precision = {:+e})", iteration, max_precision);
+        // Second, if we never reached the minimum threshold level, mark the
+        // entire solution as failed.
+        else if max_precision > min_threshold {
             di_jones.fill(Jones::from([Complex::new(f32::NAN, 0.0); 4]));
             false
         }
-        // Third, we exceeded the minimum threshold level, but not the maximum (ie. we didn't break early)
-        else if max_precision > tols.1 {
-            info!("Solution block converged but did not meet {:+e} threshold after {} iterations (precision = {:+e})", tols.1, iteration, max_precision);
+        // Third, we exceeded the minimum threshold, but not the stop (ie. we
+        // didn't break early)
+        else if max_precision > stop_threshold {
             true
         }
-        // Finally, we exceeded the maximum threshold level and broke the iterations early
+        // Finally, we exceeded the stop threshold level and broke the
+        // iterations early.
         else {
-            info!(
-                "Solution block converged after {} iterations (precision = {:+e})",
-                iteration, max_precision
-            );
             true
         }
     };
 
-    (iteration, converged)
+    CalibrationResult {
+        num_iterations: iteration,
+        converged,
+        max_precision,
+        num_failed,
+    }
 }
 
 fn calibration_loop(
-    data: ArrayView3<Vis<f32>>,
-    model: ArrayView3<Vis<f32>>,
-    di_jones: ArrayView2<Jones<f32>>,
-    baseline_to_tile_map: &HashMap<usize, (usize, usize)>,
-    mut top: ArrayViewMut2<Jones<f32>>,
-    mut bot: ArrayViewMut2<Jones<f32>>,
+    data: ArrayView3<Jones<f32>>,
+    model: ArrayView3<Jones<f32>>,
+    di_jones: ArrayView1<Jones<f32>>,
+    unflagged_baseline_to_unflagged_tile_map: &HashMap<usize, (usize, usize)>,
+    mut top: ArrayViewMut1<Jones<f32>>,
+    mut bot: ArrayViewMut1<Jones<f32>>,
 ) {
     // Time axis.
     data.outer_iter()
@@ -691,39 +576,23 @@ fn calibration_loop(
                 .zip(model_time.outer_iter())
                 .enumerate()
                 .for_each(|(unflagged_bl_index, (data_bl, model_bl))| {
-                    let (tile1, tile2) = baseline_to_tile_map[&unflagged_bl_index];
+                    let (tile1, tile2) =
+                        unflagged_baseline_to_unflagged_tile_map[&unflagged_bl_index];
 
                     // Unflagged frequency chan axis.
-                    data_bl.iter().zip(model_bl.iter()).enumerate().for_each(
-                        |(fine_chan, (data_vis, model_vis))| {
+                    data_bl
+                        .iter()
+                        .zip(model_bl.iter())
+                        .for_each(|(j_data, j_model)| {
                             // Suppress boundary checks for maximum performance!
                             unsafe {
-                                let j_t1 = di_jones.uget((tile1, fine_chan));
-                                let j_t2 = di_jones.uget((tile2, fine_chan));
-                                let j_data: Jones<f32> = Jones::from([
-                                    data_vis.xx,
-                                    data_vis.xy,
-                                    data_vis.yx,
-                                    data_vis.yy,
-                                ]);
-                                let j_model: Jones<f32> = Jones::from([
-                                    model_vis.xx,
-                                    model_vis.xy,
-                                    model_vis.yx,
-                                    model_vis.yy,
-                                ]);
+                                let j_t1 = di_jones.uget(tile1);
+                                let j_t2 = di_jones.uget(tile2);
 
                                 // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
                                 {
-                                    let top_t1 = top.uget_mut((tile1, fine_chan));
-                                    let bot_t1 = bot.uget_mut((tile1, fine_chan));
-
-                                    // J M^H
-                                    // let z = j_t2.mul_hermitian(&j_model);
-                                    // // D (J M^H)
-                                    // *top_t1 += j_data.clone() * &z;
-                                    // // (J M^H)^H (J M^H)
-                                    // *bot_t1 += z.h() * z;
+                                    let top_t1 = top.uget_mut(tile1);
+                                    let bot_t1 = bot.uget_mut(tile1);
 
                                     // J M^H
                                     let z = Jones::axbh(j_t2, &j_model);
@@ -731,21 +600,10 @@ fn calibration_loop(
                                     Jones::plus_axb(top_t1, &j_data, &z);
                                     // (J M^H)^H (J M^H)
                                     Jones::plus_ahxb(bot_t1, &z, &z);
-
-                                    // *bot_t1 += z.h() * &z;
-                                    // dbg!(j_t1, j_t2, j_data, j_model, &z, top_t1, bot_t1);
-                                    // std::process::exit(1);
                                 }
                                 {
-                                    let top_t2 = top.uget_mut((tile2, fine_chan));
-                                    let bot_t2 = bot.uget_mut((tile2, fine_chan));
-
-                                    // // J (M^H)^H
-                                    // let z = j_t1.clone() * j_model;
-                                    // // D^H (J M^H)^H
-                                    // *top_t2 += j_data.h() * &z;
-                                    // // (J M^H) (J M^H)
-                                    // *bot_t2 += z.h() * z;
+                                    let top_t2 = top.uget_mut(tile2);
+                                    let bot_t2 = bot.uget_mut(tile2);
 
                                     // J (M^H)^H
                                     let z = Jones::axb(j_t1, &j_model);
@@ -755,8 +613,7 @@ fn calibration_loop(
                                     Jones::plus_ahxb(bot_t2, &z, &z);
                                 }
                             }
-                        },
-                    )
+                        })
                 })
         });
 }

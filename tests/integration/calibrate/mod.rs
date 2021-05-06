@@ -3,9 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
-Code to abstract beam calculations.
+Integration tests for calibration.
  */
 
- pub(crate) trait Beam: Sync + Send {
-    fn calc_jones
- }
+mod cli_args;

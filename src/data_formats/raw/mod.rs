@@ -11,6 +11,7 @@ pub(crate) mod error;
 pub use error::*;
 
 use std::collections::HashSet;
+use std::f64::consts::TAU;
 use std::path::{Path, PathBuf};
 
 use log::{debug, warn};
@@ -21,7 +22,7 @@ use crate::context::{FreqContext, ObsContext};
 use crate::flagging::aoflagger::AOFlags;
 use crate::glob::*;
 use crate::mwalib::{CorrelatorContext, Pol};
-use mwa_hyperdrive_core::{RADec, XYZ};
+use mwa_hyperdrive_core::{erfa_sys, mwalib, Jones, RADec, XYZ};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawData {
@@ -94,8 +95,8 @@ impl RawData {
         debug!("Creating mwalib context");
         let mwalib_context = CorrelatorContext::new(&meta_pb, &gpubox_pbs)?;
         let metafits_context = &mwalib_context.metafits_context;
-        let num_tiles = metafits_context.rf_inputs.len() / 2;
-        debug!("There are {} total tiles", num_tiles);
+        let total_num_tiles = metafits_context.rf_inputs.len() / 2;
+        debug!("There are {} total tiles", total_num_tiles);
 
         let mut tile_flags_set = HashSet::new();
         if !ignore_metafits_tile_flags {
@@ -110,12 +111,12 @@ impl RawData {
         } else {
             debug!("NOT using metafits tile flags");
         };
-        let num_unflagged_tiles = num_tiles - tile_flags_set.len();
+        let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
         for &f in &tile_flags_set {
-            if f > num_tiles - 1 {
+            if f > total_num_tiles - 1 {
                 return Err(NewRawError::InvalidTileFlag {
                     got: f,
-                    max: num_tiles - 1,
+                    max: total_num_tiles - 1,
                 });
             }
         }
@@ -133,7 +134,7 @@ impl RawData {
             false
         };
         let ideal_delays = if listed_delays.iter().all(|&d| d != 32) {
-            listed_delays.clone()
+            listed_delays
         } else {
             // Even if DELAYS is all 32, the ideal delays are listed in HDU 2 of the
             // metafits file. Some dipoles might be dead, though, so iterate over RF
@@ -170,12 +171,12 @@ impl RawData {
 
         let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
         tile_flags.sort_unstable();
-        let num_unflagged_tiles = num_tiles - tile_flags.len();
+        let num_unflagged_tiles = total_num_tiles - tile_flags.len();
         for &f in &tile_flags {
-            if f > num_tiles - 1 {
+            if f > total_num_tiles - 1 {
                 return Err(NewRawError::InvalidTileFlag {
                     got: f,
-                    max: num_tiles - 1,
+                    max: total_num_tiles - 1,
                 });
             }
         }
@@ -186,7 +187,7 @@ impl RawData {
             return Err(NewRawError::AllTilesFlagged);
         }
 
-        let fine_chan_flags: Vec<usize> = if dont_flag_fine_channels {
+        let fine_chan_flags_per_coarse_chan: Vec<usize> = if dont_flag_fine_channels {
             vec![]
         } else {
             // If the flags aren't specified, use the observation's fine-channel
@@ -226,6 +227,9 @@ impl RawData {
             None
         };
 
+        let time_res = metafits_context.corr_int_time_ms as f64 / 1e3;
+
+        // TODO: Which timesteps are good ones?
         let timesteps: Vec<hifitime::Epoch> = mwalib_context
             .timesteps
             .iter()
@@ -234,20 +238,28 @@ impl RawData {
                 // https://en.wikipedia.org/wiki/Global_Positioning_System#Timekeeping
                 // The difference between GPS and TAI time is always 19s, but
                 // hifitime wants the number of TAI seconds since 1900. GPS time
-                // starts at 1980 Jan 5.
-                let tai = gps
-                    + 19.0
-                    + hifitime::SECONDS_PER_YEAR * 80.0
-                    + hifitime::SECONDS_PER_DAY * 4.0;
+                // starts at 1980 Jan 5. Also adjust the time to be a centroid;
+                // add half of the time resolution.
+                let tai = gps + 19.0 + crate::constants::HIFITIME_GPS_FACTOR + time_res / 2.0;
                 hifitime::Epoch::from_tai_seconds(tai)
             })
             .collect::<Vec<_>>();
 
-        // let lst = lst_from_timestep(timestep, &context, time_res);
-        // let pointing = pointing_from_timestep(timestep, &context, time_res);
+        // Now that we have the timesteps, we can get the first LST. As our
+        // timesteps are listed as centroids, the first timestep does not need
+        // to be adjusted according to timewidth.
+        let first_timestep_mjd = timesteps[0].as_mjd_utc_days();
+        let lst0 = unsafe {
+            let gst = erfa_sys::eraGst06a(
+                erfa_sys::ERFA_DJM0,
+                first_timestep_mjd,
+                erfa_sys::ERFA_DJM0,
+                first_timestep_mjd,
+            );
+            (gst + mwalib::MWA_LONGITUDE_RADIANS) % TAU
+        };
 
         // Populate a frequency context struct.
-        let native_freq_res = metafits_context.corr_fine_chan_width_hz as f64;
         let mut fine_chan_freqs = Vec::with_capacity(
             metafits_context.num_corr_fine_chans_per_coarse * metafits_context.num_coarse_chans,
         );
@@ -273,12 +285,7 @@ impl RawData {
                 .iter()
                 .map(|cc| cc.chan_centre_hz as f64)
                 .collect(),
-            coarse_chan_width: mwalib_context
-                .coarse_chans
-                .iter()
-                .next()
-                .unwrap()
-                .chan_width_hz as f64,
+            coarse_chan_width: mwalib_context.coarse_chans[0].chan_width_hz as f64,
             total_bandwidth: mwalib_context
                 .coarse_chans
                 .iter()
@@ -323,16 +330,19 @@ impl RawData {
         }
 
         let obs_context = ObsContext {
-            obsid: metafits_context.obs_id,
+            obsid: Some(metafits_context.obs_id),
             timesteps,
             timestep_indices: 0..mwalib_context.timesteps.len(),
-            native_time_res: metafits_context.corr_int_time_ms as f64 / 1e3,
+            lst0,
+            time_res,
             pointing,
             delays: ideal_delays,
             tile_xyz,
             baseline_xyz,
             tile_flags,
-            fine_chan_flags,
+            fine_chan_flags_per_coarse_chan,
+            num_unflagged_tiles,
+            num_unflagged_baselines: num_unflagged_tiles * (num_unflagged_tiles - 1) / 2,
             dipole_gains,
         };
 
@@ -356,9 +366,11 @@ impl InputData for RawData {
 
     fn read(
         &self,
-        time_range: &Range<usize>,
-        freq_range: &Range<usize>,
-    ) -> Result<Vec<Visibilities>, ReadInputDataError> {
+        mut data_array: ArrayViewMut2<Jones<f32>>,
+        timestep: usize,
+        tile_to_baseline_map: &HashMap<(usize, usize), usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(Vec<UVW>, Array2<f32>), ReadInputDataError> {
         todo!();
     }
 }

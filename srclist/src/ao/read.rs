@@ -19,7 +19,7 @@ source lists.
 use super::*;
 use mwa_hyperdrive_core::sexagesimal::*;
 
-/// Parse a buffer containing an AO-style source list into a `SourceList`.
+/// Parse a buffer containing an AO-style source list into a [SourceList].
 pub fn parse_source_list<T: std::io::BufRead>(
     buf: &mut T,
 ) -> Result<SourceList, ReadSourceListError> {
@@ -661,7 +661,7 @@ source {
         let s = sl.get("GLEAM J113423-172750").unwrap();
         assert_eq!(s.components.len(), 1);
         let comp = &s.components[0];
-        assert_abs_diff_eq!(comp.radec.ra, 2.8897987797585847, epsilon = 1e-10);
+        assert_abs_diff_eq!(comp.radec.ra, 3.0298759753097615, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.30480564447181374, epsilon = 1e-10);
         assert!(match comp.flux_type {
             FluxDensityType::PowerLaw { .. } => true,
@@ -709,7 +709,7 @@ source {
         let s = sl.get("GLEAM J114901-120412").unwrap();
         assert_eq!(s.components.len(), 1);
         let comp = &s.components[0];
-        assert_abs_diff_eq!(comp.radec.ra, 2.8940519367365574, epsilon = 1e-10);
+        assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2106621177436647, epsilon = 1e-10);
         assert!(match comp.flux_type {
             FluxDensityType::PowerLaw { .. } => true,
@@ -766,7 +766,7 @@ source {
         let s = sl.get("3C444").unwrap();
         assert_eq!(s.components.len(), 1);
         let comp = &s.components[0];
-        assert_abs_diff_eq!(comp.radec.ra, 6.008129174084178, epsilon = 1e-10);
+        assert_abs_diff_eq!(comp.radec.ra, 5.82253473993655, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
         assert!(match comp.flux_type {
             FluxDensityType::List { .. } => true,
@@ -830,7 +830,7 @@ source {
         let s = sl.get("3C444").unwrap();
         assert_eq!(s.components.len(), 2);
         let comp = &s.components[0];
-        assert_abs_diff_eq!(comp.radec.ra, 6.008129174084178, epsilon = 1e-10);
+        assert_abs_diff_eq!(comp.radec.ra, 5.82253473993655, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
         assert!(match comp.flux_type {
             FluxDensityType::List { .. } => true,
@@ -855,7 +855,7 @@ source {
         });
 
         let comp = &s.components[1];
-        assert_abs_diff_eq!(comp.radec.ra, 2.8940519367365574, epsilon = 1e-10);
+        assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2106621177436647, epsilon = 1e-10);
         assert!(match comp.flux_type {
             FluxDensityType::PowerLaw { .. } => true,
@@ -925,7 +925,7 @@ source {
         let s = sl.get("3C444").unwrap();
         assert_eq!(s.components.len(), 2);
         let comp = &s.components[0];
-        assert_abs_diff_eq!(comp.radec.ra, 6.008129174084178, epsilon = 1e-10);
+        assert_abs_diff_eq!(comp.radec.ra, 5.82253473993655, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
         assert!(match comp.flux_type {
             FluxDensityType::List { .. } => true,
@@ -950,7 +950,7 @@ source {
         });
 
         let comp = &s.components[1];
-        assert_abs_diff_eq!(comp.radec.ra, 2.8940519367365574, epsilon = 1e-10);
+        assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2106621177436647, epsilon = 1e-10);
         assert!(match comp.flux_type {
             FluxDensityType::List { .. } => true,

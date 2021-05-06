@@ -11,6 +11,7 @@ mod di;
 mod error;
 pub(crate) mod params;
 mod predict;
+mod solutions;
 mod veto;
 
 pub use error::CalibrateError;

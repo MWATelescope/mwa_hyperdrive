@@ -10,7 +10,13 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ReadInputDataError {
-    // TODO: Tidy.
+    #[error("Output {array_type} array did not have expected {expected_len} elements on axis {axis_num}!")]
+    BadArraySize {
+        array_type: &'static str,
+        expected_len: usize,
+        axis_num: usize,
+    },
+
     #[error("{0}")]
     MS(#[from] super::ms::error::MSError),
 }

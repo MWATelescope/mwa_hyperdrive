@@ -14,8 +14,8 @@ cargo test -- --ignored
 
 #[cfg(test)]
 mod tests {
-    use mwa_hyperdrive_tests::full_obsids::*;
-    use mwa_hyperdrive_tests::*;
+    use crate::tests::full_obsids::*;
+    use crate::tests::*;
 
     fn args_1065880128() -> (CalibrateUserArgs, TempDir) {
         let mut args = get_1065880128();

@@ -17,7 +17,7 @@ use crate::calibrate::args::CalibrateUserArgs;
 /// there are only 3 coarse bands and 3 timesteps.
 pub(crate) fn get_1090008640() -> CalibrateUserArgs {
     // Ensure that the required files are there.
-    let metafits = PathBuf::from("tests/1090008640/1090008640.metafits");
+    let metafits = PathBuf::from("test_files/1090008640/1090008640.metafits");
     assert!(
         metafits.exists(),
         "Could not find {}, which is required for this test",
@@ -31,7 +31,7 @@ pub(crate) fn get_1090008640() -> CalibrateUserArgs {
         "1090008640_20140721201027_gpubox02_00.fits",
         "1090008640_20140721201027_gpubox03_00.fits",
     ] {
-        let pathbuf = PathBuf::from(format!("tests/1090008640/{}", f));
+        let pathbuf = PathBuf::from(format!("test_files/1090008640/{}", f));
         assert!(
             pathbuf.exists(),
             "Could not find {}, which is required for this test",
@@ -41,7 +41,7 @@ pub(crate) fn get_1090008640() -> CalibrateUserArgs {
     }
 
     let srclist = PathBuf::from(
-        "tests/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml",
+        "test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml",
     );
     assert!(
         srclist.exists(),
@@ -54,6 +54,7 @@ pub(crate) fn get_1090008640() -> CalibrateUserArgs {
     CalibrateUserArgs {
         data: Some(data),
         source_list: Some(path_to_string(&srclist)),
+        no_beam: Some(true),
         ..Default::default()
     }
 }
@@ -62,12 +63,9 @@ pub(crate) fn get_1090008640() -> CalibrateUserArgs {
 /// observational data is inside the hyperdrive git repo, but has been reduced;
 /// there is only 1 coarse band and 3 timesteps.
 pub(crate) fn get_1090008640_smallest() -> CalibrateUserArgs {
-    // We can just use the other function and remove all but the first gpubox
-    // file.
+    // We can just use the other function and remove all but the metafits and
+    // the first gpubox file.
     let mut args = get_1090008640();
-    // let gpuboxes: Option<Vec<String>> = args.gpuboxes;
-    // let first = gpuboxes.unwrap()[0].clone();
-    // args.gpuboxes = Some(vec![first]);
     args.data = Some(args.data.unwrap().into_iter().take(2).collect());
     args
 }

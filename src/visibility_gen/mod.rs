@@ -224,6 +224,7 @@ pub fn vis_gen(
             &mut buf,
             &imag,
         )?;
+        buf.flush()?;
 
         // Write a text file.
         if text_file {
@@ -245,6 +246,7 @@ pub fn vis_gen(
                     )?;
                 }
             }
+            buf.flush()?;
         }
     }
 

@@ -23,6 +23,12 @@ pub enum ReadSourceListError {
         source_name: String,
     },
 
+    #[error("Could not interpret the contents of the source list. Specify which style source list it is, and a more specific error can be shown.")]
+    FailedToReadAsAnyType,
+
+    #[error("Could not deserialise the contents as yaml or json.\n\nyaml error: {yaml_err}\n\njson error: {json_err}")]
+    FailedToDeserialise { yaml_err: String, json_err: String },
+
     #[error("{0}")]
     Common(#[from] ReadSourceListCommonError),
 
@@ -248,6 +254,12 @@ pub enum WriteSourceListError {
         source_list_type: &'static str,
         fd_type: &'static str,
     },
+
+    #[error("Not enough information was provided to write the output source list. Please specify an output type.")]
+    NotEnoughInfo,
+
+    #[error("Cannot write a hyperdrive-style source list to a file with an extension '{0}'.")]
+    InvalidHyperdriveFormat(String),
 
     #[error("{0}")]
     Estimate(#[from] mwa_hyperdrive_core::EstimateError),

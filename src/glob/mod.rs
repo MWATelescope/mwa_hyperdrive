@@ -12,20 +12,7 @@ use glob::glob;
 use thiserror::Error;
 
 /// Given a glob pattern, get all of the matches from the filesystem.
-///
-/// # Examples
-///
-/// ```
-/// # use std::path::PathBuf;
-/// # use mwa_hyperdrive::glob::*;
-/// # fn main() -> Result<(), GlobError> {
-/// let glob = "Cargo*";
-/// let matches: Vec<PathBuf> = get_all_matches_from_glob(&glob)?;
-/// assert!(&matches.contains(&PathBuf::from("Cargo.toml")));
-/// # Ok(())
-/// # }
-/// ```
-pub fn get_all_matches_from_glob(g: &str) -> Result<Vec<PathBuf>, GlobError> {
+pub(crate) fn get_all_matches_from_glob(g: &str) -> Result<Vec<PathBuf>, GlobError> {
     let mut entries = vec![];
     for entry in glob(g)? {
         match entry {
@@ -39,26 +26,7 @@ pub fn get_all_matches_from_glob(g: &str) -> Result<Vec<PathBuf>, GlobError> {
 /// The same as `get_all_matches_from_glob`, but only a single result is
 /// expected to be returned from the glob match. If there are no results, or
 /// more than one, an error is returned.
-///
-/// # Examples
-///
-/// ```
-/// # use std::path::PathBuf;
-/// # use mwa_hyperdrive::glob::*;
-/// # fn main() -> Result<(), GlobError> {
-/// let glob = "Cargo.t*l";
-/// assert_eq!(get_single_match_from_glob(&glob)?, PathBuf::from("Cargo.toml"));
-///
-/// let glob = "Cargo.t??l";
-/// assert_eq!(get_single_match_from_glob(&glob)?, PathBuf::from("Cargo.toml"));
-///
-/// let glob = "../Cargo*";
-/// // Matches "Cargo.lock" and "Cargo.toml".
-/// assert!(get_single_match_from_glob(&glob).is_err());
-/// # Ok(())
-/// # }
-/// ```
-pub fn get_single_match_from_glob(g: &str) -> Result<PathBuf, GlobError> {
+pub(crate) fn get_single_match_from_glob(g: &str) -> Result<PathBuf, GlobError> {
     let entries = get_all_matches_from_glob(g)?;
     match entries.as_slice() {
         [] => Err(GlobError::NoMatches {
@@ -109,5 +77,24 @@ mod tests {
         assert!(result.is_ok());
         let entry = result.unwrap();
         assert_eq!(entry, PathBuf::from("core/Cargo.toml"));
+    }
+
+    #[test]
+    fn test_single_glob() {
+        let glob = "Cargo.t*l";
+        assert_eq!(
+            get_single_match_from_glob(&glob).unwrap(),
+            PathBuf::from("Cargo.toml")
+        );
+
+        let glob = "Cargo.t??l";
+        assert_eq!(
+            get_single_match_from_glob(&glob).unwrap(),
+            PathBuf::from("Cargo.toml")
+        );
+
+        let glob = "../Cargo*";
+        // Matches "Cargo.lock" and "Cargo.toml".
+        assert!(get_single_match_from_glob(&glob).is_err());
     }
 }

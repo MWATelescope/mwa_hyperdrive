@@ -31,7 +31,6 @@ pub(crate) struct ObsContext {
 
     /// The unique timesteps in the observation. These are stored as
     /// `hifitime::Epoch` structs to help keep the code flexible.
-    // TODO: Make these centroids.
     pub(crate) timesteps: Vec<hifitime::Epoch>,
 
     /// The timestep indices of the input data that aren't totally flagged
@@ -69,7 +68,7 @@ pub(crate) struct ObsContext {
 
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
-    pub(crate) fine_chan_flags_per_coarse_band: Vec<usize>,
+    pub(crate) fine_chan_flags_per_coarse_chan: Vec<usize>,
 
     /// The number of unflagged tiles in the input data.
     pub(crate) num_unflagged_tiles: usize,
@@ -127,4 +126,68 @@ pub(crate) struct FreqContext {
     /// necessarily the fine-channel resolution of the original observation's
     /// data.
     pub(crate) native_fine_chan_width: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::constants::HIFITIME_GPS_FACTOR;
+    use crate::tests::{reduced_obsids::*, *};
+
+    // astropy doesn't exactly agree with the numbers below, I think because the
+    // LST listed in MWA metafits files doesn't agree with what astropy thinks
+    // it should be. But, it's all very close.
+    #[test]
+    fn test_lst_from_timestep_native() {
+        // Obsid 1090008640 actually starts at GPS time 1090008641.
+        let args = get_1090008640();
+        let params = args.into_params().unwrap();
+        let obs_context = params.input_data.get_obs_context();
+        // gpstime 1090008642
+        assert_abs_diff_eq!(
+            obs_context.lst_from_timestep(0),
+            6.262123573853594,
+            epsilon = 1e-10
+        );
+
+        // gpstime 1090008644
+        assert_abs_diff_eq!(
+            obs_context.lst_from_timestep(1),
+            6.262269416170651,
+            epsilon = 1e-10
+        );
+    }
+
+    // #[test]
+    // // Unlike the test above, decrease the time resolution by averaging.
+    // fn test_lst_from_timestep_averaged() {
+    //     let args = get_1090008640();
+    // args.time_res = ...
+    // let params = args.into_params().unwrap();
+    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
+    //     {
+    //         Ok(c) => c,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     // The native time res. is 2.0s, let's make our target 4.0s here.
+    //     let time_res = 4.0;
+    //     let new_lst = lst_from_timestep(0, &context, time_res);
+    //     // gpstime 1090008643
+    //     assert_abs_diff_eq!(new_lst, 6.2621966114770915, epsilon = 1e-10);
+
+    //     let new_lst = lst_from_timestep(1, &context, time_res);
+    //     // gpstime 1090008647
+    //     assert_abs_diff_eq!(new_lst, 6.262488296111205, epsilon = 1e-10);
+    // }
+
+    #[test]
+    fn hifitime_behaves_as_expected() {
+        let gps = 1065880128.0;
+        // https://en.wikipedia.org/wiki/Global_Positioning_System#Timekeeping
+        // The difference between GPS and TAI time is always 19s, but hifitime
+        // wants the number of TAI seconds since 1900. GPS time starts at 1980
+        // Jan 5.
+        let tai = gps + 19.0 + HIFITIME_GPS_FACTOR;
+        let epoch = hifitime::Epoch::from_tai_seconds(tai);
+        assert_abs_diff_eq!(epoch.as_gpst_seconds() - HIFITIME_GPS_FACTOR, 1065880128.0);
+    }
 }

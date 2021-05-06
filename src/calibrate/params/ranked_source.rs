@@ -13,6 +13,7 @@ beam-attenuated flux density, as well as other things.
 use mwa_hyperdrive_core::*;
 
 /// A source's name as well as its apparent flux density.
+#[derive(Debug)]
 pub(crate) struct RankedSource {
     /// The name of the source. This can be used as a key for a `SourceList`.
     pub(crate) name: String,
@@ -27,7 +28,7 @@ pub(crate) struct RankedSource {
 
     /// The flux-density-weighted average position of all of the source's
     /// components. Only Stokes I flux densities are used in this calculation.
-    pub(crate) weighted_pos: RADec,
+    pub(crate) weighted_pos: Option<RADec>,
 }
 
 impl RankedSource {
@@ -117,16 +118,9 @@ mod tests {
             Ok(rs) => rs,
             Err(e) => panic!("{}", e),
         };
-        assert_abs_diff_eq!(
-            ranked_source.weighted_pos.ra,
-            10.5_f64.to_radians(),
-            epsilon = 1e-10
-        );
-        assert_abs_diff_eq!(
-            ranked_source.weighted_pos.dec,
-            9.5_f64.to_radians(),
-            epsilon = 1e-10
-        );
+        let weighted_pos = ranked_source.weighted_pos.unwrap();
+        assert_abs_diff_eq!(weighted_pos.ra, 10.5_f64.to_radians(), epsilon = 1e-10);
+        assert_abs_diff_eq!(weighted_pos.dec, 9.5_f64.to_radians(), epsilon = 1e-10);
 
         // Complex case: both components have different Stokes I FDs. Modify the
         // FD of the first component.
@@ -139,15 +133,8 @@ mod tests {
                 Ok(rs) => rs,
                 Err(e) => panic!("{}", e),
             };
-        assert_abs_diff_eq!(
-            ranked_source.weighted_pos.ra,
-            10.25_f64.to_radians(),
-            epsilon = 1e-10
-        );
-        assert_abs_diff_eq!(
-            ranked_source.weighted_pos.dec,
-            9.25_f64.to_radians(),
-            epsilon = 1e-10
-        );
+        let weighted_pos = ranked_source.weighted_pos.unwrap();
+        assert_abs_diff_eq!(weighted_pos.ra, 10.25_f64.to_radians(), epsilon = 1e-10);
+        assert_abs_diff_eq!(weighted_pos.dec, 9.25_f64.to_radians(), epsilon = 1e-10);
     }
 }

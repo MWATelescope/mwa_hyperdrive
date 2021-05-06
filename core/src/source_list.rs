@@ -119,7 +119,6 @@ impl IntoIterator for SourceList {
 mod tests {
     use super::*;
     use approx::*;
-    use ndarray::arr1;
     use std::f64::consts::*;
 
     #[test]
@@ -178,7 +177,7 @@ mod tests {
         sl.insert("source_3".to_string(), s);
 
         let lst = 3.0 * FRAC_PI_4;
-        let azel = sl.get_azel_mwa_parallel(lst);
+        let azels = sl.get_azel_mwa_parallel(lst);
         let az_expected = [
             0.5284641294204054,
             0.4140207507698987,
@@ -199,15 +198,11 @@ mod tests {
             2.254528351516936,
             2.0543439118454256,
         ];
-        assert_abs_diff_eq!(
-            arr1(&azel.iter().map(|ae| ae.az).collect::<Vec<_>>()),
-            arr1(&az_expected),
-            epsilon = 1e-10
-        );
-        assert_abs_diff_eq!(
-            arr1(&azel.iter().map(|ae| ae.za()).collect::<Vec<_>>()),
-            arr1(&za_expected),
-            epsilon = 1e-10
-        );
+        for ((&azel, &expected_az), &expected_za) in
+            azels.iter().zip(az_expected.iter()).zip(za_expected.iter())
+        {
+            assert_abs_diff_eq!(azel.az, expected_az, epsilon = 1e-10);
+            assert_abs_diff_eq!(azel.za(), expected_za, epsilon = 1e-10);
+        }
     }
 }

@@ -172,43 +172,51 @@ struct AOFlagsTemp {
 }
 
 #[derive(Debug)]
-pub struct AOFlags {
-    /// The GPS time of the first scan [milliseconds].
-    pub start_time_milli: u64,
+pub(crate) struct AOFlags {
+    /// The GPS time of the first scan \[milliseconds\].
+    pub(crate) start_time_milli: u64,
+
     /// The number of time steps in the data (duration of observation /
     /// integration time).
-    pub num_time_steps: usize,
+    pub(crate) num_time_steps: usize,
+
     /// The total number of fine channels over all coarse bands.
-    pub num_channels: usize,
+    pub(crate) num_channels: usize,
+
     /// The number of baselines (auto- and cross-correlation).
-    pub num_baselines: usize,
+    pub(crate) num_baselines: usize,
+
     /// The visibility flags. These are separated by gpubox number. Flags are
     /// encoded as bits, i.e. 0 for unflagged, 1 for flagged.
     ///
     /// Example: Given a value of 192 (0b11000000), the first and second
     /// visibilities are flagged, and the following six visibilities are
     /// unflagged.
-    pub flags: BTreeMap<u8, Vec<u8>>,
+    pub(crate) flags: BTreeMap<u8, Vec<u8>>,
+
     /// The fractional amount that each channel is flagged.
     ///
     /// Each key is a gpubox number. Each value (which is a vector) has
     /// `num_channels / flags.len()` elements (i.e. the number of fine channels
     /// per coarse band), and each of those elements is between 0 (0% flagged)
     /// and 1 (100% flagged).
-    pub occupancy: BTreeMap<u8, Vec<f32>>,
+    pub(crate) occupancy: BTreeMap<u8, Vec<f32>>,
+
     /// The gpubox numbers that these flags apply to (usually between 1 and 24).
     /// The values here should be used as keys for `flags`.
-    pub gpubox_nums: Vec<u8>,
+    pub(crate) gpubox_nums: Vec<u8>,
+
     /// The version of cotter used to write the flags.
-    pub cotter_version: String,
+    pub(crate) cotter_version: String,
+
     /// The date on which this cotter version was created.
-    pub cotter_version_date: String,
+    pub(crate) cotter_version_date: String,
 }
 
 impl AOFlags {
     /// Create a `AOFlags` struct from a cotter mwaf file. You should
     /// probably also run the `trim` function on this struct.
-    pub fn new_from_mwaf<T: AsRef<Path>>(file: &T) -> Result<Self, MwafError> {
+    pub(crate) fn new_from_mwaf<T: AsRef<Path>>(file: &T) -> Result<Self, MwafError> {
         let m = Mwaf::unpack(file)?;
 
         // Check that things are consistent.
@@ -251,7 +259,7 @@ impl AOFlags {
 
     /// From many mwaf files, return a single `AOFlags` struct with all
     /// flags. You should probably also run the `trim` function on this struct.
-    pub fn new_from_mwafs<T: AsRef<Path>>(files: &[T]) -> Result<Self, MwafMergeError> {
+    pub(crate) fn new_from_mwafs<T: AsRef<Path>>(files: &[T]) -> Result<Self, MwafMergeError> {
         if files.is_empty() {
             return Err(MwafMergeError::NoFilesGiven);
         }
@@ -384,7 +392,7 @@ impl AOFlags {
     /// being collected. This routine discards flags from times that mwalib does
     /// not use (i.e. before OBSID+QUACKTIM and the last common time to all
     /// gpubox files).
-    pub fn trim(&mut self, context: &MetafitsContext) {
+    pub(crate) fn trim(&mut self, context: &MetafitsContext) {
         // Don't use "as i64", just in case something goes wrong.
         let to_i64 = |n: u64| -> i64 {
             n.try_into()
@@ -495,23 +503,16 @@ fn get_occupancy(flags: &[u8], num_channels: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use approx::assert_abs_diff_eq;
-    use tempfile::NamedTempFile;
-
-    fn deflate_gz<T: AsRef<Path>>(file: &T) -> NamedTempFile {
-        let mut temp = NamedTempFile::new().unwrap();
-        let mut gz = flate2::read::GzDecoder::new(std::fs::File::open(file).unwrap());
-        std::io::copy(&mut gz, &mut temp).unwrap();
-        temp
-    }
+    use crate::tests::*;
 
     #[test]
     fn test_1065880128_01_mwaf() {
         // The mwaf file is gzipped to save space in git. gunzip it to a
         // temporary spot.
-        let mwaf = deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz");
+        let mwaf =
+            crate::tests::deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_01.mwaf.gz");
         let result = AOFlags::new_from_mwaf(&mwaf);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();
 
         assert_eq!(m.num_time_steps, 224);
@@ -572,9 +573,10 @@ mod tests {
 
     #[test]
     fn test_1065880128_02_mwaf() {
-        let mwaf = deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz");
+        let mwaf =
+            crate::tests::deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_02.mwaf.gz");
         let result = AOFlags::new_from_mwaf(&mwaf);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();
 
         assert_eq!(m.num_time_steps, 224);
@@ -634,10 +636,10 @@ mod tests {
     #[test]
     fn test_merging_1065880128_mwafs() {
         let result = AOFlags::new_from_mwafs(&[
-            deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz"),
-            deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz"),
+            deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_01.mwaf.gz"),
+            deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_02.mwaf.gz"),
         ]);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();
 
         assert_eq!(m.num_time_steps, 224);
@@ -663,8 +665,8 @@ mod tests {
     #[test]
     fn test_trimming_1065880128_mwafs() {
         let mut m = AOFlags::new_from_mwafs(&[
-            deflate_gz(&"tests/1065880128/1065880128_01.mwaf.gz"),
-            deflate_gz(&"tests/1065880128/1065880128_02.mwaf.gz"),
+            deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_01.mwaf.gz"),
+            deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_02.mwaf.gz"),
         ])
         .unwrap();
         assert_eq!(m.num_time_steps, 224);
@@ -714,7 +716,7 @@ mod tests {
             assert_abs_diff_eq!(res, exp);
         }
 
-        let mut c = MetafitsContext::new(&"tests/1065880128/1065880128.metafits").unwrap();
+        let mut c = MetafitsContext::new(&"test_files/1065880128/1065880128.metafits").unwrap();
         // 1065880128 actually has 109s of data as opposed to the scheduled
         // 112s, but this is impossible to determine without its gpubox files.
         // Because I don't want to include the gpubox files in hyperdrive for

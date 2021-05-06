@@ -7,7 +7,7 @@ Useful constants.
 
 All constants *must* be double precision. `hyperdrive` should do as many
 calculations as possible in double precision before converting to a lower
-precision, if it is ever required.
+precision.
  */
 
 use std::f64::consts::{PI, TAU};
@@ -16,15 +16,13 @@ use std::f64::consts::{PI, TAU};
 pub const DEFAULT_SPEC_INDEX: f64 = -0.8;
 /// The smallest allowable spectral index.
 pub const SPEC_INDEX_CAP: f64 = -2.0;
-/// The sign of the lm->uv Fourier transform.
-pub const R2C_SIGN: f64 = -1.0;
 
 // Things that should never change.
 
 /// Speed of light \[metres/second\]
 pub const VEL_C: f64 = erfa_sys::ERFA_CMPS;
 
-/// Seconds per day
+/// Seconds per day (86400)
 pub const DAYSEC: f64 = erfa_sys::ERFA_DAYSEC;
 /// Seconds of time to radians (7.272205216643039903848712e-5).
 pub const DS2R: f64 = erfa_sys::ERFA_DS2R;

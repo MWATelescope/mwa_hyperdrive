@@ -18,6 +18,7 @@ use super::lmn::LMN;
 /// A struct containing a Right Ascension and Declination. All units are in
 /// radians.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct RADec {
     /// Right ascension \[radians\]
     pub ra: f64,
@@ -55,11 +56,11 @@ impl RADec {
     /// From a collection of `RADec` coordinates and weights, find the average
     /// `RADec` position. The lengths of both collection must be the same to get
     /// sensible results. Not providing any `RADec` coordinates will make this
-    /// function panic.
+    /// function return `None`.
     ///
     /// This function accounts for Right Ascension coordinates that range over
     /// 360 degrees.
-    pub fn weighted_average(radec: &[Self], weights: &[f64]) -> Self {
+    pub fn weighted_average(radec: &[Self], weights: &[f64]) -> Option<Self> {
         // Accounting for the 360 degree branch cut.
         let any_less_than_90 = radec.iter().any(|c| (0.0..FRAC_PI_4).contains(&c.ra));
         let any_between_90_270 = radec
@@ -68,9 +69,7 @@ impl RADec {
         let any_greater_than_270 = radec.iter().any(|c| (3.0 * FRAC_PI_4..TAU).contains(&c.ra));
         let new_cutoff = match (any_less_than_90, any_between_90_270, any_greater_than_270) {
             // User is misusing the code!
-            (false, false, false) => {
-                panic!("No RADec coordinates were provided to weighted_average")
-            }
+            (false, false, false) => return None,
 
             // Easy ones.
             (true, false, false) => 0.0,
@@ -104,7 +103,7 @@ impl RADec {
             weighted_pos.ra += TAU;
         }
 
-        weighted_pos
+        Some(weighted_pos)
     }
 
     /// Get the (l,m,n) direction cosines from these coordinates. All arguments
@@ -168,13 +167,17 @@ mod tests {
         let w1 = 1.0;
         let c2 = RADec::new_degrees(11.0, 10.0);
         let w2 = 1.0;
-        let weighted_pos = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        let result = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        assert!(result.is_some());
+        let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 10.5_f64.to_radians(), epsilon = 1e-10);
         assert_abs_diff_eq!(weighted_pos.dec, 9.5_f64.to_radians(), epsilon = 1e-10);
 
         // Complex case: both components have different weights.
         let w1 = 3.0;
-        let weighted_pos = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        let result = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        assert!(result.is_some());
+        let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 10.25_f64.to_radians(), epsilon = 1e-10);
         assert_abs_diff_eq!(weighted_pos.dec, 9.25_f64.to_radians(), epsilon = 1e-10);
     }
@@ -186,7 +189,9 @@ mod tests {
         let w1 = 1.0;
         let c2 = RADec::new_degrees(359.0, 10.0);
         let w2 = 1.0;
-        let weighted_pos = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        let result = RADec::weighted_average(&[c1, c2], &[w1, w2]);
+        assert!(result.is_some());
+        let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 4.5_f64.to_radians(), epsilon = 1e-10);
         assert_abs_diff_eq!(weighted_pos.dec, 9.5_f64.to_radians(), epsilon = 1e-10);
     }
@@ -195,14 +200,15 @@ mod tests {
     fn test_weighted_pos_single() {
         let c = RADec::new(0.5, 0.75);
         let w = 1.0;
-        let weighted_pos = RADec::weighted_average(&[c], &[w]);
+        let result = RADec::weighted_average(&[c], &[w]);
+        assert!(result.is_some());
+        let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 0.5, epsilon = 1e-10);
         assert_abs_diff_eq!(weighted_pos.dec, 0.75, epsilon = 1e-10);
     }
 
     #[test]
-    #[should_panic]
     fn test_weighted_pos_empty() {
-        let _weighted_pos = RADec::weighted_average(&[], &[1.0]);
+        assert!(RADec::weighted_average(&[], &[1.0]).is_none());
     }
 }

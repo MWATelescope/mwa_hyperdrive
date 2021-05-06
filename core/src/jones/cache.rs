@@ -16,6 +16,7 @@ use std::hash::{Hash, Hasher};
 
 use dashmap::DashMap;
 use mwa_hyperbeam::fee::*;
+use num::Complex;
 
 use super::Jones;
 
@@ -98,8 +99,14 @@ impl JonesCache {
         // If we hit this part of the code, the relevant Jones matrix was not in
         // the cache.
         let jones = beam.calc_jones(az_rad, za_rad, beam_freq, delays, amps, norm_to_zenith)?;
-        self.0.insert(hash, Jones(jones));
-        Ok(Jones(jones))
+        let jones = Jones::from([
+            Complex::new(jones[0].re, jones[0].im),
+            Complex::new(jones[1].re, jones[1].im),
+            Complex::new(jones[2].re, jones[2].im),
+            Complex::new(jones[3].re, jones[3].im),
+        ]);
+        self.0.insert(hash.clone(), jones);
+        Ok(self.0.get(&hash).unwrap().clone())
     }
 
     /// Get the size of the cache.

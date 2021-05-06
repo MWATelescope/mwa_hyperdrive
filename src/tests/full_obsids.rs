@@ -21,8 +21,8 @@ use super::*;
 
 /// Get the calibration arguments associated with the 1065880128 observation
 /// (including gpubox files and mwaf files).
-pub fn get_1065880128() -> CalibrateUserArgs {
-    let metafits = PathBuf::from("tests/1065880128/1065880128.metafits");
+pub(crate) fn get_1065880128() -> CalibrateUserArgs {
+    let metafits = PathBuf::from("test_files/1065880128/1065880128.metafits");
     assert!(
         metafits.exists(),
         "Could not find {}, which is required for this test",
@@ -106,7 +106,7 @@ pub fn get_1065880128() -> CalibrateUserArgs {
         "1065880128_23.mwaf",
         "1065880128_24.mwaf",
     ] {
-        let pathbuf = PathBuf::from(format!("tests/1065880128/{}", f));
+        let pathbuf = PathBuf::from(format!("test_files/1065880128/{}", f));
         assert!(
             pathbuf.exists(),
             "Could not find {}, which is required for this test",
@@ -120,7 +120,7 @@ pub fn get_1065880128() -> CalibrateUserArgs {
     }
 
     let srclist = PathBuf::from(
-        "tests/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
+        "test_files/1065880128/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1065880128_100.yaml",
     );
     assert!(
         srclist.exists(),

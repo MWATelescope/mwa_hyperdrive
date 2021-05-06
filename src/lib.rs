@@ -10,6 +10,7 @@ pub mod calibrate;
 pub mod simulate_vis;
 
 pub(crate) mod constants;
+pub(crate) mod beam;
 pub(crate) mod context;
 pub(crate) mod data_formats;
 pub(crate) mod error;

@@ -12,6 +12,7 @@ Handle interferometric direction-cosine coordinates.
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 /// Relationships, Polarimetry, and the Measurement Equation.
 #[derive(Debug)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct LMN {
     /// l-coordinate \[radians\]
     pub l: f64,

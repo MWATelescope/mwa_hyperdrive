@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 /*!
-Code for handling sexagesimal conversion.
+Code for handling conversion to and from sexagesimal.
  */
 
 use thiserror::Error;
@@ -99,7 +99,7 @@ pub fn sexagesimal_dms_string_to_degrees(dms: &str) -> Result<f64, SexagesimalEr
 /// # fn main() -> Result<(), SexagesimalError> {
 /// let s = "-11h49m01.062s";
 /// let f = sexagesimal_hms_string_to_degrees(s)?;
-/// assert_abs_diff_eq!(f, -165.8169619, epsilon = 1e-6);
+/// assert_abs_diff_eq!(f, -177.254425, epsilon = 1e-6);
 /// # Ok(())
 /// # }
 /// ```
@@ -146,7 +146,8 @@ pub fn sexagesimal_hms_to_float(h: f64, m: f64, s: f64) -> f64 {
 /// assert_eq!(dms, "-165d01m01.0628s");
 /// ```
 pub fn degrees_to_sexagesimal_dms(f: f64) -> String {
-    let (negative, f_abs) = if f < 0.0 { (true, f.abs()) } else { (false, f) };
+    let negative = f < 0.0;
+    let f_abs = f.abs();
     let degrees = f_abs.floor();
     let minutes = (f_abs - degrees) * 60.0;
     let seconds = (minutes - minutes.floor()) * 60.0;
@@ -169,21 +170,15 @@ pub fn degrees_to_sexagesimal_dms(f: f64) -> String {
 ///
 /// ```
 /// # use mwa_hyperdrive_core::sexagesimal::*;
-/// let hms = degrees_to_sexagesimal_hms(-165.8169619);
-/// assert_eq!(hms, "-11h49m01.0628s");
+/// let hms = degrees_to_sexagesimal_hms(-177.254425);
+/// assert_eq!(hms, "-11h49m01.0619s");
 /// ```
 pub fn degrees_to_sexagesimal_hms(f: f64) -> String {
-    let (negative, f_abs) = if f < 0.0 {
-        (true, f.abs() / 15.0)
-    } else {
-        (false, f / 15.0)
-    };
-    // let hours = (f_abs / 15.0).floor();
-    // let minutes = (f_abs - f_abs.floor()) * 60.0;
-    // let seconds = (minutes - minutes.floor()) * 60.0;
-    let hours = f_abs.floor();
-    let minutes = (f_abs - f_abs.floor()) * 60.0;
-    let seconds = (minutes - minutes.floor()) * 60.0;
+    let negative = f < 0.0;
+    let f_abs = f.abs();
+    let hours = (f_abs / 15.0).floor();
+    let minutes = ((f_abs / 15.0 - hours) * 60.0).floor();
+    let seconds = (((f_abs / 15.0 - hours) * 60.0) - minutes) * 60.0;
 
     format!(
         "{sign}{hrs}h{min:02}m{sec:02}.{frac:04}s",
@@ -236,5 +231,12 @@ mod tests {
         let result = sexagesimal_colon_str_to_degrees("12:30:45");
         assert!(result.is_ok());
         assert_abs_diff_eq!(result.unwrap(), 12.5125, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_sex_hms_1() {
+        let result = sexagesimal_hms_string_to_degrees("11h34m23.7854s");
+        assert!(result.is_ok(), "{}", result.unwrap_err());
+        assert_abs_diff_eq!(result.unwrap(), 173.59910583333334);
     }
 }

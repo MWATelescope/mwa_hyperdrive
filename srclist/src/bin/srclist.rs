@@ -10,28 +10,24 @@ files, as well as convert between supported source list formats.
  */
 
 use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
-use log::{debug, warn};
+use log::trace;
 use structopt::{clap::AppSettings, StructOpt};
 use thiserror::Error;
 
-use mwa_hyperdrive_core::SourceList;
 use mwa_hyperdrive_srclist::{hyperdrive, read::*, rts, woden, *};
 
 // Put various help texts in here, so that all available source list types are
 // listed at compile time.
 lazy_static::lazy_static! {
-    static ref VERIFY_INPUT_TYPE_HELP: String =
-        format!("The type of source lists being verified. This is only really useful if they are .txt files, because it's ambiguous if these are RTS or WODEN source lists. Currently supported types: {}",
-                *SOURCE_LIST_TYPES_COMMA_SEPARATED);
-
     static ref CONVERT_INPUT_TYPE_HELP: String =
-        format!("If the input source list is a .txt file, this flag specifies the type of source list read. Currently supported types: {}",
+        format!("Specifies the type of the input source list. Currently supported types: {}",
                 *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 
     static ref CONVERT_OUTPUT_TYPE_HELP: String =
-        format!("If the output source list is a .txt file, then this flag specifies the type of source list written. Currently supported types: {}",
+        format!("Specifies the type of the output source list. May be required depending on the output filename. Currently supported types: {}",
                 *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 }
 
@@ -43,9 +39,6 @@ enum Args {
         /// Path to the source list(s) to be verified.
         #[structopt(name = "SOURCE_LISTS", parse(from_os_str))]
         source_lists: Vec<PathBuf>,
-
-        #[structopt(short = "i", long, parse(from_str), help = VERIFY_INPUT_TYPE_HELP.as_str())]
-        input_type: Option<String>,
 
         /// The verbosity of the program. The default is to print high-level
         /// information.
@@ -100,40 +93,13 @@ fn setup_logging(level: u8) -> Result<(), fern::InitError> {
     Ok(())
 }
 
-fn source_list_type_compatible_with_file_type(
-    sl_type: &SourceListType,
-    file_type: &SourceListFileType,
-) {
-    let exit = |slt, ft| {
-        eprintln!(
-            "Source list type {:?} cannot be read from or written to a file type {:?}",
-            slt, ft
-        );
-        std::process::exit(1);
-    };
-
-    match sl_type {
-        SourceListType::Hyperdrive => match file_type {
-            SourceListFileType::Json | SourceListFileType::Yaml => (),
-            _ => exit(sl_type, file_type),
-        },
-        SourceListType::Rts | SourceListType::Woden | SourceListType::AO => match file_type {
-            SourceListFileType::Txt => (),
-            _ => exit(sl_type, file_type),
-        },
-    }
-}
-
 /// Read and print stats out for each input source list. If a source list
 /// couldn't be read, print the error, and continue trying to read the other
 /// source lists.
 ///
 /// If the source list type is provided, then assume that all source lists have
 /// that type.
-fn verify(
-    source_lists: Vec<PathBuf>,
-    source_list_type: Option<SourceListType>,
-) -> Result<(), SourceListError> {
+fn verify(source_lists: Vec<PathBuf>) -> Result<(), SourceListError> {
     if source_lists.is_empty() {
         eprintln!("No source lists were supplied!");
         std::process::exit(1);
@@ -142,76 +108,16 @@ fn verify(
     for source_list in source_lists {
         println!("{}:", source_list.display());
 
-        let file_type = parse_file_type(&source_list)?;
-        let sl_type = match &source_list_type {
-            Some(slt) => slt.clone(),
-            // If the source list type wasn't provided, then try to guess from
-            // the file type.
-            None => match &file_type {
-                SourceListFileType::Json | SourceListFileType::Yaml => SourceListType::Hyperdrive,
-                SourceListFileType::Txt => {
-                    warn!("Assuming that the input source list is RTS style");
-                    SourceListType::Rts
-                }
-            },
-        };
-
-        // Check that the source list type is compatible with the file type.
-        source_list_type_compatible_with_file_type(&sl_type, &file_type);
-
-        let sl: SourceList = {
-            let mut f = std::io::BufReader::new(File::open(&source_list)?);
-
-            match sl_type {
-                // The following could probably be cleaned up with macros, but
-                // I'm not comfortable crossing that bridge yet...
-                SourceListType::Hyperdrive => match file_type {
-                    SourceListFileType::Json => match hyperdrive::source_list_from_json(&mut f) {
-                        Ok(sl) => sl,
-                        Err(e) => {
-                            println!("{}\n", e);
-                            continue;
-                        }
-                    },
-                    SourceListFileType::Yaml => match hyperdrive::source_list_from_yaml(&mut f) {
-                        Ok(sl) => sl,
-                        Err(e) => {
-                            println!("{}\n", e);
-                            continue;
-                        }
-                    },
-                    // Other enum variants get handled above.
-                    _ => unreachable!(),
-                },
-
-                SourceListType::Rts => match rts::parse_source_list(&mut f) {
-                    Ok(sl) => sl,
-                    Err(e) => {
-                        println!("{}\n", e);
-                        continue;
-                    }
-                },
-
-                SourceListType::Woden => match woden::parse_source_list(&mut f) {
-                    Ok(sl) => sl,
-                    Err(e) => {
-                        println!("{}\n", e);
-                        continue;
-                    }
-                },
-
-                SourceListType::AO => match ao::parse_source_list(&mut f) {
-                    Ok(sl) => sl,
-                    Err(e) => {
-                        println!("{}\n", e);
-                        continue;
-                    }
-                },
+        let (sl, sl_type) = match read_source_list_file(&source_list, None) {
+            Ok(sl) => sl,
+            Err(e) => {
+                println!("{}\n", e);
+                continue;
             }
         };
-
+        println!("    {}-style source list", sl_type);
         println!(
-            "{} sources, {} components\n",
+            "    {} sources, {} components\n",
             sl.len(),
             sl.iter().map(|s| s.1.components.len()).sum::<usize>()
         );
@@ -225,7 +131,7 @@ fn main() {
     // prints the debug representation of the error. The code below prints the
     // "display" or human readable representation of the error.
     if let Err(e) = try_main() {
-        eprintln!("{}", e);
+        eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 }
@@ -234,13 +140,10 @@ fn try_main() -> Result<(), SrclistError> {
     match Args::from_args() {
         Args::Verify {
             source_lists,
-            input_type,
             verbosity,
         } => {
             setup_logging(verbosity).expect("Failed to initialize logging.");
-
-            let input_sl_type = input_type.map(|t| parse_source_list_type(&t).unwrap());
-            verify(source_lists, input_sl_type)?;
+            verify(source_lists)?;
         }
 
         Args::Convert {
@@ -252,61 +155,72 @@ fn try_main() -> Result<(), SrclistError> {
         } => {
             setup_logging(verbosity).expect("Failed to initialize logging.");
 
-            let input_file_type = parse_file_type(&input_source_list)?;
-            let output_file_type = parse_file_type(&output_source_list)?;
-
-            let input_sl_type = match input_type {
+            let input_sl_type = match (input_type, parse_file_type(&input_source_list)) {
                 // The input source list type was manually specified.
-                Some(t) => parse_source_list_type(&t)?,
+                (Some(t), _) => parse_source_list_type(&t)?,
 
-                // Input source list type not specified; try to get the type
-                // from the output file's extension.
-                None => match &input_file_type {
-                    SourceListFileType::Json | SourceListFileType::Yaml => {
-                        SourceListType::Hyperdrive
-                    }
-                    SourceListFileType::Txt => {
-                        warn!("Assuming that the input source list is RTS style");
-                        SourceListType::Rts
-                    }
-                },
-            };
-            let output_sl_type = match &output_type {
-                // The output source list type was manually specified.
-                Some(t) => parse_source_list_type(&t)?,
+                // Input source list type was not specified, but the file
+                // extension was recognised. We can assume based on this.
+                (_, Some(SourceListFileType::Yaml)) => SourceListType::Hyperdrive,
+                (_, Some(SourceListFileType::Json)) => SourceListType::Hyperdrive,
 
-                // Output source list type not specified; try to get the type
-                // from the output file's extension.
-                None => match &output_file_type {
-                    SourceListFileType::Json | SourceListFileType::Yaml => {
-                        SourceListType::Hyperdrive
-                    }
-                    SourceListFileType::Txt => {
-                        warn!("Assuming that the output source list is RTS style");
-                        SourceListType::Rts
-                    }
-                },
+                // Input source list type not specified and the file extension
+                // was not recognised.
+                (_, _) => SourceListType::Unspecified,
             };
 
-            // Check that the source list types are compatible with
-            // corresponding file types.
-            source_list_type_compatible_with_file_type(&input_sl_type, &input_file_type);
-            source_list_type_compatible_with_file_type(&output_sl_type, &output_file_type);
+            let (output_sl_type, output_file_type) =
+                match (&output_type, parse_file_type(&output_source_list)) {
+                    // The output source list type was manually specified.
+                    (Some(t), file_type) => match (parse_source_list_type(&t)?, file_type) {
+                        (SourceListType::Hyperdrive, Some(SourceListFileType::Yaml)) => {
+                            (SourceListType::Hyperdrive, Some(SourceListFileType::Yaml))
+                        }
+                        (SourceListType::Hyperdrive, Some(SourceListFileType::Json)) => {
+                            (SourceListType::Hyperdrive, Some(SourceListFileType::Json))
+                        }
+                        (SourceListType::Hyperdrive, _) => {
+                            let ext = output_source_list
+                                .extension()
+                                .and_then(|os_str| os_str.to_str())
+                                .map(|str| str.to_string())
+                                .unwrap_or("<no extension>".to_string());
+                            return Err(
+                                error::WriteSourceListError::InvalidHyperdriveFormat(ext).into()
+                            );
+                        }
+                        // All other source-list types and file types are allowed.
+                        (sl_type, file_type) => (sl_type, file_type),
+                    },
+
+                    // Output source list type was not specified, but the file
+                    // extension was recognised. We can assume based on this.
+                    (_, Some(SourceListFileType::Yaml)) => {
+                        (SourceListType::Hyperdrive, Some(SourceListFileType::Yaml))
+                    }
+                    (_, Some(SourceListFileType::Json)) => {
+                        (SourceListType::Hyperdrive, Some(SourceListFileType::Json))
+                    }
+
+                    // Not enough information is available on the output source
+                    // list; we must return an error.
+                    (_, _) => return Err(error::WriteSourceListError::NotEnoughInfo.into()),
+                };
 
             // Read the input source list.
-            let sl = mwa_hyperdrive_srclist::read::read_source_list_file(
+            let (sl, _) = mwa_hyperdrive_srclist::read::read_source_list_file(
                 &input_source_list,
-                input_sl_type,
+                Some(input_sl_type),
             )?;
 
             // Write the output source list.
-            debug!("Attempting to write source list");
-            let mut f = std::io::BufWriter::new(File::create(&output_source_list)?);
+            trace!("Attempting to write source list");
+            let mut f = BufWriter::new(File::create(&output_source_list)?);
 
             match output_sl_type {
                 SourceListType::Hyperdrive => match output_file_type {
-                    SourceListFileType::Json => hyperdrive::source_list_to_json(&mut f, &sl)?,
-                    SourceListFileType::Yaml => hyperdrive::source_list_to_yaml(&mut f, &sl)?,
+                    Some(SourceListFileType::Yaml) => hyperdrive::source_list_to_yaml(&mut f, &sl)?,
+                    Some(SourceListFileType::Json) => hyperdrive::source_list_to_json(&mut f, &sl)?,
                     // Other enum variants get handled above.
                     _ => unreachable!(),
                 },
@@ -316,7 +230,12 @@ fn try_main() -> Result<(), SrclistError> {
                 SourceListType::Woden => woden::write_source_list(&mut f, &sl)?,
 
                 SourceListType::AO => ao::write_source_list(&mut f, &sl)?,
+
+                // The "unspecified" type cannot be reached from user input.
+                SourceListType::Unspecified => unreachable!(),
             };
+
+            f.flush()?;
         }
     }
 

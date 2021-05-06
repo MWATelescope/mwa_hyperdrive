@@ -16,6 +16,7 @@ use crate::constants::MWA_LAT_RAD;
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 /// Relationships, Polarimetry, and the Measurement Equation.
 #[derive(Clone, Copy, Debug)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct XYZ {
     /// x-coordinate \[meters\]
     pub x: f64,

@@ -12,10 +12,14 @@ use structopt::{clap::AppSettings, StructOpt};
 
 use mwa_hyperdrive::{calibrate::calibrate, simulate_vis::simulate_vis, *};
 
-#[derive(StructOpt, Debug)]
-#[structopt(author, name = "hyperdrive", version = HYPERDRIVE_VERSION.as_str(), about, global_settings = &[AppSettings::ColoredHelp, AppSettings::ArgRequiredElseHelp])]
+#[derive(StructOpt)]
+#[structopt(name = "hyperdrive", author, about,
+            version = HYPERDRIVE_VERSION.as_str(),
+            global_settings = &[AppSettings::ColoredHelp,
+                                AppSettings::ArgRequiredElseHelp,
+                                AppSettings::DeriveDisplayOrder])]
 enum Args {
-    /// Calibrate the input data. WIP.
+    /// Perform direction-independent calibration on the input MWA data.
     Calibrate {
         // Share the arguments that could be passed in via a parameter file.
         #[structopt(flatten)]
@@ -81,8 +85,10 @@ fn main() {
 }
 
 fn try_main() -> Result<(), HyperdriveError> {
-    // Set up logging.
+    // Get the command-line arguments.
     let args = Args::from_args();
+
+    // Set up logging.
     let verbosity = match args {
         Args::Calibrate { verbosity, .. } => verbosity,
         Args::SimulateVis { verbosity, .. } => verbosity,

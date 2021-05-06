@@ -11,6 +11,7 @@ use crate::constants::*;
 
 /// East, North and Height coordinates.
 #[derive(Debug)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct ENH {
     /// East \[metres\]
     pub e: f64,
