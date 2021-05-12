@@ -115,7 +115,7 @@ pub fn read_source_list_file<T: AsRef<Path>>(
                     // f = std::io::BufReader::new(File::open(&file)?);
                 }
             }
-            return Err(ReadSourceListError::FailedToReadAsAnyType.into());
+            Err(ReadSourceListError::FailedToReadAsAnyType.into())
         }
     }
 }

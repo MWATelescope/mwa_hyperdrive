@@ -54,7 +54,7 @@ pub(crate) fn get_1090008640() -> CalibrateUserArgs {
     CalibrateUserArgs {
         data: Some(data),
         source_list: Some(path_to_string(&srclist)),
-        no_beam: Some(true),
+        no_beam: true,
         ..Default::default()
     }
 }

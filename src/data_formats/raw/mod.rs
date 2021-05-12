@@ -51,8 +51,6 @@ impl RawData {
         metadata: &T,
         gpuboxes: &[T],
         mwafs: Option<&[T]>,
-        ignore_metafits_tile_flags: bool,
-        dont_flag_fine_channels: bool,
     ) -> Result<Self, NewRawError> {
         // The metafits argument could be a glob. If the specified
         // metafits file can't be found, treat it as a glob and expand
@@ -98,19 +96,13 @@ impl RawData {
         let total_num_tiles = metafits_context.rf_inputs.len() / 2;
         debug!("There are {} total tiles", total_num_tiles);
 
-        let mut tile_flags_set = HashSet::new();
-        if !ignore_metafits_tile_flags {
-            for flagged_meta_file in metafits_context
-                .rf_inputs
-                .iter()
-                .filter(|rf| rf.pol == Pol::Y && rf.flagged)
-            {
-                tile_flags_set.insert(flagged_meta_file.ant as usize);
-            }
-            debug!("Using metafits tile flags; found {:?}", &tile_flags_set);
-        } else {
-            debug!("NOT using metafits tile flags");
-        };
+        let mut tile_flags_set: HashSet<usize> = metafits_context
+            .rf_inputs
+            .iter()
+            .filter(|rf| rf.pol == Pol::Y && rf.flagged)
+            .map(|rf_input| rf_input.ant as usize)
+            .collect();
+        debug!("Found tile flags {:?}", &tile_flags_set);
         let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
         for &f in &tile_flags_set {
             if f > total_num_tiles - 1 {
@@ -187,9 +179,7 @@ impl RawData {
             return Err(NewRawError::AllTilesFlagged);
         }
 
-        let fine_chan_flags_per_coarse_chan: Vec<usize> = if dont_flag_fine_channels {
-            vec![]
-        } else {
+        let fine_chan_flags_per_coarse_chan: Vec<usize> = 
             // If the flags aren't specified, use the observation's fine-channel
             // frequency resolution to set them.
             match metafits_context.corr_fine_chan_width_hz {
@@ -205,7 +195,6 @@ impl RawData {
                 40000 => vec![0, 1, 16, 30, 31],
 
                 f => return Err(NewRawError::UnhandledFreqResolutionForFlags(f)),
-            }
         };
 
         let aoflags = if let Some(m) = mwafs {
@@ -368,7 +357,7 @@ impl InputData for RawData {
         &self,
         mut data_array: ArrayViewMut2<Jones<f32>>,
         timestep: usize,
-        tile_to_baseline_map: &HashMap<(usize, usize), usize>,
+        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(Vec<UVW>, Array2<f32>), ReadInputDataError> {
         todo!();

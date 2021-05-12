@@ -259,7 +259,7 @@ mod tests {
     #[serial]
     fn test_beam_attenuated_flux_density() {
         let mut args = get_1090008640_smallest();
-        args.no_beam = Some(false);
+        args.no_beam = false;
         let params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
         let pointing = &obs_context.pointing;
@@ -311,7 +311,7 @@ mod tests {
     fn veto() {
         // let (metafits, beam, mut source_list) = get_params();
         let mut args = get_1090008640_smallest();
-        args.no_beam = Some(false);
+        args.no_beam = false;
         let mut params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
         // For testing's sake, keep only the following bright sources.
@@ -414,7 +414,7 @@ mod tests {
     #[serial]
     fn top_n_sources() {
         let mut args = get_1090008640_smallest();
-        args.no_beam = Some(false);
+        args.no_beam = false;
         let mut params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
 

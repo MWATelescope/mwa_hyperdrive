@@ -22,6 +22,7 @@ use crate::context::{FreqContext, ObsContext};
 use mwa_hyperdrive_core::{Jones, UVW};
 
 pub(crate) trait InputData: Sync + Send {
+    // fn get_obs_context(&self) -> &ObsContext;
     fn get_obs_context(&self) -> &ObsContext;
 
     fn get_freq_context(&self) -> &FreqContext;
@@ -33,7 +34,7 @@ pub(crate) trait InputData: Sync + Send {
         &self,
         data_array: ArrayViewMut2<Jones<f32>>,
         timestep: usize,
-        baseline_map: &HashMap<(usize, usize), usize>,
+        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(Vec<UVW>, Array2<f32>), ReadInputDataError>;
 }

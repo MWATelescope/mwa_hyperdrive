@@ -53,12 +53,13 @@ pub(crate) struct ObsContext {
     /// values of 32).
     pub(crate) delays: Vec<u32>,
 
-    /// The geocentric `XYZ` coordinates of all tiles in the array \[metres\].
+    /// The geocentric [XYZ] coordinates of all tiles in the array \[metres\].
     /// This includes tiles that have been flagged in the input data.
     pub(crate) tile_xyz: Vec<XYZ>,
 
-    /// The `XyzBaselines` of the observations \[metres\]. This does not change
-    /// over time; it is determined only by the telescope's tile layout.
+    /// The [XyzBaseline]s of the observations \[metres\]. This does not change
+    /// over time; it is determined only by the telescope's tile layout. This
+    /// will contain flagged baselines.
     pub(crate) baseline_xyz: Vec<XyzBaseline>,
 
     /// The tiles already flagged in the supplied data. These values correspond

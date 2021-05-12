@@ -48,11 +48,11 @@ pub fn parse_source_list<T: std::io::BufRead>(
             })
     };
 
-    let float_to_int = |float: f64, line_num: u32| -> Result<u8, ReadSourceListCommonError> {
+    let float_to_int = |float: f64, line_num: u32| -> Result<usize, ReadSourceListCommonError> {
         if float < 0.0 || float > std::u8::MAX as _ {
             Err(ReadSourceListCommonError::FloatToIntError { line_num, float })
         } else {
-            Ok(float as u8)
+            Ok(float as _)
         }
     };
 

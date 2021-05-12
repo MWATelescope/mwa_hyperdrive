@@ -9,17 +9,14 @@ This code borrows heavily from Torrance Hodgson's excellent Julia code at
 https://github.com/torrance/MWAjl
 */
 
-use std::collections::HashMap;
-
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
 use log::{debug, info, trace};
 use ndarray::prelude::*;
-use num::Complex;
 use rayon::prelude::*;
 
 use super::{predict, solutions::write_solutions, CalibrateError, CalibrateParams};
-use crate::*;
+use crate::{math::cross_correlation_baseline_to_tiles, *};
 
 /// Do all the steps required for direction-independent calibration; read the
 /// input data, predict a model against it, and write the solutions out.
@@ -193,11 +190,28 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         // individual threads.
         scope.spawn(move |_| {
             let obs_context = params.input_data.get_obs_context();
+
+            // Make collections of references to each component type.
+            let mut point_comps: Vec<&SourceComponent> = vec![];
+            let mut gaussian_comps: Vec<&SourceComponent> = vec![];
+            let mut shapelet_comps: Vec<&SourceComponent> = vec![];
+            for comp in params
+                .source_list
+                .iter()
+                .flat_map(|(_, src)| &src.components)
+            {
+                match comp.comp_type {
+                    ComponentType::Point => point_comps.push(comp),
+                    ComponentType::Gaussian { .. } => gaussian_comps.push(comp),
+                    ComponentType::Shapelet { .. } => shapelet_comps.push(comp),
+                }
+            }
+
             // Iterate on the receive channel forever. This terminates when
             // there is no data in the channel _and_ the sender has been
             // dropped.
             for msg in rx_data.iter() {
-                let (timestep, uvws, vis_model_slice, weights) = match msg {
+                let (timestep, uvws, mut vis_model_slice, weights) = match msg {
                     Ok(msg) => msg,
                     Err(e) => {
                         sx_error.send(e).unwrap();
@@ -208,19 +222,17 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
                 // For this time, get the AzEl coordinates of the sky-model
                 // components.
-                // TODO: Verify LSTs are sensible. Write tests.
                 let lst = obs_context.lst_from_timestep(timestep);
                 let azels = params.source_list.get_azel_mwa_parallel(lst);
                 let hadecs: Vec<_> = params
                     .source_list
                     .iter()
-                    .map(|(_, src)| &src.components)
-                    .flatten()
+                    .flat_map(|(_, src)| &src.components)
                     .map(|comp| comp.radec.to_hadec(lst))
                     .collect();
 
                 // TODO: Use a Jones matrix cache.
-                let fds = predict::beam_correct_flux_densities(
+                let fds_result = predict::beam_correct_flux_densities(
                     flux_densities.view(),
                     &azels,
                     &hadecs,
@@ -229,31 +241,63 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     &[1.0; 16],
                     &params.freq.unflagged_fine_chan_freqs,
                 );
-                // let fds = predict::beam_correct_flux_densities(
-                //     flux_densities.view(),
-                //     &azels,
-                //     &params.beam,
-                //     &obs_context.delays,
-                //     &[1.0; 16],
-                //     &params.freq.unflagged_fine_chan_freqs,
-                // );
-                let model_result = fds.map(|fds| {
-                    predict::predict_model(
-                        vis_model_slice,
-                        weights.view(),
-                        fds.view(),
-                        &params.source_list,
-                        &lmns,
-                        &uvws,
-                        &params.freq.unflagged_fine_chan_freqs,
-                    )
-                });
                 // If we encountered an error, we need to handle it on the main
                 // thread (send it out).
-                if let Err(e) = model_result {
-                    sx_error.send(e).unwrap();
-                    break;
-                }
+                let fds = match fds_result {
+                    Err(e) => {
+                        sx_error.send(e).unwrap();
+                        break;
+                    }
+                    // Otherwise, we can continue.
+                    Ok(fds) => fds,
+                };
+
+                predict::predict_model_points(
+                    vis_model_slice.view_mut(),
+                    weights.view(),
+                    fds.view(),
+                    &point_comps,
+                    &lmns,
+                    &uvws,
+                    &params.freq.unflagged_fine_chan_freqs,
+                );
+                predict::predict_model_gaussians(
+                    vis_model_slice.view_mut(),
+                    weights.view(),
+                    fds.view(),
+                    &gaussian_comps,
+                    &lmns,
+                    &uvws,
+                    &params.freq.unflagged_fine_chan_freqs,
+                );
+                // Shapelets need their own special kind of UVW coordinates.
+                let mut shapelet_uvws: Array2<UVW> = Array2::from_elem(
+                    (shapelet_comps.len(), params.unflagged_baseline_xyz.len()),
+                    UVW::default(),
+                );
+                shapelet_uvws
+                    .outer_iter_mut()
+                    .into_par_iter()
+                    .zip(shapelet_comps.par_iter())
+                    .for_each(|(mut array, comp)| {
+                        let hadec = comp.radec.to_hadec(lst);
+                        let shapelet_uvws =
+                            UVW::get_baselines(&params.unflagged_baseline_xyz, &hadec);
+                        array.assign(&Array1::from(shapelet_uvws));
+                    });
+                // To ensure that `shapelet_uvws` is being strided efficiently,
+                // invert the axes here.
+                let shapelet_uvws = shapelet_uvws.t().to_owned();
+                predict::predict_model_shapelets(
+                    vis_model_slice.view_mut(),
+                    weights.view(),
+                    fds.view(),
+                    &shapelet_comps,
+                    shapelet_uvws.view(),
+                    &lmns,
+                    &uvws,
+                    &params.freq.unflagged_fine_chan_freqs,
+                );
             }
             drop(sx_error);
         });
@@ -319,21 +363,20 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                             chanblock_index..chanblock_index + 1
                         ]),
                         di_jones,
-                        &params.unflagged_baseline_to_unflagged_tile_map,
                         params.max_iterations,
                         params.stop_threshold,
                         params.min_threshold,
                     );
 
-                    let start_str = format!("chanblock {:<3}", chanblock);
+                    let start_str = format!("chanblock {:>3}", chanblock);
                     if num_unflagged_tiles - cal_result.num_failed <= 4 {
                         info!(
-                            "{}: failed    ({:<2}): Too many antenna solutions failed ({})",
+                            "{}: failed    ({:>2}): Too many antenna solutions failed ({})",
                             start_str, cal_result.num_iterations, cal_result.num_failed
                         );
                     } else if cal_result.max_precision > params.min_threshold {
                         info!(
-                            "{}: failed    ({:<2}): {:.5e} > {:e}",
+                            "{}: failed    ({:>2}): {:.5e} > {:e}",
                             start_str,
                             cal_result.num_iterations,
                             cal_result.max_precision,
@@ -341,7 +384,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         );
                     } else if cal_result.max_precision > params.stop_threshold {
                         info!(
-                            "{}: converged ({:<2}): {:e} > {:.5e} > {:e}",
+                            "{}: converged ({:>2}): {:e} > {:.5e} > {:e}",
                             start_str,
                             cal_result.num_iterations,
                             params.min_threshold,
@@ -350,7 +393,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         );
                     } else {
                         info!(
-                            "{}: converged ({:<2}): {:e} > {:.5e}",
+                            "{}: converged ({:>2}): {:e} > {:.5e}",
                             start_str,
                             cal_result.num_iterations,
                             params.stop_threshold,
@@ -396,7 +439,6 @@ fn calibrate(
     data: ArrayView3<Jones<f32>>,
     model: ArrayView3<Jones<f32>>,
     mut di_jones: ArrayViewMut1<Jones<f32>>,
-    unflagged_baseline_to_unflagged_tile_map: &HashMap<usize, (usize, usize)>,
     max_iterations: usize,
     stop_threshold: f32,
     min_threshold: f32,
@@ -420,14 +462,7 @@ fn calibrate(
         top.fill(Jones::default());
         bot.fill(Jones::default());
 
-        calibration_loop(
-            data,
-            model,
-            di_jones.view(),
-            unflagged_baseline_to_unflagged_tile_map,
-            top.view_mut(),
-            bot.view_mut(),
-        );
+        calibration_loop(data, model, di_jones.view(), top.view_mut(), bot.view_mut());
 
         // Obtain the new DI Jones matrices from "top" and "bot".
         // Tile/antenna axis.
@@ -507,7 +542,7 @@ fn calibrate(
         .zip(failed.iter())
         .filter(|(_, &failed)| failed)
         .for_each(|(mut di_jones, _)| {
-            di_jones.fill(Jones::from([Complex::new(f32::NAN, 0.0); 4]));
+            di_jones.fill(Jones::nan());
         });
 
     // max_precision = maximum(distances)
@@ -526,25 +561,13 @@ fn calibrate(
 
     let num_failed = failed.iter().filter(|&&f| f).count();
     let converged = {
-        // First, if only 4 or fewer antennas remain, mark the solution as
-        // trash.
-        if num_unflagged_tiles - num_failed <= 4 {
-            di_jones.fill(Jones::from([Complex::new(f32::NAN, 0.0); 4]));
+        // If only 4 or fewer antennas remain, or we never reached the minimum
+        // threshold level, mark the solution as failed.
+        if num_unflagged_tiles - num_failed <= 4 || max_precision > min_threshold {
+            di_jones.fill(Jones::nan());
             false
         }
-        // Second, if we never reached the minimum threshold level, mark the
-        // entire solution as failed.
-        else if max_precision > min_threshold {
-            di_jones.fill(Jones::from([Complex::new(f32::NAN, 0.0); 4]));
-            false
-        }
-        // Third, we exceeded the minimum threshold, but not the stop (ie. we
-        // didn't break early)
-        else if max_precision > stop_threshold {
-            true
-        }
-        // Finally, we exceeded the stop threshold level and broke the
-        // iterations early.
+        // If converged within the minimum threshold, signal success.
         else {
             true
         }
@@ -562,10 +585,11 @@ fn calibration_loop(
     data: ArrayView3<Jones<f32>>,
     model: ArrayView3<Jones<f32>>,
     di_jones: ArrayView1<Jones<f32>>,
-    unflagged_baseline_to_unflagged_tile_map: &HashMap<usize, (usize, usize)>,
     mut top: ArrayViewMut1<Jones<f32>>,
     mut bot: ArrayViewMut1<Jones<f32>>,
 ) {
+    let num_unflagged_tiles = di_jones.len_of(Axis(0));
+
     // Time axis.
     data.outer_iter()
         .zip(model.outer_iter())
@@ -576,8 +600,10 @@ fn calibration_loop(
                 .zip(model_time.outer_iter())
                 .enumerate()
                 .for_each(|(unflagged_bl_index, (data_bl, model_bl))| {
-                    let (tile1, tile2) =
-                        unflagged_baseline_to_unflagged_tile_map[&unflagged_bl_index];
+                    let (tile1, tile2) = cross_correlation_baseline_to_tiles(
+                        num_unflagged_tiles,
+                        unflagged_bl_index,
+                    );
 
                     // Unflagged frequency chan axis.
                     data_bl
@@ -590,28 +616,30 @@ fn calibration_loop(
                                 let j_t2 = di_jones.uget(tile2);
 
                                 // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
-                                {
-                                    let top_t1 = top.uget_mut(tile1);
-                                    let bot_t1 = bot.uget_mut(tile1);
+                                let top_t1 = top.uget_mut(tile1);
+                                let bot_t1 = bot.uget_mut(tile1);
 
-                                    // J M^H
-                                    let z = Jones::axbh(j_t2, &j_model);
-                                    // D (J M^H)
-                                    Jones::plus_axb(top_t1, &j_data, &z);
-                                    // (J M^H)^H (J M^H)
-                                    Jones::plus_ahxb(bot_t1, &z, &z);
-                                }
-                                {
-                                    let top_t2 = top.uget_mut(tile2);
-                                    let bot_t2 = bot.uget_mut(tile2);
+                                // J M^H
+                                let z = Jones::axbh(j_t2, &j_model);
+                                // D (J M^H)
+                                Jones::plus_axb(top_t1, &j_data, &z);
+                                // (J M^H)^H (J M^H)
+                                Jones::plus_ahxb(bot_t1, &z, &z);
 
-                                    // J (M^H)^H
-                                    let z = Jones::axb(j_t1, &j_model);
-                                    // D^H (J M^H)^H
-                                    Jones::plus_ahxb(top_t2, &j_data, &z);
-                                    // (J M^H) (J M^H)
-                                    Jones::plus_ahxb(bot_t2, &z, &z);
-                                }
+                                // Release the mutable references on `top` and
+                                // `bot` so we can make new ones.
+                                drop(top_t1);
+                                drop(bot_t1);
+
+                                let top_t2 = top.uget_mut(tile2);
+                                let bot_t2 = bot.uget_mut(tile2);
+
+                                // J (M^H)^H
+                                let z = Jones::axb(j_t1, &j_model);
+                                // D^H (J M^H)^H
+                                Jones::plus_ahxb(top_t2, &j_data, &z);
+                                // (J M^H) (J M^H)
+                                Jones::plus_ahxb(bot_t2, &z, &z);
                             }
                         })
                 })

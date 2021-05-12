@@ -48,7 +48,8 @@ If not specified, the program will try all types"#, *mwa_hyperdrive_srclist::SOU
         format!("The path to the file where the calibration solutions are written. Supported formats are .fits and .bin (which is the \"André calibrate format\"). Default: {}", DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
 }
 
-// Arguments that are exposed to users. All arguments should be optional.
+// Arguments that are exposed to users. All arguments except bools should be
+// optional.
 //
 // These are digested by hyperdrive and used to eventually populate
 // `CalibrateParams`, which is used throughout hyperdrive's calibrate.
@@ -70,7 +71,7 @@ pub struct CalibrateUserArgs {
     /// Don't apply a beam response when generating a sky model. The default is
     /// to use the FEE beam.
     #[structopt(long)]
-    pub no_beam: Option<bool>,
+    pub no_beam: bool,
 
     /// Path to the sky-model source list file.
     #[structopt(short, long)]
@@ -112,15 +113,13 @@ pub struct CalibrateUserArgs {
     #[structopt(long)]
     pub tile_flags: Option<Vec<usize>>,
 
-    /// If specified, pretend that all tiles are unflagged in the metafits file.
-    /// Applies only when reading in data from gpubox files.
+    /// If specified, pretend that all tiles are unflagged in the input data.
     #[structopt(long)]
-    pub ignore_metafits_flags: Option<bool>,
+    pub ignore_input_data_tile_flags: bool,
 
-    /// If specified, don't flag channel edges and the DC channel when reading
-    /// in data from gpubox files.
+    /// If specified, pretend all fine channels in the input data are unflagged.
     #[structopt(long)]
-    pub dont_flag_fine_channels: Option<bool>,
+    pub ignore_input_data_fine_channels_flags: bool,
 
     /// The fine channels to be flagged in each coarse channel. e.g. 0 1 16 30
     /// 31 are typical for 40 kHz data.
@@ -213,58 +212,55 @@ impl CalibrateUserArgs {
         };
 
         // Ensure all of the file args are accounted for by pattern matching.
-        match file_args {
-            Self {
-                data,
-                output_solutions_filename,
-                beam_file,
-                no_beam,
-                source_list,
-                source_list_type,
-                num_sources,
-                source_dist_cutoff,
-                veto_threshold,
-                time_res,
-                freq_res,
-                tile_flags,
-                ignore_metafits_flags,
-                dont_flag_fine_channels,
-                fine_chan_flags_per_coarse_chan,
-                fine_chan_flags,
-                max_iterations,
-                stop_thresh,
-                min_thresh,
-            } => {
-                // Merge all the arguments, preferring the CLI args when available.
-                Ok(Self {
-                    data: cli_args.data.or(data),
-                    output_solutions_filename: cli_args
-                        .output_solutions_filename
-                        .or(output_solutions_filename),
-                    beam_file: cli_args.beam_file.or(beam_file),
-                    no_beam: cli_args.no_beam.or(no_beam),
-                    source_list: cli_args.source_list.or(source_list),
-                    source_list_type: cli_args.source_list_type.or(source_list_type),
-                    num_sources: cli_args.num_sources.or(num_sources),
-                    source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
-                    veto_threshold: cli_args.veto_threshold.or(veto_threshold),
-                    time_res: cli_args.time_res.or(time_res),
-                    freq_res: cli_args.freq_res.or(freq_res),
-                    tile_flags: cli_args.tile_flags.or(tile_flags),
-                    ignore_metafits_flags: cli_args.ignore_metafits_flags.or(ignore_metafits_flags),
-                    dont_flag_fine_channels: cli_args
-                        .dont_flag_fine_channels
-                        .or(dont_flag_fine_channels),
-                    fine_chan_flags_per_coarse_chan: cli_args
-                        .fine_chan_flags_per_coarse_chan
-                        .or(fine_chan_flags_per_coarse_chan),
-                    fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
-                    max_iterations: cli_args.max_iterations.or(max_iterations),
-                    stop_thresh: cli_args.stop_thresh.or(stop_thresh),
-                    min_thresh: cli_args.min_thresh.or(min_thresh),
-                })
-            }
-        }
+        let Self {
+            data,
+            output_solutions_filename,
+            beam_file,
+            no_beam,
+            source_list,
+            source_list_type,
+            num_sources,
+            source_dist_cutoff,
+            veto_threshold,
+            time_res,
+            freq_res,
+            tile_flags,
+            ignore_input_data_tile_flags,
+            ignore_input_data_fine_channels_flags,
+            fine_chan_flags_per_coarse_chan,
+            fine_chan_flags,
+            max_iterations,
+            stop_thresh,
+            min_thresh,
+        } = file_args;
+        // Merge all the arguments, preferring the CLI args when available.
+        Ok(Self {
+            data: cli_args.data.or(data),
+            output_solutions_filename: cli_args
+                .output_solutions_filename
+                .or(output_solutions_filename),
+            beam_file: cli_args.beam_file.or(beam_file),
+            no_beam: cli_args.no_beam || no_beam,
+            source_list: cli_args.source_list.or(source_list),
+            source_list_type: cli_args.source_list_type.or(source_list_type),
+            num_sources: cli_args.num_sources.or(num_sources),
+            source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
+            veto_threshold: cli_args.veto_threshold.or(veto_threshold),
+            time_res: cli_args.time_res.or(time_res),
+            freq_res: cli_args.freq_res.or(freq_res),
+            tile_flags: cli_args.tile_flags.or(tile_flags),
+            ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
+                || ignore_input_data_tile_flags,
+            ignore_input_data_fine_channels_flags: cli_args.ignore_input_data_fine_channels_flags
+                || ignore_input_data_fine_channels_flags,
+            fine_chan_flags_per_coarse_chan: cli_args
+                .fine_chan_flags_per_coarse_chan
+                .or(fine_chan_flags_per_coarse_chan),
+            fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
+            max_iterations: cli_args.max_iterations.or(max_iterations),
+            stop_thresh: cli_args.stop_thresh.or(stop_thresh),
+            min_thresh: cli_args.min_thresh.or(min_thresh),
+        })
     }
 
     pub fn into_params(self) -> Result<CalibrateParams, InvalidArgsError> {

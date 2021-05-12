@@ -13,7 +13,7 @@ use rayon::prelude::*;
 
 /// The (u,v,w) coordinates of a baseline. All units are in terms of wavelength,
 /// with units of metres.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct UVW {
     /// u-coordinate \[meters\]

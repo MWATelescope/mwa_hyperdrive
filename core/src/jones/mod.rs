@@ -26,12 +26,24 @@ use crate::FluxDensity;
 pub struct Jones<F: Float + Num>([Complex<F>; 4]);
 
 impl<F: Float> Jones<F> {
+    /// Return an identity matrix. All imaginary parts are zero.
     pub fn identity() -> Self {
         Self::from([
             Complex::new(F::one(), F::zero()),
             Complex::new(F::zero(), F::zero()),
             Complex::new(F::zero(), F::zero()),
             Complex::new(F::one(), F::zero()),
+        ])
+    }
+
+    /// Return a matrix with all real parts set to NaN and all imaginary parts
+    /// set to zero.
+    pub fn nan() -> Self {
+        Self::from([
+            Complex::new(F::nan(), F::zero()),
+            Complex::new(F::nan(), F::zero()),
+            Complex::new(F::nan(), F::zero()),
+            Complex::new(F::nan(), F::zero()),
         ])
     }
 
@@ -578,6 +590,12 @@ mod tests {
             assert!(j.re.is_nan());
             assert!(j.im.is_nan());
         }
+    }
+
+    #[test]
+    fn test_is_nan_works() {
+        let j: Jones<f64> = Jones::nan();
+        assert!(j.iter().any(|f| f.is_nan()));
     }
 
     #[test]

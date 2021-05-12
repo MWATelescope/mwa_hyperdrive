@@ -10,11 +10,18 @@ currently work only on a single timestep.
 use std::f64::consts::{FRAC_PI_2, LN_2, TAU};
 
 use ndarray::{parallel::prelude::*, prelude::*};
+use num::Complex;
 
 use super::CalibrateError;
 use crate::beam::Beam;
-use crate::{math::cexp, MWA_LAT_RAD, VEL_C};
-use mwa_hyperdrive_core::{erfa_sys, AzEl, ComponentType, HADec, Jones, SourceList, LMN, UVW};
+use crate::{
+    constants::*,
+    math::{cexp, exp},
+    shapelets::*,
+};
+use mwa_hyperdrive_core::{
+    c64, erfa_sys, AzEl, ComponentType, HADec, Jones, SourceComponent, LMN, UVW,
+};
 
 /// Beam-correct the expected flux densities of the sky-model source components.
 ///
@@ -90,43 +97,52 @@ pub(crate) fn beam_correct_flux_densities(
 
 /// For a single timestep, over a range of frequencies and baselines, predict
 /// visibility values for each sky-model source component. Write the predicted
-/// "model" into the supplied array.
+/// visibilities into the model_array.
 ///
-/// `model_array`: A mutable ndarray slice of the model of all visibilities. The
-/// first axis is unflagged baseline, the second unflagged fine channel.
+/// `model_array`: A mutable `ndarray` view of the model of all visibilities.
+/// The first axis is unflagged baseline, the second unflagged fine channel.
 ///
-/// `flux_densities`: An ndarray slice of the instrumental Stokes flux densities
-/// of all sky-model source components. The first axis is unflagged fine
-/// channel, the second is sky-model component.
+/// `weights`: An `ndarray` view of the weights obtained alongside input data.
+/// To make the model visibilities match the input data visibilities, these need
+/// to be applied. The shape is the same as `model_array`.
 ///
-/// `calc_jones`: A function that takes the horizon coordinates (i.e. [AzEl]) of
-/// a source component and a frequency \[Hz\] returning a beam Jones matrix.
+/// `flux_densities`: An `ndarray` view of the instrumental Stokes flux
+/// densities of all sky-model source components. The first axis is unflagged
+/// fine channel, the second is sky-model component.
 ///
-/// `lsts`: The local sidereal times that we have to predict over. This is a
-/// proxy for time. Each LST is used with the pointing to make correct [AzEl]
-/// coordinates for each source component.
+/// `components`: The sky-model source components. These are input as references
+/// for flexibility.
 ///
-/// `lmn`: The LMN coordinates of all sky-model source components.
+/// `lmns`: The [LMN] coordinates of all sky-model source components. They
+/// should be in the same order as the `components` they correspond to.
 ///
-/// `uvw`: The [UVW] coordinates of each baseline \[metres\]. Each row
-/// corresponds to a unique time. This should be the same length as
-/// `model_array`'s first axis.
-pub(crate) fn predict_model(
+/// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should be
+/// the same length as `model_array`'s first axis.
+///
+/// `freqs`: The unflagged fine-channel frequencies to model over \[Hz\]. This
+/// should be the same length as `model_array`'s second axis. Used to divide the
+/// UVW coordinates by wavelength.
+///
+/// `envelope_fn`: A function to be used to calculate a component's visibility
+/// envelope. This parameter is what makes this function general.
+fn predict_model_common<F>(
     mut model_array: ArrayViewMut2<Jones<f32>>,
     weights: ArrayView2<f32>,
     flux_densities: ArrayView2<Jones<f64>>,
-    source_list: &SourceList,
+    components: &[&SourceComponent],
     lmns: &[LMN],
     uvws: &[UVW],
     freqs: &[f64],
-) {
-    // Unflagged baseline axis.
+    envelope_fn: F,
+) where
+    F: Sync + Fn(&SourceComponent, UVW) -> f64,
+{
+    // Iterate over the unflagged baseline axis.
     model_array
         .outer_iter_mut()
         .into_par_iter()
         .zip(uvws.par_iter())
         .zip(weights.outer_iter().into_par_iter())
-        // TODO: Not happy with the variable names here.
         .for_each(|((mut model_bl_axis, uvw), weights_bl_axis)| {
             // Unflagged fine-channel axis.
             model_bl_axis
@@ -140,43 +156,7 @@ pub(crate) fn predict_model(
 
                     // Now that we have the UVW coordinates, we can determine
                     // each source component's envelope.
-                    let envelopes = source_list
-                        .iter()
-                        .map(|(_, src)| &src.components)
-                        .flatten()
-                        .map(|comp| match &comp.comp_type {
-                            ComponentType::Point => 1.0,
-
-                            ComponentType::Gaussian { maj, min, pa } => {
-                                let (s_pa, c_pa) = pa.sin_cos();
-                                // Temporary variables for clarity.
-                                let k_x = uvw.u * s_pa + uvw.v * c_pa;
-                                let k_y = uvw.u * c_pa - uvw.v * s_pa;
-                                (-FRAC_PI_2.powi(2) / LN_2
-                                    * (maj.powi(2) * k_x.powi(2) + min.powi(2) * k_y.powi(2)))
-                                .exp()
-                            }
-
-                            ComponentType::Shapelet {
-                                maj,
-                                min,
-                                pa,
-                                coeffs,
-                            } => {
-                                todo!()
-                                // let (s_pa, c_pa) = pa.sin_cos();
-                                // // Get major and minor axes in sigmas.
-                                // let maj = maj / SQRT_8_LOG_2;
-                                // let min = min / SQRT_8_LOG_2;
-                                // // Temporary variables for clarity.
-                                // let x = uvw.u * s_pa + uvw.v * c_pa;
-                                // let y = uvw.u * c_pa - uvw.v * s_pa;
-                                // (-2.0
-                                //     * PI.powi(2)
-                                //     * (maj.powi(2) * x.powi(2) + (min.powi(2) * y.powi(2))))
-                                // .exp()
-                            }
-                        });
+                    let envelopes = components.iter().map(|&comp| envelope_fn(comp, uvw));
 
                     comp_fds.iter().zip(lmns.iter()).zip(envelopes).for_each(
                         |((comp_fd_c64, lmn), envelope)| {
@@ -195,6 +175,196 @@ pub(crate) fn predict_model(
                     )
                 });
         });
+}
+
+/// For a single timestep, over a range of frequencies and baselines, predict
+/// visibility values for each specified sky-model point-source component. See
+/// `predict_model_common` for an explanation of the arguments.
+pub(crate) fn predict_model_points(
+    model_array: ArrayViewMut2<Jones<f32>>,
+    weights: ArrayView2<f32>,
+    flux_densities: ArrayView2<Jones<f64>>,
+    point_comps: &[&SourceComponent],
+    lmns: &[LMN],
+    uvws: &[UVW],
+    freqs: &[f64],
+) {
+    if !point_comps.is_empty() {
+        predict_model_common(
+            model_array,
+            weights,
+            flux_densities,
+            point_comps,
+            lmns,
+            uvws,
+            freqs,
+            // When calculating a point-source visibility, the envelope is always 1.
+            |_, _| 1.0,
+        );
+    }
+}
+
+/// For a single timestep, over a range of frequencies and baselines, predict
+/// visibility values for each specified sky-model gaussian-source component.
+/// See `predict_model_common` for an explanation of the arguments.
+pub(crate) fn predict_model_gaussians(
+    model_array: ArrayViewMut2<Jones<f32>>,
+    weights: ArrayView2<f32>,
+    flux_densities: ArrayView2<Jones<f64>>,
+    gaussian_comps: &[&SourceComponent],
+    lmns: &[LMN],
+    uvws: &[UVW],
+    freqs: &[f64],
+) {
+    if !gaussian_comps.is_empty() {
+        predict_model_common(
+            model_array,
+            weights,
+            flux_densities,
+            gaussian_comps,
+            lmns,
+            uvws,
+            freqs,
+            |comp, uvw| {
+                match &comp.comp_type {
+                    ComponentType::Gaussian { maj, min, pa } => {
+                        let (s_pa, c_pa) = pa.sin_cos();
+                        // Temporary variables for clarity.
+                        let k_x = uvw.u * s_pa + uvw.v * c_pa;
+                        let k_y = uvw.u * c_pa - uvw.v * s_pa;
+                        exp(-FRAC_PI_2.powi(2) / LN_2
+                            * (maj.powi(2) * k_x.powi(2) + min.powi(2) * k_y.powi(2)))
+                    }
+
+                    // We only reach here if the function is being
+                    // misused.
+                    _ => unreachable!(),
+                }
+            },
+        );
+    }
+}
+
+/// For a single timestep, over a range of frequencies and baselines, predict
+/// visibility values for each specified sky-model shapelet-source component.
+/// See `predict_model_common` for an explanation of the arguments.
+///
+/// `shapelet_uvws` are special UVWs generated as if each shapelet component was
+/// at the phase centre \[metres\]. The first axis is unflagged baseline, the
+/// second shapelet component.
+pub(crate) fn predict_model_shapelets(
+    mut model_array: ArrayViewMut2<Jones<f32>>,
+    weights: ArrayView2<f32>,
+    flux_densities: ArrayView2<Jones<f64>>,
+    shapelet_comps: &[&SourceComponent],
+    shapelet_uvws: ArrayView2<UVW>,
+    lmns: &[LMN],
+    uvws: &[UVW],
+    freqs: &[f64],
+) {
+    // Iterate over the unflagged baseline axis.
+    model_array
+        .outer_iter_mut()
+        .into_par_iter()
+        .zip(uvws.par_iter())
+        .zip(shapelet_uvws.outer_iter().into_par_iter())
+        .zip(weights.outer_iter().into_par_iter())
+        .for_each(
+            |(((mut model_bl_axis, uvw), shapelet_uvws_per_comp), weights_bl_axis)| {
+                // Unflagged fine-channel axis.
+                model_bl_axis
+                    .iter_mut()
+                    .zip(flux_densities.outer_iter())
+                    .zip(weights_bl_axis.iter())
+                    .zip(freqs)
+                    .zip(shapelet_uvws_per_comp.iter())
+                    .for_each(|((((model_vis, comp_fds), weight), freq), shapelet_uvw)| {
+                        // Divide by lambda to make UVW dimensionless.
+                        let uvw = *uvw / (VEL_C / freq);
+                        let shapelet_uvw = *shapelet_uvw / (VEL_C / freq);
+
+                        // Now that we have the UVW coordinates, we can determine
+                        // each source component's envelope.
+                        let envelopes: Vec<c64> = shapelet_comps
+                            .iter()
+                            .map(|&comp| {
+                                match &comp.comp_type {
+                                    ComponentType::Shapelet {
+                                        maj,
+                                        min,
+                                        pa,
+                                        coeffs,
+                                    } => {
+                                        let (s_pa, c_pa) = pa.sin_cos();
+                                        // The following code borrows from WODEN.
+                                        let x = shapelet_uvw.u * s_pa + shapelet_uvw.v * c_pa;
+                                        let y = shapelet_uvw.u * c_pa - shapelet_uvw.v * s_pa;
+                                        let const_x = maj * SQRT_FRAC_PI_SQ_2_LN_2 / SBF_DX;
+                                        let const_y = -min * SQRT_FRAC_PI_SQ_2_LN_2 / SBF_DX;
+                                        let x_pos = x * const_x + SBF_C;
+                                        let y_pos = y * const_y + SBF_C;
+                                        let x_pos_int = x_pos as usize;
+                                        let y_pos_int = y_pos as usize;
+
+                                        // Fold the shapelet basis functions
+                                        // (here, "coeffs") into a single
+                                        // envelope.
+                                        coeffs.iter().fold(
+                                            Complex::new(0.0, 0.0),
+                                            |envelope, sbf| {
+                                                let f_hat = sbf.coeff;
+
+                                                let x_low = SHAPELET_BASIS_VALUES
+                                                    [SBF_L * sbf.n1 + x_pos_int];
+                                                let x_high = SHAPELET_BASIS_VALUES
+                                                    [SBF_L * sbf.n1 + x_pos_int + 1];
+                                                let u_value = x_low
+                                                    + (x_high - x_low) * (x_pos - x_pos.floor());
+
+                                                let y_low = SHAPELET_BASIS_VALUES
+                                                    [SBF_L * sbf.n2 + y_pos_int];
+                                                let y_high = SHAPELET_BASIS_VALUES
+                                                    [SBF_L * sbf.n2 + y_pos_int + 1];
+                                                let v_value = y_low
+                                                    + (y_high - y_low) * (y_pos - y_pos.floor());
+
+                                                envelope
+                                                    + I_POWER_TABLE[(sbf.n1 + sbf.n2) % 4]
+                                                        * f_hat
+                                                        * u_value
+                                                        * v_value
+                                            },
+                                        )
+                                    }
+
+                                    // We only reach here if the function is being
+                                    // misused.
+                                    _ => unreachable!(),
+                                }
+                            })
+                            .collect();
+
+                        comp_fds
+                            .iter()
+                            .zip(lmns.iter())
+                            .zip(envelopes.into_iter())
+                            .for_each(|((comp_fd_c64, lmn), envelope)| {
+                                let arg =
+                                    TAU * (uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * (lmn.n - 1.0));
+                                let phase = cexp(arg) * envelope;
+                                // Multiply the component flux density by `phase`,
+                                // as these are both in double precision.
+                                let fd_times_phase_c64 = comp_fd_c64.clone() * phase;
+                                // Demote to single precision.
+                                let fd_times_phase_c32: Jones<f32> = fd_times_phase_c64.into();
+                                // Now that the Jones matrix is single precision, we
+                                // can multiply by the weight and add to the model
+                                // visibility.
+                                *model_vis += fd_times_phase_c32 * *weight;
+                            })
+                    });
+            },
+        );
 }
 
 #[cfg(test)]

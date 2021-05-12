@@ -26,6 +26,7 @@ use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 use log::{debug, info, trace, warn};
+use rayon::prelude::*;
 
 use crate::beam::Beam;
 use crate::calibrate::veto::veto_sources;
@@ -38,6 +39,7 @@ use mwa_hyperdrive_srclist::SourceListType;
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {
     /// Interface to the MWA data, and metadata on the input data.
+    // pub(crate) input_data: Box<dyn InputData>,
     pub(crate) input_data: Box<dyn InputData>,
 
     /// Beam struct.
@@ -97,14 +99,10 @@ pub struct CalibrateParams {
     /// flagged.
     pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
-    /// Given an unflagged baseline number, get the _unflagged_ tile number pair
-    /// that contribute to it. e.g. If tile 1 (i.e. the second tile) is flagged,
-    /// then the first unflagged baseline (i.e. 0) is _still_ between unflagged
-    /// tile 0 and tile 1.
-    ///
-    /// This exists to index unflagged arrays correctly.
-    // TODO: Surely this can be replaced with some clever maths?
-    pub(crate) unflagged_baseline_to_unflagged_tile_map: HashMap<usize, (usize, usize)>,
+    /// The unflagged [XyzBaseline]s of the observation \[metres\]. This does
+    /// not change over time; it is determined only by the telescope's tile
+    /// layout.
+    pub(crate) unflagged_baseline_xyz: Vec<XyzBaseline>,
 
     /// The maximum number of times to iterate when performing "MitchCal".
     pub(crate) max_iterations: usize,
@@ -146,8 +144,8 @@ impl CalibrateParams {
             time_res,
             freq_res,
             tile_flags,
-            ignore_metafits_flags,
-            dont_flag_fine_channels,
+            ignore_input_data_tile_flags,
+            ignore_input_data_fine_channels_flags,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
             max_iterations,
@@ -173,13 +171,7 @@ impl CalibrateParams {
         ) {
             // Valid input for reading raw data.
             (Some(meta), Some(gpuboxes), mwafs, None, None) => {
-                let input_data = RawData::new(
-                    &meta,
-                    &gpuboxes,
-                    mwafs.as_deref(),
-                    ignore_metafits_flags.unwrap_or_default(),
-                    dont_flag_fine_channels.unwrap_or_default(),
-                )?;
+                let input_data = RawData::new(&meta, &gpuboxes, mwafs.as_deref())?;
 
                 // Print some high-level information.
                 let obs_context = input_data.get_obs_context();
@@ -192,7 +184,6 @@ impl CalibrateParams {
                     Some(_) => info!("Using supplied mwaf flags"),
                     None => warn!("No mwaf flags files supplied"),
                 }
-
                 Box::new(input_data)
             }
 
@@ -234,11 +225,11 @@ impl CalibrateParams {
         };
 
         let beam: Box<dyn Beam> = {
-            if no_beam.unwrap_or_default() {
-                debug!("Not using a beam");
+            if no_beam {
+                info!("Not using a beam");
                 Box::new(beam::NoBeam)
             } else {
-                debug!("Using FEE beam");
+                info!("Using FEE beam");
                 if let Some(bf) = beam_file {
                     // Set up the beam struct from the specified beam file.
                     Box::new(beam::FEEBeam::new(&bf)?)
@@ -481,6 +472,15 @@ impl CalibrateParams {
         // let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
 
         let tile_baseline_maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
+        let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
+
+        let unflagged_baseline_xyz = obs_context
+            .baseline_xyz
+            .par_iter()
+            .enumerate()
+            .filter(|(baseline_index, _)| !flagged_baselines.contains(baseline_index))
+            .map(|(_, xyz)| xyz.clone())
+            .collect();
 
         // Make sure the thresholds are sensible.
         let mut stop_threshold = stop_thresh.unwrap_or(DEFAULT_STOP_THRESHOLD);
@@ -502,8 +502,7 @@ impl CalibrateParams {
             jones_cache: JonesCache::new(),
             tile_to_unflagged_baseline_map: tile_baseline_maps.tile_to_unflagged_baseline_map,
             unflagged_baseline_to_tile_map: tile_baseline_maps.unflagged_baseline_to_tile_map,
-            unflagged_baseline_to_unflagged_tile_map: tile_baseline_maps
-                .unflagged_baseline_to_unflagged_tile_map,
+            unflagged_baseline_xyz,
             max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),
             stop_threshold,
             min_threshold,
@@ -527,7 +526,6 @@ impl CalibrateParams {
 struct TileBaselineMaps {
     tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
     unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
-    unflagged_baseline_to_unflagged_tile_map: HashMap<usize, (usize, usize)>,
 }
 
 fn generate_tile_baseline_maps(
@@ -536,37 +534,78 @@ fn generate_tile_baseline_maps(
 ) -> TileBaselineMaps {
     let mut tile_to_unflagged_baseline_map = HashMap::new();
     let mut unflagged_baseline_to_tile_map = HashMap::new();
-    let mut unflagged_baseline_to_unflagged_tile_map = HashMap::new();
     let mut bl = 0;
-    let mut unflagged_tile1 = 0;
     for tile1 in 0..total_num_tiles {
         if tile_flags.contains(&tile1) {
             continue;
         }
-        let mut unflagged_tile2 = unflagged_tile1 + 1;
         for tile2 in tile1 + 1..total_num_tiles {
             if tile_flags.contains(&tile2) {
                 continue;
             }
             tile_to_unflagged_baseline_map.insert((tile1, tile2), bl);
             unflagged_baseline_to_tile_map.insert(bl, (tile1, tile2));
-            unflagged_baseline_to_unflagged_tile_map.insert(bl, (unflagged_tile1, unflagged_tile2));
             bl += 1;
-            unflagged_tile2 += 1;
         }
-        unflagged_tile1 += 1;
     }
 
     TileBaselineMaps {
         tile_to_unflagged_baseline_map,
         unflagged_baseline_to_tile_map,
-        unflagged_baseline_to_unflagged_tile_map,
     }
+}
+
+fn get_flagged_baselines_set(
+    total_num_tiles: usize,
+    tile_flags: &HashSet<usize>,
+) -> HashSet<usize> {
+    let mut flagged_baselines: HashSet<usize> = HashSet::new();
+    let mut bl = 0;
+    for tile1 in 0..total_num_tiles {
+        for tile2 in tile1 + 1..total_num_tiles {
+            if tile_flags.contains(&tile1) || tile_flags.contains(&tile2) {
+                flagged_baselines.insert(bl);
+            }
+            bl += 1;
+        }
+    }
+    flagged_baselines
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::tests::{full_obsids::*, reduced_obsids::*, *};
+
+    #[test]
+    fn test_generate_tile_baseline_maps() {
+        let total_num_tiles = 128;
+        let mut tile_flags = HashSet::new();
+        let maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
+        assert_eq!(maps.tile_to_unflagged_baseline_map[&(0, 1)], 0);
+        assert_eq!(maps.unflagged_baseline_to_tile_map[&0], (0, 1));
+
+        tile_flags.insert(1);
+        let maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
+        assert_eq!(maps.tile_to_unflagged_baseline_map[&(0, 2)], 0);
+        assert_eq!(maps.tile_to_unflagged_baseline_map[&(2, 3)], 126);
+        assert_eq!(maps.unflagged_baseline_to_tile_map[&0], (0, 2));
+        assert_eq!(maps.unflagged_baseline_to_tile_map[&126], (2, 3));
+    }
+
+    #[test]
+    fn test_get_flagged_baselines_set() {
+        let total_num_tiles = 128;
+        let mut tile_flags = HashSet::new();
+        let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
+        assert!(flagged_baselines.is_empty());
+
+        tile_flags.insert(127);
+        let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
+        assert!(flagged_baselines.contains(&126));
+        assert!(flagged_baselines.contains(&252));
+        assert!(flagged_baselines.contains(&8127));
+    }
 
     #[test]
     fn test_new_params() {
@@ -686,7 +725,6 @@ mod tests {
         assert!(params.tile_flags.contains(&3));
         assert_eq!(params.unflagged_baseline_to_tile_map.len(), 7750);
         assert_eq!(params.tile_to_unflagged_baseline_map.len(), 7750);
-        assert_eq!(params.unflagged_baseline_to_unflagged_tile_map.len(), 7750);
 
         assert_eq!(params.unflagged_baseline_to_tile_map[&0], (0, 4));
         assert_eq!(params.unflagged_baseline_to_tile_map[&1], (0, 5));
@@ -697,12 +735,6 @@ mod tests {
         assert_eq!(params.tile_to_unflagged_baseline_map[&(0, 5)], 1);
         assert_eq!(params.tile_to_unflagged_baseline_map[&(0, 6)], 2);
         assert_eq!(params.tile_to_unflagged_baseline_map[&(0, 7)], 3);
-
-        // This map does not care about which tiles are flagged.
-        assert_eq!(params.unflagged_baseline_to_unflagged_tile_map[&0], (0, 1));
-        assert_eq!(params.unflagged_baseline_to_unflagged_tile_map[&1], (0, 2));
-        assert_eq!(params.unflagged_baseline_to_unflagged_tile_map[&2], (0, 3));
-        assert_eq!(params.unflagged_baseline_to_unflagged_tile_map[&3], (0, 4));
     }
 
     // The following tests use full MWA data.

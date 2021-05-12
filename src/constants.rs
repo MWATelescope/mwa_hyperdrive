@@ -4,11 +4,9 @@
 
 /*!
 Useful constants.
-
-All constants *must* be double precision. `hyperdrive` should do as many
-calculations as possible in double precision before converting to a lower
-precision, if it is ever required.
  */
+
+use mwa_hyperdrive_core::c64;
 
 /// Sources with beam-attenuated flux densities less than this value are
 /// discarded from sky-model source lists.
@@ -36,7 +34,7 @@ pub(crate) const DEFAULT_STOP_THRESHOLD: f32 = 1e-8;
 pub(crate) const DEFAULT_MIN_THRESHOLD: f32 = 1e-5;
 
 /// The default calibration solutions filename to use.
-pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &'static str = "hyperdrive_solutions.bin";
+pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions.bin";
 
 /// Alan Levine's gains from PFB simulations. Taken from RTS source code.
 pub(crate) const LEVINE_GAINS_40KHZ: [f64; 32] = [
@@ -96,5 +94,8 @@ pub(crate) const HIFITIME_GPS_FACTOR: f64 =
 /// TAI epoch because that's well supported by hifitime, and hifitime converts an
 /// epoch to many formats including JD, and accounts for leap seconds.
 pub(crate) const MJD_TAI_EPOCH_DIFF: f64 = 1297728000.0;
+
+// sqrt(pi^2 / (2 ln(2)))
+pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.668223128318498282851579;
 
 pub(crate) use mwa_hyperdrive_core::constants::*;

@@ -15,7 +15,7 @@ members = [
 ]
 
 [profile.dev]
-opt-level = 2
+opt-level = 3
 
 [features]
 default = []
@@ -31,6 +31,7 @@ chrono = "0.4.19"
 crossbeam-channel = "0.5.0"
 crossbeam-utils = "0.8.3"
 fern = { version = "0.6.0", features = ["chrono"] }
+flate2 = "1.0.20"
 glob = "0.3.0"
 hifitime = "2.2.3"
 indicatif = "0.16.0"
@@ -57,7 +58,6 @@ mwa_hyperdrive_cuda =    { path = "cuda", optional = true }
 approx = { git = "https://github.com/brendanzab/approx", rev = "68aaa77", features = ["num-complex"] }
 assert_cmd = "1.0.1"
 criterion = "0.3.3"
-flate2 = "1.0.19"
 indoc = "1.0.3"
 ndarray = { version = "0.15.1", features = ["approx"] }
 serial_test = "0.5.1"

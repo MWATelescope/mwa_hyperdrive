@@ -28,6 +28,7 @@ pub(crate) fn sin(x: f64) -> f64 {
 pub(crate) fn cos(x: f64) -> f64 {
     x.cos()
 }
+
 /// Inverse tangent. y comes before x, like the C function.
 ///
 /// # Examples
@@ -37,6 +38,15 @@ pub(crate) fn cos(x: f64) -> f64 {
 // using it correctly.
 pub(crate) fn atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
+}
+
+/// Exponential.
+///
+/// # Examples
+///
+/// `assert_abs_diff_eq!(exp(1), 2.718281828);`
+pub(crate) fn exp(x: f64) -> f64 {
+    x.exp()
 }
 
 /// Complex exponential. The argument is assumed to be purely imaginary.
@@ -50,6 +60,28 @@ pub(crate) fn atan2(y: f64, x: f64) -> f64 {
 pub(crate) fn cexp(x: f64) -> c64 {
     let (s, c) = x.sin_cos();
     c64::new(c, s)
+}
+
+/// Convert a _cross-correlation_ baseline index into its constituent tile
+/// indices. Baseline 0 _is not_ between tile 0 and tile 0; it is between tile 0
+/// and tile 1.
+// Courtesy Brian Crosse.
+#[inline]
+pub(crate) fn cross_correlation_baseline_to_tiles(
+    total_num_tiles: usize,
+    baseline: usize,
+) -> (usize, usize) {
+    // This works if we include auto-correlation "baselines".
+    // let n = total_num_tiles as f64;
+    // let bl = baseline as f64;
+    // let tile1 = (-0.5 * (4.0 * n * (n + 1.0) - 8.0 * bl + 1.0).sqrt() + n + 0.5).floor();
+    // let tile2 = bl - tile1 * (n - (tile1 + 1.0) / 2.0);
+
+    let n = (total_num_tiles - 1) as f64;
+    let bl = baseline as f64;
+    let tile1 = (-0.5 * (4.0 * n * (n + 1.0) - 8.0 * bl + 1.0).sqrt() + n + 0.5).floor();
+    let tile2 = bl - tile1 * (n - (tile1 + 1.0) / 2.0) + 1.0;
+    (tile1 as usize, tile2 as usize)
 }
 
 #[cfg(test)]
@@ -77,5 +109,68 @@ mod tests {
     #[test]
     fn test_cexp() {
         assert_abs_diff_eq!(cexp(PI), c64::new(-1.0, 0.0));
+    }
+
+    #[test]
+    fn test_cross_correlation_baseline_to_tiles() {
+        // Let's pretend we have 128 tiles, therefore 8128 baselines. Check that
+        // our function does the right thing.
+        let n = 128;
+        let mut bl_index = 0;
+        for tile1 in 0..n {
+            for tile2 in tile1 + 1..n {
+                let (t1, t2) = cross_correlation_baseline_to_tiles(n, bl_index);
+                assert_eq!(
+                    tile1, t1,
+                    "Expected tile1 = {}, got {}. bl = {}",
+                    tile1, t1, bl_index
+                );
+                assert_eq!(
+                    tile2, t2,
+                    "Expected tile2 = {}, got {}. bl = {}",
+                    tile2, t2, bl_index
+                );
+                bl_index += 1;
+            }
+        }
+
+        // Try with a different number of tiles.
+        let n = 126;
+        let mut bl_index = 0;
+        for tile1 in 0..n {
+            for tile2 in tile1 + 1..n {
+                let (t1, t2) = cross_correlation_baseline_to_tiles(n, bl_index);
+                assert_eq!(
+                    tile1, t1,
+                    "Expected tile1 = {}, got {}. bl = {}",
+                    tile1, t1, bl_index
+                );
+                assert_eq!(
+                    tile2, t2,
+                    "Expected tile2 = {}, got {}. bl = {}",
+                    tile2, t2, bl_index
+                );
+                bl_index += 1;
+            }
+        }
+
+        let n = 256;
+        let mut bl_index = 0;
+        for tile1 in 0..n {
+            for tile2 in tile1 + 1..n {
+                let (t1, t2) = cross_correlation_baseline_to_tiles(n, bl_index);
+                assert_eq!(
+                    tile1, t1,
+                    "Expected tile1 = {}, got {}. bl = {}",
+                    tile1, t1, bl_index
+                );
+                assert_eq!(
+                    tile2, t2,
+                    "Expected tile2 = {}, got {}. bl = {}",
+                    tile2, t2, bl_index
+                );
+                bl_index += 1;
+            }
+        }
     }
 }

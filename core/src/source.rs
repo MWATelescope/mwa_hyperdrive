@@ -76,6 +76,30 @@ impl SourceComponent {
     pub fn estimate_at_freq(&self, freq_hz: f64) -> Result<FluxDensity, EstimateError> {
         self.flux_type.estimate_at_freq(freq_hz)
     }
+
+    /// Is this component a point source?
+    pub fn is_point(&self) -> bool {
+        match self.comp_type {
+            ComponentType::Point => true,
+            _ => false,
+        }
+    }
+
+    /// Is this component a gaussian source?
+    pub fn is_gaussian(&self) -> bool {
+        match self.comp_type {
+            ComponentType::Gaussian { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Is this component a shapelet source?
+    pub fn is_shapelet(&self) -> bool {
+        match self.comp_type {
+            ComponentType::Shapelet { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 /// Source types supported by hyperdrive.
@@ -107,9 +131,29 @@ pub enum ComponentType {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+impl ComponentType {
+    // The following functions save the caller from using pattern matching to
+    // determine the enum variant.
+
+    /// Is this a point source?
+    pub fn is_point(&self) -> bool {
+        matches!(self, Self::Point)
+    }
+
+    /// Is this a gaussian source?
+    pub fn is_gaussian(&self) -> bool {
+        matches!(self, Self::Gaussian { .. })
+    }
+
+    /// Is this a shapelet source?
+    pub fn is_shapelet(&self) -> bool {
+        matches!(self, Self::Shapelet { .. })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShapeletCoeff {
-    pub n1: u8,
-    pub n2: u8,
+    pub n1: usize,
+    pub n2: usize,
     pub coeff: f64,
 }
