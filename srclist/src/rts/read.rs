@@ -2,21 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Parsing of RTS source lists.
-
-RTS sources always have a "base source", which can be thought of as a
-non-optional component. Coordinates are hour angle and declination, which have
-units of decimal hours (i.e. 0 - 24) and degrees, respectively.
-
-Gaussian and shapelet sizes are specified in arcseconds, whereas position angles
-are in degrees. All frequencies are in Hz, and all flux densities are in Jy.
-
-All flux densities are specified in the "list" style, and all have units of Jy.
-
-Keywords like SOURCE, COMPONENT, POINT etc. must be at the start of a line (i.e.
-no preceeding space).
- */
+//! Parsing of RTS source lists.
+//!
+//! RTS sources always have a "base source", which can be thought of as a
+//! non-optional component. Coordinates are hour angle and declination, which
+//! have units of decimal hours (i.e. 0 - 24) and degrees, respectively.
+//!
+//! Gaussian and shapelet sizes are specified in arcminutes, whereas position
+//! angles are in degrees. All frequencies are in Hz, and all flux densities are
+//! in Jy.
+//!
+//! All flux densities are specified in the "list" style, and all have units of
+//! Jy.
+//!
+//! Keywords like SOURCE, COMPONENT, POINT etc. must be at the start of a line
+//! (i.e. no preceeding space).
 
 use log::warn;
 
@@ -214,13 +214,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListRtsError::IncompleteGaussianLine(line_num).into())
                     }
                 };
-                let maj_arcsec = match items.next() {
+                let maj_arcmin = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteGaussianLine(line_num).into())
                     }
                 };
-                let min_arcsec = match items.next() {
+                let min_arcmin = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteGaussianLine(line_num).into())
@@ -239,8 +239,8 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 let comp_type = ComponentType::Gaussian {
-                    maj: maj_arcsec.to_radians() / 3600.0,
-                    min: min_arcsec.to_radians() / 3600.0,
+                    maj: maj_arcmin.to_radians() / 60.0,
+                    min: min_arcmin.to_radians() / 60.0,
                     pa: position_angle.to_radians(),
                 };
 
@@ -270,13 +270,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListRtsError::IncompleteShapelet2Line(line_num).into())
                     }
                 };
-                let maj_arcsec = match items.next() {
+                let maj_arcmin = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteShapelet2Line(line_num).into())
                     }
                 };
-                let min_arcsec = match items.next() {
+                let min_arcmin = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteShapelet2Line(line_num).into())
@@ -295,8 +295,8 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 let comp_type = ComponentType::Shapelet {
-                    maj: maj_arcsec.to_radians() / 3600.0,
-                    min: min_arcsec.to_radians() / 3600.0,
+                    maj: maj_arcmin.to_radians() / 60.0,
+                    min: min_arcmin.to_radians() / 60.0,
                     pa: position_angle.to_radians(),
                     coeffs: vec![],
                 };
@@ -1083,5 +1083,57 @@ mod tests {
             err_message,
             "Source VLA_ForA: The sum of all Stokes Q flux densities was negative (-1)"
         );
+    }
+
+    #[test]
+    fn units() {
+        // The first component is taken from one of Jack's source lists; dunno
+        // why the major (3.75) is smaller than the minor (4.0)! I suppose it
+        // doesn't matter if the PA is right...
+        let mut sl = Cursor::new(indoc! {"
+        SOURCE VLA_ForA 3.40182 -37.5551
+        FREQ 185.0e+6 209.81459 0 0 0
+        SHAPELET2 68.70984356 3.75 4.0
+        COEFF 0.0 0.0 0.099731291104
+        COMPONENT 3.40200 -37.6
+        GAUSSIAN 90 1.0 0.5
+        FREQ 180e+6 0.5 0 0 0
+        FREQ 170e+6 1.0 0 0.2 0
+        ENDCOMPONENT
+        ENDSOURCE
+        "});
+        let result = parse_source_list(&mut sl);
+        assert!(result.is_ok(), "{:?}", result);
+        let sl = result.unwrap();
+        let source = &sl["VLA_ForA"];
+
+        match &source.components[0].comp_type {
+            ComponentType::Shapelet {
+                maj,
+                min,
+                pa,
+                coeffs,
+            } => {
+                assert_abs_diff_eq!(*maj, 3.75_f64.to_radians() / 60.0);
+                assert_abs_diff_eq!(*min, 4.0_f64.to_radians() / 60.0);
+                assert_abs_diff_eq!(*pa, 68.70984356_f64.to_radians());
+                assert_eq!(coeffs.len(), 1);
+                assert_eq!(coeffs[0].n1, 0);
+                assert_eq!(coeffs[0].n2, 0);
+                assert_abs_diff_eq!(coeffs[0].coeff, 0.099731291104);
+            }
+
+            _ => unreachable!(),
+        }
+
+        match &source.components[1].comp_type {
+            ComponentType::Gaussian { maj, min, pa } => {
+                assert_abs_diff_eq!(*maj, 1.0_f64.to_radians() / 60.0);
+                assert_abs_diff_eq!(*min, 0.5_f64.to_radians() / 60.0);
+                assert_abs_diff_eq!(*pa, 90_f64.to_radians());
+            }
+
+            _ => unreachable!(),
+        }
     }
 }

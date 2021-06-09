@@ -2,14 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to handle hyperdrive source list files.
-
-All frequencies are in Hz. All flux densities are in Jy. All Gaussian and
-Shapelet sizes are in arcsec, but their position angles are in degrees.
-
-RA and Dec are in degrees in the J2000 epoch.
-*/
+//! Code to handle hyperdrive source list files.
+//!
+//! All frequencies are in Hz. All flux densities are in Jy. All Gaussian and
+//! Shapelet sizes are in arcsec, but their position angles are in degrees.
+//!
+//! RA and Dec are in degrees in the J2000 epoch.
 
 pub mod read;
 pub mod write;

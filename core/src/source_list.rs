@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code surrounding the `BTreeMap` used to contain all sky-model sources and their
-components.
- */
+//! Code surrounding the `BTreeMap` used to contain all sky-model sources and
+//! their components.
 
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
@@ -33,9 +31,8 @@ impl SourceList {
     /// with sources and their components.
     pub fn get_azel(&self, lst_rad: f64, latitude_rad: f64) -> Vec<AzEl> {
         self.iter()
-            // For each source, get all of its component's (Az, ZA) coordinates.
-            .map(|(_, src)| &src.components)
-            .flatten()
+            // For each source, get all of its component's (Az, El) coordinates.
+            .flat_map(|(_, src)| &src.components)
             .map(|comp| comp.radec.to_hadec(lst_rad).to_azel(latitude_rad))
             .collect()
     }
@@ -56,9 +53,7 @@ impl SourceList {
     /// with sources and their components.
     pub fn get_azel_parallel(&self, lst_rad: f64, latitude_rad: f64) -> Vec<AzEl> {
         self.par_iter()
-            // For each source, get all of its component's (Az, ZA) coordinates.
-            .map(|(_, src)| &src.components)
-            .flatten()
+            .flat_map(|(_, src)| &src.components)
             .map(|comp| comp.radec.to_hadec(lst_rad).to_azel(latitude_rad))
             .collect()
     }
@@ -72,21 +67,19 @@ impl SourceList {
     }
 
     /// Get the LMN coordinates for all components of all sources.
-    pub fn get_lmns(&self, pointing: &RADec) -> Vec<LMN> {
+    pub fn get_lmns(&self, phase_centre: &RADec) -> Vec<LMN> {
         self.iter()
-            .map(|(_, src)| &src.components)
-            .flatten()
-            .map(|comp| comp.radec.to_lmn(&pointing))
+            .flat_map(|(_, src)| &src.components)
+            .map(|comp| comp.radec.to_lmn(phase_centre))
             .collect()
     }
 
     /// Get the LMN coordinates for all components of all sources. The sources are iterated
     /// in parallel.
-    pub fn get_lmns_parallel(&self, pointing: &RADec) -> Vec<LMN> {
+    pub fn get_lmns_parallel(&self, phase_centre: &RADec) -> Vec<LMN> {
         self.par_iter()
-            .map(|(_, src)| &src.components)
-            .flatten()
-            .map(|comp| comp.radec.to_lmn(&pointing))
+            .flat_map(|(_, src)| &src.components)
+            .map(|comp| comp.radec.to_lmn(phase_centre))
             .collect()
     }
 }
@@ -122,9 +115,10 @@ mod tests {
     use std::f64::consts::*;
 
     #[test]
-    // Test that the (Az, ZA) coordinates retrieved from the `.get_azza()`
-    // method of `SourceList` are correct and always in the same order.
-    fn test_get_azza_mwa() {
+    // Test that the (Az, El) coordinates retrieved from the
+    // `.get_azel_mwa_parallel()` method of `SourceList` are correct and always
+    // in the same order.
+    fn test_get_azel_mwa() {
         let mut sl = SourceList::new();
         // Use a common component. Only the `radec` part needs to be modified.
         let comp = SourceComponent {

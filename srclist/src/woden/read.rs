@@ -2,32 +2,32 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Parsing of WODEN source lists.
-
-WODEN source lists are similar to RTS source lists, but a little more modern.
-There is no "base source", and point-source-component types are explicit. SOURCE
-lines include a count of how many of each component type is associated with the
-source.
-
-Coordinates are hour angle and declination, which have units of decimal hours
-(i.e. 0 - 24) and degrees, respectively.
-
-Gaussian and shapelet sizes are specified in arcminutes, whereas position angles
-are in degrees. All frequencies are in Hz.
-
-All flux densities are specified in the "list" style, and all have units of Jy.
-
-Keywords like SOURCE, COMPONENT, POINT etc. must be at the start of a line (i.e.
-no preceeding space). COMPONENT must be followed by one of POINT, GAUSSIAN or
-SHAPELET. Each component will have a corresponding GPARAMS or SPARAMS (nothing
-needed for a point source).
- */
+//! Parsing of WODEN source lists.
+//!
+//! WODEN source lists are similar to RTS source lists, but a little more modern.
+//! There is no "base source", and point-source-component types are explicit. SOURCE
+//! lines include a count of how many of each component type is associated with the
+//! source.
+//!
+//! Coordinates are hour angle and declination, which have units of decimal hours
+//! (i.e. 0 - 24) and degrees, respectively.
+//!
+//! Gaussian and shapelet sizes are specified in arcminutes, whereas position angles
+//! are in degrees. All frequencies are in Hz.
+//!
+//! All flux densities are specified as power laws, and all have units of Jy. If
+//! a flux density is listed as FREQ, then it uses a default spectral index. The
+//! alternative is LINEAR, which lists the SI. There is only one flux density per component.
+//!
+//! Keywords like SOURCE, COMPONENT, POINT etc. must be at the start of a line (i.e.
+//! no preceeding space). COMPONENT must be followed by one of POINT, GAUSSIAN or
+//! SHAPELET. Each component will have a corresponding GPARAMS or SPARAMS (nothing
+//! needed for a point source).
 
 use std::convert::TryInto;
 
 use log::warn;
-use mwa_hyperdrive_core::constants::DH2R;
+use mwa_hyperdrive_core::constants::{DEFAULT_SPEC_INDEX, DH2R};
 
 use super::*;
 
@@ -265,7 +265,10 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     // Assume the base source is a point source. If we find
                     // component type information, we can overwrite this.
                     comp_type,
-                    flux_type: FluxDensityType::List { fds: vec![] },
+                    flux_type: FluxDensityType::PowerLaw {
+                        fd: FluxDensity::default(),
+                        si: 0.0,
+                    },
                 });
 
                 in_component = true;
@@ -325,16 +328,104 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     );
                 }
 
-                let fd = FluxDensity {
-                    freq,
-                    i: stokes_i,
-                    q: stokes_q,
-                    u: stokes_u,
-                    v: stokes_v,
+                match components.iter_mut().last().map(|c| &mut c.flux_type) {
+                    Some(FluxDensityType::PowerLaw { fd, si }) => {
+                        // If the frequency is set (i.e. not 0), the ignore
+                        // additional flux density lines for this component.
+                        if fd.freq > f64::EPSILON {
+                            warn!("Ignoring FREQ line {}", line_num);
+                        } else {
+                            *fd = FluxDensity {
+                                freq,
+                                i: stokes_i,
+                                q: stokes_q,
+                                u: stokes_u,
+                                v: stokes_v,
+                            };
+                            *si = DEFAULT_SPEC_INDEX;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+
+            // Flux density line for a power law.
+            Some("LINEAR") => {
+                if !in_source {
+                    return Err(ReadSourceListCommonError::OutsideSource {
+                        line_num,
+                        keyword: "LINEAR",
+                    }
+                    .into());
+                } else if !in_component {
+                    return Err(ReadSourceListCommonError::OutsideComponent {
+                        line_num,
+                        keyword: "LINEAR",
+                    }
+                    .into());
+                }
+
+                // LINEAR lines must have at least 7 elements (including LINEAR).
+                let freq = match items.next() {
+                    Some(f) => parse_float(f, line_num)?,
+                    None => {
+                        return Err(ReadSourceListCommonError::IncompleteLinearLine(line_num).into())
+                    }
                 };
+                let stokes_i = match items.next() {
+                    Some(f) => parse_float(f, line_num)?,
+                    None => {
+                        return Err(ReadSourceListCommonError::IncompleteLinearLine(line_num).into())
+                    }
+                };
+                let stokes_q = match items.next() {
+                    Some(f) => parse_float(f, line_num)?,
+                    None => {
+                        return Err(ReadSourceListCommonError::IncompleteLinearLine(line_num).into())
+                    }
+                };
+                let stokes_u = match items.next() {
+                    Some(f) => parse_float(f, line_num)?,
+                    None => {
+                        return Err(ReadSourceListCommonError::IncompleteLinearLine(line_num).into())
+                    }
+                };
+                let stokes_v = match items.next() {
+                    Some(f) => parse_float(f, line_num)?,
+                    None => {
+                        return Err(ReadSourceListCommonError::IncompleteLinearLine(line_num).into())
+                    }
+                };
+                let spectral_index = match items.next() {
+                    Some(f) => parse_float(f, line_num)?,
+                    None => {
+                        return Err(ReadSourceListCommonError::IncompleteLinearLine(line_num).into())
+                    }
+                };
+                if items.next().is_some() {
+                    warn!(
+                        "Source list line {}: Ignoring trailing contents after spectral index",
+                        line_num
+                    );
+                }
 
                 match components.iter_mut().last().map(|c| &mut c.flux_type) {
-                    Some(FluxDensityType::List { fds }) => fds.push(fd),
+                    Some(FluxDensityType::PowerLaw { fd, si }) => {
+                        // If the frequency is set (i.e. not 0), the ignore
+                        // additional flux density lines for this component.
+                        if fd.freq > f64::EPSILON {
+                            warn!("Ignoring LINEAR line {}", line_num);
+                        } else {
+                            *fd = FluxDensity {
+                                freq,
+                                i: stokes_i,
+                                q: stokes_q,
+                                u: stokes_u,
+                                v: stokes_v,
+                            };
+                            *si = spectral_index;
+                        }
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -536,18 +627,16 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 // Check that the last component struct added actually has flux
-                // densities. WODEN source lists can only have the "list" type.
+                // densities.
                 match &mut components.iter_mut().last().unwrap().flux_type {
-                    FluxDensityType::List { fds } => {
-                        if fds.is_empty() {
+                    FluxDensityType::PowerLaw { fd, si } => {
+                        if fd.i.abs() < f64::EPSILON
+                            && fd.q.abs() < f64::EPSILON
+                            && fd.u.abs() < f64::EPSILON
+                            && fd.v.abs() < f64::EPSILON
+                            && si.abs() < f64::EPSILON
+                        {
                             return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
-                        } else {
-                            // Sort the existing flux densities by frequency.
-                            fds.sort_unstable_by(|&a, &b| {
-                                a.freq.partial_cmp(&b.freq).unwrap_or_else(|| {
-                                    panic!("Couldn't compare {} to {}", a.freq, b.freq)
-                                })
-                            });
                         }
                     }
                     _ => unreachable!(),
@@ -754,16 +843,17 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
         assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
+            FluxDensityType::PowerLaw { .. } => true,
             _ => false,
         });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        let (fd, si) = match &comp.flux_type {
+            FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 180e6);
-        assert_abs_diff_eq!(fds[0].i, 10.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
+        assert_abs_diff_eq!(fd.freq, 180e6);
+        assert_abs_diff_eq!(fd.i, 10.0);
+        assert_abs_diff_eq!(fd.q, 0.0);
+        assert_abs_diff_eq!(*si, -0.8);
 
         assert!(match &comp.comp_type {
             ComponentType::Point => true,
@@ -794,22 +884,61 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
         assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
+            FluxDensityType::PowerLaw { .. } => true,
             _ => false,
         });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        let (fd, si) = match &comp.flux_type {
+            FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
         };
 
-        // Note that 180 MHz isn't the first FREQ specified; the list has been
-        // sorted.
-        assert_abs_diff_eq!(fds[0].freq, 170e6);
-        assert_abs_diff_eq!(fds[0].i, 8.0);
-        assert_abs_diff_eq!(fds[0].v, 0.2);
-        assert_abs_diff_eq!(fds[1].freq, 180e6);
-        assert_abs_diff_eq!(fds[1].i, 10.0);
-        assert_abs_diff_eq!(fds[1].q, 0.0);
+        // Note that the 170 MHz line isn't included; only one flux density can
+        // be associated with a component.
+        assert_abs_diff_eq!(fd.freq, 180e6);
+        assert_abs_diff_eq!(fd.i, 10.0);
+        assert_abs_diff_eq!(fd.q, 0.0);
+        assert_abs_diff_eq!(*si, -0.8);
+
+        assert!(match &comp.comp_type {
+            ComponentType::Point => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn parse_point_source3() {
+        let mut sl = Cursor::new(indoc! {"
+        SOURCE point_source P 1 G 0 S 0 0
+        COMPONENT POINT 3.378 -37.2
+        LINEAR 1.7e+08 8.0 0 0 0.2 -0.5
+        ENDCOMPONENT
+        ENDSOURCE
+        "});
+
+        let result = parse_source_list(&mut sl);
+        assert!(result.is_ok(), "{:?}", result);
+        let sl = result.unwrap();
+        assert_eq!(sl.len(), 1);
+
+        assert!(sl.contains_key("point_source"));
+        let s = sl.get("point_source").unwrap();
+        assert_eq!(s.components.len(), 1);
+        let comp = &s.components[0];
+        assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
+        assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
+        assert!(match comp.flux_type {
+            FluxDensityType::PowerLaw { .. } => true,
+            _ => false,
+        });
+        let (fd, si) = match &comp.flux_type {
+            FluxDensityType::PowerLaw { fd, si } => (fd, si),
+            _ => unreachable!(),
+        };
+
+        assert_abs_diff_eq!(fd.freq, 170e6);
+        assert_abs_diff_eq!(fd.i, 8.0);
+        assert_abs_diff_eq!(fd.v, 0.2);
+        assert_abs_diff_eq!(*si, -0.5);
 
         assert!(match &comp.comp_type {
             ComponentType::Point => true,
@@ -840,16 +969,17 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
         assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
+            FluxDensityType::PowerLaw { .. } => true,
             _ => false,
         });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        let (fd, si) = match &comp.flux_type {
+            FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 180e6);
-        assert_abs_diff_eq!(fds[0].i, 10.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
+        assert_abs_diff_eq!(fd.freq, 180e6);
+        assert_abs_diff_eq!(fd.i, 10.0);
+        assert_abs_diff_eq!(fd.q, 0.0);
+        assert_abs_diff_eq!(*si, -0.8);
 
         assert!(match &comp.comp_type {
             ComponentType::Gaussian { .. } => true,
@@ -889,16 +1019,17 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
         assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
+            FluxDensityType::PowerLaw { .. } => true,
             _ => false,
         });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        let (fd, si) = match &comp.flux_type {
+            FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 180e6);
-        assert_abs_diff_eq!(fds[0].i, 10.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
+        assert_abs_diff_eq!(fd.freq, 180e6);
+        assert_abs_diff_eq!(fd.i, 10.0);
+        assert_abs_diff_eq!(fd.q, 0.0);
+        assert_abs_diff_eq!(*si, -0.8);
 
         assert!(match &comp.comp_type {
             ComponentType::Shapelet { .. } => true,

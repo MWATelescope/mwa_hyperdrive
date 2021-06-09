@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Structures to describe sky-model sources and their components.
- */
+//! Structures to describe sky-model sources and their components.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,19 +20,19 @@ pub struct Source {
 
 impl Source {
     /// Calculate the (l,m,n) coordinates of each component's (RA,Dec).
-    pub fn get_lmn(&self, pointing: &RADec) -> Vec<LMN> {
+    pub fn get_lmn(&self, phase_centre: &RADec) -> Vec<LMN> {
         self.components
             .iter()
-            .map(|comp| comp.radec.to_lmn(&pointing))
+            .map(|comp| comp.radec.to_lmn(phase_centre))
             .collect()
     }
 
     /// Calculate the (l,m,n) coordinates of each component's (RA,Dec). The
     /// calculation is done in parallel.
-    pub fn get_lmn_parallel(&self, pointing: &RADec) -> Vec<LMN> {
+    pub fn get_lmn_parallel(&self, phase_centre: &RADec) -> Vec<LMN> {
         self.components
             .par_iter()
-            .map(|comp| comp.radec.to_lmn(&pointing))
+            .map(|comp| comp.radec.to_lmn(phase_centre))
             .collect()
     }
 
@@ -79,26 +77,17 @@ impl SourceComponent {
 
     /// Is this component a point source?
     pub fn is_point(&self) -> bool {
-        match self.comp_type {
-            ComponentType::Point => true,
-            _ => false,
-        }
+        matches!(self.comp_type, ComponentType::Point)
     }
 
     /// Is this component a gaussian source?
     pub fn is_gaussian(&self) -> bool {
-        match self.comp_type {
-            ComponentType::Gaussian { .. } => true,
-            _ => false,
-        }
+        matches!(self.comp_type, ComponentType::Gaussian { .. })
     }
 
     /// Is this component a shapelet source?
     pub fn is_shapelet(&self) -> bool {
-        match self.comp_type {
-            ComponentType::Shapelet { .. } => true,
-            _ => false,
-        }
+        matches!(self.comp_type, ComponentType::Shapelet { .. })
     }
 }
 

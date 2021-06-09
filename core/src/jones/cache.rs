@@ -2,14 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to cache Jones matrices.
-
-Because it's very likely that the Jones matrices derived from different tiles
-are exactly the same (especially if we ignore the positions of the tiles), the
-code here exists to cache Jones matrices given the parameters that would be
-given to beam code.
- */
+//! Code to cache Jones matrices.
+//!
+//! Because it's very likely that the Jones matrices derived from different
+//! tiles are exactly the same (especially if we ignore the positions of the
+//! tiles), the code here exists to cache Jones matrices given the parameters
+//! that would be given to beam code.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

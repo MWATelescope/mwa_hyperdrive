@@ -2,12 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Handle (x,y,z) coordinates of an antenna (a.k.a. station).
- */
+//! Handle (x,y,z) coordinates of an antenna (a.k.a. tile or station).
+//!
+//! This coordinate system is discussed at length in Interferometry and
+//! Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
+//! Relationships, Polarimetry, and the Measurement Equation.
 
 use super::enh::ENH;
-use crate::constants::MWA_LAT_RAD;
+use crate::{constants::MWA_LAT_RAD, HADec, UVW};
 
 /// The (x,y,z) coordinates of an antenna (a.k.a. tile or station). All units
 /// are in metres.
@@ -15,7 +17,7 @@ use crate::constants::MWA_LAT_RAD;
 /// This coordinate system is discussed at length in Interferometry and
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 /// Relationships, Polarimetry, and the Measurement Equation.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, Default)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct XYZ {
     /// x-coordinate \[meters\]
@@ -77,7 +79,7 @@ impl XYZ {
         let mut diffs = Vec::with_capacity(n_baselines);
         for i in 0..n_tiles {
             for j in i + 1..n_tiles {
-                diffs.push(xyz[i] - xyz[j]);
+                diffs.push(xyz[i].clone() - &xyz[j]);
             }
         }
         diffs
@@ -119,6 +121,44 @@ impl XYZ {
     pub fn get_baselines_mwalib(context: &mwalib::MetafitsContext) -> Vec<XyzBaseline> {
         Self::get_baselines(&Self::get_tiles_mwalib(context))
     }
+
+    // This is what cotter does to precessed XYZ tile positions.
+    // TODO: Check that this matches doing what we used to do (i.e. XYZ -> XyzBaseline -> UVW).
+    pub fn to_uvw(xyzs: &[Self], phase_centre: &HADec) -> Vec<UVW> {
+        let (s_ha, c_ha) = phase_centre.ha.sin_cos();
+        let (s_dec, c_dec) = phase_centre.dec.sin_cos();
+
+        // Get a UVW for each tile.
+        let tile_uvws: Vec<UVW> = xyzs
+            .iter()
+            .map(|xyz| {
+                let bl = XyzBaseline {
+                    x: xyz.x,
+                    y: xyz.y,
+                    z: xyz.z,
+                };
+                UVW::from_xyz_inner(&bl, s_ha, c_ha, s_dec, c_dec)
+            })
+            .collect();
+
+        // Take the difference of every pair of UVWs.
+        let num_tiles = xyzs.len();
+        let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+        let mut bl_uvws = Vec::with_capacity(num_baselines);
+        for i in 0..num_tiles {
+            for j in i + 1..num_tiles {
+                let tile_1 = tile_uvws[i];
+                let tile_2 = tile_uvws[j];
+                let uvw_bl = UVW {
+                    u: tile_1.u - tile_2.u,
+                    v: tile_1.v - tile_2.v,
+                    w: tile_1.w - tile_2.w,
+                };
+                bl_uvws.push(uvw_bl);
+            }
+        }
+        bl_uvws
+    }
 }
 
 impl std::ops::Sub<XYZ> for XYZ {
@@ -133,12 +173,24 @@ impl std::ops::Sub<XYZ> for XYZ {
     }
 }
 
+impl std::ops::Sub<&XYZ> for XYZ {
+    type Output = XyzBaseline;
+
+    fn sub(self, rhs: &Self) -> XyzBaseline {
+        XyzBaseline {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            z: self.z - rhs.z,
+        }
+    }
+}
+
 /// The (x,y,z) coordinates of a baseline. All units are in metres.
 ///
 /// This coordinate system is discussed at length in Interferometry and
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 /// Relationships, Polarimetry, and the Measurement Equation.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct XyzBaseline {
     /// x-coordinate \[meters\]
     pub x: f64,

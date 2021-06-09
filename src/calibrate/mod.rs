@@ -2,15 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to handle calibration.
- */
+//! Code to handle calibration.
 
 pub mod args;
 mod di;
 mod error;
+mod model;
 pub(crate) mod params;
-mod predict;
 mod solutions;
 mod veto;
 

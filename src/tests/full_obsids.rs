@@ -2,20 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-This module provides functions for tests against full observations.
-
-The required gpubox and/or mwaf files need to be in hyperdrive's "tests/{obsid}"
-directory. These could be symlinked from somewhere else for convenience. Because
-this data should not be expected to always be there (it occupies a large
-volume), any tests using these functions should have a
-
-#[ignore]
-
-annotation on the test function. "Ignored" tests are run with something like:
-
-`cargo test -- --ignored`
- */
+//! This module provides functions for tests against full observations.
+//!
+//! The required gpubox and/or mwaf files need to be in hyperdrive's
+//! "tests/{obsid}" directory. These could be symlinked from somewhere else for
+//! convenience. Because this data should not be expected to always be there (it
+//! occupies a large volume), any tests using these functions should have a
+//!
+//! #[ignore]
+//!
+//! annotation on the test function. "Ignored" tests are run with something
+//! like:
+//!
+//! `cargo test -- --ignored`
 
 use super::*;
 

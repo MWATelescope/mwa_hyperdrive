@@ -2,9 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Handle East, North and Height coordinates (typically associated with MWA tiles).
- */
+//! Handle East, North and Height coordinates (typically associated with MWA
+//! tiles).
 
 use super::xyz::XYZ;
 use crate::constants::*;

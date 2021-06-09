@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Some helper mathematics.
- */
+//! Some helper mathematics.
 
 #![allow(dead_code)]
 
@@ -16,6 +14,7 @@ use crate::c64;
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(sin(FRAC_PI_6), 0.5);`
+#[inline]
 pub(crate) fn sin(x: f64) -> f64 {
     x.sin()
 }
@@ -25,6 +24,7 @@ pub(crate) fn sin(x: f64) -> f64 {
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(cos(FRAC_PI_3), 0.5);`
+#[inline]
 pub(crate) fn cos(x: f64) -> f64 {
     x.cos()
 }
@@ -36,6 +36,7 @@ pub(crate) fn cos(x: f64) -> f64 {
 /// `assert_abs_diff_eq!(atan2(1, -1), 3.0 / 4.0 * PI);`
 // I don't like Rust's atan2. This test helps me sleep at night knowing I'm
 // using it correctly.
+#[inline]
 pub(crate) fn atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
 }
@@ -45,6 +46,7 @@ pub(crate) fn atan2(y: f64, x: f64) -> f64 {
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(exp(1), 2.718281828);`
+#[inline]
 pub(crate) fn exp(x: f64) -> f64 {
     x.exp()
 }
@@ -57,6 +59,7 @@ pub(crate) fn exp(x: f64) -> f64 {
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(cexp(PI), c64::new(-1.0, 0.0));`
+#[inline]
 pub(crate) fn cexp(x: f64) -> c64 {
     let (s, c) = x.sin_cos();
     c64::new(c, s)
@@ -82,6 +85,14 @@ pub(crate) fn cross_correlation_baseline_to_tiles(
     let tile1 = (-0.5 * (4.0 * n * (n + 1.0) - 8.0 * bl + 1.0).sqrt() + n + 0.5).floor();
     let tile2 = bl - tile1 * (n - (tile1 + 1.0) / 2.0) + 1.0;
     (tile1 as usize, tile2 as usize)
+}
+
+/// From the number of baselines, get the number of tiles.
+// From the definition of how many baselines there are in an array of N tiles,
+// this is just the solved quadratic.
+#[inline]
+pub(crate) fn num_tiles_from_num_baselines(num_baselines: usize) -> usize {
+    (1 + num::integer::Roots::sqrt(&(1 + 8 * num_baselines))) / 2
 }
 
 #[cfg(test)]
@@ -172,5 +183,12 @@ mod tests {
                 bl_index += 1;
             }
         }
+    }
+
+    #[test]
+    fn test_num_tiles_from_num_baselines() {
+        assert_eq!(num_tiles_from_num_baselines(8128), 128);
+        assert_eq!(num_tiles_from_num_baselines(8001), 127);
+        assert_eq!(num_tiles_from_num_baselines(15), 6);
     }
 }

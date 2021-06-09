@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+//! Code to be shared between hyperdrive-related binaries.
+
 pub(crate) fn setup_logging(level: u8) -> Result<(), fern::InitError> {
     let high_level_messages = fern::Dispatch::new().format(|out, message, record| {
         out.finish(format_args!(

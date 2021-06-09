@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Writing "André Offringa"-style text source lists.
- */
+//! Writing "André Offringa"-style text source lists.
 
 use mwa_hyperdrive_core::sexagesimal::*;
 
@@ -90,6 +88,7 @@ pub fn write_source_list<T: std::io::Write>(
 
         writeln!(buf, "}}")?;
     }
+    buf.flush()?;
 
     Ok(())
 }

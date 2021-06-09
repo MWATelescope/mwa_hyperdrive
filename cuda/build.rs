@@ -66,12 +66,11 @@ fn main() {
             // The DEBUG env. variable is set by cargo. If running "cargo build
             // --release", DEBUG is "false", otherwise "true". C/C++/CUDA like
             // the compile option "NDEBUG" to be defined when using assert.h, so
-            // if appropriate, define that here. "DEBUG" is also defined, and
-            // could also be used.
-            if env::var("DEBUG").unwrap() == "false" {
-                "NDEBUG"
-            } else {
-                "DEBUG"
+            // if appropriate, define that here. We also define "DEBUG" so that
+            // could be used.
+            match env::var("DEBUG").as_deref() {
+                Ok("false") => "NDEBUG",
+                _ => "DEBUG",
             },
             None,
         );
@@ -84,15 +83,15 @@ fn main() {
     // If the library path manually specified, search there.
     if let Ok(lib_dir) = env::var("CUDA_LIB") {
         println!("cargo:rustc-link-search=native={}", lib_dir);
-    } else {
-        // Use the following search paths when linking. CUDA could be installed
-        // in a couple of places, and use "lib" or "lib64"; specify all
-        // combinations.
-        for path in &["/usr/local/cuda", "/opt/cuda"] {
-            for lib_path in &["lib", "lib64"] {
-                println!("cargo:rustc-link-search=native={}/{}", path, lib_path);
-            }
-        }
+        // } else {
+        //     // Use the following search paths when linking. CUDA could be installed
+        //     // in a couple of places, and use "lib" or "lib64"; specify all
+        //     // combinations.
+        //     for path in &["/usr/local/cuda", "/opt/cuda"] {
+        //         for lib_path in &["lib", "lib64"] {
+        //             println!("cargo:rustc-link-search=native={}/{}", path, lib_path);
+        //         }
+        //     }
     }
 
     // Link CUDA.

@@ -2,9 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Calibration software for the Murchison Widefield Array (MWA) radio telescope.
- */
+//! Calibration software for the Murchison Widefield Array (MWA) radio
+//! telescope.
 
 pub mod calibrate;
 pub mod simulate_vis;
@@ -17,6 +16,7 @@ pub(crate) mod error;
 pub(crate) mod flagging;
 pub(crate) mod glob;
 pub(crate) mod math;
+pub(crate) mod precession;
 pub(crate) mod shapelets;
 pub(crate) mod visibility_gen;
 

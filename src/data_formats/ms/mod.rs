@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to interface with CASA measurement sets.
- */
+//! Code to interface with CASA measurement sets.
 
 pub(crate) mod error;
 mod helpers;
@@ -13,7 +11,6 @@ pub use error::*;
 use helpers::*;
 
 use std::collections::BTreeSet;
-use std::f64::consts::TAU;
 use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
@@ -21,10 +18,10 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::*;
-use crate::constants::HIFITIME_GPS_FACTOR;
 use crate::context::{FreqContext, ObsContext};
 use crate::glob::get_single_match_from_glob;
-use mwa_hyperdrive_core::{c32, erfa_sys, mwalib, Jones, RADec, XYZ};
+use crate::{calibrate::params::Delays, constants::HIFITIME_GPS_FACTOR};
+use mwa_hyperdrive_core::{c32, mwalib, Jones, RADec};
 
 pub(crate) struct MS {
     /// Observation metadata.
@@ -48,7 +45,11 @@ impl MS {
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
-    pub(crate) fn new<T: AsRef<Path>>(ms: &T, metafits: Option<&T>) -> Result<Self, NewMSError> {
+    pub(crate) fn new<T: AsRef<Path>>(
+        ms: &T,
+        metafits: Option<&T>,
+        dipole_delays: &mut Delays,
+    ) -> Result<Self, NewMSError> {
         // The ms argument could be a glob. If the specified argument can't be
         // found as a file, treat it as a glob and expand it to find a match.
         let ms = {
@@ -81,8 +82,9 @@ impl MS {
         // let table_keywords = main_table.table_keyword_names().unwrap();
         // let cotter = table_keywords.contains(&"MWA_COTTER_VERSION".to_string());
 
-        // Get the antenna XYZ positions (geocentric, not geodetic).
+        // Get the tile names and XYZ positions (geocentric, not geodetic).
         let mut antenna_table = read_table(&ms, Some("ANTENNA"))?;
+        let names: Vec<String> = antenna_table.get_col_as_vec("NAME").unwrap();
         let mut casacore_positions = Array2::zeros((antenna_table.n_rows() as usize, 3));
         let mut i = 0;
         antenna_table
@@ -137,8 +139,16 @@ impl MS {
                 .filter(|ant| !present_tiles.contains(ant))
                 .collect()
         };
+        let num_unflagged_tiles = total_num_tiles - tile_flags.len();
         debug!("Flagged tiles in the MS: {:?}", tile_flags);
         debug!("Autocorrelations present: {}", autocorrelations_present);
+
+        // Get the observation phase centre.
+        let phase_centre = {
+            let mut field_table = read_table(&ms, Some("FIELD"))?;
+            let phase_vec = field_table.get_cell_as_vec("PHASE_DIR", 0).unwrap();
+            RADec::new(phase_vec[0], phase_vec[1])
+        };
 
         // Now that we have the number of flagged tiles in the measurement set,
         // we can work out the first and last good timesteps. This is important
@@ -146,7 +156,6 @@ impl MS {
         // should all be flagged, and we are not interested in using any of
         // those data. We work out the first and last good timesteps by
         // inspecting the flags at each timestep. TODO: Autocorrelations?
-        let num_unflagged_tiles = total_num_tiles - tile_flags.len();
         let step = num_unflagged_tiles * (num_unflagged_tiles - 1) / 2
             + if autocorrelations_present {
                 num_unflagged_tiles
@@ -154,7 +163,7 @@ impl MS {
                 0
             };
         trace!("MS step: {}", step);
-        let timestep_indices = {
+        let unflagged_timestep_indices = {
             // The first and last good timestep indicies.
             let mut first: Option<usize> = None;
             let mut last: Option<usize> = None;
@@ -184,7 +193,6 @@ impl MS {
                 _ => return Err(NewMSError::AllFlagged),
             }
         };
-        debug!("MS timestep indices (exclusive): {:?}", timestep_indices);
 
         // Get the unique times in the MS.
         let utc_times: Vec<f64> = main_table.get_col_as_vec("TIME").unwrap();
@@ -195,67 +203,53 @@ impl MS {
             time_set.insert((utc_time * 1e3).round() as _);
         }
         // Assume the timesteps are contiguous, i.e. the span of time between
-        // two consequtive timesteps is the same between all consequtive
+        // two consecutive timesteps is the same between all consecutive
         // timesteps.
-        let mut utc_timesteps: Vec<u64> = time_set
-            .into_iter()
-            .enumerate()
-            .filter(|(i, _)| timestep_indices.contains(i))
-            .map(|(_, t)| t)
-            .collect();
+        let mut utc_timesteps: Vec<u64> = time_set.into_iter().collect();
         // Sort the timesteps ascendingly.
         utc_timesteps.sort_unstable_by(|a, b| a.partial_cmp(&b).unwrap());
 
         // Get the observation's native time resolution. There is a possibility
         // that the MS contains only one timestep.
-        let time_res = if cotter && utc_timesteps.len() == 1 {
+        let time_res = if utc_timesteps.len() == 1 {
             warn!("Only one timestep is present in the data; can't determine the observation's native time resolution.");
-            0.0
+            None
         } else {
             // Undo the multiply by 1e3.
-            (utc_timesteps[1] - utc_timesteps[0]) as f64 / 1e3
+            let tr = (utc_timesteps[1] - utc_timesteps[0]) as f64 / 1e3;
+            trace!("Time resolution: {}s", tr);
+            Some(tr)
         };
 
         let timesteps: Vec<hifitime::Epoch> = utc_timesteps
             .into_par_iter()
             // casacore keeps the stores the times as centroids, so no
-            // correction is needed. Undo the multiply by 1e3 on `utc`.
+            // correction is needed. Undo the multiply by 1e3 from above.
             .map(|utc| casacore_utc_to_epoch(utc as f64 / 1e3))
             .collect();
-        // unwrap should be fine here, because we insist that the measurement
-        // set is not empty at the start of this function.
-        debug!(
-            "First good GPS timestep: {}",
-            // Need to remove a number from the result of .as_gpst_seconds(), as
-            // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
-            // expect GPS timestamps to be "leading edge", not centroids.
-            timesteps.first().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR - time_res / 2.0
-        );
-        debug!(
-            "Last good GPS timestep:  {}",
-            timesteps.iter().last().unwrap().as_gpst_seconds()
-                - HIFITIME_GPS_FACTOR
-                - time_res / 2.0
-        );
-
-        // Now that we have the timesteps, we can get the first LST. As
-        // measurement sets populate centroids, the first timestep does not need
-        // to be adjusted according to timewidth.
-        let first_timestep_mjd = timesteps[0].as_mjd_utc_days();
-        let lst0 = unsafe {
-            let gst = erfa_sys::eraGst06a(
-                erfa_sys::ERFA_DJM0,
-                first_timestep_mjd,
-                erfa_sys::ERFA_DJM0,
-                first_timestep_mjd,
+        if let Some(tr) = time_res {
+            debug!(
+                "First good GPS timestep: {}",
+                // Need to remove a number from the result of .as_gpst_seconds(), as
+                // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
+                // expect GPS timestamps to be "leading edge", not centroids.
+                timesteps[unflagged_timestep_indices.start].as_gpst_seconds()
+                    - HIFITIME_GPS_FACTOR
+                    - tr / 2.0
             );
-            (gst + mwalib::MWA_LONGITUDE_RADIANS) % TAU
-        };
-
-        // Get the observation phase centre.
-        let mut field_table = read_table(&ms, Some("FIELD"))?;
-        let pointing_vec = field_table.get_cell_as_vec("PHASE_DIR", 0).unwrap();
-        let pointing = RADec::new(pointing_vec[0], pointing_vec[1]);
+            debug!(
+                "Last good GPS timestep:  {}",
+                timesteps[unflagged_timestep_indices.end - 1].as_gpst_seconds()
+                    - HIFITIME_GPS_FACTOR
+                    - tr / 2.0
+            );
+        } else {
+            // No time resolution; just print out the first GPS timestep.
+            debug!(
+                "Only GPS timestep: {}",
+                timesteps[0].as_gpst_seconds() - HIFITIME_GPS_FACTOR
+            );
+        }
 
         // Get the frequency information.
         let mut spectral_window_table = read_table(&ms, Some("SPECTRAL_WINDOW"))?;
@@ -306,23 +300,125 @@ impl MS {
             }
         };
 
-        let delays: Vec<u32> = {
-            match read_table(&ms, Some("MWA_TILE_POINTING")) {
-                // TODO: Use the phase centre to work out the sweet spot, and
-                // get the delays that way.
-                Err(_) => {
-                    warn!("Assuming all dipole delays are 0 - TODO for Chris!");
-                    vec![0; 16]
+        // If a metafits file was provided, we _may_ use it. Get a _potential_
+        // mwalib object ready.
+        let mut mwalib = None;
+
+        // Populate the dipole delays if we need to, and get the pointing centre
+        // if we can.
+        let pointing_centre: Option<RADec> =
+            match (read_table(&ms, Some("MWA_TILE_POINTING")), metafits) {
+                (Err(_), None) => {
+                    // MWA_TILE_POINTING doesn't exist and no metafits file was
+                    // provided; no changes to the delays can be made here. We also
+                    // know nothing about the pointing centre.
+                    None
                 }
-                Ok(mut mwa_tile_pointing_table) => {
-                    let delays_signed: Vec<i32> = mwa_tile_pointing_table
-                        .get_cell_as_vec("DELAYS", 0)
+
+                // MWA_TILE_POINTING exists - use this over the metafits
+                // file even if it's provided.
+                (Ok(mut mwa_tile_pointing_table), _) => {
+                    // Only use the measurement set delays if the delays struct
+                    // provided to this function was empty.
+                    match dipole_delays {
+                        Delays::Available(_) | Delays::NotNecessary => (),
+                        Delays::None => {
+                            debug!("Using MWA_TILE_POINTING for dipole delays");
+                            let delays_signed: Vec<i32> = mwa_tile_pointing_table
+                                .get_cell_as_vec("DELAYS", 0)
+                                .unwrap();
+                            let delays_unsigned: Vec<u32> =
+                                delays_signed.into_iter().map(|d| d as u32).collect();
+                            *dipole_delays = Delays::Available(delays_unsigned);
+                        }
+                    }
+                    let pointing_vec: Vec<f64> = mwa_tile_pointing_table
+                        .get_cell_as_vec("DIRECTION", 0)
                         .unwrap();
-                    delays_signed.into_iter().map(|d| d as _).collect()
+                    Some(RADec::new(pointing_vec[0], pointing_vec[1]))
                 }
+
+                // Use the metafits file.
+                (Err(_), Some(meta)) => {
+                    // Populate `mwalib` if it isn't already populated.
+                    let context = match mwalib.as_mut() {
+                        Some(c) => c,
+                        None => {
+                            let c = mwalib::MetafitsContext::new(meta)?;
+                            mwalib = Some(c);
+                            mwalib.as_ref().unwrap()
+                        }
+                    };
+                    // Only use the metafits delays if none were provided to
+                    // this function.
+                    match dipole_delays {
+                        Delays::Available(_) | Delays::NotNecessary => (),
+                        _ => {
+                            debug!("Using metafits for dipole delays");
+                            let metafits_delays = metafits::get_true_delays(context);
+                            *dipole_delays = Delays::Available(metafits_delays);
+                        }
+                    }
+                    Some(RADec::new_degrees(
+                        context.ra_tile_pointing_degrees,
+                        context.dec_tile_pointing_degrees,
+                    ))
+                }
+            };
+        match &dipole_delays {
+            Delays::Available(d) => debug!("Dipole delays: {:?}", d),
+            Delays::NotNecessary => {
+                debug!("Dipole delays weren't searched for in input data; not necessary")
+            }
+            Delays::None => warn!("Dipole delays not provided and not available in input data!"),
+        }
+
+        // Get dipole information. When interacting with beam code, use a gain
+        // of 0 for dead dipoles, and 1 for all others. cotter doesn't supply
+        // this information; if the user provided a metafits file, we can use
+        // that, otherwise we must assume all dipoles are alive.
+        let dipole_gains: Array2<f64> = match (cotter, metafits) {
+            (true, None) => {
+                warn!("cotter does not supply dead dipole information.");
+                warn!("Without a metafits file, we must assume all dipoles are alive.");
+                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                Array2::from_elem((num_unflagged_tiles, 16), 1.0)
+            }
+
+            (false, None) => {
+                warn!("Without a metafits file, we must assume all dipoles are alive.");
+                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                Array2::from_elem((num_unflagged_tiles, 16), 1.0)
+            }
+
+            (_, Some(meta)) => {
+                // Populate `mwalib` if it isn't already populated.
+                let context = match mwalib.as_mut() {
+                    Some(c) => c,
+                    None => {
+                        let c = mwalib::MetafitsContext::new(meta)?;
+                        mwalib = Some(c);
+                        mwalib.as_ref().unwrap()
+                    }
+                };
+                let mut dipole_gains = Array2::from_elem(
+                    (
+                        context.rf_inputs.len() / 2,
+                        context.rf_inputs[0].dipole_gains.len(),
+                    ),
+                    1.0,
+                );
+                for (mut dipole_gains_for_one_tile, rf_input) in dipole_gains.outer_iter_mut().zip(
+                    context
+                        .rf_inputs
+                        .iter()
+                        .filter(|rf_input| rf_input.pol == mwalib::Pol::Y),
+                ) {
+                    dipole_gains_for_one_tile.assign(&ArrayView1::from(&rf_input.dipole_gains));
+                }
+                dipole_gains
             }
         };
-        debug!("MS dipole delays: {:?}", &delays);
 
         let coarse_chan_width = total_bandwidth_hz / coarse_chan_nums.len() as f64;
         let native_fine_chan_width = if fine_chan_freqs_hz.len() == 1 {
@@ -383,7 +479,7 @@ impl MS {
                 Some(_) => ew_iter.next().unwrap().parse::<f64>().unwrap() * 1e3, // kHz -> Hz;
                 None => 80e3,
             };
-            debug!("cotter -edgewidth (Hz): {}", edgewidth);
+            debug!("cotter -edgewidth: {} Hz", edgewidth);
             // If -noflagdcchannels is specified, then the centre channel of
             // each coarse channel is not flagged. Without this flag, the centre
             // channels are flagged.
@@ -406,71 +502,32 @@ impl MS {
             vec![]
         };
 
-        let baseline_xyz = XYZ::get_baselines(&tile_xyz);
-
-        // Get dead dipole information. When interacting with beam code, use a
-        // gain of 0 for dead dipoles, and 1 for all others. cotter doesn't
-        // supply this information; if the user provided a metafits file, we can
-        // use that, otherwise we must assume all dipoles are alive.
-        let dipole_gains: Array2<f64> = match (cotter, metafits) {
-            (true, None) => {
-                warn!("cotter does not supply dead dipole information.");
-                warn!("Without a metafits file, we must assume all dipoles are alive.");
-                warn!("This will make beam Jones matrices inaccurate in sky-model prediction.");
-                Array2::from_elem((num_unflagged_tiles, 16), 1.0)
-            }
-
-            (false, None) => {
-                warn!("Without a metafits file, we must assume all dipoles are alive.");
-                warn!("This will make beam Jones matrices inaccurate in sky-model prediction.");
-                Array2::from_elem((num_unflagged_tiles, 16), 1.0)
-            }
-
-            (_, Some(m)) => {
-                let mwalib = mwalib::MetafitsContext::new(m)?;
-                let mut dipole_gains = Array2::from_elem(
-                    (
-                        mwalib.rf_inputs.len() / 2,
-                        mwalib.rf_inputs[0].dipole_gains.len(),
-                    ),
-                    1.0,
-                );
-                for (mut dipole_gains_for_one_tile, rf_input) in dipole_gains.outer_iter_mut().zip(
-                    mwalib
-                        .rf_inputs
-                        .iter()
-                        .filter(|rf_input| rf_input.pol == mwalib::Pol::Y),
-                ) {
-                    dipole_gains_for_one_tile.assign(&ArrayView1::from(&rf_input.dipole_gains));
-                }
-                dipole_gains
-            }
-        };
-
-        let num_unflagged_tiles = tile_xyz.len() - tile_flags.len();
         let obs_context = ObsContext {
             obsid,
             timesteps,
-            timestep_indices,
-            lst0,
-            time_res,
-            pointing,
-            delays,
+            unflagged_timestep_indices,
+            phase_centre,
+            pointing_centre,
+            names,
             tile_xyz,
-            baseline_xyz,
             tile_flags,
             fine_chan_flags_per_coarse_chan,
             num_unflagged_tiles,
             num_unflagged_baselines: num_unflagged_tiles * (num_unflagged_tiles - 1) / 2,
             dipole_gains,
+            time_res,
+            // TODO
+            array_longitude_rad: None,
+            array_latitude_rad: None,
         };
 
-        Ok(Self {
+        let ms = Self {
             obs_context,
             freq_context,
             ms,
             step,
-        })
+        };
+        Ok(ms)
     }
 }
 
@@ -496,11 +553,6 @@ impl InputData for MS {
         let row_range_start = timestep * self.step;
         let row_range_end = (timestep + 1) * self.step;
         let row_range = row_range_start as u64..row_range_end as u64;
-        trace!(
-            "Reading timestep {:<3} (row range {:?}) from the MS",
-            timestep,
-            row_range
-        );
 
         let mut uvws = Vec::with_capacity(row_range_end - row_range_start);
         let mut out_weights = Array2::from_elem(data_array.dim(), 0.0);

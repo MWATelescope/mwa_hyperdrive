@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to read and write calibration solutions.
- */
+//! Code to read and write calibration solutions.
 
 use std::collections::HashSet;
 use std::fs::File;

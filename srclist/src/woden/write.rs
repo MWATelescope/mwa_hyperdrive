@@ -2,14 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Writing WODEN-style text source lists.
-
-WODEN doesn't allow spectral indices to be supplied in its source lists, and
-only allows a single FREQ line. For this reason, when writing power law flux
-densities, the spectral index has to be discarded. Similarly, only the first
-flux densities in a list of flux densities will be written here.
- */
+//! Writing WODEN-style text source lists.
+//!
+//! WODEN only allows for a single flux density per component. For this reason,
+//! only the first flux density in a list of flux densities will be written
+//! here.
 
 use super::*;
 
@@ -65,13 +62,11 @@ fn write_flux_type<T: std::io::Write>(
             )?;
         }
 
-        // SI information is discarded.
-        FluxDensityType::PowerLaw { .. } => {
-            let fd = flux_type.estimate_at_freq(150e6)?;
+        FluxDensityType::PowerLaw { fd, si } => {
             writeln!(
                 buf,
-                "FREQ {:+e} {} {} {} {}",
-                fd.freq, fd.i, fd.q, fd.u, fd.v
+                "LINEAR {:+e} {} {} {} {} {}",
+                fd.freq, fd.i, fd.q, fd.u, fd.v, si
             )?;
         }
 
@@ -141,6 +136,7 @@ pub fn write_source_list<T: std::io::Write>(
 
         writeln!(buf, "ENDSOURCE")?;
     }
+    buf.flush()?;
 
     Ok(())
 }

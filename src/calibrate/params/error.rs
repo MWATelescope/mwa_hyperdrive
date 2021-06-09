@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+//! Errors associated with calibration arguments.
+
 use std::path::PathBuf;
 
 use thiserror::Error;
-
-use mwa_hyperdrive_core::mwa_hyperbeam;
 
 /// Errors associated with setting up a `CalibrateParams` struct.
 #[derive(Error, Debug)]
@@ -24,11 +24,22 @@ pub enum InvalidArgsError {
     #[error("No sky-model source list file supplied")]
     NoSourceList,
 
+    #[error(
+        "The specified MWA dipole delays aren't valid; there should be 16 values between 0 and 32"
+    )]
+    BadDelays,
+
     #[error("The number of specified sources was 0, or the size of the source list was 0")]
     NoSources,
 
     #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
     NoSourcesAfterVeto,
+
+    #[error("A single timestep was supplied multiple times; this is invalid")]
+    DuplicateTimesteps,
+
+    #[error("Timestep {got} was requested but it isn't available; the last timestep is {last}")]
+    UnavailableTimestep { got: usize, last: usize },
 
     #[error("Cannot use {got}s as the calibration time resolution; this must be a multiple of the native resolution ({native}s)")]
     InvalidTimeResolution { got: f64, native: f64 },
@@ -39,11 +50,16 @@ pub enum InvalidArgsError {
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
     InvalidTileFlag { got: usize, max: usize },
 
-    #[error("Cannot write calibration solutions to a file type '{ext}'. Supported formats are fits and bin")]
+    #[error("Cannot write calibration solutions to a file type '{ext}'. Supported formats are: fits, bin")]
     OutputSolutionsFileType { ext: String },
 
-    #[error("Cannot write to the specified calibration solutions file '{file}'. Do you have write permissions set?")]
-    OutputSolutionsFileNotWritable { file: String },
+    #[error(
+        "Cannot write sky-model visibilities to a file type '{ext}'. Supported formats are: uvfits"
+    )]
+    ModelFileType { ext: String },
+
+    #[error("Cannot write to the specified file '{file}'. Do you have write permissions set?")]
+    FileNotWritable { file: String },
 
     #[error("{0}")]
     InputFile(#[from] super::filenames::InputFileError),
@@ -63,11 +79,8 @@ pub enum InvalidArgsError {
     #[error("{0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
-    #[error("hyperbeam init error: {0}")]
-    HyperbeamInit(#[from] mwa_hyperbeam::fee::InitFEEBeamError),
-
-    #[error("hyperbeam error: {0}")]
-    Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
+    #[error("{0}")]
+    Beam(#[from] crate::beam::BeamError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

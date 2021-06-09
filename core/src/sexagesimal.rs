@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code for handling conversion to and from sexagesimal.
- */
+//! Code for handling conversion to and from sexagesimal.
 
 use thiserror::Error;
 
@@ -238,5 +236,30 @@ mod tests {
         let result = sexagesimal_hms_string_to_degrees("11h34m23.7854s");
         assert!(result.is_ok(), "{}", result.unwrap_err());
         assert_abs_diff_eq!(result.unwrap(), 173.59910583333334);
+    }
+
+    #[test]
+    fn test_sex_dms_to_degrees() {
+        let f = sexagesimal_dms_string_to_degrees("-11d49m01.062s").unwrap();
+        assert_abs_diff_eq!(f, -11.81696167, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn test_sex_hms_to_degrees() {
+        let s = "-11h49m01.062s";
+        let f = sexagesimal_hms_string_to_degrees(s).unwrap();
+        assert_abs_diff_eq!(f, -177.254425, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn tet_degrees_to_sexagesimal_dms() {
+        let dms = degrees_to_sexagesimal_dms(-165.0169619);
+        assert_eq!(dms, "-165d01m01.0628s");
+    }
+
+    #[test]
+    fn test_degrees_to_sexagesimal_hms() {
+        let hms = degrees_to_sexagesimal_hms(-177.254425);
+        assert_eq!(hms, "-11h49m01.0619s");
     }
 }

@@ -2,19 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Parsing of "André Offringa"-style source lists.
-
-Coordinates are RA and declination, which have units of decimal hours (i.e. 0 -
-24) and degrees, respectively, but in sexagesimal format.
-
-Gaussian sizes are specified in arcseconds, whereas position angles are in
-degrees. Frequencies have units annotated, but these always seem to be MHz, and
-similarly with flux densities in Jy.
-
-The code here is probably incomplete, but it should work for the majority of
-source lists.
- */
+//! Parsing of "André Offringa"-style source lists.
+//!
+//! Coordinates are RA and declination, which have units of decimal hours (i.e.
+//! 0 - 24) and degrees, respectively, but in sexagesimal format.
+//!
+//! Gaussian sizes are specified in arcseconds, whereas position angles are in
+//! degrees. Frequencies have units annotated, but these always seem to be MHz,
+//! and similarly with flux densities in Jy.
+//!
+//! The code here is probably incomplete, but it should work for the majority of
+//! source lists.
 
 use super::*;
 use mwa_hyperdrive_core::sexagesimal::*;

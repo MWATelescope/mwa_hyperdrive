@@ -2,15 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Error type for all calibration-related errors.
- */
+//! Error type for all calibration-related errors.
 
 use thiserror::Error;
 
 use super::{params::InvalidArgsError, solutions::WriteSolutionsError};
-use crate::data_formats::ReadInputDataError;
+use crate::data_formats::{uvfits::UvfitsError, ReadInputDataError};
 use mwa_hyperdrive_core::{mwalib, EstimateError};
+use mwalib::fitsio;
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {
@@ -30,7 +29,10 @@ pub enum CalibrateError {
     Beam(#[from] crate::beam::BeamError),
 
     #[error("cfitsio error: {0}")]
-    Fitsio(#[from] mwalib::fitsio::errors::Error),
+    Fitsio(#[from] fitsio::errors::Error),
+
+    #[error("Error when interfacing with uvfits: {0}")]
+    Uvifts(#[from] UvfitsError),
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),

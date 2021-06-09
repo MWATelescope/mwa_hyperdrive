@@ -2,35 +2,35 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Parameters required for calibration and associated functions.
-
-Strategy: Users give arguments to hyperdrive (handled by calibrate::args).
-hyperdrive turns arguments into parameters (handled by calibrate::params). Using
-this terminology, the code to handle arguments and parameters (and associated
-errors) can be neatly split.
- */
+//! Parameters required for calibration and associated functions.
+//!
+//! Strategy: Users give arguments to hyperdrive (handled by calibrate::args).
+//! hyperdrive turns arguments into parameters (handled by calibrate::params). Using
+//! this terminology, the code to handle arguments and parameters (and associated
+//! errors) can be neatly split.
 
 pub(crate) mod error;
 mod filenames;
 pub(crate) mod freq;
 pub(crate) mod ranked_source;
 
-pub use error::*;
+pub(crate) use error::*;
 use filenames::InputDataTypes;
 pub(crate) use freq::*;
 pub(crate) use ranked_source::*;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use log::{debug, info, trace, warn};
+use mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
 use rayon::prelude::*;
 
-use crate::beam::Beam;
+use crate::beam::{Beam, BeamError};
 use crate::calibrate::veto::veto_sources;
 use crate::data_formats::*;
+use crate::precession::precess_time;
 use crate::{glob::*, *};
 use mwa_hyperdrive_core::jones::cache::JonesCache;
 use mwa_hyperdrive_core::*;
@@ -45,13 +45,22 @@ pub struct CalibrateParams {
     /// Beam struct.
     pub(crate) beam: Box<dyn Beam>,
 
+    /// A shared cache of Jones matrices. This field should be used to generate
+    /// Jones matrices and populate the cache.
+    pub(crate) jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache,
+
     /// The sky-model source list.
     pub(crate) source_list: mwa_hyperdrive_core::SourceList,
+
+    /// The optional sky-model visibilities file. If specified, it will be
+    /// written to during calibration.
+    pub(crate) model_file: Option<PathBuf>,
 
     /// A list of source names sorted by flux density (brightest to dimmest).
     ///
     /// `source_list` can't be sorted, so this is used to index the source list.
-    pub(crate) ranked_sources: Vec<RankedSource>,
+    // Not currently used.
+    _ranked_sources: Vec<RankedSource>,
 
     /// The number of components in the source list. If all sources have only
     /// one component, then this is equal to the length of the source list.
@@ -68,21 +77,16 @@ pub struct CalibrateParams {
     /// Channel- and frequency-related parameters required for calibration.
     pub(crate) freq: FrequencyParams,
 
-    /// The target time resolution \[seconds\].
+    /// The target time resolution \[seconds\]. This is kept optional in case in
+    /// the input data has only one time step, and therefore no resolution.
     ///
     /// e.g. If the input data is in 0.5s resolution and this variable was 4s,
     /// then we average 8 scans worth of time data when calibrating.
-    pub(crate) time_res: f64,
+    pub(crate) time_res: Option<f64>,
 
-    /// A shared cache of Jones matrices. This field should be used to generate
-    /// Jones matrices and populate the cache.
-    pub(crate) jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache,
-    // /// The observation timestep indices, respecting the target time resolution.
-    // ///
-    // /// If time_res is the same as the observations native resolution, then
-    // /// these timesteps are the same as mwalib's timesteps. Otherwise, they need
-    // /// to be adjusted.
-    // timesteps: Vec<usize>,
+    /// The timestep indices to use in calibration.
+    pub(crate) timesteps: Vec<usize>,
+
     /// Given two antenna numbers, get the unflagged baseline number. e.g. If
     /// antenna 1 (i.e. the second antenna) is flagged, then the first baseline
     /// (i.e. 0) is between antenna 0 and antenna 2.
@@ -99,11 +103,25 @@ pub struct CalibrateParams {
     /// flagged.
     pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
-    /// The unflagged [XyzBaseline]s of the observation \[metres\]. This does
-    /// not change over time; it is determined only by the telescope's tile
-    /// layout.
-    pub(crate) unflagged_baseline_xyz: Vec<XyzBaseline>,
+    /// The names of the unflagged tiles.
+    pub(crate) unflagged_tile_names: Vec<String>,
 
+    /// The unflagged [XYZ] coordinates of each tile \[metres\]. This does not
+    /// change over time; it is determined only by the telescope's tile layout.
+    pub(crate) unflagged_tile_xyz: Vec<XYZ>,
+
+    /// The Earth longitude of the array \[radians\]. This is populated by user
+    /// input or the input data.
+    pub(crate) array_longitude: f64,
+
+    /// The Earth latitude of the array \[radians\]. This is populated by user
+    /// input or the input data.
+    pub(crate) array_latitude: f64,
+
+    // /// The unflagged XYZ coordinates of each baseline ([XyzBaseline])
+    // /// \[metres\]. This does not change over time; it is determined only by the
+    // /// telescope's tile layout.
+    // pub(crate) unflagged_baseline_xyz: Vec<XyzBaseline>,
     /// The maximum number of times to iterate when performing "MitchCal".
     pub(crate) max_iterations: usize,
 
@@ -134,6 +152,7 @@ impl CalibrateParams {
         super::args::CalibrateUserArgs {
             data,
             output_solutions_filename,
+            model_filename,
             beam_file,
             no_beam,
             source_list,
@@ -143,16 +162,39 @@ impl CalibrateParams {
             veto_threshold,
             time_res,
             freq_res,
+            timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
             ignore_input_data_fine_channels_flags,
+            delays,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
             max_iterations,
             stop_thresh,
             min_thresh,
+            array_longitude_deg,
+            array_latitude_deg,
         }: super::args::CalibrateUserArgs,
     ) -> Result<Self, InvalidArgsError> {
+        let mut dipole_delays = match (delays, no_beam) {
+            // Check that delays are sensible, regardless if we actually need
+            // them.
+            (Some(d), _) => {
+                if d.len() != 16 || d.iter().any(|&v| v > 32) {
+                    return Err(InvalidArgsError::BadDelays);
+                }
+                Delays::Available(d)
+            }
+
+            // No delays were provided, but because we're not using beam code,
+            // we don't need them.
+            (None, true) => Delays::NotNecessary,
+
+            // No delays were provided, but they'll be necessary eventually.
+            // Other code should fail if no delays can be found.
+            (None, false) => Delays::None,
+        };
+
         // Handle input data. We expect one of three possibilities:
         // - gpubox files, a metafits file (and maybe mwaf files),
         // - a measurement set (and maybe a metafits file), or
@@ -171,7 +213,8 @@ impl CalibrateParams {
         ) {
             // Valid input for reading raw data.
             (Some(meta), Some(gpuboxes), mwafs, None, None) => {
-                let input_data = RawData::new(&meta, &gpuboxes, mwafs.as_deref())?;
+                let input_data =
+                    RawData::new(&meta, &gpuboxes, mwafs.as_deref(), &mut dipole_delays)?;
 
                 // Print some high-level information.
                 let obs_context = input_data.get_obs_context();
@@ -189,7 +232,7 @@ impl CalibrateParams {
 
             // Valid input for reading a measurement set.
             (meta, None, None, Some(ms), None) => {
-                let input_data = MS::new(&ms, meta.as_ref())?;
+                let input_data = MS::new(&ms, meta.as_ref(), &mut dipole_delays)?;
                 match input_data.get_obs_context().obsid {
                     Some(o) => info!(
                         "Calibrating obsid {} from measurement set {}",
@@ -224,22 +267,7 @@ impl CalibrateParams {
             _ => return Err(InvalidArgsError::InvalidDataInput),
         };
 
-        let beam: Box<dyn Beam> = {
-            if no_beam {
-                info!("Not using a beam");
-                Box::new(beam::NoBeam)
-            } else {
-                info!("Using FEE beam");
-                if let Some(bf) = beam_file {
-                    // Set up the beam struct from the specified beam file.
-                    Box::new(beam::FEEBeam::new(&bf)?)
-                } else {
-                    // Set up the beam struct from the MWA_BEAM_FILE environment
-                    // variable.
-                    Box::new(beam::FEEBeam::new_from_env()?)
-                }
-            }
-        };
+        let beam: Box<dyn Beam> = create_beam_object(no_beam, dipole_delays, beam_file)?;
 
         // Handle potential issues with the output calibration solutions file.
         let output_solutions_filename = PathBuf::from(
@@ -276,7 +304,7 @@ impl CalibrateParams {
                     output_solutions_filename.display()
                 ),
                 Err(std::io::ErrorKind::PermissionDenied) => {
-                    return Err(InvalidArgsError::OutputSolutionsFileNotWritable {
+                    return Err(InvalidArgsError::FileNotWritable {
                         file: output_solutions_filename.display().to_string(),
                     })
                 }
@@ -284,8 +312,110 @@ impl CalibrateParams {
             }
         }
 
+        // Handle potential issues with the output model file.
+        let model_file = match model_filename {
+            None => None,
+            Some(filename) => {
+                let pb = PathBuf::from(filename);
+                // Is the output file type supported?
+                match &pb.extension().and_then(|os_str| os_str.to_str()) {
+                    Some("uvfits") => (),
+                    ext => {
+                        return Err(InvalidArgsError::ModelFileType {
+                            ext: ext.unwrap_or("<no extension>").to_string(),
+                        })
+                    }
+                }
+                // Check if the file exists. If so, check we can write to it. If we
+                // aren't able to write to the file, then handle the problem here.
+                if pb.exists() {
+                    match OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(&pb)
+                        .map_err(|io_error| io_error.kind())
+                    {
+                        Ok(_) => warn!(
+                            "Will overwrite the existing sky-model file '{}'",
+                            pb.display()
+                        ),
+                        Err(std::io::ErrorKind::PermissionDenied) => {
+                            return Err(InvalidArgsError::FileNotWritable {
+                                file: pb.display().to_string(),
+                            })
+                        }
+                        Err(e) => return Err(InvalidArgsError::IO(e.into())),
+                    }
+                };
+
+                Some(pb)
+            }
+        };
+
         let obs_context = input_data.get_obs_context();
         let freq_context = input_data.get_freq_context();
+
+        let timesteps_to_use = {
+            let input_data_unflagged_timesteps: Vec<usize> = obs_context
+                .unflagged_timestep_indices
+                .clone()
+                .into_iter()
+                .collect();
+            match timesteps {
+                None => input_data_unflagged_timesteps,
+                Some(mut ts) => {
+                    // Make sure there are no duplicates.
+                    let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
+                    if timesteps_hashset.len() != ts.len() {
+                        return Err(InvalidArgsError::DuplicateTimesteps);
+                    }
+
+                    // Ensure that all specified timesteps are actually available.
+                    for t in &ts {
+                        if !(0..obs_context.timesteps.len()).contains(t) {
+                            return Err(InvalidArgsError::UnavailableTimestep {
+                                got: *t,
+                                last: obs_context.timesteps.len() - 1,
+                            });
+                        }
+                    }
+
+                    ts.sort_unstable();
+                    ts
+                }
+            }
+        };
+        info!(
+            "Available timesteps (exclusive): {:?}",
+            0..obs_context.timesteps.len()
+        );
+        info!(
+            "Unflagged timesteps (exclusive): {:?}",
+            obs_context.unflagged_timestep_indices
+        );
+        {
+            // We don't require the timesteps to be used in calibration to be
+            // sequential. But if they are, it looks a bit neater to print them out
+            // as a range rather than individual indicies.
+            info!(
+                "{}",
+                range_or_comma_separated(&timesteps_to_use, Some("Using timesteps"))
+            );
+        }
+
+        let array_longitude = match (array_longitude_deg, obs_context.array_longitude_rad) {
+            (Some(array_longitude_deg), _) => array_longitude_deg.to_radians(),
+            (None, Some(input_data_long)) => input_data_long,
+            (None, None) => {
+                warn!("Assuming that the input array is at the MWA Earth coordinates");
+                MWA_LONGITUDE_RADIANS
+            }
+        };
+        let array_latitude = match (array_latitude_deg, obs_context.array_latitude_rad) {
+            (Some(array_latitude_deg), _) => array_latitude_deg.to_radians(),
+            (None, Some(input_data_lat)) => input_data_lat,
+            (None, None) => MWA_LATITUDE_RADIANS,
+        };
 
         // The length of the tile XYZ collection is the total number of tiles in
         // the array, even if some tiles are flagged.
@@ -361,8 +491,9 @@ impl CalibrateParams {
             });
         }
 
+        let total_num_fine_channels = freq_context.fine_chan_freqs.len();
         let num_fine_chans_per_coarse_band =
-            freq_context.fine_chan_freqs.len() / freq_context.coarse_chan_freqs.len();
+            total_num_fine_channels / freq_context.coarse_chan_freqs.len();
         let num_unflagged_fine_chans_per_coarse_band =
             num_fine_chans_per_coarse_band - fine_chan_flags_per_coarse_chan.len();
         let mut unflagged_fine_chans = HashSet::new();
@@ -379,6 +510,7 @@ impl CalibrateParams {
         }
         let freq_struct = FrequencyParams {
             res: freq_res,
+            num_fine_chans: total_num_fine_channels,
             num_unflagged_fine_chans_per_coarse_band,
             num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
                 * freq_context.coarse_chan_freqs.len(),
@@ -386,6 +518,49 @@ impl CalibrateParams {
             unflagged_fine_chan_freqs,
             fine_chan_flags,
         };
+
+        // Print out some coordinates, including their precessed counterparts
+        // (if applicable).
+        let precession_info = precess_time(
+            &obs_context.phase_centre,
+            &obs_context.timesteps[0],
+            array_longitude,
+            array_latitude,
+        );
+
+        info!(
+            "Phase centre:                   {}",
+            &obs_context.phase_centre
+        );
+        info!(
+            "Phase centre (J2000):           {}",
+            precession_info
+                .hadec_j2000
+                .to_radec(precession_info.lmst_j2000)
+        );
+        if let Some(pc) = &obs_context.pointing_centre {
+            info!("Pointing centre:                {}", pc);
+        }
+        info!(
+            "LMST of first timestep:         {:.4}°",
+            precession_info.lmst.to_degrees()
+        );
+        info!(
+            "LMST of first timestep (J2000): {:.4}°",
+            precession_info.lmst_j2000.to_degrees()
+        );
+        info!(
+            "Array longitude:                {:.4}°",
+            array_longitude.to_degrees()
+        );
+        info!(
+            "Array latitude:                 {:.4}°",
+            array_latitude.to_degrees()
+        );
+        info!(
+            "Array latitude (J2000):         {:.4}°",
+            precession_info.array_latitude_j2000.to_degrees()
+        );
 
         let mut source_list: SourceList = {
             // Handle the source list argument.
@@ -434,11 +609,13 @@ impl CalibrateParams {
         if num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
-        let ranked_sources = veto_sources(
+        let _ranked_sources = veto_sources(
             &mut source_list,
-            &obs_context.pointing,
-            obs_context.lst0,
-            &obs_context.delays,
+            &precession_info
+                .hadec_j2000
+                .to_radec(precession_info.lmst_j2000),
+            precession_info.lmst_j2000,
+            precession_info.array_latitude_j2000,
             &freq_context.coarse_chan_freqs,
             &beam,
             num_sources,
@@ -461,12 +638,14 @@ impl CalibrateParams {
         }
 
         let native_time_res = obs_context.time_res;
-        let time_res = time_res.unwrap_or(native_time_res);
-        if time_res % native_time_res != 0.0 {
-            return Err(InvalidArgsError::InvalidTimeResolution {
-                got: time_res,
-                native: native_time_res,
-            });
+        let time_res = time_res.or(native_time_res);
+        if let (Some(tr), Some(ntr)) = (time_res, native_time_res) {
+            if tr % ntr != 0.0 {
+                return Err(InvalidArgsError::InvalidTimeResolution {
+                    got: tr,
+                    native: ntr,
+                });
+            }
         }
         // let num_time_steps_to_average = time_res / native_time_res;
         // let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
@@ -474,13 +653,21 @@ impl CalibrateParams {
         let tile_baseline_maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
         let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
 
-        let unflagged_baseline_xyz = obs_context
-            .baseline_xyz
+        let (unflagged_tile_xyz, unflagged_tile_names) = obs_context
+            .tile_xyz
             .par_iter()
+            .zip(obs_context.names.par_iter())
             .enumerate()
-            .filter(|(baseline_index, _)| !flagged_baselines.contains(baseline_index))
-            .map(|(_, xyz)| xyz.clone())
-            .collect();
+            .filter(|(tile_index, _)| !tile_flags.contains(tile_index))
+            .map(|(_, (xyz, name))| (xyz.clone(), name.clone()))
+            .unzip();
+        // let unflagged_baseline_xyz = obs_context
+        //     .baseline_xyz
+        //     .par_iter()
+        //     .enumerate()
+        //     .filter(|(baseline_index, _)| !flagged_baselines.contains(baseline_index))
+        //     .map(|(_, xyz)| xyz.clone())
+        //     .collect();
 
         // Make sure the thresholds are sensible.
         let mut stop_threshold = stop_thresh.unwrap_or(DEFAULT_STOP_THRESHOLD);
@@ -493,21 +680,60 @@ impl CalibrateParams {
         Ok(Self {
             input_data,
             beam,
+            jones_cache: JonesCache::new(),
             source_list,
-            ranked_sources,
+            model_file,
+            _ranked_sources,
             num_components,
             tile_flags,
             freq: freq_struct,
             time_res,
-            jones_cache: JonesCache::new(),
+            timesteps: timesteps_to_use,
             tile_to_unflagged_baseline_map: tile_baseline_maps.tile_to_unflagged_baseline_map,
             unflagged_baseline_to_tile_map: tile_baseline_maps.unflagged_baseline_to_tile_map,
-            unflagged_baseline_xyz,
+            unflagged_tile_names,
+            unflagged_tile_xyz,
+            // unflagged_baseline_xyz,
+            array_longitude,
+            array_latitude,
             max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),
             stop_threshold,
             min_threshold,
             output_solutions_filename,
         })
+    }
+}
+
+/// An enum to track whether MWA dipole delays are provided and/or necessary.
+pub(crate) enum Delays {
+    /// Delays are available.
+    Available(Vec<u32>),
+
+    /// Delays have not been provided, but are necessary for calibration.
+    None,
+
+    /// Delays are not necessary, probably because no beam code is being used.
+    NotNecessary,
+}
+
+fn create_beam_object<T: AsRef<Path>>(
+    no_beam: bool,
+    delays: Delays,
+    beam_file: Option<T>,
+) -> Result<Box<dyn Beam>, BeamError> {
+    if no_beam {
+        info!("Not using a beam");
+        Ok(Box::new(beam::NoBeam))
+    } else {
+        info!("Using FEE beam");
+        if let Some(bf) = beam_file {
+            // Set up the FEE beam struct from the specified beam file.
+            Ok(Box::new(beam::FEEBeam::new(&bf, delays)?))
+        } else {
+            // Set up the FEE beam struct from the MWA_BEAM_FILE environment
+            // variable.
+            Ok(Box::new(beam::FEEBeam::new_from_env(delays)?))
+        }
     }
 }
 
@@ -572,6 +798,48 @@ fn get_flagged_baselines_set(
     flagged_baselines
 }
 
+// It looks a bit neater to print out a collection of numbers as a range rather
+// than individual indicies if they're sequential. This function inspects a
+// collection and returns a string to be printed.
+fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> String {
+    if collection.is_empty() {
+        return "".to_string();
+    }
+
+    let mut iter = collection.iter();
+    let mut prev = *iter.next().unwrap();
+    // Innocent until proven guilty.
+    let mut is_sequential = true;
+    while let Some(next) = iter.next() {
+        if *next == prev + 1 {
+            prev = *next;
+        } else {
+            is_sequential = false;
+            break;
+        }
+    }
+
+    if is_sequential {
+        let suffix = format!("{:?}", (collection[0]..collection.last().unwrap() + 1));
+        if let Some(p) = prefix {
+            format!("{} (exclusive): {}", p, suffix)
+        } else {
+            suffix
+        }
+    } else {
+        let suffix = collection
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if let Some(p) = prefix {
+            format!("{}: {}", p, suffix)
+        } else {
+            suffix
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,7 +883,7 @@ mod tests {
             Err(e) => panic!("{}", e),
         };
         // The default time resolution should be 2.0s, as per the metafits.
-        assert_abs_diff_eq!(params.time_res, 2.0);
+        assert_abs_diff_eq!(params.time_res.unwrap(), 2.0);
         // The default freq resolution should be 40kHz, as per the metafits.
         assert_abs_diff_eq!(params.freq.res, 40e3, epsilon = 1e-10);
     }
@@ -630,7 +898,7 @@ mod tests {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
-        assert_abs_diff_eq!(params.time_res, 4.0);
+        assert_abs_diff_eq!(params.time_res.unwrap(), 4.0);
 
         let mut args = get_1090008640();
         // 8.0 should be a multiple of 2.0s
@@ -639,7 +907,7 @@ mod tests {
             Ok(p) => p,
             Err(e) => panic!("{}", e),
         };
-        assert_abs_diff_eq!(params.time_res, 8.0);
+        assert_abs_diff_eq!(params.time_res.unwrap(), 8.0);
     }
 
     #[test]

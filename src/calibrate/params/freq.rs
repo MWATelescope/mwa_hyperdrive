@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Channel- and frequency-related parameters required for calibration and
-associated functions.
- */
+//! Channel- and frequency-related parameters required for calibration and
+//! associated functions.
 
 use std::collections::HashSet;
 
@@ -21,6 +19,10 @@ pub struct FrequencyParams {
     /// primarily used in floating-point calculations, so it's more convenient
     /// to store it as a float.
     pub res: f64,
+
+    /// The total number of fine-frequency channels. For 40 kHz data, this is
+    /// 768.
+    pub(crate) num_fine_chans: usize,
 
     /// The number of unflagged fine-frequency channels per coarse band. For 40
     /// kHz data, this is probably 27 (5 channels flagged for each coarse band).

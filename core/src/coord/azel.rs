@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Handle (azimuth, elevation) coordinates.
- */
+//! Handle (azimuth, elevation) coordinates.
 
 use std::f64::consts::FRAC_PI_2;
 
@@ -53,6 +51,17 @@ impl AzEl {
     /// and Declination) for the MWA's location.
     pub fn to_hadec_mwa(&self) -> HADec {
         Self::to_hadec(&self, crate::constants::MWA_LAT_RAD)
+    }
+}
+
+impl std::fmt::Display for AzEl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "({:.4}°, {:.4}°)",
+            self.az.to_degrees(),
+            self.el.to_degrees()
+        )
     }
 }
 

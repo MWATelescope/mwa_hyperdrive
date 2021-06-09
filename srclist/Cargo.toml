@@ -20,6 +20,6 @@ thiserror = "1.0.*"
 mwa_hyperdrive_core = { path = "../core" }
 
 [dev-dependencies]
-approx = "0.4.*"
+approx = "0.5.*"
 indoc = "1.0.*"
 tempfile = "3.1.0"

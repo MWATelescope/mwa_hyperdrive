@@ -2,92 +2,32 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to handle direction-independent calibration.
-
-This code borrows heavily from Torrance Hodgson's excellent Julia code at
-https://github.com/torrance/MWAjl
-*/
+//! Code to handle direction-independent calibration.
+//!
+//! This code borrows heavily from Torrance Hodgson's excellent Julia code at
+//! https://github.com/torrance/MWAjl
 
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, info, trace};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use super::{predict, solutions::write_solutions, CalibrateError, CalibrateParams};
+use super::{model, solutions::write_solutions, CalibrateError, CalibrateParams};
+use crate::data_formats::uvfits::UvfitsWriter;
+use crate::precession::precess_time;
 use crate::{math::cross_correlation_baseline_to_tiles, *};
 
 /// Do all the steps required for direction-independent calibration; read the
-/// input data, predict a model against it, and write the solutions out.
+/// input data, generate a model against it, and write the solutions out.
 pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
-    // The LMN coordinates of each source component.
-    let lmns = params
-        .source_list
-        .get_lmns_parallel(&params.input_data.get_obs_context().pointing);
-
-    // Get the instrumental flux densities for each component at each frequency.
-    // These don't change with time, so we can save a lot of computation by just
-    // doing this once.
-    // The calculation is currently done in serial. This shouldn't be a problem
-    // unless the size of the source list is huge.
-    // TODO: Don't do a transpose and make this run in parallel.
-    trace!("Estimating flux densities for sky-model components at all frequencies");
-    let flux_densities = {
-        let mut fds = Array2::from_elem(
-            (
-                params.num_components,
-                params.freq.unflagged_fine_chan_freqs.len(),
-            ),
-            // [0.0; 4],
-            Jones::default(),
-        );
-        let components = params
-            .source_list
-            .iter()
-            .map(|(_, src)| &src.components)
-            .flatten();
-        for (mut comp_axis, comp) in fds.outer_iter_mut().zip(components) {
-            for (comp_fd, freq) in comp_axis
-                .iter_mut()
-                .zip(params.freq.unflagged_fine_chan_freqs.iter())
-            {
-                *comp_fd = comp.estimate_at_freq(*freq)?.into();
-            }
-        }
-        // Flip the array axes; this makes things simpler later.
-        fds.t().to_owned()
-    };
-    // let inst_flux_densities = {
-    //     let mut fds = Array2::from_elem(
-    //         (
-    //             params.num_components,
-    //             params.freq.unflagged_fine_chan_freqs.len(),
-    //         ),
-    //         InstrumentalStokes::default(),
-    //     );
-    //     let components = params
-    //         .source_list
-    //         .iter()
-    //         .map(|(_, src)| &src.components)
-    //         .flatten();
-    //     for (mut comp_axis, comp) in fds.outer_iter_mut().zip(components) {
-    //         for (comp_fd, freq) in comp_axis
-    //             .iter_mut()
-    //             .zip(params.freq.unflagged_fine_chan_freqs.iter())
-    //         {
-    //             *comp_fd = comp.estimate_at_freq(*freq)?.into();
-    //         }
-    //     }
-    //     // Flip the array axes; this makes things simpler later.
-    //     fds.t().to_owned()
-    // };
+    let obs_context = params.input_data.get_obs_context();
+    let freq_context = params.input_data.get_freq_context();
 
     trace!("Allocating memory for input data visibilities and model visibilities");
-    // TODO: Use params' timesteps.
-    let timesteps = &params.input_data.get_obs_context().timestep_indices;
     let vis_shape = (
-        timesteps.end - timesteps.start,
+        params.timesteps.len(),
         params.unflagged_baseline_to_tile_map.len(),
         params.freq.unflagged_fine_chans.len(),
     );
@@ -103,45 +43,66 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         / 1024 / 1024
     );
 
-    // As most of the tiles likely have the same configuration (all the same
-    // delays and amps), we can be much more efficient with computation by
-    // computing over only unique tile configurations (that is, unique
-    // combinations of amplitudes/delays).
-    // let mut tile_configs: HashMap<u64, TileConfig> = HashMap::new();
-    // for tile in params
-    //     .get_obs_context()
-    //     .
-    //     .rf_inputs
-    //     .iter()
-    //     .filter(|&rf| !params.tile_flags.contains(&(rf.ant as _)))
-    //     .filter(|&rf| rf.pol == mwa_hyperdrive_core::mwalib::Pol::Y)
-    // {
-    //     let h = TileConfig::hash(&tile.dipole_delays, &tile.dipole_gains);
-    //     match tile_configs.get_mut(&h) {
-    //         None => {
-    //             tile_configs.insert(
-    //                 h,
-    //                 TileConfig::new(tile.ant, &tile.dipole_delays, &tile.dipole_gains),
-    //             );
-    //         }
-    //         Some(c) => {
-    //             c.antennas.push(tile.ant as _);
-    //         }
-    //     };
-    // }
-
-    // Set up our producer (IO reading and sending) thread and worker (IO
-    // receiving and predicting) thread. By doing things this way, the disk and
-    // CPU is fully utilised; the input data and our predicted model is
-    // assembled as efficiently as possible.
+    // Set up our producer (IO reading and sending) thread, worker (IO receiving
+    // and predicting) thread and model (writes the sky model to a file) thread.
+    // By doing things this way, the disk and CPU is fully utilised; the input
+    // data and our predicted model is assembled as efficiently as possible.
     info!("Beginning reading of input data and prediction");
     // Data communication channel. The producer might send an error on this
     // channel; it's up to the worker to propagate it.
     let (sx_data, rx_data) = unbounded();
-    // Error channel. This allows the worker to send an error out to the
-    // main thread.
-    let (sx_error, rx_error) = bounded(1);
+    // Model communication channel. The worker might send an error on this
+    // channel.
+    let (sx_model, rx_model) = unbounded();
+    // Final channel. Used to communicate with the main thread outside the
+    // thread scope.
+    let (sx_final, rx_final) = bounded(1);
+
+    // Progress bars. Courtesy Dev.
+    let multi_progress = MultiProgress::new();
+    let read_progress = multi_progress.add(
+        ProgressBar::new(vis_shape.0 as _)
+            .with_style(
+                ProgressStyle::default_bar()
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
+                    .progress_chars("=> "),
+            )
+            .with_position(0)
+            .with_message("Reading timesteps"),
+    );
+    let model_progress = multi_progress.add(
+        ProgressBar::new(vis_shape.0 as _)
+            .with_style(
+                ProgressStyle::default_bar()
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
+                    .progress_chars("=> "),
+            )
+            .with_position(0)
+            .with_message("Sky modelling"),
+    );
+    // Only add a model writing progress bar if we need it.
+    let model_write_progress = match params.model_file {
+        Some(_) => Some(
+            multi_progress.add(
+                ProgressBar::new(vis_shape.0 as _)
+                    .with_style(
+                        ProgressStyle::default_bar()
+                            .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
+                            .progress_chars("=> "),
+                    )
+                    .with_position(0)
+                    .with_message("Model writing"),
+            ),
+        ),
+        None => None,
+    };
+
     scope(|scope| {
+        // Spawn a thread to draw the progress bars.
+        scope.spawn(|_| {
+            multi_progress.join().unwrap();
+        });
+
         // Mutable slices of the "global" data and model arrays. These allow
         // threads to mutate the global arrays in parallel (using the
         // Arc<Mutex<_>> pattern would kill performance here).
@@ -150,8 +111,11 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
         // Producer (input data reading thread).
         scope.spawn(move |_| {
-            for ((timestep, vis_data_slice), vis_model_slice) in
-                timesteps.clone().zip(vis_data_slices).zip(vis_model_slices)
+            for ((&timestep, vis_data_slice), vis_model_slice) in params
+                .timesteps
+                .iter()
+                .zip(vis_data_slices)
+                .zip(vis_model_slices)
             {
                 let read_result = params.input_data.read(
                     vis_data_slice,
@@ -166,7 +130,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     .map_err(CalibrateError::from);
                 // If we can't send the message, it's because the channel has
                 // been closed on the other side. That should only happen
-                // because the worker has exited due to error; in that casea,
+                // because the worker has exited due to error; in that case,
                 // just exit this thread.
                 match sx_data.send(msg) {
                     Ok(_) => (),
@@ -176,12 +140,14 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 if read_failed {
                     break;
                 }
+
+                read_progress.inc(1);
             }
 
             // By dropping the send channel, we signal to the worker thread that
             // there is no more incoming data, and it can stop waiting.
             drop(sx_data);
-            trace!("Producer finished reading input data");
+            read_progress.finish_with_message("Finished reading input data");
         });
 
         // Worker (predictor thread). Only one thread receives the input data,
@@ -189,136 +155,231 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         // having slices of the input data being processed serially by
         // individual threads.
         scope.spawn(move |_| {
-            let obs_context = params.input_data.get_obs_context();
-
-            // Make collections of references to each component type.
-            let mut point_comps: Vec<&SourceComponent> = vec![];
-            let mut gaussian_comps: Vec<&SourceComponent> = vec![];
-            let mut shapelet_comps: Vec<&SourceComponent> = vec![];
-            for comp in params
-                .source_list
-                .iter()
-                .flat_map(|(_, src)| &src.components)
-            {
-                match comp.comp_type {
-                    ComponentType::Point => point_comps.push(comp),
-                    ComponentType::Gaussian { .. } => gaussian_comps.push(comp),
-                    ComponentType::Shapelet { .. } => shapelet_comps.push(comp),
+            // Split the source list by component. This only needs to be done
+            // once, so do it outside the loop.
+            match model::split_components(
+                &params.source_list,
+                &params.freq.unflagged_fine_chan_freqs,
+                &obs_context.phase_centre,
+            ) {
+                Err(e) => {
+                    sx_model.send(Err(CalibrateError::from(e))).unwrap();
                 }
+                Ok(split_components) => {
+                    // Iterate on the receive channel forever. This terminates when
+                    // there is no data in the channel _and_ the sender has been
+                    // dropped.
+                    for msg in rx_data.iter() {
+                        let (timestep, uvws, mut vis_model_slice, weights) = match msg {
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                // Propagate the error.
+                                sx_model.send(Err(e)).unwrap();
+                                break;
+                            }
+                        };
+
+                        // TODO: Allow the user to turn off precession.
+                        let precession_info = precess_time(
+                            &obs_context.phase_centre,
+                            &obs_context.timesteps[timestep],
+                            params.array_longitude,
+                            params.array_latitude,
+                        );
+                        // Apply precession to the tile XYZ positions.
+                        let precessed_tile_xyz =
+                            precession_info.precess_xyz_parallel(&obs_context.tile_xyz);
+                        let precessed_xyz_bls = XYZ::get_baselines(&precessed_tile_xyz);
+                        let precessed_uvws =
+                            XYZ::to_uvw(&precessed_tile_xyz, &precession_info.hadec_j2000);
+                        // let baseline_xyz = XYZ::get_baselines(&tile_xyz);
+
+                        // let lst = obs_context.lst_from_timestep(timestep);
+                        let model_result = model::model_timestep(
+                            vis_model_slice.view_mut(),
+                            weights.view(),
+                            &split_components,
+                            &params.beam,
+                            precession_info.lmst_j2000,
+                            &precessed_xyz_bls,
+                            &precessed_uvws,
+                            &params.freq.unflagged_fine_chan_freqs,
+                        );
+                        let model_failed = model_result.is_err();
+                        let msg = model_result.map(|_| {
+                            (
+                                vis_model_slice,
+                                weights,
+                                uvws,
+                                &obs_context.timesteps[timestep],
+                            )
+                        });
+                        // If we can't send the message, it's because the
+                        // channel has been closed on the other side. That
+                        // should only happen because the thread has exited due
+                        // to error; in that case, just exit this thread.
+                        match sx_model.send(msg) {
+                            Ok(_) => (),
+                            Err(_) => break,
+                        }
+                        if model_failed {
+                            break;
+                        }
+
+                        model_progress.inc(1);
+                    }
+                    model_progress.finish_with_message("Finished generating sky model");
+                }
+            };
+
+            drop(sx_model);
+        });
+
+        // Model writing thread. If the user hasn't specified to write the model
+        // to a file, then this thread just propagates errors.
+        scope.spawn(move |_| {
+            // If the user wants the sky model written out, create the file
+            // here. This can take a good deal of time; by creating the file in
+            // a thread, the other threads can do useful work in the meantime.
+            let model_writer_result = if let Some(model_pb) = &params.model_file {
+                info!("Writing the sky model to {}", model_pb.display());
+                let start_epoch = &obs_context.timesteps[params.timesteps[0]];
+                let centre_freq =
+                    freq_context.fine_chan_freqs[0] + freq_context.total_bandwidth / 2.0;
+                let obs_name = obs_context.obsid.map(|o| format!("{}", o));
+
+                let create_result = UvfitsWriter::new(
+                    &model_pb,
+                    // Don't include flagged timesteps or flagged baselines.
+                    vis_shape.0,
+                    vis_shape.1,
+                    // ... but use all channels (including flagged channels).
+                    // fits files expect a neat layout.
+                    params.freq.num_fine_chans,
+                    start_epoch,
+                    freq_context.native_fine_chan_width,
+                    centre_freq,
+                    params.freq.num_fine_chans / 2,
+                    &obs_context.phase_centre,
+                    obs_name.as_deref(),
+                );
+                // Handle any errors during output model file creation.
+                match create_result {
+                    Err(e) => {
+                        sx_final.send(Err(CalibrateError::from(e))).unwrap();
+                        // If there was an error, make the code below exit early
+                        // so that this thread does no more work. The error has
+                        // already been propagated to the main thread.
+                        Err(0)
+                    }
+                    Ok(v) => Ok(Some(v)),
+                }
+            } else {
+                Ok(None)
+            };
+
+            match model_writer_result {
+                Ok(Some(mut model_writer)) => {
+                    for msg in rx_model.iter() {
+                        // Handle any errors from the worker thread.
+                        let (vis_model_timestep, weights, uvws, epoch) = match msg {
+                            Err(e) => {
+                                sx_final.send(Err(e)).unwrap();
+                                break;
+                            }
+                            Ok(v) => v,
+                        };
+
+                        let write_result: Result<(), CalibrateError> = {
+                            model_writer.open().map_err(CalibrateError::from).and_then(
+                                |mut uvfits| {
+                                    model_writer
+                                        .write_from_vis(
+                                            &mut uvfits,
+                                            vis_model_timestep.view(),
+                                            weights.view(),
+                                            &uvws,
+                                            epoch,
+                                            params.freq.num_fine_chans,
+                                            &params.freq.fine_chan_flags,
+                                        )
+                                        .map_err(CalibrateError::from)
+                                },
+                            )
+                        };
+                        match write_result {
+                            Err(e) => {
+                                sx_final.send(Err(e)).unwrap();
+                                break;
+                            }
+                            Ok(()) => (),
+                        };
+
+                        if let Some(pb) = &model_write_progress {
+                            pb.inc(1)
+                        }
+                    }
+
+                    // Send the model writer object out to the main thread.
+                    sx_final.send(Ok(Some(model_writer))).unwrap();
+                }
+
+                // There's no model to write out, but we still need to handle
+                // all of the incoming messages.
+                Ok(None) => {
+                    for msg in rx_model.iter() {
+                        // Handle any errors from the worker thread.
+                        if let Err(e) = msg {
+                            sx_final.send(Err(e)).unwrap();
+                            break;
+                        };
+                    }
+                    // Send the model writer object out to the main thread.
+                    sx_final.send(Ok(None)).unwrap();
+                }
+
+                // There was an error when creating the model file. Exit now.
+                Err(_) => (),
             }
 
-            // Iterate on the receive channel forever. This terminates when
-            // there is no data in the channel _and_ the sender has been
-            // dropped.
-            for msg in rx_data.iter() {
-                let (timestep, uvws, mut vis_model_slice, weights) = match msg {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        sx_error.send(e).unwrap();
-                        break;
-                    }
-                };
-                trace!("Predicting timestep {}", timestep);
-
-                // For this time, get the AzEl coordinates of the sky-model
-                // components.
-                let lst = obs_context.lst_from_timestep(timestep);
-                let azels = params.source_list.get_azel_mwa_parallel(lst);
-                let hadecs: Vec<_> = params
-                    .source_list
-                    .iter()
-                    .flat_map(|(_, src)| &src.components)
-                    .map(|comp| comp.radec.to_hadec(lst))
-                    .collect();
-
-                // TODO: Use a Jones matrix cache.
-                let fds_result = predict::beam_correct_flux_densities(
-                    flux_densities.view(),
-                    &azels,
-                    &hadecs,
-                    &params.beam,
-                    &obs_context.delays,
-                    &[1.0; 16],
-                    &params.freq.unflagged_fine_chan_freqs,
-                );
-                // If we encountered an error, we need to handle it on the main
-                // thread (send it out).
-                let fds = match fds_result {
-                    Err(e) => {
-                        sx_error.send(e).unwrap();
-                        break;
-                    }
-                    // Otherwise, we can continue.
-                    Ok(fds) => fds,
-                };
-
-                predict::predict_model_points(
-                    vis_model_slice.view_mut(),
-                    weights.view(),
-                    fds.view(),
-                    &point_comps,
-                    &lmns,
-                    &uvws,
-                    &params.freq.unflagged_fine_chan_freqs,
-                );
-                predict::predict_model_gaussians(
-                    vis_model_slice.view_mut(),
-                    weights.view(),
-                    fds.view(),
-                    &gaussian_comps,
-                    &lmns,
-                    &uvws,
-                    &params.freq.unflagged_fine_chan_freqs,
-                );
-                // Shapelets need their own special kind of UVW coordinates.
-                let mut shapelet_uvws: Array2<UVW> = Array2::from_elem(
-                    (shapelet_comps.len(), params.unflagged_baseline_xyz.len()),
-                    UVW::default(),
-                );
-                shapelet_uvws
-                    .outer_iter_mut()
-                    .into_par_iter()
-                    .zip(shapelet_comps.par_iter())
-                    .for_each(|(mut array, comp)| {
-                        let hadec = comp.radec.to_hadec(lst);
-                        let shapelet_uvws =
-                            UVW::get_baselines(&params.unflagged_baseline_xyz, &hadec);
-                        array.assign(&Array1::from(shapelet_uvws));
-                    });
-                // To ensure that `shapelet_uvws` is being strided efficiently,
-                // invert the axes here.
-                let shapelet_uvws = shapelet_uvws.t().to_owned();
-                predict::predict_model_shapelets(
-                    vis_model_slice.view_mut(),
-                    weights.view(),
-                    fds.view(),
-                    &shapelet_comps,
-                    shapelet_uvws.view(),
-                    &lmns,
-                    &uvws,
-                    &params.freq.unflagged_fine_chan_freqs,
-                );
+            drop(sx_final);
+            if let Some(pb) = model_write_progress {
+                pb.finish_with_message("Finished writing sky model");
             }
-            drop(sx_error);
         });
     })
     .unwrap();
 
-    // If an error message comes in on this channel, propagate it.
-    for err_msg in rx_error.iter() {
-        return Err(err_msg);
+    // Handle messages from the scoped threads.
+    for msg in rx_final.iter() {
+        match msg {
+            // Finalise writing the model file.
+            Ok(Some(model_writer)) => {
+                trace!("Finalising writing of model uvfits file");
+                model_writer.write_uvfits_antenna_table(
+                    &params.unflagged_tile_names,
+                    &params.unflagged_tile_xyz,
+                )?;
+                if let Some(model_pb) = &params.model_file {
+                    info!("Finished writing sky model to {}", model_pb.display());
+                }
+            }
+
+            // We're not writing a model; nothing to do.
+            Ok(None) => (),
+
+            // If an error message comes in on this channel, propagate it.
+            Err(e) => return Err(e),
+        }
     }
 
-    info!("Finished reading data and predicting a model against it.");
-
-    let timeblock_len = timesteps.end - timesteps.start;
     // TODO: Let the user determine this -- using all timesteps at once for now.
+    let timeblock_len = params.timesteps.len();
     let num_timeblocks = 1;
     let mut chanblocks = params.freq.unflagged_fine_chans.iter().collect::<Vec<_>>();
     chanblocks.sort_unstable();
 
     // The shape of the array containing output Jones matrices.
-    let obs_context = params.input_data.get_obs_context();
     let total_num_tiles = obs_context.tile_xyz.len();
     let num_unflagged_tiles = obs_context.num_unflagged_tiles;
     let shape = (num_timeblocks, num_unflagged_tiles, chanblocks.len());
@@ -332,10 +393,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     // The output DI Jones matrices.
     let mut di_jones = Array3::from_elem(shape, Jones::identity());
     let mut converged = Array2::from_elem(
-        (
-            timesteps.end - timesteps.start,
-            params.freq.num_unflagged_fine_chans,
-        ),
+        (params.timesteps.len(), params.freq.num_unflagged_fine_chans),
         false,
     );
 
@@ -344,13 +402,21 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         .into_iter()
         .zip(di_jones.outer_iter_mut())
         .for_each(|(timeblock, di_jones)| {
-            info!("Calibrating timeblock {}", timeblock);
+            let pb = ProgressBar::new(chanblocks.len() as _)
+            .with_style(
+                ProgressStyle::default_bar()
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:3}/{len:3} ({elapsed_precise}<{eta_precise})")
+                    .progress_chars("=> "),
+            );
+            pb.set_message(format!("Calibrating timeblock {}", timeblock));
+
             let mut di_jones_rev = di_jones.reversed_axes();
+            let mut converged_in_timeblock = Vec::with_capacity(chanblocks.len());
             chanblocks
                 .par_iter()
                 .zip(di_jones_rev.outer_iter_mut())
                 .enumerate()
-                .for_each(|(chanblock_index, (&&chanblock, di_jones))| {
+                .map(|(chanblock_index, (&&chanblock, di_jones))| {
                     let cal_result = calibrate(
                         vis_data.slice(s![
                             timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
@@ -368,43 +434,42 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         params.min_threshold,
                     );
 
-                    let start_str = format!("chanblock {:>3}", chanblock);
+                    let mut status_str = format!("Chanblock {:>3}", chanblock);
                     if num_unflagged_tiles - cal_result.num_failed <= 4 {
-                        info!(
-                            "{}: failed    ({:>2}): Too many antenna solutions failed ({})",
-                            start_str, cal_result.num_iterations, cal_result.num_failed
-                        );
+                        status_str.push_str(&format!(": failed    ({:>2}): Too many antenna solutions failed ({})",
+                        cal_result.num_iterations, cal_result.num_failed));
                     } else if cal_result.max_precision > params.min_threshold {
-                        info!(
-                            "{}: failed    ({:>2}): {:.5e} > {:e}",
-                            start_str,
+                        status_str.push_str(&format!(
+                            ": failed    ({:>2}): {:.5e} > {:e}",
                             cal_result.num_iterations,
                             cal_result.max_precision,
                             params.min_threshold,
-                        );
+                        ));
                     } else if cal_result.max_precision > params.stop_threshold {
-                        info!(
-                            "{}: converged ({:>2}): {:e} > {:.5e} > {:e}",
-                            start_str,
+                        status_str.push_str(&format!(
+                            ": converged ({:>2}): {:e} > {:.5e} > {:e}",
                             cal_result.num_iterations,
                             params.min_threshold,
                             cal_result.max_precision,
                             params.stop_threshold
-                        );
+                        ));
                     } else {
-                        info!(
-                            "{}: converged ({:>2}): {:e} > {:.5e}",
-                            start_str,
+                        status_str.push_str(&format!(
+                            ": converged ({:>2}): {:e} > {:.5e}",
                             cal_result.num_iterations,
                             params.stop_threshold,
                             cal_result.max_precision
-                        );
+                        ));
                     }
-                });
+                    pb.println(status_str);
+                    pb.inc(1);
+                    cal_result.converged
+                }).collect_into_vec(&mut converged_in_timeblock);
+            pb.finish_with_message(format!("Timeblock {}: {}/{} chanblocks succeeded", timeblock, converged_in_timeblock.iter().filter(|&&x| x).count(), chanblocks.len()))
         });
 
     // Write out the solutions.
-    let num_fine_freq_chans = params.input_data.get_freq_context().fine_chan_freqs.len();
+    let num_fine_freq_chans = freq_context.fine_chan_freqs.len();
     trace!("Writing solutions...");
     write_solutions(
         &params.output_solutions_filename,
@@ -431,7 +496,7 @@ struct CalibrationResult {
 }
 
 /// Calibrate the antennas of the array by comparing the observed input data
-/// against our predicted model. Return the number of iterations this took.
+/// against our generated model. Return the number of iterations this took.
 ///
 /// This function is intended to be run in parallel; for that reason, no
 /// parallel code is inside this function.
@@ -625,11 +690,6 @@ fn calibration_loop(
                                 Jones::plus_axb(top_t1, &j_data, &z);
                                 // (J M^H)^H (J M^H)
                                 Jones::plus_ahxb(bot_t1, &z, &z);
-
-                                // Release the mutable references on `top` and
-                                // `bot` so we can make new ones.
-                                drop(top_t1);
-                                drop(bot_t1);
 
                                 let top_t2 = top.uget_mut(tile2);
                                 let bot_t2 = bot.uget_mut(tile2);

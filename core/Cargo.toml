@@ -24,10 +24,11 @@ thiserror = "1.0.*"
 
 dashmap = { version = "4.0.*", optional = true }
 # mwa_hyperbeam = { version = "0.3.*", optional = true }
-mwa_hyperbeam = { path = "/home/chj/Software/personal/mwa_hyperbeam", optional = true }
+# mwa_hyperbeam = { path = "/home/chj/Software/personal/mwa_hyperbeam", optional = true }
+mwa_hyperbeam = { git = "https://github.com/cjordan/mwa_hyperbeam", branch = "parallactic", optional = true }
+
+# Needed to implement AbsDiffEq on the Jones type. Makes testing much easier!
+approx = { version = "0.5.*", features = ["num-complex"] }
 
 [dev-dependencies]
-# approx = { version = "0.4.*", features = ["num-complex"] }
-approx = { git = "https://github.com/brendanzab/approx", rev = "68aaa77", features = ["num-complex"] }
-ndarray = { version = "^0", features = ["approx"] }
 serial_test = "0.5.*"

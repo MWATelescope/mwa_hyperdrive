@@ -17,7 +17,7 @@ pub enum SimulateVisError {
     VisibilityGen(#[from] crate::visibility_gen::VisibilityGenerationError),
 
     #[error("{0}")]
-    ReadSourceList(#[from] mwa_hyperdrive_srclist::error::ReadSourceListError),
+    ReadSourceList(#[from] mwa_hyperdrive_srclist::ReadSourceListError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

@@ -2,11 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Useful constants.
- */
-
-use mwa_hyperdrive_core::c64;
+//! Useful constants.
 
 /// Sources with beam-attenuated flux densities less than this value are
 /// discarded from sky-model source lists.
@@ -96,6 +92,6 @@ pub(crate) const HIFITIME_GPS_FACTOR: f64 =
 pub(crate) const MJD_TAI_EPOCH_DIFF: f64 = 1297728000.0;
 
 // sqrt(pi^2 / (2 ln(2)))
-pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.668223128318498282851579;
+pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.6682231283184983;
 
 pub(crate) use mwa_hyperdrive_core::constants::*;

@@ -100,6 +100,9 @@ pub enum ReadSourceListCommonError {
     #[error("Source list line {0}: Incomplete FREQ")]
     IncompleteFluxLine(u32),
 
+    #[error("Source list line {0}: Incomplete LINEAR")]
+    IncompleteLinearLine(u32),
+
     #[error("Source list line {0}: Found an additional component type when one already exists")]
     MultipleComponentTypes(u32),
 

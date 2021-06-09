@@ -2,16 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code for general Jones matrix math.
-
-It's not ideal to use LAPACK for matrix multiplies or inverses, because it is
-not possible to optimise only for 2x2 matrices. Here, we supply the math for
-these special cases.
-
-Parts of the code are derived from Torrance Hodgson's MWAjl:
-https://github.com/torrance/MWAjl/blob/master/src/matrix2x2.jl
- */
+//! Code for general Jones matrix math.
+//!
+//! It's not ideal to use LAPACK for matrix multiplies or inverses, because it
+//! is not possible to optimise only for 2x2 matrices. Here, we supply the math
+//! for these special cases.
+//!
+//! Parts of the code are derived from Torrance Hodgson's MWAjl:
+//! https://github.com/torrance/MWAjl/blob/master/src/matrix2x2.jl
 
 #[cfg(feature = "beam")]
 pub mod cache;
@@ -403,7 +401,6 @@ impl From<&FluxDensity> for Jones<f64> {
     }
 }
 
-#[cfg(test)]
 impl<F: Float> approx::AbsDiffEq for Jones<F> {
     type Epsilon = F;
 

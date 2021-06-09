@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to write out hyperdrive source lists.
-
-To make the source list files a little easier to read and write, `SourceList`
-isn't directly serialisable or deserialisable. Use temporary types here to do
-the serde magic and write out a `SourceList`.
- */
+//! Code to write out hyperdrive source lists.
+//!
+//! To make the source list files a little easier to read and write,
+//! [SourceList] isn't directly serialisable or deserialisable. Use temporary
+//! types here to do the serde magic and write out a [SourceList].
 
 use super::*;
 

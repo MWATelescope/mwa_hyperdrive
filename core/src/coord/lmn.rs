@@ -2,9 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Handle interferometric direction-cosine coordinates.
- */
+//! Handle interferometric direction-cosine coordinates.
+//!
+//! This coordinate system is discussed at length in Interferometry and
+//! Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
+//! Relationships, Polarimetry, and the Measurement Equation.
 
 /// (l,m,n) direction-cosine coordinates. All units are in radians.
 ///

@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to handle reading from and writing to various data container formats.
- */
+//! Code to handle reading from and writing to various data container formats.
 
 mod error;
+pub(crate) mod metafits;
 pub(crate) mod ms;
 pub(crate) mod raw;
+pub(crate) mod uvfits;
 
 pub(crate) use error::ReadInputDataError;
 pub(crate) use ms::MS;

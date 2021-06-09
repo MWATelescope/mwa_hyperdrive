@@ -2,14 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Handling of calibration arguments.
-
-Strategy: Users give arguments to hyperdrive (handled by calibrate::args).
-hyperdrive turns arguments into parameters (handled by calibrate::params). Using
-this paradigm, the code to handle arguments and parameters (and associated
-errors) can be neatly split.
- */
+//! Handling of calibration arguments.
+//!
+//! Strategy: Users give arguments to hyperdrive (handled by calibrate::args).
+//! hyperdrive turns arguments into parameters (handled by calibrate::params).
+//! Using this paradigm, the code to handle arguments and parameters (and
+//! associated errors) can be neatly split.
 
 use std::fs::File;
 use std::io::Read;
@@ -22,8 +20,12 @@ use thiserror::Error;
 
 use crate::calibrate::params::{CalibrateParams, InvalidArgsError};
 use crate::*;
+use mwa_hyperdrive_core::mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
 
 lazy_static::lazy_static! {
+    static ref OUTPUT_SOLUTIONS_HELP: String =
+        format!("The path to the file where the calibration solutions are written. Supported formats are .fits and .bin (which is the \"André calibrate format\"). Default: {}", DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
+
     static ref SOURCE_DIST_CUTOFF_HELP: String =
         format!("The sky-model source cutoff distance [degrees]. This is only used if the input sky-model source list has more sources than specified by num-sources. Default: {}", CUTOFF_DISTANCE);
 
@@ -44,8 +46,11 @@ If not specified, the program will try all types"#, *mwa_hyperdrive_srclist::SOU
     static ref MIN_THRESHOLD_HELP: String =
         format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Reaching this threshold counts as \"converged\", but it's not as good as the stop threshold. Default: {:e}", DEFAULT_MIN_THRESHOLD);
 
-    static ref OUTPUT_SOLUTIONS_HELP: String =
-        format!("The path to the file where the calibration solutions are written. Supported formats are .fits and .bin (which is the \"André calibrate format\"). Default: {}", DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
+    static ref ARRAY_LONGITUDE_HELP: String =
+        format!("The Earth longitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LONGITUDE_RADIANS.to_degrees());
+
+    static ref ARRAY_LATITUDE_HELP: String =
+        format!("The Earth latitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LATITUDE_RADIANS.to_degrees());
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -62,6 +67,12 @@ pub struct CalibrateUserArgs {
 
     #[structopt(short, long, help = OUTPUT_SOLUTIONS_HELP.as_str())]
     pub output_solutions_filename: Option<String>,
+
+    /// The path to the file where the generated sky-model visibilities are
+    /// written. Only uvfits is currently supported. If this argument isn't
+    /// supplied, then no file is written.
+    #[structopt(short, long)]
+    pub model_filename: Option<String>,
 
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided with the MWA_BEAM_FILE environment variable.
@@ -107,6 +118,12 @@ pub struct CalibrateUserArgs {
     #[structopt(short, long)]
     pub freq_res: Option<f64>,
 
+    /// The timesteps to use from the input data. The timesteps will be
+    /// ascendingly sorted for calibration. No duplicates are allowed. The
+    /// default is to use all unflagged timesteps.
+    #[structopt(long)]
+    pub timesteps: Option<Vec<usize>>,
+
     /// Additional tiles to be flagged. These values correspond to values in the
     /// "Antenna" column of HDU 1 in the metafits file, e.g. 0 3 127. These
     /// values should also be the same as FHD tile flags.
@@ -116,6 +133,10 @@ pub struct CalibrateUserArgs {
     /// If specified, pretend that all tiles are unflagged in the input data.
     #[structopt(long)]
     pub ignore_input_data_tile_flags: bool,
+
+    /// If specified, use these dipole delays for the MWA pointing.
+    #[structopt(long)]
+    pub delays: Option<Vec<u32>>,
 
     /// If specified, pretend all fine channels in the input data are unflagged.
     #[structopt(long)]
@@ -142,6 +163,12 @@ pub struct CalibrateUserArgs {
 
     #[structopt(long, help = MIN_THRESHOLD_HELP.as_str())]
     pub min_thresh: Option<f32>,
+
+    #[structopt(long = "array_longitude", help = ARRAY_LONGITUDE_HELP.as_str())]
+    pub array_longitude_deg: Option<f64>,
+
+    #[structopt(long = "array_latitude", help = ARRAY_LATITUDE_HELP.as_str())]
+    pub array_latitude_deg: Option<f64>,
 }
 
 impl CalibrateUserArgs {
@@ -215,6 +242,7 @@ impl CalibrateUserArgs {
         let Self {
             data,
             output_solutions_filename,
+            model_filename,
             beam_file,
             no_beam,
             source_list,
@@ -224,14 +252,18 @@ impl CalibrateUserArgs {
             veto_threshold,
             time_res,
             freq_res,
+            timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
+            delays,
             ignore_input_data_fine_channels_flags,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
             max_iterations,
             stop_thresh,
             min_thresh,
+            array_longitude_deg,
+            array_latitude_deg,
         } = file_args;
         // Merge all the arguments, preferring the CLI args when available.
         Ok(Self {
@@ -239,6 +271,7 @@ impl CalibrateUserArgs {
             output_solutions_filename: cli_args
                 .output_solutions_filename
                 .or(output_solutions_filename),
+            model_filename: cli_args.model_filename.or(model_filename),
             beam_file: cli_args.beam_file.or(beam_file),
             no_beam: cli_args.no_beam || no_beam,
             source_list: cli_args.source_list.or(source_list),
@@ -248,9 +281,11 @@ impl CalibrateUserArgs {
             veto_threshold: cli_args.veto_threshold.or(veto_threshold),
             time_res: cli_args.time_res.or(time_res),
             freq_res: cli_args.freq_res.or(freq_res),
+            timesteps: cli_args.timesteps.or(timesteps),
             tile_flags: cli_args.tile_flags.or(tile_flags),
             ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
                 || ignore_input_data_tile_flags,
+            delays: cli_args.delays.or(delays),
             ignore_input_data_fine_channels_flags: cli_args.ignore_input_data_fine_channels_flags
                 || ignore_input_data_fine_channels_flags,
             fine_chan_flags_per_coarse_chan: cli_args
@@ -260,6 +295,8 @@ impl CalibrateUserArgs {
             max_iterations: cli_args.max_iterations.or(max_iterations),
             stop_thresh: cli_args.stop_thresh.or(stop_thresh),
             min_thresh: cli_args.min_thresh.or(min_thresh),
+            array_longitude_deg: cli_args.array_longitude_deg.or(array_longitude_deg),
+            array_latitude_deg: cli_args.array_latitude_deg.or(array_latitude_deg),
         })
     }
 

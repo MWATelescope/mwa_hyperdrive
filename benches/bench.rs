@@ -18,5 +18,10 @@ fn jones_operations(c: &mut Criterion) {
     c.bench_function("hermitian multiply", |b| b.iter(|| j.mul_hermitian(&j2)));
 }
 
-criterion_group!(benches, jones_operations);
+criterion_group!(
+    name = benches;
+    config = Criterion::default();
+    targets =
+        jones_operations,
+);
 criterion_main!(benches);

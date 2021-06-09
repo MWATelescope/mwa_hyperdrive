@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Writing RTS-style text source lists.
- */
+//! Writing RTS-style text source lists.
 
 use super::*;
 
@@ -19,8 +17,8 @@ fn write_comp_type<T: std::io::Write>(
             buf,
             "GAUSSIAN {} {} {}",
             pa.to_degrees(),
-            maj.to_degrees() * 3600.0,
-            min.to_degrees() * 3600.0
+            maj.to_degrees() * 60.0,
+            min.to_degrees() * 60.0
         )?,
 
         ComponentType::Shapelet {
@@ -123,6 +121,7 @@ pub fn write_source_list<T: std::io::Write>(
 
         writeln!(buf, "ENDSOURCE")?;
     }
+    buf.flush()?;
 
     Ok(())
 }

@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to remove sources from a source list.
-
-Sources can be either because their position in the beam attenuates them
-sufficiently (veto), or we request a certain number of sources.
- */
+//! Code to remove sources from a source list.
+//!
+//! A sources can be removed either because its position in the beam attenuates
+//! its brightness too severely (veto), or we request a certain number of
+//! sources (say N) and there are more than N sources in the source list.
 
 use log::{debug, trace, warn};
 use rayon::{iter::Either, prelude::*};
@@ -39,16 +38,16 @@ use mwa_hyperdrive_core::*;
 /// compared to the obs start.
 pub(crate) fn veto_sources(
     source_list: &mut SourceList,
-    pointing: &RADec,
+    phase_centre: &RADec,
     lst_rad: f64,
-    delays: &[u32],
+    array_latitude_rad: f64,
     coarse_chan_freqs: &[f64],
     beam: &Box<dyn Beam>,
     num_sources: Option<usize>,
     source_dist_cutoff: f64,
     veto_threshold: f64,
 ) -> Result<Vec<RankedSource>, VetoError> {
-    let pointing_azel = pointing.to_hadec(lst_rad).to_azel_mwa();
+    let phase_azel = phase_centre.to_hadec(lst_rad).to_azel(array_latitude_rad);
 
     // We want to store the flux densities for each source at the "mean
     // frequency". Store the middle coarse channel number to achieve this later.
@@ -59,7 +58,7 @@ pub(crate) fn veto_sources(
     let dist_cutoff: Option<f64> = {
         match num_sources {
             Some(n) => {
-                if source_list.len() < n {
+                if source_list.len() <= n {
                     {
                         debug!("The supplied source list has enough sources to satisfy the requested number of sources; no distance cutoff necessary");
                         None
@@ -84,18 +83,17 @@ pub(crate) fn veto_sources(
             // Are any of this source's components too low in elevation? Or too
             // far from the pointing centre?
             for comp in &source.components {
-                let azel = comp.radec.to_hadec(lst_rad).to_azel_mwa();
+                let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                 if azel.el < ELEVATION_LIMIT {
-                    trace!("A component of source {}'s elevation ({} radians) was below the limit ({} radians)",
-                           source_name,
+                    trace!("A component's elevation ({} radians, source {}) was below the limit ({} radians)",
                            azel.el,
+                           source_name,
                            ELEVATION_LIMIT);
                     return Either::Left(Ok(source_name.clone()));
                 } else if let Some(d) = dist_cutoff {
-                    if comp.radec.separation(&pointing) > d {
-                    trace!("A component of source {}'s elevation ({} radians) was too far from the pointing centre ({} radians)",
+                    if comp.radec.separation(&phase_centre) > d {
+                    trace!("A component (source {}) was too far from the pointing centre (separation {} radians)",
                            source_name,
-                           azel.el,
                            d);
                     return Either::Left(Ok(source_name.clone()));
                     };
@@ -118,12 +116,9 @@ pub(crate) fn veto_sources(
 
                 // Get the beam response at this source position and frequency.
                 let j = match beam.calc_jones(
-                        pointing_azel.az,
-                        pointing_azel.za(),
+                        &phase_azel,
                         cc_freq as _,
-                        delays,
-                        &[1.0; 16],
-                    true) {
+                        &[1.0; 16]) {
                         Ok(j) => j,
                         Err(e) => return Either::Left(Err(e.into())),
                     };
@@ -252,7 +247,9 @@ pub enum VetoError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::precession::get_unprecessed_lmst;
     use crate::tests::*;
+    use mwa_hyperdrive_core::mwalib::MWA_LONGITUDE_RADIANS;
     use reduced_obsids::get_1090008640_smallest;
 
     #[test]
@@ -262,35 +259,22 @@ mod tests {
         args.no_beam = false;
         let params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
-        let pointing = &obs_context.pointing;
-        let pointing_azel = pointing.to_hadec(obs_context.lst0).to_azel_mwa();
+        let phase = &obs_context.phase_centre;
+        let lmst = get_unprecessed_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
+        let phase_azel = phase.to_hadec(lmst).to_azel_mwa();
 
         let jones_pointing_centre = params
             .beam
-            .calc_jones(
-                pointing_azel.az,
-                pointing_azel.za(),
-                180e6 as _,
-                &obs_context.delays,
-                &[1.0; 16],
-                true,
-            )
+            .calc_jones(&phase_azel, 180e6 as _, &[1.0; 16])
             .unwrap();
-        let radec_null = RADec::new_degrees(
-            pointing.ra.to_degrees() + 80.0,
-            pointing.dec.to_degrees() + 80.0,
-        );
-        let azel_null = radec_null.to_hadec(obs_context.lst0).to_azel_mwa();
+        let radec_null =
+            RADec::new_degrees(phase.ra.to_degrees() + 80.0, phase.dec.to_degrees() + 80.0);
+        assert!(radec_null.dec.to_degrees() > -90.0);
+        assert!(radec_null.dec.to_degrees() < 90.0);
+        let azel_null = radec_null.to_hadec(lmst).to_azel_mwa();
         let jones_null = params
             .beam
-            .calc_jones(
-                azel_null.az,
-                azel_null.za(),
-                180e6 as _,
-                &obs_context.delays,
-                &[1.0; 16],
-                true,
-            )
+            .calc_jones(&azel_null, 180e6 as _, &[1.0; 16])
             .unwrap();
         let fd = FluxDensity {
             freq: 180e6,
@@ -300,7 +284,7 @@ mod tests {
             v: 0.0,
         };
         let bafd_pc = get_beam_attenuated_flux_density(&fd, &jones_pointing_centre);
-        assert_abs_diff_eq!(bafd_pc, 1.9822859522655294, epsilon = 1e-10);
+        assert_abs_diff_eq!(bafd_pc, 1.9822303442965272, epsilon = 1e-10);
 
         let bafd_null = get_beam_attenuated_flux_density(&fd, &jones_null);
         assert_abs_diff_eq!(bafd_null, 0.0000000005317170873153842, epsilon = 1e-10);
@@ -314,6 +298,7 @@ mod tests {
         args.no_beam = false;
         let mut params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
+        let lmst = get_unprecessed_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
         // For testing's sake, keep only the following bright sources.
         let sources = &[
             "J002549-260211",
@@ -390,9 +375,9 @@ mod tests {
 
         let result = veto_sources(
             &mut params.source_list,
-            &obs_context.pointing,
-            obs_context.lst0,
-            &obs_context.delays,
+            &obs_context.phase_centre,
+            lmst,
+            MWA_LAT_RAD,
             &params.input_data.get_freq_context().coarse_chan_freqs,
             &params.beam,
             None,
@@ -417,6 +402,7 @@ mod tests {
         args.no_beam = false;
         let mut params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
+        let lmst = get_unprecessed_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
 
         // For testing's sake, keep only the following sources.
         let sources = &[
@@ -436,9 +422,9 @@ mod tests {
 
         let result = veto_sources(
             &mut params.source_list,
-            &obs_context.pointing,
-            obs_context.lst0,
-            &obs_context.delays,
+            &obs_context.phase_centre,
+            lmst,
+            MWA_LAT_RAD,
             &params.input_data.get_freq_context().coarse_chan_freqs,
             &params.beam,
             Some(3),

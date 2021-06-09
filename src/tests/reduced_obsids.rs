@@ -2,11 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-This module provides functions for tests against observations that occupy a
-small amount of data. These tests are useful as it allows hyperdrive to perform
-units tests without requiring MWA data for a full observation.
- */
+//! This module provides functions for tests against observations that occupy a
+//! small amount of data. These tests are useful as it allows hyperdrive to
+//! perform units tests without requiring MWA data for a full observation.
 
 use super::*;
 

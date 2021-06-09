@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to read sky-model source list files.
- */
+//! Code to read sky-model source list files.
 
 use std::fs::File;
 use std::path::Path;

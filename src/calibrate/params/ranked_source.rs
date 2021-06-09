@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Specialised code for calibrating sky-model sources.
-
-The `SourceList` type is deliberately not sorted by flux density, or anything
-else, so the `RankedSource` type here helps calibration by providing a
-beam-attenuated flux density, as well as other things.
- */
+//! Specialised code for calibrating sky-model sources.
+//!
+//! The `SourceList` type is deliberately not sorted by flux density, or anything
+//! else, so the `RankedSource` type here helps calibration by providing a
+//! beam-attenuated flux density, as well as other things.
 
 use mwa_hyperdrive_core::*;
 
@@ -47,7 +45,10 @@ impl RankedSource {
             weights.push(stokes_i);
         }
         let weighted_pos = RADec::weighted_average(
-            &src.components.iter().map(|c| c.radec).collect::<Vec<_>>(),
+            &src.components
+                .iter()
+                .map(|c| &c.radec)
+                .collect::<Vec<&RADec>>(),
             &weights,
         );
         Ok(Self {

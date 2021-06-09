@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Code to handle reading from raw MWA files.
- */
+//! Code to handle reading from raw MWA files.
 
 pub(crate) mod error;
 
@@ -18,11 +16,18 @@ use log::{debug, warn};
 use ndarray::prelude::*;
 
 use super::*;
-use crate::context::{FreqContext, ObsContext};
 use crate::flagging::aoflagger::AOFlags;
 use crate::glob::*;
 use crate::mwalib::{CorrelatorContext, Pol};
-use mwa_hyperdrive_core::{erfa_sys, mwalib, Jones, RADec, XYZ};
+use crate::{
+    calibrate::params::Delays,
+    context::{FreqContext, ObsContext},
+};
+use mwa_hyperdrive_core::{
+    erfa_sys,
+    mwalib::{self, MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS},
+    Jones, RADec, XYZ,
+};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawData {
@@ -51,6 +56,7 @@ impl RawData {
         metadata: &T,
         gpuboxes: &[T],
         mwafs: Option<&[T]>,
+        dipole_delays: &mut Delays,
     ) -> Result<Self, NewRawError> {
         // The metafits argument could be a glob. If the specified
         // metafits file can't be found, treat it as a glob and expand
@@ -128,37 +134,14 @@ impl RawData {
         let ideal_delays = if listed_delays.iter().all(|&d| d != 32) {
             listed_delays
         } else {
-            // Even if DELAYS is all 32, the ideal delays are listed in HDU 2 of the
-            // metafits file. Some dipoles might be dead, though, so iterate over RF
-            // inputs until we have all non-32 delays.
-
-            let mut ideal_delays = vec![32; 16];
-            for rf in metafits_context
-                .rf_inputs
-                .iter()
-                .filter(|rf| rf.pol == Pol::Y)
-            {
-                let dipole_delays = &rf.dipole_delays;
-                if dipole_delays == &[32; 16] {
-                    tile_flags_set.insert(rf.ant as usize);
-                    continue;
-                }
-                for (i, &d) in dipole_delays.iter().enumerate() {
-                    if d != 32 {
-                        ideal_delays[i] = d;
-                    }
-                }
-
-                // Are all delays non-32?
-                if ideal_delays.iter().all(|&d| d != 32) {
-                    break;
-                }
-            }
-            ideal_delays
+            metafits::get_true_delays(&metafits_context)
         };
         debug!("Ideal observation dipole delays: {:?}", &ideal_delays);
-        if bad_obs {
-            warn!("Using {:?} as dipole delays", &ideal_delays);
+        if matches!(dipole_delays, Delays::None) {
+            if bad_obs {
+                warn!("Using {:?} as dipole delays", &ideal_delays);
+            }
+            *dipole_delays = Delays::Available(ideal_delays);
         }
 
         let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
@@ -179,7 +162,7 @@ impl RawData {
             return Err(NewRawError::AllTilesFlagged);
         }
 
-        let fine_chan_flags_per_coarse_chan: Vec<usize> = 
+        let fine_chan_flags_per_coarse_chan: Vec<usize> =
             // If the flags aren't specified, use the observation's fine-channel
             // frequency resolution to set them.
             match metafits_context.corr_fine_chan_width_hz {
@@ -216,7 +199,7 @@ impl RawData {
             None
         };
 
-        let time_res = metafits_context.corr_int_time_ms as f64 / 1e3;
+        let time_res = Some(metafits_context.corr_int_time_ms as f64 / 1e3);
 
         // TODO: Which timesteps are good ones?
         let timesteps: Vec<hifitime::Epoch> = mwalib_context
@@ -229,7 +212,8 @@ impl RawData {
                 // hifitime wants the number of TAI seconds since 1900. GPS time
                 // starts at 1980 Jan 5. Also adjust the time to be a centroid;
                 // add half of the time resolution.
-                let tai = gps + 19.0 + crate::constants::HIFITIME_GPS_FACTOR + time_res / 2.0;
+                let tai =
+                    gps + 19.0 + crate::constants::HIFITIME_GPS_FACTOR + time_res.unwrap() / 2.0;
                 hifitime::Epoch::from_tai_seconds(tai)
             })
             .collect::<Vec<_>>();
@@ -289,18 +273,30 @@ impl RawData {
             native_fine_chan_width: metafits_context.corr_fine_chan_width_hz as f64,
         };
 
-        let pointing = RADec::new(
+        let phase_centre = RADec::new(
             metafits_context
                 .ra_phase_center_degrees
-                .unwrap_or(metafits_context.ra_tile_pointing_degrees)
+                .unwrap_or_else(|| {
+                    warn!("Assuming that the phase centre is the same as the pointing centre");
+                    metafits_context.ra_tile_pointing_degrees
+                })
                 .to_radians(),
             metafits_context
                 .dec_phase_center_degrees
                 .unwrap_or(metafits_context.dec_tile_pointing_degrees)
                 .to_radians(),
         );
+        let pointing_centre = Some(RADec::new(
+            metafits_context.ra_tile_pointing_degrees.to_radians(),
+            metafits_context.dec_tile_pointing_degrees.to_radians(),
+        ));
         let tile_xyz = XYZ::get_tiles_mwalib(&metafits_context);
-        let baseline_xyz = XYZ::get_baselines(&tile_xyz);
+        // let baseline_xyz = XYZ::get_baselines(&tile_xyz);
+        let names: Vec<String> = metafits_context
+            .rf_inputs
+            .iter()
+            .map(|rf_input| rf_input.tile_name.clone())
+            .collect();
 
         let mut dipole_gains = Array2::from_elem(
             (
@@ -321,18 +317,20 @@ impl RawData {
         let obs_context = ObsContext {
             obsid: Some(metafits_context.obs_id),
             timesteps,
-            timestep_indices: 0..mwalib_context.timesteps.len(),
-            lst0,
-            time_res,
-            pointing,
-            delays: ideal_delays,
+            unflagged_timestep_indices: 0..mwalib_context.timesteps.len(),
+            phase_centre,
+            pointing_centre,
+            names,
+            // baseline_xyz,
             tile_xyz,
-            baseline_xyz,
             tile_flags,
             fine_chan_flags_per_coarse_chan,
             num_unflagged_tiles,
             num_unflagged_baselines: num_unflagged_tiles * (num_unflagged_tiles - 1) / 2,
             dipole_gains,
+            time_res,
+            array_longitude_rad: Some(MWA_LONGITUDE_RADIANS),
+            array_latitude_rad: Some(MWA_LATITUDE_RADIANS),
         };
 
         Ok(Self {

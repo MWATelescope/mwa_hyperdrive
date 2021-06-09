@@ -2,13 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Metadata on an observation.
- */
+//! Metadata on an observation.
 
 use std::f64::consts::TAU;
 use std::ops::Range;
 
+use hifitime::Epoch;
 use ndarray::Array2;
 
 use mwa_hyperdrive_core::{
@@ -29,38 +28,32 @@ pub(crate) struct ObsContext {
     /// time.
     pub(crate) obsid: Option<u32>,
 
-    /// The unique timesteps in the observation. These are stored as
-    /// `hifitime::Epoch` structs to help keep the code flexible.
-    pub(crate) timesteps: Vec<hifitime::Epoch>,
+    /// The unique timesteps in the observation. These are stored as `hifitime`
+    /// [Epoch] structs to help keep the code flexible. These include flagged
+    /// timesteps.
+    pub(crate) timesteps: Vec<Epoch>,
 
     /// The timestep indices of the input data that aren't totally flagged
     /// (exclusive).
-    pub(crate) timestep_indices: Range<usize>,
+    pub(crate) unflagged_timestep_indices: Range<usize>,
 
-    /// The Local Sidereal Time in the __middle__ of the first timestep
-    /// \[radians\].
-    pub(crate) lst0: f64,
-
-    /// The time resolution of the supplied data \[seconds\]. This is not
-    /// necessarily the native time resolution of the original observation's
-    /// data.
-    pub(crate) time_res: f64,
-
+    // /// The Local Mean Sidereal Time in the __middle__ of the first timestep
+    // /// (even if its flagged) \[radians\].
+    // pub(crate) lst0: f64,
     /// The observation phase centre.
-    pub(super) pointing: RADec,
+    pub(super) phase_centre: RADec,
 
-    /// The ideal dipole delays of each MWA tile in the observation (i.e. no
-    /// values of 32).
-    pub(crate) delays: Vec<u32>,
+    /// The observation pointing centre.
+    ///
+    /// This is typically not used, but if available is nice to report.
+    pub(super) pointing_centre: Option<RADec>,
+
+    /// The names of each of the tiles used in the array.
+    pub(crate) names: Vec<String>,
 
     /// The geocentric [XYZ] coordinates of all tiles in the array \[metres\].
     /// This includes tiles that have been flagged in the input data.
     pub(crate) tile_xyz: Vec<XYZ>,
-
-    /// The [XyzBaseline]s of the observations \[metres\]. This does not change
-    /// over time; it is determined only by the telescope's tile layout. This
-    /// will contain flagged baselines.
-    pub(crate) baseline_xyz: Vec<XyzBaseline>,
 
     /// The tiles already flagged in the supplied data. These values correspond
     /// to those from the "Antenna" column in HDU 1 of the metafits file. Zero
@@ -82,13 +75,31 @@ pub(crate) struct ObsContext {
     /// antenna, the second dipole index. These will typically all be of value
     /// 1.0, except where a dipole is dead (0.0).
     pub(crate) dipole_gains: Array2<f64>,
+
+    /// The time resolution of the supplied data \[seconds\]. This is not
+    /// necessarily the native time resolution of the original observation's
+    /// data. This is kept optional in case in the input data has only one time
+    /// step, and therefore no resolution.
+    pub(crate) time_res: Option<f64>,
+
+    /// The Earth longitude of the instrumental array \[radians\].
+    pub(crate) array_longitude_rad: Option<f64>,
+
+    /// The Earth latitude of the instrumental array \[radians\].
+    pub(crate) array_latitude_rad: Option<f64>,
 }
 
-impl ObsContext {
-    pub(crate) fn lst_from_timestep(&self, timestep: usize) -> f64 {
-        (self.lst0 + SOLAR2SIDEREAL * DS2R * timestep as f64 * self.time_res) % TAU
-    }
-}
+// impl ObsContext {
+//     pub(crate) fn lst_from_timestep(&self, timestep: usize) -> f64 {
+//         if let Some(tr) = self.time_res {
+//             (self.lst0 + SOLAR2SIDEREAL * DS2R * timestep as f64 * tr) % TAU
+//         } else {
+//             // No time resolution implies no timesteps; just return the first
+//             // LST.
+//             self.lst0
+//         }
+//     }
+// }
 
 /// Metadata on an observation's frequency setup.
 pub(crate) struct FreqContext {
@@ -134,29 +145,29 @@ mod tests {
     use crate::constants::HIFITIME_GPS_FACTOR;
     use crate::tests::{reduced_obsids::*, *};
 
-    // astropy doesn't exactly agree with the numbers below, I think because the
-    // LST listed in MWA metafits files doesn't agree with what astropy thinks
-    // it should be. But, it's all very close.
-    #[test]
-    fn test_lst_from_timestep_native() {
-        // Obsid 1090008640 actually starts at GPS time 1090008641.
-        let args = get_1090008640();
-        let params = args.into_params().unwrap();
-        let obs_context = params.input_data.get_obs_context();
-        // gpstime 1090008642
-        assert_abs_diff_eq!(
-            obs_context.lst_from_timestep(0),
-            6.262123573853594,
-            epsilon = 1e-10
-        );
+    // // astropy doesn't exactly agree with the numbers below, I think because the
+    // // LST listed in MWA metafits files doesn't agree with what astropy thinks
+    // // it should be. But, it's all very close.
+    // #[test]
+    // fn test_lst_from_timestep_native() {
+    //     // Obsid 1090008640 actually starts at GPS time 1090008641.
+    //     let args = get_1090008640();
+    //     let params = args.into_params().unwrap();
+    //     let obs_context = params.input_data.get_obs_context();
+    //     // gpstime 1090008642
+    //     assert_abs_diff_eq!(
+    //         obs_context.lst_from_timestep(0),
+    //         6.262123573853594,
+    //         epsilon = 1e-10
+    //     );
 
-        // gpstime 1090008644
-        assert_abs_diff_eq!(
-            obs_context.lst_from_timestep(1),
-            6.262269416170651,
-            epsilon = 1e-10
-        );
-    }
+    //     // gpstime 1090008644
+    //     assert_abs_diff_eq!(
+    //         obs_context.lst_from_timestep(1),
+    //         6.262269416170651,
+    //         epsilon = 1e-10
+    //     );
+    // }
 
     // #[test]
     // // Unlike the test above, decrease the time resolution by averaging.
