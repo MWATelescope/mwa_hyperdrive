@@ -5,8 +5,7 @@
 //! Handle East, North and Height coordinates (typically associated with MWA
 //! tiles).
 
-use super::xyz::XYZ;
-use crate::constants::*;
+use crate::{constants::*, XyzGeodetic};
 
 /// East, North and Height coordinates.
 #[derive(Debug)]
@@ -22,27 +21,27 @@ pub struct ENH {
 
 impl ENH {
     /// Convert coords in local topocentric East, North, Height units to 'local'
-    /// XYZ units. Local means Z points north, X points through the equator from
-    /// the geocenter along the local meridian and Y is East. This is like the
-    /// absolute system except that zero longitude is now the local meridian
-    /// rather than prime meridian. Latitude is geodetic, in radians. This is
-    /// what you want for constructing the local antenna positions in a UVFITS
-    /// antenna table.
+    /// [XyzGeodetic] units. Local means Z points north, X points through the
+    /// equator from the geocenter along the local meridian and Y is East. This
+    /// is like the absolute system except that zero longitude is now the local
+    /// meridian rather than prime meridian. Latitude is geodetic, in radians.
+    /// This is what you want for constructing the local antenna positions in a
+    /// UVFITS antenna table.
     ///
     /// Taken from the third edition of Interferometry and Synthesis in Radio
     /// Astronomy, chapter 4: Geometrical Relationships, Polarimetry, and the
     /// Measurement Equation.
-    pub fn to_xyz(&self, latitude: f64) -> XYZ {
-        let (s_lat, c_lat) = latitude.sin_cos();
-        XYZ {
+    pub fn to_xyz(&self, latitude_rad: f64) -> XyzGeodetic {
+        let (s_lat, c_lat) = latitude_rad.sin_cos();
+        XyzGeodetic {
             x: -self.n * s_lat + self.h * c_lat,
             y: self.e,
             z: self.n * c_lat + self.h * s_lat,
         }
     }
 
-    /// Convert ENH coordinates to local XYZ for the MWA's latitude.
-    pub fn to_xyz_mwa(&self) -> XYZ {
+    /// Convert [ENH] coordinates to [XyzGeodetic] for the MWA's latitude.
+    pub fn to_xyz_mwa(&self) -> XyzGeodetic {
         self.to_xyz(MWA_LAT_RAD)
     }
 }

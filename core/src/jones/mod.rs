@@ -344,7 +344,7 @@ impl<F: Float + MulAssign> MulAssign<&Jones<F>> for Jones<F> {
 impl<F: Float> num::traits::Zero for Jones<F> {
     #[inline]
     fn zero() -> Self {
-        Self::from([Complex::new(F::zero(), F::zero()); 4])
+        Self::from([Complex::zero(); 4])
     }
 
     #[inline]
@@ -365,9 +365,33 @@ impl From<Jones<f32>> for Jones<f64> {
     }
 }
 
+impl From<&Jones<f32>> for Jones<f64> {
+    #[inline]
+    fn from(j_c32: &Jones<f32>) -> Self {
+        Self::from([
+            Complex::new(j_c32[0].re as _, j_c32[0].im as _),
+            Complex::new(j_c32[1].re as _, j_c32[1].im as _),
+            Complex::new(j_c32[2].re as _, j_c32[2].im as _),
+            Complex::new(j_c32[3].re as _, j_c32[3].im as _),
+        ])
+    }
+}
+
 impl From<Jones<f64>> for Jones<f32> {
     #[inline]
     fn from(j_c64: Jones<f64>) -> Self {
+        Self::from([
+            Complex::new(j_c64[0].re as _, j_c64[0].im as _),
+            Complex::new(j_c64[1].re as _, j_c64[1].im as _),
+            Complex::new(j_c64[2].re as _, j_c64[2].im as _),
+            Complex::new(j_c64[3].re as _, j_c64[3].im as _),
+        ])
+    }
+}
+
+impl From<&Jones<f64>> for Jones<f32> {
+    #[inline]
+    fn from(j_c64: &Jones<f64>) -> Self {
         Self::from([
             Complex::new(j_c64[0].re as _, j_c64[0].im as _),
             Complex::new(j_c64[1].re as _, j_c64[1].im as _),

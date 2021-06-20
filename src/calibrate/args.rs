@@ -159,10 +159,10 @@ pub struct CalibrateUserArgs {
     pub max_iterations: Option<usize>,
 
     #[structopt(long, help = STOP_THRESHOLD_HELP.as_str())]
-    pub stop_thresh: Option<f32>,
+    pub stop_thresh: Option<f64>,
 
     #[structopt(long, help = MIN_THRESHOLD_HELP.as_str())]
-    pub min_thresh: Option<f32>,
+    pub min_thresh: Option<f64>,
 
     #[structopt(long = "array_longitude", help = ARRAY_LONGITUDE_HELP.as_str())]
     pub array_longitude_deg: Option<f64>,

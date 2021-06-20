@@ -16,5 +16,8 @@ pub enum ReadInputDataError {
     },
 
     #[error("{0}")]
-    MS(#[from] super::ms::error::MSError),
+    MS(#[from] super::ms::MSError),
+
+    #[error("{0}")]
+    Uvfits(#[from] super::uvfits::UvfitsReadError),
 }

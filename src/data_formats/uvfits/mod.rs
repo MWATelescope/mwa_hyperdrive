@@ -5,9 +5,11 @@
 //! Code to handle reading from and writing to uvfits files.
 
 mod error;
+mod read;
 mod write;
 
 pub(crate) use error::*;
+pub(crate) use read::*;
 pub(crate) use write::*;
 
 use std::ffi::CString;
@@ -45,9 +47,23 @@ fn rust_strings_to_c_strings<T: AsRef<str>>(
 // Shamelessly copied from the RTS, originally written by Randall Wayth.
 fn encode_uvfits_baseline(ant1: usize, ant2: usize) -> usize {
     if ant2 > 255 {
-        ant1 * 2048 + ant2 + 65536
+        ant1 * 2048 + ant2 + 65_536
     } else {
         ant1 * 256 + ant2
+    }
+}
+
+/// Decode a uvfits baseline into the antennas that formed it. Antenna indices
+/// start at 1.
+fn decode_uvfits_baseline(bl: usize) -> (usize, usize) {
+    if bl < 65_535 {
+        let ant2 = bl % 256;
+        let ant1 = (bl - ant2) / 256;
+        (ant1, ant2)
+    } else {
+        let ant2 = (bl - 65_536) % 2048;
+        let ant1 = (bl - ant2 - 65_536) / 2048;
+        (ant1, ant2)
     }
 }
 
@@ -67,7 +83,14 @@ mod tests {
     }
 
     #[test]
-    fn test_uvfits_baselines() {
+    fn test_encode_uvfits_baseline() {
         assert_eq!(encode_uvfits_baseline(1, 1), 257);
+        // TODO: Test the other part of the if statement.
+    }
+
+    #[test]
+    fn test_decode_uvfits_baseline() {
+        assert_eq!(decode_uvfits_baseline(257), (1, 1));
+        // TODO: Test the other part of the if statement.
     }
 }

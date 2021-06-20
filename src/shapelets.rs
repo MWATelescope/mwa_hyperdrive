@@ -50,11 +50,22 @@ lazy_static::lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn shapelet_basis_values() {
         // Not all SHAPELET_BASIS_VALUES are equal to zero (or smaller than
         // epsilon).
         assert!(!SHAPELET_BASIS_VALUES.iter().all(|&v| v < f64::EPSILON));
+
+        // The middle value has a value of 1.0.
+        assert_abs_diff_eq!(SHAPELET_BASIS_VALUES[SBF_L / 2], 1.0, epsilon = 1e-10);
+
+        // The middle + 1 value has a value of 0.99995.
+        assert_abs_diff_eq!(
+            SHAPELET_BASIS_VALUES[SBF_L / 2 + 1],
+            0.99995,
+            epsilon = 1e-8
+        );
     }
 }

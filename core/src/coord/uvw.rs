@@ -122,7 +122,7 @@ impl approx::AbsDiffEq for UVW {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coord::xyz::XYZ;
+    use crate::XyzGeodetic;
     use approx::*;
 
     #[test]
@@ -152,18 +152,18 @@ mod tests {
     #[test]
     fn get_uvw_baselines_test() {
         let xyz = vec![
-            XYZ {
+            XyzGeodetic {
                 x: 289.5692922664971,
                 y: -585.6749877929688,
                 z: -259.3106530519151,
             },
-            XYZ {
+            XyzGeodetic {
                 x: 750.5194624923599,
                 y: -565.4390258789063,
                 z: 665.2348852011041,
             },
         ];
-        let xyz_bl = XYZ::get_baselines(&xyz);
+        let xyz_bl = XyzGeodetic::get_baselines(&xyz);
         let phase = HADec::new(6.0163, -0.453121);
         let uvw = UVW::get_baselines(&xyz_bl, &phase);
         let expected = UVW {

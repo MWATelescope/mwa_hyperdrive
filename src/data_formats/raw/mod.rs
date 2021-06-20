@@ -9,7 +9,6 @@ pub(crate) mod error;
 pub use error::*;
 
 use std::collections::HashSet;
-use std::f64::consts::TAU;
 use std::path::{Path, PathBuf};
 
 use log::{debug, warn};
@@ -24,9 +23,8 @@ use crate::{
     context::{FreqContext, ObsContext},
 };
 use mwa_hyperdrive_core::{
-    erfa_sys,
-    mwalib::{self, MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS},
-    Jones, RADec, XYZ,
+    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    Jones, RADec, XyzGeodetic,
 };
 
 /// Raw MWA data, i.e. gpubox files.
@@ -39,7 +37,7 @@ pub(crate) struct RawData {
 
     // Raw-data-specific things follow.
     /// The interface to the raw data via mwalib.
-    pub(crate) mwalib_context: CorrelatorContext,
+    pub(crate) _mwalib_context: CorrelatorContext,
 
     // TODO: Rename to something more general. Don't need actual AOFlagger flags.
     /// AOFlagger flags.
@@ -47,7 +45,7 @@ pub(crate) struct RawData {
     /// These aren't necessarily derived from mwaf files; if the user did
     /// not supply flags, then `aoflags` may contain no flags, or just
     /// default channel flags (the edges and centre channel, for example).
-    aoflags: Option<AOFlags>,
+    _aoflags: Option<AOFlags>,
 }
 
 impl RawData {
@@ -102,14 +100,13 @@ impl RawData {
         let total_num_tiles = metafits_context.rf_inputs.len() / 2;
         debug!("There are {} total tiles", total_num_tiles);
 
-        let mut tile_flags_set: HashSet<usize> = metafits_context
+        let tile_flags_set: HashSet<usize> = metafits_context
             .rf_inputs
             .iter()
             .filter(|rf| rf.pol == Pol::Y && rf.flagged)
             .map(|rf_input| rf_input.ant as usize)
             .collect();
         debug!("Found tile flags {:?}", &tile_flags_set);
-        let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
         for &f in &tile_flags_set {
             if f > total_num_tiles - 1 {
                 return Err(NewRawError::InvalidTileFlag {
@@ -218,20 +215,6 @@ impl RawData {
             })
             .collect::<Vec<_>>();
 
-        // Now that we have the timesteps, we can get the first LST. As our
-        // timesteps are listed as centroids, the first timestep does not need
-        // to be adjusted according to timewidth.
-        let first_timestep_mjd = timesteps[0].as_mjd_utc_days();
-        let lst0 = unsafe {
-            let gst = erfa_sys::eraGst06a(
-                erfa_sys::ERFA_DJM0,
-                first_timestep_mjd,
-                erfa_sys::ERFA_DJM0,
-                first_timestep_mjd,
-            );
-            (gst + mwalib::MWA_LONGITUDE_RADIANS) % TAU
-        };
-
         // Populate a frequency context struct.
         let mut fine_chan_freqs = Vec::with_capacity(
             metafits_context.num_corr_fine_chans_per_coarse * metafits_context.num_coarse_chans,
@@ -290,9 +273,8 @@ impl RawData {
             metafits_context.ra_tile_pointing_degrees.to_radians(),
             metafits_context.dec_tile_pointing_degrees.to_radians(),
         ));
-        let tile_xyz = XYZ::get_tiles_mwalib(&metafits_context);
-        // let baseline_xyz = XYZ::get_baselines(&tile_xyz);
-        let names: Vec<String> = metafits_context
+        let tile_xyzs = XyzGeodetic::get_tiles_mwalib(&metafits_context);
+        let tile_names: Vec<String> = metafits_context
             .rf_inputs
             .iter()
             .map(|rf_input| rf_input.tile_name.clone())
@@ -320,24 +302,21 @@ impl RawData {
             unflagged_timestep_indices: 0..mwalib_context.timesteps.len(),
             phase_centre,
             pointing_centre,
-            names,
-            // baseline_xyz,
-            tile_xyz,
+            tile_names,
+            tile_xyzs,
             tile_flags,
             fine_chan_flags_per_coarse_chan,
-            num_unflagged_tiles,
-            num_unflagged_baselines: num_unflagged_tiles * (num_unflagged_tiles - 1) / 2,
             dipole_gains,
             time_res,
-            array_longitude_rad: Some(MWA_LONGITUDE_RADIANS),
-            array_latitude_rad: Some(MWA_LATITUDE_RADIANS),
+            array_longitude_rad: Some(MWA_LONG_RAD),
+            array_latitude_rad: Some(MWA_LAT_RAD),
         };
 
         Ok(Self {
             obs_context,
             freq_context,
-            mwalib_context,
-            aoflags,
+            _mwalib_context: mwalib_context,
+            _aoflags: aoflags,
         })
     }
 }
@@ -357,7 +336,7 @@ impl InputData for RawData {
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
         flagged_fine_chans: &HashSet<usize>,
-    ) -> Result<(Vec<UVW>, Array2<f32>), ReadInputDataError> {
+    ) -> Result<Array2<f32>, ReadInputDataError> {
         todo!();
     }
 }

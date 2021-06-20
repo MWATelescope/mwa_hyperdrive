@@ -7,12 +7,11 @@
 use std::path::Path;
 
 use hifitime::Epoch;
-use ndarray::prelude::*;
 use rubbl_casatables::{Table, TableOpenMode};
 
 use super::error::*;
 use crate::constants::*;
-use mwa_hyperdrive_core::{erfa_sys, mwalib, XYZ};
+use mwa_hyperdrive_core::{xyz, XyzGeocentric, XyzGeodetic};
 
 /// Open a measurement set table read only. If `table` is `None`, then open the
 /// base table.
@@ -26,7 +25,8 @@ pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MSErro
     }
 }
 
-/// Convert a casacore time to a `hifitime` [Epoch].
+/// Convert a casacore time to a `hifitime` [Epoch]. This function is especially
+/// useful because casacore apparently doesn't account for leap seconds.
 ///
 /// casacore uses seconds since 1858-11-17T00:00:00 (MJD epoch).
 pub(super) fn casacore_utc_to_epoch(utc_seconds: f64) -> hifitime::Epoch {
@@ -43,36 +43,26 @@ pub(super) fn casacore_utc_to_epoch(utc_seconds: f64) -> hifitime::Epoch {
     Epoch::from_tai_seconds(utc_seconds - MJD_TAI_EPOCH_DIFF + num_leap_seconds)
 }
 
-/// casacore's antenna positions are geodetic [XYZ] coordinates, but we use
-/// geocentric [XYZ] coordinates in hyperdrive. This function converts the
-/// casacore positions.
-pub(super) fn casacore_positions_to_local_xyz(pos: ArrayView2<f64>) -> Result<Vec<XYZ>, MSError> {
-    let mut mwa_xyz: [f64; 3] = [0.0; 3];
-    let status = unsafe {
-        erfa_sys::eraGd2gc(
-            erfa_sys::ERFA_WGS84 as i32,   // ellipsoid identifier (Note 1)
-            mwalib::MWA_LONGITUDE_RADIANS, // longitude (radians, east +ve)
-            mwalib::MWA_LATITUDE_RADIANS,  // latitude (geodetic, radians, Note 3)
-            mwalib::MWA_ALTITUDE_METRES,   // height above ellipsoid (geodetic, Notes 2,3)
-            mwa_xyz.as_mut_ptr(),          // geocentric vector (Note 2)
-        )
-    };
-    if status != 0 {
-        return Err(MSError::Geodetic2Geocentric);
-    }
+/// casacore's antenna positions are [XyzGeocentric] coordinates, but we use
+/// [XyzGeodetic] coordinates in hyperdrive. This function converts the casacore
+/// positions.
+pub(super) fn casacore_positions_to_local_xyz(
+    pos: &[XyzGeocentric],
+    longitude_rad: f64,
+    latitude_rad: f64,
+    height_metres: f64,
+) -> Result<Vec<XyzGeodetic>, MSError> {
+    xyz::geocentric_to_geodetic(pos, longitude_rad, latitude_rad, height_metres)
+        .map_err(|_| MSError::Geodetic2Geocentric)
+}
 
-    let xyz = pos
-        .outer_iter()
-        .map(|geodetic| {
-            let geocentric = XYZ {
-                x: geodetic[0] - mwa_xyz[0],
-                y: geodetic[1] - mwa_xyz[1],
-                z: geodetic[2] - mwa_xyz[2],
-            };
-            geocentric.rotate_mwa(-1)
-        })
-        .collect();
-    Ok(xyz)
+/// casacore's antenna positions are [XyzGeocentric] coordinates, but we use
+/// [XyzGeodetic] coordinates in hyperdrive. This function converts the casacore
+/// positions, assuming we're at the MWA coordinates.
+pub(super) fn casacore_positions_to_local_xyz_mwa(
+    pos: &[XyzGeocentric],
+) -> Result<Vec<XyzGeodetic>, MSError> {
+    casacore_positions_to_local_xyz(pos, MWA_LONG_RAD, MWA_LAT_RAD, MWA_HEIGHT_M)
 }
 
 #[cfg(test)]

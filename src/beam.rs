@@ -74,28 +74,31 @@ pub(crate) struct FEEBeam {
 }
 
 impl FEEBeam {
+    fn new_inner(beam: mwa_hyperbeam::fee::FEEBeam, delays: Delays) -> Result<Self, BeamError> {
+        let delays = match delays {
+            Delays::Available(d) => d,
+            _ => return Err(BeamError::NoDelays),
+        };
+
+        // Wrap the `FEEBeam` out of hyperbeam with our own `FEEBeam`.
+        Ok(FEEBeam { beam, delays })
+    }
+
     pub(crate) fn new<T: AsRef<std::path::Path>>(
         file: T,
         delays: Delays,
     ) -> Result<Self, BeamError> {
-        // Wrap the `FEEBeam` out of hyperbeam with our own `FEEBeam`.
         let beam = mwa_hyperbeam::fee::FEEBeam::new(file)?;
-        let delays = match delays {
-            Delays::Available(d) => d,
-            _ => return Err(BeamError::NoDelays),
-        };
-
-        Ok(FEEBeam { beam, delays })
+        FEEBeam::new_inner(beam, delays)
     }
 
     pub(crate) fn new_from_env(delays: Delays) -> Result<Self, BeamError> {
         let beam = mwa_hyperbeam::fee::FEEBeam::new_from_env()?;
-        let delays = match delays {
-            Delays::Available(d) => d,
-            _ => return Err(BeamError::NoDelays),
-        };
+        FEEBeam::new_inner(beam, delays)
+    }
 
-        Ok(FEEBeam { beam, delays })
+    pub(crate) fn get_delays(&self) -> &[u32] {
+        &self.delays
     }
 }
 
@@ -132,7 +135,7 @@ impl Beam for FEEBeam {
         // sub-array into our special `Jones` wrapper. A benchmark analysis
         // suggests that the compiler doesn't actually do any copying; it knows
         // that this is a no-op.
-        let j = j.mapv(|j| Jones::from(j));
+        let j = j.mapv(Jones::from);
         let j = Array1::from(j.to_vec());
 
         Ok(j)

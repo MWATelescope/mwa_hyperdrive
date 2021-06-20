@@ -10,7 +10,7 @@ mod helpers;
 pub use error::*;
 use helpers::*;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
@@ -19,9 +19,18 @@ use rayon::prelude::*;
 
 use super::*;
 use crate::context::{FreqContext, ObsContext};
+use crate::data_formats::metafits;
 use crate::glob::get_single_match_from_glob;
 use crate::{calibrate::params::Delays, constants::HIFITIME_GPS_FACTOR};
-use mwa_hyperdrive_core::{c32, mwalib, Jones, RADec};
+use mwa_hyperdrive_core::{
+    c32,
+    constants::{
+        COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
+    },
+    Jones, RADec, XyzGeocentric,
+};
+
+const TIMESTEP_AS_INT_FACTOR: f64 = 1e6;
 
 pub(crate) struct MS {
     /// Observation metadata.
@@ -82,24 +91,35 @@ impl MS {
         // let table_keywords = main_table.table_keyword_names().unwrap();
         // let cotter = table_keywords.contains(&"MWA_COTTER_VERSION".to_string());
 
-        // Get the tile names and XYZ positions (geocentric, not geodetic).
+        // Get the tile names and XYZ positions.
         let mut antenna_table = read_table(&ms, Some("ANTENNA"))?;
-        let names: Vec<String> = antenna_table.get_col_as_vec("NAME").unwrap();
-        let mut casacore_positions = Array2::zeros((antenna_table.n_rows() as usize, 3));
-        let mut i = 0;
+        let tile_names: Vec<String> = antenna_table.get_col_as_vec("NAME").unwrap();
+        let mut casacore_positions = Vec::with_capacity(antenna_table.n_rows() as usize);
         antenna_table
             .for_each_row(|row| {
                 // TODO: Kill the failure crate, and all unwraps!!
                 let pos: Vec<f64> = row.get_cell("POSITION").unwrap();
-                casacore_positions
-                    .slice_mut(s![i, ..])
-                    .assign(&Array1::from(pos));
-                i += 1;
+                let pos_xyz = XyzGeocentric {
+                    x: pos[0],
+                    y: pos[1],
+                    z: pos[2],
+                };
+                casacore_positions.push(pos_xyz);
                 Ok(())
             })
             .unwrap();
-        let tile_xyz = casacore_positions_to_local_xyz(casacore_positions.view())?;
-        let total_num_tiles = tile_xyz.len();
+        let tile_xyzs = if cotter {
+            casacore_positions_to_local_xyz(
+                &casacore_positions,
+                COTTER_MWA_LONGITUDE_RADIANS,
+                COTTER_MWA_LATITUDE_RADIANS,
+                COTTER_MWA_HEIGHT_METRES,
+            )?
+        } else {
+            // TODO: Get actual array coordinates.
+            casacore_positions_to_local_xyz_mwa(&casacore_positions)?
+        };
+        let total_num_tiles = tile_xyzs.len();
         debug!("There are {} total tiles", total_num_tiles);
 
         // Get the observation's flagged tiles. cotter doesn't populate the
@@ -111,7 +131,7 @@ impl MS {
         // TODO: Handle autos not being present.
         let mut autocorrelations_present = false;
         let tile_flags: Vec<usize> = {
-            let mut present_tiles = std::collections::HashSet::new();
+            let mut present_tiles = HashSet::new();
             // N.B. The following method doesn't work if the antenna1 number
             // increases faster than antenna2.
             let mut first_antenna1 = None;
@@ -198,16 +218,16 @@ impl MS {
         let utc_times: Vec<f64> = main_table.get_col_as_vec("TIME").unwrap();
         let mut time_set: BTreeSet<u64> = BTreeSet::new();
         for utc_time in utc_times {
-            // Avoid float precision errors by multiplying by 1e3 and converting
-            // to an int.
-            time_set.insert((utc_time * 1e3).round() as _);
+            // Avoid float precision errors by multiplying by a big number and
+            // converting to an int.
+            time_set.insert((utc_time * TIMESTEP_AS_INT_FACTOR).round() as _);
         }
         // Assume the timesteps are contiguous, i.e. the span of time between
         // two consecutive timesteps is the same between all consecutive
         // timesteps.
         let mut utc_timesteps: Vec<u64> = time_set.into_iter().collect();
         // Sort the timesteps ascendingly.
-        utc_timesteps.sort_unstable_by(|a, b| a.partial_cmp(&b).unwrap());
+        utc_timesteps.sort_unstable();
 
         // Get the observation's native time resolution. There is a possibility
         // that the MS contains only one timestep.
@@ -215,19 +235,19 @@ impl MS {
             warn!("Only one timestep is present in the data; can't determine the observation's native time resolution.");
             None
         } else {
-            // Undo the multiply by 1e3.
-            let tr = (utc_timesteps[1] - utc_timesteps[0]) as f64 / 1e3;
-            trace!("Time resolution: {}s", tr);
+            // Undo the multiply by the big number.
+            let tr = (utc_timesteps[1] - utc_timesteps[0]) as f64 / TIMESTEP_AS_INT_FACTOR;
             Some(tr)
         };
 
         let timesteps: Vec<hifitime::Epoch> = utc_timesteps
             .into_par_iter()
             // casacore keeps the stores the times as centroids, so no
-            // correction is needed. Undo the multiply by 1e3 from above.
-            .map(|utc| casacore_utc_to_epoch(utc as f64 / 1e3))
+            // correction is needed. Undo the multiply by a big number from
+            // above.
+            .map(|utc| casacore_utc_to_epoch(utc as f64 / TIMESTEP_AS_INT_FACTOR))
             .collect();
-        if let Some(tr) = time_res {
+        if let Some(time_res) = time_res {
             debug!(
                 "First good GPS timestep: {}",
                 // Need to remove a number from the result of .as_gpst_seconds(), as
@@ -235,13 +255,13 @@ impl MS {
                 // expect GPS timestamps to be "leading edge", not centroids.
                 timesteps[unflagged_timestep_indices.start].as_gpst_seconds()
                     - HIFITIME_GPS_FACTOR
-                    - tr / 2.0
+                    - time_res / 2.0
             );
             debug!(
                 "Last good GPS timestep:  {}",
                 timesteps[unflagged_timestep_indices.end - 1].as_gpst_seconds()
                     - HIFITIME_GPS_FACTOR
-                    - tr / 2.0
+                    - time_res / 2.0
             );
         } else {
             // No time resolution; just print out the first GPS timestep.
@@ -340,20 +360,12 @@ impl MS {
 
                 // Use the metafits file.
                 (Err(_), Some(meta)) => {
-                    // Populate `mwalib` if it isn't already populated.
-                    let context = match mwalib.as_mut() {
-                        Some(c) => c,
-                        None => {
-                            let c = mwalib::MetafitsContext::new(meta)?;
-                            mwalib = Some(c);
-                            mwalib.as_ref().unwrap()
-                        }
-                    };
+                    let context = metafits::populate_metafits_context(&mut mwalib, meta)?;
                     // Only use the metafits delays if none were provided to
                     // this function.
                     match dipole_delays {
                         Delays::Available(_) | Delays::NotNecessary => (),
-                        _ => {
+                        Delays::None => {
                             debug!("Using metafits for dipole delays");
                             let metafits_delays = metafits::get_true_delays(context);
                             *dipole_delays = Delays::Available(metafits_delays);
@@ -377,46 +389,19 @@ impl MS {
         // of 0 for dead dipoles, and 1 for all others. cotter doesn't supply
         // this information; if the user provided a metafits file, we can use
         // that, otherwise we must assume all dipoles are alive.
-        let dipole_gains: Array2<f64> = match (cotter, metafits) {
-            (true, None) => {
-                warn!("cotter does not supply dead dipole information.");
-                warn!("Without a metafits file, we must assume all dipoles are alive.");
-                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                Array2::from_elem((num_unflagged_tiles, 16), 1.0)
-            }
-
-            (false, None) => {
-                warn!("Without a metafits file, we must assume all dipoles are alive.");
-                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                Array2::from_elem((num_unflagged_tiles, 16), 1.0)
-            }
-
-            (_, Some(meta)) => {
-                // Populate `mwalib` if it isn't already populated.
-                let context = match mwalib.as_mut() {
-                    Some(c) => c,
-                    None => {
-                        let c = mwalib::MetafitsContext::new(meta)?;
-                        mwalib = Some(c);
-                        mwalib.as_ref().unwrap()
-                    }
-                };
-                let mut dipole_gains = Array2::from_elem(
-                    (
-                        context.rf_inputs.len() / 2,
-                        context.rf_inputs[0].dipole_gains.len(),
-                    ),
-                    1.0,
-                );
-                for (mut dipole_gains_for_one_tile, rf_input) in dipole_gains.outer_iter_mut().zip(
-                    context
-                        .rf_inputs
-                        .iter()
-                        .filter(|rf_input| rf_input.pol == mwalib::Pol::Y),
-                ) {
-                    dipole_gains_for_one_tile.assign(&ArrayView1::from(&rf_input.dipole_gains));
+        let dipole_gains: Array2<f64> = match metafits {
+            None => {
+                if cotter {
+                    warn!("cotter does not supply dead dipole information.");
                 }
-                dipole_gains
+                warn!("Without a metafits file, we must assume all dipoles are alive.");
+                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                Array2::ones((num_unflagged_tiles, 16))
+            }
+
+            Some(meta) => {
+                let context = metafits::populate_metafits_context(&mut mwalib, meta)?;
+                metafits::get_dipole_gains(context)
             }
         };
 
@@ -508,12 +493,10 @@ impl MS {
             unflagged_timestep_indices,
             phase_centre,
             pointing_centre,
-            names,
-            tile_xyz,
+            tile_names,
+            tile_xyzs,
             tile_flags,
             fine_chan_flags_per_coarse_chan,
-            num_unflagged_tiles,
-            num_unflagged_baselines: num_unflagged_tiles * (num_unflagged_tiles - 1) / 2,
             dipole_gains,
             time_res,
             // TODO
@@ -546,7 +529,7 @@ impl InputData for MS {
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
         flagged_fine_chans: &HashSet<usize>,
-    ) -> Result<(Vec<UVW>, Array2<f32>), ReadInputDataError> {
+    ) -> Result<Array2<f32>, ReadInputDataError> {
         // When reading in a new timestep's data, these indices should be
         // multiplied by `step` to get the amount of rows to stride in the main
         // table.
@@ -554,8 +537,7 @@ impl InputData for MS {
         let row_range_end = (timestep + 1) * self.step;
         let row_range = row_range_start as u64..row_range_end as u64;
 
-        let mut uvws = Vec::with_capacity(row_range_end - row_range_start);
-        let mut out_weights = Array2::from_elem(data_array.dim(), 0.0);
+        let mut out_weights = Array2::zeros(data_array.dim());
 
         let mut main_table = read_table(&self.ms, None).unwrap();
         let mut row_index = row_range.start;
@@ -574,11 +556,6 @@ impl InputData for MS {
                     if uvw.len() < 3 {
                         return Err(MSError::NotThreeUVW { row_index }.into());
                     }
-                    uvws.push(UVW {
-                        u: uvw[0],
-                        v: uvw[1],
-                        w: uvw[2],
-                    });
                     // The data array is arranged [frequency][instrumental_pol].
                     let data: Array2<c32> = row.get_cell("DATA").unwrap();
                     // The weight array is arranged
@@ -592,8 +569,8 @@ impl InputData for MS {
                     let flags: Array2<bool> = row.get_cell("FLAG").unwrap();
 
                     // Put the data and weights into the shared arrays outside
-                    // this function. Before we can do this, we need to remove
-                    // any globally-flagged fine channels. Use an int to index
+                    // this scope. Before we can do this, we need to remove any
+                    // globally-flagged fine channels. Use an int to index
                     // unflagged fine channel (outer_freq_chan_index).
                     let mut outer_freq_chan_index: usize = 0;
                     for (freq_chan, ((data_freq_axis, weights_freq_axis), flags_freq_axis)) in data
@@ -701,6 +678,6 @@ impl InputData for MS {
                 Ok(())
             })
             .unwrap();
-        Ok((uvws, out_weights))
+        Ok(out_weights)
     }
 }

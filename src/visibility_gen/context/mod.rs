@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use mwa_hyperdrive_core::{mwalib, XyzBaseline, XYZ};
+use mwa_hyperdrive_core::{mwalib, XyzBaseline, XyzGeodetic};
 use mwalib::*;
 
 #[cfg(feature = "cuda")]
@@ -71,7 +71,7 @@ impl Context {
             mwalib,
             base_freq,
             base_lst,
-            xyz: XYZ::get_baselines(&xyz),
+            xyz: XyzGeodetic::get_baselines(&xyz),
         })
     }
 }

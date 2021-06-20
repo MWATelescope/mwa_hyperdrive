@@ -7,7 +7,10 @@
 use thiserror::Error;
 
 use super::{params::InvalidArgsError, solutions::WriteSolutionsError};
-use crate::data_formats::{uvfits::UvfitsError, ReadInputDataError};
+use crate::data_formats::{
+    uvfits::{UvfitsReadError, UvfitsWriteError},
+    ReadInputDataError,
+};
 use mwa_hyperdrive_core::{mwalib, EstimateError};
 use mwalib::fitsio;
 
@@ -31,8 +34,11 @@ pub enum CalibrateError {
     #[error("cfitsio error: {0}")]
     Fitsio(#[from] fitsio::errors::Error),
 
-    #[error("Error when interfacing with uvfits: {0}")]
-    Uvifts(#[from] UvfitsError),
+    #[error("Error when reading uvfits: {0}")]
+    UviftsRead(#[from] UvfitsReadError),
+
+    #[error("Error when writing uvfits: {0}")]
+    UviftsWrite(#[from] UvfitsWriteError),
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),

@@ -74,6 +74,9 @@ pub enum InvalidArgsError {
     MS(#[from] crate::data_formats::ms::NewMSError),
 
     #[error("{0}")]
+    Uvfits(#[from] crate::data_formats::uvfits::UvfitsReadError),
+
+    #[error("{0}")]
     Veto(#[from] crate::calibrate::veto::VetoError),
 
     #[error("{0}")]

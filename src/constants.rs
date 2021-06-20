@@ -22,12 +22,12 @@ pub(crate) const DEFAULT_MAX_ITERATIONS: usize = 50;
 
 /// The threshold to satisfy convergence when performing "MitchCal" in
 /// direction-independent calibration.
-pub(crate) const DEFAULT_STOP_THRESHOLD: f32 = 1e-8;
+pub(crate) const DEFAULT_STOP_THRESHOLD: f64 = 1e-8;
 
 /// The minimum threshold to satisfy convergence when performing "MitchCal" in
 /// direction-independent calibration. Reaching this threshold counts as
 /// "converged", but it's not as good as the stop threshold.
-pub(crate) const DEFAULT_MIN_THRESHOLD: f32 = 1e-5;
+pub(crate) const DEFAULT_MIN_THRESHOLD: f64 = 1e-5;
 
 /// The default calibration solutions filename to use.
 pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions.bin";
@@ -79,16 +79,17 @@ pub(crate) const EMPIRICAL_GAINS_40KHZ: [f64; 32] = [
 ];
 
 /// This is the number of seconds from 1900 Jan 1 and 1980 Jan 5. The GPS epoch
-/// is 1980 Jan 5, but hifitime uses 1900 for everything; subtracting this
-/// number from the result of hifitime::Epoch::as_gpst_seconds gives the
+/// is 1980 Jan 5, but `hifitime` uses 1900 for everything; subtracting this
+/// number from the result of `hifitime::Epoch::as_gpst_seconds` gives the
 /// expected GPS time.
 pub(crate) const HIFITIME_GPS_FACTOR: f64 =
     hifitime::SECONDS_PER_YEAR * 80.0 + hifitime::SECONDS_PER_DAY * 4.0;
 
 /// The number of seconds between 1858-11-17T00:00:00 (MJD epoch, used by
 /// casacore) and 1900-01-01T00:00:00 (TAI epoch) is 1297728000. I'm using the
-/// TAI epoch because that's well supported by hifitime, and hifitime converts an
-/// epoch to many formats including JD, and accounts for leap seconds.
+/// TAI epoch because that's well supported by `hifitime`, and `hifitime`
+/// converts an epoch to many formats including JD, and accounts for leap
+/// seconds.
 pub(crate) const MJD_TAI_EPOCH_DIFF: f64 = 1297728000.0;
 
 // sqrt(pi^2 / (2 ln(2)))

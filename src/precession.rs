@@ -9,7 +9,7 @@ use std::f64::consts::TAU;
 use hifitime::Epoch;
 use rayon::prelude::*;
 
-use mwa_hyperdrive_core::{HADec, RADec, XYZ};
+use mwa_hyperdrive_core::{HADec, RADec, XyzGeodetic};
 
 #[derive(Debug)]
 pub(crate) struct PrecessionInfo {
@@ -31,7 +31,7 @@ pub(crate) struct PrecessionInfo {
 
 impl PrecessionInfo {
     // Blatently stolen from cotter.
-    pub(crate) fn precess_xyz_parallel(&self, xyzs: &[XYZ]) -> Vec<XYZ> {
+    pub(crate) fn precess_xyz_parallel(&self, xyzs: &[XyzGeodetic]) -> Vec<XyzGeodetic> {
         let (sep, cep) = self.lmst.sin_cos();
         let (s2000, c2000) = self.lmst_j2000.sin_cos();
         let mut out = Vec::with_capacity(xyzs.len());
@@ -49,7 +49,7 @@ impl PrecessionInfo {
                 let zpr2 = (rmat[2][0]) * xpr + (rmat[2][1]) * ypr + (rmat[2][2]) * zpr;
 
                 // rotate back to frame with xp pointing out at lmst2000
-                XYZ {
+                XyzGeodetic {
                     x: c2000 * xpr2 + s2000 * ypr2,
                     y: -s2000 * xpr2 + c2000 * ypr2,
                     z: zpr2,

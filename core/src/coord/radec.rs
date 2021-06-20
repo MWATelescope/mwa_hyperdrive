@@ -25,17 +25,17 @@ pub struct RADec {
 }
 
 impl RADec {
-    /// Make a new `RADec` struct from values in radians.
+    /// Make a new [RADec] struct from values in radians.
     pub fn new(ra: f64, dec: f64) -> Self {
         Self { ra, dec }
     }
 
-    /// Make a new `RADec` struct from values in degrees.
+    /// Make a new [RADec] struct from values in degrees.
     pub fn new_degrees(ra: f64, dec: f64) -> Self {
         Self::new(ra.to_radians(), dec.to_radians())
     }
 
-    /// Given a local sidereal time, make a new `HADec` struct from a `RADec`.
+    /// Given a local sidereal time, make a new [HADec] struct from a [RADec].
     pub fn to_hadec(&self, lst_rad: f64) -> HADec {
         HADec {
             ha: lst_rad - self.ra,
@@ -43,7 +43,7 @@ impl RADec {
         }
     }
 
-    /// Given a local sidereal time, make a new `RADec` struct from a `HADec`.
+    /// Given a local sidereal time, make a new [RADec] struct from a [HADec].
     pub fn from_hadec(hadec: &HADec, lst_rad: f64) -> Self {
         Self {
             ra: lst_rad - hadec.ha,
@@ -51,10 +51,10 @@ impl RADec {
         }
     }
 
-    /// From a collection of `RADec` coordinates and weights, find the average
-    /// `RADec` position. The lengths of both collection must be the same to get
-    /// sensible results. Not providing any `RADec` coordinates will make this
-    /// function return `None`.
+    /// From a collection of [RADec] coordinates and weights, find the average
+    /// [RADec] position. The lengths of both collection must be the same to get
+    /// sensible results. Not providing any [RADec] coordinates will make this
+    /// function return [None].
     ///
     /// This function accounts for Right Ascension coordinates that range over
     /// 360 degrees.
@@ -116,8 +116,7 @@ impl RADec {
         Some(weighted_pos)
     }
 
-    /// Get the (l,m,n) direction cosines from these coordinates. All arguments
-    /// are in radians.
+    /// Get the [LMN] direction cosines from an [RADec] and a phase centre.
     ///
     /// Derived using "Coordinate transformations" on page 388 of Synthesis
     /// Imaging in Radio Astronomy II.
@@ -133,7 +132,7 @@ impl RADec {
         }
     }
 
-    /// Calculate the distance between two sets of coordinates (radians).
+    /// Calculate the distance between two sets of coordinates \[radians\].
     ///
     /// Uses ERFA.
     pub fn separation(&self, b: &Self) -> f64 {

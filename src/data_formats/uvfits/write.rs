@@ -15,7 +15,9 @@ use ndarray::prelude::*;
 
 use super::*;
 use crate::math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_baselines};
-use mwa_hyperdrive_core::{constants::VEL_C, erfa_sys, mwalib, Jones, RADec, UVW, XYZ};
+use mwa_hyperdrive_core::{
+    constants::VEL_C, erfa_sys, mwalib, Jones, RADec, XyzGeocentric, XyzGeodetic, UVW,
+};
 use mwalib::{fitsio, fitsio_sys};
 
 /// A helper struct to write out a uvfits file.
@@ -61,7 +63,7 @@ impl<'a> UvfitsWriter<'a> {
         centre_freq_chan: usize,
         phase_centre: &RADec,
         obs_name: Option<&str>,
-    ) -> Result<Self, UvfitsError> {
+    ) -> Result<Self, UvfitsWriteError> {
         // Delete any file that already exists.
         if filename.exists() {
             std::fs::remove_file(&filename)?;
@@ -223,8 +225,8 @@ impl<'a> UvfitsWriter<'a> {
     /// location is MWA.
     ///
     /// `centre_freq` is the centre frequency of the coarse band that this
-    /// uvfits file pertains to. `positions` are the absolute XYZ coordinates of
-    /// the MWA tiles. These positions need to have the MWA's "centre" XYZ
+    /// uvfits file pertains to. `positions` are the [XyzGeodetic] coordinates
+    /// of the MWA tiles. These positions need to have the MWA's "centre" XYZ
     /// coordinates subtracted to make them local XYZ.
     ///
     /// `Self` must have only have a single HDU when this function is called
@@ -233,10 +235,10 @@ impl<'a> UvfitsWriter<'a> {
     pub(crate) fn write_uvfits_antenna_table<T: AsRef<str>>(
         self,
         antenna_names: &[T],
-        positions: &[XYZ],
-    ) -> Result<(), UvfitsError> {
+        positions: &[XyzGeodetic],
+    ) -> Result<(), UvfitsWriteError> {
         if self.current_num_rows != self.total_num_rows {
-            return Err(UvfitsError::NotEnoughRowsWritten {
+            return Err(UvfitsWriteError::NotEnoughRowsWritten {
                 current: self.current_num_rows,
                 total: self.total_num_rows,
             });
@@ -282,11 +284,11 @@ impl<'a> UvfitsWriter<'a> {
         // Open the newly-created HDU.
         let hdu = uvfits.hdu(1)?;
 
-        // Set ARRAYX, Y and Z to the MWA's coordinates in XYZ. The results here are
-        // slightly different to those given by cotter. This is at least partly due
-        // to different constants (the altitude is definitely slightly different),
-        // but possibly also because ERFA is more accurate than cotter's
-        // "homebrewed" Geodetic2XYZ.
+        // Set ARRAYX, Y and Z to the MWA's coordinates in XYZ (geocentric). The
+        // results here are slightly different to those given by cotter. This is
+        // at least partly due to different constants (the altitude is
+        // definitely slightly different), but possibly also because ERFA is
+        // more accurate than cotter's "homebrewed" Geodetic2XYZ.
         let mut mwa_xyz: [f64; 3] = [0.0; 3];
         unsafe {
             status = erfa_sys::eraGd2gc(
@@ -298,14 +300,14 @@ impl<'a> UvfitsWriter<'a> {
             );
         }
         if status != 0 {
-            return Err(UvfitsError::Erfa {
+            return Err(UvfitsWriteError::Erfa {
                 source_file: file!(),
                 source_line: line!(),
                 status,
                 function: "eraGd2gc",
             });
         }
-        let mwa_xyz = XYZ {
+        let mwa_xyz = XyzGeocentric {
             x: mwa_xyz[0],
             y: mwa_xyz[1],
             z: mwa_xyz[2],
@@ -360,14 +362,8 @@ impl<'a> UvfitsWriter<'a> {
                 );
                 fits_check_status(status)?;
 
+                let mut c_xyz = [pos.x, pos.y, pos.z];
                 // STABXYZ. ffpcld = fits_write_col_dbl
-                let xyz = XYZ {
-                    x: pos.x - mwa_xyz.x,
-                    y: pos.y - mwa_xyz.y,
-                    z: pos.z - mwa_xyz.z,
-                }
-                .rotate_mwa(-1);
-                let mut c_xyz = [xyz.x, xyz.y, xyz.z];
                 fitsio_sys::ffpcld(
                     uvfits.as_raw(),    /* I - FITS file pointer                       */
                     2,                  /* I - number of column to write (1 = 1st col) */
@@ -502,9 +498,9 @@ impl<'a> UvfitsWriter<'a> {
         tile_index2: usize,
         epoch: &Epoch,
         vis: &[f32],
-    ) -> Result<(), UvfitsError> {
+    ) -> Result<(), UvfitsWriteError> {
         if self.current_num_rows + 1 > self.total_num_rows {
-            return Err(UvfitsError::BadRowNum {
+            return Err(UvfitsWriteError::BadRowNum {
                 row_num: self.current_num_rows,
                 num_rows: self.total_num_rows,
             });
@@ -551,7 +547,7 @@ impl<'a> UvfitsWriter<'a> {
         epoch: &Epoch,
         num_fine_chans: usize,
         fine_chan_flags: &HashSet<usize>,
-    ) -> Result<(), UvfitsError> {
+    ) -> Result<(), UvfitsWriteError> {
         let num_unflagged_baselines = vis_array.len_of(Axis(0));
         let num_unflagged_tiles = num_tiles_from_num_baselines(num_unflagged_baselines);
         // Write out all the baselines of the timestep we received.
@@ -658,9 +654,9 @@ mod tests {
         }
 
         let names = ["Tile1", "Tile2", "Tile3"];
-        let positions: Vec<XYZ> = (0..names.len())
+        let positions: Vec<XyzGeodetic> = (0..names.len())
             .into_iter()
-            .map(|i| XYZ {
+            .map(|i| XyzGeodetic {
                 x: i as f64,
                 y: i as f64 * 2.0,
                 z: i as f64 * 3.0,

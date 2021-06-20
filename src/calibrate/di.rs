@@ -7,6 +7,8 @@
 //! This code borrows heavily from Torrance Hodgson's excellent Julia code at
 //! https://github.com/torrance/MWAjl
 
+use std::ops::Deref;
+
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -18,6 +20,7 @@ use super::{model, solutions::write_solutions, CalibrateError, CalibrateParams};
 use crate::data_formats::uvfits::UvfitsWriter;
 use crate::precession::precess_time;
 use crate::{math::cross_correlation_baseline_to_tiles, *};
+use mwa_hyperdrive_core::xyz;
 
 /// Do all the steps required for direction-independent calibration; read the
 /// input data, generate a model against it, and write the solutions out.
@@ -81,21 +84,18 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
             .with_message("Sky modelling"),
     );
     // Only add a model writing progress bar if we need it.
-    let model_write_progress = match params.model_file {
-        Some(_) => Some(
-            multi_progress.add(
-                ProgressBar::new(vis_shape.0 as _)
-                    .with_style(
-                        ProgressStyle::default_bar()
-                            .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
-                            .progress_chars("=> "),
-                    )
-                    .with_position(0)
-                    .with_message("Model writing"),
-            ),
-        ),
-        None => None,
-    };
+    let model_write_progress = params.model_file.clone().map(|_|
+        multi_progress.add(
+            ProgressBar::new(vis_shape.0 as _)
+                .with_style(
+                    ProgressStyle::default_bar()
+                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
+                        .progress_chars("=> "),
+                )
+                .with_position(0)
+                .with_message("Model writing"),
+        )
+    );
 
     scope(|scope| {
         // Spawn a thread to draw the progress bars.
@@ -126,7 +126,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 let read_failed = read_result.is_err();
                 // Send the result of the read to the worker thread.
                 let msg = read_result
-                    .map(|(uvws, weights)| (timestep, uvws, vis_model_slice, weights))
+                    .map(|weights| (timestep, vis_model_slice, weights))
                     .map_err(CalibrateError::from);
                 // If we can't send the message, it's because the channel has
                 // been closed on the other side. That should only happen
@@ -170,7 +170,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     // there is no data in the channel _and_ the sender has been
                     // dropped.
                     for msg in rx_data.iter() {
-                        let (timestep, uvws, mut vis_model_slice, weights) = match msg {
+                        let (timestep, mut vis_model_slice, weights) = match msg {
                             Ok(msg) => msg,
                             Err(e) => {
                                 // Propagate the error.
@@ -178,42 +178,37 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                                 break;
                             }
                         };
+                        let timestamp = obs_context.timesteps[timestep];
 
                         // TODO: Allow the user to turn off precession.
                         let precession_info = precess_time(
                             &obs_context.phase_centre,
-                            &obs_context.timesteps[timestep],
+                            &timestamp,
                             params.array_longitude,
                             params.array_latitude,
                         );
                         // Apply precession to the tile XYZ positions.
-                        let precessed_tile_xyz =
-                            precession_info.precess_xyz_parallel(&obs_context.tile_xyz);
-                        let precessed_xyz_bls = XYZ::get_baselines(&precessed_tile_xyz);
-                        let precessed_uvws =
-                            XYZ::to_uvw(&precessed_tile_xyz, &precession_info.hadec_j2000);
-                        // let baseline_xyz = XYZ::get_baselines(&tile_xyz);
+                        let precessed_tile_xyzs =
+                            precession_info.precess_xyz_parallel(&obs_context.tile_xyzs);
+                        let uvws = xyz::xyzs_to_uvws(
+                            &precessed_tile_xyzs,
+                            &obs_context
+                                .phase_centre
+                                .to_hadec(precession_info.lmst_j2000),
+                        );
 
-                        // let lst = obs_context.lst_from_timestep(timestep);
                         let model_result = model::model_timestep(
                             vis_model_slice.view_mut(),
                             weights.view(),
                             &split_components,
-                            &params.beam,
+                            params.beam.deref(),
                             precession_info.lmst_j2000,
-                            &precessed_xyz_bls,
-                            &precessed_uvws,
+                            &precessed_tile_xyzs,
+                            &uvws,
                             &params.freq.unflagged_fine_chan_freqs,
                         );
                         let model_failed = model_result.is_err();
-                        let msg = model_result.map(|_| {
-                            (
-                                vis_model_slice,
-                                weights,
-                                uvws,
-                                &obs_context.timesteps[timestep],
-                            )
-                        });
+                        let msg = model_result.map(|_| (vis_model_slice, weights, uvws, timestamp));
                         // If we can't send the message, it's because the
                         // channel has been closed on the other side. That
                         // should only happen because the thread has exited due
@@ -299,7 +294,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                                             vis_model_timestep.view(),
                                             weights.view(),
                                             &uvws,
-                                            epoch,
+                                            &epoch,
                                             params.freq.num_fine_chans,
                                             &params.freq.fine_chan_flags,
                                         )
@@ -380,8 +375,8 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     chanblocks.sort_unstable();
 
     // The shape of the array containing output Jones matrices.
-    let total_num_tiles = obs_context.tile_xyz.len();
-    let num_unflagged_tiles = obs_context.num_unflagged_tiles;
+    let total_num_tiles = obs_context.tile_xyzs.len();
+    let num_unflagged_tiles = total_num_tiles - params.tile_flags.len();
     let shape = (num_timeblocks, num_unflagged_tiles, chanblocks.len());
     debug!(
         "Shape of DI Jones matrices array: {:?} ({} MiB)",
@@ -417,17 +412,14 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 .zip(di_jones_rev.outer_iter_mut())
                 .enumerate()
                 .map(|(chanblock_index, (&&chanblock, di_jones))| {
+                    let range = s![
+                        timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
+                        ..,
+                        chanblock_index..chanblock_index + 1
+                    ];
                     let cal_result = calibrate(
-                        vis_data.slice(s![
-                            timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
-                            ..,
-                            chanblock_index..chanblock_index + 1
-                        ]),
-                        vis_model.slice(s![
-                            timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
-                            ..,
-                            chanblock_index..chanblock_index + 1
-                        ]),
+                        vis_data.slice(range),
+                        vis_model.slice(range),
                         di_jones,
                         params.max_iterations,
                         params.stop_threshold,
@@ -491,7 +483,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 struct CalibrationResult {
     num_iterations: usize,
     converged: bool,
-    max_precision: f32,
+    max_precision: f64,
     num_failed: usize,
 }
 
@@ -503,18 +495,20 @@ struct CalibrationResult {
 fn calibrate(
     data: ArrayView3<Jones<f32>>,
     model: ArrayView3<Jones<f32>>,
-    mut di_jones: ArrayViewMut1<Jones<f32>>,
+    mut di_jones: ArrayViewMut1<Jones<f64>>,
     max_iterations: usize,
-    stop_threshold: f32,
-    min_threshold: f32,
+    stop_threshold: f64,
+    min_threshold: f64,
 ) -> CalibrationResult {
-    let mut new_jones: Array1<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
-    let mut top: Array1<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
-    let mut bot: Array1<Jones<f32>> = Array::from_elem(di_jones.dim(), Jones::default());
+    debug_assert_eq!(data.dim(), model.dim());
+
+    let mut new_jones: Array1<Jones<f64>> = Array::from_elem(di_jones.dim(), Jones::default());
+    let mut top: Array1<Jones<f64>> = Array::from_elem(di_jones.dim(), Jones::default());
+    let mut bot: Array1<Jones<f64>> = Array::from_elem(di_jones.dim(), Jones::default());
     // The convergence precisions per antenna. They are stored per polarisation
     // for programming convenience, but really only we're interested in the
     // largest value in the entire array.
-    let mut precisions: Array2<f32> = Array::from_elem((di_jones.len(), 4), f32::default());
+    let mut precisions: Array2<f64> = Array::zeros((di_jones.len(), 4));
     let mut failed: Array1<bool> = Array1::from_elem(di_jones.len(), false);
 
     // Shortcuts.
@@ -583,7 +577,7 @@ fn calibrate(
                             acc + array![norm[0], norm[1], norm[2], norm[3]]
                         },
                     );
-                    antenna_precision.assign(&(jones_diff_sum / di_jones.len() as f32));
+                    antenna_precision.assign(&(jones_diff_sum / di_jones.len() as f64));
 
                     // di_jones = 0.5 * (di_jones + new_jones)
                     di_jones += &new_jones;
@@ -611,7 +605,7 @@ fn calibrate(
         });
 
     // max_precision = maximum(distances)
-    let max_precision: f32 = precisions
+    let max_precision: f64 = precisions
         .outer_iter()
         .zip(failed.iter())
         .filter(|(_, &failed)| !failed)
@@ -646,12 +640,13 @@ fn calibrate(
     }
 }
 
+/// "MitchCal".
 fn calibration_loop(
     data: ArrayView3<Jones<f32>>,
     model: ArrayView3<Jones<f32>>,
-    di_jones: ArrayView1<Jones<f32>>,
-    mut top: ArrayViewMut1<Jones<f32>>,
-    mut bot: ArrayViewMut1<Jones<f32>>,
+    di_jones: ArrayView1<Jones<f64>>,
+    mut top: ArrayViewMut1<Jones<f64>>,
+    mut bot: ArrayViewMut1<Jones<f64>>,
 ) {
     let num_unflagged_tiles = di_jones.len_of(Axis(0));
 
@@ -675,15 +670,20 @@ fn calibration_loop(
                         .iter()
                         .zip(model_bl.iter())
                         .for_each(|(j_data, j_model)| {
+                            // Copy and promote the data and model Jones
+                            // matrices.
+                            let j_data: Jones<f64> = j_data.into();
+                            let j_model: Jones<f64> = j_model.into();
+
                             // Suppress boundary checks for maximum performance!
                             unsafe {
                                 let j_t1 = di_jones.uget(tile1);
                                 let j_t2 = di_jones.uget(tile2);
 
-                                // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
                                 let top_t1 = top.uget_mut(tile1);
                                 let bot_t1 = bot.uget_mut(tile1);
 
+                                // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
                                 // J M^H
                                 let z = Jones::axbh(j_t2, &j_model);
                                 // D (J M^H)
@@ -705,40 +705,3 @@ fn calibration_loop(
                 })
         });
 }
-
-// #[derive(Debug)]
-// pub(crate) struct TileConfig<'a> {
-//     /// The tile antenna numbers that this configuration applies to.
-//     pub(crate) antennas: Vec<usize>,
-
-//     /// The delays of this configuration.
-//     pub(crate) delays: &'a [u32],
-
-//     /// The amps of this configuration.
-//     pub(crate) amps: &'a [f64],
-// }
-
-// impl<'a> TileConfig<'a> {
-//     /// Make a new `TileConfig`.
-//     pub(crate) fn new(antenna: u32, delays: &'a [u32], amps: &'a [f64]) -> Self {
-//         Self {
-//             antennas: vec![antenna as _],
-//             delays,
-//             amps,
-//         }
-//     }
-
-//     /// From tile delays and amplitudes, generate a hash. Useful to identify if
-//     /// this `TileConfig` matches another.
-//     pub(crate) fn hash(delays: &[u32], amps: &[f64]) -> u64 {
-//         let mut hasher = DefaultHasher::new();
-//         delays.hash(&mut hasher);
-//         // We can't hash f64 values, so convert them to ints. Multiply by a big
-//         // number to get away from integer rounding.
-//         let to_int = |x: f64| (x * 1e8) as u32;
-//         for &a in amps {
-//             to_int(a).hash(&mut hasher);
-//         }
-//         hasher.finish()
-//     }
-// }

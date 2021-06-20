@@ -4,16 +4,12 @@
 
 //! Metadata on an observation.
 
-use std::f64::consts::TAU;
 use std::ops::Range;
 
 use hifitime::Epoch;
 use ndarray::Array2;
 
-use mwa_hyperdrive_core::{
-    constants::{DS2R, SOLAR2SIDEREAL},
-    RADec, XyzBaseline, XYZ,
-};
+use mwa_hyperdrive_core::{RADec, XyzGeodetic};
 
 /// Observation metadata.
 ///
@@ -49,11 +45,11 @@ pub(crate) struct ObsContext {
     pub(super) pointing_centre: Option<RADec>,
 
     /// The names of each of the tiles used in the array.
-    pub(crate) names: Vec<String>,
+    pub(crate) tile_names: Vec<String>,
 
-    /// The geocentric [XYZ] coordinates of all tiles in the array \[metres\].
-    /// This includes tiles that have been flagged in the input data.
-    pub(crate) tile_xyz: Vec<XYZ>,
+    /// The [XyzGeodetic] coordinates of all tiles in the array \[metres\]. This
+    /// includes tiles that have been flagged in the input data.
+    pub(crate) tile_xyzs: Vec<XyzGeodetic>,
 
     /// The tiles already flagged in the supplied data. These values correspond
     /// to those from the "Antenna" column in HDU 1 of the metafits file. Zero
@@ -64,13 +60,6 @@ pub(crate) struct ObsContext {
     /// data. Zero indexed.
     pub(crate) fine_chan_flags_per_coarse_chan: Vec<usize>,
 
-    /// The number of unflagged tiles in the input data.
-    pub(crate) num_unflagged_tiles: usize,
-
-    /// The number of unflagged cross-correlation baselines. e.g. if there are
-    /// 128 unflagged tiles, then this is 8128.
-    pub(crate) num_unflagged_baselines: usize,
-
     /// The dipole gains for each tile in the array. The first axis is unflagged
     /// antenna, the second dipole index. These will typically all be of value
     /// 1.0, except where a dipole is dead (0.0).
@@ -78,8 +67,9 @@ pub(crate) struct ObsContext {
 
     /// The time resolution of the supplied data \[seconds\]. This is not
     /// necessarily the native time resolution of the original observation's
-    /// data. This is kept optional in case in the input data has only one time
-    /// step, and therefore no resolution.
+    /// data, as it may have already been averaged. This is kept optional in
+    /// case in the input data has only one time step, and therefore no
+    /// resolution.
     pub(crate) time_res: Option<f64>,
 
     /// The Earth longitude of the instrumental array \[radians\].
@@ -88,18 +78,6 @@ pub(crate) struct ObsContext {
     /// The Earth latitude of the instrumental array \[radians\].
     pub(crate) array_latitude_rad: Option<f64>,
 }
-
-// impl ObsContext {
-//     pub(crate) fn lst_from_timestep(&self, timestep: usize) -> f64 {
-//         if let Some(tr) = self.time_res {
-//             (self.lst0 + SOLAR2SIDEREAL * DS2R * timestep as f64 * tr) % TAU
-//         } else {
-//             // No time resolution implies no timesteps; just return the first
-//             // LST.
-//             self.lst0
-//         }
-//     }
-// }
 
 /// Metadata on an observation's frequency setup.
 pub(crate) struct FreqContext {

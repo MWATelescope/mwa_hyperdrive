@@ -36,13 +36,14 @@ use mwa_hyperdrive_core::*;
 /// Assume an ideal array (all dipoles with unity gain). Also assume that the
 /// observation does not elapse enough time to shift sources into beam nulls
 /// compared to the obs start.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn veto_sources(
     source_list: &mut SourceList,
     phase_centre: &RADec,
     lst_rad: f64,
     array_latitude_rad: f64,
     coarse_chan_freqs: &[f64],
-    beam: &Box<dyn Beam>,
+    beam: &dyn Beam,
     num_sources: Option<usize>,
     source_dist_cutoff: f64,
     veto_threshold: f64,
@@ -81,7 +82,7 @@ pub(crate) fn veto_sources(
         .par_iter()
         .partition_map(|(source_name, source)| {
             // Are any of this source's components too low in elevation? Or too
-            // far from the pointing centre?
+            // far from the phase centre?
             for comp in &source.components {
                 let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                 if azel.el < ELEVATION_LIMIT {
@@ -251,6 +252,7 @@ mod tests {
     use crate::tests::*;
     use mwa_hyperdrive_core::mwalib::MWA_LONGITUDE_RADIANS;
     use reduced_obsids::get_1090008640_smallest;
+    use std::ops::Deref;
 
     #[test]
     #[serial]
@@ -293,7 +295,6 @@ mod tests {
     #[test]
     #[serial]
     fn veto() {
-        // let (metafits, beam, mut source_list) = get_params();
         let mut args = get_1090008640_smallest();
         args.no_beam = false;
         let mut params = args.into_params().unwrap();
@@ -379,7 +380,7 @@ mod tests {
             lmst,
             MWA_LAT_RAD,
             &params.input_data.get_freq_context().coarse_chan_freqs,
-            &params.beam,
+            params.beam.deref(),
             None,
             180.0,
             20.0,
@@ -426,7 +427,7 @@ mod tests {
             lmst,
             MWA_LAT_RAD,
             &params.input_data.get_freq_context().coarse_chan_freqs,
-            &params.beam,
+            params.beam.deref(),
             Some(3),
             180.0,
             0.1,

@@ -38,7 +38,7 @@ pub enum MSError {
     #[error("Specified table name {0} does not exist")]
     TableDoesntExist(String),
 
-    #[error("When reading in measurment set, ERFA function eraGd2gc failed to convert geodetic coordinates to geocentric. Is something wrong with your ANTENNA/POSITION column?")]
+    #[error("When reading in measurment set, ERFA function eraGd2gc failed to convert geocentric coordinates to geodetic. Is something wrong with your ANTENNA/POSITION column?")]
     Geodetic2Geocentric,
 
     #[error("Row {row_index} did not have 3 UVW elements!")]

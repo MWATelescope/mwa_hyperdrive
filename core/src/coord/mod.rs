@@ -14,8 +14,9 @@ pub mod xyz;
 
 // Re-exports.
 pub use azel::AzEl;
+pub use enh::ENH;
 pub use hadec::HADec;
 pub use lmn::LMN;
 pub use radec::RADec;
 pub use uvw::UVW;
-pub use xyz::{XyzBaseline, XYZ};
+pub use xyz::{XyzBaseline, XyzGeocentric, XyzGeodetic};

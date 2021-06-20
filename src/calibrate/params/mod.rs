@@ -21,6 +21,7 @@ pub(crate) use ranked_source::*;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use log::{debug, info, trace, warn};
@@ -62,15 +63,11 @@ pub struct CalibrateParams {
     // Not currently used.
     _ranked_sources: Vec<RankedSource>,
 
-    /// The number of components in the source list. If all sources have only
-    /// one component, then this is equal to the length of the source list.
-    pub(crate) num_components: usize,
-
     /// Which tiles are flagged? This field contains flags that are
     /// user-specified as well as whatever was already flagged in the supplied
     /// data.
     ///
-    /// These values correspond to those from the "Antenna" column in HDU 1 of
+    /// These values correspond to those from the "Antenna" column in HDU 2 of
     /// the metafits file. Zero indexed.
     pub(crate) tile_flags: HashSet<usize>,
 
@@ -106,9 +103,10 @@ pub struct CalibrateParams {
     /// The names of the unflagged tiles.
     pub(crate) unflagged_tile_names: Vec<String>,
 
-    /// The unflagged [XYZ] coordinates of each tile \[metres\]. This does not
-    /// change over time; it is determined only by the telescope's tile layout.
-    pub(crate) unflagged_tile_xyz: Vec<XYZ>,
+    /// The unflagged [XyzGeodetic] coordinates of each tile \[metres\]. This
+    /// does not change over time; it is determined only by the telescope's tile
+    /// layout.
+    pub(crate) unflagged_tile_xyz: Vec<XyzGeodetic>,
 
     /// The Earth longitude of the array \[radians\]. This is populated by user
     /// input or the input data.
@@ -118,21 +116,17 @@ pub struct CalibrateParams {
     /// input or the input data.
     pub(crate) array_latitude: f64,
 
-    // /// The unflagged XYZ coordinates of each baseline ([XyzBaseline])
-    // /// \[metres\]. This does not change over time; it is determined only by the
-    // /// telescope's tile layout.
-    // pub(crate) unflagged_baseline_xyz: Vec<XyzBaseline>,
     /// The maximum number of times to iterate when performing "MitchCal".
     pub(crate) max_iterations: usize,
 
     /// The threshold at which we stop convergence when performing "MitchCal".
     /// This is smaller than `min_threshold`.
-    pub(crate) stop_threshold: f32,
+    pub(crate) stop_threshold: f64,
 
     /// The minimum threshold to satisfy convergence when performing "MitchCal".
     /// Reaching this threshold counts as "converged", but it's not as good as
     /// the stop threshold. This is bigger than `stop_threshold`.
-    pub(crate) min_threshold: f32,
+    pub(crate) min_threshold: f64,
 
     /// The path to the file where the calibration solutions are written.
     /// Supported formats are .fits and .bin (which is the "André calibrate
@@ -248,20 +242,24 @@ impl CalibrateParams {
             }
 
             // Valid input for reading uvfits files.
-            // TODO: Might need a metafits here.
-            (None, None, None, None, Some(uvfits_strs)) => {
-                todo!();
-
-                // let mut uvfits_pbs = Vec::with_capacity(uvfits_strs.len());
-                // for s in uvfits_strs {
-                //     let pb = PathBuf::from(s);
-                //     // Check that the file actually exists and is readable.
-                //     if !pb.exists() || !is_readable(&pb)? {
-                //         return Err(InvalidArgsError::BadFile(pb));
-                //     }
-                //     uvfits_pbs.push(pb);
-                // }
-                // InputData::Uvfits { paths: uvfits_pbs }
+            (meta, None, None, None, Some(uvfits_strs)) => {
+                let input_data = match uvfits_strs.len() {
+                    0 => panic!("whatcha doin?"),
+                    1 => Uvfits::new(&uvfits_strs[0], meta.as_ref(), &mut dipole_delays)?,
+                    _ => panic!("TODO: support many uvfits files"),
+                };
+                match input_data.get_obs_context().obsid {
+                    Some(o) => info!(
+                        "Calibrating obsid {} from uvfits {}",
+                        o,
+                        input_data.uvfits.canonicalize()?.display()
+                    ),
+                    None => info!(
+                        "Calibrating uvfits {}",
+                        input_data.uvfits.canonicalize()?.display()
+                    ),
+                }
+                Box::new(input_data)
             }
 
             _ => return Err(InvalidArgsError::InvalidDataInput),
@@ -419,7 +417,7 @@ impl CalibrateParams {
 
         // The length of the tile XYZ collection is the total number of tiles in
         // the array, even if some tiles are flagged.
-        let total_num_tiles = obs_context.tile_xyz.len();
+        let total_num_tiles = obs_context.tile_xyzs.len();
         info!("Total number of tiles: {}", total_num_tiles);
 
         // Assign the tile flags.
@@ -427,9 +425,11 @@ impl CalibrateParams {
             Some(flags) => flags.into_iter().collect(),
             None => HashSet::new(),
         };
-        // Add tiles that have already been flagged by the input data.
-        for &obs_tile_flag in &obs_context.tile_flags {
-            tile_flags.insert(obs_tile_flag);
+        if !ignore_input_data_tile_flags {
+            // Add tiles that have already been flagged by the input data.
+            for &obs_tile_flag in &obs_context.tile_flags {
+                tile_flags.insert(obs_tile_flag);
+            }
         }
         let num_unflagged_tiles = total_num_tiles - tile_flags.len();
         info!("Total number of unflagged tiles: {}", num_unflagged_tiles);
@@ -447,8 +447,10 @@ impl CalibrateParams {
                 Some(flags) => flags.into_iter().collect(),
                 None => HashSet::new(),
             };
-        for &obs_fine_chan_flag in &obs_context.fine_chan_flags_per_coarse_chan {
-            fine_chan_flags_per_coarse_chan.insert(obs_fine_chan_flag);
+        if !ignore_input_data_fine_channels_flags {
+            for &obs_fine_chan_flag in &obs_context.fine_chan_flags_per_coarse_chan {
+                fine_chan_flags_per_coarse_chan.insert(obs_fine_chan_flag);
+            }
         }
         {
             let mut fine_chan_flags_per_coarse_chan_vec =
@@ -617,7 +619,7 @@ impl CalibrateParams {
             precession_info.lmst_j2000,
             precession_info.array_latitude_j2000,
             &freq_context.coarse_chan_freqs,
-            &beam,
+            beam.deref(),
             num_sources,
             source_dist_cutoff.unwrap_or(CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
@@ -639,35 +641,30 @@ impl CalibrateParams {
 
         let native_time_res = obs_context.time_res;
         let time_res = time_res.or(native_time_res);
-        if let (Some(tr), Some(ntr)) = (time_res, native_time_res) {
-            if tr % ntr != 0.0 {
-                return Err(InvalidArgsError::InvalidTimeResolution {
-                    got: tr,
-                    native: ntr,
-                });
+        if let Some(ntr) = native_time_res {
+            info!("Input data time resolution: {:.2}s", ntr);
+            if let Some(tr) = time_res {
+                if tr % ntr != 0.0 {
+                    return Err(InvalidArgsError::InvalidTimeResolution {
+                        got: tr,
+                        native: ntr,
+                    });
+                }
             }
         }
         // let num_time_steps_to_average = time_res / native_time_res;
         // let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
 
         let tile_baseline_maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
-        let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
 
         let (unflagged_tile_xyz, unflagged_tile_names) = obs_context
-            .tile_xyz
+            .tile_xyzs
             .par_iter()
-            .zip(obs_context.names.par_iter())
+            .zip(obs_context.tile_names.par_iter())
             .enumerate()
             .filter(|(tile_index, _)| !tile_flags.contains(tile_index))
             .map(|(_, (xyz, name))| (xyz.clone(), name.clone()))
             .unzip();
-        // let unflagged_baseline_xyz = obs_context
-        //     .baseline_xyz
-        //     .par_iter()
-        //     .enumerate()
-        //     .filter(|(baseline_index, _)| !flagged_baselines.contains(baseline_index))
-        //     .map(|(_, xyz)| xyz.clone())
-        //     .collect();
 
         // Make sure the thresholds are sensible.
         let mut stop_threshold = stop_thresh.unwrap_or(DEFAULT_STOP_THRESHOLD);
@@ -684,7 +681,6 @@ impl CalibrateParams {
             source_list,
             model_file,
             _ranked_sources,
-            num_components,
             tile_flags,
             freq: freq_struct,
             time_res,
@@ -693,7 +689,6 @@ impl CalibrateParams {
             unflagged_baseline_to_tile_map: tile_baseline_maps.unflagged_baseline_to_tile_map,
             unflagged_tile_names,
             unflagged_tile_xyz,
-            // unflagged_baseline_xyz,
             array_longitude,
             array_latitude,
             max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),
@@ -725,15 +720,17 @@ fn create_beam_object<T: AsRef<Path>>(
         info!("Not using a beam");
         Ok(Box::new(beam::NoBeam))
     } else {
-        info!("Using FEE beam");
-        if let Some(bf) = beam_file {
+        trace!("Setting up FEE beam");
+        let beam = if let Some(bf) = beam_file {
             // Set up the FEE beam struct from the specified beam file.
-            Ok(Box::new(beam::FEEBeam::new(&bf, delays)?))
+            Box::new(beam::FEEBeam::new(&bf, delays)?)
         } else {
             // Set up the FEE beam struct from the MWA_BEAM_FILE environment
             // variable.
-            Ok(Box::new(beam::FEEBeam::new_from_env(delays)?))
-        }
+            Box::new(beam::FEEBeam::new_from_env(delays)?)
+        };
+        info!("Using FEE beam with delays {:?}", beam.get_delays());
+        Ok(beam)
     }
 }
 
@@ -810,7 +807,7 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
     let mut prev = *iter.next().unwrap();
     // Innocent until proven guilty.
     let mut is_sequential = true;
-    while let Some(next) = iter.next() {
+    for next in iter {
         if *next == prev + 1 {
             prev = *next;
         } else {

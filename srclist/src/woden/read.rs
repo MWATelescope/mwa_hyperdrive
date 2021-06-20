@@ -64,7 +64,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
         }
     };
 
-    while buf.read_line(&mut line).expect("IO error") > 0 {
+    while buf.read_line(&mut line)? > 0 {
         line_num += 1;
 
         // Handle lines that aren't intended to parsed (comments and blank

@@ -6,6 +6,7 @@
 //! on a single timestep.
 
 use std::f64::consts::{FRAC_PI_2, LN_2, TAU};
+use std::ops::Deref;
 
 use log::trace;
 use ndarray::{parallel::prelude::*, prelude::*};
@@ -19,8 +20,8 @@ use crate::{
     shapelets::*,
 };
 use mwa_hyperdrive_core::{
-    c64, AzEl, ComponentType, EstimateError, Jones, RADec, SourceComponent, SourceList,
-    XyzBaseline, LMN, UVW,
+    c64, xyz, AzEl, ComponentType, EstimateError, Jones, RADec, SourceComponent, SourceList,
+    XyzGeodetic, LMN, UVW,
 };
 
 /// Instrumental flux densities and [LMN] coordinates for a particular type of
@@ -195,7 +196,7 @@ pub(super) fn split_components<'a>(
 /// `instrumental_flux_densities`.
 fn beam_correct_flux_densities_inner(
     instrumental_flux_densities: ArrayView2<Jones<f64>>,
-    beam: &Box<dyn Beam>,
+    beam: &dyn Beam,
     azels: &[AzEl],
     dipole_gains: &[f64],
     freqs: &[f64],
@@ -245,7 +246,7 @@ fn beam_correct_flux_densities_inner(
 fn beam_correct_flux_densities(
     components: &PerComponentParams,
     lst_rad: f64,
-    beam: &Box<dyn Beam>,
+    beam: &dyn Beam,
     dipole_gains: &[f64],
     freqs: &[f64],
 ) -> Result<Array2<Jones<f64>>, CalibrateError> {
@@ -262,23 +263,26 @@ fn beam_correct_flux_densities(
 
     beam_correct_flux_densities_inner(
         c.instrumental_flux_densities.view(),
-        beam,
+        beam.deref(),
         &azels,
         dipole_gains,
         freqs,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn model_timestep(
     mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
     weights: ArrayView2<f32>,
     split_components: &SplitComponents,
-    beam: &Box<dyn Beam>,
+    beam: &dyn Beam,
     lst_rad: f64,
-    unflagged_baseline_xyzs: &[XyzBaseline],
+    tile_xyzs: &[XyzGeodetic],
     uvws: &[UVW],
     unflagged_fine_chan_freqs: &[f64],
 ) -> Result<(), CalibrateError> {
+    debug_assert_eq!(vis_model_slice.dim(), weights.dim());
+
     let beamed_point_fds = beam_correct_flux_densities(
         &split_components.point,
         lst_rad,
@@ -316,7 +320,8 @@ pub(super) fn model_timestep(
         &[1.0; 16],
         unflagged_fine_chan_freqs,
     )?;
-    // Shapelets need their own special kind of UVW coordinates.
+    // Shapelets need their own special kind of UVW coordinates. Each shapelet
+    // component's position is treated as the phase centre.
     let mut shapelet_uvws: Array2<UVW> = Array2::from_elem(
         (
             split_components.shapelet.components.len(),
@@ -330,7 +335,7 @@ pub(super) fn model_timestep(
         .zip(split_components.shapelet.components.par_iter())
         .for_each(|(mut baseline_uvw, comp)| {
             let hadec = comp.radec.to_hadec(lst_rad);
-            let shapelet_uvws = UVW::get_baselines_parallel(unflagged_baseline_xyzs, &hadec);
+            let shapelet_uvws = xyz::xyzs_to_uvws(&tile_xyzs, &hadec);
             baseline_uvw.assign(&Array1::from(shapelet_uvws));
         });
     // To ensure that `shapelet_uvws` is being strided efficiently,
@@ -520,6 +525,10 @@ fn model_shapelets(
     debug_assert_eq!(model_array.len_of(Axis(1)), freqs.len());
     debug_assert_eq!(beam_corrected_fds.len_of(Axis(0)), freqs.len());
     debug_assert_eq!(
+        beam_corrected_fds.len_of(Axis(1)),
+        shapelet_uvws.len_of(Axis(1))
+    );
+    debug_assert_eq!(
         beam_corrected_fds.dim(),
         shapelet_comp_params.instrumental_flux_densities.dim()
     );
@@ -537,26 +546,27 @@ fn model_shapelets(
         .outer_iter_mut()
         .into_par_iter()
         .zip(uvws.par_iter())
-        .zip(shapelet_uvws.outer_iter().into_par_iter())
+        .zip(shapelet_uvws.outer_iter())
         .for_each(|((mut model_bl_axis, uvw), shapelet_uvws_per_comp)| {
             // Unflagged fine-channel axis.
             model_bl_axis
                 .iter_mut()
                 .zip(beam_corrected_fds.outer_iter())
                 .zip(freqs)
-                .zip(shapelet_uvws_per_comp.iter())
-                .for_each(|(((model_vis, comp_fds), freq), shapelet_uvw)| {
+                .for_each(|((model_vis, comp_fds), freq)| {
                     // Divide by lambda to make UVW dimensionless.
                     let lambda = VEL_C / freq;
                     let uvw = *uvw / lambda;
-                    let shapelet_uvw = *shapelet_uvw / lambda;
 
                     // Now that we have the UVW coordinates, we can determine
                     // each source component's envelope.
                     let envelopes: Vec<c64> = shapelet_comp_params
                         .components
                         .iter()
-                        .map(|&comp| {
+                        .zip(shapelet_uvws_per_comp.iter())
+                        .map(|(&comp, shapelet_uvw)| {
+                            let shapelet_u = shapelet_uvw.u / lambda;
+                            let shapelet_v = shapelet_uvw.v / lambda;
                             match &comp.comp_type {
                                 ComponentType::Shapelet {
                                     maj,
@@ -566,39 +576,43 @@ fn model_shapelets(
                                 } => {
                                     let (s_pa, c_pa) = pa.sin_cos();
                                     // The following code borrows from WODEN.
-                                    let x = shapelet_uvw.u * s_pa + shapelet_uvw.v * c_pa;
-                                    let y = shapelet_uvw.u * c_pa - shapelet_uvw.v * s_pa;
+                                    let x = shapelet_u * s_pa + shapelet_v * c_pa;
+                                    let y = shapelet_u * c_pa - shapelet_v * s_pa;
                                     let const_x = maj * SQRT_FRAC_PI_SQ_2_LN_2 / SBF_DX;
                                     let const_y = -min * SQRT_FRAC_PI_SQ_2_LN_2 / SBF_DX;
                                     let x_pos = x * const_x + SBF_C;
                                     let y_pos = y * const_y + SBF_C;
-                                    let x_pos_int = x_pos as usize;
-                                    let y_pos_int = y_pos as usize;
+                                    let x_pos_int = x_pos.floor() as usize;
+                                    let y_pos_int = y_pos.floor() as usize;
 
                                     // Fold the shapelet basis functions (here,
                                     // "coeffs") into a single envelope.
                                     coeffs.iter().fold(Complex::new(0.0, 0.0), |envelope, sbf| {
                                         let f_hat = sbf.coeff;
 
-                                        let x_low =
-                                            SHAPELET_BASIS_VALUES[SBF_L * sbf.n1 + x_pos_int];
-                                        let x_high =
-                                            SHAPELET_BASIS_VALUES[SBF_L * sbf.n1 + x_pos_int + 1];
-                                        let u_value =
-                                            x_low + (x_high - x_low) * (x_pos - x_pos.floor());
+                                        // Omitting boundary checks speeds
+                                        // things up by ~14%.
+                                        unsafe {
+                                            let x_low = SHAPELET_BASIS_VALUES
+                                                .get_unchecked(SBF_L * sbf.n1 + x_pos_int);
+                                            let x_high = SHAPELET_BASIS_VALUES
+                                                .get_unchecked(SBF_L * sbf.n1 + x_pos_int + 1);
+                                            let u_value =
+                                                x_low + (x_high - x_low) * (x_pos - x_pos.floor());
 
-                                        let y_low =
-                                            SHAPELET_BASIS_VALUES[SBF_L * sbf.n2 + y_pos_int];
-                                        let y_high =
-                                            SHAPELET_BASIS_VALUES[SBF_L * sbf.n2 + y_pos_int + 1];
-                                        let v_value =
-                                            y_low + (y_high - y_low) * (y_pos - y_pos.floor());
+                                            let y_low = SHAPELET_BASIS_VALUES
+                                                .get_unchecked(SBF_L * sbf.n2 + y_pos_int);
+                                            let y_high = SHAPELET_BASIS_VALUES
+                                                .get_unchecked(SBF_L * sbf.n2 + y_pos_int + 1);
+                                            let v_value =
+                                                y_low + (y_high - y_low) * (y_pos - y_pos.floor());
 
-                                        envelope
-                                            + I_POWER_TABLE[(sbf.n1 + sbf.n2) % 4]
-                                                * f_hat
-                                                * u_value
-                                                * v_value
+                                            envelope
+                                                + I_POWER_TABLE.get_unchecked((sbf.n1 + sbf.n2) % 4)
+                                                    * f_hat
+                                                    * u_value
+                                                    * v_value
+                                        }
                                     })
                                 }
 
@@ -704,7 +718,6 @@ mod tests {
     fn test_beam_correct_flux_densities_no_beam() {
         let freqs = [170e6];
         let lst = 6.261977848;
-        let dipole_delays = [0; 16];
         let dipole_gains = [1.0; 16];
 
         let beam: Box<dyn Beam> = Box::new(crate::beam::NoBeam);
@@ -712,7 +725,7 @@ mod tests {
         let inst_flux_densities = get_instrumental_flux_densities(&srclist, &freqs);
         let result = match beam_correct_flux_densities_inner(
             inst_flux_densities.view(),
-            &beam,
+            beam.deref(),
             &srclist.get_azel_mwa(lst),
             &dipole_gains,
             &freqs,
@@ -755,7 +768,7 @@ mod tests {
 
         let result = match beam_correct_flux_densities_inner(
             inst_flux_densities.view(),
-            &beam,
+            beam.deref(),
             &srclist.get_azel_mwa(lst),
             &dipole_gains,
             &freqs,
@@ -825,7 +838,7 @@ mod tests {
         let inst_flux_densities = get_instrumental_flux_densities(&srclist, &freqs);
         let result = match beam_correct_flux_densities_inner(
             inst_flux_densities.view(),
-            &beam,
+            beam.deref(),
             &srclist.get_azel_mwa(lst),
             &dipole_gains,
             &freqs,

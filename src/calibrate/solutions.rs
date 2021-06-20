@@ -21,7 +21,7 @@ use mwalib::fitsio::{
 
 pub(super) fn write_solutions(
     file: &Path,
-    di_jones: ArrayView3<Jones<f32>>,
+    di_jones: ArrayView3<Jones<f64>>,
     num_timeblocks: usize,
     total_num_tiles: usize,
     num_fine_freq_chans: usize,
@@ -55,7 +55,7 @@ pub(super) fn write_solutions(
 /// Write a "André-Offringa calibrate format" calibration solutions binary file.
 fn write_andre_binary(
     bin_file: &Path,
-    di_jones: ArrayView3<Jones<f32>>,
+    di_jones: ArrayView3<Jones<f64>>,
     num_timeblocks: usize,
     total_num_tiles: usize,
     num_fine_freq_chans: usize,
@@ -124,7 +124,7 @@ fn write_andre_binary(
 
 fn write_fits(
     fits_file: &Path,
-    di_jones: ArrayView3<Jones<f32>>,
+    di_jones: ArrayView3<Jones<f64>>,
     num_timeblocks: usize,
     total_num_tiles: usize,
     num_fine_freq_chans: usize,
@@ -148,7 +148,7 @@ fn write_fits(
     // Fill the fits file with NaN before overwriting with our solved solutions.
     // We have to be tricky with what gets written out, because `di_jones`
     // doesn't necessarily have the same shape as the output.
-    let mut fits_image_data = vec![f32::NAN; dim.iter().product()];
+    let mut fits_image_data = vec![f64::NAN; dim.iter().product()];
     for (timeblock, di_jones_per_time) in di_jones.outer_iter().enumerate() {
         let mut unflagged_tile_index = 0;
         for tile in 0..total_num_tiles {
