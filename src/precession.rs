@@ -60,11 +60,9 @@ impl PrecessionInfo {
     }
 }
 
-pub(crate) fn get_unprecessed_lmst(time: &Epoch, array_longitude_rad: f64) -> f64 {
-    unsafe {
-        let gmst = pal_sys::palGmst(time.as_mjd_utc_days());
-        (gmst + array_longitude_rad) % TAU
-    }
+pub(crate) fn get_lmst(time: &Epoch, array_longitude_rad: f64) -> f64 {
+    let gmst = pal::palGmst(time.as_mjd_utc_days());
+    (gmst + array_longitude_rad) % TAU
 }
 
 // This function is very similar to cotter's `PrepareTimestepUVW`.
@@ -76,66 +74,61 @@ pub(crate) fn precess_time(
 ) -> PrecessionInfo {
     let mjd = time.as_mjd_utc_days();
 
-    unsafe {
-        // Note that we explicitly use the LMST because we're handling nutation
-        // ourselves.
-        let lmst = {
-            let gmst = pal_sys::palGmst(mjd);
-            (gmst + array_longitude_rad) % TAU
-        };
+    // Note that we explicitly use the LMST because we're handling nutation
+    // ourselves.
+    let lmst = get_lmst(time, array_longitude_rad);
 
-        let j2000 = 2000.0;
-        let radec_aber = aber_radec_rad(j2000, mjd, phase_centre);
-        let mut rotation_matrix = [[0.0; 3]; 3];
-        pal_sys::palPrenut(j2000, mjd, rotation_matrix.as_mut_ptr());
+    let j2000 = 2000.0;
+    let radec_aber = aber_radec_rad(j2000, mjd, phase_centre);
+    let mut rotation_matrix = [[0.0; 3]; 3];
+    pal::palPrenut(j2000, mjd, rotation_matrix.as_mut_ptr());
 
-        // Transpose the rotation matrix.
-        let mut rotation_matrix = {
-            let mut new = [[0.0; 3]; 3];
-            let old = rotation_matrix;
-            for i in 0..3 {
-                for j in 0..3 {
-                    new[j][i] = old[i][j];
-                }
+    // Transpose the rotation matrix.
+    let mut rotation_matrix = {
+        let mut new = [[0.0; 3]; 3];
+        let old = rotation_matrix;
+        for (i, old) in old.iter().enumerate() {
+            for (j, new) in new.iter_mut().enumerate() {
+                new[i] = old[j];
             }
-            new
-        };
-
-        let precessed = hadec_j2000(&mut rotation_matrix, lmst, array_latitude_rad, &radec_aber);
-
-        PrecessionInfo {
-            rotation_matrix,
-            hadec_j2000: precessed.hadec,
-            lmst,
-            lmst_j2000: precessed.lmst,
-            array_latitude_j2000: precessed.latitude,
         }
+        new
+    };
+
+    let precessed = hadec_j2000(&mut rotation_matrix, lmst, array_latitude_rad, &radec_aber);
+
+    PrecessionInfo {
+        rotation_matrix,
+        hadec_j2000: precessed.hadec,
+        lmst,
+        lmst_j2000: precessed.lmst,
+        array_latitude_j2000: precessed.latitude,
     }
 }
 
 // Blatently stolen from cotter.
-unsafe fn aber_radec_rad(eq: f64, mjd: f64, radec: &RADec) -> RADec {
+fn aber_radec_rad(eq: f64, mjd: f64, radec: &RADec) -> RADec {
     let mut v1 = [0.0; 3];
     let mut v2 = [0.0; 3];
 
-    pal_sys::palDcs2c(radec.ra, radec.dec, v1.as_mut_ptr());
+    pal::palDcs2c(radec.ra, radec.dec, v1.as_mut_ptr());
     stelaber(eq, mjd, &mut v1, &mut v2);
     let mut ra2 = 0.0;
     let mut dec2 = 0.0;
-    pal_sys::palDcc2s(v2.as_mut_ptr(), &mut ra2, &mut dec2);
-    ra2 = pal_sys::palDranrm(ra2);
+    pal::palDcc2s(v2.as_mut_ptr(), &mut ra2, &mut dec2);
+    ra2 = pal::palDranrm(ra2);
 
     RADec::new(ra2, dec2)
 }
 
 // Blatently stolen from cotter.
-unsafe fn stelaber(eq: f64, mjd: f64, v1: &mut [f64; 3], v2: &mut [f64; 3]) {
+fn stelaber(eq: f64, mjd: f64, v1: &mut [f64; 3], v2: &mut [f64; 3]) {
     let mut amprms = [0.0; 21];
     let mut v1n = [0.0; 3];
     let mut v2un = [0.0; 3];
     let mut abv = [0.0; 3];
 
-    pal_sys::palMappa(eq, mjd, amprms.as_mut_ptr());
+    pal::palMappa(eq, mjd, amprms.as_mut_ptr());
 
     /* Unpack scalar and vector parameters */
     let ab1 = &amprms[11];
@@ -144,17 +137,17 @@ unsafe fn stelaber(eq: f64, mjd: f64, v1: &mut [f64; 3], v2: &mut [f64; 3]) {
     abv[2] = amprms[10];
 
     let mut w = 0.0;
-    pal_sys::palDvn(v1.as_mut_ptr(), v1n.as_mut_ptr(), &mut w);
+    pal::palDvn(v1.as_mut_ptr(), v1n.as_mut_ptr(), &mut w);
 
     /* Aberration (normalization omitted) */
-    let p1dv = pal_sys::palDvdv(v1n.as_mut_ptr(), abv.as_mut_ptr());
+    let p1dv = pal::palDvdv(v1n.as_mut_ptr(), abv.as_mut_ptr());
     w = 1.0 + p1dv / (ab1 + 1.0);
     v2un[0] = ab1 * v1n[0] + w * abv[0];
     v2un[1] = ab1 * v1n[1] + w * abv[1];
     v2un[2] = ab1 * v1n[2] + w * abv[2];
 
     /* Normalize */
-    pal_sys::palDvn(v2un.as_mut_ptr(), v2.as_mut_ptr(), &mut w);
+    pal::palDvn(v2un.as_mut_ptr(), v2.as_mut_ptr(), &mut w);
 }
 
 /// The return type of `hadec_j2000`. All values are in radians.
@@ -164,7 +157,7 @@ struct HADecJ2000 {
     lmst: f64,
 }
 
-unsafe fn hadec_j2000(
+fn hadec_j2000(
     rotation_matrix: &mut [[f64; 3]; 3],
     lmst: f64,
     lat_rad: f64,
@@ -172,29 +165,233 @@ unsafe fn hadec_j2000(
 ) -> HADecJ2000 {
     let (new_lmst, new_lat) = rotate_radec(rotation_matrix, lmst, lat_rad);
     HADecJ2000 {
-        hadec: HADec::new(pal_sys::palDranrm(new_lmst - radec.ra), radec.dec),
+        hadec: HADec::new(pal::palDranrm(new_lmst - radec.ra), radec.dec),
         latitude: new_lat,
         lmst: new_lmst,
     }
 }
 
 // Blatently stolen from cotter.
-unsafe fn rotate_radec(rotation_matrix: &mut [[f64; 3]; 3], ra: f64, dec: f64) -> (f64, f64) {
+fn rotate_radec(rotation_matrix: &mut [[f64; 3]; 3], ra: f64, dec: f64) -> (f64, f64) {
     let mut v1 = [0.0; 3];
     let mut v2 = [0.0; 3];
 
-    pal_sys::palDcs2c(ra, dec, v1.as_mut_ptr());
-    pal_sys::palDmxv(
+    pal::palDcs2c(ra, dec, v1.as_mut_ptr());
+    pal::palDmxv(
         rotation_matrix.as_mut_ptr(),
         v1.as_mut_ptr(),
         v2.as_mut_ptr(),
     );
     let mut ra2 = 0.0;
     let mut dec2 = 0.0;
-    pal_sys::palDcc2s(v2.as_mut_ptr(), &mut ra2, &mut dec2);
-    ra2 = pal_sys::palDranrm(ra2);
+    pal::palDcc2s(v2.as_mut_ptr(), &mut ra2, &mut dec2);
+    ra2 = pal::palDranrm(ra2);
 
     (ra2, dec2)
+}
+
+mod pal {
+    #![allow(non_snake_case)]
+
+    //! So that we don't require starlink PAL, write the equivalent functions
+    //! here. PAL depends on ERFA and luckily all the needed PAL functions just
+    //! use ERFA. Code is derived from https://github.com/Starlink/pal commit
+    //! 7af65f0 and is licensed under the LGPL-3.0.
+    //!
+    //! Why not just depend on PAL? It's a huge pain. (1) The C library is
+    //! either named libstarlink-pal or libpal, (2) it depends on ERFA so
+    //! statically compiling it in a -sys crate is much harder than it should
+    //! be, (3) this code changes so slowly that we're unlikely to be
+    //! out-of-date.
+
+    use mwa_hyperdrive_core::erfa_sys::*;
+
+    // TODO: ERFA_AULT isn't showing up in erfa_sys for some reason.
+    const ERFA_AULT: f64 = ERFA_DAU / ERFA_CMPS;
+
+    pub(super) fn palGmst(ut1: f64) -> f64 {
+        unsafe { eraGmst06(ERFA_DJM0, ut1, ERFA_DJM0, ut1) }
+    }
+
+    pub(super) fn palDcs2c(a: f64, b: f64, v: *mut f64) {
+        unsafe { eraS2c(a, b, v) }
+    }
+
+    pub(super) fn palDcc2s(v: *mut f64, a: &mut f64, b: &mut f64) {
+        unsafe { eraC2s(v, a, b) }
+    }
+
+    pub(super) fn palDranrm(angle: f64) -> f64 {
+        unsafe { eraAnp(angle) }
+    }
+
+    pub(super) fn palDvn(v: *mut f64, uv: *mut f64, vm: *mut f64) {
+        unsafe { eraPn(v, vm, uv) }
+    }
+
+    pub(super) fn palDvdv(va: *mut f64, vb: *mut f64) -> f64 {
+        unsafe { eraPdp(va, vb) }
+    }
+
+    pub(super) fn palDmxv(dm: *mut [f64; 3], va: *mut f64, vb: *mut f64) {
+        unsafe { eraRxp(dm, va, vb) }
+    }
+
+    pub(super) fn palEvp(
+        date: f64,
+        deqx: f64,
+        dvb: *mut f64,
+        dpb: *mut f64,
+        dvh: *mut f64,
+        dph: *mut f64,
+    ) {
+        unsafe {
+            /* Local Variables; */
+            let mut pvh = [[0.0; 3]; 2];
+            let mut pvb = [[0.0; 3]; 2];
+            let mut d1 = 0.0;
+            let mut d2 = 0.0;
+            let mut r = [[0.0; 3]; 3];
+
+            /* BCRS PV-vectors. */
+            eraEpv00(2400000.5, date, pvh.as_mut_ptr(), pvb.as_mut_ptr());
+
+            /* Was precession to another equinox requested? */
+            if deqx > 0.0 {
+                /* Yes: compute precession matrix from J2000.0 to deqx. */
+                eraEpj2jd(deqx, &mut d1, &mut d2);
+                eraPmat06(d1, d2, r.as_mut_ptr());
+
+                /* Rotate the PV-vectors. */
+                eraRxpv(r.as_mut_ptr(), pvh.as_mut_ptr(), pvh.as_mut_ptr());
+                eraRxpv(r.as_mut_ptr(), pvb.as_mut_ptr(), pvb.as_mut_ptr());
+            }
+
+            /* Return the required vectors. */
+            let dvb = std::slice::from_raw_parts_mut(dvb, 3);
+            let dpb = std::slice::from_raw_parts_mut(dpb, 3);
+            let dvh = std::slice::from_raw_parts_mut(dvh, 3);
+            let dph = std::slice::from_raw_parts_mut(dph, 3);
+            for i in 0..3 {
+                dvh[i] = pvh[1][i] / ERFA_DAYSEC;
+                dvb[i] = pvb[1][i] / ERFA_DAYSEC;
+                dph[i] = pvh[0][i];
+                dpb[i] = pvb[0][i];
+            }
+        }
+    }
+
+    pub(super) fn palPrenut(epoch: f64, date: f64, rmatpn: *mut [f64; 3]) {
+        unsafe {
+            /* Local Variables: */
+            let mut bpa = 0.0;
+            let mut bpia = 0.0;
+            let mut bqa = 0.0;
+            let mut chia = 0.0;
+            let mut d1 = 0.0;
+            let mut d2 = 0.0;
+            let mut eps0 = 0.0;
+            let mut epsa = 0.0;
+            let mut gam = 0.0;
+            let mut oma = 0.0;
+            let mut pa = 0.0;
+            let mut phi = 0.0;
+            let mut pia = 0.0;
+            let mut psi = 0.0;
+            let mut psia = 0.0;
+            let mut r1 = [[0.0; 3]; 3];
+            let mut r2 = [[0.0; 3]; 3];
+            let mut thetaa = 0.0;
+            let mut za = 0.0;
+            let mut zetaa = 0.0;
+
+            /* Specified Julian epoch as a 2-part JD. */
+            eraEpj2jd(epoch, &mut d1, &mut d2);
+
+            /* P matrix, from specified epoch to J2000.0. */
+            eraP06e(
+                d1,
+                d2,
+                &mut eps0,
+                &mut psia,
+                &mut oma,
+                &mut bpa,
+                &mut bqa,
+                &mut pia,
+                &mut bpia,
+                &mut epsa,
+                &mut chia,
+                &mut za,
+                &mut zetaa,
+                &mut thetaa,
+                &mut pa,
+                &mut gam,
+                &mut phi,
+                &mut psi,
+            );
+            eraIr(r1.as_mut_ptr());
+            eraRz(-chia, r1.as_mut_ptr());
+            eraRx(oma, r1.as_mut_ptr());
+            eraRz(psia, r1.as_mut_ptr());
+            eraRx(-eps0, r1.as_mut_ptr());
+
+            /* NPB matrix, from J2000.0 to date. */
+            eraPnm06a(ERFA_DJM0, date, r2.as_mut_ptr());
+
+            /* NPB matrix, from specified epoch to date. */
+            eraRxr(r2.as_mut_ptr(), r1.as_mut_ptr(), rmatpn);
+        }
+    }
+
+    pub(super) fn palMappa(eq: f64, date: f64, amprms: *mut f64) {
+        unsafe {
+            /* Local constants */
+
+            /*  Gravitational radius of the Sun x 2 (2*mu/c**2, AU) */
+            let gr2: f64 = 2.0 * 9.87063e-9;
+
+            /* Local Variables; */
+            let mut ebd = [0.0; 3];
+            let mut ehd = [0.0; 3];
+            let mut eh = [0.0; 3];
+            let mut e = 0.0;
+            let mut vn = [0.0; 3];
+            let mut vm = 0.0;
+
+            /* Initialise so that unsused values are returned holding zero */
+            let amprms = std::slice::from_raw_parts_mut(amprms, 21);
+            amprms.fill(0.0);
+
+            /* Time interval for proper motion correction. */
+            amprms[0] = eraEpj(ERFA_DJM0, date) - eq;
+
+            /* Get Earth barycentric and heliocentric position and velocity. */
+            palEvp(
+                date,
+                eq,
+                ebd.as_mut_ptr(),
+                &mut amprms[1],
+                ehd.as_mut_ptr(),
+                eh.as_mut_ptr(),
+            );
+
+            /* Heliocentric direction of Earth (normalized) and modulus. */
+            eraPn(eh.as_mut_ptr(), &mut e, &mut amprms[4]);
+
+            /* Light deflection parameter */
+            amprms[7] = gr2 / e;
+
+            /* Aberration parameters. */
+            for i in 0..3 {
+                amprms[i + 8] = ebd[i] * ERFA_AULT;
+            }
+            eraPn(&mut amprms[8], &mut vm, vn.as_mut_ptr());
+            amprms[11] = (1.0 - vm * vm).sqrt();
+
+            /* NPB matrix. */
+            palPrenut(eq, date, amprms.as_mut_ptr().add(12) as _);
+        }
+    }
 }
 
 #[cfg(test)]

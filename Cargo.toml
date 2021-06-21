@@ -15,7 +15,7 @@ members = [
 ]
 
 [profile.dev]
-opt-level = 3
+opt-level = 2
 
 [features]
 default = []
@@ -23,8 +23,7 @@ cuda = ["mwa_hyperdrive_cuda"]
 erfa-static = ["mwa_hyperdrive_core/erfa-static"]
 hdf5-static = ["mwa_hyperdrive_core/hdf5-static"]
 cfitsio-static = ["mwa_hyperdrive_core/cfitsio-static"]
-pal-static = ["pal-sys/static"]
-all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "pal-sys/static"]
+all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 
 [dependencies]
 byteorder = "1.4.3"
@@ -48,9 +47,6 @@ serde_json = "1.0.64"
 structopt = "0.3.21"
 thiserror = "1.0.24"
 toml = "0.5.8"
-
-# Will remove when Birli is in shape.
-pal-sys = "0.1.0"
 
 mwa_hyperdrive_core =    { path = "core" }
 mwa_hyperdrive_srclist = { path = "srclist" }

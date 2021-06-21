@@ -192,7 +192,7 @@ mod tests {
             2.254528351516936,
             2.0543439118454256,
         ];
-        for ((&azel, &expected_az), &expected_za) in
+        for ((azel, &expected_az), &expected_za) in
             azels.iter().zip(az_expected.iter()).zip(za_expected.iter())
         {
             assert_abs_diff_eq!(azel.az, expected_az, epsilon = 1e-10);

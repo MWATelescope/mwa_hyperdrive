@@ -8,7 +8,7 @@ use super::azel::AzEl;
 use super::radec::RADec;
 
 /// A struct containing an Hour Angle and Declination. All units are in radians.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct HADec {
     /// Hour angle \[radians\]

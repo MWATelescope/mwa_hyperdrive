@@ -248,7 +248,7 @@ pub enum VetoError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::precession::get_unprecessed_lmst;
+    use crate::precession::get_lmst;
     use crate::tests::*;
     use mwa_hyperdrive_core::mwalib::MWA_LONGITUDE_RADIANS;
     use reduced_obsids::get_1090008640_smallest;
@@ -262,7 +262,7 @@ mod tests {
         let params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
         let phase = &obs_context.phase_centre;
-        let lmst = get_unprecessed_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
+        let lmst = get_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
         let phase_azel = phase.to_hadec(lmst).to_azel_mwa();
 
         let jones_pointing_centre = params
@@ -299,7 +299,7 @@ mod tests {
         args.no_beam = false;
         let mut params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
-        let lmst = get_unprecessed_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
+        let lmst = get_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
         // For testing's sake, keep only the following bright sources.
         let sources = &[
             "J002549-260211",
@@ -403,7 +403,7 @@ mod tests {
         args.no_beam = false;
         let mut params = args.into_params().unwrap();
         let obs_context = params.input_data.get_obs_context();
-        let lmst = get_unprecessed_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
+        let lmst = get_lmst(&obs_context.timesteps[0], MWA_LONGITUDE_RADIANS);
 
         // For testing's sake, keep only the following sources.
         let sources = &[
