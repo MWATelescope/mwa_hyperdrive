@@ -461,7 +461,13 @@ impl MS {
             // flagged at the coarse channel edges. The default is 80 kHz.
             let mut ew_iter = str_iter.clone();
             let edgewidth = match ew_iter.find(|&s| s.contains("-edgewidth")) {
-                Some(_) => ew_iter.next().unwrap().parse::<f64>().unwrap() * 1e3, // kHz -> Hz;
+                Some(_) => {
+                    let ew_str = ew_iter.next().unwrap();
+                    // The string may be quoted; remove those so it can be
+                    // parsed as a float.
+                    let ew_str = ew_str.trim_matches('\"');
+                    ew_str.parse::<f64>().unwrap() * 1e3
+                }
                 None => 80e3,
             };
             debug!("cotter -edgewidth: {} Hz", edgewidth);

@@ -106,7 +106,7 @@ pub struct CalibrateParams {
     /// The unflagged [XyzGeodetic] coordinates of each tile \[metres\]. This
     /// does not change over time; it is determined only by the telescope's tile
     /// layout.
-    pub(crate) unflagged_tile_xyz: Vec<XyzGeodetic>,
+    pub(crate) unflagged_tile_xyzs: Vec<XyzGeodetic>,
 
     /// The Earth longitude of the array \[radians\]. This is populated by user
     /// input or the input data.
@@ -657,7 +657,7 @@ impl CalibrateParams {
 
         let tile_baseline_maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
 
-        let (unflagged_tile_xyz, unflagged_tile_names) = obs_context
+        let (unflagged_tile_xyzs, unflagged_tile_names) = obs_context
             .tile_xyzs
             .par_iter()
             .zip(obs_context.tile_names.par_iter())
@@ -688,7 +688,7 @@ impl CalibrateParams {
             tile_to_unflagged_baseline_map: tile_baseline_maps.tile_to_unflagged_baseline_map,
             unflagged_baseline_to_tile_map: tile_baseline_maps.unflagged_baseline_to_tile_map,
             unflagged_tile_names,
-            unflagged_tile_xyz,
+            unflagged_tile_xyzs,
             array_longitude,
             array_latitude,
             max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),

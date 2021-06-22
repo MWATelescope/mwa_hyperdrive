@@ -189,7 +189,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         );
                         // Apply precession to the tile XYZ positions.
                         let precessed_tile_xyzs =
-                            precession_info.precess_xyz_parallel(&obs_context.tile_xyzs);
+                            precession_info.precess_xyz_parallel(&params.unflagged_tile_xyzs);
                         let uvws = xyz::xyzs_to_uvws(
                             &precessed_tile_xyzs,
                             &obs_context
@@ -353,7 +353,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 trace!("Finalising writing of model uvfits file");
                 model_writer.write_uvfits_antenna_table(
                     &params.unflagged_tile_names,
-                    &params.unflagged_tile_xyz,
+                    &params.unflagged_tile_xyzs,
                 )?;
                 if let Some(model_pb) = &params.model_file {
                     info!("Finished writing sky model to {}", model_pb.display());
