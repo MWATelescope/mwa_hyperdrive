@@ -82,7 +82,7 @@ pub(crate) const EMPIRICAL_GAINS_40KHZ: [f64; 32] = [
 /// is 1980 Jan 5, but `hifitime` uses 1900 for everything; subtracting this
 /// number from the result of `hifitime::Epoch::as_gpst_seconds` gives the
 /// expected GPS time.
-pub(crate) const HIFITIME_GPS_FACTOR: f64 =
+pub const HIFITIME_GPS_FACTOR: f64 =
     hifitime::SECONDS_PER_YEAR * 80.0 + hifitime::SECONDS_PER_DAY * 4.0;
 
 /// The number of seconds between 1858-11-17T00:00:00 (MJD epoch, used by

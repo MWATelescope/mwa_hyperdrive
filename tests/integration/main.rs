@@ -9,10 +9,18 @@
 
 mod calibrate;
 
+use std::fs::File;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::str::from_utf8;
 
 use assert_cmd::{output::OutputError, Command};
+use tempfile::TempDir;
+
+fn hyperdrive() -> Command {
+    Command::cargo_bin("hyperdrive").unwrap()
+}
 
 fn get_cmd_output(result: Result<Output, OutputError>) -> (String, String) {
     let output = match result {
@@ -25,6 +33,8 @@ fn get_cmd_output(result: Result<Output, OutputError>) -> (String, String) {
     )
 }
 
-fn hyperdrive() -> Command {
-    Command::cargo_bin("hyperdrive").unwrap()
+fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(filename: T, dir: U) -> (PathBuf, File) {
+    let path = dir.as_ref().join(filename);
+    let f = File::create(&path).expect("couldn't make file");
+    (path, f)
 }

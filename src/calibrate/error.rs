@@ -6,7 +6,10 @@
 
 use thiserror::Error;
 
-use super::{params::InvalidArgsError, solutions::WriteSolutionsError};
+use super::{
+    params::InvalidArgsError,
+    solutions::{ReadSolutionsError, WriteSolutionsError},
+};
 use crate::data_formats::{
     uvfits::{UvfitsReadError, UvfitsWriteError},
     ReadInputDataError,
@@ -25,7 +28,10 @@ pub enum CalibrateError {
     #[error("{0}")]
     Read(#[from] ReadInputDataError),
 
-    #[error("{0}")]
+    #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions")]
+    ReadSolutions(#[from] ReadSolutionsError),
+
+    #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions")]
     WriteSolutions(#[from] WriteSolutionsError),
 
     #[error("{0}")]

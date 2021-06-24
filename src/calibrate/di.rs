@@ -11,12 +11,12 @@ use std::ops::Deref;
 
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use log::{debug, info, trace};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use super::{model, solutions::write_solutions, CalibrateError, CalibrateParams};
+use super::{model, solutions::CalibrationSolutions, CalibrateError, CalibrateParams};
 use crate::data_formats::uvfits::UvfitsWriter;
 use crate::precession::precess_time;
 use crate::{math::cross_correlation_baseline_to_tiles, *};
@@ -62,7 +62,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     let (sx_final, rx_final) = bounded(1);
 
     // Progress bars. Courtesy Dev.
-    let multi_progress = MultiProgress::new();
+    let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
     let read_progress = multi_progress.add(
         ProgressBar::new(vis_shape.0 as _)
             .with_style(
@@ -377,16 +377,29 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     // The shape of the array containing output Jones matrices.
     let total_num_tiles = obs_context.tile_xyzs.len();
     let num_unflagged_tiles = total_num_tiles - params.tile_flags.len();
+    let total_num_fine_freq_chans = freq_context.fine_chan_freqs.len();
     let shape = (num_timeblocks, num_unflagged_tiles, chanblocks.len());
+    let mut sols = CalibrationSolutions {
+        file: params.output_solutions_filename.clone(),
+        di_jones: Array3::from_elem(shape, Jones::identity()),
+        num_timeblocks,
+        total_num_tiles,
+        total_num_fine_freq_chans,
+        timesteps: params
+            .timesteps
+            .iter()
+            .map(|&ts| obs_context.timesteps[ts])
+            .collect(),
+        obsid: obs_context.obsid,
+        time_res: params.time_res,
+    };
     debug!(
         "Shape of DI Jones matrices array: {:?} ({} MiB)",
         shape,
-        shape.0 * shape.1 * shape.2 * std::mem::size_of::<Jones<f32>>()
+        shape.0 * shape.1 * shape.2 * std::mem::size_of_val(&sols.di_jones[[0, 0, 0]])
         // 1024 * 1024 == 1 MiB.
         / 1024 / 1024
     );
-    // The output DI Jones matrices.
-    let mut di_jones = Array3::from_elem(shape, Jones::identity());
     let mut converged = Array2::from_elem(
         (params.timesteps.len(), params.freq.num_unflagged_fine_chans),
         false,
@@ -395,7 +408,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     // For each timeblock, calibrate all chanblocks in parallel.
     (0..num_timeblocks)
         .into_iter()
-        .zip(di_jones.outer_iter_mut())
+        .zip(sols.di_jones.outer_iter_mut())
         .for_each(|(timeblock, di_jones)| {
             let pb = ProgressBar::new(chanblocks.len() as _)
             .with_style(
@@ -403,6 +416,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     .template("{msg:17}: [{wide_bar:.blue}] {pos:3}/{len:3} ({elapsed_precise}<{eta_precise})")
                     .progress_chars("=> "),
             );
+            pb.set_draw_target(ProgressDrawTarget::stdout());
             pb.set_message(format!("Calibrating timeblock {}", timeblock));
 
             let mut di_jones_rev = di_jones.reversed_axes();
@@ -461,21 +475,9 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         });
 
     // Write out the solutions.
-    let num_fine_freq_chans = freq_context.fine_chan_freqs.len();
     trace!("Writing solutions...");
-    write_solutions(
-        &params.output_solutions_filename,
-        di_jones.view(),
-        num_timeblocks,
-        total_num_tiles,
-        num_fine_freq_chans,
-        &params.tile_flags,
-        &params.freq.unflagged_fine_chans,
-    )?;
-    info!(
-        "Calibration solutions written to {}",
-        &params.output_solutions_filename.display()
-    );
+    sols.write_solutions_from_ext(&params.tile_flags, &params.freq.unflagged_fine_chans)?;
+    info!("Calibration solutions written to {}", sols.file.display());
 
     Ok(())
 }

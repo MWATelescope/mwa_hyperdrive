@@ -30,6 +30,7 @@ use mwa_hyperdrive_core::{
     Jones, RADec, XyzGeocentric,
 };
 
+const COTTER_DEFAULT_EDGEWIDTH: f64 = 80e3;
 const TIMESTEP_AS_INT_FACTOR: f64 = 1e6;
 
 pub(crate) struct MS {
@@ -466,11 +467,18 @@ impl MS {
                     // The string may be quoted; remove those so it can be
                     // parsed as a float.
                     let ew_str = ew_str.trim_matches('\"');
-                    ew_str.parse::<f64>().unwrap() * 1e3
+                    let ew = ew_str.parse::<f64>().unwrap() * 1e3;
+                    debug!("cotter -edgewidth: {} kHz", ew);
+                    ew
                 }
-                None => 80e3,
+                None => {
+                    debug!(
+                        "Assuming cotter is using default edgewidth of {} kHz",
+                        COTTER_DEFAULT_EDGEWIDTH
+                    );
+                    COTTER_DEFAULT_EDGEWIDTH
+                }
             };
-            debug!("cotter -edgewidth: {} Hz", edgewidth);
             // If -noflagdcchannels is specified, then the centre channel of
             // each coarse channel is not flagged. Without this flag, the centre
             // channels are flagged.

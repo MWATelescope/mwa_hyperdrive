@@ -16,11 +16,14 @@ pub mod cache;
 
 use std::ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Sub, SubAssign};
 
-use num::{traits::NumAssign, Complex, Float, Num};
+use num::{
+    traits::{float::FloatCore, NumAssign},
+    Complex, Float, Num,
+};
 
 use crate::FluxDensity;
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(PartialEq, Clone, Default)]
 pub struct Jones<F: Float + Num>([Complex<F>; 4]);
 
 impl<F: Float> Jones<F> {
@@ -116,6 +119,14 @@ impl<F: Float> Jones<F> {
 
     pub fn axbh(a: &Self, b: &Self) -> Self {
         a.clone() * b.h()
+    }
+}
+
+impl<F: Float + FloatCore> Jones<F> {
+    /// Are any elements of this [Jones] NaN?
+    #[inline(always)]
+    pub fn any_nan(&self) -> bool {
+        self.iter().any(|f| f.is_nan())
     }
 }
 
@@ -425,6 +436,74 @@ impl From<&FluxDensity> for Jones<f64> {
     }
 }
 
+impl std::fmt::Display for Jones<f32> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "[[{:.9} {:.9} i, {:.9} {:.9} i]\n [{:.9} {:.9} i, {:.9} {:.9} i]]",
+            self[0].re,
+            self[0].im,
+            self[1].re,
+            self[1].im,
+            self[2].re,
+            self[2].im,
+            self[3].re,
+            self[3].im,
+        )
+    }
+}
+
+impl std::fmt::Display for Jones<f64> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "[[{:.15} {:.15} i, {:.15} {:.15} i]\n [{:.15} {:.15} i, {:.15} {:.15} i]]",
+            self[0].re,
+            self[0].im,
+            self[1].re,
+            self[1].im,
+            self[2].re,
+            self[2].im,
+            self[3].re,
+            self[3].im,
+        )
+    }
+}
+
+impl std::fmt::Debug for Jones<f32> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "[[{:.9} {:.9} i, {:.9} {:.9} i]\n [{:.9} {:.9} i, {:.9} {:.9} i]]",
+            self[0].re,
+            self[0].im,
+            self[1].re,
+            self[1].im,
+            self[2].re,
+            self[2].im,
+            self[3].re,
+            self[3].im,
+        )
+    }
+}
+
+impl std::fmt::Debug for Jones<f64> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "[[{:.15} {:.15} i, {:.15} {:.15} i]\n [{:.15} {:.15} i, {:.15} {:.15} i]]",
+            self[0].re,
+            self[0].im,
+            self[1].re,
+            self[1].im,
+            self[2].re,
+            self[2].im,
+            self[3].re,
+            self[3].im,
+        )
+    }
+}
+
 impl<F: Float> approx::AbsDiffEq for Jones<F> {
     type Epsilon = F;
 
@@ -580,10 +659,7 @@ mod tests {
             c64::new(2.0, 0.0),
             c64::new(4.0, 0.0),
         ]);
-        for j in a.div(&a).iter() {
-            assert!(j.re.is_nan());
-            assert!(j.im.is_nan());
-        }
+        assert!(a.div(&a).any_nan());
     }
 
     #[test]
@@ -607,16 +683,14 @@ mod tests {
             c64::new(2.0, 0.0),
             c64::new(4.0, 0.0),
         ]);
-        for j in a.inv().iter() {
-            assert!(j.re.is_nan());
-            assert!(j.im.is_nan());
-        }
+        assert!(a.inv().any_nan());
     }
 
     #[test]
     fn test_is_nan_works() {
         let j: Jones<f64> = Jones::nan();
         assert!(j.iter().any(|f| f.is_nan()));
+        assert!(j.any_nan());
     }
 
     #[test]

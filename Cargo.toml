@@ -28,8 +28,8 @@ all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 [dependencies]
 byteorder = "1.4.3"
 chrono = "0.4.19"
-crossbeam-channel = "0.5.0"
-crossbeam-utils = "0.8.3"
+crossbeam-channel = "0.5.1"
+crossbeam-utils = "0.8.5"
 fern = { version = "0.6.0", features = ["chrono"] }
 flate2 = "1.0.20"
 glob = "0.3.0"
@@ -37,15 +37,15 @@ hifitime = "2.2.3"
 indicatif = { version = "0.16.2", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.14"
-ndarray = { version = "0.15.1", features = ["rayon"] }
+ndarray = { version = "0.15.3", features = ["rayon"] }
 num = "0.4.0"
-rayon = "1.5.0"
-regex = "1.4.5"
+rayon = "1.5.1"
+regex = "1.4.6"
 rubbl_casatables = "0.3.1"
-serde = { version = "1.0.125", features = ["derive"] }
+serde = { version = "1.0.126", features = ["derive"] }
 serde_json = "1.0.64"
 structopt = "0.3.21"
-thiserror = "1.0.24"
+thiserror = "1.0.25"
 toml = "0.5.8"
 
 mwa_hyperdrive_core =    { path = "core" }
@@ -53,17 +53,17 @@ mwa_hyperdrive_srclist = { path = "srclist" }
 mwa_hyperdrive_cuda =    { path = "cuda", optional = true }
 
 [dev-dependencies]
-approx = { version = "0.5.0", features = ["num-complex"] }
-assert_cmd = "1.0.1"
-criterion = "0.3.3"
-indoc = "1.0.3"
-ndarray = { version = "0.15.1", features = ["approx"] }
-serial_test = "0.5.1"
-tempfile = "3.1.0"
+approx = { version = "0.5.*", features = ["num-complex"] }
+assert_cmd = "1.0.*"
+criterion = "0.3.*"
+indoc = "1.0.*"
+ndarray = { version = "0.15.*", features = ["approx"] }
+serial_test = "0.5.*"
+tempfile = "3.1.*"
 
 [build-dependencies]
-built = { version = "0.5.1", features = ["chrono", "git2"] }
-pkg-config = "0.3.19"
+built = { version = "0.5.*", features = ["chrono", "git2"] }
+pkg-config = "0.3.*"
 
 [[bench]]
 name = "bench"

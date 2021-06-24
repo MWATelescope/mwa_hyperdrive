@@ -9,7 +9,7 @@ mod di;
 mod error;
 mod model;
 pub(crate) mod params;
-mod solutions;
+pub mod solutions;
 mod veto;
 
 pub use error::CalibrateError;
