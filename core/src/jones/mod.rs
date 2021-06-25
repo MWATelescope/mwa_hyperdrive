@@ -14,7 +14,7 @@
 #[cfg(feature = "beam")]
 pub mod cache;
 
-use std::ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 
 use num::{
     traits::{float::FloatCore, NumAssign},
@@ -64,27 +64,6 @@ impl<F: Float> Jones<F> {
     #[inline(always)]
     pub fn mul_hermitian(&self, b: &Self) -> Self {
         self.clone() * b.h()
-    }
-
-    /// "Divide" two Jones matrices. Another way of looking at what this
-    /// function does is solving `C` in `C B = A`, i.e.
-    ///
-    /// `C B = A`
-    ///
-    /// `C B B^-1 = A B^-1`
-    ///
-    /// `C = A / B`
-    ///
-    /// If B is singular, all the results' elements are NaN.
-    #[inline(always)]
-    pub fn div(&self, b: &Self) -> Self {
-        let inv_det = Complex::new(F::one(), F::zero()) / (b[0] * b[3] - b[1] * b[2]);
-        Self::from([
-            (self[0] * b[3] - self[1] * b[2]) * inv_det,
-            (self[1] * b[0] - self[0] * b[1]) * inv_det,
-            (self[2] * b[3] - self[3] * b[2]) * inv_det,
-            (self[3] * b[0] - self[2] * b[1]) * inv_det,
-        ])
     }
 
     /// Get the inverse of the Jones matrix (`J^I`).
@@ -328,7 +307,7 @@ impl<F: Float + NumAssign> MulAssign<Complex<F>> for Jones<F> {
     }
 }
 
-impl<F: Float + MulAssign> MulAssign<Jones<F>> for Jones<F> {
+impl<F: Float + NumAssign> MulAssign<Jones<F>> for Jones<F> {
     #[inline(always)]
     fn mul_assign(&mut self, rhs: Self) {
         self.0 = [
@@ -340,7 +319,7 @@ impl<F: Float + MulAssign> MulAssign<Jones<F>> for Jones<F> {
     }
 }
 
-impl<F: Float + MulAssign> MulAssign<&Jones<F>> for Jones<F> {
+impl<F: Float + NumAssign> MulAssign<&Jones<F>> for Jones<F> {
     #[inline(always)]
     fn mul_assign(&mut self, rhs: &Self) {
         self.0 = [
@@ -349,6 +328,100 @@ impl<F: Float + MulAssign> MulAssign<&Jones<F>> for Jones<F> {
             self[2] * rhs[0] + self[3] * rhs[2],
             self[2] * rhs[1] + self[3] * rhs[3],
         ];
+    }
+}
+
+impl<F: Float> Div<F> for Jones<F> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn div(self, rhs: F) -> Self {
+        Jones::from([self[0] / rhs, self[1] / rhs, self[2] / rhs, self[3] / rhs])
+    }
+}
+
+impl<F: Float> Div<Complex<F>> for Jones<F> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn div(self, rhs: Complex<F>) -> Self {
+        Jones::from([self[0] / rhs, self[1] / rhs, self[2] / rhs, self[3] / rhs])
+    }
+}
+
+impl<F: Float> Div<Jones<F>> for Jones<F> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn div(self, rhs: Self) -> Self {
+        let inv_det = Complex::new(F::one(), F::zero()) / (rhs[0] * rhs[3] - rhs[1] * rhs[2]);
+        Self::from([
+            (self[0] * rhs[3] - self[1] * rhs[2]) * inv_det,
+            (self[1] * rhs[0] - self[0] * rhs[1]) * inv_det,
+            (self[2] * rhs[3] - self[3] * rhs[2]) * inv_det,
+            (self[3] * rhs[0] - self[2] * rhs[1]) * inv_det,
+        ])
+    }
+}
+
+impl<F: Float> Div<&Jones<F>> for Jones<F> {
+    type Output = Self;
+
+    #[inline(always)]
+    fn div(self, rhs: &Self) -> Self {
+        let inv_det = Complex::new(F::one(), F::zero()) / (rhs[0] * rhs[3] - rhs[1] * rhs[2]);
+        Self::from([
+            (self[0] * rhs[3] - self[1] * rhs[2]) * inv_det,
+            (self[1] * rhs[0] - self[0] * rhs[1]) * inv_det,
+            (self[2] * rhs[3] - self[3] * rhs[2]) * inv_det,
+            (self[3] * rhs[0] - self[2] * rhs[1]) * inv_det,
+        ])
+    }
+}
+
+impl<F: Float + NumAssign> DivAssign<F> for Jones<F> {
+    #[inline(always)]
+    fn div_assign(&mut self, rhs: F) {
+        self[0] /= rhs;
+        self[1] /= rhs;
+        self[2] /= rhs;
+        self[3] /= rhs;
+    }
+}
+
+impl<F: Float + NumAssign> DivAssign<Complex<F>> for Jones<F> {
+    #[inline(always)]
+    fn div_assign(&mut self, rhs: Complex<F>) {
+        self[0] /= rhs;
+        self[1] /= rhs;
+        self[2] /= rhs;
+        self[3] /= rhs;
+    }
+}
+
+impl<F: Float + NumAssign> DivAssign<Jones<F>> for Jones<F> {
+    #[inline(always)]
+    fn div_assign(&mut self, rhs: Self) {
+        let inv_det = Complex::new(F::one(), F::zero()) / (rhs[0] * rhs[3] - rhs[1] * rhs[2]);
+        *self = Self::from([
+            (self[0] * rhs[3] - self[1] * rhs[2]) * inv_det,
+            (self[1] * rhs[0] - self[0] * rhs[1]) * inv_det,
+            (self[2] * rhs[3] - self[3] * rhs[2]) * inv_det,
+            (self[3] * rhs[0] - self[2] * rhs[1]) * inv_det,
+        ]);
+    }
+}
+
+impl<F: Float + NumAssign> DivAssign<&Jones<F>> for Jones<F> {
+    #[inline(always)]
+    fn div_assign(&mut self, rhs: &Self) {
+        let inv_det = Complex::new(F::one(), F::zero()) / (rhs[0] * rhs[3] - rhs[1] * rhs[2]);
+        *self = Self::from([
+            (self[0] * rhs[3] - self[1] * rhs[2]) * inv_det,
+            (self[1] * rhs[0] - self[0] * rhs[1]) * inv_det,
+            (self[2] * rhs[3] - self[3] * rhs[2]) * inv_det,
+            (self[3] * rhs[0] - self[2] * rhs[1]) * inv_det,
+        ]);
     }
 }
 
@@ -659,7 +732,8 @@ mod tests {
             c64::new(2.0, 0.0),
             c64::new(4.0, 0.0),
         ]);
-        assert!(a.div(&a).any_nan());
+        let b = a.clone();
+        assert!((a / b).any_nan());
     }
 
     #[test]
