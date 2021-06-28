@@ -35,6 +35,7 @@ flate2 = "1.0.20"
 glob = "0.3.0"
 hifitime = "2.2.3"
 indicatif = { version = "0.16.2", features = ["rayon"] }
+itertools = "0.10.1"
 lazy_static = "1.4.0"
 log = "0.4.14"
 ndarray = { version = "0.15.3", features = ["rayon"] }
@@ -45,6 +46,8 @@ rubbl_casatables = "0.3.1"
 serde = { version = "1.0.126", features = ["derive"] }
 serde_json = "1.0.64"
 structopt = "0.3.21"
+strum = "0.21.0"
+strum_macros = "0.21.1"
 thiserror = "1.0.25"
 toml = "0.5.8"
 

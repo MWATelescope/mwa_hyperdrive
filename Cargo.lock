@@ -664,9 +664,9 @@ dependencies = [
 
 [[package]]
 name = "hermit-abi"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "322f4de77956e22ed0e5032c359a0f1273f1f7f0d79bfa3b8ffbc730d7fbcc5c"
+checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
 ]
@@ -907,7 +907,7 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.3.4"
-source = "git+https://github.com/cjordan/mwa_hyperbeam?branch=parallactic#dd6bd6ec633645da8b58f6beaf8209feb61cb19c"
+source = "git+https://github.com/cjordan/mwa_hyperbeam?branch=parallactic#d2115d0c2d30c408cec0cd0941ff121d8c6a6f56"
 dependencies = [
  "cbindgen",
  "dashmap",
@@ -937,6 +937,7 @@ dependencies = [
  "hifitime",
  "indicatif",
  "indoc",
+ "itertools 0.10.1",
  "lazy_static",
  "log",
  "mwa_hyperdrive_core",
@@ -952,6 +953,8 @@ dependencies = [
  "serde_json",
  "serial_test",
  "structopt",
+ "strum",
+ "strum_macros",
  "tempfile",
  "thiserror",
  "toml",
@@ -989,6 +992,7 @@ dependencies = [
  "approx 0.5.0",
  "fern",
  "indoc",
+ "itertools 0.10.1",
  "lazy_static",
  "log",
  "mwa_hyperdrive_core",
@@ -1743,15 +1747,15 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7318c509b5ba57f18533982607f24070a55d353e90d4cae30c467cdb2ad5ac5c"
+checksum = "aaf86bbcfd1fa9670b7a129f64fc0c9fcbbfe4f1bc4210e9e98fe71ffc12cde2"
 
 [[package]]
 name = "strum_macros"
-version = "0.20.1"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee8bc6b87a5112aeeab1f4a9f7ab634fe6cbefc4850006df31267f4cfb9e3149"
+checksum = "d06aaeeee809dbc59eb4556183dd927df67db1540de5be8d3ec0b6636358a5ec"
 dependencies = [
  "heck",
  "proc-macro2",

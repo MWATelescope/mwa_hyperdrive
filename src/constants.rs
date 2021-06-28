@@ -14,7 +14,7 @@ pub(crate) const ELEVATION_LIMIT: f64 = 0.0;
 
 /// Sources that are separated by more than this value (degrees) from the
 /// pointing are discarded from sky-model source lists.
-pub(crate) const CUTOFF_DISTANCE: f64 = 30.0;
+pub(crate) const DEFAULT_CUTOFF_DISTANCE: f64 = 30.0;
 
 /// The maximum number of times to iterate when performing "MitchCal" in
 /// direction-independent calibration.

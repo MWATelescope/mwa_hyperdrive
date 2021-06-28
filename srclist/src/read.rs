@@ -13,35 +13,15 @@ use thiserror::Error;
 
 use crate::*;
 
-pub fn parse_file_type(file: &Path) -> Option<SourceListFileType> {
-    let ext = file.extension().and_then(|e| e.to_str());
-    match ext {
-        Some("json") => Some(SourceListFileType::Json),
-        Some("yaml") => Some(SourceListFileType::Yaml),
-        Some("txt") => Some(SourceListFileType::Txt),
-        _ => None,
-    }
-}
-
-pub fn parse_source_list_type(s: &str) -> Result<SourceListType, SourceListError> {
-    match s {
-        "hyperdrive" => Ok(SourceListType::Hyperdrive),
-        "rts" => Ok(SourceListType::Rts),
-        "woden" => Ok(SourceListType::Woden),
-        "ao" => Ok(SourceListType::AO),
-        _ => Err(SourceListError::InvalidSourceListType),
-    }
-}
-
 /// Given the path to a sky-model source list file (and optionally its type,
 /// e.g. "RTS style"), return a [SourceList] object. The [SourceListType] is
 /// also returned in case that's interesting to the caller.
 pub fn read_source_list_file<T: AsRef<Path>>(
-    file: T,
+    path: T,
     sl_type: Option<SourceListType>,
 ) -> Result<(SourceList, SourceListType), SourceListError> {
     trace!("Attempting to read source list");
-    let mut f = std::io::BufReader::new(File::open(&file)?);
+    let mut f = std::io::BufReader::new(File::open(&path)?);
 
     match sl_type {
         Some(SourceListType::Hyperdrive) => {
@@ -72,7 +52,7 @@ pub fn read_source_list_file<T: AsRef<Path>>(
             Err(e) => Err(e.into()),
         },
 
-        Some(SourceListType::Unspecified) | None => {
+        None => {
             // Try all kinds.
             match hyperdrive::source_list_from_yaml(&mut f) {
                 Ok(sl) => return Ok((sl, SourceListType::Hyperdrive)),
@@ -80,37 +60,34 @@ pub fn read_source_list_file<T: AsRef<Path>>(
                     trace!("Failed to read source list as hyperdrive-style yaml");
                     // Even a failed attempt to read the file alters the buffer. Open it
                     // again.
-                    f = std::io::BufReader::new(File::open(&file)?);
+                    f = std::io::BufReader::new(File::open(&path)?);
                 }
             }
             match hyperdrive::source_list_from_json(&mut f) {
                 Ok(sl) => return Ok((sl, SourceListType::Hyperdrive)),
                 Err(_) => {
                     trace!("Failed to read source list as hyperdrive-style json");
-                    f = std::io::BufReader::new(File::open(&file)?);
+                    f = std::io::BufReader::new(File::open(&path)?);
                 }
             }
             match rts::parse_source_list(&mut f) {
                 Ok(sl) => return Ok((sl, SourceListType::Rts)),
                 Err(_) => {
                     trace!("Failed to read source list as rts-style");
-                    f = std::io::BufReader::new(File::open(&file)?);
+                    f = std::io::BufReader::new(File::open(&path)?);
                 }
             }
             match ao::parse_source_list(&mut f) {
                 Ok(sl) => return Ok((sl, SourceListType::AO)),
                 Err(_) => {
                     trace!("Failed to read source list as ao-style");
-                    f = std::io::BufReader::new(File::open(&file)?);
+                    f = std::io::BufReader::new(File::open(&path)?);
                 }
             }
             match woden::parse_source_list(&mut f) {
                 Ok(sl) => return Ok((sl, SourceListType::Woden)),
                 Err(_) => {
                     trace!("Failed to read source list as woden-style");
-                    // The following should be uncommented if new source list
-                    // types are enumerated below!
-                    // f = std::io::BufReader::new(File::open(&file)?);
                 }
             }
             Err(ReadSourceListError::FailedToReadAsAnyType.into())
@@ -123,9 +100,6 @@ pub fn read_source_list_file<T: AsRef<Path>>(
 pub enum SourceListError {
     #[error("Unrecognised source list type. Valid types are: {}", *SOURCE_LIST_TYPES_COMMA_SEPARATED)]
     InvalidSourceListType,
-
-    #[error("Unrecognised source list file type. Valid types are: {}", *SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED)]
-    InvalidSourceListFileType,
 
     #[error(
         "Attempted to read a {sl_type}-style source list from a {sl_file_type} file, but that is not handled"

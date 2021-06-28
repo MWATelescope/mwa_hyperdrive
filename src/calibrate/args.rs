@@ -12,22 +12,36 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
+use itertools::Itertools;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
+use strum::IntoEnumIterator;
+use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
 
 use crate::calibrate::params::{CalibrateParams, InvalidArgsError};
 use crate::*;
 use mwa_hyperdrive_core::mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
 
+#[derive(Display, EnumIter, EnumString)]
+enum ArgFileTypes {
+    #[strum(serialize = "toml")]
+    Toml,
+    #[strum(serialize = "json")]
+    Json,
+}
+
 lazy_static::lazy_static! {
+    pub(crate) static ref ARG_FILE_TYPES_COMMA_SEPARATED: String = ArgFileTypes::iter().join(", ");
+
     static ref OUTPUT_SOLUTIONS_HELP: String =
         format!("The path to the file where the calibration solutions are written. Supported formats are .fits and .bin (which is the \"André calibrate format\"). Default: {}", DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
 
     static ref SOURCE_DIST_CUTOFF_HELP: String =
-        format!("The sky-model source cutoff distance [degrees]. This is only used if the input sky-model source list has more sources than specified by num-sources. Default: {}", CUTOFF_DISTANCE);
+        format!("The sky-model source cutoff distance [degrees]. This is only used if the input sky-model source list has more sources than specified by num-sources. Default: {}", DEFAULT_CUTOFF_DISTANCE);
 
     static ref VETO_THRESHOLD_HELP: String =
         format!("The smallest possible beam-attenuated flux density any sky-model source is allowed to have. Default: {}", DEFAULT_VETO_THRESHOLD);
@@ -44,7 +58,7 @@ If not specified, the program will try all types"#, *mwa_hyperdrive_srclist::SOU
         format!("The threshold at which we stop convergence when performing \"MitchCal\". Default: {:e}", DEFAULT_STOP_THRESHOLD);
 
     static ref MIN_THRESHOLD_HELP: String =
-        format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Reaching this threshold counts as \"converged\", but it's not as good as the stop threshold. Default: {:e}", DEFAULT_MIN_THRESHOLD);
+        format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Reaching this threshold counts as converged, but iteration will continue until max iterations or the stop threshold is reached. Default: {:e}", DEFAULT_MIN_THRESHOLD);
 
     static ref ARRAY_LONGITUDE_HELP: String =
         format!("The Earth longitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LONGITUDE_RADIANS.to_degrees());
@@ -74,16 +88,6 @@ pub struct CalibrateUserArgs {
     #[structopt(short, long)]
     pub model_filename: Option<String>,
 
-    /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
-    /// provided with the MWA_BEAM_FILE environment variable.
-    #[structopt(long)]
-    pub beam_file: Option<String>,
-
-    /// Don't apply a beam response when generating a sky model. The default is
-    /// to use the FEE beam.
-    #[structopt(long)]
-    pub no_beam: bool,
-
     /// Path to the sky-model source list file.
     #[structopt(short, long)]
     pub source_list: Option<String>,
@@ -106,18 +110,27 @@ pub struct CalibrateUserArgs {
     #[structopt(long, help = VETO_THRESHOLD_HELP.as_str())]
     pub veto_threshold: Option<f64>,
 
-    /// The calibration time resolution [seconds]. This must be a multiple of
-    /// the input data's native time resolution. If not supplied, then the
-    /// observation's native time resolution is used.
-    #[structopt(short, long)]
-    pub time_res: Option<f64>,
+    /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
+    /// provided by the MWA_BEAM_FILE environment variable.
+    #[structopt(long)]
+    pub beam_file: Option<String>,
 
-    /// The calibration fine-channel frequency resolution [Hz]. This must be a
-    /// multiple of the input data's native frequency resolution. If not
-    /// supplied, then the observation's native frequency resolution is used.
-    #[structopt(short, long)]
-    pub freq_res: Option<f64>,
+    /// Don't apply a beam response when generating a sky model. The default is
+    /// to use the FEE beam.
+    #[structopt(long)]
+    pub no_beam: bool,
 
+    // /// The calibration time resolution [seconds]. This must be a multiple of
+    // /// the input data's native time resolution. If not supplied, then the
+    // /// observation's native time resolution is used.
+    // #[structopt(short, long)]
+    // pub time_res: Option<f64>,
+
+    // /// The calibration fine-channel frequency resolution [Hz]. This must be a
+    // /// multiple of the input data's native frequency resolution. If not
+    // /// supplied, then the observation's native frequency resolution is used.
+    // #[structopt(short, long)]
+    // pub freq_res: Option<f64>,
     /// The timesteps to use from the input data. The timesteps will be
     /// ascendingly sorted for calibration. No duplicates are allowed. The
     /// default is to use all unflagged timesteps.
@@ -125,7 +138,7 @@ pub struct CalibrateUserArgs {
     pub timesteps: Option<Vec<usize>>,
 
     /// Additional tiles to be flagged. These values correspond to values in the
-    /// "Antenna" column of HDU 1 in the metafits file, e.g. 0 3 127. These
+    /// "Antenna" column of HDU 2 in the metafits file, e.g. 0 3 127. These
     /// values should also be the same as FHD tile flags.
     #[structopt(long)]
     pub tile_flags: Option<Vec<usize>>,
@@ -177,7 +190,7 @@ impl CalibrateUserArgs {
     /// a single struct. Where applicable, it will prefer CLI parameters over
     /// those in the file.
     ///
-    /// The argument to this function is the `Path` to the arguments file.
+    /// The argument to this function is the path to the arguments file.
     ///
     /// This function should only ever merge arguments, and not try to make
     /// sense of them.
@@ -198,9 +211,10 @@ impl CalibrateUserArgs {
             let file_args_extension = file_args_path
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase());
-            match file_args_extension.as_deref() {
-                Some("toml") => {
+                .map(|e| e.to_lowercase())
+                .and_then(|e| ArgFileTypes::from_str(&e).ok());
+            match file_args_extension {
+                Some(ArgFileTypes::Toml) => {
                     debug!("Parsing toml file...");
                     let mut fh = File::open(&arg_file)?;
                     fh.read_to_string(&mut contents)?;
@@ -215,7 +229,7 @@ impl CalibrateUserArgs {
                     }
                 }
 
-                Some("json") => {
+                Some(ArgFileTypes::Json) => {
                     debug!("Parsing json file...");
                     let mut fh = File::open(&arg_file)?;
                     fh.read_to_string(&mut contents)?;
@@ -250,8 +264,8 @@ impl CalibrateUserArgs {
             num_sources,
             source_dist_cutoff,
             veto_threshold,
-            time_res,
-            freq_res,
+            // time_res,
+            // freq_res,
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
@@ -279,8 +293,8 @@ impl CalibrateUserArgs {
             num_sources: cli_args.num_sources.or(num_sources),
             source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
             veto_threshold: cli_args.veto_threshold.or(veto_threshold),
-            time_res: cli_args.time_res.or(time_res),
-            freq_res: cli_args.freq_res.or(freq_res),
+            // time_res: cli_args.time_res.or(time_res),
+            // freq_res: cli_args.freq_res.or(freq_res),
             timesteps: cli_args.timesteps.or(timesteps),
             tile_flags: cli_args.tile_flags.or(tile_flags),
             ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
@@ -308,7 +322,7 @@ impl CalibrateUserArgs {
 /// Errors associated with merging `CalibrateUserArgs` structs.
 #[derive(Error, Debug)]
 pub enum CalibrateArgsError {
-    #[error("Argument file '{0}' doesn't have a recognised file extension! Valid extensions are .toml and .json")]
+    #[error("Argument file '{0}' doesn't have a recognised file extension! Valid extensions are: {}", *ARG_FILE_TYPES_COMMA_SEPARATED)]
     UnrecognisedArgFileExt(String),
 
     #[error("Couldn't decode toml structure from {file}:\n{err}")]
@@ -318,6 +332,5 @@ pub enum CalibrateArgsError {
     JsonDecode { file: String, err: String },
 
     #[error("IO error when trying to read argument file: {0}")]
-    #[allow(clippy::upper_case_acronyms)]
     IO(#[from] std::io::Error),
 }

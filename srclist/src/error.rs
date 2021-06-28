@@ -4,6 +4,9 @@
 
 use thiserror::Error;
 
+use crate::read::SourceListError;
+use crate::HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED;
+
 /// Errors associated with reading in any kind of source list.
 #[derive(Error, Debug)]
 pub enum ReadSourceListError {
@@ -261,7 +264,7 @@ pub enum WriteSourceListError {
     #[error("Not enough information was provided to write the output source list. Please specify an output type.")]
     NotEnoughInfo,
 
-    #[error("Cannot write a hyperdrive-style source list to a file with an extension '{0}'.")]
+    #[error("'{0}' is an invalid file type for a hyperdrive-style source list; must have one of the following extensions: {}", *HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED)]
     InvalidHyperdriveFormat(String),
 
     #[error("{0}")]
@@ -279,4 +282,16 @@ pub enum WriteSourceListError {
 
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum SrclistError {
+    #[error("{0}")]
+    SourceList(#[from] SourceListError),
+
+    #[error("{0}")]
+    WriteSourceList(#[from] WriteSourceListError),
+
+    #[error("{0}")]
+    IO(#[from] std::io::Error),
 }

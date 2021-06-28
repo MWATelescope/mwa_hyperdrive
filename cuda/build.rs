@@ -49,7 +49,7 @@ fn main() {
         }
 
         // Continue if this file's extension is .cu
-        if let Some("cu") = path.extension().map(|os_str| os_str.to_str().unwrap()) {
+        if let Some("cu") = path.extension().and_then(|os_str| os_str.to_str()) {
             // Add this .cu file to be compiled later.
             cuda_files.push(path);
         }

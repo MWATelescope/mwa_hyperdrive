@@ -6,6 +6,8 @@
 
 use thiserror::Error;
 
+use mwa_hyperdrive_srclist::SrclistError;
+
 #[derive(Error, Debug)]
 pub enum HyperdriveError {
     #[error("Requested GPU processing, but the CUDA feature was not enabled when hyperdrive was compiled.")]
@@ -22,4 +24,7 @@ pub enum HyperdriveError {
 
     #[error("{0}")]
     SimulateVis(#[from] crate::simulate_vis::SimulateVisError),
+
+    #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists")]
+    Srclist(#[from] SrclistError),
 }

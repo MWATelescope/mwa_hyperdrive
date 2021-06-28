@@ -13,7 +13,7 @@ use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use log::{debug, info, trace};
-use ndarray::{prelude::*, AssignElem};
+use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::{model, solutions::CalibrationSolutions, CalibrateError, CalibrateParams};

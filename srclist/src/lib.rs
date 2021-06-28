@@ -5,80 +5,59 @@
 //! Code to handle sky-model source lists.
 
 pub mod ao;
+pub mod convert;
 mod error;
 pub mod hyperdrive;
 pub mod read;
 pub mod rts;
+pub mod verify;
 pub mod woden;
 
+pub use convert::*;
 pub use error::*;
+pub use verify::*;
 
+use itertools::Itertools;
 use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
+use strum_macros::{Display, EnumIter, EnumString};
 
-#[derive(Debug, Clone, Copy, EnumIter, PartialEq)]
+/// All of the possible sky-model sources list types.
+#[derive(Debug, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
 pub enum SourceListType {
+    #[strum(serialize = "hyperdrive")]
     Hyperdrive,
+    #[strum(serialize = "rts")]
     Rts,
+    #[strum(serialize = "woden")]
     Woden,
+    #[strum(serialize = "ao")]
     AO,
-    Unspecified,
+    // #[strum(serialize = "unspecified")]
+    // Unspecified,
 }
 
-#[derive(Debug, EnumIter)]
-pub enum SourceListFileType {
-    Json,
+/// All of the possible file extensions that a hyperdrive-style sky-model source
+/// list can have.
+#[derive(Debug, Display, EnumIter, EnumString)]
+pub enum HyperdriveFileType {
+    #[strum(serialize = "yaml")]
     Yaml,
-    Txt,
+    #[strum(serialize = "json")]
+    Json,
 }
 
 lazy_static::lazy_static! {
-    pub static ref SOURCE_LIST_TYPES_COMMA_SEPARATED: String = {
-        // Iterate over all of the enum variants for SourceListType and join
-        // them in a comma-separated string. Ignore the "Unspecified" enum
-        // variant.
-        SourceListType::iter()
-            .filter(|&ft| ft != SourceListType::Unspecified)
-            .map(|ft| ft.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
+    pub static ref SOURCE_LIST_TYPES_COMMA_SEPARATED: String = SourceListType::iter().join(", ");
 
-    pub static ref SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED: String = {
-        // Iterate over all of the enum variants for SourceListFileType and join
-        // them in a comma-separated string.
-        SourceListFileType::iter().map(|ft| ft.to_string()).collect::<Vec<_>>().join(", ")
-    };
-}
+    pub static ref HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED: String = HyperdriveFileType::iter().join(", ");
 
-impl std::fmt::Display for SourceListFileType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match &self {
-                SourceListFileType::Json => "json",
-                SourceListFileType::Yaml => "yaml",
-                SourceListFileType::Txt => "txt",
-            }
-        )
-    }
-}
+    pub static ref CONVERT_INPUT_TYPE_HELP: String =
+        format!("Specifies the type of the input source list. Currently supported types: {}",
+                *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 
-impl std::fmt::Display for SourceListType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match &self {
-                SourceListType::Hyperdrive => "hyperdrive",
-                SourceListType::Rts => "rts",
-                SourceListType::Woden => "woden",
-                SourceListType::AO => "ao",
-                SourceListType::Unspecified => "unspecified",
-            }
-        )
-    }
+    pub static ref CONVERT_OUTPUT_TYPE_HELP: String =
+        format!("Specifies the type of the output source list. May be required depending on the output filename. Currently supported types: {}",
+                *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 }
 
 // Convenience imports.

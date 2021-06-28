@@ -9,10 +9,15 @@ use common::*;
 
 use std::path::PathBuf;
 
-use log::{debug, info};
+use log::{debug, info, trace};
 use structopt::{clap::AppSettings, StructOpt};
 
-use mwa_hyperdrive::{calibrate::calibrate, simulate_vis::simulate_vis, *};
+use mwa_hyperdrive::{
+    calibrate::{args::*, calibrate},
+    simulate_vis::simulate_vis,
+    HyperdriveError,
+};
+use mwa_hyperdrive_srclist::{CONVERT_INPUT_TYPE_HELP, CONVERT_OUTPUT_TYPE_HELP};
 
 #[derive(StructOpt)]
 #[structopt(name = "hyperdrive", author, about,
@@ -22,10 +27,14 @@ use mwa_hyperdrive::{calibrate::calibrate, simulate_vis::simulate_vis, *};
                                 AppSettings::DeriveDisplayOrder])]
 enum Args {
     /// Perform direction-independent calibration on the input MWA data.
-    Calibrate {
+    ///
+    /// See for more info:
+    /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-usage
+    #[structopt(alias = "calibrate")]
+    DiCalibrate {
         // Share the arguments that could be passed in via a parameter file.
         #[structopt(flatten)]
-        cli_args: mwa_hyperdrive::calibrate::args::CalibrateUserArgs,
+        cli_args: CalibrateUserArgs,
 
         /// All of the arguments to calibrate may be specified in a toml or json
         /// file. Any CLI arguments override parameters set in the file.
@@ -74,6 +83,46 @@ enum Args {
         #[structopt(short = "n", long)]
         dry_run: bool,
     },
+
+    /// Convert a sky-model source list from one format to another.
+    ///
+    /// See for more info:
+    /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+    ConvertSrclist {
+        #[structopt(short = "i", long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
+        input_type: Option<String>,
+
+        /// Path to the source list to be converted.
+        #[structopt(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
+        input_source_list: PathBuf,
+
+        #[structopt(short = "o", long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
+        output_type: Option<String>,
+
+        /// Path to the output source list.
+        #[structopt(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+        output_source_list: PathBuf,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[structopt(short, long, parse(from_occurrences))]
+        verbosity: u8,
+    },
+
+    /// Verify that sky-model source lists can be read by hyperdrive.
+    ///
+    /// See for more info:
+    /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+    VerifySrclist {
+        /// Path to the source list(s) to be verified.
+        #[structopt(name = "SOURCE_LISTS", parse(from_os_str))]
+        source_lists: Vec<PathBuf>,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[structopt(short, long, parse(from_occurrences))]
+        verbosity: u8,
+    },
 }
 
 fn main() {
@@ -92,8 +141,10 @@ fn try_main() -> Result<(), HyperdriveError> {
 
     // Set up logging.
     let verbosity = match args {
-        Args::Calibrate { verbosity, .. } => verbosity,
+        Args::DiCalibrate { verbosity, .. } => verbosity,
         Args::SimulateVis { verbosity, .. } => verbosity,
+        Args::ConvertSrclist { verbosity, .. } => verbosity,
+        Args::VerifySrclist { verbosity, .. } => verbosity,
     };
     setup_logging(verbosity).expect("Failed to initialise logging.");
 
@@ -101,8 +152,10 @@ fn try_main() -> Result<(), HyperdriveError> {
     info!(
         "hyperdrive {}",
         match args {
-            Args::Calibrate { .. } => "calibrate",
+            Args::DiCalibrate { .. } => "di-calibrate",
             Args::SimulateVis { .. } => "simulate-vis",
+            Args::ConvertSrclist { .. } => "convert-srclist",
+            Args::VerifySrclist { .. } => "verify-srclist",
         }
     );
     info!("Version {}", env!("CARGO_PKG_VERSION"));
@@ -116,27 +169,27 @@ fn try_main() -> Result<(), HyperdriveError> {
             );
             info!("            git head ref: {}", hr);
         }
-        None => info!("<no git info>"),
+        None => info!("Compiled on git commit hash: <no git info>"),
     }
     info!("            {}", BUILT_TIME_UTC);
     info!("         with compiler {}", RUSTC_VERSION);
     info!("");
 
     match Args::from_args() {
-        Args::Calibrate {
+        Args::DiCalibrate {
             cli_args,
             args_file,
             verbosity: _,
             dry_run,
         } => {
             let args = if let Some(f) = args_file {
-                debug!("Merging command-line arguments with the argument file");
+                trace!("Merging command-line arguments with the argument file");
                 cli_args.merge(&f)?
             } else {
                 cli_args
             };
             debug!("{:#?}", &args);
-            debug!("Converting arguments into calibration parameters");
+            trace!("Converting arguments into calibration parameters");
             let parameters = args.into_params()?;
 
             if dry_run {
@@ -164,6 +217,26 @@ fn try_main() -> Result<(), HyperdriveError> {
             }
 
             simulate_vis(cli_args, param_file, cpu, write_to_text, dry_run)?
+        }
+
+        Args::ConvertSrclist {
+            input_source_list,
+            output_source_list,
+            input_type,
+            output_type,
+            verbosity: _,
+        } => mwa_hyperdrive_srclist::convert(
+            &input_source_list,
+            &output_source_list,
+            input_type,
+            output_type,
+        )?,
+
+        Args::VerifySrclist {
+            source_lists,
+            verbosity: _,
+        } => {
+            mwa_hyperdrive_srclist::verify(&source_lists)?;
         }
     }
 

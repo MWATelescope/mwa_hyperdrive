@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use log::{debug, info, trace, warn};
 use mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
@@ -154,8 +155,8 @@ impl CalibrateParams {
             num_sources,
             source_dist_cutoff,
             veto_threshold,
-            time_res,
-            freq_res,
+            // time_res,
+            // freq_res,
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
@@ -485,13 +486,14 @@ impl CalibrateParams {
 
         // Set up frequency information.
         let native_freq_res = freq_context.native_fine_chan_width;
-        let freq_res = freq_res.unwrap_or(native_freq_res);
-        if freq_res % native_freq_res != 0.0 {
-            return Err(InvalidArgsError::InvalidFreqResolution {
-                got: freq_res,
-                native: native_freq_res,
-            });
-        }
+        let freq_res = native_freq_res;
+        // let freq_res = freq_res.unwrap_or(native_freq_res);
+        // if freq_res % native_freq_res != 0.0 {
+        //     return Err(InvalidArgsError::InvalidFreqResolution {
+        //         got: freq_res,
+        //         native: native_freq_res,
+        //     });
+        // }
 
         let total_num_fine_channels = freq_context.fine_chan_freqs.len();
         let num_fine_chans_per_coarse_band =
@@ -583,12 +585,10 @@ impl CalibrateParams {
             // Read the source list file. If the type was manually specified,
             // use that, otherwise the reading code will try all available
             // kinds.
-            let sl_type = match source_list_type.as_ref() {
-                Some(t) => mwa_hyperdrive_srclist::read::parse_source_list_type(&t)?,
-                None => SourceListType::Unspecified,
-            };
+            let sl_type_specified = source_list_type.is_none();
+            let sl_type = source_list_type.and_then(|t| SourceListType::from_str(t.as_ref()).ok());
             let (sl, sl_type) =
-                match mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, Some(sl_type)) {
+                match mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, sl_type) {
                     Ok((sl, sl_type)) => (sl, sl_type),
                     Err(e) => {
                         eprintln!("Error when trying to read source list:");
@@ -598,7 +598,7 @@ impl CalibrateParams {
 
             // If the user didn't specify the source list type, then print out
             // what we found.
-            if source_list_type.is_none() {
+            if sl_type_specified {
                 debug!("Successfully parsed {}-style source list", sl_type);
             }
 
@@ -621,7 +621,7 @@ impl CalibrateParams {
             &freq_context.coarse_chan_freqs,
             beam.deref(),
             num_sources,
-            source_dist_cutoff.unwrap_or(CUTOFF_DISTANCE),
+            source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
         let num_components = source_list
@@ -640,7 +640,8 @@ impl CalibrateParams {
         }
 
         let native_time_res = obs_context.time_res;
-        let time_res = time_res.or(native_time_res);
+        // let time_res = time_res.or(native_time_res);
+        let time_res = native_time_res;
         if let Some(ntr) = native_time_res {
             info!("Input data time resolution: {:.2}s", ntr);
             if let Some(tr) = time_res {
@@ -885,94 +886,94 @@ mod tests {
         assert_abs_diff_eq!(params.freq.res, 40e3, epsilon = 1e-10);
     }
 
-    #[test]
-    fn test_new_params_time_averaging() {
-        // The native time resolution is 2.0s.
-        let mut args = get_1090008640_smallest();
-        // 4.0 should be a multiple of 2.0s
-        args.time_res = Some(4.0);
-        let params = match args.into_params() {
-            Ok(p) => p,
-            Err(e) => panic!("{}", e),
-        };
-        assert_abs_diff_eq!(params.time_res.unwrap(), 4.0);
+    // #[test]
+    // fn test_new_params_time_averaging() {
+    //     // The native time resolution is 2.0s.
+    //     let mut args = get_1090008640_smallest();
+    //     // 4.0 should be a multiple of 2.0s
+    //     args.time_res = Some(4.0);
+    //     let params = match args.into_params() {
+    //         Ok(p) => p,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     assert_abs_diff_eq!(params.time_res.unwrap(), 4.0);
 
-        let mut args = get_1090008640();
-        // 8.0 should be a multiple of 2.0s
-        args.time_res = Some(8.0);
-        let params = match args.into_params() {
-            Ok(p) => p,
-            Err(e) => panic!("{}", e),
-        };
-        assert_abs_diff_eq!(params.time_res.unwrap(), 8.0);
-    }
+    //     let mut args = get_1090008640();
+    //     // 8.0 should be a multiple of 2.0s
+    //     args.time_res = Some(8.0);
+    //     let params = match args.into_params() {
+    //         Ok(p) => p,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     assert_abs_diff_eq!(params.time_res.unwrap(), 8.0);
+    // }
 
-    #[test]
-    fn test_new_params_time_averaging_fail() {
-        // The native time resolution is 2.0s.
-        let mut args = get_1090008640_smallest();
-        // 2.01 is not a multiple of 2.0s
-        args.time_res = Some(2.01);
-        let result = args.into_params();
-        assert!(
-            result.is_err(),
-            "Expected CalibrateParams to have not been successfully created"
-        );
+    // #[test]
+    // fn test_new_params_time_averaging_fail() {
+    //     // The native time resolution is 2.0s.
+    //     let mut args = get_1090008640_smallest();
+    //     // 2.01 is not a multiple of 2.0s
+    //     args.time_res = Some(2.01);
+    //     let result = args.into_params();
+    //     assert!(
+    //         result.is_err(),
+    //         "Expected CalibrateParams to have not been successfully created"
+    //     );
 
-        let mut args = get_1090008640_smallest();
-        // 3.0 is not a multiple of 2.0s
-        args.time_res = Some(3.0);
-        let result = args.into_params();
-        assert!(
-            result.is_err(),
-            "Expected CalibrateParams to have not been successfully created"
-        );
-    }
+    //     let mut args = get_1090008640_smallest();
+    //     // 3.0 is not a multiple of 2.0s
+    //     args.time_res = Some(3.0);
+    //     let result = args.into_params();
+    //     assert!(
+    //         result.is_err(),
+    //         "Expected CalibrateParams to have not been successfully created"
+    //     );
+    // }
 
-    #[test]
-    fn test_new_params_freq_averaging() {
-        // The native freq. resolution is 40kHz.
-        let mut args = get_1090008640_smallest();
-        // 80e3 should be a multiple of 40kHz
-        args.freq_res = Some(80e3);
-        let params = match args.into_params() {
-            Ok(p) => p,
-            Err(e) => panic!("{}", e),
-        };
-        assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
+    // #[test]
+    // fn test_new_params_freq_averaging() {
+    //     // The native freq. resolution is 40kHz.
+    //     let mut args = get_1090008640_smallest();
+    //     // 80e3 should be a multiple of 40kHz
+    //     args.freq_res = Some(80e3);
+    //     let params = match args.into_params() {
+    //         Ok(p) => p,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
 
-        let mut args = get_1090008640_smallest();
-        // 200e3 should be a multiple of 40kHz
-        args.freq_res = Some(200e3);
-        let params = match args.into_params() {
-            Ok(p) => p,
-            Err(e) => panic!("{}", e),
-        };
-        assert_abs_diff_eq!(params.freq.res, 200e3, epsilon = 1e-10);
-    }
+    //     let mut args = get_1090008640_smallest();
+    //     // 200e3 should be a multiple of 40kHz
+    //     args.freq_res = Some(200e3);
+    //     let params = match args.into_params() {
+    //         Ok(p) => p,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     assert_abs_diff_eq!(params.freq.res, 200e3, epsilon = 1e-10);
+    // }
 
-    #[test]
-    fn test_new_params_freq_averaging_fail() {
-        // The native freq. resolution is 40kHz.
-        let mut args = get_1090008640_smallest();
-        // 10e3 is not a multiple of 40kHz
-        args.freq_res = Some(10e3);
-        let result = args.into_params();
-        assert!(
-            result.is_err(),
-            "Expected CalibrateParams to have not been successfully created"
-        );
+    // #[test]
+    // fn test_new_params_freq_averaging_fail() {
+    //     // The native freq. resolution is 40kHz.
+    //     let mut args = get_1090008640_smallest();
+    //     // 10e3 is not a multiple of 40kHz
+    //     args.freq_res = Some(10e3);
+    //     let result = args.into_params();
+    //     assert!(
+    //         result.is_err(),
+    //         "Expected CalibrateParams to have not been successfully created"
+    //     );
 
-        let mut args = get_1090008640_smallest();
+    //     let mut args = get_1090008640_smallest();
 
-        // 79e3 is not a multiple of 40kHz
-        args.freq_res = Some(79e3);
-        let result = args.into_params();
-        assert!(
-            result.is_err(),
-            "Expected CalibrateParams to have not been successfully created"
-        );
-    }
+    //     // 79e3 is not a multiple of 40kHz
+    //     args.freq_res = Some(79e3);
+    //     let result = args.into_params();
+    //     assert!(
+    //         result.is_err(),
+    //         "Expected CalibrateParams to have not been successfully created"
+    //     );
+    // }
 
     #[test]
     fn test_new_params_tile_flags() {
