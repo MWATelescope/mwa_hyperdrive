@@ -13,17 +13,35 @@ use crate::constants::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 /// At a frequency, four flux densities for each Stokes parameter.
+// When serialising/deserialising, ignore Stokes Q U V if they are zero.
 pub struct FluxDensity {
     /// The frequency that these flux densities apply to \[Hz\]
     pub freq: f64,
+
     /// The flux density of Stokes I \[Jy\]
     pub i: f64,
+
     /// The flux density of Stokes Q \[Jy\]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero")]
     pub q: f64,
+
     /// The flux density of Stokes U \[Jy\]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero")]
     pub u: f64,
+
     /// The flux density of Stokes V \[Jy\]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero")]
     pub v: f64,
+}
+
+/// This is only used for serialize
+// https://stackoverflow.com/questions/53900612/how-do-i-avoid-generating-json-when-serializing-a-value-that-is-null-or-a-defaul
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(num: &f64) -> bool {
+    num.abs() < f64::EPSILON
 }
 
 impl std::ops::Mul<f64> for FluxDensity {

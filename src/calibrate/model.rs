@@ -8,19 +8,17 @@
 use std::f64::consts::{FRAC_PI_2, LN_2, TAU};
 use std::ops::Deref;
 
-use log::trace;
 use ndarray::{parallel::prelude::*, prelude::*};
 use num::Complex;
 
 use super::CalibrateError;
-use crate::beam::Beam;
 use crate::{
     constants::*,
     math::{cexp, exp},
     shapelets::*,
 };
 use mwa_hyperdrive_core::{
-    c64, xyz, AzEl, ComponentType, EstimateError, Jones, RADec, SourceComponent, SourceList,
+    c64, xyz, AzEl, Beam, ComponentType, EstimateError, Jones, RADec, SourceComponent, SourceList,
     XyzGeodetic, LMN, UVW,
 };
 
@@ -116,7 +114,6 @@ pub(super) fn split_components<'a>(
     // Get the instrumental flux densities for each component at each frequency.
     // These don't change with time, so we can save a lot of computation by just
     // doing this once.
-    trace!("Estimating flux densities for sky-model components at all frequencies");
     let flux_densities = |comps: &[&SourceComponent]| -> Result<Array2<Jones<f64>>, EstimateError> {
         let mut fds = Array2::from_elem(
             (comps.len(), unflagged_fine_chan_freqs.len()),
@@ -270,10 +267,8 @@ fn beam_correct_flux_densities(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn model_timestep(
     mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
-    weights: ArrayView2<f32>,
     split_components: &SplitComponents,
     beam: &dyn Beam,
     lst_rad: f64,
@@ -281,8 +276,6 @@ pub(super) fn model_timestep(
     uvws: &[UVW],
     unflagged_fine_chan_freqs: &[f64],
 ) -> Result<(), CalibrateError> {
-    debug_assert_eq!(vis_model_slice.dim(), weights.dim());
-
     let beamed_point_fds = beam_correct_flux_densities(
         &split_components.point,
         lst_rad,
@@ -349,11 +342,6 @@ pub(super) fn model_timestep(
         uvws,
         unflagged_fine_chan_freqs,
     );
-
-    // Scale by weights.
-    ndarray::Zip::from(&mut vis_model_slice)
-        .and(&weights)
-        .par_for_each(|vis, &weight| *vis *= weight);
 
     Ok(())
 }
@@ -643,8 +631,11 @@ fn model_shapelets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{calibrate::params::Delays, tests::*};
-    use mwa_hyperdrive_core::{FluxDensity, FluxDensityType};
+    use crate::tests::*;
+    use mwa_hyperdrive_core::{
+        beam::{Delays, FEEBeam, NoBeam},
+        FluxDensity, FluxDensityType,
+    };
     use mwa_hyperdrive_srclist::SourceListType;
 
     fn get_small_source_list() -> SourceList {
@@ -720,7 +711,7 @@ mod tests {
         let lst = 6.261977848;
         let dipole_gains = [1.0; 16];
 
-        let beam: Box<dyn Beam> = Box::new(crate::beam::NoBeam);
+        let beam: Box<dyn Beam> = Box::new(NoBeam);
         let srclist = get_small_source_list();
         let inst_flux_densities = get_instrumental_flux_densities(&srclist, &freqs);
         let result = match beam_correct_flux_densities_inner(
@@ -762,7 +753,7 @@ mod tests {
         let dipole_gains = [1.0; 16];
 
         let beam: Box<dyn Beam> =
-            Box::new(crate::beam::FEEBeam::new_from_env(Delays::Available(dipole_delays)).unwrap());
+            Box::new(FEEBeam::new_from_env(Delays::Available(dipole_delays)).unwrap());
         let srclist = get_small_source_list();
         let inst_flux_densities = get_instrumental_flux_densities(&srclist, &freqs);
 
@@ -833,7 +824,7 @@ mod tests {
         let dipole_gains = [1.0; 16];
 
         let beam: Box<dyn Beam> =
-            Box::new(crate::beam::FEEBeam::new_from_env(Delays::Available(dipole_delays)).unwrap());
+            Box::new(FEEBeam::new_from_env(Delays::Available(dipole_delays)).unwrap());
         let srclist = get_small_source_list();
         let inst_flux_densities = get_instrumental_flux_densities(&srclist, &freqs);
         let result = match beam_correct_flux_densities_inner(

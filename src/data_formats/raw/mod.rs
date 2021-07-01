@@ -15,14 +15,12 @@ use log::{debug, warn};
 use ndarray::prelude::*;
 
 use super::*;
+use crate::context::{FreqContext, ObsContext};
 use crate::flagging::aoflagger::AOFlags;
 use crate::glob::*;
 use crate::mwalib::{CorrelatorContext, Pol};
-use crate::{
-    calibrate::params::Delays,
-    context::{FreqContext, ObsContext},
-};
 use mwa_hyperdrive_core::{
+    beam::Delays,
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     Jones, RADec, XyzGeodetic,
 };

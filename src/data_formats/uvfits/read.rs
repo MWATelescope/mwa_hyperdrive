@@ -13,12 +13,12 @@ use mwa_hyperdrive_core::XyzGeodetic;
 use ndarray::prelude::*;
 
 use super::*;
+use crate::constants::HIFITIME_GPS_FACTOR;
 use crate::context::{FreqContext, ObsContext};
 use crate::data_formats::{metafits, InputData, ReadInputDataError};
 use crate::glob::get_single_match_from_glob;
-use crate::{calibrate::params::Delays, constants::HIFITIME_GPS_FACTOR};
 use fitsio::errors::check_status as fits_check_status;
-use mwa_hyperdrive_core::{c32, mwalib, Jones, RADec};
+use mwa_hyperdrive_core::{beam::Delays, c32, mwalib, Jones, RADec};
 use mwalib::{
     fitsio::{hdu::FitsHdu, FitsFile},
     *,

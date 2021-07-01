@@ -226,8 +226,7 @@ impl<'a> UvfitsWriter<'a> {
     ///
     /// `centre_freq` is the centre frequency of the coarse band that this
     /// uvfits file pertains to. `positions` are the [XyzGeodetic] coordinates
-    /// of the MWA tiles. These positions need to have the MWA's "centre" XYZ
-    /// coordinates subtracted to make them local XYZ.
+    /// of the MWA tiles.
     ///
     /// `Self` must have only have a single HDU when this function is called
     /// (true when using methods only provided by `Self`).

@@ -29,11 +29,11 @@ use log::{debug, info, trace, warn};
 use mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
 use rayon::prelude::*;
 
-use crate::beam::{Beam, BeamError};
 use crate::calibrate::veto::veto_sources;
 use crate::data_formats::*;
 use crate::precession::precess_time;
 use crate::{glob::*, *};
+use mwa_hyperdrive_core::beam::*;
 use mwa_hyperdrive_core::jones::cache::JonesCache;
 use mwa_hyperdrive_core::*;
 use mwa_hyperdrive_srclist::SourceListType;
@@ -700,18 +700,6 @@ impl CalibrateParams {
     }
 }
 
-/// An enum to track whether MWA dipole delays are provided and/or necessary.
-pub(crate) enum Delays {
-    /// Delays are available.
-    Available(Vec<u32>),
-
-    /// Delays have not been provided, but are necessary for calibration.
-    None,
-
-    /// Delays are not necessary, probably because no beam code is being used.
-    NotNecessary,
-}
-
 fn create_beam_object<T: AsRef<Path>>(
     no_beam: bool,
     delays: Delays,
@@ -719,16 +707,16 @@ fn create_beam_object<T: AsRef<Path>>(
 ) -> Result<Box<dyn Beam>, BeamError> {
     if no_beam {
         info!("Not using a beam");
-        Ok(Box::new(beam::NoBeam))
+        Ok(Box::new(NoBeam))
     } else {
         trace!("Setting up FEE beam");
         let beam = if let Some(bf) = beam_file {
             // Set up the FEE beam struct from the specified beam file.
-            Box::new(beam::FEEBeam::new(&bf, delays)?)
+            Box::new(FEEBeam::new(&bf, delays)?)
         } else {
             // Set up the FEE beam struct from the MWA_BEAM_FILE environment
             // variable.
-            Box::new(beam::FEEBeam::new_from_env(delays)?)
+            Box::new(FEEBeam::new_from_env(delays)?)
         };
         info!("Using FEE beam with delays {:?}", beam.get_delays());
         Ok(beam)

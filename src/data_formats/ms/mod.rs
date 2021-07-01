@@ -18,11 +18,12 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::*;
+use crate::constants::HIFITIME_GPS_FACTOR;
 use crate::context::{FreqContext, ObsContext};
 use crate::data_formats::metafits;
 use crate::glob::get_single_match_from_glob;
-use crate::{calibrate::params::Delays, constants::HIFITIME_GPS_FACTOR};
 use mwa_hyperdrive_core::{
+    beam::Delays,
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
@@ -250,7 +251,7 @@ impl MS {
             .collect();
         if let Some(time_res) = time_res {
             debug!(
-                "First good GPS timestep: {}",
+                "First good GPS timestep: {:.2}",
                 // Need to remove a number from the result of .as_gpst_seconds(), as
                 // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
                 // expect GPS timestamps to be "leading edge", not centroids.
@@ -259,7 +260,7 @@ impl MS {
                     - time_res / 2.0
             );
             debug!(
-                "Last good GPS timestep:  {}",
+                "Last good GPS timestep:  {:.2}",
                 timesteps[unflagged_timestep_indices.end - 1].as_gpst_seconds()
                     - HIFITIME_GPS_FACTOR
                     - time_res / 2.0
@@ -267,7 +268,7 @@ impl MS {
         } else {
             // No time resolution; just print out the first GPS timestep.
             debug!(
-                "Only GPS timestep: {}",
+                "Only GPS timestep: {:.2}",
                 timesteps[0].as_gpst_seconds() - HIFITIME_GPS_FACTOR
             );
         }

@@ -23,9 +23,9 @@ pub(super) type TmpSourceList = BTreeMap<String, Vec<TmpComponent>>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct TmpComponent {
-    /// Degrees
+    /// \[degrees\]
     ra: f64,
-    /// Degrees
+    /// \[degrees\]
     dec: f64,
     comp_type: ComponentType,
     flux_type: TmpFluxDensityType,

@@ -14,7 +14,7 @@ use crate::data_formats::{
     uvfits::{UvfitsReadError, UvfitsWriteError},
     ReadInputDataError,
 };
-use mwa_hyperdrive_core::{mwalib, EstimateError};
+use mwa_hyperdrive_core::{beam::BeamError, mwalib, EstimateError};
 use mwalib::fitsio;
 
 #[derive(Error, Debug)]
@@ -35,7 +35,7 @@ pub enum CalibrateError {
     WriteSolutions(#[from] WriteSolutionsError),
 
     #[error("{0}")]
-    Beam(#[from] crate::beam::BeamError),
+    Beam(#[from] BeamError),
 
     #[error("cfitsio error: {0}")]
     Fitsio(#[from] fitsio::errors::Error),

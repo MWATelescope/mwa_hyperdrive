@@ -13,8 +13,8 @@ use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
 
 use super::params::RankedSource;
-use crate::{beam::Beam, *};
-use mwa_hyperdrive_core::*;
+use crate::*;
+use mwa_hyperdrive_core::{beam::BeamError, *};
 
 /// This function mutates the input source list, removing any sources that have
 /// beam-attenuated flux densities less than the threshold, and/or remove
@@ -85,9 +85,9 @@ pub(crate) fn veto_sources(
             // far from the phase centre?
             for comp in &source.components {
                 let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                if azel.el < ELEVATION_LIMIT {
-                    trace!("A component's elevation ({} radians, source {}) was below the limit ({} radians)",
-                           azel.el,
+                if azel.el.to_degrees() < ELEVATION_LIMIT {
+                    trace!("A component's elevation ({}°, source {}) was below the limit ({}°)",
+                           azel.el.to_degrees(),
                            source_name,
                            ELEVATION_LIMIT);
                     return Either::Left(Ok(source_name.clone()));
@@ -239,7 +239,7 @@ pub enum VetoError {
     TooFewSources { requested: usize, available: usize },
 
     #[error("{0}")]
-    Beam(#[from] crate::beam::BeamError),
+    Beam(#[from] BeamError),
 
     #[error("{0}")]
     Estimate(#[from] mwa_hyperdrive_core::flux_density::EstimateError),

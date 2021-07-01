@@ -26,4 +26,6 @@ pub use mwalib;
 pub use num::complex::{Complex32 as c32, Complex64 as c64};
 
 #[cfg(feature = "beam")]
-pub use mwa_hyperbeam;
+pub mod beam;
+#[cfg(feature = "beam")]
+pub use beam::Beam;
