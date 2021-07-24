@@ -10,19 +10,18 @@ use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
 use mwa_hyperdrive_core::XyzGeodetic;
+use mwalib::{
+    fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
+    *,
+};
 use ndarray::prelude::*;
 
 use super::*;
-use crate::constants::HIFITIME_GPS_FACTOR;
 use crate::context::{FreqContext, ObsContext};
 use crate::data_formats::{metafits, InputData, ReadInputDataError};
 use crate::glob::get_single_match_from_glob;
-use fitsio::errors::check_status as fits_check_status;
+use crate::time::{epoch_as_gps_seconds, jd_to_epoch};
 use mwa_hyperdrive_core::{beam::Delays, c32, mwalib, Jones, RADec};
-use mwalib::{
-    fitsio::{hdu::FitsHdu, FitsFile},
-    *,
-};
 
 const TIMESTEP_AS_INT_FACTOR: f64 = 1e18;
 
@@ -108,14 +107,14 @@ impl Uvfits {
             "Number of fine frequency chans: {}",
             metadata.num_fine_freq_chans
         );
-        debug!("UU index: {}", metadata.indices.u);
-        debug!("VV index: {}", metadata.indices.v);
-        debug!("WW index: {}", metadata.indices.w);
+        debug!("UU index:       {}", metadata.indices.u);
+        debug!("VV index:       {}", metadata.indices.v);
+        debug!("WW index:       {}", metadata.indices.w);
         debug!("BASELINE index: {}", metadata.indices.baseline);
-        debug!("DATE index: {}", metadata.indices.date);
-        debug!("RA index: {}", metadata.indices.ra);
-        debug!("DEC index: {}", metadata.indices.dec);
-        debug!("FREQ index: {}", metadata.indices.freq);
+        debug!("DATE index:     {}", metadata.indices.date);
+        debug!("RA index:       {}", metadata.indices.ra);
+        debug!("DEC index:      {}", metadata.indices.dec);
+        debug!("FREQ index:     {}", metadata.indices.freq);
 
         if metadata.num_rows == 0 {
             return Err(UvfitsReadError::Empty(uvfits_pb));
@@ -140,13 +139,16 @@ impl Uvfits {
             RADec::new_degrees(ra, dec)
         };
 
+        // TODO: Properly determine MWA version.
+        let mwa_version = MWAVersion::CorrLegacy;
+
         // Get the dipole delays and the pointing centre (if possible).
         // TODO: Decide on a key that uvfits can optionally provide for dipole
         // delays. Until this available, a metafits file is always necessary.
         let pointing_centre: Option<RADec> = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta)?;
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
                 // Only use the metafits delays if none were provided to
                 // this function.
                 match dipole_delays {
@@ -190,18 +192,16 @@ impl Uvfits {
                 let time_res = (second - first).in_unit_f64(hifitime::TimeUnit::Second);
                 trace!("Time resolution: {}s", time_res);
                 debug!(
-                    "First good GPS timestep: {}",
+                    "First good GPS timestep: {:.2}",
                     // Need to remove a number from the result of .as_gpst_seconds(), as
                     // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
                     // expect GPS timestamps to be "leading edge", not centroids.
-                    timesteps[unflagged_timestep_indices.start].as_gpst_seconds()
-                        - HIFITIME_GPS_FACTOR
+                    epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.start])
                         - time_res / 2.0
                 );
                 debug!(
-                    "Last good GPS timestep:  {}",
-                    timesteps[unflagged_timestep_indices.end - 1].as_gpst_seconds()
-                        - HIFITIME_GPS_FACTOR
+                    "Last good GPS timestep:  {:.2}",
+                    epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.end - 1])
                         - time_res / 2.0
                 );
                 Some(time_res)
@@ -209,8 +209,8 @@ impl Uvfits {
             _ => {
                 warn!("Only one timestep is present in the data; can't determine the observation's native time resolution.");
                 debug!(
-                    "Only GPS timestep: {}",
-                    timesteps[0].as_gpst_seconds() - HIFITIME_GPS_FACTOR
+                    "Only GPS timestep: {:.2}",
+                    epoch_as_gps_seconds(timesteps[0])
                 );
                 None
             }
@@ -228,7 +228,7 @@ impl Uvfits {
         let dipole_gains: Array2<f64> = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta)?;
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
                 metafits::get_dipole_gains(context)
             }
             None => {
@@ -242,7 +242,7 @@ impl Uvfits {
         let obsid = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta)?;
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
                 Some(context.obs_id)
             }
             // How does a uvfits file advertise the obsid? There is an "obs.
@@ -664,7 +664,7 @@ impl Indices {
 fn get_jd_frac_timesteps(
     uvfits: &mut FitsFile,
     metadata: &UvfitsMetadata,
-) -> Result<BTreeSet<u64>, UvfitsReadError> {
+) -> Result<BTreeSet<i64>, UvfitsReadError> {
     let mut timesteps = BTreeSet::new();
     let mut status = 0;
     unsafe {
@@ -683,11 +683,12 @@ fn get_jd_frac_timesteps(
             // TODO: Handle the errors nicely; the error messages aren't helpful
             // right now.
             fits_check_status(status)?;
+
+            // Floats can't be compared nicely. Multiply by a big number and
+            // round to an int.
+            let timestep_as_int = (timestep[0] * TIMESTEP_AS_INT_FACTOR) as i64;
+            timesteps.insert(timestep_as_int);
         }
-        // Floats can't be compared nicely. Multiply by a big number and round
-        // to an int.
-        let timestep_as_int = (timestep[0] * TIMESTEP_AS_INT_FACTOR) as u64;
-        timesteps.insert(timestep_as_int);
     }
     Ok(timesteps)
 }
@@ -801,17 +802,4 @@ fn read_cell_array(
 
         Ok(array)
     }
-}
-
-/// Convert a Julian date to a `hifitime` [Epoch]. This function is especially
-/// useful to account for leap seconds.
-pub(super) fn jd_to_epoch(jd_days: f64) -> hifitime::Epoch {
-    // This isn't really the number of leap seconds; it's the number of leap
-    // seconds divided by the number of seconds in a day. Perfect for adding to
-    // a JD.
-    let num_leap_seconds = {
-        let naive_obs_epoch = Epoch::from_tai_days(jd_days);
-        jd_days - naive_obs_epoch.as_utc_days()
-    };
-    Epoch::from_jde_tai(jd_days + num_leap_seconds)
 }

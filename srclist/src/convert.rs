@@ -21,6 +21,7 @@ pub fn convert<T: AsRef<Path>, S: AsRef<str>>(
     output_path: T,
     input_type: Option<S>,
     output_type: Option<S>,
+    convert_lists: bool,
 ) -> Result<(), SrclistError> {
     let input_path = input_path.as_ref().to_path_buf();
     let output_path = output_path.as_ref().to_path_buf();
@@ -37,13 +38,21 @@ pub fn convert<T: AsRef<Path>, S: AsRef<str>>(
     }
 
     // Read the input source list.
-    let (sl, sl_type) = crate::read::read_source_list_file(&input_path, input_type)?;
+    let (mut sl, sl_type) = crate::read::read_source_list_file(&input_path, input_type)?;
     if input_type.is_none() {
         info!(
             "Successfully read {} as a {}-style source list",
             input_path.display(),
             sl_type
         );
+    }
+
+    // If we were told to, attempt to convert lists of flux densities to power
+    // laws.
+    if convert_lists {
+        sl.values_mut()
+            .flat_map(|src| &mut src.components)
+            .for_each(|comp| comp.flux_type.convert_list_to_power_law());
     }
 
     // Write the output source list.

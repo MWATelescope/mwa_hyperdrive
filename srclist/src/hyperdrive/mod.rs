@@ -4,13 +4,11 @@
 
 //! Code to handle hyperdrive source list files.
 //!
-//! All frequencies are in Hz. All flux densities are in Jy. All Gaussian and
-//! Shapelet sizes are in arcsec, but their position angles are in degrees.
-//!
-//! RA and Dec are in degrees in the J2000 epoch.
+//! See for more info:
+//! <https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists>
 
-pub mod read;
-pub mod write;
+mod read;
+mod write;
 
 use std::collections::BTreeMap;
 

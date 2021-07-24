@@ -15,7 +15,10 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use mwa_hyperdrive_core::*;
-    use mwa_hyperdrive_srclist::hyperdrive;
+    use mwa_hyperdrive_srclist::{
+        hyperdrive, ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source,
+        SourceComponent, SourceList,
+    };
 
     /// The return value of this function is the sourcelist that should match
     /// what is in the examples.
@@ -73,7 +76,7 @@ mod tests {
                         coeffs: vec![ShapeletCoeff {
                             n1: 0,
                             n2: 1,
-                            coeff: 0.5,
+                            value: 0.5,
                         }],
                     },
                     flux_type: FluxDensityType::CurvedPowerLaw {

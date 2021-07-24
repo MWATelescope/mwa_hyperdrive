@@ -48,6 +48,7 @@ impl HADec {
     /// elevation), given the local latitude on Earth.
     ///
     /// Uses ERFA.
+    #[cfg(feature = "erfa")]
     pub fn to_azel(&self, latitude_rad: f64) -> AzEl {
         let mut az = 0.0;
         let mut el = 0.0;
@@ -57,6 +58,7 @@ impl HADec {
 
     /// Convert the equatorial coordinates to horizon coordinates (azimuth and
     /// elevation) for the MWA's location.
+    #[cfg(feature = "mwalib")]
     pub fn to_azel_mwa(&self) -> AzEl {
         Self::to_azel(&self, crate::constants::MWA_LAT_RAD)
     }
@@ -64,6 +66,7 @@ impl HADec {
     /// Calculate the distance between two sets of coordinates.
     ///
     /// Uses ERFA.
+    #[cfg(feature = "erfa")]
     pub fn separation(&self, b: &Self) -> f64 {
         unsafe { erfa_sys::eraSeps(self.ha, self.dec, b.ha, b.dec) }
     }
@@ -81,6 +84,7 @@ mod tests {
     use approx::*;
 
     #[test]
+    #[cfg(feature = "mwalib")]
     fn to_azel() {
         let hd = HADec::new_degrees(1.0, -35.0);
         let ae = hd.to_azel_mwa();
@@ -89,6 +93,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "mwalib")]
     fn to_azel2() {
         let hd = HADec::new_degrees(23.0, -35.0);
         let ae = hd.to_azel_mwa();
@@ -97,6 +102,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "erfa")]
     fn separation() {
         let hd1 = HADec::new_degrees(1.0, -35.0);
         let hd2 = HADec::new_degrees(23.0, -35.0);
@@ -105,6 +111,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "erfa")]
     fn separation2() {
         let hd1 = HADec::new_degrees(1.0, -35.0);
         let hd2 = HADec::new_degrees(1.1, -35.0);
@@ -113,6 +120,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "erfa")]
     fn separation3() {
         let hd1 = HADec::new_degrees(1.0, -35.0);
         let hd2 = HADec::new_degrees(4.0, 35.0);
@@ -121,6 +129,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "erfa")]
     fn separation4() {
         let hd1 = HADec::new_degrees(2.0, -35.0);
         let hd2 = HADec::new_degrees(2.0, -35.0);

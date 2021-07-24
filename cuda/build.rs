@@ -38,7 +38,8 @@ fn main() {
         panic!("HYPERDRIVE_CUDA_COMPUTE is not a two-digit number!")
     }
 
-    // Compile all CUDA source files into a single library.
+    // Compile all CUDA source files into a single library. Find .cu, .h and
+    // .cuh files; if any of them change, tell cargo to recompile.
     let mut cuda_files = vec![];
     for entry in std::fs::read_dir("src_cuda").expect("src_cuda directory doesn't exist!") {
         let entry = entry.expect("Couldn't access file in src_cuda directory");
@@ -49,9 +50,18 @@ fn main() {
         }
 
         // Continue if this file's extension is .cu
-        if let Some("cu") = path.extension().and_then(|os_str| os_str.to_str()) {
-            // Add this .cu file to be compiled later.
-            cuda_files.push(path);
+        match path.extension().and_then(|os_str| os_str.to_str()) {
+            Some("cu") => {
+                println!("cargo:rerun-if-changed={}", path.display());
+                // Add this .cu file to be compiled later.
+                cuda_files.push(path);
+            }
+
+            Some("h" | "cuh") => {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+
+            _ => (),
         }
     }
 
@@ -73,28 +83,15 @@ fn main() {
                 _ => "DEBUG",
             },
             None,
-        );
-    for f in cuda_files {
-        println!("cargo:rerun-if-changed={}", f.display());
-        cuda_target.file(f);
-    }
-    cuda_target.compile("hyperdrive_cu");
+        )
+        .files(&cuda_files)
+        .compile("hyperdrive_cu");
 
-    // If the library path manually specified, search there.
+    // Link CUDA. If the library path manually specified, search there.
     if let Ok(lib_dir) = env::var("CUDA_LIB") {
         println!("cargo:rustc-link-search=native={}", lib_dir);
-        // } else {
-        //     // Use the following search paths when linking. CUDA could be installed
-        //     // in a couple of places, and use "lib" or "lib64"; specify all
-        //     // combinations.
-        //     for path in &["/usr/local/cuda", "/opt/cuda"] {
-        //         for lib_path in &["lib", "lib64"] {
-        //             println!("cargo:rustc-link-search=native={}/{}", path, lib_path);
-        //         }
-        //     }
     }
 
-    // Link CUDA.
     if infer_static("cuda") {
         // CUDA ships its static library as cudart_static.a, not cudart.a
         println!("cargo:rustc-link-lib=static=cudart_static");

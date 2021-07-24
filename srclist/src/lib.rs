@@ -5,35 +5,49 @@
 //! Code to handle sky-model source lists.
 
 pub mod ao;
-pub mod convert;
-mod error;
+pub mod constants;
+pub mod flux_density;
 pub mod hyperdrive;
 pub mod read;
 pub mod rts;
-pub mod verify;
+pub mod source_lists;
 pub mod woden;
 
+mod by_beam;
+mod convert;
+mod error;
+mod verify;
+mod veto;
+
+pub use by_beam::*;
 pub use convert::*;
 pub use error::*;
+pub use flux_density::*;
+pub use source_lists::*;
 pub use verify::*;
+pub use veto::*;
 
 use itertools::Itertools;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
+
+use constants::*;
+use mwa_hyperdrive_core::RADec;
 
 /// All of the possible sky-model sources list types.
 #[derive(Debug, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
 pub enum SourceListType {
     #[strum(serialize = "hyperdrive")]
     Hyperdrive,
+
     #[strum(serialize = "rts")]
     Rts,
+
     #[strum(serialize = "woden")]
     Woden,
+
     #[strum(serialize = "ao")]
     AO,
-    // #[strum(serialize = "unspecified")]
-    // Unspecified,
 }
 
 /// All of the possible file extensions that a hyperdrive-style sky-model source
@@ -42,6 +56,7 @@ pub enum SourceListType {
 pub enum HyperdriveFileType {
     #[strum(serialize = "yaml")]
     Yaml,
+
     #[strum(serialize = "json")]
     Json,
 }
@@ -51,27 +66,34 @@ lazy_static::lazy_static! {
 
     pub static ref HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED: String = HyperdriveFileType::iter().join(", ");
 
+    pub static ref SRCLIST_BY_BEAM_OUTPUT_TYPE_HELP: String =
+    format!("Specifies the type of the output source list. If not specified, the input source list type is used. Currently supported types: {}",
+            *SOURCE_LIST_TYPES_COMMA_SEPARATED);
+
+    pub static ref SOURCE_DIST_CUTOFF_HELP: String =
+    format!("Specifies the maximum distance from the phase centre a source can be [degrees]. Default: {}",
+            DEFAULT_CUTOFF_DISTANCE);
+
+    pub static ref VETO_THRESHOLD_HELP: String =
+    format!("Specifies the minimum Stokes XX+YY a source must have before it gets vetoed [Jy]. Default: {}",
+            DEFAULT_VETO_THRESHOLD);
+
     pub static ref CONVERT_INPUT_TYPE_HELP: String =
-        format!("Specifies the type of the input source list. Currently supported types: {}",
+    format!("Specifies the type of the input source list. Currently supported types: {}",
                 *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 
     pub static ref CONVERT_OUTPUT_TYPE_HELP: String =
-        format!("Specifies the type of the output source list. May be required depending on the output filename. Currently supported types: {}",
-                *SOURCE_LIST_TYPES_COMMA_SEPARATED);
+    format!("Specifies the type of the output source list. May be required depending on the output filename. Currently supported types: {}",
+            *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 }
-
-// Convenience imports.
-use mwa_hyperdrive_core::*;
 
 // External re-exports.
 pub use mwa_hyperdrive_core;
-pub use mwa_hyperdrive_core::SourceList;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
-    use mwa_hyperdrive_core::constants::DEFAULT_SPEC_INDEX;
     use std::io::Cursor;
 
     fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
@@ -130,8 +152,8 @@ mod tests {
                                     assert_eq!(s1_coeff.n1, s2_coeff.n1);
                                     assert_eq!(s1_coeff.n2, s2_coeff.n2);
                                     assert_abs_diff_eq!(
-                                        s1_coeff.coeff,
-                                        s2_coeff.coeff,
+                                        s1_coeff.value,
+                                        s2_coeff.value,
                                         epsilon = 1e-10
                                     );
                                 }
@@ -143,7 +165,12 @@ mod tests {
 
                 match &s1_comp.flux_type {
                     FluxDensityType::List { fds } => {
-                        assert!(matches!(s2_comp.flux_type, FluxDensityType::List { .. }));
+                        assert!(
+                            matches!(s2_comp.flux_type, FluxDensityType::List { .. }),
+                            "{:?} {:?}",
+                            s1_comp,
+                            s2_comp
+                        );
                         let s1_fds = fds;
                         match &s2_comp.flux_type {
                             FluxDensityType::List { fds } => {
@@ -160,43 +187,59 @@ mod tests {
                         }
                     }
 
-                    FluxDensityType::PowerLaw { fd, si } => {
+                    FluxDensityType::PowerLaw { .. } => {
                         assert!(matches!(
                             s2_comp.flux_type,
                             FluxDensityType::PowerLaw { .. }
                         ));
-                        let s1_fd = fd;
-                        let s1_si = *si;
                         match s2_comp.flux_type {
-                            FluxDensityType::PowerLaw { fd, si } => {
-                                assert_abs_diff_eq!(s1_fd.freq, fd.freq, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.i, fd.i, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.q, fd.q, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.u, fd.u, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.v, fd.v, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_si, si, epsilon = 1e-10);
+                            FluxDensityType::PowerLaw { .. } => {
+                                // The parameters of the power law may not
+                                // match, but the estimated flux densities
+                                // should.
+                                let s1_fd = s1_comp.flux_type.estimate_at_freq(150e6);
+                                let s2_fd = s2_comp.flux_type.estimate_at_freq(150e6);
+                                assert_abs_diff_eq!(s1_fd.freq, s2_fd.freq, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.i, s2_fd.i, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.q, s2_fd.q, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.u, s2_fd.u, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.v, s2_fd.v, epsilon = 1e-10);
+                                let s1_fd = s1_comp.flux_type.estimate_at_freq(250e6);
+                                let s2_fd = s2_comp.flux_type.estimate_at_freq(250e6);
+                                assert_abs_diff_eq!(s1_fd.freq, s2_fd.freq, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.i, s2_fd.i, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.q, s2_fd.q, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.u, s2_fd.u, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.v, s2_fd.v, epsilon = 1e-10);
                             }
                             _ => unreachable!(),
                         }
                     }
 
-                    FluxDensityType::CurvedPowerLaw { fd, si, q } => {
+                    FluxDensityType::CurvedPowerLaw { .. } => {
                         assert!(matches!(
                             s2_comp.flux_type,
                             FluxDensityType::PowerLaw { .. }
                         ));
-                        let s1_fd = fd;
-                        let s1_si = *si;
-                        let s1_q = *q;
                         match s2_comp.flux_type {
-                            FluxDensityType::CurvedPowerLaw { fd, si, q } => {
-                                assert_abs_diff_eq!(s1_fd.freq, fd.freq, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.i, fd.i, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.q, fd.q, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.u, fd.u, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_fd.v, fd.v, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_si, si, epsilon = 1e-10);
-                                assert_abs_diff_eq!(s1_q, q, epsilon = 1e-10);
+                            FluxDensityType::CurvedPowerLaw { .. } => {
+                                // The parameters of the curved power law may
+                                // not match, but the estimated flux densities
+                                // should.
+                                let s1_fd = s1_comp.flux_type.estimate_at_freq(150e6);
+                                let s2_fd = s2_comp.flux_type.estimate_at_freq(150e6);
+                                assert_abs_diff_eq!(s1_fd.freq, s2_fd.freq, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.i, s2_fd.i, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.q, s2_fd.q, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.u, s2_fd.u, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.v, s2_fd.v, epsilon = 1e-10);
+                                let s1_fd = s1_comp.flux_type.estimate_at_freq(250e6);
+                                let s2_fd = s2_comp.flux_type.estimate_at_freq(250e6);
+                                assert_abs_diff_eq!(s1_fd.freq, s2_fd.freq, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.i, s2_fd.i, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.q, s2_fd.q, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.u, s2_fd.u, epsilon = 1e-10);
+                                assert_abs_diff_eq!(s1_fd.v, s2_fd.v, epsilon = 1e-10);
                             }
                             _ => unreachable!(),
                         }
@@ -215,14 +258,15 @@ mod tests {
                 components: vec![SourceComponent {
                     radec: RADec::new_degrees(60.0, -27.0),
                     comp_type: ComponentType::Point,
-                    flux_type: FluxDensityType::List {
-                        fds: vec![FluxDensity {
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: DEFAULT_SPEC_INDEX,
+                        fd: FluxDensity {
                             freq: 180e6,
                             i: 10.0,
                             q: 1.0,
                             u: 2.0,
                             v: 3.0,
-                        }],
+                        },
                     },
                 }],
             },
@@ -237,14 +281,15 @@ mod tests {
                         min: 0.5,
                         pa: 90.0,
                     },
-                    flux_type: FluxDensityType::List {
-                        fds: vec![FluxDensity {
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: DEFAULT_SPEC_INDEX,
+                        fd: FluxDensity {
                             freq: 190e6,
                             i: 11.0,
                             q: 1.0,
                             u: 2.0,
                             v: 3.0,
-                        }],
+                        },
                     },
                 }],
             },
@@ -261,17 +306,18 @@ mod tests {
                         coeffs: vec![ShapeletCoeff {
                             n1: 0,
                             n2: 0,
-                            coeff: 1.0,
+                            value: 1.0,
                         }],
                     },
-                    flux_type: FluxDensityType::List {
-                        fds: vec![FluxDensity {
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: DEFAULT_SPEC_INDEX,
+                        fd: FluxDensity {
                             freq: 170e6,
                             i: 9.0,
                             q: 1.0,
                             u: 2.0,
                             v: 3.0,
-                        }],
+                        },
                     },
                 }],
             },
@@ -365,8 +411,8 @@ mod tests {
             .flat_map(|(_, s)| &mut s.components)
         {
             comp.flux_type = match &comp.flux_type {
-                FluxDensityType::List {fds} => FluxDensityType::PowerLaw {fd: fds[0], si: DEFAULT_SPEC_INDEX},
-                FluxDensityType::PowerLaw {fd, si} => FluxDensityType::PowerLaw {fd: fd.clone(), si: *si},
+                FluxDensityType::List {fds} => FluxDensityType::PowerLaw {fd: fds[0].clone(), si: DEFAULT_SPEC_INDEX},
+                FluxDensityType::PowerLaw {fd, si} => FluxDensityType::PowerLaw {si: *si, fd: fd.clone()},
                 FluxDensityType::CurvedPowerLaw {..} => panic!("Source list has a curved power law, but it shouldn't, and WODEN can't handle it."),
             };
         }

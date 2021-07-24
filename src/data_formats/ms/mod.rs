@@ -18,17 +18,17 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::*;
-use crate::constants::HIFITIME_GPS_FACTOR;
 use crate::context::{FreqContext, ObsContext};
 use crate::data_formats::metafits;
 use crate::glob::get_single_match_from_glob;
+use crate::time::{casacore_utc_to_epoch, epoch_as_gps_seconds};
 use mwa_hyperdrive_core::{
     beam::Delays,
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
     },
-    Jones, RADec, XyzGeocentric,
+    mwalib, Jones, RADec, XyzGeocentric,
 };
 
 const COTTER_DEFAULT_EDGEWIDTH: f64 = 80e3;
@@ -51,11 +51,11 @@ pub(crate) struct MS {
 }
 
 impl MS {
-    /// Verify and populate metadata associated with this measurement set. TODO:
-    /// Use the metafits to get dead dipole info.
+    /// Verify and populate metadata associated with this measurement set.
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
+    // TODO: Handle multiple measurement sets.
     pub(crate) fn new<T: AsRef<Path>>(
         ms: &T,
         metafits: Option<&T>,
@@ -251,25 +251,22 @@ impl MS {
             .collect();
         if let Some(time_res) = time_res {
             debug!(
-                "First good GPS timestep: {:.2}",
+                "First good timestep (GPS): {:.2}",
                 // Need to remove a number from the result of .as_gpst_seconds(), as
                 // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
                 // expect GPS timestamps to be "leading edge", not centroids.
-                timesteps[unflagged_timestep_indices.start].as_gpst_seconds()
-                    - HIFITIME_GPS_FACTOR
-                    - time_res / 2.0
+                epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.start]) - time_res / 2.0
             );
             debug!(
-                "Last good GPS timestep:  {:.2}",
-                timesteps[unflagged_timestep_indices.end - 1].as_gpst_seconds()
-                    - HIFITIME_GPS_FACTOR
+                "Last good timestep  (GPS): {:.2}",
+                epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.end - 1])
                     - time_res / 2.0
             );
         } else {
             // No time resolution; just print out the first GPS timestep.
             debug!(
-                "Only GPS timestep: {:.2}",
-                timesteps[0].as_gpst_seconds() - HIFITIME_GPS_FACTOR
+                "Only timestep (GPS): {:.2}",
+                epoch_as_gps_seconds(timesteps[0])
             );
         }
 
@@ -325,6 +322,11 @@ impl MS {
         // If a metafits file was provided, we _may_ use it. Get a _potential_
         // mwalib object ready.
         let mut mwalib = None;
+        // TODO: At the time of writing, only cotter is writing measurement sets
+        // with MWA data. cotter doesn't work with MWAX. However, it is possible
+        // that cotter has been used on "CorrOldLegacy", or that this
+        // measurement set has been generated in another way...
+        let mwa_version = mwalib::MWAVersion::CorrLegacy;
 
         // Populate the dipole delays if we need to, and get the pointing centre
         // if we can.
@@ -362,7 +364,8 @@ impl MS {
 
                 // Use the metafits file.
                 (Err(_), Some(meta)) => {
-                    let context = metafits::populate_metafits_context(&mut mwalib, meta)?;
+                    let context =
+                        metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
                     // Only use the metafits delays if none were provided to
                     // this function.
                     match dipole_delays {
@@ -402,7 +405,7 @@ impl MS {
             }
 
             Some(meta) => {
-                let context = metafits::populate_metafits_context(&mut mwalib, meta)?;
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
                 metafits::get_dipole_gains(context)
             }
         };

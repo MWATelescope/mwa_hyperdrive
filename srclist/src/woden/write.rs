@@ -39,7 +39,7 @@ fn write_comp_type<T: std::io::Write>(
                 min.to_degrees() * 60.0
             )?;
             for c in coeffs {
-                writeln!(buf, "SCOEFF {} {} {}", c.n1, c.n2, c.coeff)?;
+                writeln!(buf, "SCOEFF {} {} {}", c.n1, c.n2, c.value)?;
             }
         }
     }
@@ -54,7 +54,7 @@ fn write_flux_type<T: std::io::Write>(
     match &flux_type {
         FluxDensityType::List { fds } => {
             // Only use the first. WODEN can't use multiple.
-            let fd = fds[0];
+            let fd = &fds[0];
             writeln!(
                 buf,
                 "FREQ {:+e} {} {} {} {}",

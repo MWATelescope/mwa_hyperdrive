@@ -60,7 +60,7 @@ impl PrecessionInfo {
     }
 }
 
-pub(crate) fn get_lmst(time: &Epoch, array_longitude_rad: f64) -> f64 {
+pub(crate) fn get_lmst(time: Epoch, array_longitude_rad: f64) -> f64 {
     let gmst = pal::palGmst(time.as_mjd_utc_days());
     (gmst + array_longitude_rad) % TAU
 }
@@ -68,7 +68,7 @@ pub(crate) fn get_lmst(time: &Epoch, array_longitude_rad: f64) -> f64 {
 // This function is very similar to cotter's `PrepareTimestepUVW`.
 pub(crate) fn precess_time(
     phase_centre: &RADec,
-    time: &Epoch,
+    time: Epoch,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
 ) -> PrecessionInfo {
@@ -417,7 +417,7 @@ mod tests {
         let phase_centre = RADec::new_degrees(0.0, -27.0);
         let eor0 = precess_time(
             &phase_centre,
-            &j2000_epoch,
+            j2000_epoch,
             MWA_LONGITUDE_RADIANS,
             MWA_LATITUDE_RADIANS,
         );
@@ -444,7 +444,7 @@ mod tests {
         let phase_centre = RADec::new_degrees(60.0, -30.0);
         let eor1 = precess_time(
             &phase_centre,
-            &j2000_epoch,
+            j2000_epoch,
             MWA_LONGITUDE_RADIANS,
             MWA_LATITUDE_RADIANS,
         );
@@ -480,7 +480,7 @@ mod tests {
 
         let p = precess_time(
             &phase_centre,
-            &epoch,
+            epoch,
             MWA_LONGITUDE_RADIANS,
             MWA_LATITUDE_RADIANS,
         );
@@ -516,7 +516,7 @@ mod tests {
 
         let p = precess_time(
             &phase_centre,
-            &epoch,
+            epoch,
             MWA_LONGITUDE_RADIANS,
             MWA_LATITUDE_RADIANS,
         );

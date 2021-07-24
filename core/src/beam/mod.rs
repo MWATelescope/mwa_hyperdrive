@@ -17,6 +17,9 @@ mod fee;
 pub use error::*;
 pub use fee::*;
 
+use std::path::Path;
+
+use log::{info, trace};
 use ndarray::prelude::*;
 
 use crate::{AzEl, Jones};
@@ -36,8 +39,8 @@ pub trait Beam: Sync + Send {
     /// information is not needed because it was provided when `self` was
     /// created.
     ///
-    /// `amps` *must* have 16 elements (each corresponds to an MWA dipole in a
-    /// tile, in the M&C order; see
+    /// `amps` *must* have 16 or 32 elements (each corresponds to an MWA dipole
+    /// in a tile, in the M&C order; see
     /// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>.
     fn calc_jones_array(
         &self,
@@ -96,6 +99,36 @@ impl Beam for NoBeam {
     }
 
     fn empty_cache(&self) {}
+}
+
+pub fn create_fee_beam_object<T: AsRef<Path>>(
+    delays: Delays,
+    beam_file: Option<T>,
+) -> Result<Box<dyn Beam>, BeamError> {
+    trace!("Setting up FEE beam");
+    let beam = if let Some(bf) = beam_file {
+        // Set up the FEE beam struct from the specified beam file.
+        Box::new(FEEBeam::new(&bf, delays)?)
+    } else {
+        // Set up the FEE beam struct from the MWA_BEAM_FILE environment
+        // variable.
+        Box::new(FEEBeam::new_from_env(delays)?)
+    };
+    info!("Using FEE beam with delays {:?}", beam.get_delays());
+    Ok(beam)
+}
+
+pub fn create_beam_object<T: AsRef<Path>>(
+    no_beam: bool,
+    delays: Delays,
+    beam_file: Option<T>,
+) -> Result<Box<dyn Beam>, BeamError> {
+    if no_beam {
+        info!("Not using a beam");
+        Ok(Box::new(NoBeam))
+    } else {
+        create_fee_beam_object(delays, beam_file)
+    }
 }
 
 #[cfg(test)]

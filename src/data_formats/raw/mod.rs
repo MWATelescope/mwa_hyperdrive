@@ -215,7 +215,8 @@ impl RawData {
 
         // Populate a frequency context struct.
         let mut fine_chan_freqs = Vec::with_capacity(
-            metafits_context.num_corr_fine_chans_per_coarse * metafits_context.num_coarse_chans,
+            metafits_context.num_corr_fine_chans_per_coarse
+                * metafits_context.metafits_coarse_chans.len(),
         );
         // TODO: I'm suspicious that the start channel freq is incorrect.
         for cc in &mwalib_context.coarse_chans {

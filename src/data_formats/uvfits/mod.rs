@@ -18,7 +18,7 @@ use hifitime::Epoch;
 
 /// From a `hifitime` [Epoch], get a formatted date string with the hours,
 /// minutes and seconds set to 0.
-fn get_truncated_date_string(epoch: &Epoch) -> String {
+fn get_truncated_date_string(epoch: Epoch) -> String {
     let (year, month, day, _, _, _, _) = epoch.as_gregorian_utc();
     format!(
         "{year}-{month}-{day}T00:00:00.0",
@@ -79,7 +79,7 @@ mod tests {
         // 1900-01-01T00:00:00 (TAI epoch) is 1297728000.
         let epoch_diff = 1297728000.0;
         let epoch = Epoch::from_tai_seconds(mjd_seconds - epoch_diff);
-        assert_eq!(get_truncated_date_string(&epoch), "2013-10-15T00:00:00.0");
+        assert_eq!(get_truncated_date_string(epoch), "2013-10-15T00:00:00.0");
     }
 
     #[test]

@@ -4,24 +4,13 @@
 
 //! Parsing of RTS source lists.
 //!
-//! RTS sources always have a "base source", which can be thought of as a
-//! non-optional component. Coordinates are hour angle and declination, which
-//! have units of decimal hours (i.e. 0 - 24) and degrees, respectively.
-//!
-//! Gaussian and shapelet sizes are specified in arcminutes, whereas position
-//! angles are in degrees. All frequencies are in Hz, and all flux densities are
-//! in Jy.
-//!
-//! All flux densities are specified in the "list" style, and all have units of
-//! Jy.
-//!
-//! Keywords like SOURCE, COMPONENT, POINT etc. must be at the start of a line
-//! (i.e. no preceeding space).
+//! See for more info:
+//! <https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists>
 
 use log::warn;
 
 use super::*;
-use crate::constants::DH2R;
+use mwa_hyperdrive_core::constants::DH2R;
 
 /// Parse a buffer containing an RTS-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -363,7 +352,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListRtsError::IncompleteCoeffLine(line_num).into())
                     }
                 };
-                let coeff = match items.next() {
+                let value = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListRtsError::IncompleteCoeffLine(line_num).into())
@@ -382,7 +371,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     let shapelet_coeff = ShapeletCoeff {
                         n1: float_to_int(n1, line_num)?,
                         n2: float_to_int(n2, line_num)?,
-                        coeff,
+                        value,
                     };
                     match &mut components.iter_mut().last().unwrap().comp_type {
                         ComponentType::Shapelet { coeffs, .. } => coeffs.push(shapelet_coeff),
@@ -467,7 +456,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                             return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
                         } else {
                             // Sort the existing flux densities by frequency.
-                            fds.sort_unstable_by(|&a, &b| {
+                            fds.sort_unstable_by(|a, b| {
                                 a.freq.partial_cmp(&b.freq).unwrap_or_else(|| {
                                     panic!("Couldn't compare {} to {}", a.freq, b.freq)
                                 })
@@ -531,20 +520,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                                 sum_v += fd.v;
                             }
                         }
-
-                        FluxDensityType::PowerLaw { fd, .. } => {
-                            sum_i += fd.i;
-                            sum_q += fd.q;
-                            sum_u += fd.u;
-                            sum_v += fd.v;
-                        }
-
-                        FluxDensityType::CurvedPowerLaw { fd, .. } => {
-                            sum_i += fd.i;
-                            sum_q += fd.q;
-                            sum_u += fd.u;
-                            sum_v += fd.v;
-                        }
+                        _ => unreachable!(),
                     }
                 }
                 if sum_i < 0.0 {
@@ -593,7 +569,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                                 );
                             } else {
                                 // Sort the existing flux densities by frequency.
-                                fds.sort_unstable_by(|&a, &b| {
+                                fds.sort_unstable_by(|a, b| {
                                     a.freq.partial_cmp(&b.freq).unwrap_or_else(|| {
                                         panic!("Couldn't compare {} to {}", a.freq, b.freq)
                                     })
@@ -694,17 +670,18 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.40182 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.5551_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
-            _ => unreachable!(),
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].freq, 180e6);
+                assert_abs_diff_eq!(fds[0].i, 1.0);
+                assert_abs_diff_eq!(fds[0].q, 0.0);
+            }
+
+            FluxDensityType::PowerLaw { .. } | FluxDensityType::CurvedPowerLaw { .. } => {
+                unreachable!()
+            }
         };
-        assert_abs_diff_eq!(fds[0].freq, 180e6);
-        assert_abs_diff_eq!(fds[0].i, 1.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
 
         assert!(sl.contains_key("VLA_ForB"));
         let s = sl.get("VLA_ForB").unwrap();
@@ -712,17 +689,15 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.40166 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.0551_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].freq, 180e6);
+                assert_abs_diff_eq!(fds[0].i, 2.0);
+                assert_abs_diff_eq!(fds[0].q, 0.0);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 180e6);
-        assert_abs_diff_eq!(fds[0].i, 2.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
     }
 
     #[test]
@@ -779,40 +754,36 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.40182 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.5551_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].freq, 180e6);
+                assert_abs_diff_eq!(fds[0].i, 1.0);
+                assert_abs_diff_eq!(fds[0].q, 0.0);
+                assert_abs_diff_eq!(fds[1].i, 0.123);
+                assert_abs_diff_eq!(fds[1].q, 0.5);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 180e6);
-        assert_abs_diff_eq!(fds[0].i, 1.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
-        assert_abs_diff_eq!(fds[1].i, 0.123);
-        assert_abs_diff_eq!(fds[1].q, 0.5);
 
         let comp = &s.components[1];
         assert_abs_diff_eq!(comp.radec.ra, 3.402 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.6_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                // Note that 180 MHz isn't the first FREQ specified; the list
+                // has been sorted.
+                assert_abs_diff_eq!(fds[0].freq, 170e6);
+                assert_abs_diff_eq!(fds[0].i, 1.0);
+                assert_abs_diff_eq!(fds[0].q, 0.0);
+                assert_abs_diff_eq!(fds[0].u, 0.2);
+                assert_abs_diff_eq!(fds[1].freq, 180e6);
+                assert_abs_diff_eq!(fds[1].i, 0.5);
+                assert_abs_diff_eq!(fds[1].u, 0.0);
+            }
             _ => unreachable!(),
         };
-        // Note that 180 MHz isn't the first FREQ specified; the list has been
-        // sorted.
-        assert_abs_diff_eq!(fds[0].freq, 170e6);
-        assert_abs_diff_eq!(fds[0].i, 1.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
-        assert_abs_diff_eq!(fds[0].u, 0.2);
-        assert_abs_diff_eq!(fds[1].freq, 180e6);
-        assert_abs_diff_eq!(fds[1].i, 0.5);
-        assert_abs_diff_eq!(fds[1].u, 0.0);
 
         assert!(sl.contains_key("VLA_ForB"));
         let s = sl.get("VLA_ForB").unwrap();
@@ -820,16 +791,14 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.40166 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.0551_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].i, 2.0);
+                assert_abs_diff_eq!(fds[0].q, 0.0);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].i, 2.0);
-        assert_abs_diff_eq!(fds[0].q, 0.0);
     }
 
     #[test]
@@ -1120,7 +1089,7 @@ mod tests {
                 assert_eq!(coeffs.len(), 1);
                 assert_eq!(coeffs[0].n1, 0);
                 assert_eq!(coeffs[0].n2, 0);
-                assert_abs_diff_eq!(coeffs[0].coeff, 0.099731291104);
+                assert_abs_diff_eq!(coeffs[0].value, 0.099731291104);
             }
 
             _ => unreachable!(),

@@ -135,6 +135,7 @@ impl RADec {
     /// Calculate the distance between two sets of coordinates \[radians\].
     ///
     /// Uses ERFA.
+    #[cfg(feature = "erfa")]
     pub fn separation(&self, b: &Self) -> f64 {
         unsafe { erfa_sys::eraSeps(self.ra, self.dec, b.ra, b.dec) }
     }

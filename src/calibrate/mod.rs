@@ -7,10 +7,8 @@
 pub mod args;
 mod di;
 mod error;
-mod model;
 pub(crate) mod params;
 pub mod solutions;
-mod veto;
 
 pub use error::CalibrateError;
 use params::CalibrateParams;

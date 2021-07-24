@@ -11,10 +11,10 @@
 use super::*;
 
 fn source_list_from_tmp_sl(
-    mut tmp_sl: BTreeMap<String, Vec<TmpComponent>>,
+    tmp_sl: BTreeMap<String, Vec<TmpComponent>>,
 ) -> Result<SourceList, ReadSourceListError> {
     let mut sl = SourceList::new();
-    for (name, tmp_comps) in tmp_sl.iter_mut() {
+    for (name, tmp_comps) in tmp_sl.into_iter() {
         let mut comps = Vec::with_capacity(tmp_comps.len());
 
         // Ensure that the sum of each Stokes' flux densities is positive.
@@ -33,7 +33,7 @@ fn source_list_from_tmp_sl(
             }
             let radec = RADec::new_degrees(tmp_comp.ra, tmp_comp.dec);
 
-            let comp_type = match &mut tmp_comp.comp_type {
+            let comp_type = match tmp_comp.comp_type {
                 ComponentType::Point => ComponentType::Point,
                 ComponentType::Gaussian { maj, min, pa } => ComponentType::Gaussian {
                     maj: maj.to_radians() / 3600.0,
@@ -53,15 +53,15 @@ fn source_list_from_tmp_sl(
                 },
             };
 
-            let flux_type = match &tmp_comp.flux_type {
+            let flux_type = match tmp_comp.flux_type {
                 TmpFluxDensityType::List(fds) => {
-                    for fd in fds {
+                    for fd in fds.iter() {
                         sum_i += fd.i;
                         sum_q += fd.q;
                         sum_u += fd.u;
                         sum_v += fd.v;
                     }
-                    FluxDensityType::List { fds: fds.clone() }
+                    FluxDensityType::List { fds }
                 }
 
                 TmpFluxDensityType::PowerLaw { si, fd } => {
@@ -69,7 +69,7 @@ fn source_list_from_tmp_sl(
                     sum_q += fd.q;
                     sum_u += fd.u;
                     sum_v += fd.v;
-                    FluxDensityType::PowerLaw { si: *si, fd: *fd }
+                    FluxDensityType::PowerLaw { si, fd }
                 }
 
                 TmpFluxDensityType::CurvedPowerLaw { si, fd, q } => {
@@ -77,11 +77,7 @@ fn source_list_from_tmp_sl(
                     sum_q += fd.q;
                     sum_u += fd.u;
                     sum_v += fd.v;
-                    FluxDensityType::CurvedPowerLaw {
-                        si: *si,
-                        fd: *fd,
-                        q: *q,
-                    }
+                    FluxDensityType::CurvedPowerLaw { si, fd, q }
                 }
             };
 

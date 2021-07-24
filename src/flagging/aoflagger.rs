@@ -714,7 +714,11 @@ mod tests {
             assert_abs_diff_eq!(res, exp);
         }
 
-        let mut c = MetafitsContext::new(&"test_files/1065880128/1065880128.metafits").unwrap();
+        let mut c = MetafitsContext::new(
+            &"test_files/1065880128/1065880128.metafits",
+            MWAVersion::CorrLegacy,
+        )
+        .unwrap();
         // 1065880128 actually has 109s of data as opposed to the scheduled
         // 112s, but this is impossible to determine without its gpubox files.
         // Because I don't want to include the gpubox files in hyperdrive for

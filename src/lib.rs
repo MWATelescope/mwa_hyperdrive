@@ -6,9 +6,10 @@
 //! telescope.
 
 pub mod calibrate;
+pub mod constants;
+pub mod model;
 pub mod simulate_vis;
 
-pub mod constants;
 pub(crate) mod context;
 pub(crate) mod data_formats;
 pub(crate) mod error;
@@ -17,7 +18,7 @@ pub(crate) mod glob;
 pub(crate) mod math;
 pub(crate) mod precession;
 pub(crate) mod shapelets;
-pub(crate) mod visibility_gen;
+pub(crate) mod time;
 
 #[cfg(test)]
 pub(crate) mod tests;

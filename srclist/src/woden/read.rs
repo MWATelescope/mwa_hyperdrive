@@ -26,8 +26,9 @@
 
 use std::convert::TryInto;
 
+use crate::constants::DEFAULT_SPEC_INDEX;
 use log::warn;
-use mwa_hyperdrive_core::constants::{DEFAULT_SPEC_INDEX, DH2R};
+use mwa_hyperdrive_core::constants::DH2R;
 
 use super::*;
 
@@ -595,7 +596,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListWodenError::IncompleteSCoeffLine(line_num).into())
                     }
                 };
-                let coeff = match items.next() {
+                let value = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(ReadSourceListWodenError::IncompleteSCoeffLine(line_num).into())
@@ -611,7 +612,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 let shapelet_coeff = ShapeletCoeff {
                     n1: float_to_int(n1, line_num)?.try_into().unwrap(),
                     n2: float_to_int(n2, line_num)?.try_into().unwrap(),
-                    coeff,
+                    value,
                 };
 
                 match &mut components.iter_mut().last().unwrap().comp_type {
@@ -690,15 +691,6 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     }
 
                     match &comp.flux_type {
-                        FluxDensityType::List { fds } => {
-                            for fd in fds {
-                                sum_i += fd.i;
-                                sum_q += fd.q;
-                                sum_u += fd.u;
-                                sum_v += fd.v;
-                            }
-                        }
-
                         FluxDensityType::PowerLaw { fd, .. } => {
                             sum_i += fd.i;
                             sum_q += fd.q;
@@ -712,6 +704,8 @@ pub fn parse_source_list<T: std::io::BufRead>(
                             sum_u += fd.u;
                             sum_v += fd.v;
                         }
+
+                        FluxDensityType::List { .. } => unreachable!(),
                     }
                 }
                 if read_num_points != num_points {
@@ -1048,7 +1042,7 @@ mod tests {
 
                 assert_eq!(coeffs[0].n1, 0);
                 assert_eq!(coeffs[0].n2, 0);
-                assert_eq!(coeffs[0].coeff, 1.0);
+                assert_eq!(coeffs[0].value, 1.0);
             }
             _ => unreachable!(),
         }

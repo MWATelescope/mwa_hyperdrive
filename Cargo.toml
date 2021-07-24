@@ -18,8 +18,8 @@ members = [
 opt-level = 2
 
 [features]
-default = []
-cuda = ["mwa_hyperdrive_cuda"]
+default = ["cuda"]
+cuda = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_srclist/cuda"]
 erfa-static = ["mwa_hyperdrive_core/erfa-static"]
 hdf5-static = ["mwa_hyperdrive_core/hdf5-static"]
 cfitsio-static = ["mwa_hyperdrive_core/cfitsio-static"]

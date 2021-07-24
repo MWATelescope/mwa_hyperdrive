@@ -5,11 +5,22 @@ authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
 edition = "2018"
 license = "MPL-2.0"
 
+[features]
+default = []
+cuda = ["mwa_hyperdrive_cuda"]
+erfa-static = ["mwa_hyperdrive_core/erfa-static"]
+hdf5-static = ["mwa_hyperdrive_core/hdf5-static"]
+cfitsio-static = ["mwa_hyperdrive_core/cfitsio-static"]
+all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
+
 [dependencies]
 fern = "0.6.*"
-itertools = "0.10.1"
+itertools = "0.10.*"
 lazy_static = "1.4.*"
 log = "0.4.*"
+ndarray = { version = "0.15.*", features = ["rayon"] }
+num = "0.4.*"
+rayon = "~1"
 serde = { version = "1.0.*", features = ["derive"] }
 serde_json = "1.0.*"
 serde_yaml = "0.8.*"
@@ -19,8 +30,11 @@ strum_macros = "0.21.*"
 thiserror = "1.0.*"
 
 mwa_hyperdrive_core = { path = "../core" }
+mwa_hyperdrive_cuda = { path = "../cuda", optional = true }
 
 [dev-dependencies]
 approx = "0.5.*"
 indoc = "1.0.*"
+num = "0.4.*"
+serial_test = "0.5.*"
 tempfile = "3.1.0"

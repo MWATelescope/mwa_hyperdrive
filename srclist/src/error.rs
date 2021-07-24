@@ -4,8 +4,7 @@
 
 use thiserror::Error;
 
-use crate::read::SourceListError;
-use crate::HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED;
+use crate::{read::SourceListError, VetoError, HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED};
 
 /// Errors associated with reading in any kind of source list.
 #[derive(Error, Debug)]
@@ -268,9 +267,6 @@ pub enum WriteSourceListError {
     InvalidHyperdriveFormat(String),
 
     #[error("{0}")]
-    Estimate(#[from] mwa_hyperdrive_core::EstimateError),
-
-    #[error("{0}")]
     Sexagesimal(#[from] mwa_hyperdrive_core::SexagesimalError),
 
     /// An IO error.
@@ -286,11 +282,17 @@ pub enum WriteSourceListError {
 
 #[derive(Error, Debug)]
 pub enum SrclistError {
+    #[error("No sources were left after vetoing; nothing left to do")]
+    NoSourcesAfterVeto,
+
     #[error("{0}")]
     SourceList(#[from] SourceListError),
 
     #[error("{0}")]
     WriteSourceList(#[from] WriteSourceListError),
+
+    #[error("{0}")]
+    Veto(#[from] VetoError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

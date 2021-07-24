@@ -42,13 +42,14 @@ fn source_list_to_tmp_sl(sl: &SourceList) -> TmpSourceList {
                 comp_type,
                 flux_type: match &comp.flux_type {
                     FluxDensityType::List { fds } => TmpFluxDensityType::List(fds.clone()),
-                    FluxDensityType::PowerLaw { si, fd } => {
-                        TmpFluxDensityType::PowerLaw { si: *si, fd: *fd }
-                    }
+                    FluxDensityType::PowerLaw { si, fd } => TmpFluxDensityType::PowerLaw {
+                        si: *si,
+                        fd: fd.clone(),
+                    },
                     FluxDensityType::CurvedPowerLaw { si, fd, q } => {
                         TmpFluxDensityType::CurvedPowerLaw {
                             si: *si,
-                            fd: *fd,
+                            fd: fd.clone(),
                             q: *q,
                         }
                     }

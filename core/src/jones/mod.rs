@@ -21,8 +21,6 @@ use num::{
     Complex, Float, Num,
 };
 
-use crate::FluxDensity;
-
 #[derive(PartialEq, Clone, Default)]
 pub struct Jones<F: Float + Num>([Complex<F>; 4]);
 
@@ -38,7 +36,7 @@ impl<F: Float> Jones<F> {
     }
 
     /// Return a matrix with all real parts set to NaN and all imaginary parts
-    /// set to zero.
+    /// set to zero. `Jones::any_nan` will return `true` for this Jones matrix.
     pub fn nan() -> Self {
         Self::from([
             Complex::new(F::nan(), F::zero()),
@@ -485,35 +483,11 @@ impl From<&Jones<f64>> for Jones<f32> {
     }
 }
 
-impl From<FluxDensity> for Jones<f64> {
-    #[inline]
-    fn from(fd: FluxDensity) -> Self {
-        Self::from([
-            Complex::new(fd.i + fd.q, 0.0),
-            Complex::new(fd.u, fd.v),
-            Complex::new(fd.u, -fd.v),
-            Complex::new(fd.i - fd.q, 0.0),
-        ])
-    }
-}
-
-impl From<&FluxDensity> for Jones<f64> {
-    #[inline]
-    fn from(fd: &FluxDensity) -> Self {
-        Self::from([
-            Complex::new(fd.i + fd.q, 0.0),
-            Complex::new(fd.u, fd.v),
-            Complex::new(fd.u, -fd.v),
-            Complex::new(fd.i - fd.q, 0.0),
-        ])
-    }
-}
-
 impl std::fmt::Display for Jones<f32> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "[[{:.9} {:.9} i, {:.9} {:.9} i]\n [{:.9} {:.9} i, {:.9} {:.9} i]]",
+            "[[{:e}{:+e}j, {:e}{:+e}j] [{:e}{:+e}j, {:e}{:+e}j]]",
             self[0].re,
             self[0].im,
             self[1].re,
@@ -530,7 +504,7 @@ impl std::fmt::Display for Jones<f64> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "[[{:.15} {:.15} i, {:.15} {:.15} i]\n [{:.15} {:.15} i, {:.15} {:.15} i]]",
+            "[[{:e}{:+e}j, {:e}{:+e}j] [{:e}{:+e}j, {:e}{:+e}j]]",
             self[0].re,
             self[0].im,
             self[1].re,
@@ -547,7 +521,7 @@ impl std::fmt::Debug for Jones<f32> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "[[{:.9} {:.9} i, {:.9} {:.9} i]\n [{:.9} {:.9} i, {:.9} {:.9} i]]",
+            "[[{:e}{:+e}j, {:e}{:+e}j] [{:e}{:+e}j, {:e}{:+e}j]]",
             self[0].re,
             self[0].im,
             self[1].re,
@@ -564,7 +538,7 @@ impl std::fmt::Debug for Jones<f64> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "[[{:.15} {:.15} i, {:.15} {:.15} i]\n [{:.15} {:.15} i, {:.15} {:.15} i]]",
+            "[[{:e}{:+e}j, {:e}{:+e}j] [{:e}{:+e}j, {:e}{:+e}j]]",
             self[0].re,
             self[0].im,
             self[1].re,
@@ -825,37 +799,5 @@ mod tests {
             c64::new(138.0, 0.0),
         ]);
         assert_abs_diff_eq!(c, expected_c, epsilon = 1e-10);
-    }
-
-    #[test]
-    fn test_from_flux_density() {
-        let fd = FluxDensity {
-            freq: 170e6,
-            i: 0.058438801501144624,
-            q: -0.3929914018344019,
-            u: -0.3899498110659575,
-            v: -0.058562589895788,
-        };
-        let result = Jones::from(fd);
-        assert_abs_diff_eq!(result[0], c64::new(fd.i + fd.q, 0.0));
-        assert_abs_diff_eq!(result[1], c64::new(fd.u, fd.v));
-        assert_abs_diff_eq!(result[2], c64::new(fd.u, -fd.v));
-        assert_abs_diff_eq!(result[3], c64::new(fd.i - fd.q, 0.0));
-    }
-
-    #[test]
-    fn test_from_flux_density_borrowed() {
-        let fd = FluxDensity {
-            freq: 170e6,
-            i: 0.058438801501144624,
-            q: -0.3929914018344019,
-            u: -0.3899498110659575,
-            v: -0.058562589895788,
-        };
-        let result = Jones::from(&fd);
-        assert_abs_diff_eq!(result[0], c64::new(fd.i + fd.q, 0.0));
-        assert_abs_diff_eq!(result[1], c64::new(fd.u, fd.v));
-        assert_abs_diff_eq!(result[2], c64::new(fd.u, -fd.v));
-        assert_abs_diff_eq!(result[3], c64::new(fd.i - fd.q, 0.0));
     }
 }

@@ -8,8 +8,6 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use mwa_hyperdrive_core::beam::BeamError;
-
 /// Errors associated with setting up a `CalibrateParams` struct.
 #[derive(Error, Debug)]
 pub enum InvalidArgsError {
@@ -79,13 +77,13 @@ pub enum InvalidArgsError {
     Uvfits(#[from] crate::data_formats::uvfits::UvfitsReadError),
 
     #[error("{0}")]
-    Veto(#[from] crate::calibrate::veto::VetoError),
+    Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 
     #[error("{0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
     #[error("{0}")]
-    Beam(#[from] BeamError),
+    Beam(#[from] mwa_hyperdrive_core::beam::BeamError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

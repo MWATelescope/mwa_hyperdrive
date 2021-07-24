@@ -10,33 +10,33 @@
 //! errors) can be neatly split.
 
 pub(crate) mod error;
-mod filenames;
 pub(crate) mod freq;
-pub(crate) mod ranked_source;
+
+mod filenames;
 
 pub(crate) use error::*;
 use filenames::InputDataTypes;
 pub(crate) use freq::*;
-pub(crate) use ranked_source::*;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use log::{debug, info, trace, warn};
 use mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
 use rayon::prelude::*;
 
-use crate::calibrate::veto::veto_sources;
+use crate::constants::*;
 use crate::data_formats::*;
+use crate::glob::*;
 use crate::precession::precess_time;
-use crate::{glob::*, *};
-use mwa_hyperdrive_core::beam::*;
-use mwa_hyperdrive_core::jones::cache::JonesCache;
+use mwa_hyperdrive_core::beam::Delays;
 use mwa_hyperdrive_core::*;
-use mwa_hyperdrive_srclist::SourceListType;
+use mwa_hyperdrive_srclist::{
+    constants::*, veto_sources, ComponentList, FluxDensityType, SourceList, SourceListType,
+};
 
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {
@@ -51,18 +51,12 @@ pub struct CalibrateParams {
     /// Jones matrices and populate the cache.
     pub(crate) jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache,
 
-    /// The sky-model source list.
-    pub(crate) source_list: mwa_hyperdrive_core::SourceList,
+    /// The sky-model source components.
+    pub(crate) sky_model_comps: ComponentList,
 
     /// The optional sky-model visibilities file. If specified, it will be
     /// written to during calibration.
     pub(crate) model_file: Option<PathBuf>,
-
-    /// A list of source names sorted by flux density (brightest to dimmest).
-    ///
-    /// `source_list` can't be sorted, so this is used to index the source list.
-    // Not currently used.
-    _ranked_sources: Vec<RankedSource>,
 
     /// Which tiles are flagged? This field contains flags that are
     /// user-specified as well as whatever was already flagged in the supplied
@@ -266,7 +260,8 @@ impl CalibrateParams {
             _ => return Err(InvalidArgsError::InvalidDataInput),
         };
 
-        let beam: Box<dyn Beam> = create_beam_object(no_beam, dipole_delays, beam_file)?;
+        let beam: Box<dyn Beam> =
+            crate::beam::create_beam_object(no_beam, dipole_delays, beam_file)?;
 
         // Handle potential issues with the output calibration solutions file.
         let output_solutions_filename = PathBuf::from(
@@ -527,7 +522,7 @@ impl CalibrateParams {
         // (if applicable).
         let precession_info = precess_time(
             &obs_context.phase_centre,
-            &obs_context.timesteps[0],
+            obs_context.timesteps[0],
             array_longitude,
             array_latitude,
         );
@@ -611,7 +606,7 @@ impl CalibrateParams {
         if num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
-        let _ranked_sources = veto_sources(
+        veto_sources(
             &mut source_list,
             &precession_info
                 .hadec_j2000
@@ -638,6 +633,38 @@ impl CalibrateParams {
         } else if source_list.is_empty() {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
+
+        // Convert list flux densities into a power law if possible.
+        // TODO: Make this user controllable.
+        let num_list_types = source_list
+            .par_iter()
+            .flat_map(|(_, source)| &source.components)
+            .filter(|comp| matches!(comp.flux_type, FluxDensityType::List { .. }))
+            .count();
+        source_list
+            .par_iter_mut()
+            .flat_map(|(_, source)| &mut source.components)
+            .for_each(|comp| match &mut comp.flux_type {
+                FluxDensityType::List { .. } => {
+                    comp.flux_type.convert_list_to_power_law();
+                }
+                _ => (),
+            });
+        let new_num_list_types = source_list
+            .par_iter()
+            .flat_map(|(_, source)| &source.components)
+            .filter(|comp| matches!(comp.flux_type, FluxDensityType::List { .. }))
+            .count();
+        debug!(
+            "{} components converted from flux density lists to power laws",
+            num_list_types - new_num_list_types
+        );
+
+        let sky_model_comps = ComponentList::new(
+            source_list,
+            &freq_struct.unflagged_fine_chan_freqs,
+            &obs_context.phase_centre,
+        );
 
         let native_time_res = obs_context.time_res;
         // let time_res = time_res.or(native_time_res);
@@ -678,10 +705,9 @@ impl CalibrateParams {
         Ok(Self {
             input_data,
             beam,
-            jones_cache: JonesCache::new(),
-            source_list,
+            jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache::new(),
+            sky_model_comps,
             model_file,
-            _ranked_sources,
             tile_flags,
             freq: freq_struct,
             time_res,
@@ -697,29 +723,6 @@ impl CalibrateParams {
             min_threshold,
             output_solutions_filename,
         })
-    }
-}
-
-fn create_beam_object<T: AsRef<Path>>(
-    no_beam: bool,
-    delays: Delays,
-    beam_file: Option<T>,
-) -> Result<Box<dyn Beam>, BeamError> {
-    if no_beam {
-        info!("Not using a beam");
-        Ok(Box::new(NoBeam))
-    } else {
-        trace!("Setting up FEE beam");
-        let beam = if let Some(bf) = beam_file {
-            // Set up the FEE beam struct from the specified beam file.
-            Box::new(FEEBeam::new(&bf, delays)?)
-        } else {
-            // Set up the FEE beam struct from the MWA_BEAM_FILE environment
-            // variable.
-            Box::new(FEEBeam::new_from_env(delays)?)
-        };
-        info!("Using FEE beam with delays {:?}", beam.get_delays());
-        Ok(beam)
     }
 }
 

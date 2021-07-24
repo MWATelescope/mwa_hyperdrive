@@ -2,23 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code surrounding the `BTreeMap` used to contain all sky-model sources and
+//! Code surrounding the [BTreeMap] used to contain all sky-model sources and
 //! their components.
 
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
-use crate::{constants::MWA_LAT_RAD, *};
 use rayon::prelude::*;
 
-/// A `BTreeMap` of source names for keys and `Source` structs for values.
+use super::*;
+use mwa_hyperdrive_core::{constants::MWA_LAT_RAD, AzEl, RADec, LMN};
+
+/// A [BTreeMap] of source names for keys and [Source] structs for values.
 ///
-/// By making `SourceList` a new type (specifically, an anonymous struct),
+/// By making [SourceList] a new type (specifically, an anonymous struct),
 /// useful methods can be put onto it.
 #[derive(Debug, Clone, Default)]
 pub struct SourceList(BTreeMap<String, Source>);
 
 impl SourceList {
+    /// Create an empty [SourceList].
     pub fn new() -> Self {
         Self::default()
     }
@@ -102,7 +105,6 @@ impl IntoIterator for SourceList {
     type Item = (String, Source);
     type IntoIter = std::collections::btree_map::IntoIter<String, Source>;
 
-    #[inline]
     fn into_iter(self) -> std::collections::btree_map::IntoIter<String, Source> {
         self.0.into_iter()
     }
@@ -111,6 +113,7 @@ impl IntoIterator for SourceList {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FluxDensity, FluxDensityType};
     use approx::*;
     use std::f64::consts::*;
 

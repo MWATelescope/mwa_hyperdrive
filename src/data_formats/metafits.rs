@@ -24,10 +24,11 @@ use mwalib::{MetafitsContext, MwalibError, Pol};
 pub(crate) fn populate_metafits_context<T: AsRef<Path>>(
     mwalib: &mut Option<MetafitsContext>,
     metafits: T,
+    mwa_version: mwalib::MWAVersion,
 ) -> Result<&MetafitsContext, MwalibError> {
     match mwalib.as_mut() {
         None => {
-            let c = MetafitsContext::new(&metafits)?;
+            let c = MetafitsContext::new(&metafits, mwa_version)?;
             *mwalib = Some(c);
         }
         Some(_) => (),

@@ -25,6 +25,7 @@ use thiserror::Error;
 use crate::calibrate::params::{CalibrateParams, InvalidArgsError};
 use crate::*;
 use mwa_hyperdrive_core::mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
+use mwa_hyperdrive_srclist::{SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP};
 
 #[derive(Display, EnumIter, EnumString)]
 enum ArgFileTypes {
@@ -39,12 +40,6 @@ lazy_static::lazy_static! {
 
     static ref OUTPUT_SOLUTIONS_HELP: String =
         format!("The path to the file where the calibration solutions are written. Supported formats are .fits and .bin (which is the \"André calibrate format\"). Default: {}", DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
-
-    static ref SOURCE_DIST_CUTOFF_HELP: String =
-        format!("The sky-model source cutoff distance [degrees]. This is only used if the input sky-model source list has more sources than specified by num-sources. Default: {}", DEFAULT_CUTOFF_DISTANCE);
-
-    static ref VETO_THRESHOLD_HELP: String =
-        format!("The smallest possible beam-attenuated flux density any sky-model source is allowed to have. Default: {}", DEFAULT_VETO_THRESHOLD);
 
     static ref SOURCE_LIST_TYPE_HELP: String =
         format!(r#"The type of sky-model source list. Valid types are: {}
@@ -101,7 +96,7 @@ pub struct CalibrateUserArgs {
     /// Example: If 1000 sources are specified here, then the top 1000 sources
     /// are used (based on their flux densities after the beam attenuation)
     /// within the specified source distance cutoff.
-    #[structopt(long)]
+    #[structopt(short, long)]
     pub num_sources: Option<usize>,
 
     #[structopt(long, help = SOURCE_DIST_CUTOFF_HELP.as_str())]
@@ -113,7 +108,7 @@ pub struct CalibrateUserArgs {
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided by the MWA_BEAM_FILE environment variable.
     #[structopt(long)]
-    pub beam_file: Option<String>,
+    pub beam_file: Option<PathBuf>,
 
     /// Don't apply a beam response when generating a sky model. The default is
     /// to use the FEE beam.

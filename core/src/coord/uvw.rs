@@ -14,11 +14,11 @@ use rayon::prelude::*;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct UVW {
-    /// u-coordinate \[meters\]
+    /// u coordinate \[meters\]
     pub u: f64,
-    /// v-coordinate \[meters\]
+    /// v coordinate \[meters\]
     pub v: f64,
-    /// w-coordinate \[meters\]
+    /// w coordinate \[meters\]
     pub w: f64,
 }
 
@@ -31,7 +31,6 @@ impl UVW {
     /// This is Equation 4.1 of: Interferometry and Synthesis in Radio
     /// Astronomy, Third Edition, Section 4: Geometrical Relationships,
     /// Polarimetry, and the Measurement Equation.
-    #[inline]
     pub fn from_xyz_inner(xyz: &XyzBaseline, s_ha: f64, c_ha: f64, s_dec: f64, c_dec: f64) -> Self {
         Self {
             u: s_ha * xyz.x + c_ha * xyz.y,
@@ -111,7 +110,6 @@ impl approx::AbsDiffEq for UVW {
         f64::EPSILON
     }
 
-    #[inline]
     fn abs_diff_eq(&self, other: &Self, epsilon: f64) -> bool {
         (self.u - other.u) <= epsilon
             && (self.v - other.v) <= epsilon

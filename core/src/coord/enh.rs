@@ -41,12 +41,14 @@ impl ENH {
     }
 
     /// Convert [ENH] coordinates to [XyzGeodetic] for the MWA's latitude.
+    #[cfg(feature = "mwalib")]
     pub fn to_xyz_mwa(&self) -> XyzGeodetic {
         self.to_xyz(MWA_LAT_RAD)
     }
 }
 
 #[cfg(test)]
+#[cfg(feature = "mwalib")]
 mod tests {
     use super::*;
     use approx::*;

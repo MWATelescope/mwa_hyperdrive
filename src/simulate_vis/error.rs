@@ -8,16 +8,45 @@ Error type for all simulate-vis-related errors.
 
 use thiserror::Error;
 
+use mwa_hyperdrive_core::mwalib;
+
 #[derive(Error, Debug)]
 pub enum SimulateVisError {
-    #[error("{0}")]
-    Param(#[from] super::ParamError),
+    #[error("Right Ascension was not within 0 to 360!")]
+    RaInvalid,
+
+    #[error("Declination was not within -90 to 90!")]
+    DecInvalid,
+
+    #[error("One of RA and Dec was specified, but none or both are required!")]
+    OnlyOneRAOrDec,
+
+    #[error("Number of fine channels cannot be 0!")]
+    FineChansZero,
+
+    #[error("The fine channel resolution cannot be 0 or negative!")]
+    FineChansWidthTooSmall,
+
+    #[error("Number of time steps cannot be 0!")]
+    TimeStepsInvalid,
 
     #[error("{0}")]
-    VisibilityGen(#[from] crate::visibility_gen::VisibilityGenerationError),
+    SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
     #[error("{0}")]
-    ReadSourceList(#[from] mwa_hyperdrive_srclist::ReadSourceListError),
+    Beam(#[from] mwa_hyperdrive_core::beam::BeamError),
+
+    #[error("{0}")]
+    Model(#[from] crate::model::ModelError),
+
+    #[error("{0}")]
+    Uvfits(#[from] crate::data_formats::uvfits::UvfitsWriteError),
+
+    #[error("{0}")]
+    Glob(#[from] crate::glob::GlobError),
+
+    #[error("{0}")]
+    Mwalib(#[from] mwalib::MwalibError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

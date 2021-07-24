@@ -4,18 +4,6 @@
 
 //! Useful constants.
 
-/// Sources with beam-attenuated flux densities less than this value are
-/// discarded from sky-model source lists.
-pub(crate) const DEFAULT_VETO_THRESHOLD: f64 = 0.01;
-
-/// Sources with elevations less than this value are discarded from sky-model
-/// source lists \[degrees\].
-pub(crate) const ELEVATION_LIMIT: f64 = 0.0;
-
-/// Sources that are separated by more than this value from the phase centre are
-/// discarded from sky-model source lists \[degrees\].
-pub(crate) const DEFAULT_CUTOFF_DISTANCE: f64 = 30.0;
-
 /// The maximum number of times to iterate when performing "MitchCal" in
 /// direction-independent calibration.
 pub(crate) const DEFAULT_MAX_ITERATIONS: usize = 50;

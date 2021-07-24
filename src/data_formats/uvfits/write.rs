@@ -47,7 +47,7 @@ pub(crate) struct UvfitsWriter<'a> {
 
     /// A `hifitime` [Epoch] struct associated with the first timestep of the
     /// data.
-    start_epoch: &'a Epoch,
+    start_epoch: Epoch,
 }
 
 impl<'a> UvfitsWriter<'a> {
@@ -57,7 +57,7 @@ impl<'a> UvfitsWriter<'a> {
         num_timesteps: usize,
         num_baselines: usize,
         num_chans: usize,
-        start_epoch: &'a Epoch,
+        start_epoch: Epoch,
         fine_chan_width_hz: f64,
         centre_freq_hz: f64,
         centre_freq_chan: usize,
@@ -129,7 +129,7 @@ impl<'a> UvfitsWriter<'a> {
                 )?;
             }
         }
-        hdu.write_key(&mut u, "DATE-OBS", get_truncated_date_string(&start_epoch))?;
+        hdu.write_key(&mut u, "DATE-OBS", get_truncated_date_string(start_epoch))?;
 
         // Dimensions.
         hdu.write_key(&mut u, "CTYPE2", "COMPLEX")?;
@@ -488,14 +488,13 @@ impl<'a> UvfitsWriter<'a> {
     /// are made one indexed by this function.
     // TODO: Assumes that all fine channels are written in `vis.` This needs to
     // be updated to add visibilities to an existing uvfits row.
-    #[inline]
     pub(crate) fn write_vis(
         &mut self,
         uvfits: &mut FitsFile,
         uvw: &UVW,
         tile_index1: usize,
         tile_index2: usize,
-        epoch: &Epoch,
+        epoch: Epoch,
         vis: &[f32],
     ) -> Result<(), UvfitsWriteError> {
         if self.current_num_rows + 1 > self.total_num_rows {
@@ -539,11 +538,10 @@ impl<'a> UvfitsWriter<'a> {
     // `vis_array.`
     pub(crate) fn write_from_vis(
         &mut self,
-        uvfits: &mut FitsFile,
         vis_array: ArrayView2<Jones<f32>>,
         weights: ArrayView2<f32>,
         uvws: &[UVW],
-        epoch: &Epoch,
+        epoch: Epoch,
         num_fine_chans: usize,
         fine_chan_flags: &HashSet<usize>,
     ) -> Result<(), UvfitsWriteError> {
@@ -588,7 +586,8 @@ impl<'a> UvfitsWriter<'a> {
                     ]);
                 };
             }
-            self.write_vis(uvfits, uvw, tile1, tile2, epoch, &vis)?;
+            let mut uvfits = self.open()?;
+            self.write_vis(&mut uvfits, uvw, tile1, tile2, epoch, &vis)?;
             vis.clear();
         }
         Ok(())
@@ -617,7 +616,7 @@ mod tests {
             num_timesteps,
             num_baselines,
             num_chans,
-            &start_epoch,
+            start_epoch,
             40e3,
             170e6,
             3,
@@ -641,7 +640,7 @@ mod tests {
                     &UVW::default(),
                     tile1,
                     tile2,
-                    &start_epoch,
+                    start_epoch,
                     (baseline_index..baseline_index + num_chans)
                         .into_iter()
                         .map(|int| int as f32)

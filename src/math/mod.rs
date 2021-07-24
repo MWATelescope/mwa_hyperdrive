@@ -14,7 +14,6 @@ use crate::c64;
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(sin(FRAC_PI_6), 0.5);`
-#[inline]
 pub(crate) fn sin(x: f64) -> f64 {
     x.sin()
 }
@@ -24,7 +23,6 @@ pub(crate) fn sin(x: f64) -> f64 {
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(cos(FRAC_PI_3), 0.5);`
-#[inline]
 pub(crate) fn cos(x: f64) -> f64 {
     x.cos()
 }
@@ -36,7 +34,6 @@ pub(crate) fn cos(x: f64) -> f64 {
 /// `assert_abs_diff_eq!(atan2(1, -1), 3.0 / 4.0 * PI);`
 // I don't like Rust's atan2. This test helps me sleep at night knowing I'm
 // using it correctly.
-#[inline]
 pub(crate) fn atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
 }
@@ -46,7 +43,6 @@ pub(crate) fn atan2(y: f64, x: f64) -> f64 {
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(exp(1), 2.718281828);`
-#[inline]
 pub(crate) fn exp(x: f64) -> f64 {
     x.exp()
 }
@@ -59,17 +55,15 @@ pub(crate) fn exp(x: f64) -> f64 {
 /// # Examples
 ///
 /// `assert_abs_diff_eq!(cexp(PI), c64::new(-1.0, 0.0));`
-#[inline]
 pub(crate) fn cexp(x: f64) -> c64 {
-    let (s, c) = x.sin_cos();
-    c64::new(c, s)
+    let (im, re) = x.sin_cos();
+    c64::new(re, im)
 }
 
 /// Convert a _cross-correlation_ baseline index into its constituent tile
 /// indices. Baseline 0 _is not_ between tile 0 and tile 0; it is between tile 0
 /// and tile 1.
 // Courtesy Brian Crosse.
-#[inline]
 pub(crate) fn cross_correlation_baseline_to_tiles(
     total_num_tiles: usize,
     baseline: usize,
@@ -90,7 +84,6 @@ pub(crate) fn cross_correlation_baseline_to_tiles(
 /// From the number of baselines, get the number of tiles.
 // From the definition of how many baselines there are in an array of N tiles,
 // this is just the solved quadratic.
-#[inline]
 pub(crate) fn num_tiles_from_num_baselines(num_baselines: usize) -> usize {
     (1 + num::integer::Roots::sqrt(&(1 + 8 * num_baselines))) / 2
 }

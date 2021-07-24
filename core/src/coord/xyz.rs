@@ -12,13 +12,15 @@
 //! Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 //! Relationships, Polarimetry, and the Measurement Equation.
 
-use rayon::prelude::*;
 use thiserror::Error;
 
-use crate::{
-    constants::{MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD},
-    HADec, ENH, UVW,
-};
+use crate::{HADec, ENH, UVW};
+
+#[cfg(feature = "erfa")]
+use rayon::prelude::*;
+
+#[cfg(feature = "mwalib")]
+use crate::constants::{MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD};
 
 /// The geodetic (x,y,z) coordinates of an antenna (a.k.a. tile or station). All
 /// units are in metres.
@@ -49,6 +51,7 @@ impl XyzGeodetic {
 
     /// Convert [XyzGeodetic] coordinates at the MWA's latitude to [ENH]
     /// coordinates.
+    #[cfg(feature = "mwalib")]
     pub fn to_enh_mwa(&self) -> ENH {
         self.to_enh(MWA_LAT_RAD)
     }
@@ -74,6 +77,7 @@ impl XyzGeodetic {
     /// "input"; e.g. in the metafits file, Tile104 is often the first tile
     /// listed ("input" 0), Tile103 second ("input" 2), so the first baseline
     /// would naively be between Tile104 and Tile103.
+    #[cfg(feature = "mwalib")]
     pub fn get_tiles_mwalib(context: &mwalib::MetafitsContext) -> Vec<Self> {
         context
             .rf_inputs
@@ -99,10 +103,12 @@ impl XyzGeodetic {
     /// "input"; e.g. in the metafits file, Tile104 is often the first tile
     /// listed ("input" 0), Tile103 second ("input" 2), so the first baseline
     /// would naively be between Tile104 and Tile103.
+    #[cfg(feature = "mwalib")]
     pub fn get_baselines_mwalib(context: &mwalib::MetafitsContext) -> Vec<XyzBaseline> {
         Self::get_baselines(&Self::get_tiles_mwalib(context))
     }
 
+    #[cfg(feature = "erfa")]
     fn to_geocentric_inner(
         &self,
         geocentric_vector: &XyzGeocentric,
@@ -121,6 +127,7 @@ impl XyzGeodetic {
     }
 
     /// Convert a [XyzGeodetic] coordinate to [XyzGeocentric].
+    #[cfg(feature = "erfa")]
     pub fn to_geocentric(
         &self,
         longitude_rad: f64,
@@ -140,6 +147,7 @@ impl XyzGeodetic {
 
     /// Convert a [XyzGeodetic] coordinate to [XyzGeocentric], using the MWA's
     /// location.
+    #[cfg(feature = "mwalib")]
     pub fn to_geocentric_mwa(&self) -> Result<XyzGeocentric, ErfaError> {
         self.to_geocentric(MWA_LONG_RAD, MWA_LAT_RAD, MWA_HEIGHT_M)
     }
@@ -147,6 +155,7 @@ impl XyzGeodetic {
 
 /// Convert [XyzGeodetic] coordinates to [UVW]s without having to form
 /// [XyzBaseline]s first.
+// TODO: Offer a parallel version.
 pub fn xyzs_to_uvws(xyzs: &[XyzGeodetic], phase_centre: &HADec) -> Vec<UVW> {
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
@@ -182,6 +191,7 @@ pub fn xyzs_to_uvws(xyzs: &[XyzGeodetic], phase_centre: &HADec) -> Vec<UVW> {
 }
 
 /// Convert many [XyzGeodetic] coordinates to [XyzGeocentric].
+#[cfg(feature = "erfa")]
 pub fn geodetic_to_geocentric(
     geodetics: &[XyzGeodetic],
     longitude_rad: f64,
@@ -200,6 +210,7 @@ pub fn geodetic_to_geocentric(
 
 /// Convert many [XyzGeodetic] coordinates to [XyzGeocentric], using the MWA's
 /// location.
+#[cfg(feature = "mwalib")]
 pub fn geodetic_to_geocentric_mwa(
     geodetics: &[XyzGeodetic],
 ) -> Result<Vec<XyzGeocentric>, ErfaError> {
@@ -264,6 +275,7 @@ pub struct XyzGeocentric {
 impl XyzGeocentric {
     /// Get a geocentric coordinate vector With the given geodetic coordinates
     /// (longitude, latitude and height). The ellipsoid model is WGS84.
+    #[cfg(feature = "erfa")]
     fn get_geocentric_vector(
         longitude_rad: f64,
         latitude_rad: f64,
@@ -296,7 +308,7 @@ impl XyzGeocentric {
 
     // TODO: Account for northing and eastings. Australia drifts by ~7cm/year,
     // and the ellipsoid model probably need to be changed too!
-    #[inline]
+    #[cfg(feature = "erfa")]
     fn to_geodetic_inner(
         &self,
         geocentric_vector: &Self,
@@ -320,6 +332,7 @@ impl XyzGeocentric {
     }
 
     /// Convert a [XyzGeocentric] coordinate to [XyzGeodetic].
+    #[cfg(feature = "erfa")]
     pub fn to_geodetic(
         &self,
         longitude_rad: f64,
@@ -340,12 +353,14 @@ impl XyzGeocentric {
 
     /// Convert a [XyzGeocentric] coordinate to [XyzGeodetic], using the MWA's
     /// location.
+    #[cfg(feature = "mwalib")]
     pub fn to_geodetic_mwa(&self) -> Result<XyzGeodetic, ErfaError> {
         self.to_geodetic(MWA_LONG_RAD, MWA_LAT_RAD, MWA_HEIGHT_M)
     }
 }
 
 /// Convert many [XyzGeocentric] coordinates to [XyzGeodetic].
+#[cfg(feature = "erfa")]
 pub fn geocentric_to_geodetic(
     geocentrics: &[XyzGeocentric],
     longitude_rad: f64,
@@ -364,6 +379,7 @@ pub fn geocentric_to_geodetic(
 
 /// Convert many [XyzGeocentric] coordinates to [XyzGeodetic], using the MWA's
 /// location.
+#[cfg(feature = "mwalib")]
 pub fn geocentric_to_geodetic_mwa(
     geocentrics: &[XyzGeocentric],
 ) -> Result<Vec<XyzGeodetic>, ErfaError> {
@@ -372,6 +388,7 @@ pub fn geocentric_to_geodetic_mwa(
 
 /// Convert many [XyzGeocentric] coordinates to [XyzGeodetic]. The calculations
 /// are done in parallel.
+#[cfg(feature = "erfa")]
 pub fn geocentric_to_geodetic_parallel(
     geocentrics: &[XyzGeocentric],
     longitude_rad: f64,
@@ -403,12 +420,13 @@ pub struct ErfaError {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use approx::*;
+
+    #[cfg(feature = "mwalib")]
     use crate::constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
     };
-
-    use super::*;
-    use approx::*;
 
     #[test]
     fn get_xyz_baselines_test() {
@@ -478,6 +496,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "mwalib")]
     fn test_geocentric_to_geodetic_and_back() {
         // These geodetic XYZ positions are taken from a uvfits made from cotter
         // for Tile011.
@@ -541,6 +560,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "mwalib")]
     fn test_batch_geodetic_methods() {
         let gds = vec![
             XyzGeodetic {
@@ -577,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "mwalib")]
     fn test_batch_geocentric_methods() {
         let gcs = vec![
             XyzGeocentric {

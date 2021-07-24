@@ -16,8 +16,9 @@ use log::{debug, info, trace};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use super::{model, solutions::CalibrationSolutions, CalibrateError, CalibrateParams};
+use super::{solutions::CalibrationSolutions, CalibrateError, CalibrateParams};
 use crate::data_formats::uvfits::UvfitsWriter;
+use crate::model;
 use crate::precession::precess_time;
 use crate::{math::cross_correlation_baseline_to_tiles, *};
 use mwa_hyperdrive_core::xyz;
@@ -37,7 +38,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     let mut vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::default());
     let mut vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::default());
     debug!(
-        "Shape of data and model arrays: ({} timesteps, {} baselines, {} channels) ({} MiB each)",
+        "Shape of data and model arrays: ({} timesteps, {} baselines, {} channels; {} MiB each)",
         vis_shape.0,
         vis_shape.1,
         vis_shape.2,
@@ -163,83 +164,71 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         // having slices of the input data being processed serially by
         // individual threads.
         scope.spawn(move |_| {
-            // Split the source list by component. This only needs to be done
-            // once, so do it outside the loop.
-            match model::split_components(
-                &params.source_list,
-                &params.freq.unflagged_fine_chan_freqs,
-                &obs_context.phase_centre,
-            ) {
-                Err(e) => {
-                    sx_model.send(Err(CalibrateError::from(e))).unwrap();
-                }
-                Ok(split_components) => {
-                    // Iterate on the receive channel forever. This terminates when
-                    // there is no data in the channel _and_ the sender has been
-                    // dropped.
-                    for msg in rx_data.iter() {
-                        let (timestep, mut vis_model_slice, weights) = match msg {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                // Propagate the error.
-                                sx_model.send(Err(e)).unwrap();
-                                break;
-                            }
-                        };
-                        debug_assert_eq!(vis_model_slice.dim(), weights.dim());
-
-                        let timestamp = obs_context.timesteps[timestep];
-
-                        // TODO: Allow the user to turn off precession.
-                        let precession_info = precess_time(
-                            &obs_context.phase_centre,
-                            &timestamp,
-                            params.array_longitude,
-                            params.array_latitude,
-                        );
-                        // Apply precession to the tile XYZ positions.
-                        let precessed_tile_xyzs =
-                            precession_info.precess_xyz_parallel(&params.unflagged_tile_xyzs);
-                        let uvws = xyz::xyzs_to_uvws(
-                            &precessed_tile_xyzs,
-                            &obs_context
-                                .phase_centre
-                                .to_hadec(precession_info.lmst_j2000),
-                        );
-
-                        let model_result = model::model_timestep(
-                            vis_model_slice.view_mut(),
-                            &split_components,
-                            params.beam.deref(),
-                            precession_info.lmst_j2000,
-                            &precessed_tile_xyzs,
-                            &uvws,
-                            &params.freq.unflagged_fine_chan_freqs,
-                        );
-                        // Scale the model visibilities by weights.
-                        ndarray::Zip::from(&mut vis_model_slice)
-                            .and(&weights)
-                            .par_for_each(|vis, &weight| *vis *= weight);
-
-                        let model_failed = model_result.is_err();
-                        let msg = model_result.map(|_| (vis_model_slice, weights, uvws, timestamp));
-                        // If we can't send the message, it's because the
-                        // channel has been closed on the other side. That
-                        // should only happen because the thread has exited due
-                        // to error; in that case, just exit this thread.
-                        match sx_model.send(msg) {
-                            Ok(_) => (),
-                            Err(_) => break,
-                        }
-                        if model_failed {
-                            break;
-                        }
-
-                        model_progress.inc(1);
+            // Iterate on the receive channel forever. This terminates when
+            // there is no data in the channel _and_ the sender has been
+            // dropped.
+            for msg in rx_data.iter() {
+                let (timestep, mut vis_model_slice, weights) = match msg {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        // Propagate the error.
+                        sx_model.send(Err(e)).unwrap();
+                        break;
                     }
-                    model_progress.finish_with_message("Finished generating sky model");
+                };
+                debug_assert_eq!(vis_model_slice.dim(), weights.dim());
+
+                let timestamp = obs_context.timesteps[timestep];
+
+                // TODO: Allow the user to turn off precession.
+                let precession_info = precess_time(
+                    &obs_context.phase_centre,
+                    timestamp,
+                    params.array_longitude,
+                    params.array_latitude,
+                );
+                // Apply precession to the tile XYZ positions.
+                let precessed_tile_xyzs =
+                    precession_info.precess_xyz_parallel(&params.unflagged_tile_xyzs);
+                let uvws = xyz::xyzs_to_uvws(
+                    &precessed_tile_xyzs,
+                    &obs_context
+                        .phase_centre
+                        .to_hadec(precession_info.lmst_j2000),
+                );
+
+                let model_result = model::model_timestep(
+                    vis_model_slice.view_mut(),
+                    &params.sky_model_comps,
+                    params.beam.deref(),
+                    precession_info.lmst_j2000,
+                    &precessed_tile_xyzs,
+                    &uvws,
+                    &params.freq.unflagged_fine_chan_freqs,
+                )
+                .map_err(CalibrateError::from);
+                // Scale the model visibilities by weights.
+                ndarray::Zip::from(&mut vis_model_slice)
+                    .and(&weights)
+                    .par_for_each(|vis, &weight| *vis *= weight);
+
+                let model_failed = model_result.is_err();
+                let msg = model_result.map(|_| (vis_model_slice, weights, uvws, timestamp));
+                // If we can't send the message, it's because the
+                // channel has been closed on the other side. That
+                // should only happen because the thread has exited due
+                // to error; in that case, just exit this thread.
+                match sx_model.send(msg) {
+                    Ok(_) => (),
+                    Err(_) => break,
                 }
-            };
+                if model_failed {
+                    break;
+                }
+
+                model_progress.inc(1);
+            }
+            model_progress.finish_with_message("Finished generating sky model");
 
             drop(sx_model);
         });
@@ -264,7 +253,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     // ... but use all channels (including flagged channels).
                     // fits files expect a neat layout.
                     params.freq.num_fine_chans,
-                    start_epoch,
+                    *start_epoch,
                     freq_context.native_fine_chan_width,
                     centre_freq,
                     params.freq.num_fine_chans / 2,
@@ -299,21 +288,16 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         };
 
                         let write_result: Result<(), CalibrateError> = {
-                            model_writer.open().map_err(CalibrateError::from).and_then(
-                                |mut uvfits| {
-                                    model_writer
-                                        .write_from_vis(
-                                            &mut uvfits,
-                                            vis_model_timestep.view(),
-                                            weights.view(),
-                                            &uvws,
-                                            &epoch,
-                                            params.freq.num_fine_chans,
-                                            &params.freq.fine_chan_flags,
-                                        )
-                                        .map_err(CalibrateError::from)
-                                },
-                            )
+                            model_writer
+                                .write_from_vis(
+                                    vis_model_timestep.view(),
+                                    weights.view(),
+                                    &uvws,
+                                    epoch,
+                                    params.freq.num_fine_chans,
+                                    &params.freq.fine_chan_flags,
+                                )
+                                .map_err(CalibrateError::from)
                         };
                         match write_result {
                             Err(e) => {
@@ -407,8 +391,10 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         time_res: params.time_res,
     };
     debug!(
-        "Shape of DI Jones matrices array: {:?} ({} MiB)",
-        shape,
+        "Shape of DI Jones matrices array: ({} timeblocks, {} tiles, {} chanblocks; {} MiB)",
+        shape.0,
+        shape.1,
+        shape.2,
         shape.0 * shape.1 * shape.2 * std::mem::size_of_val(&sols.di_jones[[0, 0, 0]])
         // 1024 * 1024 == 1 MiB.
         / 1024 / 1024

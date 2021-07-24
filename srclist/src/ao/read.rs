@@ -4,13 +4,6 @@
 
 //! Parsing of "André Offringa"-style source lists.
 //!
-//! Coordinates are RA and declination, which have units of decimal hours (i.e.
-//! 0 - 24) and degrees, respectively, but in sexagesimal format.
-//!
-//! Gaussian sizes are specified in arcseconds, whereas position angles are in
-//! degrees. Frequencies have units annotated, but these always seem to be MHz,
-//! and similarly with flux densities in Jy.
-//!
 //! The code here is probably incomplete, but it should work for the majority of
 //! source lists.
 
@@ -528,15 +521,6 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     let mut sum_v = 0.0;
                     for c in &source.components {
                         match &c.flux_type {
-                            FluxDensityType::List { fds } => {
-                                for fd in fds {
-                                    sum_i += fd.i;
-                                    sum_q += fd.q;
-                                    sum_u += fd.u;
-                                    sum_v += fd.v;
-                                }
-                            }
-
                             FluxDensityType::PowerLaw { fd, .. } => {
                                 sum_i += fd.i;
                                 sum_q += fd.q;
@@ -549,6 +533,15 @@ pub fn parse_source_list<T: std::io::BufRead>(
                                 sum_q += fd.q;
                                 sum_u += fd.u;
                                 sum_v += fd.v;
+                            }
+
+                            FluxDensityType::List { fds } => {
+                                for fd in fds {
+                                    sum_i += fd.i;
+                                    sum_q += fd.q;
+                                    sum_u += fd.u;
+                                    sum_v += fd.v;
+                                }
                             }
                         }
                     }
@@ -766,27 +759,22 @@ source {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 5.82253473993655, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].freq, 197.435e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].i, 32.5745, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].freq, 197.435e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].i, 32.5745, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
 
-        assert!(match comp.comp_type {
-            ComponentType::Point { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.comp_type, ComponentType::Point { .. }));
     }
 
     #[test]
@@ -830,55 +818,45 @@ source {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 5.82253473993655, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].i, 32.5745, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].freq, 197.435e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].i, 32.5745, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
 
-        assert!(match comp.comp_type {
-            ComponentType::Point { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.comp_type, ComponentType::Point { .. }));
 
         let comp = &s.components[1];
         assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2106621177436647, epsilon = 1e-10);
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
-        let (fd, si) = match &comp.flux_type {
-            FluxDensityType::PowerLaw { fd, si } => (fd, si),
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
+        match &comp.flux_type {
+            FluxDensityType::PowerLaw { si, fd } => {
+                assert_abs_diff_eq!(*si, -0.88, epsilon = 1e-10);
+                assert_abs_diff_eq!(fd.freq, 200e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fd.i, 4.306472, epsilon = 1e-10);
+                assert_abs_diff_eq!(fd.q, 0.0, epsilon = 1e-10);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fd.freq, 200e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fd.i, 4.306472, epsilon = 1e-10);
-        assert_abs_diff_eq!(fd.q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(*si, -0.88, epsilon = 1e-10);
 
-        assert!(match comp.comp_type {
-            ComponentType::Gaussian { .. } => true,
-            _ => false,
-        });
-        let (maj, min, pa) = match &comp.comp_type {
-            ComponentType::Gaussian { maj, min, pa } => (maj, min, pa),
+        assert!(matches!(comp.comp_type, ComponentType::Gaussian { .. }));
+        match &comp.comp_type {
+            ComponentType::Gaussian { maj, min, pa } => {
+                assert_abs_diff_eq!(*maj, 0.0007548549014875475, epsilon = 1e-10);
+                assert_abs_diff_eq!(*min, 0.0007209179438098799, epsilon = 1e-10);
+                assert_abs_diff_eq!(*pa, 1.5341444125030157, epsilon = 1e-10);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(*maj, 0.0007548549014875475, epsilon = 1e-10);
-        assert_abs_diff_eq!(*min, 0.0007209179438098799, epsilon = 1e-10);
-        assert_abs_diff_eq!(*pa, 1.5341444125030157, epsilon = 1e-10);
     }
 
     #[test]
@@ -925,46 +903,39 @@ source {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 5.82253473993655, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].freq, 197.435e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].i, 32.5745, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].freq, 197.435e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].i, 32.5745, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
 
-        assert!(match comp.comp_type {
-            ComponentType::Point { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.comp_type, ComponentType::Point { .. }));
 
         let comp = &s.components[1];
         assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2106621177436647, epsilon = 1e-10);
-        assert!(match comp.flux_type {
-            FluxDensityType::List { .. } => true,
-            _ => false,
-        });
-        let fds = match &comp.flux_type {
-            FluxDensityType::List { fds } => fds,
+        assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
+        match &comp.flux_type {
+            FluxDensityType::List { fds } => {
+                assert_abs_diff_eq!(fds[0].freq, 157.355e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].i, 27.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].freq, 187.435e6, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].i, 22.5745, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
+                assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
+            }
             _ => unreachable!(),
         };
-        assert_abs_diff_eq!(fds[0].freq, 157.355e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].i, 27.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[0].v, 37.0557, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].freq, 187.435e6, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].i, 22.5745, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].q, 0.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(fds[1].v, 32.5745, epsilon = 1e-10);
     }
 }

@@ -9,8 +9,8 @@
 //!
 //! RA is in decimal hours (0 to 24) and Dec are in degrees in the J2000 epoch.
 
-pub mod read;
-pub mod write;
+mod read;
+mod write;
 
 use super::error::*;
 use crate::*;

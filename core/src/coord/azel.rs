@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Handle (azimuth, elevation) coordinates.
+//! Handle (azimuth, elevation) coordinates (also known as horizontal
+//! coordinates).
 
 use std::f64::consts::FRAC_PI_2;
 
+#[cfg(feature = "erfa")]
 use super::hadec::HADec;
 
 /// A struct containing an Azimuth and Elevation. All units are in radians.
@@ -40,6 +42,7 @@ impl AzEl {
     /// and Declination), given the local latitude on Earth.
     ///
     /// Uses ERFA.
+    #[cfg(feature = "erfa")]
     pub fn to_hadec(&self, latitude_rad: f64) -> HADec {
         let mut ha = 0.0;
         let mut dec = 0.0;
@@ -49,6 +52,7 @@ impl AzEl {
 
     /// Convert the horizon coordinates to equatorial coordinates (Hour Angle
     /// and Declination) for the MWA's location.
+    #[cfg(feature = "mwalib")]
     pub fn to_hadec_mwa(&self) -> HADec {
         Self::to_hadec(&self, crate::constants::MWA_LAT_RAD)
     }
@@ -71,6 +75,7 @@ mod tests {
     use approx::*;
 
     #[test]
+    #[cfg(feature = "erfa")]
     fn to_hadec() {
         let ae = AzEl::new_degrees(45.0, 30.0);
         let hd = ae.to_hadec(-0.497600);
@@ -79,6 +84,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "erfa")]
     fn to_hadec2() {
         let ae = AzEl::new(0.261700, 0.785400);
         let hd = ae.to_hadec(-0.897600);

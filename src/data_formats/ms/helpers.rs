@@ -6,7 +6,6 @@
 
 use std::path::Path;
 
-use hifitime::Epoch;
 use rubbl_casatables::{Table, TableOpenMode};
 
 use super::error::*;
@@ -23,24 +22,6 @@ pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MSErro
         Ok(t) => Ok(t),
         Err(e) => Err(MSError::RubblError(e.to_string())),
     }
-}
-
-/// Convert a casacore time to a `hifitime` [Epoch]. This function is especially
-/// useful because casacore apparently doesn't account for leap seconds.
-///
-/// casacore uses seconds since 1858-11-17T00:00:00 (MJD epoch).
-pub(super) fn casacore_utc_to_epoch(utc_seconds: f64) -> hifitime::Epoch {
-    // It appears that casacore does not count the number of leap seconds when
-    // giving out the number of UTC seconds. This needs to be accounted for.
-    // Because I don't have direct access to a table of leap seconds, and don't
-    // want to constantly maintain one, I'm making a compromise; the method
-    // below will be off by 1s if the supplied `utc_seconds` is near a leap
-    // second.
-    let num_leap_seconds = {
-        let naive_obs_epoch = Epoch::from_tai_seconds(utc_seconds - MJD_TAI_EPOCH_DIFF);
-        utc_seconds - MJD_TAI_EPOCH_DIFF - naive_obs_epoch.as_utc_seconds()
-    };
-    Epoch::from_tai_seconds(utc_seconds - MJD_TAI_EPOCH_DIFF + num_leap_seconds)
 }
 
 /// casacore's antenna positions are [XyzGeocentric] coordinates, but we use
@@ -63,23 +44,4 @@ pub(super) fn casacore_positions_to_local_xyz_mwa(
     pos: &[XyzGeocentric],
 ) -> Result<Vec<XyzGeodetic>, MSError> {
     casacore_positions_to_local_xyz(pos, MWA_LONG_RAD, MWA_LAT_RAD, MWA_HEIGHT_M)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tests::*;
-
-    #[test]
-    fn hifitime_behaves_as_expected() {
-        // This UTC time is taken from the 1065880128 observation.
-        let utc = 4888561714.0;
-        let epoch = casacore_utc_to_epoch(utc);
-        assert_abs_diff_eq!(epoch.as_utc_seconds(), 3590833714.0, epsilon = 1e-10);
-        assert_abs_diff_eq!(
-            epoch.as_gpst_seconds() - HIFITIME_GPS_FACTOR,
-            1065880130.0,
-            epsilon = 1e-10
-        );
-    }
 }

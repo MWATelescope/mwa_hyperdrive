@@ -35,7 +35,7 @@ fn write_comp_type<T: std::io::Write>(
                 min.to_degrees() * 60.0
             )?;
             for c in coeffs {
-                writeln!(buf, "COEFF {} {} {}", c.n1, c.n2, c.coeff)?;
+                writeln!(buf, "COEFF {} {} {}", c.n1, c.n2, c.value)?;
             }
         }
     }
@@ -61,8 +61,8 @@ fn write_flux_type<T: std::io::Write>(
         // If there are only two "list type" flux densities, the RTS uses them
         // as a power law.
         FluxDensityType::PowerLaw { .. } => {
-            let fd_150 = flux_type.estimate_at_freq(150e6)?;
-            let fd_200 = flux_type.estimate_at_freq(200e6)?;
+            let fd_150 = flux_type.estimate_at_freq(150e6);
+            let fd_200 = flux_type.estimate_at_freq(200e6);
             for fd in &[fd_150, fd_200] {
                 writeln!(
                     buf,
