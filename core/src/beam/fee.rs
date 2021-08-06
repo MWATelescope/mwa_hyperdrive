@@ -45,7 +45,7 @@ impl FEEBeam {
 }
 
 impl Beam for FEEBeam {
-    fn calc_jones(&self, azel: &AzEl, freq_hz: u32, amps: &[f64]) -> Result<Jones<f64>, BeamError> {
+    fn calc_jones(&self, azel: AzEl, freq_hz: u32, amps: &[f64]) -> Result<Jones<f64>, BeamError> {
         let j = self
             .beam
             .calc_jones(azel.az, azel.za(), freq_hz, &self.delays, amps, true)?;

@@ -22,6 +22,7 @@ use mwa_hyperdrive_core::{
     mwalib, RADec,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
     input_path: T,
     output_path: Option<T>,
@@ -60,7 +61,7 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
                 .extension()
                 .and_then(|os_str| os_str.to_str())
                 .expect("Input file didn't have an extension");
-            let mut output_path = input_path_base.clone();
+            let mut output_path = input_path_base;
             output_path.push_str(&format!("_{}", num_sources));
             output_path.push_str(&format!(".{}", input_path_ext));
             let output_pb = PathBuf::from(output_path);
@@ -124,7 +125,7 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
     // Veto sources.
     let brightest_source_name = veto_sources(
         &mut sl,
-        &phase_centre,
+        phase_centre,
         lst,
         mwalib::MWA_LATITUDE_RADIANS,
         &coarse_chan_freqs,

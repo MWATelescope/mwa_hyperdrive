@@ -182,7 +182,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
                 // TODO: Allow the user to turn off precession.
                 let precession_info = precess_time(
-                    &obs_context.phase_centre,
+                    obs_context.phase_centre,
                     timestamp,
                     params.array_longitude,
                     params.array_latitude,
@@ -192,7 +192,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     precession_info.precess_xyz_parallel(&params.unflagged_tile_xyzs);
                 let uvws = xyz::xyzs_to_uvws(
                     &precessed_tile_xyzs,
-                    &obs_context
+                    obs_context
                         .phase_centre
                         .to_hadec(precession_info.lmst_j2000),
                 );
@@ -246,7 +246,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 let obs_name = obs_context.obsid.map(|o| format!("{}", o));
 
                 let create_result = UvfitsWriter::new(
-                    &model_pb,
+                    model_pb,
                     // Don't include flagged timesteps or flagged baselines.
                     vis_shape.0,
                     vis_shape.1,
@@ -257,7 +257,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     freq_context.native_fine_chan_width,
                     centre_freq,
                     params.freq.num_fine_chans / 2,
-                    &obs_context.phase_centre,
+                    obs_context.phase_centre,
                     obs_name.as_deref(),
                 );
                 // Handle any errors during output model file creation.
@@ -458,14 +458,15 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         cal_result.max_precision,
                         params.stop_threshold
                     ));
+                    pb.inc(1);
                 } else {
                     status_str.push_str(&format!(
                         ": converged ({:>2}): {:e} > {:.5e}",
                         cal_result.num_iterations, params.stop_threshold, cal_result.max_precision
                     ));
+                    pb.inc(1);
                 }
                 pb.println(status_str);
-                pb.inc(1);
                 cal_result
             })
             .collect_into_vec(&mut timeblock_cal_results);
@@ -474,34 +475,17 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
             .iter()
             .filter(|result| result.converged)
             .count();
-        pb.finish_with_message(format!(
-            "Timeblock {}: {}/{} chanblocks succeeded",
-            timeblock,
-            total_converged_count,
-            chanblocks.len()
-        ));
 
         // Attempt to calibrate any chanblocks that failed by taking solutions
         // from nearby chanblocks as starting points.
         if total_converged_count > 0 && total_converged_count != chanblocks.len() {
-            let initial_converged_count = total_converged_count;
-            let num_failed = chanblocks.len() - total_converged_count;
             let mut new_converged_count = 1;
-            let pb = ProgressBar::new(num_failed as _)
-            .with_style(
-                ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:3}/{len:3} ({elapsed_precise}<{eta_precise})")
-                    .progress_chars("=> "),
-            )
-            .with_position(0)
-            .with_message(format!("Re-calibrating timeblock {}", timeblock));
-            pb.set_draw_target(ProgressDrawTarget::stdout());
 
             let mut retry_iter = 0;
             while new_converged_count > 0 && total_converged_count != chanblocks.len() {
                 retry_iter += 1;
                 pb.println(format!(
-                    "Calibrate failed chanblocks iteration {}",
+                    "*** Re-calibrating failed chanblocks iteration {} ***",
                     retry_iter
                 ));
 
@@ -622,19 +606,14 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 new_converged_count = tmp - total_converged_count;
                 total_converged_count = tmp;
             }
-            pb.finish_with_message(format!(
-                "Timeblock {}: {}/{} reattempted chanblocks succeeded",
-                timeblock,
-                total_converged_count - initial_converged_count,
-                num_failed
-            ));
-            info!(
-                "Timeblock {}: {}/{} chanblocks succeeded",
-                timeblock,
-                total_converged_count,
-                chanblocks.len()
-            );
         }
+        pb.abandon();
+        info!(
+            "Timeblock {}: {}/{} chanblocks converged",
+            timeblock,
+            total_converged_count,
+            chanblocks.len()
+        );
     }
 
     // Write out the solutions.

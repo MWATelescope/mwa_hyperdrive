@@ -44,7 +44,7 @@ struct RankedSource {
 #[allow(clippy::too_many_arguments)]
 pub fn veto_sources(
     source_list: &mut SourceList,
-    phase_centre: &RADec,
+    phase_centre: RADec,
     lst_rad: f64,
     array_latitude_rad: f64,
     coarse_chan_freqs: &[f64],
@@ -75,7 +75,7 @@ pub fn veto_sources(
                     ELEVATION_LIMIT);
                     return Either::Left(Ok(source_name.clone()));
                 }
-                let separation = comp.radec.separation(&phase_centre);
+                let separation = comp.radec.separation(phase_centre);
                 if separation > dist_cutoff {
                     trace!("A component (source {}) was too far from the phase centre (separation {}°)",
                     source_name,
@@ -96,7 +96,7 @@ pub fn veto_sources(
                     // Get the beam response at this source position and
                     // frequency.
                     let j = match beam.calc_jones(
-                            &azel,
+                            *azel,
                             cc_freq as u32,
                             &[1.0; 16]) {
                             Ok(j) => j,
@@ -186,7 +186,7 @@ fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones<f64>) -> f64 {
     // where J is the beam-response Jones matrix and I are the instrumental flux
     // densities.
     let ji = j.clone() * i;
-    let jijh = ji.mul_hermitian(&j);
+    let jijh = ji.mul_hermitian(j);
     // Use the trace of `jijh` as the total source flux density.
     // Using the determinant instead of the trace might be more
     // realistic; uncomment the line below to do that.

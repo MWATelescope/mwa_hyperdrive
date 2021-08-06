@@ -17,6 +17,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --allowlist-type "ShapeletCoeff" \
     --allowlist-type "ShapeletUV" \
     --allowlist-type "Jones.*" \
+    --allowlist-var "POWER_LAW_FD_REF_FREQ" \
     --size_t-is-usize \
     > "${SCRIPTPATH}"/src/model.rs
 

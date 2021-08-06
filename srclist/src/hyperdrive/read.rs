@@ -92,25 +92,25 @@ fn source_list_from_tmp_sl(
             return Err(ReadSourceListError::InvalidFluxDensitySum {
                 sum: sum_i,
                 stokes_comp: "I",
-                source_name: name.clone(),
+                source_name: name,
             });
         } else if sum_q < 0.0 {
             return Err(ReadSourceListError::InvalidFluxDensitySum {
                 sum: sum_q,
                 stokes_comp: "Q",
-                source_name: name.clone(),
+                source_name: name,
             });
         } else if sum_u < 0.0 {
             return Err(ReadSourceListError::InvalidFluxDensitySum {
                 sum: sum_u,
                 stokes_comp: "U",
-                source_name: name.clone(),
+                source_name: name,
             });
         } else if sum_v < 0.0 {
             return Err(ReadSourceListError::InvalidFluxDensitySum {
                 sum: sum_v,
                 stokes_comp: "V",
-                source_name: name.clone(),
+                source_name: name,
             });
         }
 

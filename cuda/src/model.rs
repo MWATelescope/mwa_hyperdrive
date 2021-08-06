@@ -430,11 +430,24 @@ fn bindgen_test_layout_JonesF64() {
         )
     );
 }
+pub const POWER_LAW_FD_REF_FREQ: f64 = 150000000.0;
 extern "C" {
     #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
-    #[doc = " sky-model point-sources. See the documentation of `model_timestep` for more"]
-    #[doc = " info."]
-    pub fn model_points(
+    #[doc = " sky-model point-sources with power-law flux densities. See the documentation"]
+    #[doc = " of `model_timestep` for more info."]
+    pub fn model_power_law_points(
+        num_power_law_points: usize,
+        lmns: *const LMN,
+        ref_fds: *const JonesF64,
+        sis: *const f64,
+        a: *const Addresses,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
+    #[doc = " sky-model point-sources with flux-density lists. See the documentation of"]
+    #[doc = " `model_timestep` for more info."]
+    pub fn model_list_points(
         num_points: usize,
         point_lmns: *const LMN,
         point_fds: *const JonesF64,
@@ -443,21 +456,49 @@ extern "C" {
 }
 extern "C" {
     #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
-    #[doc = " sky-model Gaussian-sources. See the documentation of `model_timestep` for"]
-    #[doc = " more info."]
-    pub fn model_gaussians(
-        num_gaussians: usize,
-        gaussian_lmns: *const LMN,
-        gaussian_fds: *const JonesF64,
+    #[doc = " sky-model Gaussian-sources with power-law flux densities. See the"]
+    #[doc = " documentation of `model_timestep` for more info."]
+    pub fn model_power_law_gaussians(
+        num_power_law_gaussians: usize,
+        lmns: *const LMN,
+        ref_fds: *const JonesF64,
+        sis: *const f64,
         gaussian_params: *const GaussianParams,
+        a: *const Addresses,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
+    #[doc = " sky-model Gaussian-sources with flux-density lists. See the"]
+    #[doc = " documentation of `model_timestep` for more info."]
+    pub fn model_list_gaussians(
+        num_power_law_gaussians: usize,
+        lmns: *const LMN,
+        fds: *const JonesF64,
+        gaussian_params: *const GaussianParams,
+        a: *const Addresses,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
+    #[doc = " sky-model shapelet-sources with power-law flux densities. See the"]
+    #[doc = " documentation of `model_timestep` for more info."]
+    pub fn model_power_law_shapelets(
+        num_shapelets: usize,
+        shapelet_lmns: *const LMN,
+        shapelet_fds: *const JonesF64,
+        gaussian_params: *const GaussianParams,
+        shapelet_uvs: *const ShapeletUV,
+        shapelet_coeffs: *const ShapeletCoeff,
+        num_shapelet_coeffs: *const usize,
         a: Addresses,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
     #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
-    #[doc = " sky-model shapelet-sources. See the documentation of `model_timestep` for"]
-    #[doc = " more info."]
-    pub fn model_shapelets(
+    #[doc = " sky-model shapelet-sources with flux-density lists. See the documentation of"]
+    #[doc = " `model_timestep` for more info."]
+    pub fn model_list_shapelets(
         num_shapelets: usize,
         shapelet_lmns: *const LMN,
         shapelet_fds: *const JonesF64,
@@ -499,16 +540,25 @@ extern "C" {
     pub fn model_timestep(
         num_baselines: usize,
         num_freqs: usize,
-        num_points: usize,
-        num_gaussians: usize,
+        num_power_law_points: usize,
+        num_list_points: usize,
+        num_power_law_gaussians: usize,
+        num_list_gaussians: usize,
         num_shapelets: usize,
         uvws: *const UVW,
         freqs: *const f64,
-        point_lmns: *const LMN,
-        point_fds: *const JonesF64,
-        gaussian_lmns: *const LMN,
-        gaussian_fds: *const JonesF64,
-        gaussian_gaussian_params: *const GaussianParams,
+        point_power_law_lmns: *const LMN,
+        point_power_law_ref_fds: *const JonesF64,
+        point_power_law_sis: *const f64,
+        point_list_lmns: *const LMN,
+        point_list_fds: *const JonesF64,
+        gaussian_power_law_lmns: *const LMN,
+        gaussian_power_law_ref_fds: *const JonesF64,
+        gaussian_power_law_sis: *const f64,
+        gaussian_power_law_gaussian_params: *const GaussianParams,
+        gaussian_list_lmns: *const LMN,
+        gaussian_list_fds: *const JonesF64,
+        gaussian_list_gaussian_params: *const GaussianParams,
         shapelet_lmns: *const LMN,
         shapelet_fds: *const JonesF64,
         shapelet_gaussian_params: *const GaussianParams,

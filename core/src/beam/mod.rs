@@ -33,7 +33,7 @@ pub trait Beam: Sync + Send {
     /// `amps` *must* have 16 elements (each corresponds to an MWA dipole in a
     /// tile, in the M&C order; see
     /// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>.
-    fn calc_jones(&self, azel: &AzEl, freq_hz: u32, amps: &[f64]) -> Result<Jones<f64>, BeamError>;
+    fn calc_jones(&self, azel: AzEl, freq_hz: u32, amps: &[f64]) -> Result<Jones<f64>, BeamError>;
 
     /// Calculate the Jones matrices for many [AzEl] directions. The pointing
     /// information is not needed because it was provided when `self` was
@@ -78,7 +78,7 @@ pub struct NoBeam;
 impl Beam for NoBeam {
     fn calc_jones(
         &self,
-        _azel: &AzEl,
+        _azel: AzEl,
         _freq_hz: u32,
         _amps: &[f64],
     ) -> Result<Jones<f64>, BeamError> {

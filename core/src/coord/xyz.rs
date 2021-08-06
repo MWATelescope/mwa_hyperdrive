@@ -28,7 +28,7 @@ use crate::constants::{MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD};
 /// This coordinate system is discussed at length in Interferometry and
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 /// Relationships, Polarimetry, and the Measurement Equation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct XyzGeodetic {
     /// x-coordinate \[meters\]
     pub x: f64,
@@ -64,7 +64,7 @@ impl XyzGeodetic {
         let mut diffs = Vec::with_capacity(num_baselines);
         for i in 0..num_tiles {
             for j in i + 1..num_tiles {
-                diffs.push(xyz[i].clone() - &xyz[j]);
+                diffs.push(xyz[i] - xyz[j]);
             }
         }
         diffs
@@ -110,7 +110,7 @@ impl XyzGeodetic {
 
     #[cfg(feature = "erfa")]
     fn to_geocentric_inner(
-        &self,
+        self,
         geocentric_vector: &XyzGeocentric,
         sin_longitude: f64,
         cos_longitude: f64,
@@ -129,7 +129,7 @@ impl XyzGeodetic {
     /// Convert a [XyzGeodetic] coordinate to [XyzGeocentric].
     #[cfg(feature = "erfa")]
     pub fn to_geocentric(
-        &self,
+        self,
         longitude_rad: f64,
         latitude_rad: f64,
         height_metres: f64,
@@ -156,7 +156,7 @@ impl XyzGeodetic {
 /// Convert [XyzGeodetic] coordinates to [UVW]s without having to form
 /// [XyzBaseline]s first.
 // TODO: Offer a parallel version.
-pub fn xyzs_to_uvws(xyzs: &[XyzGeodetic], phase_centre: &HADec) -> Vec<UVW> {
+pub fn xyzs_to_uvws(xyzs: &[XyzGeodetic], phase_centre: HADec) -> Vec<UVW> {
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
     // Get a UVW for each tile.
@@ -246,7 +246,7 @@ impl std::ops::Sub<&XyzGeodetic> for XyzGeodetic {
 /// This coordinate system is discussed at length in Interferometry and
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 /// Relationships, Polarimetry, and the Measurement Equation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct XyzBaseline {
     /// x-coordinate \[meters\]
     pub x: f64,
@@ -262,7 +262,7 @@ pub struct XyzBaseline {
 /// This coordinate system is discussed at length in Interferometry and
 /// Synthesis in Radio Astronomy, Third Edition, Section 4: Geometrical
 /// Relationships, Polarimetry, and the Measurement Equation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct XyzGeocentric {
     /// x-coordinate \[meters\]
     pub x: f64,
@@ -310,8 +310,8 @@ impl XyzGeocentric {
     // and the ellipsoid model probably need to be changed too!
     #[cfg(feature = "erfa")]
     fn to_geodetic_inner(
-        &self,
-        geocentric_vector: &Self,
+        self,
+        geocentric_vector: Self,
         sin_longitude: f64,
         cos_longitude: f64,
     ) -> XyzGeodetic {
@@ -334,7 +334,7 @@ impl XyzGeocentric {
     /// Convert a [XyzGeocentric] coordinate to [XyzGeodetic].
     #[cfg(feature = "erfa")]
     pub fn to_geodetic(
-        &self,
+        self,
         longitude_rad: f64,
         latitude_rad: f64,
         height_metres: f64,
@@ -342,12 +342,8 @@ impl XyzGeocentric {
         let geocentric_vector =
             XyzGeocentric::get_geocentric_vector(longitude_rad, latitude_rad, height_metres)?;
         let (sin_longitude, cos_longitude) = (-longitude_rad).sin_cos();
-        let geodetic = XyzGeocentric::to_geodetic_inner(
-            &self,
-            &geocentric_vector,
-            sin_longitude,
-            cos_longitude,
-        );
+        let geodetic =
+            XyzGeocentric::to_geodetic_inner(self, geocentric_vector, sin_longitude, cos_longitude);
         Ok(geodetic)
     }
 
@@ -372,7 +368,7 @@ pub fn geocentric_to_geodetic(
     let (sin_longitude, cos_longitude) = (-longitude_rad).sin_cos();
     let geodetics = geocentrics
         .iter()
-        .map(|gc| gc.to_geodetic_inner(&geocentric_vector, sin_longitude, cos_longitude))
+        .map(|gc| gc.to_geodetic_inner(geocentric_vector, sin_longitude, cos_longitude))
         .collect();
     Ok(geodetics)
 }
@@ -401,7 +397,7 @@ pub fn geocentric_to_geodetic_parallel(
     let geodetics = geocentrics
         .par_iter()
         .map(|gc| {
-            XyzGeocentric::to_geodetic_inner(gc, &geocentric_vector, sin_longitude, cos_longitude)
+            XyzGeocentric::to_geodetic_inner(*gc, geocentric_vector, sin_longitude, cos_longitude)
         })
         .collect();
     Ok(geodetics)

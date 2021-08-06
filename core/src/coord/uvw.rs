@@ -44,7 +44,7 @@ impl UVW {
     /// This is Equation 4.1 of: Interferometry and Synthesis in Radio
     /// Astronomy, Third Edition, Section 4: Geometrical Relationships,
     /// Polarimetry, and the Measurement Equation.
-    pub fn from_xyz(xyz: &XyzBaseline, phase_centre: &HADec) -> Self {
+    pub fn from_xyz(xyz: &XyzBaseline, phase_centre: HADec) -> Self {
         let (s_ha, c_ha) = phase_centre.ha.sin_cos();
         let (s_dec, c_dec) = phase_centre.dec.sin_cos();
         Self::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec)
@@ -55,7 +55,7 @@ impl UVW {
     /// This is Equation 4.1 of: Interferometry and Synthesis in Radio
     /// Astronomy, Third Edition, Section 4: Geometrical Relationships,
     /// Polarimetry, and the Measurement Equation.
-    pub fn get_baselines(xyzs: &[XyzBaseline], phase_centre: &HADec) -> Vec<Self> {
+    pub fn get_baselines(xyzs: &[XyzBaseline], phase_centre: HADec) -> Vec<Self> {
         let (s_ha, c_ha) = phase_centre.ha.sin_cos();
         let (s_dec, c_dec) = phase_centre.dec.sin_cos();
         xyzs.iter()
@@ -69,7 +69,7 @@ impl UVW {
     /// This is Equation 4.1 of: Interferometry and Synthesis in Radio
     /// Astronomy, Third Edition, Section 4: Geometrical Relationships,
     /// Polarimetry, and the Measurement Equation.
-    pub fn get_baselines_parallel(xyzs: &[XyzBaseline], phase_centre: &HADec) -> Vec<Self> {
+    pub fn get_baselines_parallel(xyzs: &[XyzBaseline], phase_centre: HADec) -> Vec<Self> {
         let (s_ha, c_ha) = phase_centre.ha.sin_cos();
         let (s_dec, c_dec) = phase_centre.dec.sin_cos();
         xyzs.par_iter()
@@ -163,7 +163,7 @@ mod tests {
         ];
         let xyz_bl = XyzGeodetic::get_baselines(&xyz);
         let phase = HADec::new(6.0163, -0.453121);
-        let uvw = UVW::get_baselines(&xyz_bl, &phase);
+        let uvw = UVW::get_baselines(&xyz_bl, phase);
         let expected = UVW {
             u: 102.04605530570603,
             v: -1028.2293398297727,
@@ -173,7 +173,7 @@ mod tests {
         assert_abs_diff_eq!(uvw[0].v, expected.v, epsilon = 1e-10);
         assert_abs_diff_eq!(uvw[0].w, expected.w, epsilon = 1e-10);
 
-        let uvw_parallel = UVW::get_baselines_parallel(&xyz_bl, &phase);
+        let uvw_parallel = UVW::get_baselines_parallel(&xyz_bl, phase);
         for (serial, parallel) in uvw.into_iter().zip(uvw_parallel.into_iter()) {
             assert_abs_diff_eq!(serial, parallel, epsilon = 1e-10);
         }

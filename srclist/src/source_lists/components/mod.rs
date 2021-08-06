@@ -4,7 +4,10 @@
 
 //! Sky-model component types.
 
-use std::f64::consts::TAU;
+#[cfg(feature = "cuda")]
+mod ffi;
+#[cfg(feature = "cuda")]
+pub use ffi::*;
 
 use ndarray::prelude::*;
 use rayon::prelude::*;
@@ -17,8 +20,6 @@ use mwa_hyperdrive_core::{
     constants::MWA_LAT_RAD,
     xyz, AzEl, Jones, RADec, XyzGeodetic, LMN, UVW,
 };
-#[cfg(feature = "cuda")]
-use mwa_hyperdrive_cuda as cuda;
 
 /// Source component types supported by hyperdrive.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -88,7 +89,7 @@ pub struct GaussianParams {
     pub pa: f64,
 }
 
-/// [ComponentList] is an alternative to `SourceList` where each of the
+/// [ComponentList] is an alternative to [SourceList] where each of the
 /// components and their parameters are arranged into vectors. This improves CPU
 /// cache efficiency and allows for easier FFI because elements are contiguous.
 ///
@@ -102,37 +103,45 @@ pub struct ComponentList {
 }
 
 impl ComponentList {
-    /// Given a source list, split the components into each type.
+    /// Given a source list, split the components into each [ComponentType].
     ///
     /// These parameters don't change over time, so it's ideal to run this
     /// function once.
     pub fn new(
         source_list: SourceList,
         unflagged_fine_chan_freqs: &[f64],
-        phase_centre: &RADec,
+        phase_centre: RADec,
     ) -> Self {
         // Unpack each of the component parameters into vectors.
         let mut point_radecs = vec![];
+        let mut point_lmns = vec![];
+        let mut point_fds: Vec<FluxDensityType> = vec![];
+
         let mut gaussian_radecs = vec![];
-        let mut shapelet_radecs = vec![];
+        let mut gaussian_lmns = vec![];
+        let mut gaussian_fds: Vec<FluxDensityType> = vec![];
         let mut gaussian_gaussian_params = vec![];
+
+        let mut shapelet_radecs = vec![];
+        let mut shapelet_lmns = vec![];
+        let mut shapelet_fds: Vec<FluxDensityType> = vec![];
         let mut shapelet_gaussian_params = vec![];
         let mut shapelet_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
-        let mut point_fds: Vec<FluxDensityType> = vec![];
-        let mut gaussian_fds: Vec<FluxDensityType> = vec![];
-        let mut shapelet_fds: Vec<FluxDensityType> = vec![];
 
         for comp in source_list.into_iter().flat_map(|(_, src)| src.components) {
+            let comp_lmn = comp.radec.to_lmn(phase_centre).prepare_for_rime();
             match comp.comp_type {
                 ComponentType::Point => {
-                    point_radecs.push(comp.radec.clone());
+                    point_radecs.push(comp.radec);
+                    point_lmns.push(comp_lmn);
                     point_fds.push(comp.flux_type);
                 }
 
                 ComponentType::Gaussian { maj, min, pa } => {
-                    gaussian_radecs.push(comp.radec.clone());
-                    gaussian_gaussian_params.push(GaussianParams { maj, min, pa });
+                    gaussian_radecs.push(comp.radec);
+                    gaussian_lmns.push(comp_lmn);
                     gaussian_fds.push(comp.flux_type);
+                    gaussian_gaussian_params.push(GaussianParams { maj, min, pa });
                 }
 
                 ComponentType::Shapelet {
@@ -141,38 +150,21 @@ impl ComponentList {
                     pa,
                     coeffs,
                 } => {
-                    shapelet_radecs.push(comp.radec.clone());
+                    shapelet_radecs.push(comp.radec);
+                    shapelet_lmns.push(comp_lmn);
+                    shapelet_fds.push(comp.flux_type);
                     shapelet_gaussian_params.push(GaussianParams { maj, min, pa });
                     shapelet_coeffs.push(coeffs);
-                    shapelet_fds.push(comp.flux_type);
                 }
             }
         }
 
-        // Get the LMN coordinates of all source components.
-        let get_lmns = |radecs: &[RADec]| -> Vec<LMN> {
-            radecs
-                .par_iter()
-                .map(|radec| {
-                    let lmn = radec.to_lmn(phase_centre);
-                    LMN {
-                        l: TAU * lmn.l,
-                        m: TAU * lmn.m,
-                        n: TAU * (lmn.n - 1.0),
-                    }
-                })
-                .collect()
-        };
-        let mut point_lmns = get_lmns(&point_radecs);
-        let mut gaussian_lmns = get_lmns(&gaussian_radecs);
-        let mut shapelet_lmns = get_lmns(&shapelet_radecs);
-
         let point_flux_densities =
-            get_instrumental_flux_densities(&point_fds, &unflagged_fine_chan_freqs);
+            get_instrumental_flux_densities(&point_fds, unflagged_fine_chan_freqs);
         let gaussian_flux_densities =
-            get_instrumental_flux_densities(&gaussian_fds, &unflagged_fine_chan_freqs);
+            get_instrumental_flux_densities(&gaussian_fds, unflagged_fine_chan_freqs);
         let shapelet_flux_densities =
-            get_instrumental_flux_densities(&shapelet_fds, &unflagged_fine_chan_freqs);
+            get_instrumental_flux_densities(&shapelet_fds, unflagged_fine_chan_freqs);
 
         // Attempt to conserve memory. (Does Rust do this anyway?)
         point_radecs.shrink_to_fit();
@@ -189,22 +181,47 @@ impl ComponentList {
             points: PointComponentParams {
                 radecs: point_radecs,
                 lmns: point_lmns,
-                instrumental_flux_densities: point_flux_densities,
+                flux_densities: point_flux_densities,
             },
             gaussians: GaussianComponentParams {
                 radecs: gaussian_radecs,
                 lmns: gaussian_lmns,
-                instrumental_flux_densities: gaussian_flux_densities,
+                flux_densities: gaussian_flux_densities,
                 gaussian_params: gaussian_gaussian_params,
             },
             shapelets: ShapeletComponentParams {
                 radecs: shapelet_radecs,
                 lmns: shapelet_lmns,
-                instrumental_flux_densities: shapelet_flux_densities,
+                flux_densities: shapelet_flux_densities,
                 gaussian_params: shapelet_gaussian_params,
                 shapelet_coeffs,
             },
         }
+    }
+}
+
+impl ShapeletComponentParams {
+    /// Shapelets need their own special kind of UVW coordinates. Each shapelet
+    /// component's position is treated as the phase centre.
+    ///
+    /// The returned array has baseline as the first axis and component as the
+    /// second.
+    pub fn get_shapelet_uvws(&self, lst_rad: f64, tile_xyzs: &[XyzGeodetic]) -> Array2<UVW> {
+        let n = tile_xyzs.len();
+        let num_baselines = (n * (n - 1)) / 2;
+
+        let mut shapelet_uvws: Array2<UVW> =
+            Array2::from_elem((num_baselines, self.radecs.len()), UVW::default());
+        shapelet_uvws
+            .axis_iter_mut(Axis(1))
+            .into_par_iter()
+            .zip(self.radecs.par_iter())
+            .for_each(|(mut baseline_uvws, radec)| {
+                let hadec = radec.to_hadec(lst_rad);
+                let uvws_row = xyz::xyzs_to_uvws(tile_xyzs, hadec);
+                baseline_uvws.assign(&Array1::from(uvws_row));
+            });
+        shapelet_uvws
     }
 }
 
@@ -240,120 +257,40 @@ fn get_instrumental_flux_densities(
 
 /// Point-source-component parameters.
 ///
-/// The first axis of `instrumental_flux_densities` is unflagged fine channel
+/// The first axis of `flux_densities` is unflagged fine channel
 /// frequency, the second is the source component. The length of `radecs`,
-/// `lmns`, `instrumental_flux_densities`'s second axis are the same.
-#[derive(Clone, Debug)]
+/// `lmns`, `flux_densities`'s second axis are the same.
+#[derive(Clone, Debug, Default)]
 pub struct PointComponentParams {
     pub radecs: Vec<RADec>,
     pub lmns: Vec<LMN>,
-    pub instrumental_flux_densities: Array2<Jones<f64>>,
+    /// Instrumental (i.e. XX, XY, YX, XX).
+    pub flux_densities: Array2<Jones<f64>>,
 }
 
 /// Gaussian-source-component parameters.
 ///
 /// See the doc comment for [PointComponentParams] for more info.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct GaussianComponentParams {
     pub radecs: Vec<RADec>,
     pub lmns: Vec<LMN>,
-    pub instrumental_flux_densities: Array2<Jones<f64>>,
+    /// Instrumental (i.e. XX, XY, YX, XX).
+    pub flux_densities: Array2<Jones<f64>>,
     pub gaussian_params: Vec<GaussianParams>,
 }
 
 /// Shapelet-source-component parameters.
 ///
 /// See the doc comment for [PointComponentParams] for more info.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ShapeletComponentParams {
     pub radecs: Vec<RADec>,
     pub lmns: Vec<LMN>,
-    pub instrumental_flux_densities: Array2<Jones<f64>>,
+    /// Instrumental (i.e. XX, XY, YX, XX).
+    pub flux_densities: Array2<Jones<f64>>,
     pub gaussian_params: Vec<GaussianParams>,
     pub shapelet_coeffs: Vec<Vec<ShapeletCoeff>>,
-}
-
-impl ShapeletComponentParams {
-    /// Shapelets need their own special kind of UVW coordinates. Each shapelet
-    /// component's position is treated as the phase centre.
-    ///
-    /// The returned array has baseline as the first axis and component as the
-    /// second.
-    pub fn get_shapelet_uvws(&self, lst_rad: f64, tile_xyzs: &[XyzGeodetic]) -> Array2<UVW> {
-        let n = tile_xyzs.len();
-        let num_baselines = (n * (n - 1)) / 2;
-
-        let mut shapelet_uvws: Array2<UVW> =
-            Array2::from_elem((num_baselines, self.radecs.len()), UVW::default());
-        shapelet_uvws
-            .axis_iter_mut(Axis(1))
-            .into_par_iter()
-            .zip(self.radecs.par_iter())
-            .for_each(|(mut baseline_uvws, radec)| {
-                let hadec = radec.to_hadec(lst_rad);
-                let uvws_row = xyz::xyzs_to_uvws(&tile_xyzs, &hadec);
-                baseline_uvws.assign(&Array1::from(uvws_row));
-            });
-        shapelet_uvws
-    }
-
-    /// Shapelets need their own special kind of UVW coordinates. Each shapelet
-    /// component's position is treated as the phase centre. This function uses
-    /// the FFI type [cuda::ShapeletUV]; the W isn't used for better efficiency.
-    ///
-    /// The returned array has baseline as the first axis and component as the
-    /// second.
-    #[cfg(feature = "cuda")]
-    pub fn get_shapelet_uvs_gpu(
-        &self,
-        lst_rad: f64,
-        tile_xyzs: &[XyzGeodetic],
-    ) -> Array2<cuda::ShapeletUV> {
-        let n = tile_xyzs.len();
-        let num_baselines = (n * (n - 1)) / 2;
-
-        let mut shapelet_uvs: Array2<cuda::ShapeletUV> = Array2::from_elem(
-            (num_baselines, self.radecs.len()),
-            cuda::ShapeletUV { u: 0.0, v: 0.0 },
-        );
-        shapelet_uvs
-            .axis_iter_mut(Axis(1))
-            .into_par_iter()
-            .zip(self.radecs.par_iter())
-            .for_each(|(mut baseline_uv, radec)| {
-                let hadec = radec.to_hadec(lst_rad);
-                let shapelet_uvs: Vec<cuda::ShapeletUV> = xyz::xyzs_to_uvws(&tile_xyzs, &hadec)
-                    .into_iter()
-                    .map(|uvw| cuda::ShapeletUV { u: uvw.u, v: uvw.v })
-                    .collect();
-                baseline_uv.assign(&Array1::from(shapelet_uvs));
-            });
-        shapelet_uvs
-    }
-
-    /// This function is intended for FFI with GPUs. There are a variable number
-    /// of shapelet coefficients for each shapelet component. To avoid excessive
-    /// dereferencing on GPUs (expensive), this method flattens the coefficients
-    /// into a single array (lengths of the array-of-arrays).
-    #[cfg(feature = "cuda")]
-    pub fn get_flattened_coeffs(&self) -> (Vec<cuda::ShapeletCoeff>, Vec<usize>) {
-        let mut coeffs = vec![];
-        let mut coeff_lengths = Vec::with_capacity(self.radecs.len());
-
-        for coeffs_for_comp in &self.shapelet_coeffs {
-            for coeff in coeffs_for_comp {
-                coeffs.push(cuda::ShapeletCoeff {
-                    n1: coeff.n1,
-                    n2: coeff.n2,
-                    value: coeff.value,
-                })
-            }
-            coeff_lengths.push(coeffs_for_comp.len());
-        }
-
-        coeffs.shrink_to_fit();
-        (coeffs, coeff_lengths)
-    }
 }
 
 /// A trait to abstract common behaviour on the per-component parameters.
@@ -417,7 +354,7 @@ impl PerComponentParams for PointComponentParams {
     ) -> Result<Array2<Jones<f64>>, BeamError> {
         beam_correct_flux_densities(
             &self.radecs,
-            self.instrumental_flux_densities.view(),
+            self.flux_densities.view(),
             lst_rad,
             beam,
             dipole_gains,
@@ -440,7 +377,7 @@ impl PerComponentParams for GaussianComponentParams {
     ) -> Result<Array2<Jones<f64>>, BeamError> {
         beam_correct_flux_densities(
             &self.radecs,
-            self.instrumental_flux_densities.view(),
+            self.flux_densities.view(),
             lst_rad,
             beam,
             dipole_gains,
@@ -463,7 +400,7 @@ impl PerComponentParams for ShapeletComponentParams {
     ) -> Result<Array2<Jones<f64>>, BeamError> {
         beam_correct_flux_densities(
             &self.radecs,
-            self.instrumental_flux_densities.view(),
+            self.flux_densities.view(),
             lst_rad,
             beam,
             dipole_gains,
@@ -516,7 +453,7 @@ fn beam_correct_flux_densities_inner(
                     // `jones_1` is the beam response from the first tile in
                     // this baseline.
                     // TODO: Use a Jones matrix cache.
-                    let jones_1 = beam.calc_jones(azel, *freq as u32, dipole_gains)?;
+                    let jones_1 = beam.calc_jones(*azel, *freq as u32, dipole_gains)?;
 
                     // `jones_2` is the beam response from the second tile in
                     // this baseline.
@@ -524,7 +461,7 @@ fn beam_correct_flux_densities_inner(
                     let jones_2 = &jones_1;
 
                     // J . I . J^H
-                    *comp_fd = Jones::axb(&jones_1, &Jones::axbh(&inst_fd, jones_2));
+                    *comp_fd = Jones::axb(&jones_1, &Jones::axbh(inst_fd, jones_2));
                     Ok(())
                 })
         });
@@ -538,6 +475,7 @@ fn beam_correct_flux_densities_inner(
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::TAU;
     use std::ops::Deref;
 
     use approx::assert_abs_diff_eq;
@@ -817,7 +755,7 @@ mod tests {
                 .count()
         });
 
-        let split_components = ComponentList::new(srclist, &freqs, &phase_centre);
+        let split_components = ComponentList::new(srclist, &freqs, phase_centre);
         let points = split_components.points;
         let gaussians = split_components.gaussians;
         let shapelets = split_components.shapelets;
@@ -831,19 +769,13 @@ mod tests {
         assert_eq!(points.lmns.len(), num_point_components);
         assert_eq!(gaussians.lmns.len(), num_gauss_components);
         assert!(shapelets.lmns.is_empty());
-        assert_abs_diff_eq!(points.lmns[0].l, 0.0025326811687516274);
-        assert_abs_diff_eq!(points.lmns[0].m, -0.12880688061967666);
-        assert_abs_diff_eq!(points.lmns[0].n, 0.9916664625927036);
+        assert_abs_diff_eq!(points.lmns[0].l, 0.0025326811687516274 * TAU);
+        assert_abs_diff_eq!(points.lmns[0].m, -0.12880688061967666 * TAU);
+        assert_abs_diff_eq!(points.lmns[0].n, (0.9916664625927036 - 1.0) * TAU);
 
-        assert_eq!(
-            points.instrumental_flux_densities.dim(),
-            (1, num_point_components)
-        );
-        assert_eq!(
-            gaussians.instrumental_flux_densities.dim(),
-            (1, num_gauss_components)
-        );
-        assert_eq!(shapelets.instrumental_flux_densities.dim(), (1, 0));
+        assert_eq!(points.flux_densities.dim(), (1, num_point_components));
+        assert_eq!(gaussians.flux_densities.dim(), (1, num_gauss_components));
+        assert_eq!(shapelets.flux_densities.dim(), (1, 0));
 
         // Test one of the component's instrumental flux densities.
         let fd = FluxDensityType::List {
@@ -862,6 +794,6 @@ mod tests {
         }
         .estimate_at_freq(freqs[0]);
         let inst_fd: Jones<f64> = fd.into();
-        assert_abs_diff_eq!(gaussians.instrumental_flux_densities[[0, 2]], inst_fd);
+        assert_abs_diff_eq!(gaussians.flux_densities[[0, 2]], inst_fd);
     }
 }

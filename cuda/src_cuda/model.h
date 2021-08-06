@@ -9,33 +9,61 @@
 #include "memory.h"
 #include "types.h"
 
+const double POWER_LAW_FD_REF_FREQ = 150e6;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
- * sky-model point-sources. See the documentation of `model_timestep` for more
- * info.
+ * sky-model point-sources with power-law flux densities. See the documentation
+ * of `model_timestep` for more info.
  */
-int model_points(const size_t num_points, const LMN *point_lmns, const JonesF64 *point_fds, const Addresses *a);
+int model_power_law_points(const size_t num_power_law_points, const LMN *lmns, const JonesF64 *ref_fds,
+                           const double *sis, const Addresses *a);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
- * sky-model Gaussian-sources. See the documentation of `model_timestep` for
- * more info.
+ * sky-model point-sources with flux-density lists. See the documentation of
+ * `model_timestep` for more info.
  */
-int model_gaussians(const size_t num_gaussians, const LMN *gaussian_lmns, const JonesF64 *gaussian_fds,
-                    const GaussianParams *gaussian_params, const Addresses a);
+int model_list_points(const size_t num_points, const LMN *point_lmns, const JonesF64 *point_fds, const Addresses *a);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
- * sky-model shapelet-sources. See the documentation of `model_timestep` for
- * more info.
+ * sky-model Gaussian-sources with power-law flux densities. See the
+ * documentation of `model_timestep` for more info.
  */
-int model_shapelets(const size_t num_shapelets, const LMN *shapelet_lmns, const JonesF64 *shapelet_fds,
-                    const GaussianParams *gaussian_params, const ShapeletUV *shapelet_uvs,
-                    const ShapeletCoeff *shapelet_coeffs, const size_t *num_shapelet_coeffs, const Addresses a);
+int model_power_law_gaussians(const size_t num_power_law_gaussians, const LMN *lmns, const JonesF64 *ref_fds,
+                              const double *sis, const GaussianParams *gaussian_params, const Addresses *a);
+
+/**
+ * Generate sky-model visibilities for a single timestep given multiple
+ * sky-model Gaussian-sources with flux-density lists. See the
+ * documentation of `model_timestep` for more info.
+ */
+int model_list_gaussians(const size_t num_power_law_gaussians, const LMN *lmns, const JonesF64 *fds,
+                         const GaussianParams *gaussian_params, const Addresses *a);
+
+/**
+ * Generate sky-model visibilities for a single timestep given multiple
+ * sky-model shapelet-sources with power-law flux densities. See the
+ * documentation of `model_timestep` for more info.
+ */
+int model_power_law_shapelets(const size_t num_shapelets, const LMN *shapelet_lmns, const JonesF64 *shapelet_fds,
+                              const GaussianParams *gaussian_params, const ShapeletUV *shapelet_uvs,
+                              const ShapeletCoeff *shapelet_coeffs, const size_t *num_shapelet_coeffs,
+                              const Addresses a);
+
+/**
+ * Generate sky-model visibilities for a single timestep given multiple
+ * sky-model shapelet-sources with flux-density lists. See the documentation of
+ * `model_timestep` for more info.
+ */
+int model_list_shapelets(const size_t num_shapelets, const LMN *shapelet_lmns, const JonesF64 *shapelet_fds,
+                         const GaussianParams *gaussian_params, const ShapeletUV *shapelet_uvs,
+                         const ShapeletCoeff *shapelet_coeffs, const size_t *num_shapelet_coeffs, const Addresses a);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
@@ -66,10 +94,14 @@ int model_shapelets(const size_t num_shapelets, const LMN *shapelet_lmns, const 
  * mutated and should be completely full of zeros before this function is
  * called.
  */
-int model_timestep(const size_t num_baselines, const size_t num_freqs, const size_t num_points,
-                   const size_t num_gaussians, const size_t num_shapelets, const UVW *uvws, const double *freqs,
-                   const LMN *point_lmns, const JonesF64 *point_fds, const LMN *gaussian_lmns,
-                   const JonesF64 *gaussian_fds, const GaussianParams *gaussian_gaussian_params,
+int model_timestep(const size_t num_baselines, const size_t num_freqs, const size_t num_power_law_points,
+                   const size_t num_list_points, const size_t num_power_law_gaussians, const size_t num_list_gaussians,
+                   const size_t num_shapelets, const UVW *uvws, const double *freqs, const LMN *point_power_law_lmns,
+                   const JonesF64 *point_power_law_ref_fds, const double *point_power_law_sis,
+                   const LMN *point_list_lmns, const JonesF64 *point_list_fds, const LMN *gaussian_power_law_lmns,
+                   const JonesF64 *gaussian_power_law_ref_fds, const double *gaussian_power_law_sis,
+                   const GaussianParams *gaussian_power_law_gaussian_params, const LMN *gaussian_list_lmns,
+                   const JonesF64 *gaussian_list_fds, const GaussianParams *gaussian_list_gaussian_params,
                    const LMN *shapelet_lmns, const JonesF64 *shapelet_fds,
                    const GaussianParams *shapelet_gaussian_params, const ShapeletUV *shapelet_uvs,
                    const ShapeletCoeff *shapelet_coeffs, const size_t *num_shapelet_coeffs,

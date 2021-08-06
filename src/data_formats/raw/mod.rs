@@ -129,7 +129,7 @@ impl RawData {
         let ideal_delays = if listed_delays.iter().all(|&d| d != 32) {
             listed_delays
         } else {
-            metafits::get_true_delays(&metafits_context)
+            metafits::get_true_delays(metafits_context)
         };
         debug!("Ideal observation dipole delays: {:?}", &ideal_delays);
         if matches!(dipole_delays, Delays::None) {
@@ -177,11 +177,11 @@ impl RawData {
 
         let aoflags = if let Some(m) = mwafs {
             debug!("Reading AOFlagger mwaf files");
-            let mut f = AOFlags::new_from_mwafs(&m)?;
+            let mut f = AOFlags::new_from_mwafs(m)?;
 
             // The cotter flags are available for all times. Make them
             // match only those we'll use according to mwalib.
-            f.trim(&metafits_context);
+            f.trim(metafits_context);
 
             // Ensure that there is a mwaf file for each specified gpubox file.
             for cc in &mwalib_context.coarse_chans {
@@ -272,7 +272,7 @@ impl RawData {
             metafits_context.ra_tile_pointing_degrees.to_radians(),
             metafits_context.dec_tile_pointing_degrees.to_radians(),
         ));
-        let tile_xyzs = XyzGeodetic::get_tiles_mwalib(&metafits_context);
+        let tile_xyzs = XyzGeodetic::get_tiles_mwalib(metafits_context);
         let tile_names: Vec<String> = metafits_context
             .rf_inputs
             .iter()

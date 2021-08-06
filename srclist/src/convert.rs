@@ -32,7 +32,7 @@ pub fn convert<T: AsRef<Path>, S: AsRef<str>>(
     // file format. This can either be explicit from the user input, or the file
     // extension.
     let output_ext = output_path.extension().and_then(|e| e.to_str());
-    let output_file_type = output_ext.and_then(|e| HyperdriveFileType::from_str(&e).ok());
+    let output_file_type = output_ext.and_then(|e| HyperdriveFileType::from_str(e).ok());
     if output_type.is_none() && output_file_type.is_some() {
         warn!("Assuming that the output file type is 'hyperdrive'");
     }

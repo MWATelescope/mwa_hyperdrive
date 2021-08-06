@@ -11,7 +11,7 @@ use std::f64::consts::FRAC_PI_2;
 use super::hadec::HADec;
 
 /// A struct containing an Azimuth and Elevation. All units are in radians.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AzEl {
     /// Hour angle \[radians\]
     pub az: f64,
@@ -54,7 +54,7 @@ impl AzEl {
     /// and Declination) for the MWA's location.
     #[cfg(feature = "mwalib")]
     pub fn to_hadec_mwa(&self) -> HADec {
-        Self::to_hadec(&self, crate::constants::MWA_LAT_RAD)
+        self.to_hadec(crate::constants::MWA_LAT_RAD)
     }
 }
 

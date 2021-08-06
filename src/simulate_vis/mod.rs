@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::PathBuf;
 
+use either::Either;
 use hifitime::Epoch;
 use log::{debug, info};
 use ndarray::prelude::*;
@@ -27,7 +28,9 @@ use crate::{
 use mwa_hyperdrive_core::{beam::Delays, *};
 #[cfg(feature = "cuda")]
 use mwa_hyperdrive_cuda as cuda;
-use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList};
+use mwa_hyperdrive_srclist::{
+    read::read_source_list_file, ComponentList, ComponentListSplit, SourceList,
+};
 use mwalib::MetafitsContext;
 
 #[derive(StructOpt, Debug, Default, Deserialize)]
@@ -87,8 +90,8 @@ pub struct SimulateVisArgs {
 
 /// Parameters needed to do sky-model visibility simulation.
 struct SimVisParams {
-    /// Sky-model source components.
-    sky_model_comps: ComponentList,
+    /// Sky-model source list.
+    source_list: SourceList,
 
     /// mwalib metafits context
     metafits: MetafitsContext,
@@ -229,9 +232,6 @@ impl SimVisParams {
             .for_each(|comp| {
                 comp.flux_type.convert_list_to_power_law();
             });
-        // Split the sky-model components (for efficiency).
-        let sky_model_comps = ComponentList::new(source_list, &fine_chan_freqs, &phase_centre);
-
         let delays = metafits::get_true_delays(&metafits);
         let beam = crate::beam::create_beam_object(
             args.no_beam,
@@ -242,7 +242,7 @@ impl SimVisParams {
         info!("Writing the sky model to {}", args.model_file.display());
 
         Ok(Self {
-            sky_model_comps,
+            source_list,
             metafits,
             model_file: args.model_file,
             phase_centre,
@@ -296,7 +296,7 @@ pub fn simulate_vis(
         params.fine_chan_freqs[1] - params.fine_chan_freqs[0],
         params.fine_chan_freqs[params.fine_chan_freqs.len() / 2],
         params.fine_chan_freqs.len() / 2,
-        &params.phase_centre,
+        params.phase_centre,
         Some(&format!(
             "Simulated visibilities for obsid {}",
             params.metafits.obs_id
@@ -308,17 +308,39 @@ pub fn simulate_vis(
     #[cfg(not(feature = "cuda"))]
     let cpu = true;
 
+    // Split the sky-model components (for efficiency). Use an Either to hold
+    // one type or the other.
+    #[cfg(feature = "cuda")]
+    let sky_model_comps: Either<ComponentList, ComponentListSplit> = if cpu {
+        Either::Left(ComponentList::new(
+            params.source_list,
+            &params.fine_chan_freqs,
+            params.phase_centre,
+        ))
+    } else {
+        Either::Right(ComponentListSplit::new(
+            params.source_list,
+            &params.fine_chan_freqs,
+            params.phase_centre,
+        ))
+    };
+    #[cfg(not(feature = "cuda"))]
+    let sky_model_comps = ComponentList::new(source_list, &fine_chan_freqs, phase_centre);
+
     // Generate the visibilities.
     for &timestep in params.timesteps.iter() {
         let lst_diff = (timestep - params.timesteps[0]).in_seconds();
         let lst = params.metafits.lst_rad + lst_diff * SOLAR2SIDEREAL * DS2R;
         let hadec_phase_centre = params.phase_centre.to_hadec(lst);
-        let uvws = xyz::xyzs_to_uvws(&xyzs, &hadec_phase_centre);
+        let uvws = xyz::xyzs_to_uvws(&xyzs, hadec_phase_centre);
 
         if cpu {
             model::model_timestep(
                 vis_model.view_mut(),
-                &params.sky_model_comps,
+                #[cfg(feature = "cuda")]
+                sky_model_comps.as_ref().unwrap_left(),
+                #[cfg(not(feature = "cuda"))]
+                &sky_model_comps,
                 params.beam.deref(),
                 lst,
                 &xyzs,
@@ -329,43 +351,47 @@ pub fn simulate_vis(
             // CUDA.
             #[cfg(feature = "cuda")]
             {
-                let shapelet_uvs = params
-                    .sky_model_comps
-                    .shapelets
-                    .get_shapelet_uvs_gpu(lst, &xyzs);
-                let (shapelet_coeffs, num_shapelet_coeffs) =
-                    params.sky_model_comps.shapelets.get_flattened_coeffs();
+                let sky_model_comps = sky_model_comps.as_ref().unwrap_right();
+                let shapelet_power_law_uvs = ComponentListSplit::get_shapelet_uvs(
+                    &sky_model_comps.shapelet_power_law_radecs,
+                    lst,
+                    &xyzs,
+                );
+                let shapelet_list_uvs = ComponentListSplit::get_shapelet_uvs(
+                    &sky_model_comps.shapelet_list_radecs,
+                    lst,
+                    &xyzs,
+                );
                 unsafe {
-                    // Shortcuts.
-                    let p = &params.sky_model_comps.points;
-                    let g = &params.sky_model_comps.gaussians;
-                    let s = &params.sky_model_comps.shapelets;
-                    dbg!(p.radecs.len());
-                    dbg!(g.radecs.len());
-                    dbg!(s.radecs.len());
                     let start = std::time::Instant::now();
                     let cuda_code = cuda::model_timestep(
                         num_cross_correlation_baselines,
                         params.fine_chan_freqs.len(),
-                        // 0,
-                        p.radecs.len(),
+                        sky_model_comps.point_power_law_radecs.len(),
+                        sky_model_comps.point_list_radecs.len(),
+                        sky_model_comps.gaussian_power_law_radecs.len(),
+                        sky_model_comps.gaussian_list_radecs.len(),
                         0,
-                        // g.radecs.len(),
-                        0,
-                        // s.radecs.len(),
                         uvws.as_ptr() as _,
                         params.fine_chan_freqs.as_ptr(),
-                        p.lmns.as_ptr() as _,
-                        p.instrumental_flux_densities.as_ptr() as _,
-                        g.lmns.as_ptr() as _,
-                        g.instrumental_flux_densities.as_ptr() as _,
-                        g.gaussian_params.as_ptr() as _,
-                        s.lmns.as_ptr() as _,
-                        s.instrumental_flux_densities.as_ptr() as _,
-                        s.gaussian_params.as_ptr() as _,
-                        shapelet_uvs.as_ptr(),
-                        shapelet_coeffs.as_ptr(),
-                        num_shapelet_coeffs.as_ptr(),
+                        sky_model_comps.point_power_law_lmns.as_ptr(),
+                        sky_model_comps.point_power_law_fds.as_ptr(),
+                        sky_model_comps.point_power_law_sis.as_ptr(),
+                        sky_model_comps.point_list_lmns.as_ptr(),
+                        sky_model_comps.point_list_fds.as_ptr(),
+                        sky_model_comps.gaussian_power_law_lmns.as_ptr(),
+                        sky_model_comps.gaussian_power_law_fds.as_ptr(),
+                        sky_model_comps.gaussian_power_law_sis.as_ptr(),
+                        sky_model_comps.gaussian_power_law_gaussian_params.as_ptr(),
+                        sky_model_comps.gaussian_list_lmns.as_ptr(),
+                        sky_model_comps.gaussian_list_fds.as_ptr(),
+                        sky_model_comps.gaussian_list_gaussian_params.as_ptr(),
+                        sky_model_comps.shapelet_power_law_lmns.as_ptr(),
+                        sky_model_comps.shapelet_power_law_fds.as_ptr(),
+                        sky_model_comps.shapelet_power_law_gaussian_params.as_ptr(),
+                        shapelet_power_law_uvs.as_ptr(),
+                        sky_model_comps.shapelet_power_law_coeffs.as_ptr(),
+                        sky_model_comps.shapelet_power_law_coeff_lens.as_ptr(),
                         shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
                         shapelets::SBF_L,
                         shapelets::SBF_N,

@@ -30,6 +30,7 @@ byteorder = "1.4.3"
 chrono = "0.4.19"
 crossbeam-channel = "0.5.1"
 crossbeam-utils = "0.8.5"
+either = "1.6.1"
 fern = { version = "0.6.0", features = ["chrono"] }
 flate2 = "1.0.20"
 glob = "0.3.0"

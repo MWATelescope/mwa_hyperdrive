@@ -97,7 +97,7 @@ pub fn model_timestep(
             &[1.0; 16],
             unflagged_fine_chan_freqs,
         )?;
-        let shapelet_uvws = components.shapelets.get_shapelet_uvws(lst_rad, &tile_xyzs);
+        let shapelet_uvws = components.shapelets.get_shapelet_uvws(lst_rad, tile_xyzs);
         model_shapelets(
             vis_model_slice.view_mut(),
             &components.shapelets.lmns,

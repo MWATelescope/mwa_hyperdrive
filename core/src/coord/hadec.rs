@@ -8,7 +8,7 @@ use super::azel::AzEl;
 use super::radec::RADec;
 
 /// A struct containing an Hour Angle and Declination. All units are in radians.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct HADec {
     /// Hour angle \[radians\]
@@ -37,7 +37,7 @@ impl HADec {
     }
 
     /// Given a local sidereal time, make a new `HADec` struct from a `RADec`.
-    pub fn from_radec(radec: &RADec, lst_rad: f64) -> Self {
+    pub fn from_radec(radec: RADec, lst_rad: f64) -> Self {
         Self {
             ha: lst_rad - radec.ra,
             dec: radec.dec,
@@ -60,7 +60,7 @@ impl HADec {
     /// elevation) for the MWA's location.
     #[cfg(feature = "mwalib")]
     pub fn to_azel_mwa(&self) -> AzEl {
-        Self::to_azel(&self, crate::constants::MWA_LAT_RAD)
+        self.to_azel(crate::constants::MWA_LAT_RAD)
     }
 
     /// Calculate the distance between two sets of coordinates.

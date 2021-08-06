@@ -56,7 +56,7 @@ impl InputDataTypes {
         let mut temp = InputDataTypesTemp::default();
 
         for file in files.iter().map(|f| f.as_str()) {
-            file_checker(&mut temp, &file)?;
+            file_checker(&mut temp, file)?;
         }
 
         if temp.metafits.len() > 1 {

@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn read_yaml_file() {
-        let f = File::open("examples/hyperdrive_srclist.yaml");
+        let f = File::open("tests/hyperdrive_srclist.yaml");
         assert!(f.is_ok(), "{}", f.unwrap_err());
         let mut f = BufReader::new(f.unwrap());
 
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn read_json_file() {
-        let f = File::open("examples/hyperdrive_srclist.json");
+        let f = File::open("tests/hyperdrive_srclist.json");
         assert!(f.is_ok(), "{}", f.unwrap_err());
         let mut f = BufReader::new(f.unwrap());
 
@@ -131,7 +131,7 @@ mod tests {
         let mut example = String::new();
         let mut just_written = String::new();
 
-        let f = File::open("examples/hyperdrive_srclist.yaml");
+        let f = File::open("tests/hyperdrive_srclist.yaml");
         assert!(f.is_ok(), "{}", f.unwrap_err());
         f.unwrap().read_to_string(&mut example).unwrap();
 
@@ -155,7 +155,7 @@ mod tests {
         let mut example = String::new();
         let mut just_written = String::new();
         {
-            let f = File::open("examples/hyperdrive_srclist.json");
+            let f = File::open("tests/hyperdrive_srclist.json");
             assert!(f.is_ok(), "{}", f.unwrap_err());
             f.unwrap().read_to_string(&mut example).unwrap();
 

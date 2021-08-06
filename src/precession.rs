@@ -67,7 +67,7 @@ pub(crate) fn get_lmst(time: Epoch, array_longitude_rad: f64) -> f64 {
 
 // This function is very similar to cotter's `PrepareTimestepUVW`.
 pub(crate) fn precess_time(
-    phase_centre: &RADec,
+    phase_centre: RADec,
     time: Epoch,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
@@ -95,7 +95,7 @@ pub(crate) fn precess_time(
         new
     };
 
-    let precessed = hadec_j2000(&mut rotation_matrix, lmst, array_latitude_rad, &radec_aber);
+    let precessed = hadec_j2000(&mut rotation_matrix, lmst, array_latitude_rad, radec_aber);
 
     PrecessionInfo {
         rotation_matrix,
@@ -107,7 +107,7 @@ pub(crate) fn precess_time(
 }
 
 // Blatently stolen from cotter.
-fn aber_radec_rad(eq: f64, mjd: f64, radec: &RADec) -> RADec {
+fn aber_radec_rad(eq: f64, mjd: f64, radec: RADec) -> RADec {
     let mut v1 = [0.0; 3];
     let mut v2 = [0.0; 3];
 
@@ -161,7 +161,7 @@ fn hadec_j2000(
     rotation_matrix: &mut [[f64; 3]; 3],
     lmst: f64,
     lat_rad: f64,
-    radec: &RADec,
+    radec: RADec,
 ) -> HADecJ2000 {
     let (new_lmst, new_lat) = rotate_radec(rotation_matrix, lmst, lat_rad);
     HADecJ2000 {
@@ -396,18 +396,45 @@ mod pal {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
-    use mwa_hyperdrive_core::mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
     use std::str::FromStr;
 
-    fn gps_to_epoch(gps: u32) -> Epoch {
-        // https://en.wikipedia.org/wiki/Global_Positioning_System#Timekeeping
-        // The difference between GPS and TAI time is always 19s, but hifitime
-        // wants the number of TAI seconds since 1900. GPS time starts at 1980
-        // Jan 5.
-        let tai = gps as f64 + 19.0 + crate::constants::HIFITIME_GPS_FACTOR;
-        Epoch::from_tai_seconds(tai)
+    use super::*;
+    use crate::time::gps_to_epoch;
+    use mwa_hyperdrive_core::constants::{MWA_LAT_RAD, MWA_LONG_RAD};
+
+    // astropy doesn't exactly agree with the numbers below, I think because the
+    // LST listed in MWA metafits files doesn't agree with what astropy thinks
+    // it should be. But, it's all very close.
+    #[test]
+    fn test_get_lst() {
+        let epoch = gps_to_epoch(1090008642.0);
+        assert_abs_diff_eq!(
+            get_lmst(epoch, MWA_LONG_RAD),
+            6.262087947389409,
+            epsilon = 1e-10
+        );
+
+        let epoch = gps_to_epoch(1090008643.0);
+        assert_abs_diff_eq!(
+            get_lmst(epoch, MWA_LONG_RAD),
+            6.2621608685650045,
+            epsilon = 1e-10
+        );
+
+        let epoch = gps_to_epoch(1090008647.0);
+        assert_abs_diff_eq!(
+            get_lmst(epoch, MWA_LONG_RAD),
+            6.262452553175729,
+            epsilon = 1e-10
+        );
+
+        let epoch = gps_to_epoch(1090008644.0);
+        assert_abs_diff_eq!(
+            get_lmst(epoch, MWA_LONG_RAD),
+            6.262233789694743,
+            epsilon = 1e-10
+        );
     }
 
     #[test]
@@ -415,12 +442,7 @@ mod tests {
         let j2000_epoch = Epoch::from_str("2000-01-01T11:58:55.816 UTC").unwrap();
 
         let phase_centre = RADec::new_degrees(0.0, -27.0);
-        let eor0 = precess_time(
-            &phase_centre,
-            j2000_epoch,
-            MWA_LONGITUDE_RADIANS,
-            MWA_LATITUDE_RADIANS,
-        );
+        let eor0 = precess_time(phase_centre, j2000_epoch, MWA_LONG_RAD, MWA_LAT_RAD);
         assert_abs_diff_eq!(eor0.rotation_matrix[0][0], 1.0, epsilon = 1e-4);
         assert_abs_diff_eq!(eor0.rotation_matrix[1][1], 1.0, epsilon = 1e-4);
         assert_abs_diff_eq!(eor0.rotation_matrix[2][2], 1.0, epsilon = 1e-4);
@@ -432,22 +454,13 @@ mod tests {
         assert_abs_diff_eq!(eor0.rotation_matrix[2][1], 0.0, epsilon = 1e-4);
 
         assert_abs_diff_eq!(eor0.lmst_j2000 - eor0.hadec_j2000.ha, 0.0, epsilon = 1e-4);
-        assert_abs_diff_eq!(
-            eor0.array_latitude_j2000,
-            MWA_LATITUDE_RADIANS,
-            epsilon = 1e-4
-        );
+        assert_abs_diff_eq!(eor0.array_latitude_j2000, MWA_LAT_RAD, epsilon = 1e-4);
         assert_abs_diff_eq!(eor0.lmst, eor0.lmst_j2000, epsilon = 1e-4);
 
         assert_abs_diff_eq!(eor0.lmst, 0.6433259676052971, epsilon = 1e-4);
 
         let phase_centre = RADec::new_degrees(60.0, -30.0);
-        let eor1 = precess_time(
-            &phase_centre,
-            j2000_epoch,
-            MWA_LONGITUDE_RADIANS,
-            MWA_LATITUDE_RADIANS,
-        );
+        let eor1 = precess_time(phase_centre, j2000_epoch, MWA_LONG_RAD, MWA_LAT_RAD);
         assert_abs_diff_eq!(eor1.rotation_matrix[0][0], 1.0, epsilon = 1e-4);
         assert_abs_diff_eq!(eor1.rotation_matrix[1][1], 1.0, epsilon = 1e-4);
         assert_abs_diff_eq!(eor1.rotation_matrix[2][2], 1.0, epsilon = 1e-4);
@@ -463,11 +476,7 @@ mod tests {
             -5.235898085317921,
             epsilon = 1e-4
         );
-        assert_abs_diff_eq!(
-            eor1.array_latitude_j2000,
-            MWA_LATITUDE_RADIANS,
-            epsilon = 1e-4
-        );
+        assert_abs_diff_eq!(eor1.array_latitude_j2000, MWA_LAT_RAD, epsilon = 1e-4);
         assert_abs_diff_eq!(eor1.lmst, eor1.lmst_j2000, epsilon = 1e-4);
 
         assert_abs_diff_eq!(eor1.lmst, 0.6433259676052971, epsilon = 1e-4);
@@ -475,15 +484,10 @@ mod tests {
 
     #[test]
     fn test_precess_1065880128_to_j2000() {
-        let epoch = gps_to_epoch(1065880128);
+        let epoch = gps_to_epoch(1065880128.0);
         let phase_centre = RADec::new_degrees(0.0, -27.0);
 
-        let p = precess_time(
-            &phase_centre,
-            epoch,
-            MWA_LONGITUDE_RADIANS,
-            MWA_LATITUDE_RADIANS,
-        );
+        let p = precess_time(phase_centre, epoch, MWA_LONG_RAD, MWA_LAT_RAD);
         // How do I know this is right? Good question! ... I don't.
         assert_abs_diff_eq!(p.rotation_matrix[0][0], 1.0, epsilon = 1e-5);
         assert_abs_diff_eq!(p.rotation_matrix[1][1], 1.0, epsilon = 1e-5);
@@ -500,7 +504,7 @@ mod tests {
         assert_abs_diff_eq!(p.lmst, 6.0747789094260245, epsilon = 1e-10);
         assert_abs_diff_eq!(p.lmst_j2000, 6.071524853456497, epsilon = 1e-10);
         assert_abs_diff_eq!(p.array_latitude_j2000, -0.467396549790915, epsilon = 1e-10);
-        assert_abs_diff_ne!(p.array_latitude_j2000, MWA_LATITUDE_RADIANS, epsilon = 1e-5);
+        assert_abs_diff_ne!(p.array_latitude_j2000, MWA_LAT_RAD, epsilon = 1e-5);
 
         let pc_hadec = phase_centre.to_hadec(p.lmst);
         let ha_diff_arcmin = (pc_hadec.ha - p.hadec_j2000.ha).to_degrees() * 60.0;
@@ -511,15 +515,10 @@ mod tests {
 
     #[test]
     fn test_precess_1099334672_to_j2000() {
-        let epoch = gps_to_epoch(1099334672);
+        let epoch = gps_to_epoch(1099334672.0);
         let phase_centre = RADec::new_degrees(60.0, -30.0);
 
-        let p = precess_time(
-            &phase_centre,
-            epoch,
-            MWA_LONGITUDE_RADIANS,
-            MWA_LATITUDE_RADIANS,
-        );
+        let p = precess_time(phase_centre, epoch, MWA_LONG_RAD, MWA_LAT_RAD);
         // How do I know this is right? Good question! ... I don't.
         assert_abs_diff_eq!(p.rotation_matrix[0][0], 1.0, epsilon = 1e-5);
         assert_abs_diff_eq!(p.rotation_matrix[1][1], 1.0, epsilon = 1e-5);
@@ -536,7 +535,7 @@ mod tests {
         assert_abs_diff_eq!(p.lmst, 1.4598017673520172, epsilon = 1e-10);
         assert_abs_diff_eq!(p.lmst_j2000, 1.4571918352968762, epsilon = 1e-10);
         assert_abs_diff_eq!(p.array_latitude_j2000, -0.4661807836570052, epsilon = 1e-10);
-        assert_abs_diff_ne!(p.array_latitude_j2000, MWA_LATITUDE_RADIANS, epsilon = 1e-5);
+        assert_abs_diff_ne!(p.array_latitude_j2000, MWA_LAT_RAD, epsilon = 1e-5);
 
         let pc_hadec = phase_centre.to_hadec(p.lmst);
         let ha_diff_arcmin = (pc_hadec.ha - p.hadec_j2000.ha).to_degrees() * 60.0;

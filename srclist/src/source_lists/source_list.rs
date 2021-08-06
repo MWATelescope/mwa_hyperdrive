@@ -44,7 +44,7 @@ impl SourceList {
     /// assuming that the latitude is the MWA's latitude. See the documentation
     /// for `SourceList::get_azel` for more details.
     pub fn get_azel_mwa(&self, lst_rad: f64) -> Vec<AzEl> {
-        Self::get_azel(&self, lst_rad, MWA_LAT_RAD)
+        self.get_azel(lst_rad, MWA_LAT_RAD)
     }
 
     /// Get azimuth and elevation coordinates for all components of all sources.
@@ -66,11 +66,11 @@ impl SourceList {
     /// for `SourceList::get_azel` for more details. The sources are iterated in
     /// parallel.
     pub fn get_azel_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
-        Self::get_azel_parallel(&self, lst_rad, MWA_LAT_RAD)
+        self.get_azel_parallel(lst_rad, MWA_LAT_RAD)
     }
 
     /// Get the LMN coordinates for all components of all sources.
-    pub fn get_lmns(&self, phase_centre: &RADec) -> Vec<LMN> {
+    pub fn get_lmns(&self, phase_centre: RADec) -> Vec<LMN> {
         self.iter()
             .flat_map(|(_, src)| &src.components)
             .map(|comp| comp.radec.to_lmn(phase_centre))
@@ -79,7 +79,7 @@ impl SourceList {
 
     /// Get the LMN coordinates for all components of all sources. The sources are iterated
     /// in parallel.
-    pub fn get_lmns_parallel(&self, phase_centre: &RADec) -> Vec<LMN> {
+    pub fn get_lmns_parallel(&self, phase_centre: RADec) -> Vec<LMN> {
         self.par_iter()
             .flat_map(|(_, src)| &src.components)
             .map(|comp| comp.radec.to_lmn(phase_centre))

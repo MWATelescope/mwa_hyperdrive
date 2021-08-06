@@ -14,7 +14,7 @@ use super::lmn::LMN;
 
 /// A struct containing a Right Ascension and Declination. All units are in
 /// radians.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct RADec {
     /// Right ascension \[radians\]
@@ -44,7 +44,7 @@ impl RADec {
     }
 
     /// Given a local sidereal time, make a new [RADec] struct from a [HADec].
-    pub fn from_hadec(hadec: &HADec, lst_rad: f64) -> Self {
+    pub fn from_hadec(hadec: HADec, lst_rad: f64) -> Self {
         Self {
             ra: lst_rad - hadec.ha,
             dec: hadec.dec,
@@ -58,13 +58,12 @@ impl RADec {
     ///
     /// This function accounts for Right Ascension coordinates that range over
     /// 360 degrees.
-    pub fn weighted_average<T: AsRef<RADec>>(radecs: &[T], weights: &[f64]) -> Option<Self> {
+    pub fn weighted_average(radecs: &[Self], weights: &[f64]) -> Option<Self> {
         // Accounting for the 360 degree branch cut.
         let mut any_less_than_90 = false;
         let mut any_between_90_270 = false;
         let mut any_greater_than_270 = false;
         for radec in radecs {
-            let radec = radec.as_ref();
             if (0.0..FRAC_PI_4).contains(&radec.ra) {
                 any_less_than_90 = true;
             }
@@ -101,7 +100,6 @@ impl RADec {
         let mut dec_sum = 0.0;
         let mut weight_sum = 0.0;
         for (c, w) in radecs.iter().zip(weights.iter()) {
-            let c = c.as_ref();
             let ra = if c.ra > new_cutoff { c.ra - TAU } else { c.ra };
             ra_sum += ra * w;
             dec_sum += c.dec * w;
@@ -120,7 +118,7 @@ impl RADec {
     ///
     /// Derived using "Coordinate transformations" on page 388 of Synthesis
     /// Imaging in Radio Astronomy II.
-    pub fn to_lmn(&self, phase_centre: &RADec) -> LMN {
+    pub fn to_lmn(&self, phase_centre: RADec) -> LMN {
         let d_ra = self.ra - phase_centre.ra;
         let (s_d_ra, c_d_ra) = d_ra.sin_cos();
         let (s_dec, c_dec) = self.dec.sin_cos();
@@ -136,14 +134,8 @@ impl RADec {
     ///
     /// Uses ERFA.
     #[cfg(feature = "erfa")]
-    pub fn separation(&self, b: &Self) -> f64 {
+    pub fn separation(&self, b: Self) -> f64 {
         unsafe { erfa_sys::eraSeps(self.ra, self.dec, b.ra, b.dec) }
-    }
-}
-
-impl AsRef<RADec> for RADec {
-    fn as_ref(&self) -> &RADec {
-        self
     }
 }
 
@@ -167,7 +159,7 @@ mod tests {
     fn test_to_lmn() {
         let radec = RADec::new_degrees(62.0, -27.5);
         let phase_centre = RADec::new_degrees(60.0, -27.0);
-        let lmn = radec.to_lmn(&phase_centre);
+        let lmn = radec.to_lmn(phase_centre);
         let expected = LMN {
             l: 0.03095623164758603,
             m: -0.008971846102111436,
@@ -188,7 +180,7 @@ mod tests {
         let w1 = 1.0;
         let c2 = RADec::new_degrees(11.0, 10.0);
         let w2 = 1.0;
-        let result = RADec::weighted_average(&[&c1, &c2], &[w1, w2]);
+        let result = RADec::weighted_average(&[c1, c2], &[w1, w2]);
         assert!(result.is_some());
         let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 10.5_f64.to_radians(), epsilon = 1e-10);
@@ -196,7 +188,7 @@ mod tests {
 
         // Complex case: both components have different weights.
         let w1 = 3.0;
-        let result = RADec::weighted_average(&[&c1, &c2], &[w1, w2]);
+        let result = RADec::weighted_average(&[c1, c2], &[w1, w2]);
         assert!(result.is_some());
         let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 10.25_f64.to_radians(), epsilon = 1e-10);
@@ -210,7 +202,7 @@ mod tests {
         let w1 = 1.0;
         let c2 = RADec::new_degrees(359.0, 10.0);
         let w2 = 1.0;
-        let result = RADec::weighted_average(&[&c1, &c2], &[w1, w2]);
+        let result = RADec::weighted_average(&[c1, c2], &[w1, w2]);
         assert!(result.is_some());
         let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 4.5_f64.to_radians(), epsilon = 1e-10);
@@ -221,7 +213,7 @@ mod tests {
     fn test_weighted_pos_single() {
         let c = RADec::new(0.5, 0.75);
         let w = 1.0;
-        let result = RADec::weighted_average(&[&c], &[w]);
+        let result = RADec::weighted_average(&[c], &[w]);
         assert!(result.is_some());
         let weighted_pos = result.unwrap();
         assert_abs_diff_eq!(weighted_pos.ra, 0.5, epsilon = 1e-10);

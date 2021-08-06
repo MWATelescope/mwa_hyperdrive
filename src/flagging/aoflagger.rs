@@ -427,7 +427,7 @@ impl AOFlags {
         for (&gpubox_num, f) in self.flags.iter() {
             self.occupancy.insert(
                 gpubox_num,
-                get_occupancy(&f, self.num_channels / self.flags.len()),
+                get_occupancy(f, self.num_channels / self.flags.len()),
             );
         }
 

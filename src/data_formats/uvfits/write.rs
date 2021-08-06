@@ -61,7 +61,7 @@ impl<'a> UvfitsWriter<'a> {
         fine_chan_width_hz: f64,
         centre_freq_hz: f64,
         centre_freq_chan: usize,
-        phase_centre: &RADec,
+        phase_centre: RADec,
         obs_name: Option<&str>,
     ) -> Result<Self, UvfitsWriteError> {
         // Delete any file that already exists.
@@ -491,7 +491,7 @@ impl<'a> UvfitsWriter<'a> {
     pub(crate) fn write_vis(
         &mut self,
         uvfits: &mut FitsFile,
-        uvw: &UVW,
+        uvw: UVW,
         tile_index1: usize,
         tile_index2: usize,
         epoch: Epoch,
@@ -587,7 +587,7 @@ impl<'a> UvfitsWriter<'a> {
                 };
             }
             let mut uvfits = self.open()?;
-            self.write_vis(&mut uvfits, uvw, tile1, tile2, epoch, &vis)?;
+            self.write_vis(&mut uvfits, *uvw, tile1, tile2, epoch, &vis)?;
             vis.clear();
         }
         Ok(())
@@ -620,7 +620,7 @@ mod tests {
             40e3,
             170e6,
             3,
-            &RADec::new_degrees(0.0, 60.0),
+            RADec::new_degrees(0.0, 60.0),
             Some("test"),
         )
         .unwrap();
@@ -637,7 +637,7 @@ mod tests {
 
                 u.write_vis(
                     &mut f,
-                    &UVW::default(),
+                    UVW::default(),
                     tile1,
                     tile2,
                     start_epoch,

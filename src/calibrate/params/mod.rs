@@ -521,7 +521,7 @@ impl CalibrateParams {
         // Print out some coordinates, including their precessed counterparts
         // (if applicable).
         let precession_info = precess_time(
-            &obs_context.phase_centre,
+            obs_context.phase_centre,
             obs_context.timesteps[0],
             array_longitude,
             array_latitude,
@@ -608,7 +608,7 @@ impl CalibrateParams {
         }
         veto_sources(
             &mut source_list,
-            &precession_info
+            precession_info
                 .hadec_j2000
                 .to_radec(precession_info.lmst_j2000),
             precession_info.lmst_j2000,
@@ -644,11 +644,10 @@ impl CalibrateParams {
         source_list
             .par_iter_mut()
             .flat_map(|(_, source)| &mut source.components)
-            .for_each(|comp| match &mut comp.flux_type {
-                FluxDensityType::List { .. } => {
+            .for_each(|comp| {
+                if let FluxDensityType::List { .. } = comp.flux_type {
                     comp.flux_type.convert_list_to_power_law();
                 }
-                _ => (),
             });
         let new_num_list_types = source_list
             .par_iter()
@@ -663,7 +662,7 @@ impl CalibrateParams {
         let sky_model_comps = ComponentList::new(
             source_list,
             &freq_struct.unflagged_fine_chan_freqs,
-            &obs_context.phase_centre,
+            obs_context.phase_centre,
         );
 
         let native_time_res = obs_context.time_res;
@@ -691,7 +690,7 @@ impl CalibrateParams {
             .zip(obs_context.tile_names.par_iter())
             .enumerate()
             .filter(|(tile_index, _)| !tile_flags.contains(tile_index))
-            .map(|(_, (xyz, name))| (xyz.clone(), name.clone()))
+            .map(|(_, (xyz, name))| (*xyz, name.clone()))
             .unzip();
 
         // Make sure the thresholds are sensible.

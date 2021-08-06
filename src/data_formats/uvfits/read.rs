@@ -427,7 +427,7 @@ impl UvfitsMetadata {
         let indices = Indices::new(uvfits, hdu)?;
 
         // GCOUNT tells us how many visibilities are in the file.
-        let num_rows_str: String = get_required_fits_key!(uvfits, &hdu, "GCOUNT")?;
+        let num_rows_str: String = get_required_fits_key!(uvfits, hdu, "GCOUNT")?;
         let num_rows: usize = match num_rows_str.parse() {
             Ok(p) => p,
             Err(_) => {
@@ -438,7 +438,7 @@ impl UvfitsMetadata {
             }
         };
         // PCOUNT tells us how many parameters are in each uvfits group.
-        let pcount_str: String = get_required_fits_key!(uvfits, &hdu, "PCOUNT")?;
+        let pcount_str: String = get_required_fits_key!(uvfits, hdu, "PCOUNT")?;
         let pcount: usize = match pcount_str.parse() {
             Ok(p) => p,
             Err(_) => {
@@ -450,7 +450,7 @@ impl UvfitsMetadata {
         };
         // NAXIS2 is how many floats are associated with a cross pol (probably 3; real
         // part of visibilitiy, imag part of visibility, weight).
-        let floats_per_pol_str: String = get_required_fits_key!(uvfits, &hdu, "NAXIS2")?;
+        let floats_per_pol_str: String = get_required_fits_key!(uvfits, hdu, "NAXIS2")?;
         let floats_per_pol: usize = match floats_per_pol_str.parse() {
             Ok(p) => p,
             Err(_) => {
@@ -461,7 +461,7 @@ impl UvfitsMetadata {
             }
         };
         // NAXIS3 is the number of cross pols.
-        let num_pols_str: String = get_required_fits_key!(uvfits, &hdu, "NAXIS3")?;
+        let num_pols_str: String = get_required_fits_key!(uvfits, hdu, "NAXIS3")?;
         let num_pols: usize = match num_pols_str.parse() {
             Ok(p) => p,
             Err(_) => {
@@ -473,7 +473,7 @@ impl UvfitsMetadata {
         };
 
         // NAXIS4 is the number of fine-frequency channels.
-        let num_fine_freq_chans_str: String = get_required_fits_key!(uvfits, &hdu, "NAXIS4")?;
+        let num_fine_freq_chans_str: String = get_required_fits_key!(uvfits, hdu, "NAXIS4")?;
         let num_fine_freq_chans: usize = match num_fine_freq_chans_str.parse() {
             Ok(p) => p,
             Err(_) => {
