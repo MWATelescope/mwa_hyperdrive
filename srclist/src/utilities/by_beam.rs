@@ -12,15 +12,109 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use log::{debug, info, trace, warn};
+use structopt::StructOpt;
 
 use crate::{
     ao, constants::*, hyperdrive, rts, veto_sources, woden, HyperdriveFileType, SourceList,
-    SourceListType, SrclistError, WriteSourceListError,
+    SourceListType, SrclistError, WriteSourceListError, CONVERT_INPUT_TYPE_HELP,
+    CONVERT_OUTPUT_TYPE_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
 };
-use mwa_hyperdrive_core::{
-    beam::{create_fee_beam_object, Delays},
-    mwalib, RADec,
-};
+use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
+use mwa_rust_core::{mwalib, RADec};
+
+/// Reduce a sky-model source list to the top N brightest sources, given
+/// pointing information.
+///
+/// See for more info:
+/// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+#[derive(StructOpt, Debug)]
+pub struct ByBeamArgs {
+    /// Path to the source list to be converted.
+    #[structopt(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
+    pub input_source_list: PathBuf,
+
+    /// Path to the output source list. If not specified, then then "_N" is
+    /// appended to the filename.
+    #[structopt(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+    pub output_source_list: Option<PathBuf>,
+
+    #[structopt(short = "i", long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
+    pub input_type: Option<String>,
+
+    #[structopt(short = "o", long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
+    pub output_type: Option<String>,
+
+    /// Reduce the input source list to the brightest N sources and write them
+    /// to the output source list. If the input source list has less than N
+    /// sources, then all sources are used.
+    #[structopt(short = "n", long)]
+    pub number: usize,
+
+    /// Path to the metafits file.
+    #[structopt(short = "m", long, parse(from_str))]
+    pub metafits: PathBuf,
+
+    #[structopt(long, help = SOURCE_DIST_CUTOFF_HELP.as_str())]
+    pub source_dist_cutoff: Option<f64>,
+
+    #[structopt(long, help = VETO_THRESHOLD_HELP.as_str())]
+    pub veto_threshold: Option<f64>,
+
+    /// Path to the MWA FEE beam file. If this is not specified, then the
+    /// MWA_BEAM_FILE environment variable should contain the path.
+    #[structopt(short, long)]
+    pub beam_file: Option<PathBuf>,
+
+    /// Attempt to convert flux density lists to power laws. See the online help
+    /// for more information.
+    #[structopt(short, long)]
+    pub convert_lists: bool,
+
+    /// Collapse all of the sky-model components into a single source; the
+    /// apparently brightest source is used as the base source. This is suitable
+    /// for an "RTS patch source list".
+    #[structopt(long)]
+    pub collapse_into_single_source: bool,
+
+    /// Don't include point components from the input sky model.
+    #[structopt(long)]
+    filter_points: bool,
+
+    /// Don't include Gaussian components from the input sky model.
+    #[structopt(long)]
+    filter_gaussians: bool,
+
+    /// Don't include shapelet components from the input sky model.
+    #[structopt(long)]
+    filter_shapelets: bool,
+
+    /// The verbosity of the program. The default is to print high-level
+    /// information.
+    #[structopt(short, long, parse(from_occurrences))]
+    pub verbosity: u8,
+}
+
+impl ByBeamArgs {
+    /// Run [by_beam] with these arguments.
+    pub fn run(&self) -> Result<(), SrclistError> {
+        by_beam(
+            &self.input_source_list,
+            self.output_source_list.as_ref(),
+            self.input_type.as_ref(),
+            self.output_type.as_ref(),
+            self.number,
+            &self.metafits,
+            self.source_dist_cutoff,
+            self.veto_threshold,
+            self.beam_file.as_ref(),
+            self.convert_lists,
+            self.collapse_into_single_source,
+            self.filter_points,
+            self.filter_gaussians,
+            self.filter_shapelets,
+        )
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
@@ -35,11 +129,14 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
     beam_file: Option<T>,
     convert_lists: bool,
     collapse_into_single_source: bool,
+    filter_points: bool,
+    filter_gaussians: bool,
+    filter_shapelets: bool,
 ) -> Result<(), SrclistError> {
     // Read the input source list.
     let input_path = input_path.as_ref().to_path_buf();
     let input_type = input_type.and_then(|t| SourceListType::from_str(t.as_ref()).ok());
-    let (mut sl, sl_type) = crate::read::read_source_list_file(&input_path, input_type)?;
+    let (sl, sl_type) = crate::read::read_source_list_file(&input_path, input_type)?;
     if input_type.is_none() {
         info!(
             "Successfully read {} as a {}-style source list",
@@ -47,6 +144,11 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
             sl_type
         );
     }
+    let counts = sl.get_counts();
+    info!(
+        "{} points, {} gaussians, {} shapelets",
+        counts.0, counts.1, counts.2
+    );
 
     // Handle the output path and type.
     let output_path = match output_path {
@@ -85,8 +187,7 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
 
     // Open the metafits.
     trace!("Attempting to open the metafits file");
-    let meta = mwalib::MetafitsContext::new(&metafits, mwalib::MWAVersion::CorrLegacy).unwrap();
-    debug!("Assuming that the metafits file is derived from the \"legacy\" MWA correlator");
+    let meta = mwalib::MetafitsContext::new(&metafits, None)?;
     let ra_phase_centre = meta
         .ra_phase_center_degrees
         .unwrap_or(meta.ra_tile_pointing_degrees);
@@ -112,8 +213,20 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
 
     // Set up the beam.
     let delays = get_true_delays(&meta);
-    let beam = create_fee_beam_object(Delays::Available(delays), beam_file).unwrap();
+    let beam = create_fee_beam_object(Delays::Available(delays), beam_file)?;
 
+    // Apply any filters.
+    let mut sl = if filter_points || filter_gaussians || filter_shapelets {
+        let sl = sl.filter(filter_points, filter_gaussians, filter_shapelets);
+        let counts = sl.get_counts();
+        debug!(
+            "After filtering, there are {} points, {} gaussians, {} shapelets",
+            counts.0, counts.1, counts.2
+        );
+        sl
+    } else {
+        sl
+    };
     // If we were told to, attempt to convert lists of flux densities to power
     // laws.
     if convert_lists {
@@ -127,7 +240,7 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
         &mut sl,
         phase_centre,
         lst,
-        mwalib::MWA_LATITUDE_RADIANS,
+        mwa_rust_core::constants::MWA_LAT_RAD,
         &coarse_chan_freqs,
         beam.deref(),
         Some(num_sources),

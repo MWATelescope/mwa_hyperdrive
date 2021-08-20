@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use mwa_hyperdrive_core::mwalib;
+use mwa_rust_core::mwalib;
 use mwalib::*;
 
 #[derive(Error, Debug)]

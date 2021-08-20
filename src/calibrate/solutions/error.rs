@@ -6,7 +6,7 @@
 
 use thiserror::Error;
 
-use mwa_hyperdrive_core::mwalib;
+use mwa_rust_core::mwalib;
 use mwalib::{fitsio, FitsError};
 
 #[derive(Error, Debug)]

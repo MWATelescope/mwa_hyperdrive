@@ -11,27 +11,35 @@ use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::PathBuf;
 
-use either::Either;
 use hifitime::Epoch;
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use itertools::Either;
 use log::{debug, info};
 use ndarray::prelude::*;
 use serde::Deserialize;
 use structopt::StructOpt;
 
 use crate::{
-    constants::*,
     data_formats::{metafits, uvfits::UvfitsWriter},
     glob::get_single_match_from_glob,
-    model, shapelets,
+    model,
     time::mjd_to_epoch,
 };
-use mwa_hyperdrive_core::{beam::Delays, *};
-#[cfg(feature = "cuda")]
-use mwa_hyperdrive_cuda as cuda;
-use mwa_hyperdrive_srclist::{
-    read::read_source_list_file, ComponentList, ComponentListSplit, SourceList,
+use mwa_hyperdrive_beam::{create_beam_object, Beam, Delays};
+use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList, SourceList};
+use mwa_rust_core::{
+    constants::{DS2R, SOLAR2SIDEREAL},
+    mwalib,
+    pos::xyz,
+    time::epoch_as_gps_seconds,
+    Jones, RADec, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
+
+#[cfg(feature = "cuda")]
+use mwa_hyperdrive_cuda as cuda;
+#[cfg(feature = "cuda")]
+use mwa_hyperdrive_srclist::ComponentListFFI;
 
 #[derive(StructOpt, Debug, Default, Deserialize)]
 pub struct SimulateVisArgs {
@@ -86,6 +94,24 @@ pub struct SimulateVisArgs {
     /// provided by the MWA_BEAM_FILE environment variable.
     #[structopt(long)]
     beam_file: Option<PathBuf>,
+
+    /// Don't attempt to convert "list" flux densities to power law flux
+    /// densities. See for more info:
+    /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+    #[structopt(long)]
+    dont_convert_lists: bool,
+
+    /// Don't include point components from the input sky model.
+    #[structopt(long)]
+    filter_points: bool,
+
+    /// Don't include Gaussian components from the input sky model.
+    #[structopt(long)]
+    filter_gaussians: bool,
+
+    /// Don't include shapelet components from the input sky model.
+    #[structopt(long)]
+    filter_shapelets: bool,
 }
 
 /// Parameters needed to do sky-model visibility simulation.
@@ -117,13 +143,32 @@ impl SimVisParams {
     fn new(args: SimulateVisArgs) -> Result<Self, SimulateVisError> {
         debug!("{:#?}", &args);
 
+        // Expose all the struct fields to ensure they're all used.
+        let SimulateVisArgs {
+            source_list,
+            metafits,
+            model_file,
+            ra,
+            dec,
+            num_fine_channels,
+            freq_res,
+            middle_freq,
+            time_steps,
+            time_res,
+            no_beam,
+            beam_file,
+            dont_convert_lists,
+            filter_points,
+            filter_gaussians,
+            filter_shapelets,
+        } = args;
+
         // Read the metafits file with mwalib.
         // TODO: Allow the user to specify the MWAVersion.
-        let metafits =
-            mwalib::MetafitsContext::new(&args.metafits, mwalib::MWAVersion::CorrLegacy)?;
+        let metafits = mwalib::MetafitsContext::new(&metafits, None)?;
 
         // Get the phase centre.
-        let phase_centre = match (args.ra, args.dec, &metafits) {
+        let phase_centre = match (ra, dec, &metafits) {
             (Some(ra), Some(dec), _) => {
                 // Verify that the input coordinates are sensible.
                 if !(0.0..=360.0).contains(&ra) {
@@ -151,71 +196,75 @@ impl SimVisParams {
         debug!("Using phase centre {}", phase_centre);
 
         // Get the fine channel frequencies.
-        if args.num_fine_channels == 0 {
+        if num_fine_channels == 0 {
             return Err(SimulateVisError::FineChansZero);
         }
-        if args.freq_res < f64::EPSILON {
+        if freq_res < f64::EPSILON {
             return Err(SimulateVisError::FineChansWidthTooSmall);
         }
-        let middle_freq = args.middle_freq.unwrap_or(metafits.centre_freq_hz as _);
+        let middle_freq = middle_freq.unwrap_or(metafits.centre_freq_hz as _);
         let fine_chan_freqs = {
-            let half_num_fine_chans = (args.num_fine_channels / 2) as f64;
-            let freq_res = args.freq_res * 1000.0; // kHz -> Hz
-            let mut fine_chan_freqs = Vec::with_capacity(args.num_fine_channels);
-            for i in 0..args.num_fine_channels {
+            let half_num_fine_chans = num_fine_channels as f64 / 2.0;
+            let freq_res = freq_res * 1000.0; // kHz -> Hz
+            let mut fine_chan_freqs = Vec::with_capacity(num_fine_channels);
+            for i in 0..num_fine_channels {
                 fine_chan_freqs
                     .push(middle_freq - half_num_fine_chans * freq_res + freq_res * i as f64);
             }
             fine_chan_freqs
         };
-        debug!(
-            "First fine channel freq: {} MHz",
-            *fine_chan_freqs.first().unwrap() / 1e6
-        );
-        debug!(
-            "Last fine channel freq:  {} MHz",
-            *fine_chan_freqs.last().unwrap() / 1e6
-        );
+        if fine_chan_freqs.len() == 1 {
+            debug!(
+                "Only fine channel freq: {} MHz",
+                *fine_chan_freqs.first().unwrap() / 1e6
+            );
+        } else {
+            debug!(
+                "First fine channel freq: {} MHz",
+                *fine_chan_freqs.first().unwrap() / 1e6
+            );
+            debug!(
+                "Last fine channel freq:  {} MHz",
+                *fine_chan_freqs.last().unwrap() / 1e6
+            );
+        }
 
         // Populate the timesteps.
-        if args.time_steps == 0 {
-            return Err(SimulateVisError::TimeStepsInvalid);
-        }
         let timesteps = {
-            let mut timesteps = Vec::with_capacity(args.time_steps);
+            let mut timesteps = Vec::with_capacity(time_steps);
             let start = mjd_to_epoch(metafits.sched_start_mjd);
-            for i in 0..args.time_steps {
+            for i in 0..time_steps {
                 timesteps.push(
                     start
                         + hifitime::Duration::from_f64(
-                            args.time_res * i as f64,
+                            time_res * i as f64,
                             hifitime::TimeUnit::Second,
                         ),
                 );
             }
             timesteps
         };
-        debug!(
-            "First timestep (GPS): {:.2}",
-            timesteps.first().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR
-        );
-        debug!(
-            "Last timestep  (GPS): {:.2}",
-            timesteps.first().unwrap().as_gpst_seconds() - HIFITIME_GPS_FACTOR
-        );
+        match timesteps.as_slice() {
+            [] => return Err(SimulateVisError::ZeroTimeSteps),
+            [t] => debug!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
+            [t0, .., tn] => {
+                debug!("First timestep (GPS): {:.2}", epoch_as_gps_seconds(*t0));
+                debug!("Last timestep  (GPS): {:.2}", epoch_as_gps_seconds(*tn));
+            }
+        }
 
         // Treat the specified source list as file path. Does it exist? Then use it.
         // Otherwise, treat the specified source list as a glob and attempt to find
         // a single file with it.
-        let sl_pb = PathBuf::from(&args.source_list);
+        let sl_pb = PathBuf::from(&source_list);
         let sl_pb = if sl_pb.exists() {
             sl_pb
         } else {
-            get_single_match_from_glob(&args.source_list)?
+            get_single_match_from_glob(&source_list)?
         };
         // Read the source list.
         // TODO: Allow the user to specify a source list type.
-        let mut source_list = match read_source_list_file(&sl_pb, None) {
+        let source_list = match read_source_list_file(&sl_pb, None) {
             Ok((sl, sl_type)) => {
                 debug!("Successfully parsed {}-style source list", sl_type);
                 sl
@@ -225,26 +274,42 @@ impl SimVisParams {
                 return Err(SimulateVisError::from(e));
             }
         };
-        // Convert flux density lists into power laws.
-        source_list
-            .values_mut()
-            .flat_map(|src| &mut src.components)
-            .for_each(|comp| {
-                comp.flux_type.convert_list_to_power_law();
-            });
-        let delays = metafits::get_true_delays(&metafits);
-        let beam = crate::beam::create_beam_object(
-            args.no_beam,
-            Delays::Available(delays),
-            args.beam_file,
-        )?;
+        let counts = source_list.get_counts();
+        debug!(
+            "Found {} points, {} gaussians, {} shapelets",
+            counts.0, counts.1, counts.2
+        );
 
-        info!("Writing the sky model to {}", args.model_file.display());
+        // Apply any filters.
+        let mut source_list = if filter_points || filter_gaussians || filter_shapelets {
+            let sl = source_list.filter(filter_points, filter_gaussians, filter_shapelets);
+            let counts = sl.get_counts();
+            debug!(
+                "After filtering, there are {} points, {} gaussians, {} shapelets",
+                counts.0, counts.1, counts.2
+            );
+            sl
+        } else {
+            source_list
+        };
+        if !dont_convert_lists {
+            // Convert flux density lists into power laws.
+            source_list
+                .values_mut()
+                .flat_map(|src| &mut src.components)
+                .for_each(|comp| {
+                    comp.flux_type.convert_list_to_power_law();
+                });
+        }
+        let delays = metafits::get_true_delays(&metafits);
+        let beam = create_beam_object(no_beam, Delays::Available(delays), beam_file)?;
+
+        info!("Writing the sky model to {}", model_file.display());
 
         Ok(Self {
             source_list,
             metafits,
-            model_file: args.model_file,
+            model_file,
             phase_centre,
             fine_chan_freqs,
             timesteps,
@@ -259,6 +324,18 @@ pub fn simulate_vis(
     #[cfg(feature = "cuda")] cpu: bool,
     dry_run: bool,
 ) -> Result<(), SimulateVisError> {
+    // Witchcraft to allow this code to be used with or without CUDA support
+    // compiled.
+    #[cfg(not(feature = "cuda"))]
+    let cpu = true;
+
+    if cpu {
+        info!("Generating sky model visibilities on the CPU");
+    } else {
+        // TODO: Display GPU info.
+        info!("Generating sky model visibilities on the GPU");
+    }
+
     let params = SimVisParams::new(args)?;
 
     if dry_run {
@@ -267,7 +344,7 @@ pub fn simulate_vis(
     }
 
     // Get the geodetic XYZ coordinates of each of the MWA tiles.
-    let xyzs = XyzGeodetic::get_tiles_mwalib(&params.metafits);
+    let xyzs = XyzGeodetic::get_tiles_mwa(&params.metafits);
     let num_cross_correlation_baselines = params.metafits.num_baselines - params.metafits.num_ants;
 
     // Construct our visibilities array. This will be re-used for each timestep
@@ -293,7 +370,11 @@ pub fn simulate_vis(
         num_cross_correlation_baselines,
         params.fine_chan_freqs.len(),
         *params.timesteps.first().unwrap(),
-        params.fine_chan_freqs[1] - params.fine_chan_freqs[0],
+        if params.fine_chan_freqs.len() == 1 {
+            None
+        } else {
+            Some(params.fine_chan_freqs[1] - params.fine_chan_freqs[0])
+        },
         params.fine_chan_freqs[params.fine_chan_freqs.len() / 2],
         params.fine_chan_freqs.len() / 2,
         params.phase_centre,
@@ -303,29 +384,42 @@ pub fn simulate_vis(
         )),
     )?;
 
-    // Witchcraft to allow this code to be used with or without CUDA support
-    // compiled.
-    #[cfg(not(feature = "cuda"))]
-    let cpu = true;
-
     // Split the sky-model components (for efficiency). Use an Either to hold
-    // one type or the other.
-    #[cfg(feature = "cuda")]
-    let sky_model_comps: Either<ComponentList, ComponentListSplit> = if cpu {
+    // one type or the other (the types differ between CPU and GPU code).
+    let sky_model_comps = if cpu {
         Either::Left(ComponentList::new(
-            params.source_list,
+            &params.source_list,
             &params.fine_chan_freqs,
             params.phase_centre,
         ))
     } else {
-        Either::Right(ComponentListSplit::new(
-            params.source_list,
-            &params.fine_chan_freqs,
-            params.phase_centre,
-        ))
+        #[cfg(feature = "cuda")]
+        {
+            Either::Right(ComponentListFFI::new(
+                params.source_list,
+                &params.fine_chan_freqs,
+                params.phase_centre,
+            ))
+        }
+
+        // It doesn't matter what goes in Right when we're not using CUDA.
+        #[cfg(not(feature = "cuda"))]
+        Either::Right(0)
     };
-    #[cfg(not(feature = "cuda"))]
-    let sky_model_comps = ComponentList::new(source_list, &fine_chan_freqs, phase_centre);
+
+    // Progress bar.
+    let model_progress = ProgressBar::new(params.timesteps.len() as _)
+        .with_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{msg}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})",
+                )
+                .progress_chars("=> "),
+        )
+        .with_position(0)
+        .with_message("Sky modelling");
+    model_progress.set_draw_target(ProgressDrawTarget::stdout());
+    model_progress.tick();
 
     // Generate the visibilities.
     for &timestep in params.timesteps.iter() {
@@ -337,10 +431,7 @@ pub fn simulate_vis(
         if cpu {
             model::model_timestep(
                 vis_model.view_mut(),
-                #[cfg(feature = "cuda")]
                 sky_model_comps.as_ref().unwrap_left(),
-                #[cfg(not(feature = "cuda"))]
-                &sky_model_comps,
                 params.beam.deref(),
                 lst,
                 &xyzs,
@@ -348,63 +439,54 @@ pub fn simulate_vis(
                 &params.fine_chan_freqs,
             )?;
         } else {
-            // CUDA.
             #[cfg(feature = "cuda")]
             {
                 let sky_model_comps = sky_model_comps.as_ref().unwrap_right();
-                let shapelet_power_law_uvs = ComponentListSplit::get_shapelet_uvs(
-                    &sky_model_comps.shapelet_power_law_radecs,
-                    lst,
-                    &xyzs,
-                );
-                let shapelet_list_uvs = ComponentListSplit::get_shapelet_uvs(
-                    &sky_model_comps.shapelet_list_radecs,
-                    lst,
-                    &xyzs,
-                );
+
+                let shapelet_power_law_uvs = if sky_model_comps.shapelet_power_law_radecs.is_empty()
+                {
+                    None
+                } else {
+                    Some(ComponentListFFI::get_shapelet_uvs(
+                        &sky_model_comps.shapelet_power_law_radecs,
+                        lst,
+                        &xyzs,
+                    ))
+                };
+                let shapelet_list_uvs = if sky_model_comps.shapelet_list_radecs.is_empty() {
+                    None
+                } else {
+                    Some(ComponentListFFI::get_shapelet_uvs(
+                        &sky_model_comps.shapelet_list_radecs,
+                        lst,
+                        &xyzs,
+                    ))
+                };
                 unsafe {
-                    let start = std::time::Instant::now();
-                    let cuda_code = cuda::model_timestep(
+                    let (points, gaussians, shapelets) = sky_model_comps.to_c_types(
+                        shapelet_power_law_uvs.as_ref().map(|o| o.as_ptr()),
+                        shapelet_list_uvs.as_ref().map(|o| o.as_ptr()),
+                    );
+                    let cuda_result = cuda::model_timestep(
                         num_cross_correlation_baselines,
                         params.fine_chan_freqs.len(),
-                        sky_model_comps.point_power_law_radecs.len(),
-                        sky_model_comps.point_list_radecs.len(),
-                        sky_model_comps.gaussian_power_law_radecs.len(),
-                        sky_model_comps.gaussian_list_radecs.len(),
-                        0,
                         uvws.as_ptr() as _,
                         params.fine_chan_freqs.as_ptr(),
-                        sky_model_comps.point_power_law_lmns.as_ptr(),
-                        sky_model_comps.point_power_law_fds.as_ptr(),
-                        sky_model_comps.point_power_law_sis.as_ptr(),
-                        sky_model_comps.point_list_lmns.as_ptr(),
-                        sky_model_comps.point_list_fds.as_ptr(),
-                        sky_model_comps.gaussian_power_law_lmns.as_ptr(),
-                        sky_model_comps.gaussian_power_law_fds.as_ptr(),
-                        sky_model_comps.gaussian_power_law_sis.as_ptr(),
-                        sky_model_comps.gaussian_power_law_gaussian_params.as_ptr(),
-                        sky_model_comps.gaussian_list_lmns.as_ptr(),
-                        sky_model_comps.gaussian_list_fds.as_ptr(),
-                        sky_model_comps.gaussian_list_gaussian_params.as_ptr(),
-                        sky_model_comps.shapelet_power_law_lmns.as_ptr(),
-                        sky_model_comps.shapelet_power_law_fds.as_ptr(),
-                        sky_model_comps.shapelet_power_law_gaussian_params.as_ptr(),
-                        shapelet_power_law_uvs.as_ptr(),
-                        sky_model_comps.shapelet_power_law_coeffs.as_ptr(),
-                        sky_model_comps.shapelet_power_law_coeff_lens.as_ptr(),
-                        shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
-                        shapelets::SBF_L,
-                        shapelets::SBF_N,
-                        shapelets::SBF_C,
-                        shapelets::SBF_DX,
+                        &points,
+                        &gaussians,
+                        &shapelets,
+                        crate::shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
+                        crate::shapelets::SBF_L,
+                        crate::shapelets::SBF_N,
+                        crate::shapelets::SBF_C,
+                        crate::shapelets::SBF_DX,
                         vis_model.as_mut_ptr() as _,
                     );
-                    dbg!(std::time::Instant::now() - start);
-                    // TODO: Handle cuda_code.
-                    if cuda_code != 0 {
+                    // TODO: Handle cuda_result.
+                    if cuda_result != 0 {
                         panic!(
                             "cuda::model_timestep exited with CUDA error code {}",
-                            cuda_code
+                            cuda_result
                         );
                     }
                 }
@@ -419,11 +501,13 @@ pub fn simulate_vis(
             params.fine_chan_freqs.len(),
             &HashSet::new(),
         )?;
-        dbg!(&vis_model[[0, 0]]);
 
         // Clear the visibilities before re-using the buffer.
         vis_model.fill(Jones::default());
+
+        model_progress.inc(1);
     }
+    model_progress.finish_with_message("Finished generating sky model");
 
     // Finalise writing the model.
     let names: Vec<&str> = params
@@ -433,6 +517,10 @@ pub fn simulate_vis(
         .map(|rf| rf.tile_name.as_str())
         .collect();
     output_writer.write_uvfits_antenna_table(&names, &xyzs)?;
+    info!(
+        "Finished writing sky model to {}",
+        &params.model_file.display()
+    );
 
     Ok(())
 }

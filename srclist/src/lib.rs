@@ -11,20 +11,16 @@ pub mod hyperdrive;
 pub mod read;
 pub mod rts;
 pub mod source_lists;
+pub mod utilities;
 pub mod woden;
 
-mod by_beam;
-mod convert;
 mod error;
-mod verify;
 mod veto;
 
-pub use by_beam::*;
-pub use convert::*;
 pub use error::*;
 pub use flux_density::*;
 pub use source_lists::*;
-pub use verify::*;
+pub use utilities::*;
 pub use veto::*;
 
 use itertools::Itertools;
@@ -32,7 +28,7 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 
 use constants::*;
-use mwa_hyperdrive_core::RADec;
+use mwa_rust_core::RADec;
 
 /// All of the possible sky-model sources list types.
 #[derive(Debug, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
@@ -88,7 +84,7 @@ lazy_static::lazy_static! {
 }
 
 // External re-exports.
-pub use mwa_hyperdrive_core;
+pub use mwa_rust_core;
 
 #[cfg(test)]
 mod tests {

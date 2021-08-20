@@ -1,0 +1,24 @@
+[package]
+name = "mwa_hyperdrive_beam"
+version = "0.1.0"
+authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
+edition = "2018"
+license = "MPL-2.0"
+
+[features]
+hdf5-static = ["mwa_hyperbeam/hdf5-static"]
+
+[dependencies]
+log = "0.4.*"
+rayon = "~1"
+mwa_rust_core = "0.1.*"
+ndarray = "0.14.*"
+thiserror = "1.0.*"
+
+dashmap = "4.0.*"
+mwa_hyperbeam = { git = "https://github.com/cjordan/mwa_hyperbeam", branch = "parallactic" }
+
+[dev-dependencies]
+approx = { version = "0.4.*", features = ["num-complex"] }
+ndarray = { version = "0.14.*", features = ["approx"] }
+serial_test = "0.5.*"

@@ -12,11 +12,15 @@ SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
 bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --allowlist-function "model_.*" \
     --blocklist-type "Addresses" \
+    --allowlist-type "RADec" \
     --allowlist-type "UVW" \
     --allowlist-type "LMN" \
     --allowlist-type "ShapeletCoeff" \
     --allowlist-type "ShapeletUV" \
     --allowlist-type "Jones.*" \
+    --allowlist-type "Points" \
+    --allowlist-type "Gaussians" \
+    --allowlist-type "Shapelets" \
     --allowlist-var "POWER_LAW_FD_REF_FREQ" \
     --size_t-is-usize \
     > "${SCRIPTPATH}"/src/model.rs

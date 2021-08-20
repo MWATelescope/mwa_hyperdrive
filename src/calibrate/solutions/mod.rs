@@ -10,7 +10,6 @@
 mod error;
 
 pub(crate) use error::*;
-use num::Complex;
 
 use std::collections::HashSet;
 use std::ffi::CString;
@@ -22,13 +21,12 @@ use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use hifitime::Epoch;
 use ndarray::prelude::*;
 
-use crate::constants::HIFITIME_GPS_FACTOR;
-use fitsio::{
+use mwa_rust_core::{mwalib, time::epoch_as_gps_seconds, Complex, Jones};
+use mwalib::fitsio::{
     errors::check_status as fits_check_status,
     images::{ImageDescription, ImageType},
     FitsFile,
 };
-use mwa_hyperdrive_core::{mwalib, Jones};
 use mwalib::*;
 
 pub struct CalibrationSolutions {
@@ -116,10 +114,7 @@ impl CalibrationSolutions {
         let timesteps = self
             .timesteps
             .iter()
-            .map(|t| {
-                let gps = t.as_gpst_seconds() - HIFITIME_GPS_FACTOR;
-                format!("{:.2}", gps)
-            })
+            .map(|&t| format!("{:.2}", epoch_as_gps_seconds(t)))
             .collect::<Vec<_>>()
             .join(",");
         unsafe {
@@ -229,13 +224,13 @@ impl CalibrationSolutions {
         bin_file.write_f64::<LittleEndian>(
             self.timesteps
                 .first()
-                .map(|t| t.as_gpst_seconds() - HIFITIME_GPS_FACTOR)
+                .map(|&t| epoch_as_gps_seconds(t))
                 .unwrap_or(0.0),
         )?;
         bin_file.write_f64::<LittleEndian>(
             self.timesteps
                 .last()
-                .map(|t| t.as_gpst_seconds() - HIFITIME_GPS_FACTOR)
+                .map(|&t| epoch_as_gps_seconds(t))
                 .unwrap_or(0.0),
         )?;
 

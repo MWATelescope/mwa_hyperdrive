@@ -9,7 +9,6 @@ use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
-use mwa_hyperdrive_core::XyzGeodetic;
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -17,11 +16,17 @@ use mwalib::{
 use ndarray::prelude::*;
 
 use super::*;
-use crate::context::{FreqContext, ObsContext};
-use crate::data_formats::{metafits, InputData, ReadInputDataError};
-use crate::glob::get_single_match_from_glob;
-use crate::time::{epoch_as_gps_seconds, jd_to_epoch};
-use mwa_hyperdrive_core::{beam::Delays, c32, mwalib, Jones, RADec};
+use crate::{
+    context::{FreqContext, ObsContext},
+    data_formats::{metafits, InputData, ReadInputDataError},
+    glob::get_single_match_from_glob,
+};
+use mwa_hyperdrive_beam::Delays;
+use mwa_rust_core::{
+    c32, mwalib,
+    time::{epoch_as_gps_seconds, jd_to_epoch},
+    Jones, RADec, XyzGeodetic,
+};
 
 const TIMESTEP_AS_INT_FACTOR: f64 = 1e18;
 
@@ -139,16 +144,14 @@ impl Uvfits {
             RADec::new_degrees(ra, dec)
         };
 
-        // TODO: Properly determine MWA version.
-        let mwa_version = MWAVersion::CorrLegacy;
-
         // Get the dipole delays and the pointing centre (if possible).
         // TODO: Decide on a key that uvfits can optionally provide for dipole
         // delays. Until this available, a metafits file is always necessary.
         let pointing_centre: Option<RADec> = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
+                // TODO: Let the user supply the MWA version.
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
                 // Only use the metafits delays if none were provided to
                 // this function.
                 match dipole_delays {
@@ -228,7 +231,7 @@ impl Uvfits {
         let dipole_gains: Array2<f64> = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
                 metafits::get_dipole_gains(context)
             }
             None => {
@@ -242,7 +245,7 @@ impl Uvfits {
         let obsid = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
                 Some(context.obs_id)
             }
             // How does a uvfits file advertise the obsid? There is an "obs.
@@ -752,7 +755,7 @@ fn get_freq_context(
         fine_chan_range: 0..metadata.num_fine_freq_chans,
         fine_chan_freqs,
         num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
-        native_fine_chan_width: fine_chan_width,
+        native_fine_chan_width: Some(fine_chan_width),
     })
 }
 

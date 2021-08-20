@@ -13,19 +13,17 @@ use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use log::{debug, info, trace};
+use mwa_hyperdrive_srclist::ComponentList;
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use super::{solutions::CalibrationSolutions, CalibrateError, CalibrateParams};
-use crate::data_formats::uvfits::UvfitsWriter;
-use crate::model;
-use crate::precession::precess_time;
-use crate::{math::cross_correlation_baseline_to_tiles, *};
-use mwa_hyperdrive_core::xyz;
+use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
+use crate::{data_formats::uvfits::UvfitsWriter, model, pos::xyz, precession::precess_time, Jones};
+use mwa_rust_core::math::cross_correlation_baseline_to_tiles;
 
 /// Do all the steps required for direction-independent calibration; read the
 /// input data, generate a model against it, and write the solutions out.
-pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
+pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
     let obs_context = params.input_data.get_obs_context();
     let freq_context = params.input_data.get_freq_context();
 
@@ -51,7 +49,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     // and predicting) thread and model (writes the sky model to a file) thread.
     // By doing things this way, the disk and CPU is fully utilised; the input
     // data and our predicted model is assembled as efficiently as possible.
-    info!("Beginning reading of input data and prediction");
+    info!("Reading input data and sky modelling");
     // Data communication channel. The producer might send an error on this
     // channel; it's up to the worker to propagate it.
     let (sx_data, rx_data) = unbounded();
@@ -68,17 +66,17 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         ProgressBar::new(vis_shape.0 as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
                     .progress_chars("=> "),
             )
             .with_position(0)
-            .with_message("Reading timesteps"),
+            .with_message("Reading data"),
     );
     let model_progress = multi_progress.add(
         ProgressBar::new(vis_shape.0 as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
                     .progress_chars("=> "),
             )
             .with_position(0)
@@ -91,13 +89,13 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
             ProgressBar::new(vis_shape.0 as _)
                 .with_style(
                     ProgressStyle::default_bar()
-                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} ({elapsed_precise}<{eta_precise})")
+                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
                         .progress_chars("=> "),
                 )
                 .with_position(0)
                 .with_message("Model writing"),
-        )}
-    );
+        )
+    });
 
     // Draw the progress bars.
     read_progress.tick();
@@ -105,6 +103,9 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     if let Some(pb) = &model_write_progress {
         pb.tick();
     }
+
+    let num_timeblocks = params.get_num_timeblocks();
+    let num_chanblocks = params.get_num_chanblocks();
 
     scope(|scope| {
         // Spawn a thread to draw the progress bars.
@@ -156,14 +157,20 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
             // By dropping the send channel, we signal to the worker thread that
             // there is no more incoming data, and it can stop waiting.
             drop(sx_data);
-            read_progress.finish_with_message("Finished reading input data");
+            read_progress.abandon_with_message("Finished reading input data");
         });
 
-        // Worker (predictor thread). Only one thread receives the input data,
-        // but it is processed in parallel. This is much more efficient than
-        // having slices of the input data being processed serially by
-        // individual threads.
+        // Worker (sky-model generation thread). Only one thread receives the
+        // input data, but it is processed in parallel. This is much more
+        // efficient than having slices of the input data being processed
+        // serially by individual threads.
         scope.spawn(move |_| {
+            let sky_model_comps = ComponentList::new(
+                &params.source_list,
+                &params.freq.unflagged_fine_chan_freqs,
+                obs_context.phase_centre,
+            );
+
             // Iterate on the receive channel forever. This terminates when
             // there is no data in the channel _and_ the sender has been
             // dropped.
@@ -199,7 +206,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
                 let model_result = model::model_timestep(
                     vis_model_slice.view_mut(),
-                    &params.sky_model_comps,
+                    &sky_model_comps,
                     params.beam.deref(),
                     precession_info.lmst_j2000,
                     &precessed_tile_xyzs,
@@ -207,12 +214,16 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     &params.freq.unflagged_fine_chan_freqs,
                 )
                 .map_err(CalibrateError::from);
-                // Scale the model visibilities by weights.
-                ndarray::Zip::from(&mut vis_model_slice)
-                    .and(&weights)
-                    .par_for_each(|vis, &weight| *vis *= weight);
-
                 let model_failed = model_result.is_err();
+
+                if !model_failed {
+                    // Scale the model visibilities by weights.
+                    ndarray::par_azip!(
+                        (vis in &mut vis_model_slice, &weight in &weights)
+                        *vis *= weight
+                    );
+                }
+
                 let msg = model_result.map(|_| (vis_model_slice, weights, uvws, timestamp));
                 // If we can't send the message, it's because the
                 // channel has been closed on the other side. That
@@ -228,7 +239,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
                 model_progress.inc(1);
             }
-            model_progress.finish_with_message("Finished generating sky model");
+            model_progress.abandon_with_message("Finished generating sky model");
 
             drop(sx_model);
         });
@@ -248,7 +259,7 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 let create_result = UvfitsWriter::new(
                     model_pb,
                     // Don't include flagged timesteps or flagged baselines.
-                    vis_shape.0,
+                    num_timeblocks,
                     vis_shape.1,
                     // ... but use all channels (including flagged channels).
                     // fits files expect a neat layout.
@@ -336,11 +347,12 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
             drop(sx_final);
             if let Some(pb) = model_write_progress {
-                pb.finish_with_message("Finished writing sky model");
+                pb.abandon_with_message("Finished writing sky model");
             }
         });
     })
     .unwrap();
+    info!("Finished reading input data and sky modelling");
 
     // Handle messages from the scoped threads.
     for msg in rx_final.iter() {
@@ -365,17 +377,19 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         }
     }
 
-    // TODO: Let the user determine this -- using all timesteps at once for now.
-    let timeblock_len = params.timesteps.len();
-    let num_timeblocks = 1;
-    let mut chanblocks = params.freq.unflagged_fine_chans.iter().collect::<Vec<_>>();
+    let mut chanblocks: Vec<usize> = params
+        .freq
+        .unflagged_fine_chans
+        .iter()
+        .map(|v| *v)
+        .collect();
     chanblocks.sort_unstable();
 
     // The shape of the array containing output Jones matrices.
     let total_num_tiles = obs_context.tile_xyzs.len();
     let num_unflagged_tiles = total_num_tiles - params.tile_flags.len();
     let total_num_fine_freq_chans = freq_context.fine_chan_freqs.len();
-    let shape = (num_timeblocks, num_unflagged_tiles, chanblocks.len());
+    let shape = (num_timeblocks, num_unflagged_tiles, num_chanblocks);
     let mut sols = CalibrationSolutions {
         file: params.output_solutions_filename.clone(),
         di_jones: Array3::from_elem(shape, Jones::identity()),
@@ -388,7 +402,9 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
             .map(|&ts| obs_context.timesteps[ts])
             .collect(),
         obsid: obs_context.obsid,
-        time_res: params.time_res,
+        time_res: obs_context
+            .time_res
+            .map(|time_res| time_res * params.time_average_factor as f64),
     };
     debug!(
         "Shape of DI Jones matrices array: ({} timeblocks, {} tiles, {} chanblocks; {} MiB)",
@@ -400,220 +416,57 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
         / 1024 / 1024
     );
 
-    // For each timeblock, calibrate all chanblocks in parallel.
-    for timeblock in (0..num_timeblocks).into_iter() {
-        let mut di_jones_rev = sols
-            .di_jones
-            .slice_mut(s![timeblock, .., ..])
-            .reversed_axes();
-
-        let pb = ProgressBar::new(chanblocks.len() as _)
-            .with_style(
-                ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:3}/{len:3} ({elapsed_precise}<{eta_precise})")
-                    .progress_chars("=> "),
-            )
-            .with_position(0)
-            .with_message(format!("Calibrating timeblock {}", timeblock));
-        pb.set_draw_target(ProgressDrawTarget::stdout());
-
-        let mut timeblock_cal_results = Vec::with_capacity(chanblocks.len());
-        chanblocks
-            .par_iter()
-            .zip(di_jones_rev.outer_iter_mut())
-            .enumerate()
-            .map(|(chanblock_index, (&&chanblock, di_jones))| {
-                let range = s![
-                    timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
-                    ..,
-                    chanblock_index..chanblock_index + 1
-                ];
-                let mut cal_result = calibrate(
-                    vis_data.slice(range),
-                    vis_model.slice(range),
-                    di_jones,
-                    params.max_iterations,
-                    params.stop_threshold,
-                    params.min_threshold,
-                );
-                cal_result.chanblock = Some(chanblock);
-                cal_result.chanblock_index = Some(chanblock_index);
-
-                let mut status_str = format!("Chanblock {:>3}", chanblock);
-                if num_unflagged_tiles - cal_result.num_failed <= 4 {
-                    status_str.push_str(&format!(
-                        ": failed    ({:>2}): Too many antenna solutions failed ({})",
-                        cal_result.num_iterations, cal_result.num_failed
-                    ));
-                } else if cal_result.max_precision > params.min_threshold {
-                    status_str.push_str(&format!(
-                        ": failed    ({:>2}): {:.5e} > {:e}",
-                        cal_result.num_iterations, cal_result.max_precision, params.min_threshold,
-                    ));
-                } else if cal_result.max_precision > params.stop_threshold {
-                    status_str.push_str(&format!(
-                        ": converged ({:>2}): {:e} > {:.5e} > {:e}",
-                        cal_result.num_iterations,
-                        params.min_threshold,
-                        cal_result.max_precision,
-                        params.stop_threshold
-                    ));
-                    pb.inc(1);
-                } else {
-                    status_str.push_str(&format!(
-                        ": converged ({:>2}): {:e} > {:.5e}",
-                        cal_result.num_iterations, params.stop_threshold, cal_result.max_precision
-                    ));
-                    pb.inc(1);
-                }
-                pb.println(status_str);
-                cal_result
-            })
-            .collect_into_vec(&mut timeblock_cal_results);
-        debug_assert_eq!(timeblock_cal_results.len(), chanblocks.len());
-        let mut total_converged_count = timeblock_cal_results
-            .iter()
-            .filter(|result| result.converged)
-            .count();
-
-        // Attempt to calibrate any chanblocks that failed by taking solutions
-        // from nearby chanblocks as starting points.
-        if total_converged_count > 0 && total_converged_count != chanblocks.len() {
-            let mut new_converged_count = 1;
-
-            let mut retry_iter = 0;
-            while new_converged_count > 0 && total_converged_count != chanblocks.len() {
-                retry_iter += 1;
-                pb.println(format!(
-                    "*** Re-calibrating failed chanblocks iteration {} ***",
-                    retry_iter
-                ));
-
-                // Iterate over all the calibration results until we find one
-                // that failed. Then find the next that succeeded. With a
-                // converged solution on both sides (or either side) of the
-                // failures, use a weighted average for a guess of what the
-                // Jones matrices should be, then re-run MitchCal.
-                let mut left = None;
-                let mut pairs = vec![];
-                let mut in_failures = false;
-                for cal_result in timeblock_cal_results.iter() {
-                    match (in_failures, cal_result.converged) {
-                        (false, true) => left = Some(cal_result.chanblock_index.unwrap()),
-                        (false, false) => in_failures = true,
-                        (true, true) => {
-                            in_failures = false;
-                            pairs.push((left, Some(cal_result.chanblock_index.unwrap())));
-                            left = Some(cal_result.chanblock_index.unwrap());
-                        }
-                        (true, false) => (),
-                    }
-                }
-
-                for p in pairs {
-                    match p {
-                        (Some(l), Some(r)) => {
-                            let left_sol = di_jones_rev.slice(s![l, ..]).to_owned();
-                            let right_sol = di_jones_rev.slice(s![r, ..]).to_owned();
-                            for i in l + 1..r {
-                                let left_weight = (r - i) as f64;
-                                let right_weight = (i - l) as f64;
-                                let weighted_sol = (&left_sol * left_weight
-                                    + &right_sol * right_weight)
-                                    / (r - l) as f64;
-                                di_jones_rev.slice_mut(s![i, ..]).assign(&weighted_sol);
-                            }
-                        }
-                        (Some(l), None) => {
-                            let left_sol = di_jones_rev.slice(s![l, ..]).to_owned();
-                            di_jones_rev
-                                .slice_mut(s![l + 1..chanblocks.len(), ..])
-                                .assign(&left_sol);
-                        }
-                        (None, Some(r)) => {
-                            let right_sol = di_jones_rev.slice(s![r, ..]).to_owned();
-                            di_jones_rev.slice_mut(s![0..r, ..]).assign(&right_sol);
-                        }
-                        (None, None) => unreachable!(),
-                    }
-                }
-
-                // Repeat calibration on failed chanblocks. Iterate over all
-                // failed chanblocks again if any chanblocks managed to
-                // converge.
-                timeblock_cal_results
-                    .par_iter_mut()
-                    .zip(di_jones_rev.outer_iter_mut())
-                    .for_each(|(old_cal_result, di_jones)| {
-                        if !old_cal_result.converged {
-                            let chanblock = old_cal_result.chanblock.unwrap();
-                            let chanblock_index = old_cal_result.chanblock_index.unwrap();
-                            let range = s![
-                                timeblock * timeblock_len..(timeblock + 1) * timeblock_len,
-                                ..,
-                                chanblock_index..chanblock_index + 1
-                            ];
-                            let mut new_cal_result = calibrate(
-                                vis_data.slice(range),
-                                vis_model.slice(range),
-                                di_jones,
-                                params.max_iterations,
-                                params.stop_threshold,
-                                params.min_threshold,
-                            );
-                            new_cal_result.chanblock = Some(chanblock);
-                            new_cal_result.chanblock_index = Some(chanblock_index);
-
-                            let mut status_str = format!("Chanblock {:>3}", chanblock);
-                            if num_unflagged_tiles - new_cal_result.num_failed <= 4 {
-                                status_str.push_str(&format!(
-                                    ": failed    ({:>2}): Too many antenna solutions failed ({})",
-                                    new_cal_result.num_iterations, new_cal_result.num_failed
-                                ));
-                            } else if new_cal_result.max_precision > params.min_threshold {
-                                status_str.push_str(&format!(
-                                    ": failed    ({:>2}): {:.5e} > {:e}",
-                                    new_cal_result.num_iterations,
-                                    new_cal_result.max_precision,
-                                    params.min_threshold,
-                                ));
-                            } else if new_cal_result.max_precision > params.stop_threshold {
-                                status_str.push_str(&format!(
-                                    ": converged ({:>2}): {:e} > {:.5e} > {:e}",
-                                    new_cal_result.num_iterations,
-                                    params.min_threshold,
-                                    new_cal_result.max_precision,
-                                    params.stop_threshold
-                                ));
-                                pb.inc(1);
-                            } else {
-                                status_str.push_str(&format!(
-                                    ": converged ({:>2}): {:e} > {:.5e}",
-                                    new_cal_result.num_iterations,
-                                    params.stop_threshold,
-                                    new_cal_result.max_precision
-                                ));
-                                pb.inc(1);
-                            }
-                            pb.println(status_str);
-                            *old_cal_result = new_cal_result;
-                        }
-                    });
-                let tmp = timeblock_cal_results
-                    .iter()
-                    .filter(|result| result.converged)
-                    .count();
-                new_converged_count = tmp - total_converged_count;
-                total_converged_count = tmp;
-            }
+    // Calibrate all timeblocks together. This is either the default behaviour,
+    // or useful for getting a good initial guess at what the solutions for each
+    // timeblock should be.
+    let total_converged_count = calibrate_timeblock(
+        vis_data.view(),
+        vis_model.view(),
+        &mut sols,
+        &chanblocks,
+        0,
+        params.timesteps.len(),
+        params.max_iterations,
+        params.stop_threshold,
+        params.min_threshold,
+        if num_timeblocks == 1 {
+            "Calibrating"
+        } else {
+            "Calibrating all timeblocks together"
         }
-        pb.abandon();
-        info!(
-            "Timeblock {}: {}/{} chanblocks converged",
-            timeblock,
-            total_converged_count,
-            chanblocks.len()
-        );
+        .to_string(),
+    );
+    info!(
+        "All timeblocks: {}/{} chanblocks converged",
+        total_converged_count, num_chanblocks
+    );
+
+    if num_timeblocks > 1 {
+        // Set all solutions to be that of the averaged solutions.
+        sols.di_jones
+            .accumulate_axis_inplace(Axis(1), |&prev, curr| *curr = prev);
+
+        // For each timeblock, calibrate all chanblocks in parallel.
+        for timeblock in (0..num_timeblocks).into_iter() {
+            let total_converged_count = calibrate_timeblock(
+                vis_data.view(),
+                vis_model.view(),
+                &mut sols,
+                &chanblocks,
+                timeblock,
+                params.time_average_factor,
+                params.max_iterations,
+                params.stop_threshold,
+                params.min_threshold,
+                format!("Calibrating timeblock {}/{}", timeblock + 1, num_timeblocks),
+            );
+            info!(
+                "Timeblock {}: {}/{} chanblocks converged",
+                timeblock + 1,
+                total_converged_count,
+                num_chanblocks
+            );
+        }
     }
 
     // Write out the solutions.
@@ -622,6 +475,232 @@ pub fn di_cal(params: &CalibrateParams) -> Result<(), CalibrateError> {
     info!("Calibration solutions written to {}", sols.file.display());
 
     Ok(())
+}
+
+/// The number of successfully calibrated chanblocks is returned.
+fn calibrate_timeblock(
+    vis_data: ArrayView3<Jones<f32>>,
+    vis_model: ArrayView3<Jones<f32>>,
+    solutions: &mut CalibrationSolutions,
+    chanblocks: &[usize],
+    timeblock: usize,
+    timeblock_length: usize,
+    max_iterations: usize,
+    stop_threshold: f64,
+    min_threshold: f64,
+    progress_bar_msg: String,
+) -> usize {
+    let num_chanblocks = chanblocks.len();
+    let num_unflagged_tiles = solutions.di_jones.dim().1;
+    let mut di_jones_rev = solutions
+        .di_jones
+        .slice_mut(s![timeblock, .., ..])
+        .reversed_axes();
+
+    let pb = ProgressBar::new(num_chanblocks as _)
+            .with_style(
+                ProgressStyle::default_bar()
+                    .template("{msg}: [{wide_bar:.blue}] {pos:3}/{len:3} converged ({elapsed_precise}<{eta_precise})")
+                    .progress_chars("=> "),
+            )
+            .with_position(0)
+            .with_message(progress_bar_msg);
+    pb.set_draw_target(ProgressDrawTarget::stdout());
+
+    let time_range_start = timeblock * timeblock_length;
+    let time_range_end = ((timeblock + 1) * timeblock_length).min(vis_data.dim().0);
+    let mut timeblock_cal_results = Vec::with_capacity(num_chanblocks);
+    chanblocks
+        .par_iter()
+        .zip(di_jones_rev.outer_iter_mut())
+        .enumerate()
+        .map(|(chanblock_index, (&chanblock, di_jones))| {
+            let range = s![
+                time_range_start..time_range_end,
+                ..,
+                chanblock_index..chanblock_index + 1
+            ];
+            let mut cal_result = calibrate(
+                vis_data.slice(range),
+                vis_model.slice(range),
+                di_jones,
+                max_iterations,
+                stop_threshold,
+                min_threshold,
+            );
+            cal_result.chanblock = Some(chanblock);
+            cal_result.chanblock_index = Some(chanblock_index);
+
+            let mut status_str = format!("Chanblock {:>3}", chanblock);
+            if num_unflagged_tiles - cal_result.num_failed <= 4 {
+                status_str.push_str(&format!(
+                    ": failed    ({:>2}): Too many antenna solutions failed ({})",
+                    cal_result.num_iterations, cal_result.num_failed
+                ));
+            } else if cal_result.max_precision > min_threshold {
+                status_str.push_str(&format!(
+                    ": failed    ({:>2}): {:.5e} > {:e}",
+                    cal_result.num_iterations, cal_result.max_precision, min_threshold,
+                ));
+            } else if cal_result.max_precision > stop_threshold {
+                status_str.push_str(&format!(
+                    ": converged ({:>2}): {:e} > {:.5e} > {:e}",
+                    cal_result.num_iterations,
+                    min_threshold,
+                    cal_result.max_precision,
+                    stop_threshold
+                ));
+                pb.inc(1);
+            } else {
+                status_str.push_str(&format!(
+                    ": converged ({:>2}): {:e} > {:.5e}",
+                    cal_result.num_iterations, stop_threshold, cal_result.max_precision
+                ));
+                pb.inc(1);
+            }
+            pb.println(status_str);
+            cal_result
+        })
+        .collect_into_vec(&mut timeblock_cal_results);
+    debug_assert_eq!(timeblock_cal_results.len(), num_chanblocks);
+    let mut total_converged_count = timeblock_cal_results
+        .iter()
+        .filter(|result| result.converged)
+        .count();
+
+    // Attempt to calibrate any chanblocks that failed by taking solutions
+    // from nearby chanblocks as starting points.
+    if total_converged_count > 0 && total_converged_count != num_chanblocks {
+        let mut new_converged_count = 1;
+
+        let mut retry_iter = 0;
+        while new_converged_count > 0 && total_converged_count != num_chanblocks {
+            retry_iter += 1;
+            pb.println(format!(
+                "*** Re-calibrating failed chanblocks iteration {} ***",
+                retry_iter
+            ));
+
+            // Iterate over all the calibration results until we find one
+            // that failed. Then find the next that succeeded. With a
+            // converged solution on both sides (or either side) of the
+            // failures, use a weighted average for a guess of what the
+            // Jones matrices should be, then re-run MitchCal.
+            let mut left = None;
+            let mut pairs = vec![];
+            let mut in_failures = false;
+            for cal_result in timeblock_cal_results.iter() {
+                match (in_failures, cal_result.converged) {
+                    (false, true) => left = Some(cal_result.chanblock_index.unwrap()),
+                    (false, false) => in_failures = true,
+                    (true, true) => {
+                        in_failures = false;
+                        pairs.push((left, Some(cal_result.chanblock_index.unwrap())));
+                        left = Some(cal_result.chanblock_index.unwrap());
+                    }
+                    (true, false) => (),
+                }
+            }
+
+            for p in pairs {
+                match p {
+                    (Some(l), Some(r)) => {
+                        let left_sol = di_jones_rev.slice(s![l, ..]).to_owned();
+                        let right_sol = di_jones_rev.slice(s![r, ..]).to_owned();
+                        for i in l + 1..r {
+                            let left_weight = (r - i) as f64;
+                            let right_weight = (i - l) as f64;
+                            let weighted_sol = (&left_sol * left_weight
+                                + &right_sol * right_weight)
+                                / (r - l) as f64;
+                            di_jones_rev.slice_mut(s![i, ..]).assign(&weighted_sol);
+                        }
+                    }
+                    (Some(l), None) => {
+                        let left_sol = di_jones_rev.slice(s![l, ..]).to_owned();
+                        di_jones_rev
+                            .slice_mut(s![l + 1..num_chanblocks, ..])
+                            .assign(&left_sol);
+                    }
+                    (None, Some(r)) => {
+                        let right_sol = di_jones_rev.slice(s![r, ..]).to_owned();
+                        di_jones_rev.slice_mut(s![0..r, ..]).assign(&right_sol);
+                    }
+                    (None, None) => unreachable!(),
+                }
+            }
+
+            // Repeat calibration on failed chanblocks. Iterate over all
+            // failed chanblocks again if any chanblocks managed to
+            // converge.
+            timeblock_cal_results
+                .par_iter_mut()
+                .zip(di_jones_rev.outer_iter_mut())
+                .for_each(|(old_cal_result, di_jones)| {
+                    if !old_cal_result.converged {
+                        let chanblock = old_cal_result.chanblock.unwrap();
+                        let chanblock_index = old_cal_result.chanblock_index.unwrap();
+                        let range = s![
+                            time_range_start..time_range_end,
+                            ..,
+                            chanblock_index..chanblock_index + 1
+                        ];
+                        let mut new_cal_result = calibrate(
+                            vis_data.slice(range),
+                            vis_model.slice(range),
+                            di_jones,
+                            max_iterations,
+                            stop_threshold,
+                            min_threshold,
+                        );
+                        new_cal_result.chanblock = Some(chanblock);
+                        new_cal_result.chanblock_index = Some(chanblock_index);
+
+                        let mut status_str = format!("Chanblock {:>3}", chanblock);
+                        if num_unflagged_tiles - new_cal_result.num_failed <= 4 {
+                            status_str.push_str(&format!(
+                                ": failed    ({:>2}): Too many antenna solutions failed ({})",
+                                new_cal_result.num_iterations, new_cal_result.num_failed
+                            ));
+                        } else if new_cal_result.max_precision > min_threshold {
+                            status_str.push_str(&format!(
+                                ": failed    ({:>2}): {:.5e} > {:e}",
+                                new_cal_result.num_iterations,
+                                new_cal_result.max_precision,
+                                min_threshold,
+                            ));
+                        } else if new_cal_result.max_precision > stop_threshold {
+                            status_str.push_str(&format!(
+                                ": converged ({:>2}): {:e} > {:.5e} > {:e}",
+                                new_cal_result.num_iterations,
+                                min_threshold,
+                                new_cal_result.max_precision,
+                                stop_threshold
+                            ));
+                            pb.inc(1);
+                        } else {
+                            status_str.push_str(&format!(
+                                ": converged ({:>2}): {:e} > {:.5e}",
+                                new_cal_result.num_iterations,
+                                stop_threshold,
+                                new_cal_result.max_precision
+                            ));
+                            pb.inc(1);
+                        }
+                        pb.println(status_str);
+                        *old_cal_result = new_cal_result;
+                    }
+                });
+            let tmp = timeblock_cal_results
+                .iter()
+                .filter(|result| result.converged)
+                .count();
+            new_converged_count = tmp - total_converged_count;
+            total_converged_count = tmp;
+        }
+    }
+    pb.abandon();
+    total_converged_count
 }
 
 #[derive(Clone)]
@@ -635,7 +714,8 @@ struct CalibrationResult {
 }
 
 /// Calibrate the antennas of the array by comparing the observed input data
-/// against our generated model. Return the number of iterations this took.
+/// against our generated model. Return information on this process
+/// ([CalibrationResult]).
 ///
 /// This function is intended to be run in parallel; for that reason, no
 /// parallel code is inside this function.
@@ -687,8 +767,8 @@ fn calibrate(
                     .zip(top.iter())
                     .zip(bot.iter())
                     .for_each(|(((di_jones, new_jones), top), bot)| {
-                        *new_jones = top.clone() / bot;
-                        if new_jones.iter().any(|f| f.is_nan()) {
+                        *new_jones = *top / bot;
+                        if new_jones.any_nan() {
                             *failed = true;
                             *di_jones = Jones::default();
                             *new_jones = Jones::default();
@@ -834,21 +914,21 @@ fn calibration_loop(
 
                                 // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
                                 // J M^H
-                                let z = Jones::axbh(j_t2, &j_model);
+                                let z = *j_t2 * j_model.h();
                                 // D (J M^H)
-                                Jones::plus_axb(top_t1, &j_data, &z);
+                                *top_t1 += j_data * z;
                                 // (J M^H)^H (J M^H)
-                                Jones::plus_ahxb(bot_t1, &z, &z);
+                                *bot_t1 += z.h() * z;
 
                                 let top_t2 = top.uget_mut(tile2);
                                 let bot_t2 = bot.uget_mut(tile2);
 
                                 // J (M^H)^H
-                                let z = Jones::axb(j_t1, &j_model);
+                                let z = *j_t1 * j_model;
                                 // D^H (J M^H)^H
-                                Jones::plus_ahxb(top_t2, &j_data, &z);
+                                *top_t2 += j_data.h() * z;
                                 // (J M^H) (J M^H)
-                                Jones::plus_ahxb(bot_t2, &z, &z);
+                                *bot_t2 += z.h() * z;
                             }
                         })
                 })

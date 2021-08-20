@@ -41,12 +41,6 @@ pub enum InvalidArgsError {
     #[error("Timestep {got} was requested but it isn't available; the last timestep is {last}")]
     UnavailableTimestep { got: usize, last: usize },
 
-    #[error("Cannot use {got}s as the calibration time resolution; this must be a multiple of the native resolution ({native}s)")]
-    InvalidTimeResolution { got: f64, native: f64 },
-
-    #[error("Cannot use {got}s as the calibration frequency resolution; this must be a multiple of the native resolution ({native}s)")]
-    InvalidFreqResolution { got: f64, native: f64 },
-
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
     InvalidTileFlag { got: usize, max: usize },
 
@@ -83,7 +77,7 @@ pub enum InvalidArgsError {
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
     #[error("{0}")]
-    Beam(#[from] mwa_hyperdrive_core::beam::BeamError),
+    Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

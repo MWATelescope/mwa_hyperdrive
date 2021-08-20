@@ -4,7 +4,7 @@
 
 //! Writing "André Offringa"-style text source lists.
 
-use mwa_hyperdrive_core::sexagesimal::*;
+use mwa_rust_core::sexagesimal::*;
 
 use super::*;
 

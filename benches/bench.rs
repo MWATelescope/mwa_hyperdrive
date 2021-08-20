@@ -4,24 +4,16 @@
 
 use criterion::*;
 
-use mwa_hyperdrive_core::{c64, Jones};
+use mwa_rust_core::{c64, Jones};
 
-fn jones_operations(c: &mut Criterion) {
-    let j = Jones::from([
-        c64::new(1.0, -2.0),
-        c64::new(5.0, -6.0),
-        c64::new(3.0, -4.0),
-        c64::new(7.0, -8.0),
-    ]);
-    let j2 = j.clone() * 2.0;
-
-    c.bench_function("hermitian multiply", |b| b.iter(|| j.mul_hermitian(&j2)));
+fn misc(c: &mut Criterion) {
+    // c.bench_function("hermitian multiply", |b| b.iter(|| j.mul_hermitian(&j2)));
 }
 
 criterion_group!(
     name = benches;
     config = Criterion::default();
     targets =
-        jones_operations,
+        misc,
 );
 criterion_main!(benches);

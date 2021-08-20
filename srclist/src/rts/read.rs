@@ -10,7 +10,7 @@
 use log::warn;
 
 use super::*;
-use mwa_hyperdrive_core::constants::DH2R;
+use mwa_rust_core::constants::DH2R;
 
 /// Parse a buffer containing an RTS-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -557,6 +557,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 if source.components.is_empty() && found_shapelets.is_empty() {
                     return Err(ReadSourceListCommonError::NoComponents(line_num).into());
                 }
+                found_shapelets.clear();
 
                 // Check that the last component struct added actually has flux
                 // densities. RTS source lists can only have the "list" type.
@@ -1052,6 +1053,38 @@ mod tests {
             err_message,
             "Source VLA_ForA: The sum of all Stokes Q flux densities was negative (-1)"
         );
+    }
+
+    #[test]
+    fn shapelet_gets_ignored() {
+        // We ignore "SHAPELET", using only "SHAPELET2".
+        let mut sl = Cursor::new(indoc! {"
+        SOURCE VLA_ForA 3.40182 -37.5551
+        FREQ 185.0e+6 209.81459 0 0 0
+        SHAPELET 68.70984356 3.75 4.0
+        COEFF 0.0 0.0 0.099731291104
+        COMPONENT 3.40200 -37.6
+        GAUSSIAN 90 1.0 0.5
+        FREQ 180e+6 0.5 0 0 0
+        FREQ 170e+6 1.0 0 0.2 0
+        ENDCOMPONENT
+        ENDSOURCE
+        SOURCE VLA_ForB 3.40182 -37.5551
+        FREQ 185.0e+6 209.81459 0 0 0
+        SHAPELET2 68.70984356 3.75 4.0
+        COEFF 0.0 0.0 0.099731291104
+        COMPONENT 3.40200 -37.6
+        GAUSSIAN 90 1.0 0.5
+        FREQ 180e+6 0.5 0 0 0
+        FREQ 170e+6 1.0 0 0.2 0
+        ENDCOMPONENT
+        ENDSOURCE
+        "});
+        let result = parse_source_list(&mut sl);
+        assert!(result.is_ok(), "{:?}", result);
+        let sl = result.unwrap();
+        assert_eq!(sl["VLA_ForA"].components.len(), 1);
+        assert_eq!(sl["VLA_ForB"].components.len(), 2);
     }
 
     #[test]

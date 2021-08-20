@@ -15,11 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use super::SourceList;
 use crate::FluxDensityType;
-use mwa_hyperdrive_core::{
-    beam::{Beam, BeamError},
-    constants::MWA_LAT_RAD,
-    xyz, AzEl, Jones, RADec, XyzGeodetic, LMN, UVW,
-};
+use mwa_hyperdrive_beam::{Beam, BeamError};
+use mwa_rust_core::{constants::MWA_LAT_RAD, pos::xyz, AzEl, Jones, RADec, XyzGeodetic, LMN, UVW};
 
 /// Source component types supported by hyperdrive.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -108,7 +105,7 @@ impl ComponentList {
     /// These parameters don't change over time, so it's ideal to run this
     /// function once.
     pub fn new(
-        source_list: SourceList,
+        source_list: &SourceList,
         unflagged_fine_chan_freqs: &[f64],
         phase_centre: RADec,
     ) -> Self {
@@ -128,20 +125,24 @@ impl ComponentList {
         let mut shapelet_gaussian_params = vec![];
         let mut shapelet_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
-        for comp in source_list.into_iter().flat_map(|(_, src)| src.components) {
+        for comp in source_list.iter().flat_map(|(_, src)| &src.components) {
             let comp_lmn = comp.radec.to_lmn(phase_centre).prepare_for_rime();
-            match comp.comp_type {
+            match &comp.comp_type {
                 ComponentType::Point => {
                     point_radecs.push(comp.radec);
                     point_lmns.push(comp_lmn);
-                    point_fds.push(comp.flux_type);
+                    point_fds.push(comp.flux_type.clone());
                 }
 
                 ComponentType::Gaussian { maj, min, pa } => {
                     gaussian_radecs.push(comp.radec);
                     gaussian_lmns.push(comp_lmn);
-                    gaussian_fds.push(comp.flux_type);
-                    gaussian_gaussian_params.push(GaussianParams { maj, min, pa });
+                    gaussian_fds.push(comp.flux_type.clone());
+                    gaussian_gaussian_params.push(GaussianParams {
+                        maj: *maj,
+                        min: *min,
+                        pa: *pa,
+                    });
                 }
 
                 ComponentType::Shapelet {
@@ -152,9 +153,13 @@ impl ComponentList {
                 } => {
                     shapelet_radecs.push(comp.radec);
                     shapelet_lmns.push(comp_lmn);
-                    shapelet_fds.push(comp.flux_type);
-                    shapelet_gaussian_params.push(GaussianParams { maj, min, pa });
-                    shapelet_coeffs.push(coeffs);
+                    shapelet_fds.push(comp.flux_type.clone());
+                    shapelet_gaussian_params.push(GaussianParams {
+                        maj: *maj,
+                        min: *min,
+                        pa: *pa,
+                    });
+                    shapelet_coeffs.push(coeffs.clone());
                 }
             }
         }
@@ -248,7 +253,8 @@ fn get_instrumental_flux_densities(
                 .zip(unflagged_fine_chan_freqs.iter())
                 .for_each(|(inst_fd, freq)| {
                     let stokes_flux_density = comp_fd.estimate_at_freq(*freq);
-                    let instrumental_flux_density: Jones<f64> = stokes_flux_density.into();
+                    let instrumental_flux_density: Jones<f64> =
+                        stokes_flux_density.to_inst_stokes();
                     *inst_fd = instrumental_flux_density;
                 })
         });
@@ -452,16 +458,15 @@ fn beam_correct_flux_densities_inner(
                 .try_for_each(|((comp_fd, inst_fd), azel)| {
                     // `jones_1` is the beam response from the first tile in
                     // this baseline.
-                    // TODO: Use a Jones matrix cache.
-                    let jones_1 = beam.calc_jones(*azel, *freq as u32, dipole_gains)?;
+                    let jones_1 = beam.calc_jones(*azel, *freq, dipole_gains)?;
 
                     // `jones_2` is the beam response from the second tile in
                     // this baseline.
                     // TODO: Use a Jones matrix from another tile!
-                    let jones_2 = &jones_1;
+                    let jones_2 = jones_1;
 
                     // J . I . J^H
-                    *comp_fd = Jones::axb(&jones_1, &Jones::axbh(inst_fd, jones_2));
+                    *comp_fd = jones_1 * *inst_fd * jones_2.h();
                     Ok(())
                 })
         });
@@ -479,12 +484,12 @@ mod tests {
     use std::ops::Deref;
 
     use approx::assert_abs_diff_eq;
-    use num::Complex;
     use serial_test::serial;
 
     use super::*;
     use crate::{FluxDensity, SourceListType};
-    use mwa_hyperdrive_core::beam::{Delays, FEEBeam, NoBeam};
+    use mwa_hyperdrive_beam::{Delays, FEEBeam, NoBeam};
+    use mwa_rust_core::Complex;
 
     fn get_small_source_list() -> SourceList {
         let (mut source_list, _) = crate::read::read_source_list_file(
@@ -635,10 +640,7 @@ mod tests {
         ]);
         assert_abs_diff_eq!(
             result[[0, 0]],
-            Jones::axb(
-                &expected_jones_1,
-                &Jones::axbh(&expected_comp_fd_1, &expected_jones_1)
-            ),
+            expected_jones_1 * expected_comp_fd_1 * expected_jones_1.h(),
             epsilon = 1e-10
         );
 
@@ -656,10 +658,7 @@ mod tests {
         ]);
         assert_abs_diff_eq!(
             result[[0, 1]],
-            Jones::axb(
-                &expected_jones_2,
-                &Jones::axbh(&expected_comp_fd_2, &expected_jones_2)
-            ),
+            expected_jones_2 * expected_comp_fd_2 * expected_jones_2.h(),
             epsilon = 1e-10
         );
     }
@@ -705,10 +704,7 @@ mod tests {
         ]);
         assert_abs_diff_eq!(
             result[[0, 0]],
-            Jones::axb(
-                &expected_jones_1,
-                &Jones::axbh(&expected_comp_fd_1, &expected_jones_1)
-            ),
+            expected_jones_1 * expected_comp_fd_1 * expected_jones_1.h(),
             epsilon = 1e-10
         );
 
@@ -726,10 +722,7 @@ mod tests {
         ]);
         assert_abs_diff_eq!(
             result[[0, 1]],
-            Jones::axb(
-                &expected_jones_2,
-                &Jones::axbh(&expected_comp_fd_2, &expected_jones_2)
-            ),
+            expected_jones_2 * expected_comp_fd_2 * expected_jones_2.h(),
             epsilon = 1e-10
         );
     }
@@ -755,7 +748,7 @@ mod tests {
                 .count()
         });
 
-        let split_components = ComponentList::new(srclist, &freqs, phase_centre);
+        let split_components = ComponentList::new(&srclist, &freqs, phase_centre);
         let points = split_components.points;
         let gaussians = split_components.gaussians;
         let shapelets = split_components.shapelets;
@@ -793,7 +786,7 @@ mod tests {
             ],
         }
         .estimate_at_freq(freqs[0]);
-        let inst_fd: Jones<f64> = fd.into();
+        let inst_fd: Jones<f64> = fd.to_inst_stokes();
         assert_abs_diff_eq!(gaussians.flux_densities[[0, 2]], inst_fd);
     }
 }

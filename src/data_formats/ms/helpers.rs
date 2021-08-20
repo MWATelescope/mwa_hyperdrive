@@ -6,11 +6,12 @@
 
 use std::path::Path;
 
+use rayon::prelude::*;
 use rubbl_casatables::{Table, TableOpenMode};
 
 use super::error::*;
 use crate::constants::*;
-use mwa_hyperdrive_core::{xyz, XyzGeocentric, XyzGeodetic};
+use mwa_rust_core::{LatLngHeight, XyzGeocentric, XyzGeodetic};
 
 /// Open a measurement set table read only. If `table` is `None`, then open the
 /// base table.
@@ -33,8 +34,17 @@ pub(super) fn casacore_positions_to_local_xyz(
     latitude_rad: f64,
     height_metres: f64,
 ) -> Result<Vec<XyzGeodetic>, MSError> {
-    xyz::geocentric_to_geodetic(pos, longitude_rad, latitude_rad, height_metres)
-        .map_err(|_| MSError::Geodetic2Geocentric)
+    let vec = XyzGeocentric::get_geocentric_vector(LatLngHeight {
+        longitude_rad,
+        latitude_rad,
+        height_metres,
+    })
+    .map_err(|_| MSError::Geodetic2Geocentric)?;
+    let (s_long, c_long) = longitude_rad.sin_cos();
+    Ok(pos
+        .par_iter()
+        .map(|xyz| xyz.to_geodetic_inner(vec, s_long, c_long))
+        .collect())
 }
 
 /// casacore's antenna positions are [XyzGeocentric] coordinates, but we use

@@ -24,8 +24,8 @@ use thiserror::Error;
 
 use crate::calibrate::params::{CalibrateParams, InvalidArgsError};
 use crate::*;
-use mwa_hyperdrive_core::mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
 use mwa_hyperdrive_srclist::{SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP};
+use mwa_rust_core::constants::{MWA_LAT_RAD, MWA_LONG_RAD};
 
 #[derive(Display, EnumIter, EnumString)]
 enum ArgFileTypes {
@@ -56,17 +56,17 @@ If not specified, the program will try all types"#, *mwa_hyperdrive_srclist::SOU
         format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Reaching this threshold counts as converged, but iteration will continue until max iterations or the stop threshold is reached. Default: {:e}", DEFAULT_MIN_THRESHOLD);
 
     static ref ARRAY_LONGITUDE_HELP: String =
-        format!("The Earth longitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LONGITUDE_RADIANS.to_degrees());
+        format!("The Earth longitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LONG_RAD.to_degrees());
 
     static ref ARRAY_LATITUDE_HELP: String =
-        format!("The Earth latitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LATITUDE_RADIANS.to_degrees());
+        format!("The Earth latitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LAT_RAD.to_degrees());
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
 // optional.
 //
 // These are digested by hyperdrive and used to eventually populate
-// `CalibrateParams`, which is used throughout hyperdrive's calibrate.
+// [CalibrateParams], which is used throughout hyperdrive's calibration code.
 #[derive(StructOpt, Debug, Default, Serialize, Deserialize)]
 pub struct CalibrateUserArgs {
     /// Paths to input data files to be calibrated. These can include a metafits
@@ -115,17 +115,22 @@ pub struct CalibrateUserArgs {
     #[structopt(long)]
     pub no_beam: bool,
 
-    // /// The calibration time resolution [seconds]. This must be a multiple of
-    // /// the input data's native time resolution. If not supplied, then the
-    // /// observation's native time resolution is used.
-    // #[structopt(short, long)]
-    // pub time_res: Option<f64>,
+    /// The number of time samples to average together before calibrating. If
+    /// this is 0, then all data is averaged together. Default: 0
+    ///
+    /// e.g. If the input data is in 0.5s resolution and this variable was 4,
+    /// then we average 2s worth of data together during calibration.
+    #[structopt(short, long)]
+    pub time_average_factor: Option<usize>,
 
-    // /// The calibration fine-channel frequency resolution [Hz]. This must be a
-    // /// multiple of the input data's native frequency resolution. If not
-    // /// supplied, then the observation's native frequency resolution is used.
+    // /// The number of fine-frequency channels to average together before
+    // /// calibrating. If this is 0, then all data is averaged together. Default:
+    // /// 1
+    // ///
+    // /// e.g. If the input data is in 20kHz resolution and this variable was 2,
+    // /// then we average 40kHz worth of data together during calibration.
     // #[structopt(short, long)]
-    // pub freq_res: Option<f64>,
+    // pub freq_average_factor: Option<usize>,
     /// The timesteps to use from the input data. The timesteps will be
     /// ascendingly sorted for calibration. No duplicates are allowed. The
     /// default is to use all unflagged timesteps.
@@ -259,8 +264,8 @@ impl CalibrateUserArgs {
             num_sources,
             source_dist_cutoff,
             veto_threshold,
-            // time_res,
-            // freq_res,
+            time_average_factor,
+            // freq_average_factor,
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
@@ -288,8 +293,8 @@ impl CalibrateUserArgs {
             num_sources: cli_args.num_sources.or(num_sources),
             source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
             veto_threshold: cli_args.veto_threshold.or(veto_threshold),
-            // time_res: cli_args.time_res.or(time_res),
-            // freq_res: cli_args.freq_res.or(freq_res),
+            time_average_factor: cli_args.time_average_factor.or(time_average_factor),
+            // freq_average_factor: cli_args.freq_average_factor.or(freq_average_factor),
             timesteps: cli_args.timesteps.or(timesteps),
             tile_flags: cli_args.tile_flags.or(tile_flags),
             ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags

@@ -7,67 +7,67 @@
 use super::*;
 use mwa_hyperdrive_cuda as cuda;
 
-/// [ComponentListSplit] is yet another alternative to [SourceList] where each
-/// of the components and their parameters are arranged into vectors, but
-/// differs from [ComponentList] in that [FluxDensityType]s are also split.
+/// [ComponentListFFI] is yet another alternative to [SourceList] where each of
+/// the components and their parameters are arranged into vectors, but differs
+/// from [ComponentList] in that [FluxDensityType]s are also split.
 ///
-/// This is particularly useful for FFI with GPUs; empirically, it is much
-/// cheaper for the GPU to estimate flux densities rather than read them from a
-/// large array on the GPU (!?). For this reason, splitting power laws from
-/// "lists" allows the GPU code to run much more efficiently.
+/// This is particularly useful for GPUs; empirically, it is much cheaper for
+/// the GPU to estimate flux densities rather than read them from a large array
+/// on the GPU (!?). For this reason, splitting power laws from "lists" allows
+/// the GPU code to run much more efficiently.
 ///
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
 /// second is the source component. The length of `radecs`, `lmns`,
 /// `*_list_fds`'s second axis are the same.
 // TODO: Curved power laws.
 #[derive(Clone, Debug)]
-pub struct ComponentListSplit {
-    pub point_power_law_radecs: Vec<RADec>,
+pub struct ComponentListFFI {
+    pub point_power_law_radecs: Vec<cuda::RADec>,
     pub point_power_law_lmns: Vec<cuda::LMN>,
     /// Instrumental flux densities calculated at 150 MHz.
     pub point_power_law_fds: Vec<cuda::JonesF64>,
     /// Spectral indices.
     pub point_power_law_sis: Vec<f64>,
 
-    pub point_list_radecs: Vec<RADec>,
+    pub point_list_radecs: Vec<cuda::RADec>,
     pub point_list_lmns: Vec<cuda::LMN>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     pub point_list_fds: Array2<cuda::JonesF64>,
 
-    pub gaussian_power_law_radecs: Vec<RADec>,
+    pub gaussian_power_law_radecs: Vec<cuda::RADec>,
     pub gaussian_power_law_lmns: Vec<cuda::LMN>,
     /// Instrumental flux densities calculated at 150 MHz.
     pub gaussian_power_law_fds: Vec<cuda::JonesF64>,
     /// Spectral indices.
     pub gaussian_power_law_sis: Vec<f64>,
-    pub gaussian_power_law_gaussian_params: Vec<cuda::GaussianParams>,
+    pub gaussian_power_law_gps: Vec<cuda::GaussianParams>,
 
-    pub gaussian_list_radecs: Vec<RADec>,
+    pub gaussian_list_radecs: Vec<cuda::RADec>,
     pub gaussian_list_lmns: Vec<cuda::LMN>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     pub gaussian_list_fds: Array2<cuda::JonesF64>,
-    pub gaussian_list_gaussian_params: Vec<cuda::GaussianParams>,
+    pub gaussian_list_gps: Vec<cuda::GaussianParams>,
 
-    pub shapelet_power_law_radecs: Vec<RADec>,
+    pub shapelet_power_law_radecs: Vec<cuda::RADec>,
     pub shapelet_power_law_lmns: Vec<cuda::LMN>,
     /// Instrumental flux densities calculated at 150 MHz.
     pub shapelet_power_law_fds: Vec<cuda::JonesF64>,
     /// Spectral indices.
     pub shapelet_power_law_sis: Vec<f64>,
-    pub shapelet_power_law_gaussian_params: Vec<cuda::GaussianParams>,
+    pub shapelet_power_law_gps: Vec<cuda::GaussianParams>,
     pub shapelet_power_law_coeffs: Vec<cuda::ShapeletCoeff>,
     pub shapelet_power_law_coeff_lens: Vec<usize>,
 
-    pub shapelet_list_radecs: Vec<RADec>,
+    pub shapelet_list_radecs: Vec<cuda::RADec>,
     pub shapelet_list_lmns: Vec<cuda::LMN>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     pub shapelet_list_fds: Array2<cuda::JonesF64>,
-    pub shapelet_list_gaussian_params: Vec<cuda::GaussianParams>,
+    pub shapelet_list_gps: Vec<cuda::GaussianParams>,
     pub shapelet_list_coeffs: Vec<cuda::ShapeletCoeff>,
     pub shapelet_list_coeff_lens: Vec<usize>,
 }
 
-impl ComponentListSplit {
+impl ComponentListFFI {
     /// Given a source list, split the components into each [ComponentType] and
     /// by each [FluxDensityType]. Any list [FluxDensityType]s should be
     /// converted to power laws before calling this function.
@@ -79,63 +79,67 @@ impl ComponentListSplit {
         unflagged_fine_chan_freqs: &[f64],
         phase_centre: RADec,
     ) -> Self {
-        let mut point_power_law_radecs: Vec<RADec> = vec![];
+        let mut point_power_law_radecs: Vec<cuda::RADec> = vec![];
         let mut point_power_law_lmns: Vec<cuda::LMN> = vec![];
         let mut point_power_law_fds: Vec<cuda::JonesF64> = vec![];
         let mut point_power_law_sis: Vec<f64> = vec![];
 
-        let mut point_list_radecs: Vec<RADec> = vec![];
+        let mut point_list_radecs: Vec<cuda::RADec> = vec![];
         let mut point_list_lmns: Vec<cuda::LMN> = vec![];
         let mut point_list_fds: Vec<FluxDensityType> = vec![];
 
-        let mut gaussian_power_law_radecs: Vec<RADec> = vec![];
+        let mut gaussian_power_law_radecs: Vec<cuda::RADec> = vec![];
         let mut gaussian_power_law_lmns: Vec<cuda::LMN> = vec![];
         let mut gaussian_power_law_fds: Vec<cuda::JonesF64> = vec![];
         let mut gaussian_power_law_sis: Vec<f64> = vec![];
-        let mut gaussian_power_law_gaussian_params: Vec<cuda::GaussianParams> = vec![];
+        let mut gaussian_power_law_gps: Vec<cuda::GaussianParams> = vec![];
 
-        let mut gaussian_list_radecs: Vec<RADec> = vec![];
+        let mut gaussian_list_radecs: Vec<cuda::RADec> = vec![];
         let mut gaussian_list_lmns: Vec<cuda::LMN> = vec![];
-        let mut gaussian_list_gaussian_params: Vec<cuda::GaussianParams> = vec![];
         let mut gaussian_list_fds: Vec<FluxDensityType> = vec![];
+        let mut gaussian_list_gps: Vec<cuda::GaussianParams> = vec![];
 
-        let mut shapelet_power_law_radecs: Vec<RADec> = vec![];
+        let mut shapelet_power_law_radecs: Vec<cuda::RADec> = vec![];
         let mut shapelet_power_law_lmns: Vec<cuda::LMN> = vec![];
         let mut shapelet_power_law_fds: Vec<cuda::JonesF64> = vec![];
         let mut shapelet_power_law_sis: Vec<f64> = vec![];
-        let mut shapelet_power_law_gaussian_params: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_power_law_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_power_law_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
-        let mut shapelet_list_radecs: Vec<RADec> = vec![];
+        let mut shapelet_list_radecs: Vec<cuda::RADec> = vec![];
         let mut shapelet_list_lmns: Vec<cuda::LMN> = vec![];
-        let mut shapelet_list_gaussian_params: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_list_fds: Vec<FluxDensityType> = vec![];
+        let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_list_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
+        let jones_to_cuda_jones = |j: Jones<f64>| -> cuda::JonesF64 {
+            cuda::JonesF64 {
+                xx_re: j[0].re,
+                xx_im: j[0].im,
+                xy_re: j[1].re,
+                xy_im: j[1].im,
+                yx_re: j[2].re,
+                yx_im: j[2].im,
+                yy_re: j[3].re,
+                yy_im: j[3].im,
+            }
+        };
+
         for comp in source_list.into_iter().flat_map(|(_, src)| src.components) {
-            let comp_lmn = comp.radec.to_lmn(phase_centre).prepare_for_rime();
-            let comp_cuda_lmn = cuda::LMN {
-                l: comp_lmn.l,
-                m: comp_lmn.m,
-                n: comp_lmn.n,
+            let radec = cuda::RADec {
+                ra: comp.radec.ra,
+                dec: comp.radec.dec,
             };
+            let LMN { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
+            let lmn = cuda::LMN { l, m, n };
             match comp.comp_type {
                 ComponentType::Point => match comp.flux_type {
                     FluxDensityType::PowerLaw { si, .. } => {
-                        point_power_law_radecs.push(comp.radec);
-                        point_power_law_lmns.push(comp_cuda_lmn);
+                        point_power_law_radecs.push(radec);
+                        point_power_law_lmns.push(lmn);
                         let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ);
-                        let inst_fd: Jones<f64> = fd_at_150mhz.into();
-                        let cuda_inst_fd: cuda::JonesF64 = cuda::JonesF64 {
-                            xx_re: inst_fd[0].re,
-                            xx_im: inst_fd[0].im,
-                            xy_re: inst_fd[1].re,
-                            xy_im: inst_fd[1].im,
-                            yx_re: inst_fd[2].re,
-                            yx_im: inst_fd[2].im,
-                            yy_re: inst_fd[3].re,
-                            yy_im: inst_fd[3].im,
-                        };
+                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                        let cuda_inst_fd: cuda::JonesF64 = jones_to_cuda_jones(inst_fd);
                         point_power_law_fds.push(cuda_inst_fd);
                         point_power_law_sis.push(si);
                     }
@@ -143,8 +147,8 @@ impl ComponentListSplit {
                     FluxDensityType::CurvedPowerLaw { .. } => todo!(),
 
                     FluxDensityType::List { .. } => {
-                        point_list_radecs.push(comp.radec);
-                        point_list_lmns.push(comp_cuda_lmn);
+                        point_list_radecs.push(radec);
+                        point_list_lmns.push(lmn);
                         point_list_fds.push(comp.flux_type);
                     }
                 },
@@ -153,32 +157,23 @@ impl ComponentListSplit {
                     let gp = cuda::GaussianParams { maj, min, pa };
                     match comp.flux_type {
                         FluxDensityType::PowerLaw { si, .. } => {
-                            gaussian_power_law_radecs.push(comp.radec);
-                            gaussian_power_law_lmns.push(comp_cuda_lmn);
+                            gaussian_power_law_radecs.push(radec);
+                            gaussian_power_law_lmns.push(lmn);
                             let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.into();
-                            let cuda_inst_fd: cuda::JonesF64 = cuda::JonesF64 {
-                                xx_re: inst_fd[0].re,
-                                xx_im: inst_fd[0].im,
-                                xy_re: inst_fd[1].re,
-                                xy_im: inst_fd[1].im,
-                                yx_re: inst_fd[2].re,
-                                yx_im: inst_fd[2].im,
-                                yy_re: inst_fd[3].re,
-                                yy_im: inst_fd[3].im,
-                            };
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd: cuda::JonesF64 = jones_to_cuda_jones(inst_fd);
                             gaussian_power_law_fds.push(cuda_inst_fd);
                             gaussian_power_law_sis.push(si);
-                            gaussian_power_law_gaussian_params.push(gp);
+                            gaussian_power_law_gps.push(gp);
                         }
 
                         FluxDensityType::CurvedPowerLaw { .. } => todo!(),
 
                         FluxDensityType::List { .. } => {
-                            gaussian_list_radecs.push(comp.radec);
-                            gaussian_list_lmns.push(comp_cuda_lmn);
+                            gaussian_list_radecs.push(radec);
+                            gaussian_list_lmns.push(lmn);
                             gaussian_list_fds.push(comp.flux_type);
-                            gaussian_list_gaussian_params.push(gp);
+                            gaussian_list_gps.push(gp);
                         }
                     };
                 }
@@ -192,34 +187,25 @@ impl ComponentListSplit {
                     let gp = cuda::GaussianParams { maj, min, pa };
                     match comp.flux_type {
                         FluxDensityType::PowerLaw { si, .. } => {
-                            shapelet_power_law_radecs.push(comp.radec);
-                            shapelet_power_law_lmns.push(comp_cuda_lmn);
+                            shapelet_power_law_radecs.push(radec);
+                            shapelet_power_law_lmns.push(lmn);
                             let fd_at_150mhz =
                                 comp.flux_type.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.into();
-                            let cuda_inst_fd: cuda::JonesF64 = cuda::JonesF64 {
-                                xx_re: inst_fd[0].re,
-                                xx_im: inst_fd[0].im,
-                                xy_re: inst_fd[1].re,
-                                xy_im: inst_fd[1].im,
-                                yx_re: inst_fd[2].re,
-                                yx_im: inst_fd[2].im,
-                                yy_re: inst_fd[3].re,
-                                yy_im: inst_fd[3].im,
-                            };
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd: cuda::JonesF64 = jones_to_cuda_jones(inst_fd);
                             shapelet_power_law_fds.push(cuda_inst_fd);
                             shapelet_power_law_sis.push(si);
-                            shapelet_power_law_gaussian_params.push(gp);
+                            shapelet_power_law_gps.push(gp);
                             shapelet_power_law_coeffs.push(coeffs);
                         }
 
                         FluxDensityType::CurvedPowerLaw { .. } => todo!(),
 
                         FluxDensityType::List { .. } => {
-                            shapelet_list_radecs.push(comp.radec);
-                            shapelet_list_lmns.push(comp_cuda_lmn);
+                            shapelet_list_radecs.push(radec);
+                            shapelet_list_lmns.push(lmn);
                             shapelet_list_fds.push(comp.flux_type);
-                            shapelet_list_gaussian_params.push(gp);
+                            shapelet_list_gps.push(gp);
                             shapelet_list_coeffs.push(coeffs);
                         }
                     }
@@ -228,50 +214,66 @@ impl ComponentListSplit {
         }
 
         let point_list_fds =
-            get_instrumental_flux_densities(&point_list_fds, unflagged_fine_chan_freqs).mapv(|j| {
-                cuda::JonesF64 {
-                    xx_re: j[0].re,
-                    xx_im: j[0].im,
-                    xy_re: j[1].re,
-                    xy_im: j[1].im,
-                    yx_re: j[2].re,
-                    yx_im: j[2].im,
-                    yy_re: j[3].re,
-                    yy_im: j[3].im,
-                }
-            });
+            get_instrumental_flux_densities(&point_list_fds, unflagged_fine_chan_freqs)
+                .mapv(|j| jones_to_cuda_jones(j));
         let gaussian_list_fds =
-            get_instrumental_flux_densities(&gaussian_list_fds, unflagged_fine_chan_freqs).mapv(
-                |j| cuda::JonesF64 {
-                    xx_re: j[0].re,
-                    xx_im: j[0].im,
-                    xy_re: j[1].re,
-                    xy_im: j[1].im,
-                    yx_re: j[2].re,
-                    yx_im: j[2].im,
-                    yy_re: j[3].re,
-                    yy_im: j[3].im,
-                },
-            );
+            get_instrumental_flux_densities(&gaussian_list_fds, unflagged_fine_chan_freqs)
+                .mapv(|j| jones_to_cuda_jones(j));
         let shapelet_list_fds =
-            get_instrumental_flux_densities(&shapelet_list_fds, unflagged_fine_chan_freqs).mapv(
-                |j| cuda::JonesF64 {
-                    xx_re: j[0].re,
-                    xx_im: j[0].im,
-                    xy_re: j[1].re,
-                    xy_im: j[1].im,
-                    yx_re: j[2].re,
-                    yx_im: j[2].im,
-                    yy_re: j[3].re,
-                    yy_im: j[3].im,
-                },
-            );
+            get_instrumental_flux_densities(&shapelet_list_fds, unflagged_fine_chan_freqs)
+                .mapv(|j| jones_to_cuda_jones(j));
 
         let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
             Self::get_flattened_coeffs(shapelet_power_law_coeffs);
         let (shapelet_list_coeffs, shapelet_list_coeff_lens) =
             Self::get_flattened_coeffs(shapelet_list_coeffs);
+
         Self {
+            point_power_law_radecs,
+            point_power_law_lmns,
+            point_power_law_fds,
+            point_power_law_sis,
+            point_list_radecs,
+            point_list_lmns,
+            point_list_fds,
+
+            gaussian_power_law_radecs,
+            gaussian_power_law_lmns,
+            gaussian_power_law_fds,
+            gaussian_power_law_sis,
+            gaussian_power_law_gps,
+            gaussian_list_radecs,
+            gaussian_list_lmns,
+            gaussian_list_fds,
+            gaussian_list_gps,
+
+            shapelet_power_law_radecs,
+            shapelet_power_law_lmns,
+            shapelet_power_law_fds,
+            shapelet_power_law_sis,
+            shapelet_power_law_gps,
+            shapelet_power_law_coeffs,
+            shapelet_power_law_coeff_lens,
+            shapelet_list_radecs,
+            shapelet_list_lmns,
+            shapelet_list_fds,
+            shapelet_list_gps,
+            shapelet_list_coeffs,
+            shapelet_list_coeff_lens,
+        }
+    }
+
+    /// Make this [ComponentListFFI] available to CUDA.
+    ///
+    /// If the optional arguments aren't given, then the returned
+    /// [cuda::Shapelets] is defective and shouldn't be used.
+    pub fn to_c_types(
+        &self,
+        power_law_uvs: Option<*const cuda::ShapeletUV>,
+        list_uvs: Option<*const cuda::ShapeletUV>,
+    ) -> (cuda::Points, cuda::Gaussians, cuda::Shapelets) {
+        // Expose all the struct fields to ensure they're all used.
+        let Self {
             point_power_law_radecs,
             point_power_law_lmns,
             point_power_law_fds,
@@ -283,25 +285,85 @@ impl ComponentListSplit {
             gaussian_power_law_lmns,
             gaussian_power_law_fds,
             gaussian_power_law_sis,
-            gaussian_power_law_gaussian_params,
+            gaussian_power_law_gps,
             gaussian_list_radecs,
             gaussian_list_lmns,
             gaussian_list_fds,
-            gaussian_list_gaussian_params,
+            gaussian_list_gps,
             shapelet_power_law_radecs,
             shapelet_power_law_lmns,
             shapelet_power_law_fds,
             shapelet_power_law_sis,
-            shapelet_power_law_gaussian_params,
+            shapelet_power_law_gps,
             shapelet_power_law_coeffs,
             shapelet_power_law_coeff_lens,
             shapelet_list_radecs,
             shapelet_list_lmns,
             shapelet_list_fds,
-            shapelet_list_gaussian_params,
+            shapelet_list_gps,
             shapelet_list_coeffs,
             shapelet_list_coeff_lens,
-        }
+        } = self;
+
+        let points = cuda::Points {
+            num_power_law_points: point_power_law_radecs.len(),
+            power_law_radecs: point_power_law_radecs.as_ptr(),
+            power_law_lmns: point_power_law_lmns.as_ptr(),
+            power_law_fds: point_power_law_fds.as_ptr(),
+            power_law_sis: point_power_law_sis.as_ptr(),
+            num_list_points: point_list_radecs.len(),
+            list_radecs: point_list_radecs.as_ptr(),
+            list_lmns: point_list_lmns.as_ptr(),
+            list_fds: point_list_fds.as_ptr(),
+        };
+
+        let gaussians = cuda::Gaussians {
+            num_power_law_gaussians: gaussian_power_law_radecs.len(),
+            power_law_radecs: gaussian_power_law_radecs.as_ptr(),
+            power_law_lmns: gaussian_power_law_lmns.as_ptr(),
+            power_law_fds: gaussian_power_law_fds.as_ptr(),
+            power_law_sis: gaussian_power_law_sis.as_ptr(),
+            power_law_gps: gaussian_power_law_gps.as_ptr(),
+            num_list_gaussians: gaussian_list_radecs.len(),
+            list_radecs: gaussian_list_radecs.as_ptr(),
+            list_lmns: gaussian_list_lmns.as_ptr(),
+            list_fds: gaussian_list_fds.as_ptr(),
+            list_gps: gaussian_list_gps.as_ptr(),
+        };
+
+        let shapelets = cuda::Shapelets {
+            num_power_law_shapelets: match power_law_uvs {
+                Some(_) => shapelet_power_law_radecs.len(),
+                None => 0,
+            },
+            power_law_radecs: shapelet_power_law_radecs.as_ptr(),
+            power_law_lmns: shapelet_power_law_lmns.as_ptr(),
+            power_law_fds: shapelet_power_law_fds.as_ptr(),
+            power_law_sis: shapelet_power_law_sis.as_ptr(),
+            power_law_gps: shapelet_power_law_gps.as_ptr(),
+            power_law_shapelet_uvs: match power_law_uvs {
+                Some(uvs) => uvs,
+                None => std::ptr::null(),
+            },
+            power_law_shapelet_coeffs: shapelet_power_law_coeffs.as_ptr(),
+            power_law_num_shapelet_coeffs: shapelet_power_law_coeff_lens.as_ptr(),
+            num_list_shapelets: match list_uvs {
+                Some(_) => shapelet_list_radecs.len(),
+                None => 0,
+            },
+            list_radecs: shapelet_list_radecs.as_ptr(),
+            list_lmns: shapelet_list_lmns.as_ptr(),
+            list_fds: shapelet_list_fds.as_ptr(),
+            list_gps: shapelet_list_gps.as_ptr(),
+            list_shapelet_uvs: match list_uvs {
+                Some(uvs) => uvs,
+                None => std::ptr::null(),
+            },
+            list_shapelet_coeffs: shapelet_list_coeffs.as_ptr(),
+            list_num_shapelet_coeffs: shapelet_list_coeff_lens.as_ptr(),
+        };
+
+        (points, gaussians, shapelets)
     }
 
     /// Shapelets need their own special kind of UVW coordinates. Each shapelet
@@ -312,7 +374,7 @@ impl ComponentListSplit {
     /// The returned array has baseline as the first axis and component as the
     /// second.
     pub fn get_shapelet_uvs(
-        radecs: &[RADec],
+        radecs: &[cuda::RADec],
         lst_rad: f64,
         tile_xyzs: &[XyzGeodetic],
     ) -> Array2<cuda::ShapeletUV> {
@@ -328,6 +390,13 @@ impl ComponentListSplit {
             .into_par_iter()
             .zip(radecs.par_iter())
             .for_each(|(mut baseline_uv, radec)| {
+                // Convert from the cuda RADec type to the Rust one (which has
+                // methods). Hopefully this is a no-op because they should be
+                // the exact same type...
+                let radec = RADec {
+                    ra: radec.ra,
+                    dec: radec.dec,
+                };
                 let hadec = radec.to_hadec(lst_rad);
                 let shapelet_uvs: Vec<cuda::ShapeletUV> = xyz::xyzs_to_uvws(tile_xyzs, hadec)
                     .into_iter()

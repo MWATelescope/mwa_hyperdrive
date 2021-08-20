@@ -8,7 +8,7 @@ use std::io::Read;
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use mwa_hyperdrive_core::c64;
+use mwa_rust_core::c64;
 
 pub(crate) const I_POWER_TABLE: [c64; 4] = [
     c64::new(1.0, 0.0),

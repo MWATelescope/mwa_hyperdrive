@@ -17,6 +17,7 @@ mod filenames;
 pub(crate) use error::*;
 use filenames::InputDataTypes;
 pub(crate) use freq::*;
+use mwa_rust_core::precession::PrecessionInfo;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
@@ -24,18 +25,21 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use log::{debug, info, trace, warn};
-use mwalib::{MWA_LATITUDE_RADIANS, MWA_LONGITUDE_RADIANS};
+use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use rayon::prelude::*;
 
 use crate::constants::*;
 use crate::data_formats::*;
 use crate::glob::*;
 use crate::precession::precess_time;
-use mwa_hyperdrive_core::beam::Delays;
-use mwa_hyperdrive_core::*;
+use mwa_hyperdrive_beam::{create_beam_object, Beam, Delays};
 use mwa_hyperdrive_srclist::{
-    constants::*, veto_sources, ComponentList, FluxDensityType, SourceList, SourceListType,
+    constants::*, veto_sources, FluxDensityType, SourceList, SourceListType,
+};
+use mwa_rust_core::{
+    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    time::epoch_as_gps_seconds,
+    XyzGeodetic,
 };
 
 /// Parameters needed to perform calibration.
@@ -47,12 +51,8 @@ pub struct CalibrateParams {
     /// Beam struct.
     pub(crate) beam: Box<dyn Beam>,
 
-    /// A shared cache of Jones matrices. This field should be used to generate
-    /// Jones matrices and populate the cache.
-    pub(crate) jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache,
-
-    /// The sky-model source components.
-    pub(crate) sky_model_comps: ComponentList,
+    /// The sky-model source list.
+    pub(crate) source_list: SourceList,
 
     /// The optional sky-model visibilities file. If specified, it will be
     /// written to during calibration.
@@ -69,12 +69,11 @@ pub struct CalibrateParams {
     /// Channel- and frequency-related parameters required for calibration.
     pub(crate) freq: FrequencyParams,
 
-    /// The target time resolution \[seconds\]. This is kept optional in case in
-    /// the input data has only one time step, and therefore no resolution.
+    /// The number of time samples to average together before calibrating.
     ///
-    /// e.g. If the input data is in 0.5s resolution and this variable was 4s,
-    /// then we average 8 scans worth of time data when calibrating.
-    pub(crate) time_res: Option<f64>,
+    /// e.g. If the input data is in 0.5s resolution and this variable was 4,
+    /// then we average 2s worth of data together during calibration.
+    pub(crate) time_average_factor: usize,
 
     /// The timestep indices to use in calibration.
     pub(crate) timesteps: Vec<usize>,
@@ -149,8 +148,8 @@ impl CalibrateParams {
             num_sources,
             source_dist_cutoff,
             veto_threshold,
-            // time_res,
-            // freq_res,
+            time_average_factor,
+            // freq_average_factor,
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
@@ -212,6 +211,7 @@ impl CalibrateParams {
                 info!("Calibrating obsid {}", obs_context.obsid.unwrap());
                 info!("Using metafits: {}", meta.display());
                 info!("Using {} gpubox files", gpuboxes.len());
+                debug!("gpubox files: {:?}", &gpuboxes);
                 match mwafs {
                     Some(_) => info!("Using supplied mwaf flags"),
                     None => warn!("No mwaf flags files supplied"),
@@ -260,8 +260,7 @@ impl CalibrateParams {
             _ => return Err(InvalidArgsError::InvalidDataInput),
         };
 
-        let beam: Box<dyn Beam> =
-            crate::beam::create_beam_object(no_beam, dipole_delays, beam_file)?;
+        let beam: Box<dyn Beam> = create_beam_object(no_beam, dipole_delays, beam_file)?;
 
         // Handle potential issues with the output calibration solutions file.
         let output_solutions_filename = PathBuf::from(
@@ -379,42 +378,24 @@ impl CalibrateParams {
                 }
             }
         };
-        info!(
-            "Available timesteps (exclusive): {:?}",
-            0..obs_context.timesteps.len()
-        );
-        info!(
-            "Unflagged timesteps (exclusive): {:?}",
-            obs_context.unflagged_timestep_indices
-        );
-        {
-            // We don't require the timesteps to be used in calibration to be
-            // sequential. But if they are, it looks a bit neater to print them out
-            // as a range rather than individual indicies.
-            info!(
-                "{}",
-                range_or_comma_separated(&timesteps_to_use, Some("Using timesteps"))
-            );
-        }
 
         let array_longitude = match (array_longitude_deg, obs_context.array_longitude_rad) {
             (Some(array_longitude_deg), _) => array_longitude_deg.to_radians(),
             (None, Some(input_data_long)) => input_data_long,
             (None, None) => {
                 warn!("Assuming that the input array is at the MWA Earth coordinates");
-                MWA_LONGITUDE_RADIANS
+                MWA_LONG_RAD
             }
         };
         let array_latitude = match (array_latitude_deg, obs_context.array_latitude_rad) {
             (Some(array_latitude_deg), _) => array_latitude_deg.to_radians(),
             (None, Some(input_data_lat)) => input_data_lat,
-            (None, None) => MWA_LATITUDE_RADIANS,
+            (None, None) => MWA_LAT_RAD,
         };
 
         // The length of the tile XYZ collection is the total number of tiles in
         // the array, even if some tiles are flagged.
         let total_num_tiles = obs_context.tile_xyzs.len();
-        info!("Total number of tiles: {}", total_num_tiles);
 
         // Assign the tile flags.
         let mut tile_flags: HashSet<usize> = match tile_flags {
@@ -426,14 +407,6 @@ impl CalibrateParams {
             for &obs_tile_flag in &obs_context.tile_flags {
                 tile_flags.insert(obs_tile_flag);
             }
-        }
-        let num_unflagged_tiles = total_num_tiles - tile_flags.len();
-        info!("Total number of unflagged tiles: {}", num_unflagged_tiles);
-        {
-            // Print out the tile flags. Use a vector to sort ascendingly.
-            let mut tile_flags = tile_flags.iter().collect::<Vec<_>>();
-            tile_flags.sort_unstable();
-            info!("Tile flags: {:?}", tile_flags);
         }
 
         // Assign the per-coarse-channel fine-channel flags.
@@ -448,19 +421,6 @@ impl CalibrateParams {
                 fine_chan_flags_per_coarse_chan.insert(obs_fine_chan_flag);
             }
         }
-        {
-            let mut fine_chan_flags_per_coarse_chan_vec =
-                fine_chan_flags_per_coarse_chan.iter().collect::<Vec<_>>();
-            fine_chan_flags_per_coarse_chan_vec.sort_unstable();
-            info!(
-                "Fine-channel flags per coarse channel: {:?}",
-                fine_chan_flags_per_coarse_chan_vec
-            );
-        }
-        debug!(
-            "Observation's fine-channel flags per coarse channel: {:?}",
-            obs_context.fine_chan_flags_per_coarse_chan
-        );
 
         // Determine all of the fine-channel flags.
         let mut fine_chan_flags: HashSet<usize> = match fine_chan_flags {
@@ -473,23 +433,8 @@ impl CalibrateParams {
                 fine_chan_flags.insert(f + freq_context.num_fine_chans_per_coarse_chan * i);
             }
         }
-        {
-            let mut fine_chan_flags_vec = fine_chan_flags.iter().collect::<Vec<_>>();
-            fine_chan_flags_vec.sort_unstable();
-            debug!("All fine-channel flags: {:?}", fine_chan_flags_vec);
-        }
 
         // Set up frequency information.
-        let native_freq_res = freq_context.native_fine_chan_width;
-        let freq_res = native_freq_res;
-        // let freq_res = freq_res.unwrap_or(native_freq_res);
-        // if freq_res % native_freq_res != 0.0 {
-        //     return Err(InvalidArgsError::InvalidFreqResolution {
-        //         got: freq_res,
-        //         native: native_freq_res,
-        //     });
-        // }
-
         let total_num_fine_channels = freq_context.fine_chan_freqs.len();
         let num_fine_chans_per_coarse_band =
             total_num_fine_channels / freq_context.coarse_chan_freqs.len();
@@ -507,8 +452,36 @@ impl CalibrateParams {
                 unflagged_fine_chan_freqs.push(freq.round());
             }
         }
+
+        // let freq_average_factor = match (freq_context.native_fine_chan_width, freq_average_factor) {
+        //     (None, _) => {
+        //         // If the input data has unknown frequency resolution, it's
+        //         // because there's only one frequency.
+        //         1
+        //     }
+        //     (Some(_), None) => {
+        //         // "None" indicates we should follow default behaviour: Each
+        //         // fine-frequency channel is calibrated independently.
+        //         1
+        //     }
+        //     (_, Some(f)) => {
+        //         // In all other cases, just use the input as is, but check that
+        //         // it's not too big.
+        //         if f > unflagged_fine_chans.len() {
+        //             warn!(
+        //                 "Cannot average {} channels; only {} are being used. Capping.",
+        //                 f,
+        //                 unflagged_fine_chans.len()
+        //             );
+        //             unflagged_fine_chans.len()
+        //         } else {
+        //             f
+        //         }
+        //     }
+        // };
+
         let freq_struct = FrequencyParams {
-            res: freq_res,
+            freq_average_factor: 1,
             num_fine_chans: total_num_fine_channels,
             num_unflagged_fine_chans_per_coarse_band,
             num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
@@ -525,40 +498,6 @@ impl CalibrateParams {
             obs_context.timesteps[0],
             array_longitude,
             array_latitude,
-        );
-
-        info!(
-            "Phase centre:                   {}",
-            &obs_context.phase_centre
-        );
-        info!(
-            "Phase centre (J2000):           {}",
-            precession_info
-                .hadec_j2000
-                .to_radec(precession_info.lmst_j2000)
-        );
-        if let Some(pc) = &obs_context.pointing_centre {
-            info!("Pointing centre:                {}", pc);
-        }
-        info!(
-            "LMST of first timestep:         {:.4}°",
-            precession_info.lmst.to_degrees()
-        );
-        info!(
-            "LMST of first timestep (J2000): {:.4}°",
-            precession_info.lmst_j2000.to_degrees()
-        );
-        info!(
-            "Array longitude:                {:.4}°",
-            array_longitude.to_degrees()
-        );
-        info!(
-            "Array latitude:                 {:.4}°",
-            array_latitude.to_degrees()
-        );
-        info!(
-            "Array latitude (J2000):         {:.4}°",
-            precession_info.array_latitude_j2000.to_degrees()
         );
 
         let mut source_list: SourceList = {
@@ -594,12 +533,12 @@ impl CalibrateParams {
             // If the user didn't specify the source list type, then print out
             // what we found.
             if sl_type_specified {
-                debug!("Successfully parsed {}-style source list", sl_type);
+                trace!("Successfully parsed {}-style source list", sl_type);
             }
 
             sl
         };
-        info!("Found {} sources in the source list", source_list.len());
+        trace!("Found {} sources in the source list", source_list.len());
         // Veto any sources that may be troublesome, and/or cap the total number
         // of sources. If the user doesn't specify how many source-list sources
         // to use, then all sources are used.
@@ -619,18 +558,7 @@ impl CalibrateParams {
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
-        let num_components = source_list
-            .values()
-            .fold(0, |a, src| a + src.components.len());
-        info!(
-            "Using {} sources with a total of {} components",
-            source_list.len(),
-            num_components
-        );
-        trace!("Using sources: {:?}", source_list.keys());
-        if source_list.len() > 10000 {
-            warn!("Using more than 10,000 sources!");
-        } else if source_list.is_empty() {
+        if source_list.is_empty() {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
 
@@ -659,28 +587,32 @@ impl CalibrateParams {
             num_list_types - new_num_list_types
         );
 
-        let sky_model_comps = ComponentList::new(
-            source_list,
-            &freq_struct.unflagged_fine_chan_freqs,
-            obs_context.phase_centre,
-        );
-
-        let native_time_res = obs_context.time_res;
-        // let time_res = time_res.or(native_time_res);
-        let time_res = native_time_res;
-        if let Some(ntr) = native_time_res {
-            info!("Input data time resolution: {:.2}s", ntr);
-            if let Some(tr) = time_res {
-                if tr % ntr != 0.0 {
-                    return Err(InvalidArgsError::InvalidTimeResolution {
-                        got: tr,
-                        native: ntr,
-                    });
+        let time_average_factor = match (obs_context.time_res, time_average_factor) {
+            (None, _) => {
+                // If the input data has unknown time resolution, it's because
+                // there's only one timestep.
+                1
+            }
+            (Some(_), None) => {
+                // "None" indicates we should follow default behaviour: All data
+                // should be averaged in time.
+                timesteps_to_use.len()
+            }
+            (_, Some(f)) => {
+                // In all other cases, just use the input as is, but check that
+                // it's not too big.
+                if f > timesteps_to_use.len() {
+                    warn!(
+                        "Cannot average {} timesteps; only {} are being used. Capping.",
+                        f,
+                        timesteps_to_use.len()
+                    );
+                    timesteps_to_use.len()
+                } else {
+                    f
                 }
             }
-        }
-        // let num_time_steps_to_average = time_res / native_time_res;
-        // let timesteps = (0..context.timesteps.len() / num_time_steps_to_average as usize).collect();
+        };
 
         let tile_baseline_maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
 
@@ -701,15 +633,14 @@ impl CalibrateParams {
             stop_threshold = min_threshold;
         }
 
-        Ok(Self {
+        let params = Self {
             input_data,
             beam,
-            jones_cache: mwa_hyperdrive_core::jones::cache::JonesCache::new(),
-            sky_model_comps,
+            source_list,
             model_file,
             tile_flags,
             freq: freq_struct,
-            time_res,
+            time_average_factor,
             timesteps: timesteps_to_use,
             tile_to_unflagged_baseline_map: tile_baseline_maps.tile_to_unflagged_baseline_map,
             unflagged_baseline_to_tile_map: tile_baseline_maps.unflagged_baseline_to_tile_map,
@@ -721,21 +652,190 @@ impl CalibrateParams {
             stop_threshold,
             min_threshold,
             output_solutions_filename,
-        })
+        };
+        params.log_param_info(&precession_info);
+        Ok(params)
+    }
+
+    fn log_param_info(&self, precession_info: &PrecessionInfo) {
+        let obs_context = self.input_data.get_obs_context();
+        let freq_context = self.input_data.get_freq_context();
+
+        info!(
+            "Array longitude, latitude:     ({:.4}°, {:.4}°)",
+            self.array_longitude.to_degrees(),
+            self.array_latitude.to_degrees()
+        );
+        info!(
+            "Array latitude (J2000):                    {:.4}°",
+            precession_info.array_latitude_j2000.to_degrees()
+        );
+        info!(
+            "Phase centre:                  ({:.4}°, {:.4}°)",
+            obs_context.phase_centre.ra.to_degrees(),
+            obs_context.phase_centre.dec.to_degrees()
+        );
+        let pc_j2000 = precession_info
+            .hadec_j2000
+            .to_radec(precession_info.lmst_j2000);
+        info!(
+            "Phase centre (J2000):          ({:.4}°, {:.4}°)",
+            pc_j2000.ra.to_degrees(),
+            pc_j2000.dec.to_degrees()
+        );
+        if let Some(pc) = obs_context.pointing_centre {
+            info!(
+                "Pointing centre:               ({:.4}°, {:.4}°)",
+                pc.ra.to_degrees(),
+                pc.dec.to_degrees()
+            );
+        }
+        info!(
+            "LMST of first timestep:         {:.4}°",
+            precession_info.lmst.to_degrees()
+        );
+        info!(
+            "LMST of first timestep (J2000): {:.4}°",
+            precession_info.lmst_j2000.to_degrees()
+        );
+
+        let total_num_tiles = obs_context.tile_xyzs.len();
+        info!("Total number of tiles:           {}", total_num_tiles);
+        let num_unflagged_tiles = total_num_tiles - self.tile_flags.len();
+        info!("Total number of unflagged tiles: {}", num_unflagged_tiles);
+        {
+            // Print out the tile flags. Use a vector to sort ascendingly.
+            let mut tile_flags = self.tile_flags.iter().collect::<Vec<_>>();
+            tile_flags.sort_unstable();
+            info!("Tile flags: {:?}", tile_flags);
+        }
+
+        info!("Available timesteps: {:?}", 0..obs_context.timesteps.len());
+        info!(
+            "Unflagged timesteps: {:?}",
+            obs_context.unflagged_timestep_indices
+        );
+        // We don't require the timesteps to be used in calibration to be
+        // sequential. But if they are, it looks a bit neater to print them out
+        // as a range rather than individual indicies.
+        info!(
+            "{}",
+            range_or_comma_separated(&self.timesteps, Some("Using timesteps:    "))
+        );
+
+        match self.timesteps.as_slice() {
+            [] => unreachable!(), // Handled by data-reading code.
+            [t] => info!(
+                "Only timestep (GPS): {:.2}",
+                epoch_as_gps_seconds(obs_context.timesteps[*t])
+            ),
+            [t0, .., tn] => {
+                info!(
+                    "First timestep (GPS): {:.2}",
+                    epoch_as_gps_seconds(obs_context.timesteps[*t0])
+                );
+                info!(
+                    "Last timestep  (GPS): {:.2}",
+                    epoch_as_gps_seconds(obs_context.timesteps[*tn])
+                );
+            }
+        }
+
+        match obs_context.time_res {
+            Some(native) => {
+                info!("Input data's time resolution: {:.2} seconds", native);
+            }
+            None => info!("Input data's time resolution unknown"),
+        }
+        match freq_context.native_fine_chan_width {
+            Some(freq_res) => {
+                info!("Input data freq. resolution:  {:.2} kHz", freq_res / 1e3);
+            }
+            None => info!("Input data freq. resolution unknown"),
+        }
+        match self.freq.unflagged_fine_chan_freqs.as_slice() {
+            [] => unreachable!(), // Handled by data-reading code.
+            [f] => info!("Only unflagged fine-channel frequency: {:.2} MHz", f / 1e6),
+            [f_0, .., f_n] => {
+                info!(
+                    "First unflagged fine-channel frequency: {:.2} MHz",
+                    f_0 / 1e6
+                );
+                info!(
+                    "Last unflagged fine-channel frequency:  {:.2} MHz",
+                    f_n / 1e6
+                );
+            }
+        }
+        info!(
+            "Number of unflagged fine channels: {}",
+            self.freq.unflagged_fine_chans.len()
+        );
+        if log_enabled!(Debug) {
+            let mut unflagged_fine_chans: Vec<_> = self.freq.unflagged_fine_chans.iter().collect();
+            unflagged_fine_chans.sort_unstable();
+            match unflagged_fine_chans.as_slice() {
+                [] => unreachable!(), // Handled by data-reading code.
+                [f] => debug!("Only unflagged fine-channel: {}", f),
+                [f_0, .., f_n] => {
+                    debug!("First unflagged fine-channel: {}", f_0);
+                    debug!("Last unflagged fine-channel:  {}", f_n);
+                }
+            }
+        }
+
+        debug!(
+            "Input data's fine-channel flags per coarse channel: {:?}",
+            obs_context.fine_chan_flags_per_coarse_chan
+        );
+        {
+            let mut fine_chan_flags_vec = self.freq.fine_chan_flags.iter().collect::<Vec<_>>();
+            fine_chan_flags_vec.sort_unstable();
+            debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
+        }
+
+        info!(
+            "Averaging {} timesteps into each timeblock",
+            self.time_average_factor,
+        );
+        info!(
+            "Averaging {} fine-freq. channels into each chanblock",
+            self.freq.freq_average_factor,
+        );
+        info!(
+            "Number of calibration timeblocks: {}",
+            self.get_num_timeblocks()
+        );
+        info!(
+            "Number of calibration chanblocks: {}",
+            self.get_num_chanblocks()
+        );
+
+        let (num_points, num_gaussians, num_shapelets) = self.source_list.get_counts();
+        let num_components = num_points + num_gaussians + num_shapelets;
+        info!(
+            "Using {} sources with a total of {} components",
+            self.source_list.len(),
+            num_components
+        );
+        info!("{} point components", num_points);
+        info!("{} Gaussian components", num_gaussians);
+        info!("{} shapelet components", num_shapelets);
+        if num_components > 10000 {
+            warn!("Using more than 10,000 components!");
+        }
+        trace!("Using sources: {:?}", self.source_list.keys());
+    }
+
+    pub(crate) fn get_num_timeblocks(&self) -> usize {
+        (self.timesteps.len() as f64 / self.time_average_factor as f64).ceil() as _
+    }
+
+    pub(crate) fn get_num_chanblocks(&self) -> usize {
+        (self.freq.unflagged_fine_chans.len() as f64 / self.freq.freq_average_factor as f64).ceil()
+            as _
     }
 }
-
-// /// Get the LST (in radians) from a timestep. `time_res_seconds` refers to the
-// /// target time resolution of calibration, *not* the observation's time
-// /// resolution.
-// ///
-// /// The LST is calculated for the middle of the timestep, not the start of it.
-// fn lst_from_timestep(timestep: usize, context: &CorrelatorContext, time_res_seconds: f64) -> f64 {
-//     let start_lst = context.metafits_context.lst_rad;
-//     let factor = SOLAR2SIDEREAL * DS2R;
-//     start_lst
-//         + factor * (get_diff_in_start_time(context) + time_res_seconds * (timestep as f64 + 0.5))
-// }
 
 struct TileBaselineMaps {
     tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
@@ -810,7 +910,7 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
     if is_sequential {
         let suffix = format!("{:?}", (collection[0]..collection.last().unwrap() + 1));
         if let Some(p) = prefix {
-            format!("{} (exclusive): {}", p, suffix)
+            format!("{} {}", p, suffix)
         } else {
             suffix
         }
@@ -821,7 +921,7 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
             .collect::<Vec<_>>()
             .join(", ");
         if let Some(p) = prefix {
-            format!("{}: {}", p, suffix)
+            format!("{} {}", p, suffix)
         } else {
             suffix
         }
@@ -863,18 +963,18 @@ mod tests {
         assert!(flagged_baselines.contains(&8127));
     }
 
-    #[test]
-    fn test_new_params() {
-        let args = get_1090008640_smallest();
-        let params = match args.into_params() {
-            Ok(p) => p,
-            Err(e) => panic!("{}", e),
-        };
-        // The default time resolution should be 2.0s, as per the metafits.
-        assert_abs_diff_eq!(params.time_res.unwrap(), 2.0);
-        // The default freq resolution should be 40kHz, as per the metafits.
-        assert_abs_diff_eq!(params.freq.res, 40e3, epsilon = 1e-10);
-    }
+    // #[test]
+    // fn test_new_params() {
+    //     let args = get_1090008640_smallest();
+    //     let params = match args.into_params() {
+    //         Ok(p) => p,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     // The default time resolution should be 2.0s, as per the metafits.
+    //     assert_abs_diff_eq!(params.time_res.unwrap(), 2.0);
+    //     // The default freq resolution should be 40kHz, as per the metafits.
+    //     assert_abs_diff_eq!(params.freq.res.unwrap(), 40e3, epsilon = 1e-10);
+    // }
 
     // #[test]
     // fn test_new_params_time_averaging() {

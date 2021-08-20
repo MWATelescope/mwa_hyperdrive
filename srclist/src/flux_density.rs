@@ -5,11 +5,10 @@
 //! Flux density structures.
 
 use ndarray::{Array1, Array2};
-use num::Complex;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
-use mwa_hyperdrive_core::Jones;
+use mwa_rust_core::{Complex, Jones};
 
 const LIST_TO_POWER_LAW_MAX_DIFF: f64 = 0.01; // 1%
 
@@ -44,26 +43,15 @@ impl FluxDensity {
     pub fn calc_spec_index(&self, fd2: &Self) -> f64 {
         (fd2.i / self.i).ln() / (fd2.freq / self.freq).ln()
     }
-}
 
-impl From<FluxDensity> for Jones<f64> {
-    fn from(fd: FluxDensity) -> Self {
-        Self::from([
-            Complex::new(fd.i + fd.q, 0.0),
-            Complex::new(fd.u, fd.v),
-            Complex::new(fd.u, -fd.v),
-            Complex::new(fd.i - fd.q, 0.0),
-        ])
-    }
-}
-
-impl From<&FluxDensity> for Jones<f64> {
-    fn from(fd: &FluxDensity) -> Self {
-        Self::from([
-            Complex::new(fd.i + fd.q, 0.0),
-            Complex::new(fd.u, fd.v),
-            Complex::new(fd.u, -fd.v),
-            Complex::new(fd.i - fd.q, 0.0),
+    /// Convert a `FluxDensity` into a [Jones] matrix representing instrumental
+    /// Stokes (i.e. XX, XY, YX, YY).
+    pub fn to_inst_stokes(&self) -> Jones<f64> {
+        Jones::from([
+            Complex::new(self.i + self.q, 0.0),
+            Complex::new(self.u, self.v),
+            Complex::new(self.u, -self.v),
+            Complex::new(self.i - self.q, 0.0),
         ])
     }
 }
@@ -237,13 +225,23 @@ impl FluxDensityType {
                     }
                 };
 
-                // Now scale the flux densities given the calculated spectral index.
+                // Now scale the flux densities given the calculated
+                // spectral index.
                 let flux_ratio = calc_flux_ratio(freq_hz, smaller_flux_density.freq, spec_index);
-
-                FluxDensity {
+                let fd = FluxDensity {
                     freq: freq_hz,
                     ..*smaller_flux_density
-                } * flux_ratio
+                } * flux_ratio;
+
+                // Handle NaNs by setting the flux densities to 0.
+                if fd.i.is_nan() {
+                    FluxDensity {
+                        freq: fd.freq,
+                        ..Default::default()
+                    }
+                } else {
+                    fd
+                }
             }
         }
     }
@@ -364,10 +362,27 @@ pub fn calc_flux_ratio(desired_freq_hz: f64, cat_freq_hz: f64, spec_index: f64) 
 }
 
 #[cfg(test)]
+impl approx::AbsDiffEq for FluxDensity {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> f64 {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: f64) -> bool {
+        f64::abs_diff_eq(&self.freq, &other.freq, epsilon)
+            && f64::abs_diff_eq(&self.i, &other.i, epsilon)
+            && f64::abs_diff_eq(&self.q, &other.q, epsilon)
+            && f64::abs_diff_eq(&self.u, &other.u, epsilon)
+            && f64::abs_diff_eq(&self.v, &other.v, epsilon)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
-    use mwa_hyperdrive_core::c64;
+    use mwa_rust_core::c64;
 
     #[test]
     fn calc_freq_ratio_1() {
@@ -483,12 +498,15 @@ mod tests {
         // We're using the SI between the middle two FDs.
         match fdt {
             FluxDensityType::PowerLaw { si, fd } => {
+                let expected_fd = FluxDensity {
+                    freq: 160e6,
+                    i: 5.910484034862892,
+                    q: 0.0,
+                    u: 0.0,
+                    v: 0.0,
+                };
                 assert_abs_diff_eq!(si, -1.0570227720845136);
-                assert_abs_diff_eq!(fd.freq, 160e6);
-                assert_abs_diff_eq!(fd.i, 5.910484034862892);
-                assert_abs_diff_eq!(fd.q, 0.0);
-                assert_abs_diff_eq!(fd.u, 0.0);
-                assert_abs_diff_eq!(fd.v, 0.0);
+                assert_abs_diff_eq!(fd, expected_fd);
             }
             _ => unreachable!(),
         }
@@ -503,26 +521,16 @@ mod tests {
             u: -0.3899498110659575,
             v: -0.058562589895788,
         };
-        let result = Jones::from(&fd);
-        assert_abs_diff_eq!(result[0], c64::new(fd.i + fd.q, 0.0));
-        assert_abs_diff_eq!(result[1], c64::new(fd.u, fd.v));
-        assert_abs_diff_eq!(result[2], c64::new(fd.u, -fd.v));
-        assert_abs_diff_eq!(result[3], c64::new(fd.i - fd.q, 0.0));
-    }
-
-    #[test]
-    fn test_to_jones_borrowed() {
-        let fd = FluxDensity {
-            freq: 170e6,
-            i: 0.058438801501144624,
-            q: -0.3929914018344019,
-            u: -0.3899498110659575,
-            v: -0.058562589895788,
-        };
-        let result = Jones::from(&fd);
-        assert_abs_diff_eq!(result[0], c64::new(fd.i + fd.q, 0.0));
-        assert_abs_diff_eq!(result[1], c64::new(fd.u, fd.v));
-        assert_abs_diff_eq!(result[2], c64::new(fd.u, -fd.v));
-        assert_abs_diff_eq!(result[3], c64::new(fd.i - fd.q, 0.0));
+        let fd2 = fd.clone();
+        let result = fd.to_inst_stokes();
+        assert_abs_diff_eq!(
+            result,
+            Jones::from([
+                c64::new(fd2.i + fd2.q, 0.0),
+                c64::new(fd2.u, fd2.v),
+                c64::new(fd2.u, -fd2.v),
+                c64::new(fd2.i - fd2.q, 0.0),
+            ])
+        );
     }
 }

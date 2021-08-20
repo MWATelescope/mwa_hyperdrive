@@ -8,14 +8,16 @@ use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
 
 use super::*;
-use crate::shapelets;
-use mwa_hyperdrive_core::{xyz, Jones, RADec, XyzGeodetic};
+use mwa_hyperdrive_srclist::{
+    constants::DEFAULT_SPEC_INDEX, ComponentList, ComponentType, FluxDensity, FluxDensityType,
+    Source, SourceComponent, SourceList,
+};
+use mwa_rust_core::{pos::xyz, Jones, RADec, XyzGeodetic};
+
 #[cfg(feature = "cuda")]
 use mwa_hyperdrive_cuda as cuda;
-use mwa_hyperdrive_srclist::{
-    constants::DEFAULT_SPEC_INDEX, ComponentList, ComponentListSplit, ComponentType, FluxDensity,
-    FluxDensityType, Source, SourceComponent, SourceList,
-};
+#[cfg(feature = "cuda")]
+use mwa_hyperdrive_srclist::ComponentListFFI;
 
 fn get_simple_point(pos: RADec, flux_density_scale: FluxDensityType) -> SourceComponent {
     SourceComponent {
@@ -178,7 +180,7 @@ fn point_zenith_cpu() {
         },
     );
     // Get the component parameters via `ComponentList`.
-    let comps = ComponentList::new(srclist, &obs.freqs, obs.phase_centre);
+    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
@@ -221,7 +223,7 @@ fn point_off_zenith_cpu() {
             )],
         },
     );
-    let comps = ComponentList::new(srclist, &obs.freqs, obs.phase_centre);
+    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
 
     let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
     model_points(
@@ -266,7 +268,7 @@ fn gaussian_zenith_cpu() {
             )],
         },
     );
-    let comps = ComponentList::new(srclist, &obs.freqs, obs.phase_centre);
+    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
 
     let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
     model_gaussians(
@@ -309,7 +311,7 @@ fn gaussian_off_zenith_cpu() {
             )],
         },
     );
-    let comps = ComponentList::new(srclist, &obs.freqs, obs.phase_centre);
+    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
 
     let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
     model_gaussians(
@@ -355,7 +357,7 @@ fn shapelet_zenith_cpu() {
             )],
         },
     );
-    let comps = ComponentList::new(srclist, &obs.freqs, obs.phase_centre);
+    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
 
     let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
     let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
@@ -401,7 +403,7 @@ fn shapelet_off_zenith_cpu() {
             )],
         },
     );
-    let comps = ComponentList::new(srclist, &obs.freqs, obs.phase_centre);
+    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
 
     let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
     let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
@@ -451,8 +453,9 @@ fn point_zenith_gpu_list() {
             )],
         },
     );
-    // Get the component parameters via `ComponentListSplit`.
-    let comps = ComponentListSplit::new(srclist, &obs.freqs, obs.phase_centre);
+    // Get the component parameters via `ComponentListFFI`.
+    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
+    let (points, _, _) = comps.to_c_types(None, None);
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
@@ -460,21 +463,16 @@ fn point_zenith_gpu_list() {
         let addresses = cuda::init_model(
             obs.uvws.len(),
             obs.freqs.len(),
-            shapelets::SBF_L,
-            shapelets::SBF_N,
-            shapelets::SBF_C,
-            shapelets::SBF_DX,
+            crate::shapelets::SBF_L,
+            crate::shapelets::SBF_N,
+            crate::shapelets::SBF_C,
+            crate::shapelets::SBF_DX,
             obs.uvws.as_ptr() as _,
             obs.freqs.as_ptr(),
-            shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
+            crate::shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
             visibilities.as_mut_ptr() as _,
         );
-        cuda::model_list_points(
-            comps.point_list_radecs.len(),
-            comps.point_list_lmns.as_ptr(),
-            comps.point_list_fds.as_ptr(),
-            &addresses,
-        );
+        cuda::model_points(&points, &addresses);
         cuda::copy_vis(&addresses);
         cuda::destroy(&addresses);
     }
@@ -500,6 +498,203 @@ fn point_zenith_gpu_list() {
     assert_abs_diff_eq!(visibilities[[1, 1]][0].im, 0.0, epsilon = 1e-10);
     assert_abs_diff_eq!(visibilities[[2, 2]][0].re, 2.0, epsilon = 1e-10);
     assert_abs_diff_eq!(visibilities[[2, 2]][0].im, 0.0, epsilon = 1e-10);
+}
+
+// Put a single point source just off zenith.
+#[test]
+#[cfg(feature = "cuda")]
+fn point_off_zenith_gpu_list() {
+    let obs = ObsParams::list();
+    let pos = RADec::new_degrees(1.0, -27.0);
+
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "off_zenith".to_string(),
+        Source {
+            components: vec![get_simple_point(
+                pos.clone(),
+                obs.flux_density_scale.clone(),
+            )],
+        },
+    );
+    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
+    let (points, _, _) = comps.to_c_types(None, None);
+
+    // Ignore applying the beam.
+    let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
+    unsafe {
+        let addresses = cuda::init_model(
+            obs.uvws.len(),
+            obs.freqs.len(),
+            crate::shapelets::SBF_L,
+            crate::shapelets::SBF_N,
+            crate::shapelets::SBF_C,
+            crate::shapelets::SBF_DX,
+            obs.uvws.as_ptr() as _,
+            obs.freqs.as_ptr(),
+            crate::shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
+            visibilities.as_mut_ptr() as _,
+        );
+        cuda::model_points(&points, &addresses);
+        cuda::copy_vis(&addresses);
+        cuda::destroy(&addresses);
+    }
+    // This time, all LMN values should be close to (but not the same as) (0, 0,
+    // 1). This means that the visibilities should be somewhat close to the
+    // input flux densities.
+    let fds: Array2<Jones<f32>> = comps.point_list_fds.mapv(|v| {
+        Jones::from([
+            Complex::new(v.xx_re, v.xx_im),
+            Complex::new(v.xy_re, v.xy_im),
+            Complex::new(v.yx_re, v.yx_im),
+            Complex::new(v.yy_re, v.yy_im),
+        ])
+        .into()
+    });
+    for (fd, vis) in fds.iter().zip(visibilities.slice(s![0, ..])) {
+        assert_abs_diff_eq!(fd[0].re, vis[0].re, epsilon = 0.05);
+        assert_abs_diff_eq!(fd[0].im, vis[0].im, epsilon = 0.35);
+        assert_abs_diff_eq!(fd[3].re, vis[3].re, epsilon = 0.05);
+        assert_abs_diff_eq!(fd[3].im, vis[3].im, epsilon = 0.35);
+        assert_abs_diff_eq!(fd[1], vis[1], epsilon = 1e-10);
+        assert_abs_diff_eq!(fd[2], vis[2], epsilon = 1e-10);
+    }
+    assert_abs_diff_eq!(visibilities[[0, 0]][0].re, 0.99522406, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[0, 0]][0].im, 0.09761678, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[1, 1]][0].re, 2.9950366, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[1, 1]][0].im, 0.17249982, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[2, 2]][0].re, 1.9958266, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[2, 2]][0].im, -0.12913574, epsilon = 1e-10);
+}
+
+// Put a single Gaussian source at zenith.
+#[test]
+#[cfg(feature = "cuda")]
+fn gaussian_zenith_gpu_list() {
+    let obs = ObsParams::list();
+
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "zenith".to_string(),
+        Source {
+            components: vec![get_simple_gaussian(
+                obs.phase_centre.clone(),
+                obs.flux_density_scale.clone(),
+            )],
+        },
+    );
+    // Get the component parameters via `ComponentListFFI`.
+    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
+    let (_, gaussians, _) = comps.to_c_types(None, None);
+
+    // Ignore applying the beam.
+    let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
+    unsafe {
+        let addresses = cuda::init_model(
+            obs.uvws.len(),
+            obs.freqs.len(),
+            crate::shapelets::SBF_L,
+            crate::shapelets::SBF_N,
+            crate::shapelets::SBF_C,
+            crate::shapelets::SBF_DX,
+            obs.uvws.as_ptr() as _,
+            obs.freqs.as_ptr(),
+            crate::shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
+            visibilities.as_mut_ptr() as _,
+        );
+        cuda::model_gaussians(&gaussians, &addresses);
+        cuda::copy_vis(&addresses);
+        cuda::destroy(&addresses);
+    }
+    // All LMN values are (0, 0, 1). This means that the Fourier transform to
+    // make a visibility from LMN and UVW will always just be the input flux
+    // density. To compare the flux densities against the visibilities, we need
+    // to change the types (just demote the precision of the FDs).
+    let fds: Array2<Jones<f32>> = comps.point_list_fds.mapv(|v| {
+        Jones::from([
+            Complex::new(v.xx_re, v.xx_im),
+            Complex::new(v.xy_re, v.xy_im),
+            Complex::new(v.yx_re, v.yx_im),
+            Complex::new(v.yy_re, v.yy_im),
+        ])
+        .into()
+    });
+    for (fd, vis) in fds.iter().zip(visibilities.slice(s![0, ..])) {
+        assert_abs_diff_eq!(fd, vis, epsilon = 1e-10);
+    }
+    assert_abs_diff_eq!(visibilities[[0, 0]][0].re, 1.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[0, 0]][0].im, 0.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[1, 1]][0].re, 3.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[1, 1]][0].im, 0.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[2, 2]][0].re, 2.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[2, 2]][0].im, 0.0, epsilon = 1e-10);
+}
+
+// Put a single Gaussian source just off zenith.
+#[test]
+#[cfg(feature = "cuda")]
+fn gaussian_off_zenith_gpu_list() {
+    let obs = ObsParams::list();
+    let pos = RADec::new_degrees(1.0, -27.0);
+
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "off_zenith".to_string(),
+        Source {
+            components: vec![get_simple_gaussian(
+                pos.clone(),
+                obs.flux_density_scale.clone(),
+            )],
+        },
+    );
+    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
+    let (_, gaussians, _) = comps.to_c_types(None, None);
+
+    // Ignore applying the beam.
+    let mut visibilities = Array2::from_elem((obs.xyzs.len(), obs.freqs.len()), Jones::default());
+    unsafe {
+        let addresses = cuda::init_model(
+            obs.uvws.len(),
+            obs.freqs.len(),
+            crate::shapelets::SBF_L,
+            crate::shapelets::SBF_N,
+            crate::shapelets::SBF_C,
+            crate::shapelets::SBF_DX,
+            obs.uvws.as_ptr() as _,
+            obs.freqs.as_ptr(),
+            crate::shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
+            visibilities.as_mut_ptr() as _,
+        );
+        cuda::model_gaussians(&gaussians, &addresses);
+        cuda::copy_vis(&addresses);
+        cuda::destroy(&addresses);
+    }
+    // This time, all LMN values should be close to (but not the same as) (0, 0,
+    // 1). This means that the visibilities should be somewhat close to the
+    // input flux densities.
+    let fds: Array2<Jones<f32>> = comps.point_list_fds.mapv(|v| {
+        Jones::from([
+            Complex::new(v.xx_re, v.xx_im),
+            Complex::new(v.xy_re, v.xy_im),
+            Complex::new(v.yx_re, v.yx_im),
+            Complex::new(v.yy_re, v.yy_im),
+        ])
+        .into()
+    });
+    for (fd, vis) in fds.iter().zip(visibilities.slice(s![0, ..])) {
+        assert_abs_diff_eq!(fd[0].re, vis[0].re, epsilon = 0.05);
+        assert_abs_diff_eq!(fd[0].im, vis[0].im, epsilon = 0.35);
+        assert_abs_diff_eq!(fd[3].re, vis[3].re, epsilon = 0.05);
+        assert_abs_diff_eq!(fd[3].im, vis[3].im, epsilon = 0.35);
+        assert_abs_diff_eq!(fd[1], vis[1], epsilon = 1e-10);
+        assert_abs_diff_eq!(fd[2], vis[2], epsilon = 1e-10);
+    }
+    assert_abs_diff_eq!(visibilities[[0, 0]][0].re, 0.99522406, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[0, 0]][0].im, 0.09761678, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[1, 1]][0].re, 2.9950366, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[1, 1]][0].im, 0.17249982, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[2, 2]][0].re, 1.9958266, epsilon = 1e-10);
+    assert_abs_diff_eq!(visibilities[[2, 2]][0].im, -0.12913574, epsilon = 1e-10);
 }
 
 // // The same as above, but on the GPU.

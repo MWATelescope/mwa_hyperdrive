@@ -13,8 +13,10 @@ use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
 
 use crate::{constants::*, SourceList, FluxDensity};
-use mwa_hyperdrive_core::{beam::BeamError, *};
+use mwa_rust_core::{RADec, Jones};
+use mwa_hyperdrive_beam::{BeamError, Beam};
 
+#[derive(Debug)]
 struct RankedSource {
     name: String,
     apparent_fd: f64,
@@ -34,8 +36,8 @@ struct RankedSource {
 /// sources that need to be vetoed due to their positions in the beam are
 /// vetoed.
 ///
-/// `coarse_chan_freqs`: The centre frequencies of each of the coarse channels
-/// of this observation [Hz].
+/// `coarse_chan_freqs_hz`: The centre frequencies of each of the coarse
+/// channels of this observation \[Hz\].
 ///
 /// Assume an ideal array (all dipoles with unity gain). Also assume that the
 /// observation does not elapse enough time to shift sources into beam nulls
@@ -47,7 +49,7 @@ pub fn veto_sources(
     phase_centre: RADec,
     lst_rad: f64,
     array_latitude_rad: f64,
-    coarse_chan_freqs: &[f64],
+    coarse_chan_freqs_hz: &[f64],
     beam: &dyn Beam,
     num_sources: Option<usize>,
     source_dist_cutoff_deg: f64,
@@ -87,7 +89,7 @@ pub fn veto_sources(
 
             // Iterate over each frequency. Is the total flux density
             // acceptable for each frequency?
-            for &cc_freq in coarse_chan_freqs {
+            for &cc_freq in coarse_chan_freqs_hz {
                 // `fd` is the sum of the source's component XX+YY flux
                 // densities at this coarse-channel frequency.
                 let mut fd = 0.0;
@@ -97,7 +99,7 @@ pub fn veto_sources(
                     // frequency.
                     let j = match beam.calc_jones(
                             *azel,
-                            cc_freq as u32,
+                            cc_freq,
                             &[1.0; 16]) {
                             Ok(j) => j,
                             Err(e) => {
@@ -107,7 +109,7 @@ pub fn veto_sources(
                         };
 
                     let comp_fd = comp.estimate_at_freq(cc_freq);
-                    fd += get_beam_attenuated_flux_density(&comp_fd, &j);
+                    fd += get_beam_attenuated_flux_density(&comp_fd, j);
                 }
                 
                 if fd < veto_threshold {
@@ -179,14 +181,13 @@ pub fn veto_sources(
 /// multiply by a beam-response Jones matrix. Return the sum of the response XX
 /// and YY flux densities as the "beam attenuated flux density".
 // This function is isolated for testing.
-fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: &Jones<f64>) -> f64 {
+fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: Jones<f64>) -> f64 {
     // Get the instrumental flux densities as a Jones matrix.
-    let i = Jones::from(fd);
+    let i = fd.to_inst_stokes();
     // Calculate: J . I . J^H
     // where J is the beam-response Jones matrix and I are the instrumental flux
     // densities.
-    let ji = j.clone() * i;
-    let jijh = ji.mul_hermitian(j);
+    let jijh = j * Jones::axbh(i, j);
     // Use the trace of `jijh` as the total source flux density.
     // Using the determinant instead of the trace might be more
     // realistic; uncomment the line below to do that.
@@ -211,7 +212,7 @@ pub enum VetoError {
 //     use crate::{
 //         read::read_source_list_file, ComponentList, ComponentType, Source, SourceComponent,
 //     };
-//     use mwa_hyperdrive_core::constants::MWA_LONG_RAD;
+//     use mwa_rust_core::constants::MWA_LONG_RAD;
 //     use reduced_obsids::get_1090008640_smallest;
 
 //     #[test]

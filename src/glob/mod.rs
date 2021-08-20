@@ -71,10 +71,10 @@ mod tests {
         let result = get_single_match_from_glob("./Cargo*");
         assert!(result.is_err());
 
-        let result = get_single_match_from_glob("core/Cargo*");
+        let result = get_single_match_from_glob("srclist/Cargo*");
         assert!(result.is_ok());
         let entry = result.unwrap();
-        assert_eq!(entry, PathBuf::from("core/Cargo.toml"));
+        assert_eq!(entry, PathBuf::from("srclist/Cargo.toml"));
     }
 
     #[test]

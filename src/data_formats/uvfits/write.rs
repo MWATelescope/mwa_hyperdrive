@@ -14,9 +14,11 @@ use hifitime::Epoch;
 use ndarray::prelude::*;
 
 use super::*;
-use crate::math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_baselines};
-use mwa_hyperdrive_core::{
-    constants::VEL_C, erfa_sys, mwalib, Jones, RADec, XyzGeocentric, XyzGeodetic, UVW,
+use mwa_rust_core::{
+    constants::{MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD, VEL_C},
+    erfa_sys,
+    math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_baselines},
+    mwalib, Jones, RADec, XyzGeocentric, XyzGeodetic, UVW,
 };
 use mwalib::{fitsio, fitsio_sys};
 
@@ -52,13 +54,16 @@ pub(crate) struct UvfitsWriter<'a> {
 
 impl<'a> UvfitsWriter<'a> {
     /// Create a new uvfits file at the specified filename.
+    ///
+    /// If `fine_chan_width_hz` is unknown, then zero is written at the FREQ
+    /// CDELT.
     pub(crate) fn new(
         filename: &'a Path,
         num_timesteps: usize,
         num_baselines: usize,
         num_chans: usize,
         start_epoch: Epoch,
-        fine_chan_width_hz: f64,
+        fine_chan_width_hz: Option<f64>,
         centre_freq_hz: f64,
         centre_freq_chan: usize,
         phase_centre: RADec,
@@ -145,7 +150,7 @@ impl<'a> UvfitsWriter<'a> {
 
         hdu.write_key(&mut u, "CTYPE4", "FREQ")?;
         hdu.write_key(&mut u, "CRVAL4", centre_freq_hz)?;
-        hdu.write_key(&mut u, "CDELT4", fine_chan_width_hz)?;
+        hdu.write_key(&mut u, "CDELT4", fine_chan_width_hz.unwrap_or(0.0))?;
         hdu.write_key(&mut u, "CRPIX4", centre_freq_chan as u64 + 1)?;
 
         hdu.write_key(&mut u, "CTYPE5", "RA")?;
@@ -291,11 +296,11 @@ impl<'a> UvfitsWriter<'a> {
         let mut mwa_xyz: [f64; 3] = [0.0; 3];
         unsafe {
             status = erfa_sys::eraGd2gc(
-                ERFA_WGS84 as i32,             // ellipsoid identifier (Note 1)
-                mwalib::MWA_LONGITUDE_RADIANS, // longitude (radians, east +ve)
-                mwalib::MWA_LATITUDE_RADIANS,  // latitude (geodetic, radians, Note 3)
-                mwalib::MWA_ALTITUDE_METRES,   // height above ellipsoid (geodetic, Notes 2,3)
-                mwa_xyz.as_mut_ptr(),          // geocentric vector (Note 2)
+                ERFA_WGS84 as i32,    // ellipsoid identifier (Note 1)
+                MWA_LONG_RAD,         // longitude (radians, east +ve)
+                MWA_LAT_RAD,          // latitude (geodetic, radians, Note 3)
+                MWA_HEIGHT_M,         // height above ellipsoid (geodetic, Notes 2,3)
+                mwa_xyz.as_mut_ptr(), // geocentric vector (Note 2)
             );
         }
         if status != 0 {
@@ -561,8 +566,7 @@ impl<'a> UvfitsWriter<'a> {
                     vis.extend_from_slice(&[0.0; 12])
                 } else {
                     let weight = unsafe { weights.uget((unflagged_bl, unflagged_chan_index)) };
-                    let jones = (unsafe { vis_array.uget((unflagged_bl, unflagged_chan_index)) })
-                        .clone()
+                    let jones = *(unsafe { vis_array.uget((unflagged_bl, unflagged_chan_index)) })
                         // Undo the weight.
                         * (1.0 / weight);
                     unflagged_chan_index += 1;
@@ -597,7 +601,7 @@ impl<'a> UvfitsWriter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::HIFITIME_GPS_FACTOR;
+    use mwa_rust_core::time::gps_to_epoch;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -608,8 +612,8 @@ mod tests {
         let num_timesteps = 1;
         let num_baselines = 3;
         let num_chans = 2;
-        let obsid = 1065880128;
-        let start_epoch = Epoch::from_tai_seconds(obsid as f64 + 19.0 + HIFITIME_GPS_FACTOR);
+        let obsid = 1065880128.0;
+        let start_epoch = gps_to_epoch(obsid);
 
         let mut u = UvfitsWriter::new(
             tmp_uvfits_file.path(),
@@ -617,7 +621,7 @@ mod tests {
             num_baselines,
             num_chans,
             start_epoch,
-            40e3,
+            Some(40e3),
             170e6,
             3,
             RADec::new_degrees(0.0, 60.0),

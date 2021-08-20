@@ -21,7 +21,7 @@ jobs:
       run: |
           apt update -y
           DEBIAN_FRONTEND="noninteractive" apt-get -y install tzdata
-          apt install -y pkg-config curl git gcc llvm libclang-dev cuda-nvcc-11-1 libcfitsio-dev liberfa-dev
+          apt install -y pkg-config curl git gcc llvm libclang-dev cuda-nvcc-11-1 libcfitsio-dev liberfa-dev libhdf5-dev
 
     - name: Install stable toolchain
       uses: actions-rs/toolchain@v1

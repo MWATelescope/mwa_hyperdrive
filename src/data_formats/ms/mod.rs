@@ -18,17 +18,19 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::*;
-use crate::context::{FreqContext, ObsContext};
-use crate::data_formats::metafits;
-use crate::glob::get_single_match_from_glob;
-use crate::time::{casacore_utc_to_epoch, epoch_as_gps_seconds};
-use mwa_hyperdrive_core::{
-    beam::Delays,
+use crate::{
+    context::{FreqContext, ObsContext},
+    data_formats::metafits,
+    glob::get_single_match_from_glob,
+};
+use mwa_hyperdrive_beam::Delays;
+use mwa_rust_core::{
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
     },
-    mwalib, Jones, RADec, XyzGeocentric,
+    time::{casacore_utc_to_epoch, epoch_as_gps_seconds},
+    Jones, RADec, XyzGeocentric,
 };
 
 const COTTER_DEFAULT_EDGEWIDTH: f64 = 80e3;
@@ -322,11 +324,6 @@ impl MS {
         // If a metafits file was provided, we _may_ use it. Get a _potential_
         // mwalib object ready.
         let mut mwalib = None;
-        // TODO: At the time of writing, only cotter is writing measurement sets
-        // with MWA data. cotter doesn't work with MWAX. However, it is possible
-        // that cotter has been used on "CorrOldLegacy", or that this
-        // measurement set has been generated in another way...
-        let mwa_version = mwalib::MWAVersion::CorrLegacy;
 
         // Populate the dipole delays if we need to, and get the pointing centre
         // if we can.
@@ -364,8 +361,8 @@ impl MS {
 
                 // Use the metafits file.
                 (Err(_), Some(meta)) => {
-                    let context =
-                        metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
+                    // TODO: Let the user supply the MWA version
+                    let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
                     // Only use the metafits delays if none were provided to
                     // this function.
                     match dipole_delays {
@@ -405,7 +402,7 @@ impl MS {
             }
 
             Some(meta) => {
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, mwa_version)?;
+                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
                 metafits::get_dipole_gains(context)
             }
         };
@@ -434,7 +431,7 @@ impl MS {
             fine_chan_range,
             fine_chan_freqs: fine_chan_freqs_hz,
             num_fine_chans_per_coarse_chan,
-            native_fine_chan_width,
+            native_fine_chan_width: Some(native_fine_chan_width),
         };
 
         // Get the observation's flagged channels per coarse band.
@@ -478,7 +475,7 @@ impl MS {
                 None => {
                     debug!(
                         "Assuming cotter is using default edgewidth of {} kHz",
-                        COTTER_DEFAULT_EDGEWIDTH
+                        COTTER_DEFAULT_EDGEWIDTH / 1e3
                     );
                     COTTER_DEFAULT_EDGEWIDTH
                 }
@@ -489,7 +486,7 @@ impl MS {
             let noflagdcchannels = str_iter.any(|s| s.contains("-noflagdcchannels"));
             debug!("cotter -noflagdcchannels: {}", noflagdcchannels);
 
-            let num_edge_channels = (edgewidth / freq_context.native_fine_chan_width).round() as _;
+            let num_edge_channels = (edgewidth / native_fine_chan_width).round() as _;
             let mut fine_chan_flags = vec![];
             for ec in 0..num_edge_channels {
                 fine_chan_flags.push(ec);
@@ -662,16 +659,15 @@ impl InputData for MS {
                                 data_array.get_mut((bl, outer_freq_chan_index)).unwrap();
                             // These are the components of the input
                             // data's visibility.
-                            let data_xx_elem: &c32 = data_freq_axis.get(0).unwrap();
+                            let data_xx_elem = data_freq_axis.get(0).unwrap();
                             let data_xy_elem = data_freq_axis.get(1).unwrap();
                             let data_yx_elem = data_freq_axis.get(2).unwrap();
                             let data_yy_elem = data_freq_axis.get(3).unwrap();
                             // This is the corresponding weight of the
-                            // visibility. It is the same for all
-                            // polarisations.
+                            // visibility. It is the same for all polarisations.
                             let weight = weights_freq_axis.get(0).unwrap();
-                            // Get the element of the output weights
-                            // array, and write to it.
+                            // Get the element of the output weights array, and
+                            // write to it.
                             let weight_elem =
                                 out_weights.get_mut((bl, outer_freq_chan_index)).unwrap();
                             *weight_elem = *weight;
@@ -681,8 +677,8 @@ impl InputData for MS {
                             if *flag {
                                 *weight_elem = 0.0
                             };
-                            // Multiply the input data visibility by the
-                            // weight and mutate the output data array.
+                            // Multiply the input data visibility by the weight
+                            // and mutate the output data array.
                             data_array_elem[0] = *data_xx_elem * *weight_elem;
                             data_array_elem[1] = *data_xy_elem * *weight_elem;
                             data_array_elem[2] = *data_yx_elem * *weight_elem;

@@ -11,7 +11,7 @@ use std::ops::{Deref, DerefMut};
 use rayon::prelude::*;
 
 use super::*;
-use mwa_hyperdrive_core::{constants::MWA_LAT_RAD, AzEl, RADec, LMN};
+use mwa_rust_core::{constants::MWA_LAT_RAD, AzEl, RADec, LMN};
 
 /// A [BTreeMap] of source names for keys and [Source] structs for values.
 ///
@@ -24,6 +24,51 @@ impl SourceList {
     /// Create an empty [SourceList].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Get counts of each of the component types. The first returned value is
+    /// the number of points, second Gaussians, third shapelets.
+    pub fn get_counts(&self) -> (usize, usize, usize) {
+        self.iter()
+            .flat_map(|(_, src)| &src.components)
+            .fold((0, 0, 0), |acc, c| {
+                match (c.is_point(), c.is_gaussian(), c.is_shapelet()) {
+                    (true, false, false) => (acc.0 + 1, acc.1, acc.2),
+                    (false, true, false) => (acc.0, acc.1 + 1, acc.2),
+                    (false, false, true) => (acc.0, acc.1, acc.2 + 1),
+                    _ => {
+                        unreachable!();
+                    }
+                }
+            })
+    }
+
+    /// Filter component types from one [SourceList] and return a new one.
+    pub fn filter(
+        self,
+        filter_points: bool,
+        filter_gaussians: bool,
+        filter_shapelets: bool,
+    ) -> SourceList {
+        let sl: BTreeMap<_, _> = self
+            .0
+            .into_iter()
+            .map(|(name, src)| {
+                let comps = src
+                    .components
+                    .into_iter()
+                    .filter(|c| {
+                        !(filter_points && c.is_point())
+                            && !(filter_gaussians && c.is_gaussian())
+                            && !(filter_shapelets && c.is_shapelet())
+                    })
+                    .collect();
+                (name, Source { components: comps })
+            })
+            // Make sure there are no empty sources.
+            .filter(|(_, src)| !src.components.is_empty())
+            .collect();
+        SourceList(sl)
     }
 
     /// Get azimuth and elevation coordinates for all components of all sources.
@@ -77,13 +122,19 @@ impl SourceList {
             .collect()
     }
 
-    /// Get the LMN coordinates for all components of all sources. The sources are iterated
-    /// in parallel.
+    /// Get the LMN coordinates for all components of all sources. The sources
+    /// are iterated in parallel.
     pub fn get_lmns_parallel(&self, phase_centre: RADec) -> Vec<LMN> {
         self.par_iter()
             .flat_map(|(_, src)| &src.components)
             .map(|comp| comp.radec.to_lmn(phase_centre))
             .collect()
+    }
+}
+
+impl From<BTreeMap<String, Source>> for SourceList {
+    fn from(sl: BTreeMap<String, Source>) -> Self {
+        Self(sl)
     }
 }
 

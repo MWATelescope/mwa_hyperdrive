@@ -4,14 +4,15 @@
 
 //! Code to abstract beam calculations.
 //!
-//! `Beam` is a trait detailing how to perform various beam-related tasks. By
+//! [Beam] is a trait detailing how to perform various beam-related tasks. By
 //! making this trait, we can neatly abstract over multiple beam codes,
-//! including a simple `NoBeam` type (which just returns identity matrices).
+//! including a simple [NoBeam] type (which just returns identity matrices).
 //!
 //! Note that (where applicable) `norm_to_zenith` is always true; the
 //! implication being that a sky-model source's brightness is always assumed to
 //! be correct when at zenith.
 
+mod cache;
 mod error;
 mod fee;
 pub use error::*;
@@ -20,9 +21,8 @@ pub use fee::*;
 use std::path::Path;
 
 use log::{info, trace};
-use ndarray::prelude::*;
 
-use crate::{AzEl, Jones};
+use mwa_rust_core::{AzEl, Jones};
 
 /// A trait abstracting beam code functions.
 pub trait Beam: Sync + Send {
@@ -33,7 +33,7 @@ pub trait Beam: Sync + Send {
     /// `amps` *must* have 16 elements (each corresponds to an MWA dipole in a
     /// tile, in the M&C order; see
     /// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>.
-    fn calc_jones(&self, azel: AzEl, freq_hz: u32, amps: &[f64]) -> Result<Jones<f64>, BeamError>;
+    fn calc_jones(&self, azel: AzEl, freq_hz: f64, amps: &[f64]) -> Result<Jones<f64>, BeamError>;
 
     /// Calculate the Jones matrices for many [AzEl] directions. The pointing
     /// information is not needed because it was provided when `self` was
@@ -45,9 +45,9 @@ pub trait Beam: Sync + Send {
     fn calc_jones_array(
         &self,
         azels: &[AzEl],
-        freq_hz: u32,
+        freq_hz: f64,
         amps: &[f64],
-    ) -> Result<Array1<Jones<f64>>, BeamError>;
+    ) -> Result<Vec<Jones<f64>>, BeamError>;
 
     /// Given a frequency in Hz, find the closest frequency that the beam code is
     /// defined for. This is important because, for example, the FEE beam code
@@ -55,8 +55,17 @@ pub trait Beam: Sync + Send {
     /// the analytic beam can be used at any frequency.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
 
-    /// If the beam struct supports it, empty its associated coefficient cache.
+    /// Get the size of the [Jones] cache associated with this [Beam].
+    fn len(&self) -> usize;
+
+    /// Is the [Jones] cache empty?
+    fn is_empty(&self) -> bool;
+
+    /// Empty the [Jones] cache.
     fn empty_cache(&self);
+
+    /// If this [Beam] supports it, empty the coefficient cache.
+    fn empty_coeff_cache(&self);
 }
 
 /// An enum to track whether MWA dipole delays are provided and/or necessary.
@@ -79,7 +88,7 @@ impl Beam for NoBeam {
     fn calc_jones(
         &self,
         _azel: AzEl,
-        _freq_hz: u32,
+        _freq_hz: f64,
         _amps: &[f64],
     ) -> Result<Jones<f64>, BeamError> {
         Ok(Jones::identity())
@@ -88,17 +97,38 @@ impl Beam for NoBeam {
     fn calc_jones_array(
         &self,
         azels: &[AzEl],
-        _freq_hz: u32,
+        _freq_hz: f64,
         _amps: &[f64],
-    ) -> Result<Array1<Jones<f64>>, BeamError> {
-        Ok(Array1::from_elem(azels.len(), Jones::identity()))
+    ) -> Result<Vec<Jones<f64>>, BeamError> {
+        Ok(vec![Jones::identity(); azels.len()])
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
         desired_freq_hz
     }
 
+    // No caches associated with `NoBeam`.
+    fn len(&self) -> usize {
+        0
+    }
+    fn is_empty(&self) -> bool {
+        true
+    }
     fn empty_cache(&self) {}
+    fn empty_coeff_cache(&self) {}
+}
+
+pub fn create_beam_object<T: AsRef<Path>>(
+    no_beam: bool,
+    delays: Delays,
+    beam_file: Option<T>,
+) -> Result<Box<dyn Beam>, BeamError> {
+    if no_beam {
+        info!("Not using a beam");
+        Ok(Box::new(NoBeam))
+    } else {
+        create_fee_beam_object(delays, beam_file)
+    }
 }
 
 pub fn create_fee_beam_object<T: AsRef<Path>>(
@@ -118,19 +148,6 @@ pub fn create_fee_beam_object<T: AsRef<Path>>(
     Ok(beam)
 }
 
-pub fn create_beam_object<T: AsRef<Path>>(
-    no_beam: bool,
-    delays: Delays,
-    beam_file: Option<T>,
-) -> Result<Box<dyn Beam>, BeamError> {
-    if no_beam {
-        info!("Not using a beam");
-        Ok(Box::new(NoBeam))
-    } else {
-        create_fee_beam_object(delays, beam_file)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,7 +161,7 @@ mod tests {
             AzEl { az: -1.0, el: 0.2 },
         ];
         let beam = NoBeam;
-        let values: Array1<Jones<f64>> = beam
+        let values = beam
             .calc_jones_array(&azels, 150e6 as _, &[1.0; 16])
             .unwrap();
 

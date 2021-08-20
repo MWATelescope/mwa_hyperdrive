@@ -4,11 +4,35 @@
 
 //! Code to verify sky-model source list files.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use log::info;
+use structopt::StructOpt;
 
 use crate::{read::read_source_list_file, SrclistError};
+
+/// Verify that sky-model source lists can be read by hyperdrive.
+///
+/// See for more info:
+/// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+#[derive(StructOpt, Debug)]
+pub struct VerifyArgs {
+    /// Path to the source list(s) to be verified.
+    #[structopt(name = "SOURCE_LISTS", parse(from_os_str))]
+    pub source_lists: Vec<PathBuf>,
+
+    /// The verbosity of the program. The default is to print high-level
+    /// information.
+    #[structopt(short, long, parse(from_occurrences))]
+    pub verbosity: u8,
+}
+
+impl VerifyArgs {
+    /// Run [verify] with these arguments.
+    pub fn run(&self) -> Result<(), SrclistError> {
+        verify(&self.source_lists)
+    }
+}
 
 /// Read and print stats out for each input source list. If a source list
 /// couldn't be read, print the error, and continue trying to read the other
@@ -34,10 +58,15 @@ pub fn verify<T: AsRef<Path>>(source_lists: &[T]) -> Result<(), SrclistError> {
             }
         };
         info!("    {}-style source list", sl_type);
+        let (points, gaussians, shapelets) = sl.get_counts();
+        let num_components = points + gaussians + shapelets;
         info!(
-            "    {} sources, {} components",
+            "    {} sources, {} components ({} points, {} gaussians, {} shapelets)",
             sl.len(),
-            sl.iter().flat_map(|(_, s)| &s.components).count()
+            num_components,
+            points,
+            gaussians,
+            shapelets
         );
         info!("");
     }

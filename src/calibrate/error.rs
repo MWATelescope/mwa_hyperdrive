@@ -15,7 +15,7 @@ use crate::data_formats::{
     ReadInputDataError,
 };
 use crate::model::ModelError;
-use mwa_hyperdrive_core::mwalib::fitsio;
+use mwa_rust_core::mwalib::fitsio;
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {

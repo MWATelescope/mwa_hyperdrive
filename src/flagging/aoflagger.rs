@@ -9,7 +9,7 @@ use std::convert::TryInto;
 use std::path::Path;
 
 use log::{debug, error};
-use mwa_hyperdrive_core::mwalib;
+use mwa_rust_core::mwalib;
 use mwalib::*;
 
 use super::error::*;
@@ -716,7 +716,7 @@ mod tests {
 
         let mut c = MetafitsContext::new(
             &"test_files/1065880128/1065880128.metafits",
-            MWAVersion::CorrLegacy,
+            Some(MWAVersion::CorrLegacy),
         )
         .unwrap();
         // 1065880128 actually has 109s of data as opposed to the scheduled

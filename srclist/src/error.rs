@@ -50,7 +50,7 @@ pub enum ReadSourceListError {
     Json(#[from] serde_json::Error),
 
     #[error("{0}")]
-    Sexagesimal(#[from] mwa_hyperdrive_core::SexagesimalError),
+    Sexagesimal(#[from] mwa_rust_core::sexagesimal::SexagesimalError),
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
@@ -267,7 +267,7 @@ pub enum WriteSourceListError {
     InvalidHyperdriveFormat(String),
 
     #[error("{0}")]
-    Sexagesimal(#[from] mwa_hyperdrive_core::SexagesimalError),
+    Sexagesimal(#[from] mwa_rust_core::sexagesimal::SexagesimalError),
 
     /// An IO error.
     #[error("{0}")]
@@ -285,6 +285,9 @@ pub enum SrclistError {
     #[error("No sources were left after vetoing; nothing left to do")]
     NoSourcesAfterVeto,
 
+    #[error("Need a metafits file to perform work, but none was supplied")]
+    MissingMetafits,
+
     #[error("{0}")]
     SourceList(#[from] SourceListError),
 
@@ -293,6 +296,12 @@ pub enum SrclistError {
 
     #[error("{0}")]
     Veto(#[from] VetoError),
+
+    #[error("{0}")]
+    Beam(#[from] mwa_hyperdrive_beam::BeamError),
+
+    #[error("{0}")]
+    Mwalib(#[from] mwa_rust_core::mwalib::MwalibError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

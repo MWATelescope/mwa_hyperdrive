@@ -9,7 +9,7 @@ use std::ops::Range;
 use hifitime::Epoch;
 use ndarray::Array2;
 
-use mwa_hyperdrive_core::{RADec, XyzGeodetic};
+use mwa_rust_core::{RADec, XyzGeodetic};
 
 /// Observation metadata.
 ///
@@ -30,7 +30,7 @@ pub(crate) struct ObsContext {
     pub(crate) timesteps: Vec<Epoch>,
 
     /// The timestep indices of the input data that aren't totally flagged
-    /// (exclusive).
+    /// (exclusive). This always contains at least one index.
     pub(crate) unflagged_timestep_indices: Range<usize>,
 
     // /// The Local Mean Sidereal Time in the __middle__ of the first timestep
@@ -115,5 +115,5 @@ pub(crate) struct FreqContext {
     /// The fine-channel resolution of the supplied data \[Hz\]. This is not
     /// necessarily the fine-channel resolution of the original observation's
     /// data.
-    pub(crate) native_fine_chan_width: f64,
+    pub(crate) native_fine_chan_width: Option<f64>,
 }

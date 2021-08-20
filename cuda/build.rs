@@ -49,8 +49,8 @@ fn main() {
             continue;
         }
 
-        // Continue if this file's extension is .cu
         match path.extension().and_then(|os_str| os_str.to_str()) {
+            // Track this file if it's extension is .cu
             Some("cu") => {
                 println!("cargo:rerun-if-changed={}", path.display());
                 // Add this .cu file to be compiled later.

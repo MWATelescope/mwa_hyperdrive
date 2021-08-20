@@ -28,7 +28,7 @@ use std::convert::TryInto;
 
 use crate::constants::DEFAULT_SPEC_INDEX;
 use log::warn;
-use mwa_hyperdrive_core::constants::DH2R;
+use mwa_rust_core::constants::DH2R;
 
 use super::*;
 

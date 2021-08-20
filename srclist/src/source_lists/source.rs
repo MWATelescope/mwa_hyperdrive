@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use super::ComponentType;
 use crate::{FluxDensity, FluxDensityType};
-use mwa_hyperdrive_core::{RADec, LMN};
+use mwa_rust_core::{RADec, LMN};
 
 #[derive(Clone, Debug, PartialEq)]
 /// A collection of components.
@@ -78,7 +78,7 @@ impl SourceComponent {
 
     /// Is this component a gaussian source?
     pub fn is_gaussian(&self) -> bool {
-        self.comp_type.is_shapelet()
+        self.comp_type.is_gaussian()
     }
 
     /// Is this component a shapelet source?
@@ -95,7 +95,7 @@ mod tests {
 
     use super::*;
     use crate::{calc_flux_ratio, constants::SPEC_INDEX_CAP};
-    use mwa_hyperdrive_core::RADec;
+    use mwa_rust_core::RADec;
 
     fn get_list_source_1() -> Source {
         Source {

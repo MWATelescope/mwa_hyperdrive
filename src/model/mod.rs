@@ -13,15 +13,15 @@ mod tests;
 use std::f64::consts::{FRAC_PI_2, LN_2};
 
 use ndarray::{parallel::prelude::*, prelude::*};
-use num::{Complex, Zero};
 
 use crate::{
     constants::*,
     math::{cexp, exp},
     shapelets::*,
 };
-use mwa_hyperdrive_core::{c64, Beam, Jones, XyzGeodetic, LMN, UVW};
+use mwa_hyperdrive_beam::Beam;
 use mwa_hyperdrive_srclist::{ComponentList, GaussianParams, PerComponentParams, ShapeletCoeff};
+use mwa_rust_core::{constants::VEL_C, Complex, Jones, XyzGeodetic, LMN, UVW};
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 
@@ -162,11 +162,7 @@ fn model_points(
                 .for_each(|((model_vis, comp_fds), freq)| {
                     // Divide UVW by lambda to make UVW dimensionless.
                     let lambda = VEL_C / freq;
-                    let uvw = UVW {
-                        u: uvw_metres.u / lambda,
-                        v: uvw_metres.v / lambda,
-                        w: uvw_metres.w / lambda,
-                    };
+                    let uvw = *uvw_metres / lambda;
 
                     // Accumulate the double-precision visibilities into a
                     // double-precision Jones matrix before putting that into
@@ -179,7 +175,7 @@ fn model_points(
                         .for_each(|(comp_fd_c64, lmn)| {
                             let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
                             let phase = cexp(arg);
-                            jones_accum += comp_fd_c64.clone() * phase;
+                            jones_accum += *comp_fd_c64 * phase;
                         });
                     // Demote to single precision now that all operations are
                     // done.
@@ -238,11 +234,7 @@ fn model_gaussians(
                 .for_each(|((model_vis, comp_fds), freq)| {
                     // Divide UVW by lambda to make UVW dimensionless.
                     let lambda = VEL_C / freq;
-                    let uvw = UVW {
-                        u: uvw_metres.u / lambda,
-                        v: uvw_metres.v / lambda,
-                        w: uvw_metres.w / lambda,
-                    };
+                    let uvw = *uvw_metres / lambda;
 
                     // Now that we have the UVW coordinates, we can determine
                     // each source component's envelope.
@@ -265,7 +257,7 @@ fn model_gaussians(
                         |((comp_fd_c64, lmn), envelope)| {
                             let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
                             let phase = cexp(arg) * envelope;
-                            jones_accum += comp_fd_c64.clone() * phase;
+                            jones_accum += *comp_fd_c64 * phase;
                         },
                     );
                     // Demote to single precision now that all operations are
@@ -334,7 +326,8 @@ fn model_shapelets(
         .for_each(
             |((mut model_bl_axis, uvw_metres), shapelet_uvws_per_comp)| {
                 // Preallocate a vector for the envelopes.
-                let mut envelopes: Vec<c64> = vec![Complex::zero(); gaussian_params.len()];
+                let mut envelopes: Vec<Complex<f64>> =
+                    vec![Complex::default(); gaussian_params.len()];
 
                 // Unflagged fine-channel axis.
                 model_bl_axis
@@ -344,14 +337,10 @@ fn model_shapelets(
                     .for_each(|((model_vis, comp_fds), freq)| {
                         // Divide UVW by lambda to make UVW dimensionless.
                         let lambda = VEL_C / freq;
-                        let uvw = UVW {
-                            u: uvw_metres.u / lambda,
-                            v: uvw_metres.v / lambda,
-                            w: uvw_metres.w / lambda,
-                        };
+                        let uvw = *uvw_metres / lambda;
 
-                        // Now that we have the UVW coordinates, we can determine
-                        // each source component's envelope.
+                        // Now that we have the UVW coordinates, we can
+                        // determine each source component's envelope.
                         envelopes
                             .iter_mut()
                             .zip(gaussian_params.iter())
@@ -375,39 +364,43 @@ fn model_shapelets(
                                 // Fold the shapelet basis functions (here,
                                 // "coeffs") into a single envelope.
                                 *envelope =
-                                    coeffs.iter().fold(Complex::zero(), |envelope_acc, coeff| {
-                                        let f_hat = coeff.value;
+                                    coeffs
+                                        .iter()
+                                        .fold(Complex::default(), |envelope_acc, coeff| {
+                                            let f_hat = coeff.value;
 
-                                        // Omitting boundary checks speeds things up by
-                                        // ~14%.
-                                        unsafe {
-                                            let x_low = SHAPELET_BASIS_VALUES
-                                                .get_unchecked(SBF_L * coeff.n1 + x_pos_int);
-                                            let x_high = SHAPELET_BASIS_VALUES
-                                                .get_unchecked(SBF_L * coeff.n1 + x_pos_int + 1);
-                                            let u_value =
-                                                x_low + (x_high - x_low) * (x_pos - x_pos.floor());
+                                            // Omitting boundary checks speeds
+                                            // things up by ~14%.
+                                            unsafe {
+                                                let x_low = SHAPELET_BASIS_VALUES
+                                                    .get_unchecked(SBF_L * coeff.n1 + x_pos_int);
+                                                let x_high = SHAPELET_BASIS_VALUES.get_unchecked(
+                                                    SBF_L * coeff.n1 + x_pos_int + 1,
+                                                );
+                                                let u_value = x_low
+                                                    + (x_high - x_low) * (x_pos - x_pos.floor());
 
-                                            let y_low = SHAPELET_BASIS_VALUES
-                                                .get_unchecked(SBF_L * coeff.n2 + y_pos_int);
-                                            let y_high = SHAPELET_BASIS_VALUES
-                                                .get_unchecked(SBF_L * coeff.n2 + y_pos_int + 1);
-                                            let v_value =
-                                                y_low + (y_high - y_low) * (y_pos - y_pos.floor());
+                                                let y_low = SHAPELET_BASIS_VALUES
+                                                    .get_unchecked(SBF_L * coeff.n2 + y_pos_int);
+                                                let y_high = SHAPELET_BASIS_VALUES.get_unchecked(
+                                                    SBF_L * coeff.n2 + y_pos_int + 1,
+                                                );
+                                                let v_value = y_low
+                                                    + (y_high - y_low) * (y_pos - y_pos.floor());
 
-                                            envelope_acc
-                                                + I_POWER_TABLE
-                                                    .get_unchecked((coeff.n1 + coeff.n2) % 4)
-                                                    * f_hat
-                                                    * u_value
-                                                    * v_value
-                                        }
-                                    })
+                                                envelope_acc
+                                                    + I_POWER_TABLE
+                                                        .get_unchecked((coeff.n1 + coeff.n2) % 4)
+                                                        * f_hat
+                                                        * u_value
+                                                        * v_value
+                                            }
+                                        })
                             });
 
                         // Accumulate the double-precision visibilities into a
-                        // double-precision Jones matrix before putting that into
-                        // the `model_array`.
+                        // double-precision Jones matrix before putting that
+                        // into the `model_array`.
                         let mut jones_accum: Jones<f64> = Jones::default();
 
                         comp_fds
@@ -417,7 +410,7 @@ fn model_shapelets(
                             .for_each(|((comp_fd_c64, lmn), envelope)| {
                                 let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
                                 let phase = cexp(arg) * envelope;
-                                jones_accum += comp_fd_c64.clone() * phase;
+                                jones_accum += *comp_fd_c64 * phase;
                             });
                         // Demote to single precision now that all operations are
                         // done.

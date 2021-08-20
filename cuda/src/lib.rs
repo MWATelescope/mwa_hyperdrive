@@ -6,6 +6,9 @@
 
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+// This is needed only because tests inside bindgen-produced files (model.rs and
+// memory.rs) trigger the warning.
+#![allow(deref_nullptr)]
 
 // Link hyperdrive_cu produced from build.rs
 #[link(name = "hyperdrive_cu", kind = "static")]

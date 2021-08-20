@@ -9,16 +9,11 @@ use std::collections::HashSet;
 
 /// Channel- and frequency-related parameters required for calibration.
 pub struct FrequencyParams {
-    /// The target fine-channel frequency resolution \[Hz\].
+    /// The number of frequency samples to average together before calibrating.
     ///
-    /// e.g. If the input data is in 40 kHz resolution and this variable was
-    /// 80e3 Hz, then we average 2 scans worth of frequency data for
-    /// calibration.
-    ///
-    /// In a perfect world, this variable would be an integer, but it's
-    /// primarily used in floating-point calculations, so it's more convenient
-    /// to store it as a float.
-    pub res: f64,
+    /// e.g. If the input data is in 40kHz resolution and this variable was 2,
+    /// then we average 80kHz worth of data together during calibration.
+    pub freq_average_factor: usize,
 
     /// The total number of fine-frequency channels. For 40 kHz data, this is
     /// 768.

@@ -8,7 +8,7 @@ Error type for all simulate-vis-related errors.
 
 use thiserror::Error;
 
-use mwa_hyperdrive_core::mwalib;
+use mwa_rust_core::mwalib;
 
 #[derive(Error, Debug)]
 pub enum SimulateVisError {
@@ -27,14 +27,14 @@ pub enum SimulateVisError {
     #[error("The fine channel resolution cannot be 0 or negative!")]
     FineChansWidthTooSmall,
 
-    #[error("Number of time steps cannot be 0!")]
-    TimeStepsInvalid,
+    #[error("Number of timesteps cannot be 0!")]
+    ZeroTimeSteps,
 
     #[error("{0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
     #[error("{0}")]
-    Beam(#[from] mwa_hyperdrive_core::beam::BeamError),
+    Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
     #[error("{0}")]
     Model(#[from] crate::model::ModelError),

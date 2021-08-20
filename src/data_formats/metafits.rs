@@ -11,7 +11,7 @@ use std::path::Path;
 use log::warn;
 use ndarray::prelude::*;
 
-use mwa_hyperdrive_core::mwalib;
+use mwa_rust_core::mwalib;
 use mwalib::{MetafitsContext, MwalibError, Pol};
 
 /// Populate an `<Option<MetafitsContext>>` if it isn't already populated and
@@ -24,7 +24,7 @@ use mwalib::{MetafitsContext, MwalibError, Pol};
 pub(crate) fn populate_metafits_context<T: AsRef<Path>>(
     mwalib: &mut Option<MetafitsContext>,
     metafits: T,
-    mwa_version: mwalib::MWAVersion,
+    mwa_version: Option<mwalib::MWAVersion>,
 ) -> Result<&MetafitsContext, MwalibError> {
     match mwalib.as_mut() {
         None => {

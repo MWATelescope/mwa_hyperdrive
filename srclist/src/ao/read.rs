@@ -8,7 +8,7 @@
 //! source lists.
 
 use super::*;
-use mwa_hyperdrive_core::sexagesimal::*;
+use mwa_rust_core::sexagesimal::*;
 
 /// Parse a buffer containing an AO-style source list into a [SourceList].
 pub fn parse_source_list<T: std::io::BufRead>(

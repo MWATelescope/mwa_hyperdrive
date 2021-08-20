@@ -16,9 +16,7 @@ pub(crate) mod error;
 pub(crate) mod flagging;
 pub(crate) mod glob;
 pub(crate) mod math;
-pub(crate) mod precession;
 pub(crate) mod shapelets;
-pub(crate) mod time;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -26,4 +24,4 @@ pub(crate) mod tests;
 // Re-exports.
 pub(crate) use constants::*;
 pub use error::HyperdriveError;
-pub(crate) use mwa_hyperdrive_core::*;
+pub(crate) use mwa_rust_core::*;

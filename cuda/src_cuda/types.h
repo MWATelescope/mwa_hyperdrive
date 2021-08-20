@@ -15,15 +15,24 @@ extern "C" {
 #endif // __cplusplus
 
 /**
- * The (u,v,w) coordinates of a baseline. There are no units (i.e. these are
- * dimensionless).
+ * (RA, Dec.) coordinates. Both have units of radians.
+ */
+typedef struct RADec {
+    // Right Ascension [radians]
+    const double ra;
+    // Declination [radians]
+    const double dec;
+} RADec;
+
+/**
+ * The (u,v,w) coordinates of a baseline. They are in units of metres.
  */
 typedef struct UVW {
-    // u coordinate \[dimensionless\]
+    // u coordinate [metres]
     const double u;
-    // v coordinate \[dimensionless\]
+    // v coordinate [metres]
     const double v;
-    // w coordinate \[dimensionless\]
+    // w coordinate [metres]
     const double w;
 } UVW;
 
@@ -31,11 +40,11 @@ typedef struct UVW {
  * The LMN coordinates of a sky-model component.
  */
 typedef struct LMN {
-    // l coordinate \[dimensionless\]
+    // l coordinate [dimensionless]
     const double l;
-    // m coordinate \[dimensionless\]
+    // m coordinate [dimensionless]
     const double m;
-    // n coordinate \[dimensionless\]
+    // n coordinate [dimensionless]
     const double n;
 } LMN;
 
@@ -43,11 +52,11 @@ typedef struct LMN {
  * Parameters describing a Gaussian (also applicable to shapelets).
  */
 typedef struct GaussianParams {
-    // Major axis size \[radians\]
+    // Major axis size [radians]
     const double maj;
-    // Minor axis size \[radians\]
+    // Minor axis size [radians]
     const double min;
-    // Position angle \[radians\]
+    // Position angle [radians]
     const double pa;
 } GaussianParams;
 
@@ -65,9 +74,9 @@ typedef struct ShapeletCoeff {
  * by not using UVW.
  */
 typedef struct ShapeletUV {
-    // u coordinate \[dimensionless\]
+    // u coordinate [metres]
     const double u;
-    // v coordinate \[dimensionless\]
+    // v coordinate [metres]
     const double v;
 } ShapeletUV;
 
@@ -116,6 +125,73 @@ typedef struct JonesF64 {
     // Imag YY component
     double yy_im;
 } JonesF64;
+
+/**
+ * All the parameters needed to describe point-source components.
+ */
+typedef struct Points {
+    const size_t num_power_law_points;
+    const RADec *power_law_radecs;
+    const LMN *power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    const JonesF64 *power_law_fds;
+    // Spectral indices.
+    const double *power_law_sis;
+
+    const size_t num_list_points;
+    const RADec *list_radecs;
+    const LMN *list_lmns;
+    // Instrumental (i.e. XX, XY, YX, XX).
+    const JonesF64 *list_fds;
+} Points;
+
+/**
+ * All the parameters needed to describe Gaussian components.
+ */
+typedef struct Gaussians {
+    const size_t num_power_law_gaussians;
+    const RADec *power_law_radecs;
+    const LMN *power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    const JonesF64 *power_law_fds;
+    // Spectral indices.
+    const double *power_law_sis;
+    const GaussianParams *power_law_gps;
+
+    const size_t num_list_gaussians;
+    const RADec *list_radecs;
+    const LMN *list_lmns;
+    // Instrumental (i.e. XX, XY, YX, XX).
+    const JonesF64 *list_fds;
+    const GaussianParams *list_gps;
+} Gaussians;
+
+/**
+ * All the parameters needed to describe Shapelet components.
+ */
+typedef struct Shapelets {
+    const size_t num_power_law_shapelets;
+    const RADec *power_law_radecs;
+    const LMN *power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    const JonesF64 *power_law_fds;
+    // Spectral indices.
+    const double *power_law_sis;
+    const GaussianParams *power_law_gps;
+    const ShapeletUV *power_law_shapelet_uvs;
+    const ShapeletCoeff *power_law_shapelet_coeffs;
+    const size_t *power_law_num_shapelet_coeffs;
+
+    const size_t num_list_shapelets;
+    const RADec *list_radecs;
+    const LMN *list_lmns;
+    // Instrumental (i.e. XX, XY, YX, XX).
+    const JonesF64 *list_fds;
+    const GaussianParams *list_gps;
+    const ShapeletUV *list_shapelet_uvs;
+    const ShapeletCoeff *list_shapelet_coeffs;
+    const size_t *list_num_shapelet_coeffs;
+} Shapelets;
 
 #ifdef __cplusplus
 } // extern "C"

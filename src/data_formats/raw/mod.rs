@@ -19,9 +19,10 @@ use crate::context::{FreqContext, ObsContext};
 use crate::flagging::aoflagger::AOFlags;
 use crate::glob::*;
 use crate::mwalib::{CorrelatorContext, Pol};
-use mwa_hyperdrive_core::{
-    beam::Delays,
+use mwa_hyperdrive_beam::Delays;
+use mwa_rust_core::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    time::gps_to_epoch,
     Jones, RADec, XyzGeodetic,
 };
 
@@ -200,17 +201,7 @@ impl RawData {
         let timesteps: Vec<hifitime::Epoch> = mwalib_context
             .timesteps
             .iter()
-            .map(|t| {
-                let gps = t.gps_time_ms as f64 / 1e3;
-                // https://en.wikipedia.org/wiki/Global_Positioning_System#Timekeeping
-                // The difference between GPS and TAI time is always 19s, but
-                // hifitime wants the number of TAI seconds since 1900. GPS time
-                // starts at 1980 Jan 5. Also adjust the time to be a centroid;
-                // add half of the time resolution.
-                let tai =
-                    gps + 19.0 + crate::constants::HIFITIME_GPS_FACTOR + time_res.unwrap() / 2.0;
-                hifitime::Epoch::from_tai_seconds(tai)
-            })
+            .map(|t| gps_to_epoch(t.gps_time_ms as f64 / 1e3))
             .collect::<Vec<_>>();
 
         // Populate a frequency context struct.
@@ -252,7 +243,7 @@ impl RawData {
                     .num_corr_fine_chans_per_coarse,
             fine_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
-            native_fine_chan_width: metafits_context.corr_fine_chan_width_hz as f64,
+            native_fine_chan_width: Some(metafits_context.corr_fine_chan_width_hz as f64),
         };
 
         let phase_centre = RADec::new(
@@ -272,7 +263,7 @@ impl RawData {
             metafits_context.ra_tile_pointing_degrees.to_radians(),
             metafits_context.dec_tile_pointing_degrees.to_radians(),
         ));
-        let tile_xyzs = XyzGeodetic::get_tiles_mwalib(metafits_context);
+        let tile_xyzs = XyzGeodetic::get_tiles_mwa(metafits_context);
         let tile_names: Vec<String> = metafits_context
             .rf_inputs
             .iter()

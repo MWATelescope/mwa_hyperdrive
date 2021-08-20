@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use ndarray::prelude::*;
 
 use crate::context::{FreqContext, ObsContext};
-use mwa_hyperdrive_core::Jones;
+use mwa_rust_core::Jones;
 
 pub(crate) trait InputData: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
