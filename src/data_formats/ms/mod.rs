@@ -124,7 +124,7 @@ impl MS {
             casacore_positions_to_local_xyz_mwa(&casacore_positions)?
         };
         let total_num_tiles = tile_xyzs.len();
-        debug!("There are {} total tiles", total_num_tiles);
+        trace!("There are {} total tiles", total_num_tiles);
 
         // Get the observation's flagged tiles. cotter doesn't populate the
         // ANTENNA table with this information; it looks like all tiles are

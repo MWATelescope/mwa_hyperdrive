@@ -4,9 +4,9 @@
 
 //! Sky-model component types.
 
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
 mod ffi;
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
 pub use ffi::*;
 
 use ndarray::prelude::*;

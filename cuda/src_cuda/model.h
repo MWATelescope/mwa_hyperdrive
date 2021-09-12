@@ -9,7 +9,7 @@
 #include "memory.h"
 #include "types.h"
 
-const double POWER_LAW_FD_REF_FREQ = 150e6; // Hz
+const FLOAT POWER_LAW_FD_REF_FREQ = 150e6; // Hz
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,10 +62,10 @@ int model_shapelets(const Shapelets *shapelets, const Addresses *a);
  * mutated and should be completely full of zeros before this function is
  * called.
  */
-int model_timestep(const size_t num_baselines, const size_t num_freqs, const UVW *uvws, const double *freqs,
+int model_timestep(const size_t num_baselines, const size_t num_freqs, const UVW *uvws, const FLOAT *freqs,
                    const Points *points, const Gaussians *gaussians, const Shapelets *shapelets,
-                   const double *shapelet_basis_values, const size_t sbf_l, const size_t sbf_n, const double sbf_c,
-                   const double sbf_dx, JonesF32 *vis);
+                   const FLOAT *shapelet_basis_values, const size_t sbf_l, const size_t sbf_n, const FLOAT sbf_c,
+                   const FLOAT sbf_dx, JonesF32 *vis);
 
 #ifdef __cplusplus
 } // extern "C"

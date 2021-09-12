@@ -15,11 +15,13 @@ use std::collections::HashSet;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::str::FromStr;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use hifitime::Epoch;
 use ndarray::prelude::*;
+use strum_macros::{Display, EnumIter, EnumString};
 
 use mwa_rust_core::{mwalib, time::epoch_as_gps_seconds, Complex, Jones};
 use mwalib::fitsio::{
@@ -29,8 +31,18 @@ use mwalib::fitsio::{
 };
 use mwalib::*;
 
+#[derive(Debug, Display, EnumIter, EnumString)]
+pub(crate) enum CalSolutionTypes {
+    /// hyperdrive's preferred format.
+    #[strum(serialize = "fits")]
+    Fits,
+
+    /// The "André Offringa" format used by mwa-reduce.
+    #[strum(serialize = "bin")]
+    Bin,
+}
+
 pub struct CalibrationSolutions {
-    pub file: PathBuf,
     pub di_jones: Array3<Jones<f64>>,
     pub num_timeblocks: usize,
     pub total_num_tiles: usize,
@@ -46,31 +58,36 @@ pub struct CalibrationSolutions {
 }
 
 impl CalibrationSolutions {
-    pub(super) fn write_solutions_from_ext(
+    pub(super) fn write_solutions_from_ext<T: AsRef<Path>>(
         &self,
+        file: T,
         tile_flags: &HashSet<usize>,
         unflagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), WriteSolutionsError> {
-        let ext = self.file.extension().and_then(|e| e.to_str());
-        match ext {
-            Some("fits") => self.write_hyperdrive_fits(tile_flags, unflagged_fine_chans),
-            Some("bin") => self.write_andre_binary(tile_flags, unflagged_fine_chans),
-            s => {
-                let ext = s.unwrap_or("<no extension>").to_string();
-                Err(WriteSolutionsError::UnsupportedExt { ext })
+        let ext = file.as_ref().extension().and_then(|e| e.to_str());
+        match ext.and_then(|s| CalSolutionTypes::from_str(s).ok()) {
+            Some(CalSolutionTypes::Fits) => {
+                self.write_hyperdrive_fits(file, tile_flags, unflagged_fine_chans)
             }
+            Some(CalSolutionTypes::Bin) => {
+                self.write_andre_binary(file, tile_flags, unflagged_fine_chans)
+            }
+            None => Err(WriteSolutionsError::UnsupportedExt {
+                ext: ext.unwrap_or("<no extension>").to_string(),
+            }),
         }
     }
 
-    fn write_hyperdrive_fits(
+    fn write_hyperdrive_fits<T: AsRef<Path>>(
         &self,
+        file: T,
         tile_flags: &HashSet<usize>,
         unflagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), WriteSolutionsError> {
-        if self.file.exists() {
-            std::fs::remove_file(&self.file)?;
+        if file.as_ref().exists() {
+            std::fs::remove_file(&file)?;
         }
-        let mut fptr = FitsFile::create(&self.file).open()?;
+        let mut fptr = FitsFile::create(&file).open()?;
         let hdu = fits_open_hdu!(&mut fptr, 0)?;
 
         // Write the obsid if we can.
@@ -173,8 +190,7 @@ impl CalibrationSolutions {
                         // Invert the Jones matrices so that they can be applied
                         // as J D J^H
                         let j = if tile_flags.contains(&tile) {
-                            // This is a Jones matrix of all NaN.
-                            Jones::nan()
+                            Jones::nan() // This is a Jones matrix of all NaN.
                         } else {
                             di_jones_per_time[[unflagged_tile_index, unflagged_chan_index]].inv()
                         };
@@ -200,14 +216,15 @@ impl CalibrationSolutions {
     }
 
     /// Write a "André-Offringa calibrate format" calibration solutions binary file.
-    fn write_andre_binary(
+    fn write_andre_binary<T: AsRef<Path>>(
         &self,
+        file: T,
         tile_flags: &HashSet<usize>,
         unflagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), WriteSolutionsError> {
         let num_polarisations = 4;
 
-        let mut bin_file = BufWriter::new(File::create(&self.file)?);
+        let mut bin_file = BufWriter::new(File::create(file)?);
         // 8 floats, 8 bytes per float.
         let mut buf = [0; 8 * 8];
         bin_file.write_all(b"MWAOCAL")?;
@@ -347,7 +364,6 @@ impl CalibrationSolutions {
         });
 
         Ok(Self {
-            file,
             di_jones,
             num_timeblocks,
             total_num_tiles,
@@ -435,7 +451,6 @@ impl CalibrationSolutions {
         });
 
         Ok(Self {
-            file: file.as_ref().to_path_buf(),
             di_jones,
             num_timeblocks,
             total_num_tiles,

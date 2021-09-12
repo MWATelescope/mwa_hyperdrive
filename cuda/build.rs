@@ -83,9 +83,14 @@ fn main() {
                 _ => "DEBUG",
             },
             None,
-        )
-        .files(&cuda_files)
-        .compile("hyperdrive_cu");
+        );
+
+    // If we're told to, use single-precision floats. The default in the CUDA
+    // code is to use double-precision.
+    #[cfg(feature = "cuda-single")]
+    cuda_target.define("SINGLE", None);
+
+    cuda_target.files(&cuda_files).compile("hyperdrive_cu");
 
     // Link CUDA. If the library path manually specified, search there.
     if let Ok(lib_dir) = env::var("CUDA_LIB") {

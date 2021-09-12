@@ -107,6 +107,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "birli"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "242bf288693a3e87804bbee1f29e368a497744b1d4cb6b5c4a685060263a725f"
+dependencies = [
+ "cfg-if 1.0.0",
+ "clap",
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "env_logger",
+ "float-cmp",
+ "indicatif",
+ "itertools",
+ "libc",
+ "log",
+ "mwa_rust_core",
+ "ndarray",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -439,6 +464,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 
 [[package]]
+name = "env_logger"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
 name = "erfa-sys"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -511,6 +549,15 @@ dependencies = [
  "crc32fast",
  "libc",
  "miniz_oxide",
+]
+
+[[package]]
+name = "float-cmp"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -687,6 +734,12 @@ dependencies = [
  "serde",
  "serde_derive",
 ]
+
+[[package]]
+name = "humantime"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "idna"
@@ -891,10 +944,11 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperbeam"
-version = "0.3.4"
-source = "git+https://github.com/cjordan/mwa_hyperbeam?branch=parallactic#52884bcde98d8a55ca44a4f952a2822a2ef0d7a4"
+version = "0.4.0"
 dependencies = [
  "cbindgen",
+ "cc",
+ "cuda-runtime-sys",
  "dashmap",
  "hdf5",
  "hdf5-sys",
@@ -910,6 +964,7 @@ version = "0.2.0-alpha2"
 dependencies = [
  "approx",
  "assert_cmd",
+ "birli",
  "byteorder",
  "criterion",
  "crossbeam-channel",
@@ -945,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperdrive_beam"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "approx",
  "dashmap",
@@ -971,10 +1026,12 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperdrive_cuda"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "cc",
+ "cfg-if 1.0.0",
  "cuda-runtime-sys",
+ "mwa_hyperdrive_beam",
 ]
 
 [[package]]

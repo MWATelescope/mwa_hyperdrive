@@ -11,14 +11,30 @@
 #include "model.h"
 #include "types.h"
 
-const double VEL_C = 299792458.0;
-const double LN_2 = 0.6931471805599453;
-const double FRAC_PI_2 = 1.5707963267948966;
-const double SQRT_FRAC_PI_SQ_2_LN_2 = 2.6682231283184983;
-const double EXP_CONST = -((FRAC_PI_2 * FRAC_PI_2) / LN_2);
+// If SINGLE is enabled, use single-precision floats everywhere. Otherwise
+// default to double-precision.
+#ifdef SINGLE
+#define FLOAT4 float4
+#define SINCOS sincosf
+#define EXP    expf
+#define POW    powf
+#define FLOOR  floorf
+#else
+#define FLOAT4 double4
+#define SINCOS sincos
+#define EXP    exp
+#define POW    pow
+#define FLOOR  floor
+#endif
 
-inline __host__ __device__ JonesF64 operator*(JonesF64 a, double b) {
-    JonesF64 t;
+const FLOAT VEL_C = 299792458.0;
+const FLOAT LN_2 = 0.6931471805599453;
+const FLOAT FRAC_PI_2 = 1.5707963267948966;
+const FLOAT SQRT_FRAC_PI_SQ_2_LN_2 = 2.6682231283184983;
+const FLOAT EXP_CONST = -((FRAC_PI_2 * FRAC_PI_2) / LN_2);
+
+inline __host__ __device__ JONES operator*(JONES a, FLOAT b) {
+    JONES t;
     t.xx_re = a.xx_re * b;
     t.xx_im = a.xx_im * b;
     t.xy_re = a.xy_re * b;
@@ -30,8 +46,8 @@ inline __host__ __device__ JonesF64 operator*(JonesF64 a, double b) {
     return t;
 }
 
-inline __host__ __device__ double4 operator+(double4 a, double4 b) {
-    double4 t;
+inline __host__ __device__ FLOAT4 operator+(FLOAT4 a, FLOAT4 b) {
+    FLOAT4 t;
     t.x = a.x - b.x;
     t.y = a.y - b.y;
     t.z = a.z - b.z;
@@ -39,8 +55,8 @@ inline __host__ __device__ double4 operator+(double4 a, double4 b) {
     return t;
 }
 
-inline __host__ __device__ double4 operator-(double4 a, double4 b) {
-    double4 t;
+inline __host__ __device__ FLOAT4 operator-(FLOAT4 a, FLOAT4 b) {
+    FLOAT4 t;
     t.x = a.x - b.x;
     t.y = a.y - b.y;
     t.z = a.z - b.z;
@@ -48,8 +64,8 @@ inline __host__ __device__ double4 operator-(double4 a, double4 b) {
     return t;
 }
 
-inline __host__ __device__ double4 operator*(double4 a, double b) {
-    double4 t;
+inline __host__ __device__ FLOAT4 operator*(FLOAT4 a, FLOAT b) {
+    FLOAT4 t;
     t.x = a.x * b;
     t.y = a.y * b;
     t.z = a.z * b;
@@ -57,7 +73,7 @@ inline __host__ __device__ double4 operator*(double4 a, double b) {
     return t;
 }
 
-inline __host__ __device__ void operator+=(double4 &a, double4 b) {
+inline __host__ __device__ void operator+=(FLOAT4 &a, FLOAT4 b) {
     a.x += b.x;
     a.y += b.y;
     a.z += b.z;
@@ -68,34 +84,21 @@ inline __host__ __device__ void operator+=(double4 &a, double4 b) {
  * Correctly multiply a Jones matrix by a complex number and accumulate in
  * another Jones matrix.
  */
-inline __device__ void complex_multiply(const JonesF64 *fd, double real, double imag, JonesF64 *delta_vis) {
-    double4 fd_re = double4{
+inline __device__ void complex_multiply(const JONES *fd, FLOAT real, FLOAT imag, JONES *delta_vis) {
+    FLOAT4 fd_re = FLOAT4{
         .x = fd->xx_re,
         .y = fd->xy_re,
         .z = fd->yx_re,
         .w = fd->yy_re,
     };
-    double4 fd_im = double4{
+    FLOAT4 fd_im = FLOAT4{
         .x = fd->xx_im,
         .y = fd->xy_im,
         .z = fd->yx_im,
         .w = fd->yy_im,
     };
-    double4 delta_vis_re = double4{
-        .x = 0.0,
-        .y = 0.0,
-        .z = 0.0,
-        .w = 0.0,
-    };
-    double4 delta_vis_im = double4{
-        .x = 0.0,
-        .y = 0.0,
-        .z = 0.0,
-        .w = 0.0,
-    };
-
-    delta_vis_re += fd_re * real - fd_im * imag;
-    delta_vis_im += fd_re * imag + fd_im * real;
+    FLOAT4 delta_vis_re = fd_re * real - fd_im * imag;
+    FLOAT4 delta_vis_im = fd_re * imag + fd_im * real;
 
     delta_vis->xx_re += delta_vis_re.x;
     delta_vis->xy_re += delta_vis_re.y;
@@ -107,19 +110,18 @@ inline __device__ void complex_multiply(const JonesF64 *fd, double real, double 
     delta_vis->yy_im += delta_vis_im.w;
 }
 
-inline __device__ void extrap_power_law_fd(const int i_comp, const double freq, const JonesF64 *d_ref_fds,
-                                           const double *d_sis, JonesF64 *out) {
-    const double flux_ratio = pow(freq / POWER_LAW_FD_REF_FREQ, d_sis[i_comp]);
+inline __device__ void extrap_power_law_fd(const int i_comp, const FLOAT freq, const JONES *d_ref_fds,
+                                           const FLOAT *d_sis, JONES *out) {
+    const FLOAT flux_ratio = POW(freq / POWER_LAW_FD_REF_FREQ, d_sis[i_comp]);
     *out = d_ref_fds[i_comp] * flux_ratio;
 }
 
 /**
  * Kernel for calculating point-source-component visibilities.
  */
-__global__ void model_points_kernel(const int num_freqs, const int num_vis, const UVW *d_uvws, const double *d_freqs,
+__global__ void model_points_kernel(const int num_freqs, const int num_vis, const UVW *d_uvws, const FLOAT *d_freqs,
                                     const Points *d_comps, JonesF32 *d_vis) {
     const int i_vis = threadIdx.x + (blockDim.x * blockIdx.x);
-
     if (i_vis >= num_vis)
         return;
 
@@ -128,8 +130,8 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
     const int i_bl = i_vis / num_freqs;
     const int i_freq = i_vis % num_freqs;
     const int i_fd = i_freq * d_comps->num_list_points;
-    const double freq = d_freqs[i_freq];
-    const double one_on_lambda = 1.0 / (VEL_C / freq);
+    const FLOAT freq = d_freqs[i_freq];
+    const FLOAT one_on_lambda = 1.0 / (VEL_C / freq);
     const UVW uvw_m = d_uvws[i_bl]; // metres
     const UVW uvw = UVW{
         .u = uvw_m.u * one_on_lambda,
@@ -137,9 +139,9 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
         .w = uvw_m.w * one_on_lambda,
     };
 
-    double real, imag;
-    JonesF64 fd;
-    JonesF64 delta_vis = JonesF64{
+    FLOAT real, imag;
+    JONES fd;
+    JONES delta_vis = JONES{
         .xx_re = 0.0,
         .xx_im = 0.0,
         .xy_re = 0.0,
@@ -152,7 +154,7 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
 
     for (int i_comp = 0; i_comp < d_comps->num_power_law_points; i_comp++) {
         const LMN lmn = d_comps->power_law_lmns[i_comp];
-        sincos(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         extrap_power_law_fd(i_comp, freq, d_comps->power_law_fds, d_comps->power_law_sis, &fd);
         complex_multiply(&fd, real, imag, &delta_vis);
@@ -160,9 +162,9 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
 
     for (int i_comp = 0; i_comp < d_comps->num_list_points; i_comp++) {
         const LMN lmn = d_comps->list_lmns[i_comp];
-        sincos(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
-        const JonesF64 *fd = &d_comps->list_fds[i_fd + i_comp];
+        const JONES *fd = &d_comps->list_fds[i_fd + i_comp];
         complex_multiply(fd, real, imag, &delta_vis);
     }
 
@@ -179,10 +181,9 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
 /**
  * Kernel for calculating Gaussian-source-component visibilities.
  */
-__global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, const UVW *d_uvws, const double *d_freqs,
+__global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, const UVW *d_uvws, const FLOAT *d_freqs,
                                        const Gaussians *d_comps, JonesF32 *d_vis) {
     const int i_vis = threadIdx.x + (blockDim.x * blockIdx.x);
-
     if (i_vis >= num_vis)
         return;
 
@@ -191,8 +192,8 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
     const int i_bl = i_vis / num_freqs;
     const int i_freq = i_vis % num_freqs;
     const int i_fd = i_freq * d_comps->num_list_gaussians;
-    const double freq = d_freqs[i_freq];
-    const double one_on_lambda = 1.0 / (VEL_C / freq);
+    const FLOAT freq = d_freqs[i_freq];
+    const FLOAT one_on_lambda = 1.0 / (VEL_C / freq);
     const UVW uvw_m = d_uvws[i_bl]; // metres
     const UVW uvw = UVW{
         .u = uvw_m.u * one_on_lambda,
@@ -200,10 +201,10 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
         .w = uvw_m.w * one_on_lambda,
     };
 
-    double real, imag;
-    double s_pa, c_pa, k_x, k_y, envelope;
-    JonesF64 fd;
-    JonesF64 delta_vis = JonesF64{
+    FLOAT real, imag;
+    FLOAT s_pa, c_pa, k_x, k_y, envelope;
+    JONES fd;
+    JONES delta_vis = JONES{
         .xx_re = 0.0,
         .xx_im = 0.0,
         .xy_re = 0.0,
@@ -216,14 +217,14 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
 
     for (size_t i_comp = 0; i_comp < d_comps->num_power_law_gaussians; i_comp++) {
         const LMN lmn = d_comps->power_law_lmns[i_comp];
-        sincos(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps->power_law_gps[i_comp];
-        sincos(g_params.pa, &s_pa, &c_pa);
+        SINCOS(g_params.pa, &s_pa, &c_pa);
         // Temporary variables for clarity.
         k_x = uvw.u * s_pa + uvw.v * c_pa;
         k_y = uvw.u * c_pa - uvw.v * s_pa;
-        envelope = exp(EXP_CONST *
+        envelope = EXP(EXP_CONST *
                        ((g_params.maj * g_params.maj) * (k_x * k_x) + (g_params.min * g_params.min) * (k_y * k_y)));
 
         // Scale by envelope.
@@ -236,21 +237,21 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
 
     for (size_t i_comp = 0; i_comp < d_comps->num_list_gaussians; i_comp++) {
         const LMN lmn = d_comps->list_lmns[i_comp];
-        sincos(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps->list_gps[i_comp];
-        sincos(g_params.pa, &s_pa, &c_pa);
+        SINCOS(g_params.pa, &s_pa, &c_pa);
         // Temporary variables for clarity.
         k_x = uvw.u * s_pa + uvw.v * c_pa;
         k_y = uvw.u * c_pa - uvw.v * s_pa;
-        envelope = exp(EXP_CONST *
+        envelope = EXP(EXP_CONST *
                        ((g_params.maj * g_params.maj) * (k_x * k_x) + (g_params.min * g_params.min) * (k_y * k_y)));
 
         // Scale by envelope.
         real *= envelope;
         imag *= envelope;
 
-        const JonesF64 *fd = &d_comps->list_fds[i_fd + i_comp];
+        const JONES *fd = &d_comps->list_fds[i_fd + i_comp];
         complex_multiply(fd, real, imag, &delta_vis);
     }
 
@@ -271,14 +272,11 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
  * sub-array is given by an element of `*_num_shapelet_coeffs`.
  */
 __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_vis, const UVW *d_uvws,
-                                       const double *d_freqs, const Shapelets *d_comps,
-                                       const double *d_shapelet_basis_values, const size_t sbf_l, const size_t sbf_n,
-                                       const double sbf_c, const double sbf_dx, JonesF32 *d_vis) {
+                                       const FLOAT *d_freqs, const Shapelets *d_comps,
+                                       const FLOAT *d_shapelet_basis_values, const size_t sbf_l, const size_t sbf_n,
+                                       const FLOAT sbf_c, const FLOAT sbf_dx, JonesF32 *d_vis) {
     const int i_vis = threadIdx.x + (blockDim.x * blockIdx.x);
-
     if (i_vis >= num_vis)
-        // if (i_vis > 0)
-        // if (i_vis != 64)
         return;
 
     // Get the indices for this thread. `i_vis` indexes over baselines and
@@ -286,8 +284,8 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
     const int i_bl = i_vis / num_freqs;
     const int i_freq = i_vis % num_freqs;
     const int i_fd = i_freq * d_comps->num_list_shapelets;
-    const double freq = d_freqs[i_freq];
-    const double one_on_lambda = 1.0 / (VEL_C / freq);
+    const FLOAT freq = d_freqs[i_freq];
+    const FLOAT one_on_lambda = 1.0 / (VEL_C / freq);
     const UVW uvw_m = d_uvws[i_bl]; // metres
     const UVW uvw = UVW{
         .u = uvw_m.u * one_on_lambda,
@@ -295,10 +293,10 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
         .w = uvw_m.w * one_on_lambda,
     };
 
-    double real, imag, real2, imag2;
-    double s_pa, c_pa;
-    JonesF64 fd;
-    JonesF64 delta_vis = JonesF64{
+    FLOAT real, imag, real2, imag2;
+    FLOAT s_pa, c_pa;
+    JONES fd;
+    JONES delta_vis = JONES{
         .xx_re = 0.0,
         .xx_im = 0.0,
         .xy_re = 0.0,
@@ -309,44 +307,44 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
         .yy_im = 0.0,
     };
 
-    const double chewie = SQRT_FRAC_PI_SQ_2_LN_2 / sbf_dx;
-    const double I_POWERS_REAL[4] = {1.0, 0.0, -1.0, 0.0};
-    const double I_POWERS_IMAG[4] = {0.0, 1.0, 0.0, -1.0};
+    const FLOAT chewie = SQRT_FRAC_PI_SQ_2_LN_2 / sbf_dx;
+    const FLOAT I_POWERS_REAL[4] = {1.0, 0.0, -1.0, 0.0};
+    const FLOAT I_POWERS_IMAG[4] = {0.0, 1.0, 0.0, -1.0};
 
     int coeff_depth = 0;
     int i_uv = i_bl * d_comps->num_power_law_shapelets;
     for (int i_comp = 0; i_comp < d_comps->num_power_law_shapelets; i_comp++) {
         const LMN lmn = d_comps->power_law_lmns[i_comp];
-        sincos(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps->power_law_shapelet_uvs[i_uv + i_comp];
-        double shapelet_u = s_uv.u * one_on_lambda;
-        double shapelet_v = s_uv.v * one_on_lambda;
+        FLOAT shapelet_u = s_uv.u * one_on_lambda;
+        FLOAT shapelet_v = s_uv.v * one_on_lambda;
         const GaussianParams g_params = d_comps->power_law_gps[i_comp];
-        sincos(g_params.pa, &s_pa, &c_pa);
+        SINCOS(g_params.pa, &s_pa, &c_pa);
 
         // Temporary variables for clarity.
-        double x = shapelet_u * s_pa + shapelet_v * c_pa;
-        double y = shapelet_u * c_pa - shapelet_v * s_pa;
-        double const_x = g_params.maj * chewie;
-        double const_y = -g_params.min * chewie;
-        double x_pos = x * const_x + sbf_c;
-        double y_pos = y * const_y + sbf_c;
-        int x_pos_int = (int)floor(x_pos);
-        int y_pos_int = (int)floor(y_pos);
+        FLOAT x = shapelet_u * s_pa + shapelet_v * c_pa;
+        FLOAT y = shapelet_u * c_pa - shapelet_v * s_pa;
+        FLOAT const_x = g_params.maj * chewie;
+        FLOAT const_y = -g_params.min * chewie;
+        FLOAT x_pos = x * const_x + sbf_c;
+        FLOAT y_pos = y * const_y + sbf_c;
+        int x_pos_int = (int)FLOOR(x_pos);
+        int y_pos_int = (int)FLOOR(y_pos);
 
-        double envelope_re = 0.0;
-        double envelope_im = 0.0;
+        FLOAT envelope_re = 0.0;
+        FLOAT envelope_im = 0.0;
         for (int i_coeff = 0; i_coeff < d_comps->power_law_num_shapelet_coeffs[i_comp]; i_coeff++) {
             const ShapeletCoeff coeff = d_comps->power_law_shapelet_coeffs[coeff_depth];
 
-            double x_low = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int];
-            double x_high = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int + 1];
-            double u_value = x_low + (x_high - x_low) * (x_pos - floor(x_pos));
+            FLOAT x_low = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int];
+            FLOAT x_high = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int + 1];
+            FLOAT u_value = x_low + (x_high - x_low) * (x_pos - FLOOR(x_pos));
 
-            double y_low = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int];
-            double y_high = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int + 1];
-            double v_value = y_low + (y_high - y_low) * (y_pos - floor(y_pos));
+            FLOAT y_low = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int];
+            FLOAT y_high = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int + 1];
+            FLOAT v_value = y_low + (y_high - y_low) * (y_pos - FLOOR(y_pos));
 
             // I_POWER_TABLE stuff. The intention is just to find the
             // appropriate power of i, i.e.:
@@ -359,10 +357,10 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
             //
             // The following my attempt at doing this efficiently.
             int i_power_index = (coeff.n1 + coeff.n2) % 4;
-            double i_power_re = I_POWERS_REAL[i_power_index];
-            double i_power_im = I_POWERS_IMAG[i_power_index];
+            FLOAT i_power_re = I_POWERS_REAL[i_power_index];
+            FLOAT i_power_im = I_POWERS_IMAG[i_power_index];
 
-            double rest = coeff.value * u_value * v_value;
+            FLOAT rest = coeff.value * u_value * v_value;
             envelope_re += i_power_re * rest;
             envelope_im += i_power_im * rest;
 
@@ -381,36 +379,36 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
     i_uv = i_bl * d_comps->num_list_shapelets;
     for (int i_comp = 0; i_comp < d_comps->num_list_shapelets; i_comp++) {
         const LMN lmn = d_comps->list_lmns[i_comp];
-        sincos(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps->list_shapelet_uvs[i_uv + i_comp];
-        double shapelet_u = s_uv.u * one_on_lambda;
-        double shapelet_v = s_uv.v * one_on_lambda;
+        FLOAT shapelet_u = s_uv.u * one_on_lambda;
+        FLOAT shapelet_v = s_uv.v * one_on_lambda;
         const GaussianParams g_params = d_comps->list_gps[i_comp];
-        sincos(g_params.pa, &s_pa, &c_pa);
+        SINCOS(g_params.pa, &s_pa, &c_pa);
 
         // Temporary variables for clarity.
-        double x = shapelet_u * s_pa + shapelet_v * c_pa;
-        double y = shapelet_u * c_pa - shapelet_v * s_pa;
-        double const_x = g_params.maj * chewie;
-        double const_y = -g_params.min * chewie;
-        double x_pos = x * const_x + sbf_c;
-        double y_pos = y * const_y + sbf_c;
-        int x_pos_int = (int)floor(x_pos);
-        int y_pos_int = (int)floor(y_pos);
+        FLOAT x = shapelet_u * s_pa + shapelet_v * c_pa;
+        FLOAT y = shapelet_u * c_pa - shapelet_v * s_pa;
+        FLOAT const_x = g_params.maj * chewie;
+        FLOAT const_y = -g_params.min * chewie;
+        FLOAT x_pos = x * const_x + sbf_c;
+        FLOAT y_pos = y * const_y + sbf_c;
+        int x_pos_int = (int)FLOOR(x_pos);
+        int y_pos_int = (int)FLOOR(y_pos);
 
-        double envelope_re = 0.0;
-        double envelope_im = 0.0;
+        FLOAT envelope_re = 0.0;
+        FLOAT envelope_im = 0.0;
         for (int i_coeff = 0; i_coeff < d_comps->list_num_shapelet_coeffs[i_comp]; i_coeff++) {
             const ShapeletCoeff *coeff = &d_comps->list_shapelet_coeffs[coeff_depth];
 
-            double x_low = d_shapelet_basis_values[sbf_l * coeff->n1 + x_pos_int];
-            double x_high = d_shapelet_basis_values[sbf_l * coeff->n1 + x_pos_int + 1];
-            double u_value = x_low + (x_high - x_low) * (x_pos - floor(x_pos));
+            FLOAT x_low = d_shapelet_basis_values[sbf_l * coeff->n1 + x_pos_int];
+            FLOAT x_high = d_shapelet_basis_values[sbf_l * coeff->n1 + x_pos_int + 1];
+            FLOAT u_value = x_low + (x_high - x_low) * (x_pos - FLOOR(x_pos));
 
-            double y_low = d_shapelet_basis_values[sbf_l * coeff->n2 + y_pos_int];
-            double y_high = d_shapelet_basis_values[sbf_l * coeff->n2 + y_pos_int + 1];
-            double v_value = y_low + (y_high - y_low) * (y_pos - floor(y_pos));
+            FLOAT y_low = d_shapelet_basis_values[sbf_l * coeff->n2 + y_pos_int];
+            FLOAT y_high = d_shapelet_basis_values[sbf_l * coeff->n2 + y_pos_int + 1];
+            FLOAT v_value = y_low + (y_high - y_low) * (y_pos - FLOOR(y_pos));
 
             // I_POWER_TABLE stuff. The intention is just to find the
             // appropriate power of i, i.e.:
@@ -423,10 +421,10 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
             //
             // The following my attempt at doing this efficiently.
             int i_power_index = (coeff->n1 + coeff->n2) % 4;
-            double i_power_re = I_POWERS_REAL[i_power_index];
-            double i_power_im = I_POWERS_IMAG[i_power_index];
+            FLOAT i_power_re = I_POWERS_REAL[i_power_index];
+            FLOAT i_power_im = I_POWERS_IMAG[i_power_index];
 
-            double rest = coeff->value * u_value * v_value;
+            FLOAT rest = coeff->value * u_value * v_value;
             envelope_re += i_power_re * rest;
             envelope_im += i_power_im * rest;
 
@@ -437,7 +435,7 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
         real2 = real * envelope_re - imag * envelope_im;
         imag2 = real * envelope_im + imag * envelope_re;
 
-        const JonesF64 *fd = &d_comps->list_fds[i_fd + i_comp];
+        const JONES *fd = &d_comps->list_fds[i_fd + i_comp];
         complex_multiply(fd, real2, imag2, &delta_vis);
     }
 
@@ -457,13 +455,13 @@ extern "C" int model_points(const Points *comps, const Addresses *a) {
     cudaSoftCheck(cudaMalloc(&d_pl_lmns, size_lmns));
     cudaSoftCheck(cudaMemcpy(d_pl_lmns, comps->power_law_lmns, size_lmns, cudaMemcpyHostToDevice));
 
-    JonesF64 *d_pl_fds = NULL;
-    size_t size_fds = comps->num_power_law_points * sizeof(JonesF64);
+    JONES *d_pl_fds = NULL;
+    size_t size_fds = comps->num_power_law_points * sizeof(JONES);
     cudaSoftCheck(cudaMalloc(&d_pl_fds, size_fds));
     cudaSoftCheck(cudaMemcpy(d_pl_fds, comps->power_law_fds, size_fds, cudaMemcpyHostToDevice));
 
-    double *d_pl_sis = NULL;
-    size_t size_sis = comps->num_power_law_points * sizeof(double);
+    FLOAT *d_pl_sis = NULL;
+    size_t size_sis = comps->num_power_law_points * sizeof(FLOAT);
     cudaSoftCheck(cudaMalloc(&d_pl_sis, size_sis));
     cudaSoftCheck(cudaMemcpy(d_pl_sis, comps->power_law_sis, size_sis, cudaMemcpyHostToDevice));
 
@@ -472,8 +470,8 @@ extern "C" int model_points(const Points *comps, const Addresses *a) {
     cudaSoftCheck(cudaMalloc(&d_list_lmns, size_lmns));
     cudaSoftCheck(cudaMemcpy(d_list_lmns, comps->list_lmns, size_lmns, cudaMemcpyHostToDevice));
 
-    JonesF64 *d_list_fds = NULL;
-    size_fds = a->num_freqs * comps->num_list_points * sizeof(JonesF64);
+    JONES *d_list_fds = NULL;
+    size_fds = a->num_freqs * comps->num_list_points * sizeof(JONES);
     cudaSoftCheck(cudaMalloc(&d_list_fds, size_fds));
     cudaSoftCheck(cudaMemcpy(d_list_fds, comps->list_fds, size_fds, cudaMemcpyHostToDevice));
 
@@ -496,7 +494,6 @@ extern "C" int model_points(const Points *comps, const Addresses *a) {
     // Thread blocks are distributed by visibility (one visibility per frequency
     // and baseline).
     dim3 blocks, threads;
-    // threads.x = 128;
     threads.x = 512;
     threads.y = 1;
     blocks.x = (int)ceil((double)a->num_vis / (double)threads.x);
@@ -521,13 +518,13 @@ extern "C" int model_gaussians(const Gaussians *comps, const Addresses *a) {
     cudaSoftCheck(cudaMalloc(&d_pl_lmns, size_lmns));
     cudaSoftCheck(cudaMemcpy(d_pl_lmns, comps->power_law_lmns, size_lmns, cudaMemcpyHostToDevice));
 
-    JonesF64 *d_pl_fds = NULL;
-    size_t size_fds = comps->num_power_law_gaussians * sizeof(JonesF64);
+    JONES *d_pl_fds = NULL;
+    size_t size_fds = comps->num_power_law_gaussians * sizeof(JONES);
     cudaSoftCheck(cudaMalloc(&d_pl_fds, size_fds));
     cudaSoftCheck(cudaMemcpy(d_pl_fds, comps->power_law_fds, size_fds, cudaMemcpyHostToDevice));
 
-    double *d_pl_sis = NULL;
-    size_t size_sis = comps->num_power_law_gaussians * sizeof(double);
+    FLOAT *d_pl_sis = NULL;
+    size_t size_sis = comps->num_power_law_gaussians * sizeof(FLOAT);
     cudaSoftCheck(cudaMalloc(&d_pl_sis, size_sis));
     cudaSoftCheck(cudaMemcpy(d_pl_sis, comps->power_law_sis, size_sis, cudaMemcpyHostToDevice));
 
@@ -541,8 +538,8 @@ extern "C" int model_gaussians(const Gaussians *comps, const Addresses *a) {
     cudaSoftCheck(cudaMalloc(&d_list_lmns, size_lmns));
     cudaSoftCheck(cudaMemcpy(d_list_lmns, comps->list_lmns, size_lmns, cudaMemcpyHostToDevice));
 
-    JonesF64 *d_list_fds = NULL;
-    size_fds = a->num_freqs * comps->num_list_gaussians * sizeof(JonesF64);
+    JONES *d_list_fds = NULL;
+    size_fds = a->num_freqs * comps->num_list_gaussians * sizeof(JONES);
     cudaSoftCheck(cudaMalloc(&d_list_fds, size_fds));
     cudaSoftCheck(cudaMemcpy(d_list_fds, comps->list_fds, size_fds, cudaMemcpyHostToDevice));
 
@@ -572,7 +569,6 @@ extern "C" int model_gaussians(const Gaussians *comps, const Addresses *a) {
     // Thread blocks are distributed by visibility (one visibility per frequency
     // and baseline).
     dim3 blocks, threads;
-    // threads.x = 128;
     threads.x = 512;
     threads.y = 1;
     blocks.x = (int)ceil((double)a->num_vis / (double)threads.x);
@@ -599,13 +595,13 @@ extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a) {
     cudaSoftCheck(cudaMalloc(&d_pl_lmns, size_lmns));
     cudaSoftCheck(cudaMemcpy(d_pl_lmns, comps->power_law_lmns, size_lmns, cudaMemcpyHostToDevice));
 
-    JonesF64 *d_pl_fds = NULL;
-    size_t size_fds = comps->num_power_law_shapelets * sizeof(JonesF64);
+    JONES *d_pl_fds = NULL;
+    size_t size_fds = comps->num_power_law_shapelets * sizeof(JONES);
     cudaSoftCheck(cudaMalloc(&d_pl_fds, size_fds));
     cudaSoftCheck(cudaMemcpy(d_pl_fds, comps->power_law_fds, size_fds, cudaMemcpyHostToDevice));
 
-    double *d_pl_sis = NULL;
-    size_t size_sis = comps->num_power_law_shapelets * sizeof(double);
+    FLOAT *d_pl_sis = NULL;
+    size_t size_sis = comps->num_power_law_shapelets * sizeof(FLOAT);
     cudaSoftCheck(cudaMalloc(&d_pl_sis, size_sis));
     cudaSoftCheck(cudaMemcpy(d_pl_sis, comps->power_law_sis, size_sis, cudaMemcpyHostToDevice));
 
@@ -643,8 +639,8 @@ extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a) {
     cudaSoftCheck(cudaMalloc(&d_list_lmns, size_lmns));
     cudaSoftCheck(cudaMemcpy(d_list_lmns, comps->list_lmns, size_lmns, cudaMemcpyHostToDevice));
 
-    JonesF64 *d_list_fds = NULL;
-    size_fds = a->num_freqs * comps->num_list_shapelets * sizeof(JonesF64);
+    JONES *d_list_fds = NULL;
+    size_fds = a->num_freqs * comps->num_list_shapelets * sizeof(JONES);
     cudaSoftCheck(cudaMalloc(&d_list_fds, size_fds));
     cudaSoftCheck(cudaMemcpy(d_list_fds, comps->list_fds, size_fds, cudaMemcpyHostToDevice));
 
@@ -730,10 +726,10 @@ extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a) {
     return EXIT_SUCCESS;
 }
 
-extern "C" int model_timestep(const size_t num_baselines, const size_t num_freqs, const UVW *uvws, const double *freqs,
+extern "C" int model_timestep(const size_t num_baselines, const size_t num_freqs, const UVW *uvws, const FLOAT *freqs,
                               const Points *points, const Gaussians *gaussians, const Shapelets *shapelets,
-                              const double *shapelet_basis_values, const size_t sbf_l, const size_t sbf_n,
-                              const double sbf_c, const double sbf_dx, JonesF32 *vis) {
+                              const FLOAT *shapelet_basis_values, const size_t sbf_l, const size_t sbf_n,
+                              const FLOAT sbf_c, const FLOAT sbf_dx, JonesF32 *vis) {
     int status = 0;
 
     Addresses a =

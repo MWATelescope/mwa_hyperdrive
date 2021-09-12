@@ -4,19 +4,19 @@
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct RADec {
-    pub ra: f64,
-    pub dec: f64,
+    pub ra: f32,
+    pub dec: f32,
 }
 #[test]
 fn bindgen_test_layout_RADec() {
     assert_eq!(
         ::std::mem::size_of::<RADec>(),
-        16usize,
+        8usize,
         concat!("Size of: ", stringify!(RADec))
     );
     assert_eq!(
         ::std::mem::align_of::<RADec>(),
-        8usize,
+        4usize,
         concat!("Alignment of ", stringify!(RADec))
     );
     assert_eq!(
@@ -26,7 +26,7 @@ fn bindgen_test_layout_RADec() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<RADec>())).dec as *const _ as usize },
-        8usize,
+        4usize,
         concat!(
             "Offset of field: ",
             stringify!(RADec),
@@ -35,25 +35,24 @@ fn bindgen_test_layout_RADec() {
         )
     );
 }
-#[doc = " The (u,v,w) coordinates of a baseline. There are no units (i.e. these are"]
-#[doc = " dimensionless)."]
+#[doc = " The (u,v,w) coordinates of a baseline. They are in units of metres."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct UVW {
-    pub u: f64,
-    pub v: f64,
-    pub w: f64,
+    pub u: f32,
+    pub v: f32,
+    pub w: f32,
 }
 #[test]
 fn bindgen_test_layout_UVW() {
     assert_eq!(
         ::std::mem::size_of::<UVW>(),
-        24usize,
+        12usize,
         concat!("Size of: ", stringify!(UVW))
     );
     assert_eq!(
         ::std::mem::align_of::<UVW>(),
-        8usize,
+        4usize,
         concat!("Alignment of ", stringify!(UVW))
     );
     assert_eq!(
@@ -63,12 +62,12 @@ fn bindgen_test_layout_UVW() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<UVW>())).v as *const _ as usize },
-        8usize,
+        4usize,
         concat!("Offset of field: ", stringify!(UVW), "::", stringify!(v))
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<UVW>())).w as *const _ as usize },
-        16usize,
+        8usize,
         concat!("Offset of field: ", stringify!(UVW), "::", stringify!(w))
     );
 }
@@ -76,20 +75,20 @@ fn bindgen_test_layout_UVW() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct LMN {
-    pub l: f64,
-    pub m: f64,
-    pub n: f64,
+    pub l: f32,
+    pub m: f32,
+    pub n: f32,
 }
 #[test]
 fn bindgen_test_layout_LMN() {
     assert_eq!(
         ::std::mem::size_of::<LMN>(),
-        24usize,
+        12usize,
         concat!("Size of: ", stringify!(LMN))
     );
     assert_eq!(
         ::std::mem::align_of::<LMN>(),
-        8usize,
+        4usize,
         concat!("Alignment of ", stringify!(LMN))
     );
     assert_eq!(
@@ -99,12 +98,12 @@ fn bindgen_test_layout_LMN() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<LMN>())).m as *const _ as usize },
-        8usize,
+        4usize,
         concat!("Offset of field: ", stringify!(LMN), "::", stringify!(m))
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<LMN>())).n as *const _ as usize },
-        16usize,
+        8usize,
         concat!("Offset of field: ", stringify!(LMN), "::", stringify!(n))
     );
 }
@@ -112,20 +111,20 @@ fn bindgen_test_layout_LMN() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct GaussianParams {
-    pub maj: f64,
-    pub min: f64,
-    pub pa: f64,
+    pub maj: f32,
+    pub min: f32,
+    pub pa: f32,
 }
 #[test]
 fn bindgen_test_layout_GaussianParams() {
     assert_eq!(
         ::std::mem::size_of::<GaussianParams>(),
-        24usize,
+        12usize,
         concat!("Size of: ", stringify!(GaussianParams))
     );
     assert_eq!(
         ::std::mem::align_of::<GaussianParams>(),
-        8usize,
+        4usize,
         concat!("Alignment of ", stringify!(GaussianParams))
     );
     assert_eq!(
@@ -140,7 +139,7 @@ fn bindgen_test_layout_GaussianParams() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<GaussianParams>())).min as *const _ as usize },
-        8usize,
+        4usize,
         concat!(
             "Offset of field: ",
             stringify!(GaussianParams),
@@ -150,7 +149,7 @@ fn bindgen_test_layout_GaussianParams() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<GaussianParams>())).pa as *const _ as usize },
-        16usize,
+        8usize,
         concat!(
             "Offset of field: ",
             stringify!(GaussianParams),
@@ -165,7 +164,7 @@ fn bindgen_test_layout_GaussianParams() {
 pub struct ShapeletCoeff {
     pub n1: usize,
     pub n2: usize,
-    pub value: f64,
+    pub value: f32,
 }
 #[test]
 fn bindgen_test_layout_ShapeletCoeff() {
@@ -215,19 +214,19 @@ fn bindgen_test_layout_ShapeletCoeff() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ShapeletUV {
-    pub u: f64,
-    pub v: f64,
+    pub u: f32,
+    pub v: f32,
 }
 #[test]
 fn bindgen_test_layout_ShapeletUV() {
     assert_eq!(
         ::std::mem::size_of::<ShapeletUV>(),
-        16usize,
+        8usize,
         concat!("Size of: ", stringify!(ShapeletUV))
     );
     assert_eq!(
         ::std::mem::align_of::<ShapeletUV>(),
-        8usize,
+        4usize,
         concat!("Alignment of ", stringify!(ShapeletUV))
     );
     assert_eq!(
@@ -242,7 +241,7 @@ fn bindgen_test_layout_ShapeletUV() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<ShapeletUV>())).v as *const _ as usize },
-        8usize,
+        4usize,
         concat!(
             "Offset of field: ",
             stringify!(ShapeletUV),
@@ -472,12 +471,12 @@ pub struct Points {
     pub num_power_law_points: usize,
     pub power_law_radecs: *const RADec,
     pub power_law_lmns: *const LMN,
-    pub power_law_fds: *const JonesF64,
-    pub power_law_sis: *const f64,
+    pub power_law_fds: *const JonesF32,
+    pub power_law_sis: *const f32,
     pub num_list_points: usize,
     pub list_radecs: *const RADec,
     pub list_lmns: *const LMN,
-    pub list_fds: *const JonesF64,
+    pub list_fds: *const JonesF32,
 }
 #[test]
 fn bindgen_test_layout_Points() {
@@ -589,13 +588,13 @@ pub struct Gaussians {
     pub num_power_law_gaussians: usize,
     pub power_law_radecs: *const RADec,
     pub power_law_lmns: *const LMN,
-    pub power_law_fds: *const JonesF64,
-    pub power_law_sis: *const f64,
+    pub power_law_fds: *const JonesF32,
+    pub power_law_sis: *const f32,
     pub power_law_gps: *const GaussianParams,
     pub num_list_gaussians: usize,
     pub list_radecs: *const RADec,
     pub list_lmns: *const LMN,
-    pub list_fds: *const JonesF64,
+    pub list_fds: *const JonesF32,
     pub list_gps: *const GaussianParams,
 }
 #[test]
@@ -730,8 +729,8 @@ pub struct Shapelets {
     pub num_power_law_shapelets: usize,
     pub power_law_radecs: *const RADec,
     pub power_law_lmns: *const LMN,
-    pub power_law_fds: *const JonesF64,
-    pub power_law_sis: *const f64,
+    pub power_law_fds: *const JonesF32,
+    pub power_law_sis: *const f32,
     pub power_law_gps: *const GaussianParams,
     pub power_law_shapelet_uvs: *const ShapeletUV,
     pub power_law_shapelet_coeffs: *const ShapeletCoeff,
@@ -739,7 +738,7 @@ pub struct Shapelets {
     pub num_list_shapelets: usize,
     pub list_radecs: *const RADec,
     pub list_lmns: *const LMN,
-    pub list_fds: *const JonesF64,
+    pub list_fds: *const JonesF32,
     pub list_gps: *const GaussianParams,
     pub list_shapelet_uvs: *const ShapeletUV,
     pub list_shapelet_coeffs: *const ShapeletCoeff,
@@ -938,7 +937,7 @@ fn bindgen_test_layout_Shapelets() {
         )
     );
 }
-pub const POWER_LAW_FD_REF_FREQ: f64 = 150000000.0;
+pub const POWER_LAW_FD_REF_FREQ: f32 = 150000000.0;
 extern "C" {
     #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
     #[doc = " sky-model point-source components. See the documentation of `model_timestep`"]
@@ -992,15 +991,15 @@ extern "C" {
         num_baselines: usize,
         num_freqs: usize,
         uvws: *const UVW,
-        freqs: *const f64,
+        freqs: *const f32,
         points: *const Points,
         gaussians: *const Gaussians,
         shapelets: *const Shapelets,
-        shapelet_basis_values: *const f64,
+        shapelet_basis_values: *const f32,
         sbf_l: usize,
         sbf_n: usize,
-        sbf_c: f64,
-        sbf_dx: f64,
+        sbf_c: f32,
+        sbf_dx: f32,
         vis: *mut JonesF32,
     ) -> ::std::os::raw::c_int;
 }

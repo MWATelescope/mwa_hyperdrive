@@ -24,13 +24,17 @@ opt-level = 2
 
 [features]
 default = []
-cuda = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_srclist/cuda"]
+# Use CUDA code with double-precision floats.
+cuda-double = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_srclist/cuda-double"]
+# Use CUDA code with single-precision floats.
+cuda-single = ["mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_srclist/cuda-single"]
 cfitsio-static = ["mwa_rust_core/cfitsio-static"]
 erfa-static = ["mwa_rust_core/erfa-static"]
 hdf5-static = ["mwa_hyperdrive_srclist/hdf5-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 
 [dependencies]
+birli = { version = "0.1.9", default_features = false }
 byteorder = "1.4.3"
 crossbeam-channel = "0.5.1"
 crossbeam-utils = "0.8.5"
@@ -59,7 +63,7 @@ toml = "0.5.8"
 
 mwa_hyperdrive_common =  { path = "common" }
 mwa_hyperdrive_beam =    { path = "beam" }
-mwa_hyperdrive_cuda =    { path = "cuda", optional = true }
+mwa_hyperdrive_cuda =    { path = "cuda", optional = true, default_features = false }
 mwa_hyperdrive_srclist = { path = "srclist" }
 
 [dev-dependencies]

@@ -4,8 +4,8 @@
 
 //! Handling of calibration arguments.
 //!
-//! Strategy: Users give arguments to hyperdrive (handled by calibrate::args).
-//! hyperdrive turns arguments into parameters (handled by calibrate::params).
+//! Strategy: Users give arguments to hyperdrive (handled by [calibrate::args]).
+//! hyperdrive turns arguments into parameters (handled by [calibrate::params]).
 //! Using this paradigm, the code to handle arguments and parameters (and
 //! associated errors) can be neatly split.
 
@@ -22,12 +22,15 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
 
-use crate::calibrate::params::{CalibrateParams, InvalidArgsError};
+use crate::calibrate::{
+    params::{CalibrateParams, InvalidArgsError},
+    solutions::CalSolutionTypes,
+};
 use crate::*;
 use mwa_hyperdrive_srclist::{SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP};
 use mwa_rust_core::constants::{MWA_LAT_RAD, MWA_LONG_RAD};
 
-#[derive(Display, EnumIter, EnumString)]
+#[derive(Debug, Display, EnumIter, EnumString)]
 enum ArgFileTypes {
     #[strum(serialize = "toml")]
     Toml,
@@ -35,11 +38,23 @@ enum ArgFileTypes {
     Json,
 }
 
-lazy_static::lazy_static! {
-    pub(crate) static ref ARG_FILE_TYPES_COMMA_SEPARATED: String = ArgFileTypes::iter().join(", ");
+#[derive(Debug, Display, EnumIter, EnumString)]
+pub(super) enum VisOutputTypes {
+    #[strum(serialize = "uvfits")]
+    Uvfits,
+}
 
-    static ref OUTPUT_SOLUTIONS_HELP: String =
-        format!("The path to the file where the calibration solutions are written. Supported formats are .fits and .bin (which is the \"André calibrate format\"). Default: {}", DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
+lazy_static::lazy_static! {
+    static ref ARG_FILE_TYPES_COMMA_SEPARATED: String = ArgFileTypes::iter().join(", ");
+
+    pub(super) static ref VIS_OUTPUT_EXTENSIONS: String = VisOutputTypes::iter().join(", ");
+
+    pub(super) static ref CAL_SOLUTION_EXTENSIONS: String = CalSolutionTypes::iter().join(", ");
+
+    static ref DI_CALIBRATE_OUTPUT_HELP: String =
+        format!("Paths to the calibration output files. Supported calibrated visibility outputs: {}. Supported calibration solution formats: {}. Default: {}", *VIS_OUTPUT_EXTENSIONS, *CAL_SOLUTION_EXTENSIONS, DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
+
+    static ref MODEL_FILENAME_HELP: String = format!("The path to the file where the generated sky-model visibilities are written. If this argument isn't supplied, then no file is written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
 
     static ref SOURCE_LIST_TYPE_HELP: String =
         format!(r#"The type of sky-model source list. Valid types are: {}
@@ -74,14 +89,11 @@ pub struct CalibrateUserArgs {
     #[structopt(short, long)]
     pub data: Option<Vec<String>>,
 
-    #[structopt(short, long, help = OUTPUT_SOLUTIONS_HELP.as_str())]
-    pub output_solutions_filename: Option<String>,
+    #[structopt(short, long, help = DI_CALIBRATE_OUTPUT_HELP.as_str())]
+    pub outputs: Option<Vec<PathBuf>>,
 
-    /// The path to the file where the generated sky-model visibilities are
-    /// written. Only uvfits is currently supported. If this argument isn't
-    /// supplied, then no file is written.
-    #[structopt(short, long)]
-    pub model_filename: Option<String>,
+    #[structopt(short, long, help = MODEL_FILENAME_HELP.as_str())]
+    pub model_filename: Option<PathBuf>,
 
     /// Path to the sky-model source list file.
     #[structopt(short, long)]
@@ -255,7 +267,7 @@ impl CalibrateUserArgs {
         // Ensure all of the file args are accounted for by pattern matching.
         let Self {
             data,
-            output_solutions_filename,
+            outputs,
             model_filename,
             beam_file,
             no_beam,
@@ -282,9 +294,7 @@ impl CalibrateUserArgs {
         // Merge all the arguments, preferring the CLI args when available.
         Ok(Self {
             data: cli_args.data.or(data),
-            output_solutions_filename: cli_args
-                .output_solutions_filename
-                .or(output_solutions_filename),
+            outputs: cli_args.outputs.or(outputs),
             model_filename: cli_args.model_filename.or(model_filename),
             beam_file: cli_args.beam_file.or(beam_file),
             no_beam: cli_args.no_beam || no_beam,

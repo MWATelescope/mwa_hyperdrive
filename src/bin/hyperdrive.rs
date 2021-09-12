@@ -67,7 +67,7 @@ enum Args {
 
         /// Use the CPU for visibility generation. This is deliberately made
         /// non-default because using a GPU is much faster.
-        #[cfg(feature = "cuda")]
+        #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
         #[structopt(short, long)]
         cpu: bool,
     },
@@ -164,13 +164,13 @@ fn try_main() -> Result<(), HyperdriveError> {
             args,
             verbosity: _,
             dry_run,
-            #[cfg(feature = "cuda")]
+            #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
             cpu,
         } => {
-            #[cfg(not(feature = "cuda"))]
+            #[cfg(not(any(feature = "cuda-double", feature = "cuda-single")))]
             simulate_vis(args, dry_run)?;
 
-            #[cfg(feature = "cuda")]
+            #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
             simulate_vis(args, cpu, dry_run)?;
 
             info!("hyperdrive simulate-vis complete.");

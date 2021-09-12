@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code to handle sky-model source lists.
+//! Code and utilities for sky-model source lists. See for more info:
+//! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
 
 pub mod ao;
 pub mod constants;

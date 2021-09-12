@@ -6,20 +6,20 @@
 #include "memory.h"
 
 Addresses init_model(const size_t num_baselines, const size_t num_freqs, const size_t sbf_l, const size_t sbf_n,
-                     const double sbf_c, const double sbf_dx, const UVW *uvws, const double *freqs,
-                     const double *shapelet_basis_values, JonesF32 *vis) {
+                     const FLOAT sbf_c, const FLOAT sbf_dx, const UVW *uvws, const FLOAT *freqs,
+                     const FLOAT *shapelet_basis_values, JonesF32 *vis) {
     UVW *d_uvws = NULL;
     size_t size_uvws = num_baselines * sizeof(UVW);
     cudaSoftCheck(cudaMalloc(&d_uvws, size_uvws));
     cudaSoftCheck(cudaMemcpy(d_uvws, uvws, size_uvws, cudaMemcpyHostToDevice));
 
-    double *d_freqs = NULL;
-    size_t size_freqs = num_freqs * sizeof(double);
+    FLOAT *d_freqs = NULL;
+    size_t size_freqs = num_freqs * sizeof(FLOAT);
     cudaSoftCheck(cudaMalloc(&d_freqs, size_freqs));
     cudaSoftCheck(cudaMemcpy(d_freqs, freqs, size_freqs, cudaMemcpyHostToDevice));
 
-    double *d_shapelet_basis_values = NULL;
-    size_t size_sbfs = sbf_l * sbf_n * sizeof(double);
+    FLOAT *d_shapelet_basis_values = NULL;
+    size_t size_sbfs = sbf_l * sbf_n * sizeof(FLOAT);
     cudaSoftCheck(cudaMalloc(&d_shapelet_basis_values, size_sbfs));
     cudaSoftCheck(cudaMemcpy(d_shapelet_basis_values, shapelet_basis_values, size_sbfs, cudaMemcpyHostToDevice));
 

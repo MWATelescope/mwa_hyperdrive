@@ -23,7 +23,24 @@ bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --allowlist-type "Shapelets" \
     --allowlist-var "POWER_LAW_FD_REF_FREQ" \
     --size_t-is-usize \
-    > "${SCRIPTPATH}"/src/model.rs
+    > "${SCRIPTPATH}"/src/model_double.rs
+
+bindgen "${SCRIPTPATH}"/src_cuda/model.h \
+    --allowlist-function "model_.*" \
+    --blocklist-type "Addresses" \
+    --allowlist-type "RADec" \
+    --allowlist-type "UVW" \
+    --allowlist-type "LMN" \
+    --allowlist-type "ShapeletCoeff" \
+    --allowlist-type "ShapeletUV" \
+    --allowlist-type "Jones.*" \
+    --allowlist-type "Points" \
+    --allowlist-type "Gaussians" \
+    --allowlist-type "Shapelets" \
+    --allowlist-var "POWER_LAW_FD_REF_FREQ" \
+    --size_t-is-usize \
+    -- -D SINGLE \
+    > "${SCRIPTPATH}"/src/model_single.rs
 
 bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-function "model_.*" \
@@ -36,4 +53,18 @@ bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-type "JonesF.*" \
     --allowlist-type "Addresses" \
     --size_t-is-usize \
-    > "${SCRIPTPATH}"/src/memory.rs
+    > "${SCRIPTPATH}"/src/memory_double.rs
+
+bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
+    --blocklist-function "model_.*" \
+    --allowlist-function "init_model" \
+    --allowlist-function "copy_vis" \
+    --allowlist-function "clear_vis" \
+    --allowlist-function "destroy" \
+    --blocklist-type "UVW" \
+    --blocklist-type "LMN" \
+    --blocklist-type "JonesF.*" \
+    --allowlist-type "Addresses" \
+    --size_t-is-usize \
+    -- -D SINGLE \
+    > "${SCRIPTPATH}"/src/memory_single.rs

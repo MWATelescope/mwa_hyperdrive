@@ -18,8 +18,13 @@ pub enum InvalidArgsError {
     #[error("Either no input data was given, or an invalid combination of formats was given.")]
     InvalidDataInput,
 
-    #[error("Supplied file path {0} does not exist or is not readable!")]
-    BadFile(PathBuf),
+    #[error("No calibration output was specified. There must be at least one calibration solution file or calibrated visibility file.")]
+    NoOutput,
+
+    #[error(
+        "Couldn't create directory '{0}' for output files. Do you have write permissions set?"
+    )]
+    NewDirectory(PathBuf),
 
     #[error("No sky-model source list file supplied")]
     NoSourceList,
@@ -44,13 +49,13 @@ pub enum InvalidArgsError {
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
     InvalidTileFlag { got: usize, max: usize },
 
-    #[error("Cannot write calibration solutions to a file type '{ext}'. Supported formats are: fits, bin")]
-    OutputSolutionsFileType { ext: String },
-
     #[error(
-        "Cannot write sky-model visibilities to a file type '{ext}'. Supported formats are: uvfits"
+        "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::calibrate::args::VIS_OUTPUT_EXTENSIONS
     )]
-    ModelFileType { ext: String },
+    VisFileType { ext: String },
+
+    #[error("Cannot write calibration outputs to a file type '{ext}'.\nSupported formats are: {} (calibration solutions)\n                     : {} (visibility files)", *crate::calibrate::args::CAL_SOLUTION_EXTENSIONS, *crate::calibrate::args::VIS_OUTPUT_EXTENSIONS)]
+    CalibrationOutputFile { ext: String },
 
     #[error("Cannot write to the specified file '{file}'. Do you have write permissions set?")]
     FileNotWritable { file: String },

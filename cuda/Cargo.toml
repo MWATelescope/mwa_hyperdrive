@@ -1,11 +1,17 @@
 [package]
 name = "mwa_hyperdrive_cuda"
-version = "0.1.0"
+version = "0.0.0"
 authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
 edition = "2018"
 license = "MPL-2.0"
 
+[features]
+# Use single-precision floats. If this feature isn't enabled, then
+# double-precision floats are used.
+cuda-single = []
+
 [dependencies]
+cfg-if = "1.0.*"
 cuda-runtime-sys = "0.3.0-alpha.1"
 
 [build-dependencies]

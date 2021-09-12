@@ -21,11 +21,11 @@ typedef struct Addresses {
     const size_t num_vis;
     const size_t sbf_l;
     const size_t sbf_n;
-    const double sbf_c;
-    const double sbf_dx;
+    const FLOAT sbf_c;
+    const FLOAT sbf_dx;
     UVW *d_uvws;
-    double *d_freqs;
-    double *d_shapelet_basis_values;
+    FLOAT *d_freqs;
+    FLOAT *d_shapelet_basis_values;
     JonesF32 *d_vis;
     JonesF32 *host_vis;
 } Addresses;
@@ -35,8 +35,8 @@ typedef struct Addresses {
  * for modelling on the device.
  */
 Addresses init_model(const size_t num_baselines, const size_t num_freqs, const size_t sbf_l, const size_t sbf_n,
-                     const double sbf_c, const double sbf_dx, const UVW *uvws, const double *freqs,
-                     const double *shapelet_basis_values, JonesF32 *vis);
+                     const FLOAT sbf_c, const FLOAT sbf_dx, const UVW *uvws, const FLOAT *freqs,
+                     const FLOAT *shapelet_basis_values, JonesF32 *vis);
 
 /**
  * Copy the device visibilities to the host. It is assumed that this operation

@@ -36,9 +36,9 @@ use mwa_rust_core::{
 };
 use mwalib::MetafitsContext;
 
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
 use mwa_hyperdrive_cuda as cuda;
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
 use mwa_hyperdrive_srclist::ComponentListFFI;
 
 #[derive(StructOpt, Debug, Default, Deserialize)]
@@ -193,7 +193,7 @@ impl SimVisParams {
                 }
             }
         };
-        debug!("Using phase centre {}", phase_centre);
+        info!("Using phase centre {}", phase_centre);
 
         // Get the fine channel frequencies.
         if num_fine_channels == 0 {
@@ -213,20 +213,13 @@ impl SimVisParams {
             }
             fine_chan_freqs
         };
-        if fine_chan_freqs.len() == 1 {
-            debug!(
-                "Only fine channel freq: {} MHz",
-                *fine_chan_freqs.first().unwrap() / 1e6
-            );
-        } else {
-            debug!(
-                "First fine channel freq: {} MHz",
-                *fine_chan_freqs.first().unwrap() / 1e6
-            );
-            debug!(
-                "Last fine channel freq:  {} MHz",
-                *fine_chan_freqs.last().unwrap() / 1e6
-            );
+        match fine_chan_freqs.as_slice() {
+            [] => unreachable!(), // Handled above.
+            [f] => info!("Only fine-channel freq: {} MHz", f / 1e6),
+            [f_0, .., f_n] => {
+                info!("First fine-channel freq: {}", f_0 / 1e6);
+                info!("Last fine-channel freq:  {}", f_n / 1e6);
+            }
         }
 
         // Populate the timesteps.
@@ -321,12 +314,12 @@ impl SimVisParams {
 /// Simulate sky-model visibilities from a sky-model source list.
 pub fn simulate_vis(
     args: SimulateVisArgs,
-    #[cfg(feature = "cuda")] cpu: bool,
+    #[cfg(any(feature = "cuda-double", feature = "cuda-single"))] cpu: bool,
     dry_run: bool,
 ) -> Result<(), SimulateVisError> {
     // Witchcraft to allow this code to be used with or without CUDA support
     // compiled.
-    #[cfg(not(feature = "cuda"))]
+    #[cfg(not(any(feature = "cuda-double", feature = "cuda-single")))]
     let cpu = true;
 
     if cpu {
@@ -393,7 +386,7 @@ pub fn simulate_vis(
             params.phase_centre,
         ))
     } else {
-        #[cfg(feature = "cuda")]
+        #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
         {
             Either::Right(ComponentListFFI::new(
                 params.source_list,
@@ -403,9 +396,32 @@ pub fn simulate_vis(
         }
 
         // It doesn't matter what goes in Right when we're not using CUDA.
-        #[cfg(not(feature = "cuda"))]
+        #[cfg(not(any(feature = "cuda-double", feature = "cuda-single")))]
         Either::Right(0)
     };
+
+    // Variables for CUDA. They're made flexible in their types for whichever
+    // precision is being used in the CUDA code.
+    #[cfg(feature = "cuda-double")]
+    let fine_chan_freqs = &params.fine_chan_freqs;
+    #[cfg(feature = "cuda-double")]
+    let shapelet_basis_values = &crate::shapelets::SHAPELET_BASIS_VALUES;
+    #[cfg(feature = "cuda-double")]
+    let sbf_c = crate::shapelets::SBF_C;
+    #[cfg(feature = "cuda-double")]
+    let sbf_dx = crate::shapelets::SBF_DX;
+
+    #[cfg(feature = "cuda-single")]
+    let fine_chan_freqs: Vec<f32> = params.fine_chan_freqs.iter().map(|&f| f as f32).collect();
+    #[cfg(feature = "cuda-single")]
+    let shapelet_basis_values: Vec<f32> = crate::shapelets::SHAPELET_BASIS_VALUES
+        .iter()
+        .map(|&f| f as f32)
+        .collect();
+    #[cfg(feature = "cuda-single")]
+    let sbf_c = crate::shapelets::SBF_C as f32;
+    #[cfg(feature = "cuda-single")]
+    let sbf_dx = crate::shapelets::SBF_DX as f32;
 
     // Progress bar.
     let model_progress = ProgressBar::new(params.timesteps.len() as _)
@@ -439,47 +455,50 @@ pub fn simulate_vis(
                 &params.fine_chan_freqs,
             )?;
         } else {
-            #[cfg(feature = "cuda")]
+            #[cfg(feature = "cuda-double")]
+            let cuda_uvws: Vec<cuda::UVW> = uvws
+                .iter()
+                .map(|&uvw| cuda::UVW {
+                    u: uvw.u,
+                    v: uvw.v,
+                    w: uvw.w,
+                })
+                .collect();
+            #[cfg(feature = "cuda-single")]
+            let cuda_uvws: Vec<cuda::UVW> = uvws
+                .iter()
+                .map(|&uvw| cuda::UVW {
+                    u: uvw.u as f32,
+                    v: uvw.v as f32,
+                    w: uvw.w as f32,
+                })
+                .collect();
+
+            #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
             {
                 let sky_model_comps = sky_model_comps.as_ref().unwrap_right();
 
-                let shapelet_power_law_uvs = if sky_model_comps.shapelet_power_law_radecs.is_empty()
-                {
+                let shapelet_uvs = if sky_model_comps.shapelet_power_law_radecs.is_empty() {
                     None
                 } else {
-                    Some(ComponentListFFI::get_shapelet_uvs(
-                        &sky_model_comps.shapelet_power_law_radecs,
-                        lst,
-                        &xyzs,
-                    ))
-                };
-                let shapelet_list_uvs = if sky_model_comps.shapelet_list_radecs.is_empty() {
-                    None
-                } else {
-                    Some(ComponentListFFI::get_shapelet_uvs(
-                        &sky_model_comps.shapelet_list_radecs,
-                        lst,
-                        &xyzs,
-                    ))
+                    Some(sky_model_comps.get_shapelet_uvs(lst, &xyzs))
                 };
                 unsafe {
-                    let (points, gaussians, shapelets) = sky_model_comps.to_c_types(
-                        shapelet_power_law_uvs.as_ref().map(|o| o.as_ptr()),
-                        shapelet_list_uvs.as_ref().map(|o| o.as_ptr()),
-                    );
+                    let (points, gaussians, shapelets) =
+                        sky_model_comps.to_c_types(shapelet_uvs.as_ref());
                     let cuda_result = cuda::model_timestep(
                         num_cross_correlation_baselines,
                         params.fine_chan_freqs.len(),
-                        uvws.as_ptr() as _,
-                        params.fine_chan_freqs.as_ptr(),
+                        cuda_uvws.as_ptr(),
+                        fine_chan_freqs.as_ptr(),
                         &points,
                         &gaussians,
                         &shapelets,
-                        crate::shapelets::SHAPELET_BASIS_VALUES.as_ptr(),
+                        shapelet_basis_values.as_ptr(),
                         crate::shapelets::SBF_L,
                         crate::shapelets::SBF_N,
-                        crate::shapelets::SBF_C,
-                        crate::shapelets::SBF_DX,
+                        sbf_c,
+                        sbf_dx,
                         vis_model.as_mut_ptr() as _,
                     );
                     // TODO: Handle cuda_result.
