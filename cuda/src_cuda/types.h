@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <stdlib.h>
 
 // If SINGLE is enabled, use single-precision floats everywhere. Otherwise
@@ -25,25 +26,15 @@ extern "C" {
 #endif // __cplusplus
 
 /**
- * (RA, Dec.) coordinates. Both have units of radians.
- */
-typedef struct RADec {
-    // Right Ascension [radians]
-    const FLOAT ra;
-    // Declination [radians]
-    const FLOAT dec;
-} RADec;
-
-/**
  * The (u,v,w) coordinates of a baseline. They are in units of metres.
  */
 typedef struct UVW {
     // u coordinate [metres]
-    const FLOAT u;
+    FLOAT u;
     // v coordinate [metres]
-    const FLOAT v;
+    FLOAT v;
     // w coordinate [metres]
-    const FLOAT w;
+    FLOAT w;
 } UVW;
 
 /**
@@ -51,11 +42,11 @@ typedef struct UVW {
  */
 typedef struct LMN {
     // l coordinate [dimensionless]
-    const FLOAT l;
+    FLOAT l;
     // m coordinate [dimensionless]
-    const FLOAT m;
+    FLOAT m;
     // n coordinate [dimensionless]
-    const FLOAT n;
+    FLOAT n;
 } LMN;
 
 /**
@@ -63,20 +54,20 @@ typedef struct LMN {
  */
 typedef struct GaussianParams {
     // Major axis size [radians]
-    const FLOAT maj;
+    FLOAT maj;
     // Minor axis size [radians]
-    const FLOAT min;
+    FLOAT min;
     // Position angle [radians]
-    const FLOAT pa;
+    FLOAT pa;
 } GaussianParams;
 
 /**
  * Parameters describing a shapelet coefficient.
  */
 typedef struct ShapeletCoeff {
-    const size_t n1;
-    const size_t n2;
-    const FLOAT value;
+    size_t n1;
+    size_t n2;
+    FLOAT value;
 } ShapeletCoeff;
 
 /**
@@ -85,9 +76,9 @@ typedef struct ShapeletCoeff {
  */
 typedef struct ShapeletUV {
     // u coordinate [metres]
-    const FLOAT u;
+    FLOAT u;
     // v coordinate [metres]
-    const FLOAT v;
+    FLOAT v;
 } ShapeletUV;
 
 /**
@@ -140,67 +131,70 @@ typedef struct JonesF64 {
  * All the parameters needed to describe point-source components.
  */
 typedef struct Points {
-    const size_t num_power_law_points;
-    const RADec *power_law_radecs;
-    const LMN *power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    const JONES *power_law_fds;
-    // Spectral indices.
-    const FLOAT *power_law_sis;
+    FLOAT *has;
+    FLOAT *decs;
 
-    const size_t num_list_points;
-    const RADec *list_radecs;
-    const LMN *list_lmns;
+    size_t num_power_law_points;
+    LMN *power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    JONES *power_law_fds;
+    // Spectral indices.
+    FLOAT *power_law_sis;
+
+    size_t num_list_points;
+    LMN *list_lmns;
     // Instrumental (i.e. XX, XY, YX, XX).
-    const JONES *list_fds;
+    JONES *list_fds;
 } Points;
 
 /**
  * All the parameters needed to describe Gaussian components.
  */
 typedef struct Gaussians {
-    const size_t num_power_law_gaussians;
-    const RADec *power_law_radecs;
-    const LMN *power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    const JONES *power_law_fds;
-    // Spectral indices.
-    const FLOAT *power_law_sis;
-    const GaussianParams *power_law_gps;
+    FLOAT *has;
+    FLOAT *decs;
 
-    const size_t num_list_gaussians;
-    const RADec *list_radecs;
-    const LMN *list_lmns;
+    size_t num_power_law_gaussians;
+    LMN *power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    JONES *power_law_fds;
+    // Spectral indices.
+    FLOAT *power_law_sis;
+    GaussianParams *power_law_gps;
+
+    size_t num_list_gaussians;
+    LMN *list_lmns;
     // Instrumental (i.e. XX, XY, YX, XX).
-    const JONES *list_fds;
-    const GaussianParams *list_gps;
+    JONES *list_fds;
+    GaussianParams *list_gps;
 } Gaussians;
 
 /**
  * All the parameters needed to describe Shapelet components.
  */
 typedef struct Shapelets {
-    const size_t num_power_law_shapelets;
-    const RADec *power_law_radecs;
-    const LMN *power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    const JONES *power_law_fds;
-    // Spectral indices.
-    const FLOAT *power_law_sis;
-    const GaussianParams *power_law_gps;
-    const ShapeletUV *power_law_shapelet_uvs;
-    const ShapeletCoeff *power_law_shapelet_coeffs;
-    const size_t *power_law_num_shapelet_coeffs;
+    FLOAT *has;
+    FLOAT *decs;
 
-    const size_t num_list_shapelets;
-    const RADec *list_radecs;
-    const LMN *list_lmns;
+    size_t num_power_law_shapelets;
+    LMN *power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    JONES *power_law_fds;
+    // Spectral indices.
+    FLOAT *power_law_sis;
+    GaussianParams *power_law_gps;
+    ShapeletUV *power_law_shapelet_uvs;
+    ShapeletCoeff *power_law_shapelet_coeffs;
+    size_t *power_law_num_shapelet_coeffs;
+
+    size_t num_list_shapelets;
+    LMN *list_lmns;
     // Instrumental (i.e. XX, XY, YX, XX).
-    const JONES *list_fds;
-    const GaussianParams *list_gps;
-    const ShapeletUV *list_shapelet_uvs;
-    const ShapeletCoeff *list_shapelet_coeffs;
-    const size_t *list_num_shapelet_coeffs;
+    JONES *list_fds;
+    GaussianParams *list_gps;
+    ShapeletUV *list_shapelet_uvs;
+    ShapeletCoeff *list_shapelet_coeffs;
+    size_t *list_num_shapelet_coeffs;
 } Shapelets;
 
 #ifdef __cplusplus

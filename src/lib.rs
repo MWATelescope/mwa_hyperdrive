@@ -11,7 +11,7 @@ pub mod model;
 pub mod simulate_vis;
 
 pub(crate) mod context;
-pub(crate) mod data_formats;
+pub mod data_formats;
 pub(crate) mod error;
 pub(crate) mod flagging;
 pub(crate) mod glob;

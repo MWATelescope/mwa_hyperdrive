@@ -67,8 +67,8 @@ enum Args {
 
         /// Use the CPU for visibility generation. This is deliberately made
         /// non-default because using a GPU is much faster.
-        #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
-        #[structopt(short, long)]
+        #[cfg(feature = "cuda")]
+        #[structopt(long)]
         cpu: bool,
     },
 
@@ -90,6 +90,12 @@ enum Args {
     SrclistVerify {
         #[structopt(flatten)]
         args: VerifyArgs,
+    },
+
+    /// Print information on the dipole gains listed by a metafits file.
+    DipoleGains {
+        #[structopt(name = "METAFITS_FILE", parse(from_os_str))]
+        metafits: PathBuf,
     },
 }
 
@@ -115,6 +121,7 @@ fn try_main() -> Result<(), HyperdriveError> {
         Args::SrclistConvert { args, .. } => &args.verbosity,
         Args::SrclistShift { args, .. } => &args.verbosity,
         Args::SrclistVerify { args, .. } => &args.verbosity,
+        Args::DipoleGains { .. } => &0,
     };
     setup_logging(*verbosity).expect("Failed to initialise logging.");
 
@@ -128,6 +135,7 @@ fn try_main() -> Result<(), HyperdriveError> {
             Args::SrclistConvert { .. } => "srclist-convert",
             Args::SrclistShift { .. } => "srclist-shift",
             Args::SrclistVerify { .. } => "srclist-verify",
+            Args::DipoleGains { .. } => "dipole-gains",
         },
         env!("CARGO_PKG_VERSION")
     );
@@ -164,13 +172,13 @@ fn try_main() -> Result<(), HyperdriveError> {
             args,
             verbosity: _,
             dry_run,
-            #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+            #[cfg(feature = "cuda")]
             cpu,
         } => {
-            #[cfg(not(any(feature = "cuda-double", feature = "cuda-single")))]
+            #[cfg(not(feature = "cuda"))]
             simulate_vis(args, dry_run)?;
 
-            #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+            #[cfg(feature = "cuda")]
             simulate_vis(args, cpu, dry_run)?;
 
             info!("hyperdrive simulate-vis complete.");
@@ -181,6 +189,64 @@ fn try_main() -> Result<(), HyperdriveError> {
         Args::SrclistConvert { args } => args.run()?,
         Args::SrclistShift { args } => args.run()?,
         Args::SrclistVerify { args } => args.run()?,
+
+        Args::DipoleGains { metafits } => {
+            let meta = mwa_rust_core::mwalib::MetafitsContext::new(&metafits, None).unwrap();
+            let gains = mwa_hyperdrive::data_formats::metafits::get_dipole_gains(&meta);
+            let mut all_unity = vec![];
+            let mut non_unity = vec![];
+            for (i, tile_gains) in gains.outer_iter().enumerate() {
+                if tile_gains
+                    .iter()
+                    .all(|&g| g.is_finite() && (g - 1.0).abs() < f64::EPSILON)
+                {
+                    all_unity.push(i);
+                } else {
+                    non_unity.push((i, tile_gains));
+                }
+            }
+
+            if all_unity.len() == meta.num_ants {
+                info!("All dipoles on all tiles have a gain of 1.0!");
+            } else {
+                info!(
+                    "Tiles with all dipoles alive ({}): {:?}",
+                    all_unity.len(),
+                    all_unity
+                );
+                info!("Other tiles:");
+                let mut bad_x = Vec::with_capacity(16);
+                let mut bad_y = Vec::with_capacity(16);
+                let mut bad_string = String::new();
+                for (tile_num, tile_gains) in non_unity {
+                    let tile_gains = tile_gains.as_slice().unwrap();
+                    tile_gains[..16].iter().enumerate().for_each(|(i, &g)| {
+                        if (g - 1.0).abs() > f64::EPSILON {
+                            bad_x.push(i);
+                        }
+                    });
+                    tile_gains[16..].iter().enumerate().for_each(|(i, &g)| {
+                        if (g - 1.0).abs() > f64::EPSILON {
+                            bad_y.push(i);
+                        }
+                    });
+                    bad_string.push_str(&format!("    Tile {:>3}: ", tile_num));
+                    if !bad_x.is_empty() {
+                        bad_string.push_str(&format!("X {:?}", &bad_x));
+                    }
+                    if !bad_x.is_empty() && !bad_y.is_empty() {
+                        bad_string.push_str(", ");
+                    }
+                    if !bad_y.is_empty() {
+                        bad_string.push_str(&format!("Y {:?}", &bad_y));
+                    }
+                    info!("{}", bad_string);
+                    bad_x.clear();
+                    bad_y.clear();
+                    bad_string.clear();
+                }
+            }
+        }
     }
 
     Ok(())

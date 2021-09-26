@@ -56,14 +56,18 @@ pub(crate) struct ObsContext {
     /// indexed.
     pub(crate) tile_flags: Vec<usize>,
 
+    /// Are auto-correlations present in the visibility data?
+    pub(crate) autocorrelations_present: bool,
+
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
     pub(crate) fine_chan_flags_per_coarse_chan: Vec<usize>,
 
     /// The dipole gains for each tile in the array. The first axis is unflagged
     /// antenna, the second dipole index. These will typically all be of value
-    /// 1.0, except where a dipole is dead (0.0).
-    pub(crate) dipole_gains: Array2<f64>,
+    /// 1.0, except where a dipole is dead (0.0). If this is `None`, then it is
+    /// assumed that all tiles are live.
+    pub(crate) dipole_gains: Option<Array2<f64>>,
 
     /// The time resolution of the supplied data \[seconds\]. This is not
     /// necessarily the native time resolution of the original observation's

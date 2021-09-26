@@ -18,41 +18,40 @@ mod fee;
 pub use error::*;
 pub use fee::*;
 
-use std::path::Path;
-
-use log::{info, trace};
-
 use mwa_rust_core::{AzEl, Jones};
+use ndarray::prelude::*;
+
+#[cfg(feature = "cuda")]
+pub use mwa_hyperbeam_cuda::fee::write_fee_cuda_file;
+
+/// Supported beam types.
+pub enum BeamType {
+    /// Fully-embedded element beam.
+    FEE,
+
+    /// a.k.a. `NoBeam`. Only returns identity matrices.
+    None,
+}
 
 /// A trait abstracting beam code functions.
 pub trait Beam: Sync + Send {
     /// Calculate the Jones matrices for an [AzEl] direction. The pointing
     /// information is not needed because it was provided when `self` was
     /// created.
-    ///
-    /// `amps` *must* have 16 elements (each corresponds to an MWA dipole in a
-    /// tile, in the M&C order; see
-    /// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>.
-    fn calc_jones(&self, azel: AzEl, freq_hz: f64, amps: &[f64]) -> Result<Jones<f64>, BeamError>;
-
-    /// Calculate the Jones matrices for many [AzEl] directions. The pointing
-    /// information is not needed because it was provided when `self` was
-    /// created.
-    ///
-    /// `amps` *must* have 16 or 32 elements (each corresponds to an MWA dipole
-    /// in a tile, in the M&C order; see
-    /// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>.
-    fn calc_jones_array(
+    fn calc_jones(
         &self,
-        azels: &[AzEl],
+        azel: AzEl,
         freq_hz: f64,
-        amps: &[f64],
-    ) -> Result<Vec<Jones<f64>>, BeamError>;
+        tile_index: usize,
+    ) -> Result<Jones<f64>, BeamError>;
 
-    /// Given a frequency in Hz, find the closest frequency that the beam code is
-    /// defined for. This is important because, for example, the FEE beam code
-    /// can only give beam responses at specific frequencies. On the other hand,
-    /// the analytic beam can be used at any frequency.
+    /// Get the type of beam.
+    fn get_beam_type(&self) -> BeamType;
+
+    /// Given a frequency in Hz, find the closest frequency that the beam code
+    /// is defined for. An example of when this is important is with the FEE
+    /// beam code, which can only give beam responses at specific frequencies.
+    /// On the other hand, the analytic beam can be used at any frequency.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
 
     /// Get the size of the [Jones] cache associated with this [Beam].
@@ -66,12 +65,23 @@ pub trait Beam: Sync + Send {
 
     /// If this [Beam] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self);
+
+    #[cfg(feature = "cuda")]
+    fn get_device_pointers(
+        &self,
+        freqs_hz: &[u32],
+    ) -> Option<mwa_hyperbeam_cuda::fee::FEEDeviceCoeffPointers>;
 }
 
 /// An enum to track whether MWA dipole delays are provided and/or necessary.
+#[derive(Debug)]
 pub enum Delays {
-    /// Delays are available.
-    Available(Vec<u32>),
+    /// Delays are fully specified.
+    Full(Array2<u32>),
+
+    /// Delays are specified for a single tile. If this can't be refined, then
+    /// we must assume that these dipoles apply to all tiles.
+    Partial(Vec<u32>),
 
     /// Delays have not been provided, but are necessary for calibration.
     None,
@@ -89,22 +99,17 @@ impl Beam for NoBeam {
         &self,
         _azel: AzEl,
         _freq_hz: f64,
-        _amps: &[f64],
+        _tile_index: usize,
     ) -> Result<Jones<f64>, BeamError> {
         Ok(Jones::identity())
     }
 
-    fn calc_jones_array(
-        &self,
-        azels: &[AzEl],
-        _freq_hz: f64,
-        _amps: &[f64],
-    ) -> Result<Vec<Jones<f64>>, BeamError> {
-        Ok(vec![Jones::identity(); azels.len()])
-    }
-
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
         desired_freq_hz
+    }
+
+    fn get_beam_type(&self) -> BeamType {
+        BeamType::None
     }
 
     // No caches associated with `NoBeam`.
@@ -116,36 +121,19 @@ impl Beam for NoBeam {
     }
     fn empty_cache(&self) {}
     fn empty_coeff_cache(&self) {}
-}
 
-pub fn create_beam_object<T: AsRef<Path>>(
-    no_beam: bool,
-    delays: Delays,
-    beam_file: Option<T>,
-) -> Result<Box<dyn Beam>, BeamError> {
-    if no_beam {
-        info!("Not using a beam");
-        Ok(Box::new(NoBeam))
-    } else {
-        create_fee_beam_object(delays, beam_file)
+    #[cfg(feature = "cuda")]
+    fn get_device_pointers(
+        &self,
+        _freqs_hz: &[u32],
+    ) -> Option<mwa_hyperbeam_cuda::fee::FEEDeviceCoeffPointers> {
+        None
     }
 }
 
-pub fn create_fee_beam_object<T: AsRef<Path>>(
-    delays: Delays,
-    beam_file: Option<T>,
-) -> Result<Box<dyn Beam>, BeamError> {
-    trace!("Setting up FEE beam");
-    let beam = if let Some(bf) = beam_file {
-        // Set up the FEE beam struct from the specified beam file.
-        Box::new(FEEBeam::new(&bf, delays)?)
-    } else {
-        // Set up the FEE beam struct from the MWA_BEAM_FILE environment
-        // variable.
-        Box::new(FEEBeam::new_from_env(delays)?)
-    };
-    info!("Using FEE beam with delays {:?}", beam.get_delays());
-    Ok(beam)
+/// Create a "no beam" object.
+pub fn create_no_beam_object() -> Box<dyn Beam> {
+    Box::new(NoBeam)
 }
 
 #[cfg(test)]
@@ -161,19 +149,9 @@ mod tests {
             AzEl { az: -1.0, el: 0.2 },
         ];
         let beam = NoBeam;
-        let values = beam
-            .calc_jones_array(&azels, 150e6 as _, &[1.0; 16])
-            .unwrap();
-
-        for value in values.into_iter() {
-            assert_abs_diff_eq!(value[0].re, 1.0);
-            assert_abs_diff_eq!(value[0].im, 0.0);
-            assert_abs_diff_eq!(value[1].re, 0.0);
-            assert_abs_diff_eq!(value[1].im, 0.0);
-            assert_abs_diff_eq!(value[2].re, 0.0);
-            assert_abs_diff_eq!(value[2].im, 0.0);
-            assert_abs_diff_eq!(value[3].re, 1.0);
-            assert_abs_diff_eq!(value[3].im, 0.0);
+        for azel in azels {
+            let j = beam.calc_jones(azel, 150e6 as _, 0).unwrap();
+            assert_abs_diff_eq!(j, Jones::identity());
         }
     }
 }

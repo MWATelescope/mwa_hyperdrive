@@ -10,6 +10,7 @@ pub use error::*;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, LN_2};
 
 use ndarray::{parallel::prelude::*, prelude::*};
@@ -21,7 +22,7 @@ use crate::{
 };
 use mwa_hyperdrive_beam::Beam;
 use mwa_hyperdrive_srclist::{ComponentList, GaussianParams, PerComponentParams, ShapeletCoeff};
-use mwa_rust_core::{constants::VEL_C, Complex, Jones, XyzGeodetic, LMN, UVW};
+use mwa_rust_core::{constants::VEL_C, AzEl, Complex, Jones, XyzGeodetic, LMN, UVW};
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 
@@ -56,60 +57,53 @@ pub fn model_timestep(
     tile_xyzs: &[XyzGeodetic],
     uvws: &[UVW],
     unflagged_fine_chan_freqs: &[f64],
+    unflagged_baseline_to_tile_map: &HashMap<usize, (usize, usize)>,
 ) -> Result<(), ModelError> {
     if !components.points.radecs.is_empty() {
-        let beamed_point_fds = components.points.beam_correct_flux_densities(
-            lst_rad,
-            beam,
-            &[1.0; 16],
-            unflagged_fine_chan_freqs,
-        )?;
         model_points(
             vis_model_slice.view_mut(),
+            beam,
+            &components.points.get_azels_mwa_parallel(lst_rad),
             &components.points.lmns,
-            beamed_point_fds.view(),
+            components.points.flux_densities.view(),
             uvws,
             unflagged_fine_chan_freqs,
+            unflagged_baseline_to_tile_map,
         );
     }
 
     if !components.gaussians.radecs.is_empty() {
-        let beamed_gaussian_fds = components.gaussians.beam_correct_flux_densities(
-            lst_rad,
-            beam,
-            &[1.0; 16],
-            unflagged_fine_chan_freqs,
-        )?;
         model_gaussians(
             vis_model_slice.view_mut(),
+            beam,
+            &components.gaussians.get_azels_mwa_parallel(lst_rad),
             &components.gaussians.lmns,
             &components.gaussians.gaussian_params,
-            beamed_gaussian_fds.view(),
+            components.gaussians.flux_densities.view(),
             uvws,
             unflagged_fine_chan_freqs,
+            unflagged_baseline_to_tile_map,
         );
     }
 
     if !components.shapelets.radecs.is_empty() {
-        let beamed_shapelet_fds = components.shapelets.beam_correct_flux_densities(
-            lst_rad,
-            beam,
-            &[1.0; 16],
-            unflagged_fine_chan_freqs,
-        )?;
         let shapelet_uvws = components.shapelets.get_shapelet_uvws(lst_rad, tile_xyzs);
         model_shapelets(
             vis_model_slice.view_mut(),
+            beam,
+            &components.shapelets.get_azels_mwa_parallel(lst_rad),
             &components.shapelets.lmns,
             &components.shapelets.gaussian_params,
             &components.shapelets.shapelet_coeffs,
             shapelet_uvws.view(),
-            beamed_shapelet_fds.view(),
+            components.shapelets.flux_densities.view(),
             uvws,
             unflagged_fine_chan_freqs,
+            unflagged_baseline_to_tile_map,
         );
     }
 
+    beam.empty_cache();
     Ok(())
 }
 
@@ -136,28 +130,60 @@ pub fn model_timestep(
 /// `freqs`: The unflagged fine-channel frequencies to model over \[Hz\]. This
 /// should be the same length as `model_array`'s second axis. Used to divide the
 /// UVW coordinates by wavelength.
-fn model_points(
+pub fn model_points(
     mut model_array: ArrayViewMut2<Jones<f32>>,
+    beam: &dyn Beam,
+    azels: &[AzEl],
     lmns: &[LMN],
-    beam_corrected_fds: ArrayView2<Jones<f64>>,
+    fds: ArrayView2<Jones<f64>>,
     uvws: &[UVW],
     freqs: &[f64],
+    baseline_to_tile_map: &HashMap<usize, (usize, usize)>,
 ) {
-    debug_assert_eq!(model_array.len_of(Axis(0)), uvws.len());
-    debug_assert_eq!(model_array.len_of(Axis(1)), freqs.len());
-    debug_assert_eq!(beam_corrected_fds.len_of(Axis(0)), freqs.len());
-    debug_assert_eq!(beam_corrected_fds.len_of(Axis(1)), lmns.len());
+    debug_assert_eq!(
+        model_array.len_of(Axis(0)),
+        uvws.len(),
+        "model_array.len_of(Axis(0)) != uvws.len()"
+    );
+    debug_assert_eq!(
+        model_array.len_of(Axis(1)),
+        freqs.len(),
+        "model_array.len_of(Axis(1)) != freqs.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(0)),
+        freqs.len(),
+        "fds.len_of(Axis(0)) != freqs.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(1)),
+        azels.len(),
+        "fds.len_of(Axis(1)) != azels.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(1)),
+        lmns.len(),
+        "fds.len_of(Axis(1)) != lmns.len()"
+    );
+    debug_assert_eq!(
+        uvws.len(),
+        baseline_to_tile_map.len(),
+        "uvws.len() != baseline_to_tile_map.len()"
+    );
 
     // Iterate over the unflagged baseline axis.
     model_array
         .outer_iter_mut()
         .into_par_iter()
         .zip(uvws.par_iter())
-        .for_each(|(mut model_bl_axis, uvw_metres)| {
+        .enumerate()
+        .for_each(|(i_baseline, (mut model_bl_axis, uvw_metres))| {
+            let (i_tile1, i_tile2) = baseline_to_tile_map[&i_baseline];
+
             // Unflagged fine-channel axis.
             model_bl_axis
                 .iter_mut()
-                .zip(beam_corrected_fds.outer_iter())
+                .zip(fds.outer_iter())
                 .zip(freqs)
                 .for_each(|((model_vis, comp_fds), freq)| {
                     // Divide UVW by lambda to make UVW dimensionless.
@@ -169,14 +195,25 @@ fn model_points(
                     // the `model_array`.
                     let mut jones_accum: Jones<f64> = Jones::default();
 
-                    comp_fds
-                        .iter()
-                        .zip(lmns.iter())
-                        .for_each(|(comp_fd_c64, lmn)| {
+                    comp_fds.iter().zip(azels.iter()).zip(lmns.iter()).for_each(
+                        |((comp_fd, azel), lmn)| {
                             let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
                             let phase = cexp(arg);
-                            jones_accum += *comp_fd_c64 * phase;
-                        });
+
+                            // Yep, we're unwrapping here. It is *extremely*
+                            // unlikely that beam errors can occur, and if its
+                            // any consolation, there's no error checking in the
+                            // CUDA code...
+                            let mut beam_1 = beam.calc_jones(*azel, *freq, i_tile1).unwrap();
+                            let beam_2 = beam.calc_jones(*azel, *freq, i_tile2).unwrap();
+                            beam_1 *= comp_fd;
+                            beam_1 *= beam_2.h();
+                            // `beam_1` now contains the beam-attenuated
+                            // instrumental flux density.
+
+                            jones_accum += beam_1 * phase;
+                        },
+                    );
                     // Demote to single precision now that all operations are
                     // done.
                     *model_vis += Jones::from(jones_accum);
@@ -209,27 +246,59 @@ fn model_points(
 /// UVW coordinates by wavelength.
 fn model_gaussians(
     mut model_array: ArrayViewMut2<Jones<f32>>,
+    beam: &dyn Beam,
+    azels: &[AzEl],
     lmns: &[LMN],
     gaussian_params: &[GaussianParams],
-    beam_corrected_fds: ArrayView2<Jones<f64>>,
+    fds: ArrayView2<Jones<f64>>,
     uvws: &[UVW],
     freqs: &[f64],
+    baseline_to_tile_map: &HashMap<usize, (usize, usize)>,
 ) {
-    debug_assert_eq!(model_array.len_of(Axis(0)), uvws.len());
-    debug_assert_eq!(model_array.len_of(Axis(1)), freqs.len());
-    debug_assert_eq!(beam_corrected_fds.len_of(Axis(0)), freqs.len());
-    debug_assert_eq!(beam_corrected_fds.len_of(Axis(1)), lmns.len());
+    debug_assert_eq!(
+        model_array.len_of(Axis(0)),
+        uvws.len(),
+        "model_array.len_of(Axis(0)) != uvws.len()"
+    );
+    debug_assert_eq!(
+        model_array.len_of(Axis(1)),
+        freqs.len(),
+        "model_array.len_of(Axis(1)) != freqs.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(0)),
+        freqs.len(),
+        "fds.len_of(Axis(0)) != freqs.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(1)),
+        azels.len(),
+        "fds.len_of(Axis(1)) != azels.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(1)),
+        lmns.len(),
+        "fds.len_of(Axis(1)) != lmns.len()"
+    );
+    debug_assert_eq!(
+        uvws.len(),
+        baseline_to_tile_map.len(),
+        "uvws.len() != baseline_to_tile_map.len()"
+    );
 
     // Iterate over the unflagged baseline axis.
     model_array
         .outer_iter_mut()
         .into_par_iter()
         .zip(uvws.par_iter())
-        .for_each(|(mut model_bl_axis, uvw_metres)| {
+        .enumerate()
+        .for_each(|(i_baseline, (mut model_bl_axis, uvw_metres))| {
+            let (i_tile1, i_tile2) = baseline_to_tile_map[&i_baseline];
+
             // Unflagged fine-channel axis.
             model_bl_axis
                 .iter_mut()
-                .zip(beam_corrected_fds.outer_iter())
+                .zip(fds.outer_iter())
                 .zip(freqs)
                 .for_each(|((model_vis, comp_fds), freq)| {
                     // Divide UVW by lambda to make UVW dimensionless.
@@ -253,13 +322,28 @@ fn model_gaussians(
                     // the `model_array`.
                     let mut jones_accum: Jones<f64> = Jones::default();
 
-                    comp_fds.iter().zip(lmns.iter()).zip(envelopes).for_each(
-                        |((comp_fd_c64, lmn), envelope)| {
+                    comp_fds
+                        .iter()
+                        .zip(azels.iter())
+                        .zip(lmns.iter())
+                        .zip(envelopes)
+                        .for_each(|(((comp_fd, azel), lmn), envelope)| {
                             let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
                             let phase = cexp(arg) * envelope;
-                            jones_accum += *comp_fd_c64 * phase;
-                        },
-                    );
+
+                            // Yep, we're unwrapping here. It is *extremely*
+                            // unlikely that beam errors can occur, and if its
+                            // any consolation, there's no error checking in the
+                            // CUDA code...
+                            let mut beam_1 = beam.calc_jones(*azel, *freq, i_tile1).unwrap();
+                            let beam_2 = beam.calc_jones(*azel, *freq, i_tile2).unwrap();
+                            beam_1 *= comp_fd;
+                            beam_1 *= beam_2.h();
+                            // `beam_1` now contains the beam-attenuated
+                            // instrumental flux density.
+
+                            jones_accum += beam_1 * phase;
+                        });
                     // Demote to single precision now that all operations are
                     // done.
                     *model_vis += Jones::from(jones_accum);
@@ -299,23 +383,57 @@ fn model_gaussians(
 /// UVW coordinates by wavelength.
 fn model_shapelets(
     mut model_array: ArrayViewMut2<Jones<f32>>,
+    beam: &dyn Beam,
+    azels: &[AzEl],
     lmns: &[LMN],
     gaussian_params: &[GaussianParams],
     shapelet_coeffs: &[Vec<ShapeletCoeff>],
     shapelet_uvws: ArrayView2<UVW>,
-    beam_corrected_fds: ArrayView2<Jones<f64>>,
+    fds: ArrayView2<Jones<f64>>,
     uvws: &[UVW],
     freqs: &[f64],
+    baseline_to_tile_map: &HashMap<usize, (usize, usize)>,
 ) {
-    debug_assert_eq!(model_array.len_of(Axis(0)), uvws.len());
-    debug_assert_eq!(model_array.len_of(Axis(0)), shapelet_uvws.len_of(Axis(0)));
-    debug_assert_eq!(model_array.len_of(Axis(1)), freqs.len());
-    debug_assert_eq!(beam_corrected_fds.len_of(Axis(0)), freqs.len());
     debug_assert_eq!(
-        beam_corrected_fds.len_of(Axis(1)),
-        shapelet_uvws.len_of(Axis(1))
+        model_array.len_of(Axis(0)),
+        uvws.len(),
+        "model_array.len_of(Axis(0)) != uvws.len()"
     );
-    debug_assert_eq!(beam_corrected_fds.len_of(Axis(1)), lmns.len());
+    debug_assert_eq!(
+        model_array.len_of(Axis(1)),
+        freqs.len(),
+        "model_array.len_of(Axis(1)) != freqs.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(0)),
+        freqs.len(),
+        "fds.len_of(Axis(0)) != freqs.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(1)),
+        azels.len(),
+        "fds.len_of(Axis(1)) != azels.len()"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(1)),
+        lmns.len(),
+        "fds.len_of(Axis(1)) != lmns.len()"
+    );
+    debug_assert_eq!(
+        uvws.len(),
+        baseline_to_tile_map.len(),
+        "uvws.len() != baseline_to_tile_map.len()"
+    );
+    debug_assert_eq!(
+        model_array.len_of(Axis(0)),
+        shapelet_uvws.len_of(Axis(0)),
+        "model_array.len_of(Axis(0)) != shapelet_uvws.len_of(Axis(0))"
+    );
+    debug_assert_eq!(
+        fds.len_of(Axis(1)),
+        shapelet_uvws.len_of(Axis(1)),
+        "fds.len_of(Axis(1)) != shapelet_uvws.len_of(Axis(1))"
+    );
 
     // Iterate over the unflagged baseline axis.
     model_array
@@ -323,8 +441,11 @@ fn model_shapelets(
         .into_par_iter()
         .zip(uvws.par_iter())
         .zip(shapelet_uvws.outer_iter())
+        .enumerate()
         .for_each(
-            |((mut model_bl_axis, uvw_metres), shapelet_uvws_per_comp)| {
+            |(i_baseline, ((mut model_bl_axis, uvw_metres), shapelet_uvws_per_comp))| {
+                let (i_tile1, i_tile2) = baseline_to_tile_map[&i_baseline];
+
                 // Preallocate a vector for the envelopes.
                 let mut envelopes: Vec<Complex<f64>> =
                     vec![Complex::default(); gaussian_params.len()];
@@ -332,7 +453,7 @@ fn model_shapelets(
                 // Unflagged fine-channel axis.
                 model_bl_axis
                     .iter_mut()
-                    .zip(beam_corrected_fds.outer_iter())
+                    .zip(fds.outer_iter())
                     .zip(freqs)
                     .for_each(|((model_vis, comp_fds), freq)| {
                         // Divide UVW by lambda to make UVW dimensionless.
@@ -405,12 +526,25 @@ fn model_shapelets(
 
                         comp_fds
                             .iter()
+                            .zip(azels.iter())
                             .zip(lmns.iter())
                             .zip(envelopes.iter())
-                            .for_each(|((comp_fd_c64, lmn), envelope)| {
+                            .for_each(|(((comp_fd, azel), lmn), envelope)| {
                                 let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
                                 let phase = cexp(arg) * envelope;
-                                jones_accum += *comp_fd_c64 * phase;
+
+                                // Yep, we're unwrapping here. It is *extremely*
+                                // unlikely that beam errors can occur, and if its
+                                // any consolation, there's no error checking in the
+                                // CUDA code...
+                                let mut beam_1 = beam.calc_jones(*azel, *freq, i_tile1).unwrap();
+                                let beam_2 = beam.calc_jones(*azel, *freq, i_tile2).unwrap();
+                                beam_1 *= comp_fd;
+                                beam_1 *= beam_2.h();
+                                // `beam_1` now contains the beam-attenuated
+                                // instrumental flux density.
+
+                                jones_accum += beam_1 * phase;
                             });
                         // Demote to single precision now that all operations are
                         // done.

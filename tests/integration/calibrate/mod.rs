@@ -24,7 +24,7 @@ fn test_1090008640_woden() {
             "test_files/1090008640_WODEN/output_band01.uvfits",
             "--source-list",
             "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-            "--output-solutions-filename",
+            "--outputs",
             &format!("{}", solutions_path.display()),
         ])
         .ok();
@@ -39,7 +39,9 @@ fn test_1090008640_woden() {
             "test_files/1090008640_WODEN/1090008640.metafits",
             "--source-list",
             "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-            "--output-solutions-filename",
+            #[cfg(feature = "cuda")]
+            "--cpu",
+            "--outputs",
             &format!("{}", solutions_path.display()),
         ])
         .ok();
@@ -65,21 +67,21 @@ fn test_1090008640_woden() {
         "No 'Chanblock' lines found. Has the code changed?"
     );
 
-    let sols = CalibrationSolutions::read_solutions_from_ext(&solutions_path).unwrap();
-    assert_eq!(sols.di_jones.dim(), (1, 128, 32));
+    let bin_sols = CalibrationSolutions::read_solutions_from_ext(&solutions_path).unwrap();
+    assert_eq!(bin_sols.di_jones.dim(), (1, 128, 32));
     assert_abs_diff_eq!(
-        sols.timesteps.first().unwrap().as_gpst_seconds(),
+        bin_sols.timesteps.first().unwrap().as_gpst_seconds(),
         // 1090008642 is the obsid + 2s, which is the centroid of the first and
         // only timestep.
         1090008642.0,
         epsilon = 1e-3
     );
     assert_abs_diff_eq!(
-        sols.timesteps.last().unwrap().as_gpst_seconds(),
+        bin_sols.timesteps.last().unwrap().as_gpst_seconds(),
         1090008642.0,
         epsilon = 1e-3
     );
-    assert!(!sols.di_jones.iter().any(|jones| jones.any_nan()));
+    assert!(!bin_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
     // Re-do calibration, but this time into the hyperdrive fits format.
     let mut solutions_path = tmp_dir.clone();
@@ -93,7 +95,9 @@ fn test_1090008640_woden() {
             "test_files/1090008640_WODEN/1090008640.metafits",
             "--source-list",
             "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-            "--output-solutions-filename",
+            #[cfg(feature = "cuda")]
+            "--cpu",
+            "--outputs",
             &format!("{}", solutions_path.display()),
         ])
         .ok();
@@ -102,7 +106,7 @@ fn test_1090008640_woden() {
     assert!(stderr.is_empty());
 
     let hyp_sols = CalibrationSolutions::read_solutions_from_ext(&solutions_path).unwrap();
-    assert_eq!(hyp_sols.di_jones.dim(), (1, 128, 32));
+    assert_eq!(hyp_sols.di_jones.dim(), bin_sols.di_jones.dim());
     assert_abs_diff_eq!(
         hyp_sols.timesteps.first().unwrap().as_gpst_seconds(),
         1090008642.0,
@@ -115,7 +119,7 @@ fn test_1090008640_woden() {
     );
     assert!(!hyp_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
-    for (a, h) in sols.di_jones.iter().zip(hyp_sols.di_jones.iter()) {
-        assert_abs_diff_eq!(a, h, epsilon = 1e-7);
-    }
+    // This epsilon is surprisingly big! Most of the errors are pretty small,
+    // though... Maybe it's because fits files store things as big endian?
+    assert_abs_diff_eq!(bin_sols.di_jones, hyp_sols.di_jones, epsilon = 1e-7);
 }

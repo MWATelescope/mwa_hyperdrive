@@ -5,7 +5,7 @@
 //! Code to handle reading from and writing to various data container formats.
 
 mod error;
-pub(crate) mod metafits;
+pub mod metafits;
 pub(crate) mod ms;
 pub(crate) mod raw;
 pub(crate) mod uvfits;
@@ -18,22 +18,51 @@ pub(crate) use uvfits::Uvfits;
 use std::collections::{HashMap, HashSet};
 
 use ndarray::prelude::*;
+use strum_macros::{Display, EnumIter, EnumString};
 
 use crate::context::{FreqContext, ObsContext};
 use mwa_rust_core::Jones;
+
+#[derive(Debug)]
+pub(crate) enum VisInputType {
+    Raw,
+    MeasurementSet,
+    Uvfits,
+}
+
+#[derive(Debug, Display, EnumIter, EnumString)]
+pub(crate) enum VisOutputType {
+    #[strum(serialize = "uvfits")]
+    Uvfits,
+}
 
 pub(crate) trait InputData: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
 
     fn get_freq_context(&self) -> &FreqContext;
 
-    /// Read all frequencies and baselines for a single timestep into the
-    /// `data_array`, returning the associated weights.
-    fn read(
+    fn get_input_data_type(&self) -> VisInputType;
+
+    /// Read cross-correlation visibilities for all frequencies and baselines in
+    /// a single timestep into the `data_array` and similar for the weights.
+    fn read_crosses(
         &self,
         data_array: ArrayViewMut2<Jones<f32>>,
+        weights_array: ArrayViewMut2<f32>,
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        flagged_baselines: &HashSet<usize>,
         flagged_fine_chans: &HashSet<usize>,
-    ) -> Result<Array2<f32>, ReadInputDataError>;
+    ) -> Result<(), ReadInputDataError>;
+
+    /// Read auto-correlation visibilities for all frequencies and tiles in a
+    /// single timestep into the `data_array` and similar for the weights.
+    fn read_autos(
+        &self,
+        data_array: ArrayViewMut2<Jones<f32>>,
+        weights_array: ArrayViewMut2<f32>,
+        timestep: usize,
+        flagged_tiles: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(), ReadInputDataError>;
 }

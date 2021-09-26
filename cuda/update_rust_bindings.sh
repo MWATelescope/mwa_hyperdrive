@@ -12,6 +12,7 @@ SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
 bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --allowlist-function "model_.*" \
     --blocklist-type "Addresses" \
+    --blocklist-type "__int8_t" \
     --allowlist-type "RADec" \
     --allowlist-type "UVW" \
     --allowlist-type "LMN" \
@@ -28,6 +29,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/model.h \
 bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --allowlist-function "model_.*" \
     --blocklist-type "Addresses" \
+    --blocklist-type "__int8_t" \
     --allowlist-type "RADec" \
     --allowlist-type "UVW" \
     --allowlist-type "LMN" \
@@ -44,6 +46,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/model.h \
 
 bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-function "model_.*" \
+    --blocklist-type "__uint64_t" \
     --allowlist-function "init_model" \
     --allowlist-function "copy_vis" \
     --allowlist-function "clear_vis" \
@@ -57,6 +60,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
 
 bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-function "model_.*" \
+    --blocklist-type "__uint64_t" \
     --allowlist-function "init_model" \
     --allowlist-function "copy_vis" \
     --allowlist-function "clear_vis" \

@@ -3,6 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::env;
+use std::path::PathBuf;
 
 // This code is adapted from pkg-config-rs
 // (https://github.com/rust-lang/pkg-config-rs).
@@ -22,7 +23,10 @@ fn infer_static(name: &str) -> bool {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+
     // Attempt to read HYPERDRIVE_CUDA_COMPUTE.
+    println!("cargo:rerun-if-env-changed=HYPERDRIVE_CUDA_COMPUTE");
     let compute = match env::var("HYPERDRIVE_CUDA_COMPUTE") {
         Ok(c) => c,
         Err(e) => panic!(
@@ -65,6 +69,12 @@ fn main() {
         }
     }
 
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    // Add the FEE beam code!
+    let mut fee_include = out_dir.clone();
+    fee_include.push("fee.h");
+    mwa_hyperbeam_cuda::fee::write_fee_cuda_file(&fee_include).unwrap();
+
     let mut cuda_target = cc::Build::new();
     cuda_target
         .cuda(true)
@@ -83,7 +93,8 @@ fn main() {
                 _ => "DEBUG",
             },
             None,
-        );
+        )
+        .include(&out_dir);
 
     // If we're told to, use single-precision floats. The default in the CUDA
     // code is to use double-precision.

@@ -7,34 +7,75 @@
 //! This code borrows heavily from Torrance Hodgson's excellent Julia code at
 //! https://github.com/torrance/MWAjl
 
+#[cfg(test)]
+mod tests;
+
+use std::collections::HashMap;
 use std::ops::Deref;
 
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use itertools::Either;
 use log::{debug, info, trace};
 use mwa_hyperdrive_srclist::ComponentList;
+use mwa_rust_core::{
+    math::cross_correlation_baseline_to_tiles, pos::xyz::xyzs_to_cross_uvws_parallel,
+    precession::get_lmst, Jones,
+};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
-use crate::{data_formats::uvfits::UvfitsWriter, model, pos::xyz, precession::precess_time, Jones};
-use mwa_rust_core::math::cross_correlation_baseline_to_tiles;
+use super::{
+    params::CalibrateParams,
+    solutions::{CalSolutionType, CalibrationSolutions},
+    CalibrateError,
+};
+use crate::{
+    data_formats::{uvfits::UvfitsWriter, VisOutputType},
+    model,
+    precession::precess_time,
+};
+
+#[cfg(feature = "cuda")]
+use mwa_hyperdrive_cuda as cuda;
+#[cfg(feature = "cuda")]
+use mwa_hyperdrive_srclist::ComponentListFFI;
 
 /// Do all the steps required for direction-independent calibration; read the
 /// input data, generate a model against it, and write the solutions out.
 pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
+    // Witchcraft to allow this code to be used with or without CUDA support
+    // compiled.
+    #[cfg(not(feature = "cuda"))]
+    let cpu = true;
+    #[cfg(feature = "cuda")]
+    let cpu = params.cpu_vis_gen;
+
+    if cpu {
+        info!("Generating sky model visibilities on the CPU");
+    } else {
+        // TODO: Display GPU info.
+        #[cfg(not(feature = "cuda-single"))]
+        info!("Generating sky model visibilities on the GPU (double precision)");
+        #[cfg(feature = "cuda-single")]
+        info!("Generating sky model visibilities on the GPU (single precision)");
+    }
+
     let obs_context = params.input_data.get_obs_context();
     let freq_context = params.input_data.get_freq_context();
 
     trace!("Allocating memory for input data visibilities and model visibilities");
+    let num_unflagged_cross_baselines = params.unflagged_baseline_to_tile_map.len();
+    let num_unflagged_fine_chans = params.freq.unflagged_fine_chans.len();
     let vis_shape = (
         params.timesteps.len(),
-        params.unflagged_baseline_to_tile_map.len(),
-        params.freq.unflagged_fine_chans.len(),
+        num_unflagged_cross_baselines,
+        num_unflagged_fine_chans,
     );
-    let mut vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::default());
-    let mut vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::default());
+    let mut vis_data: Array3<Jones<f32>> = Array3::zeros(vis_shape);
+    let mut vis_model: Array3<Jones<f32>> = Array3::zeros(vis_shape);
+    let mut vis_weights: Array3<f32> = Array3::zeros(vis_shape);
     debug!(
         "Shape of data and model arrays: ({} timesteps, {} baselines, {} channels; {} MiB each)",
         vis_shape.0,
@@ -52,13 +93,13 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
     info!("Reading input data and sky modelling");
     // Data communication channel. The producer might send an error on this
     // channel; it's up to the worker to propagate it.
-    let (sx_data, rx_data) = unbounded();
+    let (tx_data, rx_data) = unbounded();
     // Model communication channel. The worker might send an error on this
     // channel.
-    let (sx_model, rx_model) = unbounded();
+    let (tx_model, rx_model) = unbounded();
     // Final channel. Used to communicate with the main thread outside the
     // thread scope.
-    let (sx_final, rx_final) = bounded(1);
+    let (tx_final, rx_final) = bounded(1);
 
     // Progress bars. Courtesy Dev.
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
@@ -113,37 +154,41 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
             multi_progress.join().unwrap();
         });
 
-        // Mutable slices of the "global" data and model arrays. These allow
-        // threads to mutate the global arrays in parallel (using the
-        // Arc<Mutex<_>> pattern would kill performance here).
-        let vis_data_slices: Vec<_> = vis_data.outer_iter_mut().collect();
-        let vis_model_slices: Vec<_> = vis_model.outer_iter_mut().collect();
+        // Mutable slices of the "global" arrays. These allow threads to mutate
+        // the global arrays in parallel (using the Arc<Mutex<_>> pattern would
+        // kill performance here).
+        let vis_data_slices = vis_data.outer_iter_mut();
+        let vis_model_slices = vis_model.outer_iter_mut();
+        let vis_weight_slices = vis_weights.outer_iter_mut();
 
-        // Producer (input data reading thread).
+        // Input visibility-data reading thread.
         scope.spawn(move |_| {
-            for ((&timestep, vis_data_slice), vis_model_slice) in params
+            for (((&timestep, vis_data_slice), vis_model_slice), mut vis_weight_slice) in params
                 .timesteps
                 .iter()
                 .zip(vis_data_slices)
                 .zip(vis_model_slices)
+                .zip(vis_weight_slices)
             {
-                let read_result = params.input_data.read(
+                let read_result = params.input_data.read_crosses(
                     vis_data_slice,
+                    vis_weight_slice.view_mut(),
                     timestep,
                     &params.tile_to_unflagged_baseline_map,
+                    &params.baseline_flags,
                     &params.freq.fine_chan_flags,
                 );
                 let read_failed = read_result.is_err();
                 // Send the result of the read to the worker thread.
                 let msg = read_result
-                    .map(|weights| (timestep, vis_model_slice, weights))
+                    .map(|()| (timestep, vis_model_slice, vis_weight_slice))
                     .map_err(CalibrateError::from);
                 // If we can't send the message, it's because the channel has
                 // been closed on the other side. That should only happen
                 // because the worker has exited due to error; in that case,
                 // just exit this thread.
-                match sx_data.send(msg) {
-                    Ok(_) => (),
+                match tx_data.send(msg) {
+                    Ok(()) => (),
                     Err(_) => break,
                 }
                 // If the result of the read was erroneous, then exit now.
@@ -156,20 +201,42 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
             // By dropping the send channel, we signal to the worker thread that
             // there is no more incoming data, and it can stop waiting.
-            drop(sx_data);
+            drop(tx_data);
             read_progress.abandon_with_message("Finished reading input data");
         });
 
-        // Worker (sky-model generation thread). Only one thread receives the
-        // input data, but it is processed in parallel. This is much more
-        // efficient than having slices of the input data being processed
-        // serially by individual threads.
+        // Sky-model generation thread. Only one thread receives the input data,
+        // but it is processed in parallel. This is much more efficient than
+        // having slices of the input data being processed serially by
+        // individual threads.
         scope.spawn(move |_| {
-            let sky_model_comps = ComponentList::new(
-                &params.source_list,
-                &params.freq.unflagged_fine_chan_freqs,
-                obs_context.phase_centre,
-            );
+            // Split the sky-model components (for efficiency). Use an Either to hold
+            // one type or the other (the types differ between CPU and GPU code).
+            let sky_model_comps = if cpu {
+                Either::Left(ComponentList::new(
+                    &params.source_list,
+                    &params.freq.unflagged_fine_chan_freqs,
+                    obs_context.phase_centre,
+                ))
+            } else {
+                #[cfg(feature = "cuda")]
+                {
+                    Either::Right(ComponentListFFI::new(
+                        params.source_list.clone(),
+                        &params.freq.unflagged_fine_chan_freqs,
+                        obs_context.phase_centre,
+                        &crate::shapelets::SHAPELET_BASIS_VALUES,
+                        crate::shapelets::SBF_L,
+                        crate::shapelets::SBF_N,
+                        crate::shapelets::SBF_C,
+                        crate::shapelets::SBF_DX,
+                    ))
+                }
+
+                // It doesn't matter what goes in Right when we're not using CUDA.
+                #[cfg(not(feature = "cuda"))]
+                Either::Right(0)
+            };
 
             // Iterate on the receive channel forever. This terminates when
             // there is no data in the channel _and_ the sender has been
@@ -179,11 +246,11 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     Ok(msg) => msg,
                     Err(e) => {
                         // Propagate the error.
-                        sx_model.send(Err(e)).unwrap();
+                        tx_model.send(Err(e)).unwrap();
                         break;
                     }
                 };
-                debug_assert_eq!(vis_model_slice.dim(), weights.dim());
+                debug_assert_eq!(vis_model_slice.dim(), weights.dim(), "vis_model_slice.dim() != weights.dim()");
 
                 let timestamp = obs_context.timesteps[timestep];
 
@@ -197,39 +264,58 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 // Apply precession to the tile XYZ positions.
                 let precessed_tile_xyzs =
                     precession_info.precess_xyz_parallel(&params.unflagged_tile_xyzs);
-                let uvws = xyz::xyzs_to_uvws(
-                    &precessed_tile_xyzs,
-                    obs_context
-                        .phase_centre
-                        .to_hadec(precession_info.lmst_j2000),
-                );
+                let uvws = xyzs_to_cross_uvws_parallel(&precessed_tile_xyzs, obs_context.phase_centre.to_hadec(precession_info.lmst_j2000));
 
-                let model_result = model::model_timestep(
-                    vis_model_slice.view_mut(),
-                    &sky_model_comps,
-                    params.beam.deref(),
-                    precession_info.lmst_j2000,
-                    &precessed_tile_xyzs,
-                    &uvws,
-                    &params.freq.unflagged_fine_chan_freqs,
-                )
-                .map_err(CalibrateError::from);
+                let model_result = if cpu {
+                    model::model_timestep(
+                        vis_model_slice.view_mut(),
+                        sky_model_comps.as_ref().unwrap_left(),
+                        params.beam.deref(),
+                        precession_info.lmst_j2000,
+                        &precessed_tile_xyzs,
+                        &uvws,
+                        &params.freq.unflagged_fine_chan_freqs,
+                        &params.unflagged_baseline_to_tile_map,
+                    ).map_err(CalibrateError::from)
+                } else {
+                    cfg_if::cfg_if! {
+                        if #[cfg(feature = "cuda")] {
+                            let cuda_uvws: Vec<cuda::UVW> = uvws
+                                .iter()
+                                .map(|&uvw| cuda::UVW {
+                                    u: uvw.u as _,
+                                    v: uvw.v as _,
+                                    w: uvw.w as _,
+                                })
+                                .collect();
+
+                            let cuda_result = sky_model_comps.as_ref().unwrap_right().model_timestep(
+                                params.beam.deref(),
+                                precession_info.lmst_j2000,
+                                &precessed_tile_xyzs,
+                                params.unflagged_baseline_to_tile_map.len(),
+                                cuda_uvws.as_ptr(),
+                                vis_model_slice.as_mut_ptr() as _,
+                            );
+                            // TODO: Handle cuda_result.
+                            if cuda_result != 0 {
+                                panic!(
+                                    "cuda::model_timestep exited with CUDA error code {}",
+                                    cuda_result
+                                );
+                            }
+                            Ok(())
+                        }
+                    }
+                };
                 let model_failed = model_result.is_err();
 
-                if !model_failed {
-                    // Scale the model visibilities by weights.
-                    ndarray::par_azip!(
-                        (vis in &mut vis_model_slice, &weight in &weights)
-                        *vis *= weight
-                    );
-                }
-
-                let msg = model_result.map(|_| (vis_model_slice, weights, uvws, timestamp));
+                let msg = model_result.map(|()| (vis_model_slice, weights, uvws, timestamp));
                 // If we can't send the message, it's because the
                 // channel has been closed on the other side. That
                 // should only happen because the thread has exited due
                 // to error; in that case, just exit this thread.
-                match sx_model.send(msg) {
+                match tx_model.send(msg) {
                     Ok(_) => (),
                     Err(_) => break,
                 }
@@ -241,11 +327,13 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
             }
             model_progress.abandon_with_message("Finished generating sky model");
 
-            drop(sx_model);
+            drop(tx_model);
         });
 
-        // Model writing thread. If the user hasn't specified to write the model
-        // to a file, then this thread just propagates errors.
+        // Model writing thread. It also multiplies model visibilities by
+        // weights *after* the visibilities have been written, such that they're
+        // ready for calibration. If the user hasn't specified to write the
+        // model to a file, then this thread just propagates errors.
         scope.spawn(move |_| {
             // If the user wants the sky model written out, create the file
             // here. This can take a good deal of time; by creating the file in
@@ -259,22 +347,25 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 let create_result = UvfitsWriter::new(
                     model_pb,
                     // Don't include flagged timesteps or flagged baselines.
-                    num_timeblocks,
+                    vis_shape.0,
                     vis_shape.1,
                     // ... but use all channels (including flagged channels).
                     // fits files expect a neat layout.
                     params.freq.num_fine_chans,
+                    false,
                     *start_epoch,
                     freq_context.native_fine_chan_width,
                     centre_freq,
                     params.freq.num_fine_chans / 2,
                     obs_context.phase_centre,
                     obs_name.as_deref(),
+                    &params.unflagged_baseline_to_tile_map,
+                    &params.freq.fine_chan_flags,
                 );
                 // Handle any errors during output model file creation.
                 match create_result {
                     Err(e) => {
-                        sx_final.send(Err(CalibrateError::from(e))).unwrap();
+                        tx_final.send(Err(CalibrateError::from(e))).unwrap();
                         // If there was an error, make the code below exit early
                         // so that this thread does no more work. The error has
                         // already been propagated to the main thread.
@@ -290,9 +381,10 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 Ok(Some(mut model_writer)) => {
                     for msg in rx_model.iter() {
                         // Handle any errors from the worker thread.
-                        let (vis_model_timestep, weights, uvws, epoch) = match msg {
+                        let (mut vis_model_timestep, weights, uvws, epoch) = match msg {
                             Err(e) => {
-                                sx_final.send(Err(e)).unwrap();
+                                tx_final.send(Err(e)).unwrap();
+                                drop(rx_model);
                                 break;
                             }
                             Ok(v) => v,
@@ -300,23 +392,28 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
                         let write_result: Result<(), CalibrateError> = {
                             model_writer
-                                .write_from_vis(
+                                .write_cross_timestep_vis(
                                     vis_model_timestep.view(),
                                     weights.view(),
                                     &uvws,
                                     epoch,
-                                    params.freq.num_fine_chans,
-                                    &params.freq.fine_chan_flags,
                                 )
                                 .map_err(CalibrateError::from)
                         };
                         match write_result {
                             Err(e) => {
-                                sx_final.send(Err(e)).unwrap();
+                                tx_final.send(Err(e)).unwrap();
                                 break;
                             }
                             Ok(()) => (),
                         };
+
+                        // Scale the model visibilities by the weights for
+                        // calibration.
+                        ndarray::par_azip!(
+                            (vis in &mut vis_model_timestep, &weight in &weights)
+                            *vis *= weight
+                        );
 
                         if let Some(pb) = &model_write_progress {
                             pb.inc(1)
@@ -324,28 +421,40 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     }
 
                     // Send the model writer object out to the main thread.
-                    sx_final.send(Ok(Some(model_writer))).unwrap();
+                    tx_final.send(Ok(Some(model_writer))).unwrap();
                 }
 
                 // There's no model to write out, but we still need to handle
-                // all of the incoming messages.
+                // all of the incoming messages and scale the visibilities by
+                // the weights.
                 Ok(None) => {
                     for msg in rx_model.iter() {
-                        // Handle any errors from the worker thread.
-                        if let Err(e) = msg {
-                            sx_final.send(Err(e)).unwrap();
-                            break;
+                        let (mut vis_model_timestep, weights, _uvws, _epoch) = match msg {
+                            // Handle any errors from the worker thread.
+                            Err(e) => {
+                                tx_final.send(Err(e)).unwrap();
+                                break;
+                            },
+                            Ok(v) => v,
                         };
+
+                        // Scale the model visibilities by the weights for
+                        // calibration.
+                        ndarray::par_azip!(
+                            (vis in &mut vis_model_timestep, &weight in &weights)
+                            *vis *= weight
+                        );
                     }
+
                     // Send the model writer object out to the main thread.
-                    sx_final.send(Ok(None)).unwrap();
+                    tx_final.send(Ok(None)).unwrap();
                 }
 
                 // There was an error when creating the model file. Exit now.
                 Err(_) => (),
             }
 
-            drop(sx_final);
+            drop(tx_final);
             if let Some(pb) = model_write_progress {
                 pb.abandon_with_message("Finished writing sky model");
             }
@@ -391,7 +500,6 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
     let total_num_fine_freq_chans = freq_context.fine_chan_freqs.len();
     let shape = (num_timeblocks, num_unflagged_tiles, num_chanblocks);
     let mut sols = CalibrationSolutions {
-        file: params.output_solutions_filename.clone(),
         di_jones: Array3::from_elem(shape, Jones::identity()),
         num_timeblocks,
         total_num_tiles,
@@ -411,7 +519,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         shape.0,
         shape.1,
         shape.2,
-        shape.0 * shape.1 * shape.2 * std::mem::size_of_val(&sols.di_jones[[0, 0, 0]])
+        shape.0 * shape.1 * shape.2 * std::mem::size_of_val(&sols.di_jones[(0, 0, 0)])
         // 1024 * 1024 == 1 MiB.
         / 1024 / 1024
     );
@@ -469,10 +577,194 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         }
     }
 
+    // The model visibilities are no longer needed.
+    drop(vis_model);
+
     // Write out the solutions.
-    trace!("Writing solutions...");
-    sols.write_solutions_from_ext(&params.tile_flags, &params.freq.unflagged_fine_chans)?;
-    info!("Calibration solutions written to {}", sols.file.display());
+    if !params.output_solutions_filenames.is_empty() {
+        info!("Writing solutions...");
+    }
+    for (sol_type, file) in &params.output_solutions_filenames {
+        match sol_type {
+            CalSolutionType::Fits => sols.write_hyperdrive_fits(
+                &file,
+                &params.tile_flags,
+                &params.freq.unflagged_fine_chans,
+            ),
+            CalSolutionType::Bin => sols.write_andre_binary(
+                &file,
+                &params.tile_flags,
+                &params.freq.unflagged_fine_chans,
+            ),
+        }?;
+        info!("Calibration solutions written to {}", file.display());
+    }
+
+    // Write out calibrated visibilities.
+    if !params.output_vis_filenames.is_empty() {
+        info!("Writing visibilities...");
+        // Get the indices of tiles there aren't flagged.
+        let unflagged_tile_indices = {
+            let mut map = HashMap::new();
+            let mut unflagged_tile_index = 0;
+            for i in 0..total_num_tiles {
+                if !params.tile_flags.contains(&i) {
+                    map.insert(i, unflagged_tile_index);
+                    unflagged_tile_index += 1;
+                }
+            }
+            map
+        };
+
+        // "Undo the weights" from the raw data and apply the solutions.
+        vis_data
+            .outer_iter_mut()
+            .into_par_iter()
+            .zip(vis_weights.outer_iter())
+            .for_each(|(mut data_baselines, weights_baselines)| {
+                data_baselines
+                    .outer_iter_mut()
+                    .zip(weights_baselines.outer_iter())
+                    .enumerate()
+                    .for_each(|(i_baseline, (mut data_chans, weights_chans))| {
+                        if let Some(&(tile1, tile2)) =
+                            params.unflagged_baseline_to_tile_map.get(&i_baseline)
+                        {
+                            // Convert the tile numbers to tile indices.
+                            let tile1 = unflagged_tile_indices[&tile1];
+                            let tile2 = unflagged_tile_indices[&tile2];
+                            data_chans
+                                .iter_mut()
+                                .zip(weights_chans.iter())
+                                .enumerate()
+                                .for_each(|(i_freq, (data_chan, weight_chan))| {
+                                    // TODO: This assumes one timeblock
+                                    // TODO: This assumes #freqs == #freqblocks
+                                    let sol1 = sols.di_jones[(0, tile1, i_freq)];
+                                    let sol2 = sols.di_jones[(0, tile2, i_freq)];
+                                    // Promote the data before demoting it again.
+                                    let mut d: Jones<f64> = Jones::from(*data_chan);
+                                    // Divide by the weight.
+                                    d /= *weight_chan as f64;
+                                    // Solutions need to be inverted, because
+                                    // they're currently stored as something
+                                    // that goes from model to data, not data to
+                                    // model.
+                                    // J1 * D * J2^H
+                                    d = sol1.inv() * d;
+                                    d *= sol2.inv().h();
+                                    *data_chan = d.into();
+                                });
+                        } else {
+                            data_chans.fill(Jones::nan())
+                        }
+                    });
+            });
+    }
+    for (vis_type, file) in &params.output_vis_filenames {
+        match vis_type {
+            // TODO: Make this an obs_context method?
+            VisOutputType::Uvfits => {
+                // We don't want to use `params.freq.fine_chan_flags` because
+                // we're handling the flagging ourselves here.
+                let flagged_fine_chans = std::collections::HashSet::new();
+                let obs_name = obs_context.obsid.map(|o| format!("MWA obsid {}", o));
+                let num_fine_chans = freq_context.fine_chan_freqs.len();
+                let mut writer = UvfitsWriter::new(
+                    &file,
+                    params.timesteps.len(),
+                    params.get_num_baselines(),
+                    params.freq.num_fine_chans,
+                    params.using_autos,
+                    obs_context.timesteps[params.timesteps[0]],
+                    freq_context.native_fine_chan_width,
+                    freq_context.fine_chan_freqs[num_fine_chans / 2],
+                    num_fine_chans / 2,
+                    obs_context.phase_centre,
+                    obs_name.as_deref(),
+                    &params.unflagged_baseline_to_tile_map,
+                    &flagged_fine_chans,
+                )?;
+
+                // We can't write out the cross- and auto-correlation visibility
+                // arrays as they are, because they are smaller than the output
+                // uvfits expects (we don't include flagged channels in the
+                // arrays). Copy the slices into proper sized arrays.
+                let num_unflagged_tiles = params.unflagged_tile_names.len();
+                let mut cross_vis_proper =
+                    Array2::zeros((num_unflagged_cross_baselines, num_fine_chans));
+                let mut cross_weights_proper =
+                    Array2::zeros((num_unflagged_cross_baselines, num_fine_chans));
+
+                for (timestep_index, &timestep) in params.timesteps.iter().enumerate() {
+                    let mut i_unflagged_baseline = 0;
+                    cross_vis_proper
+                        .outer_iter_mut()
+                        .zip(cross_weights_proper.outer_iter_mut())
+                        .enumerate()
+                        .filter(|(i_baseline, _)| !params.baseline_flags.contains(i_baseline))
+                        .for_each(|(_, (mut vis_proper, mut weights_proper))| {
+                            let mut i_unflagged_fine_freq_chan = 0;
+
+                            vis_proper
+                                .iter_mut()
+                                .zip(weights_proper.iter_mut())
+                                .enumerate()
+                                .filter(|(i_fine_freq_chan, _)| {
+                                    params.freq.unflagged_fine_chans.contains(i_fine_freq_chan)
+                                })
+                                .for_each(|(_, (proper_vis, proper_weight))| {
+                                    *proper_vis = vis_data[(
+                                        timestep_index,
+                                        i_unflagged_baseline,
+                                        i_unflagged_fine_freq_chan,
+                                    )];
+                                    *proper_weight = vis_weights[(
+                                        timestep_index,
+                                        i_unflagged_baseline,
+                                        i_unflagged_fine_freq_chan,
+                                    )];
+
+                                    i_unflagged_fine_freq_chan += 1;
+                                });
+
+                            i_unflagged_baseline += 1;
+                        });
+
+                    // Write out the visibilities.
+                    let epoch = obs_context.timesteps[timestep];
+                    let uvws = xyzs_to_cross_uvws_parallel(
+                        &obs_context.tile_xyzs,
+                        obs_context
+                            .phase_centre
+                            .to_hadec(get_lmst(epoch, params.array_longitude)),
+                    );
+
+                    if params.using_autos {
+                        writer.write_cross_and_auto_timestep_vis(
+                            cross_vis_proper.view(),
+                            cross_weights_proper.view(),
+                            Array2::zeros((num_unflagged_tiles, num_fine_chans)).view(),
+                            Array2::ones((num_unflagged_tiles, num_fine_chans)).view(),
+                            &uvws,
+                            epoch,
+                        )?;
+                    } else {
+                        writer.write_cross_timestep_vis(
+                            cross_vis_proper.view(),
+                            cross_weights_proper.view(),
+                            &uvws,
+                            epoch,
+                        )?;
+                    }
+                }
+
+                writer
+                    .write_uvfits_antenna_table(&obs_context.tile_names, &obs_context.tile_xyzs)?;
+            }
+        }
+        info!("Calibrated visibilities written to {}", file.display());
+    }
 
     Ok(())
 }
@@ -491,7 +783,7 @@ fn calibrate_timeblock(
     progress_bar_msg: String,
 ) -> usize {
     let num_chanblocks = chanblocks.len();
-    let num_unflagged_tiles = solutions.di_jones.dim().1;
+    let num_tiles = solutions.di_jones.dim().1;
     let mut di_jones_rev = solutions
         .di_jones
         .slice_mut(s![timeblock, .., ..])
@@ -532,7 +824,7 @@ fn calibrate_timeblock(
             cal_result.chanblock_index = Some(chanblock_index);
 
             let mut status_str = format!("Chanblock {:>3}", chanblock);
-            if num_unflagged_tiles - cal_result.num_failed <= 4 {
+            if num_tiles - cal_result.num_failed <= 4 {
                 status_str.push_str(&format!(
                     ": failed    ({:>2}): Too many antenna solutions failed ({})",
                     cal_result.num_iterations, cal_result.num_failed
@@ -657,7 +949,7 @@ fn calibrate_timeblock(
                         new_cal_result.chanblock_index = Some(chanblock_index);
 
                         let mut status_str = format!("Chanblock {:>3}", chanblock);
-                        if num_unflagged_tiles - new_cal_result.num_failed <= 4 {
+                        if num_tiles - new_cal_result.num_failed <= 4 {
                             status_str.push_str(&format!(
                                 ": failed    ({:>2}): Too many antenna solutions failed ({})",
                                 new_cal_result.num_iterations, new_cal_result.num_failed
@@ -729,9 +1021,9 @@ fn calibrate(
 ) -> CalibrationResult {
     debug_assert_eq!(data.dim(), model.dim());
 
-    let mut new_jones: Array1<Jones<f64>> = Array::from_elem(di_jones.dim(), Jones::default());
-    let mut top: Array1<Jones<f64>> = Array::from_elem(di_jones.dim(), Jones::default());
-    let mut bot: Array1<Jones<f64>> = Array::from_elem(di_jones.dim(), Jones::default());
+    let mut new_jones: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
+    let mut top: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
+    let mut bot: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
     // The convergence precisions per antenna. They are stored per polarisation
     // for programming convenience, but really only we're interested in the
     // largest value in the entire array.
@@ -739,7 +1031,7 @@ fn calibrate(
     let mut failed: Array1<bool> = Array1::from_elem(di_jones.len(), false);
 
     // Shortcuts.
-    let num_unflagged_tiles = di_jones.len_of(Axis(0));
+    let num_tiles = di_jones.len_of(Axis(0));
 
     let mut iteration = 0;
     while iteration < max_iterations {
@@ -767,8 +1059,8 @@ fn calibrate(
                     .zip(top.iter())
                     .zip(bot.iter())
                     .for_each(|(((di_jones, new_jones), top), bot)| {
-                        *new_jones = *top / bot;
-                        if new_jones.any_nan() {
+                        let div = *top / bot;
+                        if div.any_nan() {
                             *failed = true;
                             *di_jones = Jones::default();
                             *new_jones = Jones::default();
@@ -778,7 +1070,7 @@ fn calibrate(
 
         // More than 4 antenna need to be present to get a good solution.
         let num_failed = failed.iter().filter(|&&f| f).count();
-        if num_unflagged_tiles - num_failed <= 4 {
+        if num_tiles - num_failed <= 4 {
             break;
         }
 
@@ -798,6 +1090,7 @@ fn calibrate(
                 .for_each(|(((mut di_jones, new_jones), mut antenna_precision), _)| {
                     // antenna_precision = sum(norm_sqr(new_jones - di_jones)) / num_freqs
                     let jones_diff_sum = (&new_jones - &di_jones).into_iter().fold(
+                        // TODO: Use a stack array instead of a heap-allocated one
                         Array1::zeros(4),
                         |acc, diff_jones| {
                             let norm = diff_jones.norm_sqr();
@@ -816,8 +1109,8 @@ fn calibrate(
                 break;
             }
         } else {
-            // On odd iterations, we simply update the DI Jones matrices with
-            // the new ones.
+            // On odd iterations, update the DI Jones matrices with the new
+            // ones.
             di_jones.assign(&new_jones);
         }
     }
@@ -849,7 +1142,7 @@ fn calibrate(
     let converged = {
         // If only 4 or fewer antennas remain, or we never reached the minimum
         // threshold level, mark the solution as failed.
-        if num_unflagged_tiles - num_failed <= 4 || max_precision > min_threshold {
+        if num_tiles - num_failed <= 4 || max_precision > min_threshold {
             di_jones.fill(Jones::nan());
             false
         }
@@ -877,7 +1170,7 @@ fn calibration_loop(
     mut top: ArrayViewMut1<Jones<f64>>,
     mut bot: ArrayViewMut1<Jones<f64>>,
 ) {
-    let num_unflagged_tiles = di_jones.len_of(Axis(0));
+    let num_tiles = di_jones.len_of(Axis(0));
 
     // Time axis.
     data.outer_iter()
@@ -888,11 +1181,8 @@ fn calibration_loop(
                 .outer_iter()
                 .zip(model_time.outer_iter())
                 .enumerate()
-                .for_each(|(unflagged_bl_index, (data_bl, model_bl))| {
-                    let (tile1, tile2) = cross_correlation_baseline_to_tiles(
-                        num_unflagged_tiles,
-                        unflagged_bl_index,
-                    );
+                .for_each(|(i_baseline, (data_bl, model_bl))| {
+                    let (tile1, tile2) = cross_correlation_baseline_to_tiles(num_tiles, i_baseline);
 
                     // Unflagged frequency chan axis.
                     data_bl
@@ -923,6 +1213,7 @@ fn calibration_loop(
                                 let top_t2 = top.uget_mut(tile2);
                                 let bot_t2 = bot.uget_mut(tile2);
 
+                                // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
                                 // J (M^H)^H
                                 let z = *j_t1 * j_model;
                                 // D^H (J M^H)^H
@@ -930,7 +1221,7 @@ fn calibration_loop(
                                 // (J M^H) (J M^H)
                                 *bot_t2 += z.h() * z;
                             }
-                        })
+                        });
                 })
         });
 }

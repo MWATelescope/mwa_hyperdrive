@@ -8,6 +8,9 @@ mod error;
 mod read;
 mod write;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) use error::*;
 pub(crate) use read::*;
 pub(crate) use write::*;
@@ -15,6 +18,8 @@ pub(crate) use write::*;
 use std::ffi::CString;
 
 use hifitime::Epoch;
+
+use super::*;
 
 /// From a `hifitime` [Epoch], get a formatted date string with the hours,
 /// minutes and seconds set to 0.
@@ -64,33 +69,5 @@ fn decode_uvfits_baseline(bl: usize) -> (usize, usize) {
         let ant2 = (bl - 65_536) % 2048;
         let ant1 = (bl - ant2 - 65_536) / 2048;
         (ant1, ant2)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_truncated_date_str() {
-        let mjd = 56580.575370370374;
-        let mjd_seconds = mjd * 24.0 * 3600.0;
-        // The number of seconds between 1858-11-17T00:00:00 (MJD epoch) and
-        // 1900-01-01T00:00:00 (TAI epoch) is 1297728000.
-        let epoch_diff = 1297728000.0;
-        let epoch = Epoch::from_tai_seconds(mjd_seconds - epoch_diff);
-        assert_eq!(get_truncated_date_string(epoch), "2013-10-15T00:00:00.0");
-    }
-
-    #[test]
-    fn test_encode_uvfits_baseline() {
-        assert_eq!(encode_uvfits_baseline(1, 1), 257);
-        // TODO: Test the other part of the if statement.
-    }
-
-    #[test]
-    fn test_decode_uvfits_baseline() {
-        assert_eq!(decode_uvfits_baseline(257), (1, 1));
-        // TODO: Test the other part of the if statement.
     }
 }

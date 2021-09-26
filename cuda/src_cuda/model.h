@@ -62,10 +62,15 @@ int model_shapelets(const Shapelets *shapelets, const Addresses *a);
  * mutated and should be completely full of zeros before this function is
  * called.
  */
-int model_timestep(const size_t num_baselines, const size_t num_freqs, const UVW *uvws, const FLOAT *freqs,
-                   const Points *points, const Gaussians *gaussians, const Shapelets *shapelets,
-                   const FLOAT *shapelet_basis_values, const size_t sbf_l, const size_t sbf_n, const FLOAT sbf_c,
-                   const FLOAT sbf_dx, JonesF32 *vis);
+int model_timestep_no_beam(int num_baselines, int num_freqs, UVW *uvws, FLOAT *freqs, Points *points,
+                           Gaussians *gaussians, Shapelets *shapelets, FLOAT *shapelet_basis_values, int sbf_l,
+                           int sbf_n, FLOAT sbf_c, FLOAT sbf_dx, JonesF32 *vis);
+
+int model_timestep_fee_beam(int num_baselines, int num_freqs, int num_tiles, UVW *uvws, FLOAT *freqs, Points *points,
+                            Gaussians *gaussians, Shapelets *shapelets, FLOAT *shapelet_basis_values, int sbf_l,
+                            int sbf_n, FLOAT sbf_c, FLOAT sbf_dx, void *d_beam_coeffs, int num_beam_coeffs,
+                            int num_unique_fee_tiles, int num_unique_fee_freqs, uint64_t *d_beam_jones_map,
+                            void *d_beam_norm_jones, JonesF32 *vis);
 
 #ifdef __cplusplus
 } // extern "C"

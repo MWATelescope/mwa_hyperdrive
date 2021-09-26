@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 use std::ffi::CString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use erfa_sys::{ERFA_DJM0, ERFA_WGS84};
 use fitsio::{errors::check_status as fits_check_status, FitsFile};
@@ -16,16 +16,14 @@ use ndarray::prelude::*;
 use super::*;
 use mwa_rust_core::{
     constants::{MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD, VEL_C},
-    erfa_sys,
-    math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_baselines},
-    mwalib, Jones, RADec, XyzGeocentric, XyzGeodetic, UVW,
+    erfa_sys, mwalib, Jones, RADec, XyzGeocentric, XyzGeodetic, UVW,
 };
 use mwalib::{fitsio, fitsio_sys};
 
 /// A helper struct to write out a uvfits file.
 pub(crate) struct UvfitsWriter<'a> {
     /// The path to the uvifts file.
-    path: &'a Path,
+    path: PathBuf,
 
     /// The number of timesteps to be written.    
     num_timesteps: usize,
@@ -50,6 +48,25 @@ pub(crate) struct UvfitsWriter<'a> {
     /// A `hifitime` [Epoch] struct associated with the first timestep of the
     /// data.
     start_epoch: Epoch,
+
+    /// Are autocorrelations accompanying the cross-correlation visibilities?
+    autocorrelations_present: bool,
+
+    /// A map from an unflagged cross-correlation baseline to its constituent
+    /// antennas.
+    unflagged_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
+
+    /// Unflagged tile indices. uvfits must internally refer to tiles in the
+    /// antenna tables by their indices, not by MWA tile indices. Ascendingly
+    /// sorted.
+    unflagged_ants: Vec<usize>,
+
+    /// A map between unflagged antenna indices and uvifts antenna indices.
+    unflagged_antenna_map: HashMap<usize, usize>,
+
+    /// A set of channels that are flagged; in the output file, these channels
+    /// and will contain only zeroes.
+    flagged_channels: &'a HashSet<usize>,
 }
 
 impl<'a> UvfitsWriter<'a> {
@@ -57,26 +74,29 @@ impl<'a> UvfitsWriter<'a> {
     ///
     /// If `fine_chan_width_hz` is unknown, then zero is written at the FREQ
     /// CDELT.
-    pub(crate) fn new(
-        filename: &'a Path,
+    pub(crate) fn new<T: AsRef<Path>>(
+        filename: T,
         num_timesteps: usize,
         num_baselines: usize,
         num_chans: usize,
+        autocorrelations_present: bool,
         start_epoch: Epoch,
         fine_chan_width_hz: Option<f64>,
         centre_freq_hz: f64,
         centre_freq_chan: usize,
         phase_centre: RADec,
         obs_name: Option<&str>,
-    ) -> Result<Self, UvfitsWriteError> {
+        unflagged_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
+        flagged_channels: &'a HashSet<usize>,
+    ) -> Result<UvfitsWriter<'a>, UvfitsWriteError> {
         // Delete any file that already exists.
-        if filename.exists() {
+        if filename.as_ref().exists() {
             std::fs::remove_file(&filename)?;
         }
 
         // Create a new fits file.
         let mut status = 0;
-        let c_filename = CString::new(filename.to_str().unwrap())?;
+        let c_filename = CString::new(filename.as_ref().to_str().unwrap())?;
         let mut fptr = std::ptr::null_mut();
         unsafe {
             fitsio_sys::ffinit(
@@ -205,8 +225,25 @@ impl<'a> UvfitsWriter<'a> {
             format!("v{}", env!("CARGO_PKG_VERSION")),
         )?;
 
+        // Get the unflagged tile indices; get the unique tiles in the baseline
+        // map.
+        let mut unflagged_antenna_set = HashSet::new();
+        for &(tile1, tile2) in unflagged_baseline_to_ants_map.values() {
+            unflagged_antenna_set.insert(tile1);
+            unflagged_antenna_set.insert(tile2);
+        }
+        // Convert the set to a vector and sort it.
+        let mut unflagged_ants: Vec<usize> = unflagged_antenna_set.into_iter().collect();
+        unflagged_ants.sort_unstable();
+        // Make a map between unflagged antennas and uvfits antennas.
+        let unflagged_antenna_map: HashMap<usize, usize> = unflagged_ants
+            .iter()
+            .enumerate()
+            .map(|(uvfits_ant, &ant)| (ant, uvfits_ant))
+            .collect();
+
         Ok(Self {
-            path: filename,
+            path: filename.as_ref().to_path_buf(),
             num_timesteps,
             num_baselines,
             num_chans,
@@ -214,6 +251,11 @@ impl<'a> UvfitsWriter<'a> {
             current_num_rows: 0,
             centre_freq: centre_freq_hz,
             start_epoch,
+            autocorrelations_present,
+            unflagged_baseline_to_ants_map,
+            unflagged_ants,
+            unflagged_antenna_map,
+            flagged_channels,
         })
     }
 
@@ -500,7 +542,7 @@ impl<'a> UvfitsWriter<'a> {
         tile_index1: usize,
         tile_index2: usize,
         epoch: Epoch,
-        vis: &[f32],
+        row: &mut [f32],
     ) -> Result<(), UvfitsWriteError> {
         if self.current_num_rows + 1 > self.total_num_rows {
             return Err(UvfitsWriteError::BadRowNum {
@@ -509,17 +551,13 @@ impl<'a> UvfitsWriter<'a> {
             });
         }
 
-        let mut row = Vec::with_capacity(5 + vis.len());
-        row.push((uvw.u / VEL_C) as f32);
-        row.push((uvw.v / VEL_C) as f32);
-        row.push((uvw.w / VEL_C) as f32);
-        row.push(encode_uvfits_baseline(tile_index1 + 1, tile_index2 + 1) as f32);
+        row[0] = (uvw.u / VEL_C) as f32;
+        row[1] = (uvw.v / VEL_C) as f32;
+        row[2] = (uvw.w / VEL_C) as f32;
+        row[3] = encode_uvfits_baseline(tile_index1 + 1, tile_index2 + 1) as f32;
         let jd_trunc = self.start_epoch.as_jde_utc_days().floor() + 0.5;
         let jd_frac = epoch.as_jde_utc_days() - jd_trunc;
-        row.push(jd_frac as f32);
-        for &v in vis {
-            row.push(v);
-        }
+        row[4] = jd_frac as f32;
 
         let mut status = 0;
         unsafe {
@@ -537,133 +575,186 @@ impl<'a> UvfitsWriter<'a> {
         Ok(())
     }
 
-    /// Assumes that `vis_array` has already had `weights` applied; these need
-    /// to be undone locally by this function.
-    // TODO: Assumes that all fine channels are written for all baselines in
-    // `vis_array.`
-    pub(crate) fn write_from_vis(
+    /// Write cross-correlation visibilities contained in `cross_vis` to the
+    /// uvfits file. The first axis of `cross_vis` corresponds to baselines, the
+    /// second frequencies. This function assumes that visibilities do not
+    /// already have weights applied to them.
+    // TODO: Assumes that all baselines and fine channels are written for a
+    // single timestep.
+    pub(crate) fn write_cross_timestep_vis(
         &mut self,
-        vis_array: ArrayView2<Jones<f32>>,
-        weights: ArrayView2<f32>,
+        cross_vis: ArrayView2<Jones<f32>>,
+        cross_weights: ArrayView2<f32>,
         uvws: &[UVW],
         epoch: Epoch,
-        num_fine_chans: usize,
-        fine_chan_flags: &HashSet<usize>,
     ) -> Result<(), UvfitsWriteError> {
-        let num_unflagged_baselines = vis_array.len_of(Axis(0));
-        let num_unflagged_tiles = num_tiles_from_num_baselines(num_unflagged_baselines);
+        let mut uvfits = self.open()?;
+
+        let num_cross_baselines = cross_vis.len_of(Axis(0));
+        let num_chans = cross_vis.len_of(Axis(1));
+        debug_assert_eq!(num_cross_baselines, uvws.len());
+        debug_assert_eq!(num_cross_baselines, self.num_baselines);
+        debug_assert_eq!(num_chans, self.num_chans);
+
         // Write out all the baselines of the timestep we received.
-        let mut vis: Vec<f32> = Vec::with_capacity(12 * num_fine_chans);
-        for (unflagged_bl, uvw) in (0..num_unflagged_baselines).into_iter().zip(uvws.iter()) {
-            // uvfits expects the tile numbers to be from 1 to the total number
-            // of tiles sequentially, so don't use the actual unflagged tile
-            // numbers.
-            let (tile1, tile2) =
-                cross_correlation_baseline_to_tiles(num_unflagged_tiles, unflagged_bl);
-            let mut unflagged_chan_index = 0;
-            for fine_chan_index in 0..num_fine_chans {
-                if fine_chan_flags.contains(&fine_chan_index) {
-                    vis.extend_from_slice(&[0.0; 12])
-                } else {
-                    let weight = unsafe { weights.uget((unflagged_bl, unflagged_chan_index)) };
-                    let jones = *(unsafe { vis_array.uget((unflagged_bl, unflagged_chan_index)) })
-                        // Undo the weight.
-                        * (1.0 / weight);
-                    unflagged_chan_index += 1;
-                    vis.extend_from_slice(&[
-                        // XX
-                        jones[0].re,
-                        jones[0].im,
-                        *weight,
-                        // YY
-                        jones[3].re,
-                        jones[3].im,
-                        *weight,
-                        // XY
-                        jones[1].re,
-                        jones[1].im,
-                        *weight,
-                        // YX
-                        jones[2].re,
-                        jones[2].im,
-                        *weight,
-                    ]);
-                };
-            }
-            let mut uvfits = self.open()?;
-            self.write_vis(&mut uvfits, *uvw, tile1, tile2, epoch, &vis)?;
+        let mut vis: Vec<f32> = Vec::with_capacity(5 + 12 * self.num_chans);
+        // Ignore the first 5 elements; those get overwritten with group
+        // parameters.
+        vis.extend_from_slice(&[0.0; 5]);
+        for (baseline, uvw) in (0..num_cross_baselines).into_iter().zip(uvws.iter()) {
+            let (ant1, ant2) = match self.unflagged_baseline_to_ants_map.get(&baseline) {
+                Some(&(ant1, ant2)) => (ant1, ant2),
+                None => continue,
+            };
+            self.unpack_freqs(
+                &mut vis,
+                cross_vis.index_axis(Axis(0), baseline),
+                cross_weights.index_axis(Axis(0), baseline),
+            );
+            // Convert the antenna indices to uvfits antenna indices.
+            let uvfits_ant1 = self.unflagged_antenna_map[&ant1];
+            let uvfits_ant2 = self.unflagged_antenna_map[&ant2];
+            self.write_vis(&mut uvfits, *uvw, uvfits_ant1, uvfits_ant2, epoch, &mut vis)?;
             vis.clear();
+            vis.extend_from_slice(&[0.0; 5]);
         }
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mwa_rust_core::time::gps_to_epoch;
-    use tempfile::NamedTempFile;
+    /// Write cross- and auto-correlation visibilities (contained in
+    /// `cross_vis` and `auto_vis`, respectively) to the uvfits file. The
+    /// first axis of `cross_vis` corresponds to baselines, the second
+    /// frequencies. This function assumes that visibilities do not already have
+    /// weights applied to them.
+    // TODO: Assumes that all baselines and fine channels are written for a
+    // single timestep.
+    pub(crate) fn write_cross_and_auto_timestep_vis(
+        &mut self,
+        cross_vis: ArrayView2<Jones<f32>>,
+        cross_weights: ArrayView2<f32>,
+        auto_vis: ArrayView2<Jones<f32>>,
+        auto_weights: ArrayView2<f32>,
+        uvws: &[UVW],
+        epoch: Epoch,
+    ) -> Result<(), UvfitsWriteError> {
+        let mut uvfits = self.open()?;
 
-    #[test]
-    // Make a tiny uvfits file. The result has been verified by CASA's
-    // "importuvfits" function.
-    fn test_new_uvfits_is_sensible() {
-        let tmp_uvfits_file = NamedTempFile::new().unwrap();
-        let num_timesteps = 1;
-        let num_baselines = 3;
-        let num_chans = 2;
-        let obsid = 1065880128.0;
-        let start_epoch = gps_to_epoch(obsid);
+        let num_cross_baselines = cross_vis.len_of(Axis(0));
+        let num_chans = cross_vis.len_of(Axis(1));
+        let num_antennas = auto_vis.len_of(Axis(0));
+        debug_assert_eq!(self.unflagged_ants.len(), num_antennas);
+        debug_assert_eq!((num_antennas * (num_antennas - 1)) / 2, num_cross_baselines);
+        debug_assert_eq!(num_cross_baselines, uvws.len());
+        debug_assert_eq!(num_cross_baselines, self.num_baselines - num_antennas);
+        debug_assert_eq!(num_chans, self.num_chans);
 
-        let mut u = UvfitsWriter::new(
-            tmp_uvfits_file.path(),
-            num_timesteps,
-            num_baselines,
-            num_chans,
-            start_epoch,
-            Some(40e3),
-            170e6,
-            3,
-            RADec::new_degrees(0.0, 60.0),
-            Some("test"),
-        )
-        .unwrap();
+        // Write out all the baselines of the timestep we received.
+        let mut vis: Vec<f32> = Vec::with_capacity(5 + 12 * self.num_chans);
+        // Ignore the first 5 elements; those get overwritten with group
+        // parameters.
+        vis.extend_from_slice(&[0.0; 5]);
+        let mut auto_ant_index = 0;
+        for (baseline, uvw) in (0..num_cross_baselines).into_iter().zip(uvws.iter()) {
+            let (cross_ant1, cross_ant2) = match self.unflagged_baseline_to_ants_map.get(&baseline)
+            {
+                Some(&(ant1, ant2)) => (ant1, ant2),
+                None => continue,
+            };
 
-        let mut f = u.open().unwrap();
-        for _timestep_index in 0..num_timesteps {
-            for baseline_index in 0..num_baselines {
-                let (tile1, tile2) = match baseline_index {
-                    0 => (0, 1),
-                    1 => (0, 2),
-                    2 => (1, 2),
-                    _ => unreachable!(),
-                };
-
-                u.write_vis(
-                    &mut f,
+            // Before we write cross-correlations, write out the autos. We know
+            // when this needs to be if `cross_ant1` has changed as we iterate
+            // over cross-correlation baselines.
+            while self.unflagged_ants[auto_ant_index] <= cross_ant1 {
+                self.unpack_freqs(
+                    &mut vis,
+                    auto_vis.index_axis(Axis(0), auto_ant_index),
+                    auto_weights.index_axis(Axis(0), auto_ant_index),
+                );
+                let auto_ant = self.unflagged_ants[auto_ant_index];
+                self.write_vis(
+                    &mut uvfits,
                     UVW::default(),
-                    tile1,
-                    tile2,
-                    start_epoch,
-                    (baseline_index..baseline_index + num_chans)
-                        .into_iter()
-                        .map(|int| int as f32)
-                        .collect::<Vec<_>>()
-                        .as_slice(),
-                )
-                .unwrap();
+                    auto_ant,
+                    auto_ant,
+                    epoch,
+                    &mut vis,
+                )?;
+                vis.clear();
+                vis.extend_from_slice(&[0.0; 5]);
+                auto_ant_index += 1;
             }
+
+            // Write the cross-correlation visibilities for this baseline.
+            self.unpack_freqs(
+                &mut vis,
+                cross_vis.index_axis(Axis(0), baseline),
+                cross_weights.index_axis(Axis(0), baseline),
+            );
+            // Convert the cross antenna indices to uvfits antenna indices.
+            let uvfits_ant1 = self.unflagged_antenna_map[&cross_ant1];
+            let uvfits_ant2 = self.unflagged_antenna_map[&cross_ant2];
+            self.write_vis(&mut uvfits, *uvw, uvfits_ant1, uvfits_ant2, epoch, &mut vis)?;
+            vis.clear();
+            vis.extend_from_slice(&[0.0; 5]);
         }
 
-        let names = ["Tile1", "Tile2", "Tile3"];
-        let positions: Vec<XyzGeodetic> = (0..names.len())
-            .into_iter()
-            .map(|i| XyzGeodetic {
-                x: i as f64,
-                y: i as f64 * 2.0,
-                z: i as f64 * 3.0,
-            })
-            .collect();
-        u.write_uvfits_antenna_table(&names, &positions).unwrap();
+        // Don't forget the last set of auto-correlations.
+        while auto_ant_index < num_antennas {
+            self.unpack_freqs(
+                &mut vis,
+                auto_vis.index_axis(Axis(0), auto_ant_index),
+                auto_weights.index_axis(Axis(0), auto_ant_index),
+            );
+            let auto_tile = self.unflagged_ants[auto_ant_index];
+            self.write_vis(
+                &mut uvfits,
+                UVW::default(),
+                auto_tile,
+                auto_tile,
+                epoch,
+                &mut vis,
+            )?;
+            vis.clear();
+            vis.extend_from_slice(&[0.0; 5]);
+            auto_ant_index += 1;
+        }
+
+        Ok(())
+    }
+
+    fn unpack_freqs(
+        &self,
+        vis: &mut Vec<f32>,
+        jones: ArrayView1<Jones<f32>>,
+        weights: ArrayView1<f32>,
+    ) {
+        let mut unflagged_chan_index = 0;
+        for fine_chan_index in 0..self.num_chans {
+            if self.flagged_channels.contains(&fine_chan_index) {
+                vis.extend_from_slice(&[0.0; 12])
+            } else {
+                let jones = unsafe { jones.uget(unflagged_chan_index) };
+                let weight = unsafe { weights.uget(unflagged_chan_index) };
+                vis.extend_from_slice(&[
+                    // XX
+                    jones[0].re,
+                    jones[0].im,
+                    *weight,
+                    // YY
+                    jones[3].re,
+                    jones[3].im,
+                    *weight,
+                    // XY
+                    jones[1].re,
+                    jones[1].im,
+                    *weight,
+                    // YX
+                    jones[2].re,
+                    jones[2].im,
+                    *weight,
+                ]);
+                unflagged_chan_index += 1;
+            };
+        }
     }
 }

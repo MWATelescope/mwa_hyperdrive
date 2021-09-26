@@ -17,29 +17,28 @@ mod filenames;
 pub(crate) use error::*;
 use filenames::InputDataTypes;
 pub(crate) use freq::*;
-use mwa_rust_core::precession::PrecessionInfo;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
-use rayon::prelude::*;
-
-use crate::constants::*;
-use crate::data_formats::*;
-use crate::glob::*;
-use crate::precession::precess_time;
-use mwa_hyperdrive_beam::{create_beam_object, Beam, Delays};
-use mwa_hyperdrive_srclist::{
-    constants::*, veto_sources, FluxDensityType, SourceList, SourceListType,
-};
 use mwa_rust_core::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    pos::precession::{precess_time, PrecessionInfo},
     time::epoch_as_gps_seconds,
     XyzGeodetic,
+};
+use rayon::prelude::*;
+
+use super::solutions::CalSolutionType;
+use crate::{constants::*, data_formats::VisOutputType, data_formats::*, glob::*};
+use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
+use mwa_hyperdrive_srclist::{
+    constants::*, veto_sources, FluxDensityType, SourceList, SourceListType,
 };
 
 /// Parameters needed to perform calibration.
@@ -48,7 +47,7 @@ pub struct CalibrateParams {
     // pub(crate) input_data: Box<dyn InputData>,
     pub(crate) input_data: Box<dyn InputData>,
 
-    /// Beam struct.
+    /// Beam object.
     pub(crate) beam: Box<dyn Beam>,
 
     /// The sky-model source list.
@@ -65,6 +64,13 @@ pub struct CalibrateParams {
     /// These values correspond to those from the "Antenna" column in HDU 2 of
     /// the metafits file. Zero indexed.
     pub(crate) tile_flags: HashSet<usize>,
+
+    /// Which baselines are flagged? These indices apply only to
+    /// cross-correlation baselines.
+    ///
+    /// These values correspond to tiles derived from the "Antenna" column in
+    /// HDU 2 of the metafits file. Zero indexed.
+    pub(crate) baseline_flags: HashSet<usize>,
 
     /// Channel- and frequency-related parameters required for calibration.
     pub(crate) freq: FrequencyParams,
@@ -88,11 +94,15 @@ pub struct CalibrateParams {
 
     /// Given an unflagged baseline number, get the tile number pair that
     /// contribute to it. e.g. If tile 1 (i.e. the second tile) is flagged, then
-    /// the first unflagged baseline (i.e. 0) is between tile 0 and tile 2.
+    /// the second unflagged baseline (i.e. 0) is between tile 0 and tile 2 (the
+    /// first is tile 0 and tile 0).
     ///
     /// This exists because some tiles may be flagged, so some baselines may be
     /// flagged.
     pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+
+    /// Are auto-correlations being included?
+    pub(crate) using_autos: bool,
 
     /// The names of the unflagged tiles.
     pub(crate) unflagged_tile_names: Vec<String>,
@@ -122,10 +132,22 @@ pub struct CalibrateParams {
     /// the stop threshold. This is bigger than `stop_threshold`.
     pub(crate) min_threshold: f64,
 
-    /// The path to the file where the calibration solutions are written.
-    /// Supported formats are .fits and .bin (which is the "André calibrate
-    /// format")
-    pub(crate) output_solutions_filename: PathBuf,
+    /// The paths to the files where the calibration solutions are written. The
+    /// same solutions are written to each file here, but the format may be
+    /// different (indicated by the file extension). Supported formats are
+    /// detailed by [super::solutions::CalSolutionType].
+    pub(crate) output_solutions_filenames: Vec<(CalSolutionType, PathBuf)>,
+
+    /// The paths to the files where calibrated visibilities are written. The
+    /// same visibilities are written to each file here, but the format may be
+    /// different (indicated by the file extension). Supported formats are
+    /// detailed by [crate::data_formats::VisOutputType].
+    pub(crate) output_vis_filenames: Vec<(VisOutputType, PathBuf)>,
+
+    #[cfg(feature = "cuda")]
+    /// If enabled, use the CPU to generate sky-model visibilites. Otherwise,
+    /// use the GPU.
+    pub(crate) cpu_vis_gen: bool,
 }
 
 impl CalibrateParams {
@@ -139,9 +161,11 @@ impl CalibrateParams {
     pub(crate) fn new(
         super::args::CalibrateUserArgs {
             data,
-            output_solutions_filename,
+            outputs,
             model_filename,
             beam_file,
+            unity_dipole_gains,
+            delays,
             no_beam,
             source_list,
             source_list_type,
@@ -154,7 +178,7 @@ impl CalibrateParams {
             tile_flags,
             ignore_input_data_tile_flags,
             ignore_input_data_fine_channels_flags,
-            delays,
+            ignore_autos,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
             max_iterations,
@@ -162,6 +186,8 @@ impl CalibrateParams {
             min_thresh,
             array_longitude_deg,
             array_latitude_deg,
+            #[cfg(feature = "cuda")]
+            cpu,
         }: super::args::CalibrateUserArgs,
     ) -> Result<Self, InvalidArgsError> {
         let mut dipole_delays = match (delays, no_beam) {
@@ -171,7 +197,7 @@ impl CalibrateParams {
                 if d.len() != 16 || d.iter().any(|&v| v > 32) {
                     return Err(InvalidArgsError::BadDelays);
                 }
-                Delays::Available(d)
+                Delays::Partial(d)
             }
 
             // No delays were provided, but because we're not using beam code,
@@ -241,7 +267,7 @@ impl CalibrateParams {
                 let input_data = match uvfits_strs.len() {
                     0 => panic!("whatcha doin?"),
                     1 => Uvfits::new(&uvfits_strs[0], meta.as_ref(), &mut dipole_delays)?,
-                    _ => panic!("TODO: support many uvfits files"),
+                    _ => todo!(),
                 };
                 match input_data.get_obs_context().obsid {
                     Some(o) => info!(
@@ -260,93 +286,87 @@ impl CalibrateParams {
             _ => return Err(InvalidArgsError::InvalidDataInput),
         };
 
-        let beam: Box<dyn Beam> = create_beam_object(no_beam, dipole_delays, beam_file)?;
+        let obs_context = input_data.get_obs_context();
+        let freq_context = input_data.get_freq_context();
 
-        // Handle potential issues with the output calibration solutions file.
-        let output_solutions_filename = PathBuf::from(
-            output_solutions_filename
-                .unwrap_or_else(|| DEFAULT_OUTPUT_SOLUTIONS_FILENAME.to_string()),
-        );
-        // Is the output file type supported?
-        match &output_solutions_filename
-            .extension()
-            .and_then(|os_str| os_str.to_str())
-        {
-            Some("fits") | Some("bin") => (),
-            ext => {
-                return Err(InvalidArgsError::OutputSolutionsFileType {
-                    ext: ext.unwrap_or("<no extension>").to_string(),
-                })
-            }
-        }
-        // Check if the file exists. If so, check we can write to it. If we
-        // aren't able to write to the file, then handle the problem here. The
-        // alternative is complaining that the file can't be written to after
-        // calibration is finished, which would mean that the time spent
-        // calibrating was wasted. This code _doesn't_ alter the file if it
-        // exists.
-        if output_solutions_filename.exists() {
-            match OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&output_solutions_filename)
-                .map_err(|io_error| io_error.kind())
-            {
-                Ok(_) => warn!(
-                    "Will overwrite the existing calibration solutions file '{}'",
-                    output_solutions_filename.display()
-                ),
-                Err(std::io::ErrorKind::PermissionDenied) => {
-                    return Err(InvalidArgsError::FileNotWritable {
-                        file: output_solutions_filename.display().to_string(),
-                    })
+        let beam: Box<dyn Beam> = if no_beam {
+            create_no_beam_object()
+        } else {
+            create_fee_beam_object(
+                beam_file,
+                obs_context.tile_xyzs.len(),
+                dipole_delays,
+                if unity_dipole_gains {
+                    None
+                } else {
+                    obs_context.dipole_gains.clone()
+                },
+            )?
+        };
+
+        // Designate calibration outputs.
+        let (output_solutions_filenames, output_vis_filenames) = {
+            match outputs {
+                // Defaults.
+                None => {
+                    let pb = PathBuf::from(DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
+                    let sol_type = pb
+                        .extension()
+                        .and_then(|os_str| os_str.to_str())
+                        .and_then(|s| CalSolutionType::from_str(s).ok())
+                        // Tests should pick up a bad default filename.
+                        .expect("DEFAULT_OUTPUT_SOLUTIONS_FILENAME has an unhandled extension!");
+                    (vec![(sol_type, pb)], vec![])
                 }
-                Err(e) => return Err(InvalidArgsError::IO(e.into())),
+                Some(outputs) => {
+                    let mut cal_sols = vec![];
+                    let mut vis_out = vec![];
+                    for file in outputs {
+                        // Is the output file type supported?
+                        let ext = file.extension().and_then(|os_str| os_str.to_str());
+                        match (
+                            ext.and_then(|s| CalSolutionType::from_str(s).ok()),
+                            ext.and_then(|s| VisOutputType::from_str(s).ok()),
+                        ) {
+                            (Some(sol_type), None) => {
+                                can_write_to_file(&file)?;
+                                cal_sols.push((sol_type, file));
+                            },
+                            (None, Some(vis_type)) => {
+                                can_write_to_file(&file)?;
+                                vis_out.push((vis_type, file));
+                            },
+                            (None, None) => return Err(InvalidArgsError::CalibrationOutputFile { ext: ext.unwrap_or("<no extension>").to_string()}),
+                            (Some(_), Some(_)) => panic!("Programmer error: File extension '{}' is valid for both calibration solutions and visibility outputs, but this shouldn't be possible.", ext.unwrap()),
+                        }
+                    }
+                    (cal_sols, vis_out)
+                }
             }
+        };
+        if output_solutions_filenames.is_empty() && output_vis_filenames.is_empty() {
+            return Err(InvalidArgsError::NoOutput);
         }
 
-        // Handle potential issues with the output model file.
+        // Handle the output model file, if specified.
         let model_file = match model_filename {
             None => None,
-            Some(filename) => {
-                let pb = PathBuf::from(filename);
+            Some(file) => {
                 // Is the output file type supported?
-                match &pb.extension().and_then(|os_str| os_str.to_str()) {
-                    Some("uvfits") => (),
-                    ext => {
-                        return Err(InvalidArgsError::ModelFileType {
+                let ext = file.extension().and_then(|os_str| os_str.to_str());
+                match ext.and_then(|s| VisOutputType::from_str(s).ok()) {
+                    Some(_) => {
+                        can_write_to_file(&file)?;
+                        Some(file)
+                    }
+                    None => {
+                        return Err(InvalidArgsError::VisFileType {
                             ext: ext.unwrap_or("<no extension>").to_string(),
                         })
                     }
                 }
-                // Check if the file exists. If so, check we can write to it. If we
-                // aren't able to write to the file, then handle the problem here.
-                if pb.exists() {
-                    match OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .open(&pb)
-                        .map_err(|io_error| io_error.kind())
-                    {
-                        Ok(_) => warn!(
-                            "Will overwrite the existing sky-model file '{}'",
-                            pb.display()
-                        ),
-                        Err(std::io::ErrorKind::PermissionDenied) => {
-                            return Err(InvalidArgsError::FileNotWritable {
-                                file: pb.display().to_string(),
-                            })
-                        }
-                        Err(e) => return Err(InvalidArgsError::IO(e.into())),
-                    }
-                };
-
-                Some(pb)
             }
         };
-
-        let obs_context = input_data.get_obs_context();
-        let freq_context = input_data.get_freq_context();
 
         let timesteps_to_use = {
             let input_data_unflagged_timesteps: Vec<usize> = obs_context
@@ -408,6 +428,7 @@ impl CalibrateParams {
                 tile_flags.insert(obs_tile_flag);
             }
         }
+        let baseline_flags = get_flagged_baselines_set(total_num_tiles, &tile_flags);
 
         // Assign the per-coarse-channel fine-channel flags.
         // TODO: Rename "coarse band" to "coarse channel".
@@ -614,6 +635,11 @@ impl CalibrateParams {
             }
         };
 
+        let using_autos = if ignore_autos {
+            false
+        } else {
+            obs_context.autocorrelations_present
+        };
         let tile_baseline_maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
 
         let (unflagged_tile_xyzs, unflagged_tile_names) = obs_context
@@ -639,11 +665,13 @@ impl CalibrateParams {
             source_list,
             model_file,
             tile_flags,
+            baseline_flags,
             freq: freq_struct,
             time_average_factor,
             timesteps: timesteps_to_use,
             tile_to_unflagged_baseline_map: tile_baseline_maps.tile_to_unflagged_baseline_map,
             unflagged_baseline_to_tile_map: tile_baseline_maps.unflagged_baseline_to_tile_map,
+            using_autos,
             unflagged_tile_names,
             unflagged_tile_xyzs,
             array_longitude,
@@ -651,7 +679,10 @@ impl CalibrateParams {
             max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),
             stop_threshold,
             min_threshold,
-            output_solutions_filename,
+            output_solutions_filenames,
+            output_vis_filenames,
+            #[cfg(feature = "cuda")]
+            cpu_vis_gen: cpu,
         };
         params.log_param_info(&precession_info);
         Ok(params)
@@ -743,13 +774,13 @@ impl CalibrateParams {
 
         match obs_context.time_res {
             Some(native) => {
-                info!("Input data's time resolution: {:.2} seconds", native);
+                info!("Input data time resolution:  {:.2} seconds", native);
             }
-            None => info!("Input data's time resolution unknown"),
+            None => info!("Input data time resolution unknown"),
         }
         match freq_context.native_fine_chan_width {
             Some(freq_res) => {
-                info!("Input data freq. resolution:  {:.2} kHz", freq_res / 1e3);
+                info!("Input data freq. resolution: {:.2} kHz", freq_res / 1e3);
             }
             None => info!("Input data freq. resolution unknown"),
         }
@@ -825,6 +856,25 @@ impl CalibrateParams {
             warn!("Using more than 10,000 components!");
         }
         trace!("Using sources: {:?}", self.source_list.keys());
+
+        if !self.output_solutions_filenames.is_empty() {
+            info!(
+                "Writing calibration solutions to: {}",
+                self.output_solutions_filenames
+                    .iter()
+                    .map(|(_, pb)| pb.display())
+                    .join(", ")
+            );
+        }
+        if !self.output_vis_filenames.is_empty() {
+            info!(
+                "Writing calibrated visibilities to: {}",
+                self.output_vis_filenames
+                    .iter()
+                    .map(|(_, pb)| pb.display())
+                    .join(", ")
+            );
+        }
     }
 
     pub(crate) fn get_num_timeblocks(&self) -> usize {
@@ -835,14 +885,25 @@ impl CalibrateParams {
         (self.freq.unflagged_fine_chans.len() as f64 / self.freq.freq_average_factor as f64).ceil()
             as _
     }
+
+    /// The number of baselines, including auto-correlation "baselines" if these
+    /// are included.
+    pub(crate) fn get_num_baselines(&self) -> usize {
+        let n = self.unflagged_tile_xyzs.len();
+        if self.using_autos {
+            (n * (n + 1)) / 2
+        } else {
+            (n * (n - 1)) / 2
+        }
+    }
 }
 
-struct TileBaselineMaps {
-    tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
-    unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+pub(crate) struct TileBaselineMaps {
+    pub(crate) tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
+    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 }
 
-fn generate_tile_baseline_maps(
+pub(crate) fn generate_tile_baseline_maps(
     total_num_tiles: usize,
     tile_flags: &HashSet<usize>,
 ) -> TileBaselineMaps {
@@ -869,6 +930,9 @@ fn generate_tile_baseline_maps(
     }
 }
 
+/// Get the flagged cross-correlation baseline indices from flagged tile
+/// indices. If all 128 tiles are flagged in a 128-element array, then this set
+/// will have 8128 flags.
 fn get_flagged_baselines_set(
     total_num_tiles: usize,
     tile_flags: &HashSet<usize>,
@@ -928,6 +992,67 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
     }
 }
 
+/// Check if we are able to write to a file path. If we aren't able to write to
+/// the file, it's either because the directory containing the file doesn't
+/// exist, or there's another issue (probably bad permissions). In the former
+/// case, create the parent directories, otherwise return an error.
+/// Additionally, if the file exists, emit a warning that it will be
+/// overwritten.
+///
+/// With this approach, we potentially avoid doing a whole run of calibration
+/// only to be unable to write to a file at the end. This code _doesn't_ alter
+/// the file if it exists.
+fn can_write_to_file<T: AsRef<Path>>(file: T) -> Result<(), InvalidArgsError> {
+    let file_exists = file.as_ref().exists();
+
+    match OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&file)
+        .map_err(|e| e.kind())
+    {
+        // File is writable.
+        Ok(_) => {
+            if file_exists {
+                warn!(
+                    "Will overwrite the existing file '{}'",
+                    file.as_ref().display()
+                )
+            }
+        }
+
+        // File doesn't exist. Attempt to make the directories leading up to the
+        // file; if this fails, then we can't write the file anyway.
+        Err(std::io::ErrorKind::NotFound) => {
+            if let Some(p) = file.as_ref().parent() {
+                match std::fs::DirBuilder::new()
+                    .recursive(true)
+                    .create(p)
+                    .map_err(|e| e.kind())
+                {
+                    Ok(()) => (),
+                    Err(std::io::ErrorKind::PermissionDenied) => {
+                        return Err(InvalidArgsError::NewDirectory(p.to_path_buf()))
+                    }
+                    Err(e) => return Err(InvalidArgsError::IO(e.into())),
+                }
+            }
+        }
+
+        Err(std::io::ErrorKind::PermissionDenied) => {
+            return Err(InvalidArgsError::FileNotWritable {
+                file: file.as_ref().display().to_string(),
+            })
+        }
+
+        Err(e) => {
+            return Err(InvalidArgsError::IO(e.into()));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -958,6 +1083,7 @@ mod tests {
 
         tile_flags.insert(127);
         let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
+        assert_eq!(flagged_baselines.len(), 127);
         assert!(flagged_baselines.contains(&126));
         assert!(flagged_baselines.contains(&252));
         assert!(flagged_baselines.contains(&8127));

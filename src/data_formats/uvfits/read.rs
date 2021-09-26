@@ -4,7 +4,7 @@
 
 //! Code to handle reading from uvfits files.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
@@ -27,8 +27,6 @@ use mwa_rust_core::{
     time::{epoch_as_gps_seconds, jd_to_epoch},
     Jones, RADec, XyzGeodetic,
 };
-
-const TIMESTEP_AS_INT_FACTOR: f64 = 1e18;
 
 pub(crate) struct Uvfits {
     /// Observation metadata.
@@ -61,12 +59,9 @@ impl Uvfits {
         metafits: Option<&T>,
         dipole_delays: &mut Delays,
     ) -> Result<Self, UvfitsReadError> {
-        let mut mwalib = match metafits {
-            None => return Err(UvfitsReadError::NoMetafits),
-            // If a metafits file was provided, we _may_ use it. Get a _potential_
-            // mwalib object ready.
-            _ => None,
-        };
+        // If a metafits file was provided, we _may_ use it. Get a _potential_
+        // mwalib object ready.
+        let mut mwalib = None;
 
         // The uvfits argument could be a glob. If the specified argument can't
         // be found as a file, treat it as a glob and expand it to find a match.
@@ -145,8 +140,6 @@ impl Uvfits {
         };
 
         // Get the dipole delays and the pointing centre (if possible).
-        // TODO: Decide on a key that uvfits can optionally provide for dipole
-        // delays. Until this available, a metafits file is always necessary.
         let pointing_centre: Option<RADec> = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
@@ -155,11 +148,10 @@ impl Uvfits {
                 // Only use the metafits delays if none were provided to
                 // this function.
                 match dipole_delays {
-                    Delays::Available(_) | Delays::NotNecessary => (),
+                    Delays::Full(_) | Delays::Partial(_) | Delays::NotNecessary => (),
                     Delays::None => {
                         debug!("Using metafits for dipole delays");
-                        let metafits_delays = metafits::get_true_delays(context);
-                        *dipole_delays = Delays::Available(metafits_delays);
+                        *dipole_delays = Delays::Full(metafits::get_dipole_delays(context));
                     }
                 }
                 Some(RADec::new_degrees(
@@ -167,24 +159,39 @@ impl Uvfits {
                     context.dec_tile_pointing_degrees,
                 ))
             }
-            // TODO: Unreachable while we require a metafits file.
-            None => unreachable!(),
+
+            None => None,
         };
         match &dipole_delays {
-            Delays::Available(d) => debug!("Dipole delays: {:?}", d),
+            Delays::Full(d) => debug!("Dipole delays: {:?}", d),
+            Delays::Partial(d) => debug!("Dipole delays: {:?}", d),
             Delays::NotNecessary => {
                 debug!("Dipole delays weren't searched for in input data; not necessary")
             }
             Delays::None => warn!("Dipole delays not provided and not available in input data!"),
         }
 
-        // Get the timesteps. uvfits timesteps are in the middle of their
-        // respective integration periods, so no adjustment is needed here.
-        let jd_frac_timesteps = get_jd_frac_timesteps(&mut uvfits, &metadata)?;
-        let timesteps: Vec<Epoch> = jd_frac_timesteps
+        // Work out the tile flags.
+        let mut present_tiles_set: HashSet<usize> = HashSet::new();
+        metadata.uvfits_baselines.iter().for_each(|&uvfits_bl| {
+            let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
+            // Don't forget to subtract one from the uvfits-formatted baselines.
+            present_tiles_set.insert(ant1 - 1);
+            present_tiles_set.insert(ant2 - 1);
+        });
+        let tile_flags = (0..total_num_tiles)
             .into_iter()
-            .map(|frac| {
-                let jd = metadata.jd_zero + (frac as f64) / TIMESTEP_AS_INT_FACTOR;
+            .filter(|i| !present_tiles_set.contains(i))
+            .collect();
+
+        // Work out the timestep epochs. uvfits timesteps are in the middle of
+        // their respective integration periods, so no adjustment is needed
+        // here.
+        let timesteps: Vec<Epoch> = metadata
+            .jd_frac_timesteps
+            .iter()
+            .map(|&frac| {
+                let jd = metadata.jd_zero + (frac as f64);
                 jd_to_epoch(jd)
             })
             .collect();
@@ -218,26 +225,23 @@ impl Uvfits {
                 None
             }
         };
-
-        // TODO: Determine if autocorrelations are present.
-        let autocorrelations_present = false;
-        // TODO: Determine tile flags.
-        let tile_flags: Vec<usize> = vec![];
-        let num_unflagged_tiles = total_num_tiles - tile_flags.len();
         debug!("Flagged tiles in the uvfits: {:?}", tile_flags);
-        debug!("Autocorrelations present: {}", autocorrelations_present);
+        debug!(
+            "Autocorrelations present: {}",
+            metadata.autocorrelations_present
+        );
 
         // Get the dipole gains. Only available with a metafits.
-        let dipole_gains: Array2<f64> = match metafits {
+        let dipole_gains: Option<Array2<f64>> = match metafits {
             Some(meta) => {
                 // Populate `mwalib` if it isn't already populated.
                 let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
-                metafits::get_dipole_gains(context)
+                Some(metafits::get_dipole_gains(context))
             }
             None => {
                 warn!("Without a metafits file, we must assume all dipoles are alive.");
                 warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                Array2::from_elem((num_unflagged_tiles, 16), 1.0)
+                None
             }
         };
 
@@ -266,6 +270,7 @@ impl Uvfits {
             tile_names,
             tile_xyzs,
             tile_flags,
+            autocorrelations_present: metadata.autocorrelations_present,
             fine_chan_flags_per_coarse_chan,
             dipole_gains,
             time_res,
@@ -293,17 +298,21 @@ impl InputData for Uvfits {
         &self.freq_context
     }
 
-    fn read(
+    fn get_input_data_type(&self) -> VisInputType {
+        VisInputType::Uvfits
+    }
+
+    fn read_crosses(
         &self,
         mut data_array: ArrayViewMut2<Jones<f32>>,
-        timestep: usize,
+        mut weights_array: ArrayViewMut2<f32>,
+        timestep_index: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        _flagged_baselines: &HashSet<usize>,
         flagged_fine_chans: &HashSet<usize>,
-    ) -> Result<Array2<f32>, ReadInputDataError> {
-        let row_range_start = timestep * self.step;
-        let row_range_end = (timestep + 1) * self.step;
-
-        let mut out_weights = Array2::from_elem(data_array.dim(), 0.0);
+    ) -> Result<(), ReadInputDataError> {
+        let row_range_start = timestep_index * self.step;
+        let row_range_end = (timestep_index + 1) * self.step;
 
         let mut uvfits = fits_open!(&self.uvfits).map_err(UvfitsReadError::from)?;
         fits_open_hdu!(&mut uvfits, 0).map_err(UvfitsReadError::from)?;
@@ -315,29 +324,30 @@ impl InputData for Uvfits {
                 * self.metadata.floats_per_pol
         ];
         for row in row_range_start..row_range_end {
-            // Read in the row's group parameters. We only read the first `pcount`
-            // elements, but make the vector bigger for writing later.
-
+            // Read in the row's group parameters.
             let mut status = 0;
             let uvfits_bl = unsafe {
                 // ffggpe = fits_read_grppar_flt
                 fitsio_sys::ffggpe(
-                    uvfits.as_raw(),             /* I - FITS file pointer                       */
-                    1 + row as i64,              /* I - group to read (1 = 1st group)           */
-                    1,                           /* I - first vector element to read (1 = 1st)  */
-                    self.metadata.pcount as i64, /* I - number of values to read                */
-                    group_params.as_mut_ptr(),   /* O - array of values that are returned       */
-                    &mut status,                 /* IO - error status                           */
+                    uvfits.as_raw(),           /* I - FITS file pointer                       */
+                    1 + row as i64,            /* I - group to read (1 = 1st group)           */
+                    1,                         /* I - first vector element to read (1 = 1st)  */
+                    group_params.len() as i64, /* I - number of values to read                */
+                    group_params.as_mut_ptr(), /* O - array of values that are returned       */
+                    &mut status,               /* IO - error status                           */
                 );
                 // TODO: Handle the errors nicely; the error messages aren't helpful
                 // right now.
                 fits_check_status(status).map_err(UvfitsReadError::from)?;
 
-                *group_params.get_unchecked((self.metadata.indices.baseline - 1) as usize)
+                group_params[(self.metadata.indices.baseline - 1) as usize]
             };
 
             let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl.round() as usize);
-            if let Some(&bl) = tile_to_unflagged_baseline_map.get(&(ant1 - 1, ant2 - 1)) {
+            if let Some(bl) = tile_to_unflagged_baseline_map
+                .get(&(ant1 - 1, ant2 - 1))
+                .cloned()
+            {
                 unsafe {
                     // ffgpve = fits_read_img_flt
                     fitsio_sys::ffgpve(
@@ -367,12 +377,18 @@ impl InputData for Uvfits {
                 // globally-flagged fine channels. Use an int to index unflagged
                 // fine channel (outer_freq_chan_index).
                 let mut outer_freq_chan_index: usize = 0;
-                for (freq_chan, data_pol_axis) in vis_array.outer_iter().enumerate() {
-                    if !flagged_fine_chans.contains(&freq_chan) {
-                        // This is a reference to the visibilities in the output
-                        // data array.
-                        let data_array_elem =
-                            data_array.get_mut((bl, outer_freq_chan_index)).unwrap();
+                for (_, data_pol_axis) in vis_array
+                    .outer_iter()
+                    .enumerate()
+                    .filter(|(freq_chan, _)| !flagged_fine_chans.contains(freq_chan))
+                {
+                    // Skip boundary checks to improve performance.
+                    // TODO: How much does this actually help?
+                    unsafe {
+                        // These are references to the visibilities and weights
+                        // in the output arrays.
+                        let data_array_elem = data_array.uget_mut((bl, outer_freq_chan_index));
+                        let weight_elem = weights_array.uget_mut((bl, outer_freq_chan_index));
 
                         // These are the components of the input data's
                         // visibilities.
@@ -384,7 +400,6 @@ impl InputData for Uvfits {
                         // Get the element of the output weights array, and
                         // write to it. We assume that weights are all equal for
                         // these visibilities.
-                        let weight_elem = out_weights.get_mut((bl, outer_freq_chan_index)).unwrap();
                         *weight_elem = data_xx[2];
 
                         // Write the input data visibility components to the
@@ -393,13 +408,128 @@ impl InputData for Uvfits {
                         data_array_elem[1] = c32::new(data_xy[0], data_xy[1]) * *weight_elem;
                         data_array_elem[2] = c32::new(data_yx[0], data_yx[1]) * *weight_elem;
                         data_array_elem[3] = c32::new(data_yy[0], data_yy[1]) * *weight_elem;
-
-                        outer_freq_chan_index += 1;
                     }
+                    outer_freq_chan_index += 1;
                 }
             }
         }
-        Ok(out_weights)
+
+        Ok(())
+    }
+
+    fn read_autos(
+        &self,
+        mut data_array: ArrayViewMut2<Jones<f32>>,
+        mut weights_array: ArrayViewMut2<f32>,
+        timestep_index: usize,
+        flagged_tiles: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(), ReadInputDataError> {
+        let row_range_start = timestep_index * self.step;
+        let row_range_end = (timestep_index + 1) * self.step;
+
+        let mut uvfits = fits_open!(&self.uvfits).map_err(UvfitsReadError::from)?;
+        fits_open_hdu!(&mut uvfits, 0).map_err(UvfitsReadError::from)?;
+        let mut group_params: Vec<f32> = vec![0.0; self.metadata.pcount];
+        let mut vis: Vec<f32> = vec![
+            0.0;
+            self.metadata.num_fine_freq_chans
+                * self.metadata.num_pols
+                * self.metadata.floats_per_pol
+        ];
+        let mut auto_array_index = 0;
+        for row in row_range_start..row_range_end {
+            // Read in the row's group parameters.
+            let mut status = 0;
+            let uvfits_bl = unsafe {
+                // ffggpe = fits_read_grppar_flt
+                fitsio_sys::ffggpe(
+                    uvfits.as_raw(),           /* I - FITS file pointer                       */
+                    1 + row as i64,            /* I - group to read (1 = 1st group)           */
+                    1,                         /* I - first vector element to read (1 = 1st)  */
+                    group_params.len() as i64, /* I - number of values to read                */
+                    group_params.as_mut_ptr(), /* O - array of values that are returned       */
+                    &mut status,               /* IO - error status                           */
+                );
+                // TODO: Handle the errors nicely; the error messages aren't helpful
+                // right now.
+                fits_check_status(status).map_err(UvfitsReadError::from)?;
+
+                group_params[(self.metadata.indices.baseline - 1) as usize]
+            };
+
+            let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl.round() as usize);
+            if ant1 == ant2 && !flagged_tiles.contains(&ant1) {
+                unsafe {
+                    // ffgpve = fits_read_img_flt
+                    fitsio_sys::ffgpve(
+                        uvfits.as_raw(),  /* I - FITS file pointer                       */
+                        1 + row as i64,   /* I - group to read (1 = 1st group)           */
+                        1,                /* I - first vector element to read (1 = 1st)  */
+                        vis.len() as i64, /* I - number of values to read                */
+                        0.0,              /* I - value for undefined pixels              */
+                        vis.as_mut_ptr(), /* O - array of values that are returned       */
+                        &mut 0,           /* O - set to 1 if any values are null; else 0 */
+                        &mut status,      /* IO - error status                           */
+                    );
+                }
+                fits_check_status(status).map_err(UvfitsReadError::from)?;
+
+                let vis_array = ArrayView3::from_shape(
+                    (
+                        self.metadata.num_fine_freq_chans,
+                        self.metadata.num_pols,
+                        self.metadata.floats_per_pol,
+                    ),
+                    vis.as_slice(),
+                )
+                .unwrap();
+                // Put the data and weights into the shared arrays outside this
+                // scope. Before we can do this, we need to remove any
+                // globally-flagged fine channels. Use an int to index unflagged
+                // fine channel (outer_freq_chan_index).
+                let mut outer_freq_chan_index = 0;
+                for (_, data_pol_axis) in vis_array
+                    .outer_iter()
+                    .enumerate()
+                    .filter(|(freq_chan, _)| !flagged_fine_chans.contains(freq_chan))
+                {
+                    // Skip boundary checks to improve performance.
+                    // TODO: How much does this actually help?
+                    unsafe {
+                        // These are references to the visibilities and weights
+                        // in the output arrays.
+                        let data_array_elem =
+                            data_array.uget_mut((auto_array_index, outer_freq_chan_index));
+                        let weight_elem =
+                            weights_array.uget_mut((auto_array_index, outer_freq_chan_index));
+
+                        // These are the components of the input data's
+                        // visibilities.
+                        let data_xx = data_pol_axis.index_axis(Axis(0), 0);
+                        let data_yy = data_pol_axis.index_axis(Axis(0), 1);
+                        let data_xy = data_pol_axis.index_axis(Axis(0), 2);
+                        let data_yx = data_pol_axis.index_axis(Axis(0), 3);
+
+                        // Get the element of the output weights array, and
+                        // write to it. We assume that weights are all equal for
+                        // these visibilities.
+                        *weight_elem = data_xx[2];
+
+                        // Write the input data visibility components to the
+                        // output data array, also multiplying by the weight.
+                        data_array_elem[0] = c32::new(data_xx[0], data_xx[1]) * *weight_elem;
+                        data_array_elem[1] = c32::new(data_xy[0], data_xy[1]) * *weight_elem;
+                        data_array_elem[2] = c32::new(data_yx[0], data_yx[1]) * *weight_elem;
+                        data_array_elem[3] = c32::new(data_yy[0], data_yy[1]) * *weight_elem;
+                    }
+                    outer_freq_chan_index += 1;
+                }
+                auto_array_index += 1;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -419,6 +549,16 @@ struct UvfitsMetadata {
     /// The indices of various parameters (e.g. BASELINE is PTYPE4, DATE is
     /// PTYPE5, etc.)
     indices: Indices,
+
+    /// Unique collection of baselines (uvfits formatted, i.e. need to be
+    /// decoded).
+    uvfits_baselines: Vec<usize>,
+
+    /// Unique collection of JD fractions for timesteps.
+    jd_frac_timesteps: Vec<f32>,
+
+    /// Are auto-correlations present?
+    autocorrelations_present: bool,
 }
 
 impl UvfitsMetadata {
@@ -501,6 +641,51 @@ impl UvfitsMetadata {
             }
         };
 
+        // Read unique group parameters (timesteps and baselines).
+        let mut uvfits_baselines_set = HashSet::new();
+        let mut uvfits_baselines = vec![];
+        let mut autocorrelations_present = false;
+        let mut jd_frac_timestep_set = HashSet::new();
+        let mut jd_frac_timesteps = vec![];
+
+        let mut status = 0;
+        unsafe {
+            let mut group_params = vec![0.0; pcount];
+            for row_num in 0..num_rows {
+                // ffggpe = fits_read_grppar_flt
+                fitsio_sys::ffggpe(
+                    uvfits.as_raw(),           /* I - FITS file pointer                       */
+                    (row_num + 1) as _,        /* I - group to read (1 = 1st group)           */
+                    1,                         /* I - first vector element to read (1 = 1st)  */
+                    pcount as _,               /* I - number of values to read                */
+                    group_params.as_mut_ptr(), /* O - array of values that are returned       */
+                    &mut status,               /* IO - error status                           */
+                );
+                // Check the status.
+                // TODO: Handle the errors nicely; the error messages aren't helpful
+                // right now.
+                fits_check_status(status)?;
+
+                // Floats can't be hashed. Hash the bits!
+                let uvfits_bl = group_params[indices.baseline as usize - 1] as usize;
+                let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
+                if !autocorrelations_present && (ant1 == ant2) {
+                    autocorrelations_present = true;
+                }
+                if !uvfits_baselines_set.contains(&uvfits_bl) {
+                    uvfits_baselines_set.insert(uvfits_bl);
+                    uvfits_baselines.push(uvfits_bl);
+                }
+
+                let timestep = group_params[indices.date as usize - 1];
+                let timestep_bits = timestep.to_bits();
+                if !jd_frac_timestep_set.contains(&timestep_bits) {
+                    jd_frac_timestep_set.insert(timestep_bits);
+                    jd_frac_timesteps.push(timestep);
+                }
+            }
+        }
+
         Ok(Self {
             num_rows,
             pcount,
@@ -509,10 +694,14 @@ impl UvfitsMetadata {
             num_fine_freq_chans,
             jd_zero,
             indices,
+            uvfits_baselines,
+            jd_frac_timesteps,
+            autocorrelations_present,
         })
     }
 }
 
+#[derive(Debug)]
 struct Indices {
     /// PTYPE
     u: u8,
@@ -658,42 +847,6 @@ impl Indices {
             freq,
         })
     }
-}
-
-/// Get each of the Julian date fractions out of the uvfits file's rows.
-///
-/// Why return a set? This prevents a some memory being uselessly allocated.
-/// However, this method assumes that all timesteps are in ascending order.
-fn get_jd_frac_timesteps(
-    uvfits: &mut FitsFile,
-    metadata: &UvfitsMetadata,
-) -> Result<BTreeSet<i64>, UvfitsReadError> {
-    let mut timesteps = BTreeSet::new();
-    let mut status = 0;
-    unsafe {
-        let mut timestep = [0.0];
-        for row_num in 0..metadata.num_rows {
-            // ffggpd = fits_read_grppar_dbl
-            fitsio_sys::ffggpd(
-                uvfits.as_raw(),            /* I - FITS file pointer                       */
-                (row_num + 1) as _,         /* I - group to read (1 = 1st group)           */
-                metadata.indices.date as _, /* I - first vector element to read (1 = 1st)  */
-                1,                          /* I - number of values to read                */
-                timestep.as_mut_ptr(),      /* O - array of values that are returned       */
-                &mut status,                /* IO - error status                           */
-            );
-            // Check the status.
-            // TODO: Handle the errors nicely; the error messages aren't helpful
-            // right now.
-            fits_check_status(status)?;
-
-            // Floats can't be compared nicely. Multiply by a big number and
-            // round to an int.
-            let timestep_as_int = (timestep[0] * TIMESTEP_AS_INT_FACTOR) as i64;
-            timesteps.insert(timestep_as_int);
-        }
-    }
-    Ok(timesteps)
 }
 
 fn get_freq_context(

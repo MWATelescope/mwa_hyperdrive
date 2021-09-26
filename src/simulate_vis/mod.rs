@@ -7,7 +7,7 @@
 mod error;
 pub use error::SimulateVisError;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::path::PathBuf;
 
@@ -15,6 +15,14 @@ use hifitime::Epoch;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Either;
 use log::{debug, info};
+use mwa_rust_core::{
+    constants::{DS2R, SOLAR2SIDEREAL},
+    mwalib,
+    pos::xyz,
+    time::epoch_as_gps_seconds,
+    Jones, RADec, XyzGeodetic,
+};
+use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use serde::Deserialize;
 use structopt::StructOpt;
@@ -25,20 +33,12 @@ use crate::{
     model,
     time::mjd_to_epoch,
 };
-use mwa_hyperdrive_beam::{create_beam_object, Beam, Delays};
+use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList, SourceList};
-use mwa_rust_core::{
-    constants::{DS2R, SOLAR2SIDEREAL},
-    mwalib,
-    pos::xyz,
-    time::epoch_as_gps_seconds,
-    Jones, RADec, XyzGeodetic,
-};
-use mwalib::MetafitsContext;
 
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 use mwa_hyperdrive_cuda as cuda;
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 use mwa_hyperdrive_srclist::ComponentListFFI;
 
 #[derive(StructOpt, Debug, Default, Deserialize)]
@@ -52,38 +52,38 @@ pub struct SimulateVisArgs {
     metafits: PathBuf,
 
     /// Path to the output visibilities file.
-    #[structopt(long, default_value = "model.uvfits")]
-    model_file: PathBuf,
+    #[structopt(short = "o", long, default_value = "model.uvfits")]
+    output_model_file: PathBuf,
 
-    /// The phase centre right ascension \[degrees\]. If this is not specified,
+    /// The phase centre right ascension [degrees]. If this is not specified,
     /// then the metafits phase/pointing centre is used.
     #[structopt(short, long)]
     ra: Option<f64>,
 
-    /// The phase centre declination \[degrees\]. If this is not specified, then
+    /// The phase centre declination [degrees]. If this is not specified, then
     /// the metafits phase/pointing centre is used.
     #[structopt(short, long)]
     dec: Option<f64>,
 
     /// The total number of fine channels in the observation.
-    #[structopt(long, default_value = "384")]
+    #[structopt(short = "c", long, default_value = "384")]
     num_fine_channels: usize,
 
-    /// The fine-channel resolution \[kHz\].
+    /// The fine-channel resolution [kHz].
     #[structopt(short, long, default_value = "80")]
     freq_res: f64,
 
-    /// The middle frequency of the simulation \[MHz\]. If this is not
-    /// specified, then the middle frequency specified in the metafits is used.
+    /// The middle frequency of the simulation [MHz]. If this is not specified,
+    /// then the middle frequency specified in the metafits is used.
     #[structopt(long)]
     middle_freq: Option<f64>,
 
     /// The number of time steps used from the metafits epoch.
-    #[structopt(short, long, default_value = "14")]
-    time_steps: usize,
+    #[structopt(short = "t", long, default_value = "14")]
+    num_timesteps: usize,
 
-    /// The time resolution \[seconds\].
-    #[structopt(long, default_value = "8.0")]
+    /// The time resolution [seconds].
+    #[structopt(long, default_value = "8")]
     time_res: f64,
 
     /// Should we use a beam? Default is to use the FEE beam.
@@ -94,6 +94,16 @@ pub struct SimulateVisArgs {
     /// provided by the MWA_BEAM_FILE environment variable.
     #[structopt(long)]
     beam_file: Option<PathBuf>,
+
+    /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
+    /// the metafits file.
+    #[structopt(long)]
+    unity_dipole_gains: bool,
+
+    /// Specify the MWA dipoles delays, ignoring whatever is in the metafits
+    /// file.
+    #[structopt(long)]
+    dipole_delays: Option<Vec<u32>>,
 
     /// Don't attempt to convert "list" flux densities to power law flux
     /// densities. See for more info:
@@ -123,13 +133,19 @@ struct SimVisParams {
     metafits: MetafitsContext,
 
     /// The output visibilities file.
-    model_file: PathBuf,
+    output_model_file: PathBuf,
 
     /// The phase centre.
     phase_centre: RADec,
 
     /// The fine frequency channel frequencies \[Hz\].
     fine_chan_freqs: Vec<f64>,
+
+    /// The [XyzGeodetic] positions of the tiles.
+    xyzs: Vec<XyzGeodetic>,
+
+    /// A map from baseline index to the baseline's constituent tiles.
+    baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
     /// Timesteps to be simulated.
     timesteps: Vec<Epoch>,
@@ -147,16 +163,18 @@ impl SimVisParams {
         let SimulateVisArgs {
             source_list,
             metafits,
-            model_file,
+            output_model_file,
             ra,
             dec,
             num_fine_channels,
             freq_res,
             middle_freq,
-            time_steps,
+            num_timesteps,
             time_res,
             no_beam,
             beam_file,
+            dipole_delays,
+            unity_dipole_gains,
             dont_convert_lists,
             filter_points,
             filter_gaussians,
@@ -202,6 +220,8 @@ impl SimVisParams {
         if freq_res < f64::EPSILON {
             return Err(SimulateVisError::FineChansWidthTooSmall);
         }
+        info!("Number of fine channels: {}", num_fine_channels);
+        info!("Fine-channel width:      {} kHz", freq_res);
         let middle_freq = middle_freq.unwrap_or(metafits.centre_freq_hz as _);
         let fine_chan_freqs = {
             let half_num_fine_chans = num_fine_channels as f64 / 2.0;
@@ -217,16 +237,16 @@ impl SimVisParams {
             [] => unreachable!(), // Handled above.
             [f] => info!("Only fine-channel freq: {} MHz", f / 1e6),
             [f_0, .., f_n] => {
-                info!("First fine-channel freq: {}", f_0 / 1e6);
-                info!("Last fine-channel freq:  {}", f_n / 1e6);
+                info!("First fine-channel freq: {} MHz", f_0 / 1e6);
+                info!("Last fine-channel freq:  {} MHz", f_n / 1e6);
             }
         }
 
         // Populate the timesteps.
         let timesteps = {
-            let mut timesteps = Vec::with_capacity(time_steps);
+            let mut timesteps = Vec::with_capacity(num_timesteps);
             let start = mjd_to_epoch(metafits.sched_start_mjd);
-            for i in 0..time_steps {
+            for i in 0..num_timesteps {
                 timesteps.push(
                     start
                         + hifitime::Duration::from_f64(
@@ -239,12 +259,36 @@ impl SimVisParams {
         };
         match timesteps.as_slice() {
             [] => return Err(SimulateVisError::ZeroTimeSteps),
-            [t] => debug!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
+            [t] => info!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
             [t0, .., tn] => {
-                debug!("First timestep (GPS): {:.2}", epoch_as_gps_seconds(*t0));
-                debug!("Last timestep  (GPS): {:.2}", epoch_as_gps_seconds(*tn));
+                info!("First timestep (GPS): {:.2}", epoch_as_gps_seconds(*t0));
+                info!("Last timestep  (GPS): {:.2}", epoch_as_gps_seconds(*tn));
             }
         }
+
+        // Get the geodetic XYZ coordinates of each of the MWA tiles.
+        let xyzs = XyzGeodetic::get_tiles_mwa(&metafits);
+
+        // Prepare a map between baselines and their constituent tiles.
+        // TODO: Utilise tile flags.
+        let tile_flags: HashSet<usize> = HashSet::new();
+        let baseline_to_tile_map = {
+            let mut baseline_to_tile_map = HashMap::new();
+            let mut bl = 0;
+            for tile1 in 0..metafits.num_ants {
+                if tile_flags.contains(&tile1) {
+                    continue;
+                }
+                for tile2 in tile1 + 1..metafits.num_ants {
+                    if tile_flags.contains(&tile2) {
+                        continue;
+                    }
+                    baseline_to_tile_map.insert(bl, (tile1, tile2));
+                    bl += 1;
+                }
+            }
+            baseline_to_tile_map
+        };
 
         // Treat the specified source list as file path. Does it exist? Then use it.
         // Otherwise, treat the specified source list as a glob and attempt to find
@@ -294,17 +338,33 @@ impl SimVisParams {
                     comp.flux_type.convert_list_to_power_law();
                 });
         }
-        let delays = metafits::get_true_delays(&metafits);
-        let beam = create_beam_object(no_beam, Delays::Available(delays), beam_file)?;
+        let beam = if no_beam {
+            create_no_beam_object()
+        } else {
+            create_fee_beam_object(
+                beam_file,
+                metafits.num_ants,
+                match dipole_delays {
+                    Some(d) => Delays::Partial(d),
+                    None => Delays::Full(metafits::get_dipole_delays(&metafits)),
+                },
+                match unity_dipole_gains {
+                    true => None,
+                    false => Some(metafits::get_dipole_gains(&metafits)),
+                },
+            )?
+        };
 
-        info!("Writing the sky model to {}", model_file.display());
+        info!("Writing the sky model to {}", output_model_file.display());
 
         Ok(Self {
             source_list,
             metafits,
-            model_file,
+            output_model_file,
             phase_centre,
             fine_chan_freqs,
+            xyzs,
+            baseline_to_tile_map,
             timesteps,
             beam,
         })
@@ -314,19 +374,22 @@ impl SimVisParams {
 /// Simulate sky-model visibilities from a sky-model source list.
 pub fn simulate_vis(
     args: SimulateVisArgs,
-    #[cfg(any(feature = "cuda-double", feature = "cuda-single"))] cpu: bool,
+    #[cfg(feature = "cuda")] cpu: bool,
     dry_run: bool,
 ) -> Result<(), SimulateVisError> {
     // Witchcraft to allow this code to be used with or without CUDA support
     // compiled.
-    #[cfg(not(any(feature = "cuda-double", feature = "cuda-single")))]
+    #[cfg(not(feature = "cuda"))]
     let cpu = true;
 
     if cpu {
         info!("Generating sky model visibilities on the CPU");
     } else {
         // TODO: Display GPU info.
-        info!("Generating sky model visibilities on the GPU");
+        #[cfg(not(feature = "cuda-single"))]
+        info!("Generating sky model visibilities on the GPU (double precision)");
+        #[cfg(feature = "cuda-single")]
+        info!("Generating sky model visibilities on the GPU (single precision)");
     }
 
     let params = SimVisParams::new(args)?;
@@ -336,14 +399,10 @@ pub fn simulate_vis(
         return Ok(());
     }
 
-    // Get the geodetic XYZ coordinates of each of the MWA tiles.
-    let xyzs = XyzGeodetic::get_tiles_mwa(&params.metafits);
-    let num_cross_correlation_baselines = params.metafits.num_baselines - params.metafits.num_ants;
-
     // Construct our visibilities array. This will be re-used for each timestep
     // before it written to disk.
     let vis_shape = (
-        num_cross_correlation_baselines,
+        params.baseline_to_tile_map.len(),
         params.fine_chan_freqs.len(),
     );
     let mut vis_model: Array2<Jones<f32>> = Array2::from_elem(vis_shape, Jones::default());
@@ -357,11 +416,13 @@ pub fn simulate_vis(
     );
 
     // Prepare the output visibilities file.
+    let fine_chan_flags = HashSet::new();
     let mut output_writer = UvfitsWriter::new(
-        &params.model_file,
+        &params.output_model_file,
         params.timesteps.len(),
-        num_cross_correlation_baselines,
+        params.baseline_to_tile_map.len(),
         params.fine_chan_freqs.len(),
+        false,
         *params.timesteps.first().unwrap(),
         if params.fine_chan_freqs.len() == 1 {
             None
@@ -375,6 +436,8 @@ pub fn simulate_vis(
             "Simulated visibilities for obsid {}",
             params.metafits.obs_id
         )),
+        &params.baseline_to_tile_map,
+        &fine_chan_flags,
     )?;
 
     // Split the sky-model components (for efficiency). Use an Either to hold
@@ -386,42 +449,24 @@ pub fn simulate_vis(
             params.phase_centre,
         ))
     } else {
-        #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+        #[cfg(feature = "cuda")]
         {
             Either::Right(ComponentListFFI::new(
                 params.source_list,
                 &params.fine_chan_freqs,
                 params.phase_centre,
+                &crate::shapelets::SHAPELET_BASIS_VALUES,
+                crate::shapelets::SBF_L,
+                crate::shapelets::SBF_N,
+                crate::shapelets::SBF_C,
+                crate::shapelets::SBF_DX,
             ))
         }
 
         // It doesn't matter what goes in Right when we're not using CUDA.
-        #[cfg(not(any(feature = "cuda-double", feature = "cuda-single")))]
+        #[cfg(not(feature = "cuda"))]
         Either::Right(0)
     };
-
-    // Variables for CUDA. They're made flexible in their types for whichever
-    // precision is being used in the CUDA code.
-    #[cfg(feature = "cuda-double")]
-    let fine_chan_freqs = &params.fine_chan_freqs;
-    #[cfg(feature = "cuda-double")]
-    let shapelet_basis_values = &crate::shapelets::SHAPELET_BASIS_VALUES;
-    #[cfg(feature = "cuda-double")]
-    let sbf_c = crate::shapelets::SBF_C;
-    #[cfg(feature = "cuda-double")]
-    let sbf_dx = crate::shapelets::SBF_DX;
-
-    #[cfg(feature = "cuda-single")]
-    let fine_chan_freqs: Vec<f32> = params.fine_chan_freqs.iter().map(|&f| f as f32).collect();
-    #[cfg(feature = "cuda-single")]
-    let shapelet_basis_values: Vec<f32> = crate::shapelets::SHAPELET_BASIS_VALUES
-        .iter()
-        .map(|&f| f as f32)
-        .collect();
-    #[cfg(feature = "cuda-single")]
-    let sbf_c = crate::shapelets::SBF_C as f32;
-    #[cfg(feature = "cuda-single")]
-    let sbf_dx = crate::shapelets::SBF_DX as f32;
 
     // Progress bar.
     let model_progress = ProgressBar::new(params.timesteps.len() as _)
@@ -442,7 +487,7 @@ pub fn simulate_vis(
         let lst_diff = (timestep - params.timesteps[0]).in_seconds();
         let lst = params.metafits.lst_rad + lst_diff * SOLAR2SIDEREAL * DS2R;
         let hadec_phase_centre = params.phase_centre.to_hadec(lst);
-        let uvws = xyz::xyzs_to_uvws(&xyzs, hadec_phase_centre);
+        let uvws = xyz::xyzs_to_cross_uvws_parallel(&params.xyzs, hadec_phase_centre);
 
         if cpu {
             model::model_timestep(
@@ -450,55 +495,29 @@ pub fn simulate_vis(
                 sky_model_comps.as_ref().unwrap_left(),
                 params.beam.deref(),
                 lst,
-                &xyzs,
+                &params.xyzs,
                 &uvws,
                 &params.fine_chan_freqs,
+                &params.baseline_to_tile_map,
             )?;
         } else {
-            #[cfg(feature = "cuda-double")]
-            let cuda_uvws: Vec<cuda::UVW> = uvws
-                .iter()
-                .map(|&uvw| cuda::UVW {
-                    u: uvw.u,
-                    v: uvw.v,
-                    w: uvw.w,
-                })
-                .collect();
-            #[cfg(feature = "cuda-single")]
-            let cuda_uvws: Vec<cuda::UVW> = uvws
-                .iter()
-                .map(|&uvw| cuda::UVW {
-                    u: uvw.u as f32,
-                    v: uvw.v as f32,
-                    w: uvw.w as f32,
-                })
-                .collect();
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "cuda")] {
+                    let cuda_uvws: Vec<cuda::UVW> = uvws
+                        .iter()
+                        .map(|&uvw| cuda::UVW {
+                            u: uvw.u as _,
+                            v: uvw.v as _,
+                            w: uvw.w as _,
+                        })
+                        .collect();
 
-            #[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
-            {
-                let sky_model_comps = sky_model_comps.as_ref().unwrap_right();
-
-                let shapelet_uvs = if sky_model_comps.shapelet_power_law_radecs.is_empty() {
-                    None
-                } else {
-                    Some(sky_model_comps.get_shapelet_uvs(lst, &xyzs))
-                };
-                unsafe {
-                    let (points, gaussians, shapelets) =
-                        sky_model_comps.to_c_types(shapelet_uvs.as_ref());
-                    let cuda_result = cuda::model_timestep(
-                        num_cross_correlation_baselines,
-                        params.fine_chan_freqs.len(),
+                    let cuda_result = sky_model_comps.as_ref().unwrap_right().model_timestep(
+                        params.beam.deref(),
+                        lst,
+                        &params.xyzs,
+                        params.baseline_to_tile_map.len(),
                         cuda_uvws.as_ptr(),
-                        fine_chan_freqs.as_ptr(),
-                        &points,
-                        &gaussians,
-                        &shapelets,
-                        shapelet_basis_values.as_ptr(),
-                        crate::shapelets::SBF_L,
-                        crate::shapelets::SBF_N,
-                        sbf_c,
-                        sbf_dx,
                         vis_model.as_mut_ptr() as _,
                     );
                     // TODO: Handle cuda_result.
@@ -512,13 +531,11 @@ pub fn simulate_vis(
             }
         }
         // Write the visibilities out.
-        output_writer.write_from_vis(
+        output_writer.write_cross_timestep_vis(
             vis_model.view(),
             Array2::ones(vis_model.dim()).view(),
             &uvws,
             timestep,
-            params.fine_chan_freqs.len(),
-            &HashSet::new(),
         )?;
 
         // Clear the visibilities before re-using the buffer.
@@ -535,10 +552,10 @@ pub fn simulate_vis(
         .iter()
         .map(|rf| rf.tile_name.as_str())
         .collect();
-    output_writer.write_uvfits_antenna_table(&names, &xyzs)?;
+    output_writer.write_uvfits_antenna_table(&names, &params.xyzs)?;
     info!(
         "Finished writing sky model to {}",
-        &params.model_file.display()
+        &params.output_model_file.display()
     );
 
     Ok(())

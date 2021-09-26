@@ -4,9 +4,9 @@
 
 //! Sky-model component types.
 
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 mod ffi;
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 pub use ffi::*;
 
 use ndarray::prelude::*;
@@ -108,7 +108,7 @@ impl ComponentList {
         source_list: &SourceList,
         unflagged_fine_chan_freqs: &[f64],
         phase_centre: RADec,
-    ) -> Self {
+    ) -> ComponentList {
         // Unpack each of the component parameters into vectors.
         let mut point_radecs = vec![];
         let mut point_lmns = vec![];
@@ -223,7 +223,7 @@ impl ShapeletComponentParams {
             .zip(self.radecs.par_iter())
             .for_each(|(mut baseline_uvws, radec)| {
                 let hadec = radec.to_hadec(lst_rad);
-                let uvws_row = xyz::xyzs_to_uvws(tile_xyzs, hadec);
+                let uvws_row = xyz::xyzs_to_cross_uvws_parallel(tile_xyzs, hadec);
                 baseline_uvws.assign(&Array1::from(uvws_row));
             });
         shapelet_uvws
@@ -458,15 +458,15 @@ fn beam_correct_flux_densities_inner(
                 .try_for_each(|((comp_fd, inst_fd), azel)| {
                     // `jones_1` is the beam response from the first tile in
                     // this baseline.
-                    let jones_1 = beam.calc_jones(*azel, *freq, dipole_gains)?;
+                    // let jones_1 = beam.calc_jones(*azel, *freq, dipole_gains)?;
 
                     // `jones_2` is the beam response from the second tile in
                     // this baseline.
                     // TODO: Use a Jones matrix from another tile!
-                    let jones_2 = jones_1;
+                    // let jones_2 = jones_1;
 
                     // J . I . J^H
-                    *comp_fd = jones_1 * *inst_fd * jones_2.h();
+                    // *comp_fd = jones_1 * *inst_fd * jones_2.h();
                     Ok(())
                 })
         });
@@ -488,7 +488,7 @@ mod tests {
 
     use super::*;
     use crate::{FluxDensity, SourceListType};
-    use mwa_hyperdrive_beam::{Delays, FEEBeam, NoBeam};
+    use mwa_hyperdrive_beam::{create_fee_beam_object, Delays, FEEBeam, NoBeam};
     use mwa_rust_core::Complex;
 
     fn get_small_source_list() -> SourceList {
@@ -604,11 +604,10 @@ mod tests {
     fn test_beam_correct_flux_densities_170_mhz() {
         let freqs = [170e6];
         let lst = 6.261977848;
-        let dipole_delays = vec![0; 16];
-        let dipole_gains = [1.0; 16];
+        let dipole_delays = array![[0; 16]];
 
         let beam: Box<dyn Beam> =
-            Box::new(FEEBeam::new_from_env(Delays::Available(dipole_delays)).unwrap());
+            Box::new(FEEBeam::new_from_env(Delays::Available(dipole_delays), None).unwrap());
         let srclist = get_small_source_list();
         let inst_flux_densities = get_instrumental_flux_densities_for_srclist(&srclist, &freqs);
 

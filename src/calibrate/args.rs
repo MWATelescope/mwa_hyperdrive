@@ -24,8 +24,9 @@ use thiserror::Error;
 
 use crate::calibrate::{
     params::{CalibrateParams, InvalidArgsError},
-    solutions::CalSolutionTypes,
+    solutions::CalSolutionType,
 };
+use crate::data_formats::VisOutputType;
 use crate::*;
 use mwa_hyperdrive_srclist::{SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP};
 use mwa_rust_core::constants::{MWA_LAT_RAD, MWA_LONG_RAD};
@@ -38,18 +39,12 @@ enum ArgFileTypes {
     Json,
 }
 
-#[derive(Debug, Display, EnumIter, EnumString)]
-pub(super) enum VisOutputTypes {
-    #[strum(serialize = "uvfits")]
-    Uvfits,
-}
-
 lazy_static::lazy_static! {
     static ref ARG_FILE_TYPES_COMMA_SEPARATED: String = ArgFileTypes::iter().join(", ");
 
-    pub(super) static ref VIS_OUTPUT_EXTENSIONS: String = VisOutputTypes::iter().join(", ");
+    pub(super) static ref VIS_OUTPUT_EXTENSIONS: String = VisOutputType::iter().join(", ");
 
-    pub(super) static ref CAL_SOLUTION_EXTENSIONS: String = CalSolutionTypes::iter().join(", ");
+    pub(super) static ref CAL_SOLUTION_EXTENSIONS: String = CalSolutionType::iter().join(", ");
 
     static ref DI_CALIBRATE_OUTPUT_HELP: String =
         format!("Paths to the calibration output files. Supported calibrated visibility outputs: {}. Supported calibration solution formats: {}. Default: {}", *VIS_OUTPUT_EXTENSIONS, *CAL_SOLUTION_EXTENSIONS, DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
@@ -122,6 +117,15 @@ pub struct CalibrateUserArgs {
     #[structopt(long)]
     pub beam_file: Option<PathBuf>,
 
+    /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
+    /// the metafits file.
+    #[structopt(long)]
+    pub unity_dipole_gains: bool,
+
+    /// If specified, use these dipole delays for the MWA pointing.
+    #[structopt(long)]
+    pub delays: Option<Vec<u32>>,
+
     /// Don't apply a beam response when generating a sky model. The default is
     /// to use the FEE beam.
     #[structopt(long)]
@@ -159,13 +163,14 @@ pub struct CalibrateUserArgs {
     #[structopt(long)]
     pub ignore_input_data_tile_flags: bool,
 
-    /// If specified, use these dipole delays for the MWA pointing.
-    #[structopt(long)]
-    pub delays: Option<Vec<u32>>,
-
     /// If specified, pretend all fine channels in the input data are unflagged.
     #[structopt(long)]
     pub ignore_input_data_fine_channels_flags: bool,
+
+    /// When writing out calibrated visibilities, don't include
+    /// auto-correlations.
+    #[structopt(long)]
+    pub ignore_autos: bool,
 
     /// The fine channels to be flagged in each coarse channel. e.g. 0 1 16 30
     /// 31 are typical for 40 kHz data.
@@ -194,6 +199,12 @@ pub struct CalibrateUserArgs {
 
     #[structopt(long = "array_latitude", help = ARRAY_LATITUDE_HELP.as_str())]
     pub array_latitude_deg: Option<f64>,
+
+    #[cfg(feature = "cuda")]
+    /// Use the CPU for visibility generation. This is deliberately made
+    /// non-default because using a GPU is much faster.
+    #[structopt(long)]
+    pub cpu: bool,
 }
 
 impl CalibrateUserArgs {
@@ -270,6 +281,8 @@ impl CalibrateUserArgs {
             outputs,
             model_filename,
             beam_file,
+            unity_dipole_gains,
+            delays,
             no_beam,
             source_list,
             source_list_type,
@@ -281,8 +294,8 @@ impl CalibrateUserArgs {
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
-            delays,
             ignore_input_data_fine_channels_flags,
+            ignore_autos,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
             max_iterations,
@@ -290,6 +303,8 @@ impl CalibrateUserArgs {
             min_thresh,
             array_longitude_deg,
             array_latitude_deg,
+            #[cfg(feature = "cuda")]
+            cpu,
         } = file_args;
         // Merge all the arguments, preferring the CLI args when available.
         Ok(Self {
@@ -297,6 +312,7 @@ impl CalibrateUserArgs {
             outputs: cli_args.outputs.or(outputs),
             model_filename: cli_args.model_filename.or(model_filename),
             beam_file: cli_args.beam_file.or(beam_file),
+            unity_dipole_gains: cli_args.unity_dipole_gains || unity_dipole_gains,
             no_beam: cli_args.no_beam || no_beam,
             source_list: cli_args.source_list.or(source_list),
             source_list_type: cli_args.source_list_type.or(source_list_type),
@@ -312,6 +328,7 @@ impl CalibrateUserArgs {
             delays: cli_args.delays.or(delays),
             ignore_input_data_fine_channels_flags: cli_args.ignore_input_data_fine_channels_flags
                 || ignore_input_data_fine_channels_flags,
+            ignore_autos: cli_args.ignore_autos || ignore_autos,
             fine_chan_flags_per_coarse_chan: cli_args
                 .fine_chan_flags_per_coarse_chan
                 .or(fine_chan_flags_per_coarse_chan),
@@ -321,6 +338,8 @@ impl CalibrateUserArgs {
             min_thresh: cli_args.min_thresh.or(min_thresh),
             array_longitude_deg: cli_args.array_longitude_deg.or(array_longitude_deg),
             array_latitude_deg: cli_args.array_latitude_deg.or(array_latitude_deg),
+            #[cfg(feature = "cuda")]
+            cpu: cli_args.cpu || cpu,
         })
     }
 

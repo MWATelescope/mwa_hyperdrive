@@ -5,15 +5,22 @@
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Addresses {
-    pub num_freqs: usize,
-    pub num_vis: usize,
-    pub sbf_l: usize,
-    pub sbf_n: usize,
+    pub num_freqs: ::std::os::raw::c_int,
+    pub num_vis: ::std::os::raw::c_int,
+    pub num_tiles: ::std::os::raw::c_int,
+    pub sbf_l: ::std::os::raw::c_int,
+    pub sbf_n: ::std::os::raw::c_int,
     pub sbf_c: f32,
     pub sbf_dx: f32,
     pub d_uvws: *mut UVW,
     pub d_freqs: *mut f32,
     pub d_shapelet_basis_values: *mut f32,
+    pub d_fee_coeffs: *mut ::std::os::raw::c_void,
+    pub num_fee_beam_coeffs: ::std::os::raw::c_int,
+    pub num_unique_fee_tiles: ::std::os::raw::c_int,
+    pub num_unique_fee_freqs: ::std::os::raw::c_int,
+    pub d_beam_jones_map: *mut u64,
+    pub d_beam_norm_jones: *mut ::std::os::raw::c_void,
     pub d_vis: *mut JonesF32,
     pub host_vis: *mut JonesF32,
 }
@@ -21,7 +28,7 @@ pub struct Addresses {
 fn bindgen_test_layout_Addresses() {
     assert_eq!(
         ::std::mem::size_of::<Addresses>(),
-        80usize,
+        112usize,
         concat!("Size of: ", stringify!(Addresses))
     );
     assert_eq!(
@@ -41,7 +48,7 @@ fn bindgen_test_layout_Addresses() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).num_vis as *const _ as usize },
-        8usize,
+        4usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -50,8 +57,18 @@ fn bindgen_test_layout_Addresses() {
         )
     );
     assert_eq!(
+        unsafe { &(*(::std::ptr::null::<Addresses>())).num_tiles as *const _ as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(num_tiles)
+        )
+    );
+    assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).sbf_l as *const _ as usize },
-        16usize,
+        12usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -61,7 +78,7 @@ fn bindgen_test_layout_Addresses() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).sbf_n as *const _ as usize },
-        24usize,
+        16usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -71,7 +88,7 @@ fn bindgen_test_layout_Addresses() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).sbf_c as *const _ as usize },
-        32usize,
+        20usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -81,7 +98,7 @@ fn bindgen_test_layout_Addresses() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).sbf_dx as *const _ as usize },
-        36usize,
+        24usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -91,7 +108,7 @@ fn bindgen_test_layout_Addresses() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).d_uvws as *const _ as usize },
-        40usize,
+        32usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -101,7 +118,7 @@ fn bindgen_test_layout_Addresses() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).d_freqs as *const _ as usize },
-        48usize,
+        40usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -113,7 +130,7 @@ fn bindgen_test_layout_Addresses() {
         unsafe {
             &(*(::std::ptr::null::<Addresses>())).d_shapelet_basis_values as *const _ as usize
         },
-        56usize,
+        48usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -122,8 +139,68 @@ fn bindgen_test_layout_Addresses() {
         )
     );
     assert_eq!(
-        unsafe { &(*(::std::ptr::null::<Addresses>())).d_vis as *const _ as usize },
+        unsafe { &(*(::std::ptr::null::<Addresses>())).d_fee_coeffs as *const _ as usize },
+        56usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(d_fee_coeffs)
+        )
+    );
+    assert_eq!(
+        unsafe { &(*(::std::ptr::null::<Addresses>())).num_fee_beam_coeffs as *const _ as usize },
         64usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(num_fee_beam_coeffs)
+        )
+    );
+    assert_eq!(
+        unsafe { &(*(::std::ptr::null::<Addresses>())).num_unique_fee_tiles as *const _ as usize },
+        68usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(num_unique_fee_tiles)
+        )
+    );
+    assert_eq!(
+        unsafe { &(*(::std::ptr::null::<Addresses>())).num_unique_fee_freqs as *const _ as usize },
+        72usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(num_unique_fee_freqs)
+        )
+    );
+    assert_eq!(
+        unsafe { &(*(::std::ptr::null::<Addresses>())).d_beam_jones_map as *const _ as usize },
+        80usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(d_beam_jones_map)
+        )
+    );
+    assert_eq!(
+        unsafe { &(*(::std::ptr::null::<Addresses>())).d_beam_norm_jones as *const _ as usize },
+        88usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(Addresses),
+            "::",
+            stringify!(d_beam_norm_jones)
+        )
+    );
+    assert_eq!(
+        unsafe { &(*(::std::ptr::null::<Addresses>())).d_vis as *const _ as usize },
+        96usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -133,7 +210,7 @@ fn bindgen_test_layout_Addresses() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Addresses>())).host_vis as *const _ as usize },
-        72usize,
+        104usize,
         concat!(
             "Offset of field: ",
             stringify!(Addresses),
@@ -146,15 +223,22 @@ extern "C" {
     #[doc = " Function to allocate necessary arrays (UVWs, frequencies and visibilities)"]
     #[doc = " for modelling on the device."]
     pub fn init_model(
-        num_baselines: usize,
-        num_freqs: usize,
-        sbf_l: usize,
-        sbf_n: usize,
+        num_baselines: ::std::os::raw::c_int,
+        num_freqs: ::std::os::raw::c_int,
+        num_tiles: ::std::os::raw::c_int,
+        sbf_l: ::std::os::raw::c_int,
+        sbf_n: ::std::os::raw::c_int,
         sbf_c: f32,
         sbf_dx: f32,
-        uvws: *const UVW,
-        freqs: *const f32,
-        shapelet_basis_values: *const f32,
+        uvws: *mut UVW,
+        freqs: *mut f32,
+        shapelet_basis_values: *mut f32,
+        d_fee_coeffs: *mut ::std::os::raw::c_void,
+        num_fee_beam_coeffs: ::std::os::raw::c_int,
+        num_unique_fee_tiles: ::std::os::raw::c_int,
+        num_unique_fee_freqs: ::std::os::raw::c_int,
+        d_beam_jones_map: *mut u64,
+        d_beam_norm_jones: *mut ::std::os::raw::c_void,
         vis: *mut JonesF32,
     ) -> Addresses;
 }
@@ -165,10 +249,10 @@ extern "C" {
 }
 extern "C" {
     #[doc = " Set all of the visibilities to zero."]
-    pub fn clear_vis(a: *const Addresses);
+    pub fn clear_vis(a: *mut Addresses);
 }
 extern "C" {
     #[doc = " Deallocate necessary arrays (UVWs, frequencies and visibilities) on the"]
     #[doc = " device."]
-    pub fn destroy(addresses: *const Addresses);
+    pub fn destroy(addresses: *mut Addresses);
 }

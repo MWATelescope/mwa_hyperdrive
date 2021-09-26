@@ -100,7 +100,8 @@ pub fn veto_sources(
                     let j = match beam.calc_jones(
                             *azel,
                             cc_freq,
-                            &[1.0; 16]) {
+                            // Have to assume that tile 0 is sensible.
+                        0) {
                             Ok(j) => j,
                             Err(e) => {
                                 trace!("Beam error for source {}", source_name);

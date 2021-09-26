@@ -12,18 +12,20 @@ exclude = [".github/*", "test_files/*"]
 
 [features]
 default = []
-cuda-double = ["mwa_hyperdrive_cuda"]
-cuda-single = ["mwa_hyperdrive_cuda/cuda-single"]
+cuda = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_beam/cuda"]
+cuda-single = ["mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_beam/cuda-single"]
 cfitsio-static = ["mwa_rust_core/cfitsio-static"]
 erfa-static = ["mwa_rust_core/erfa-static"]
 hdf5-static = ["mwa_hyperdrive_beam/hdf5-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 
 [dependencies]
+cfg-if = "1.0.*"
 itertools = "0.10.*"
 lazy_static = "1.4.*"
 log = "0.4.*"
-mwa_rust_core = "0.1.*"
+# mwa_rust_core = "0.2.*"
+mwa_rust_core = { path = "/home/chj/Software/personal/mwa_rust_core" }
 ndarray = { version = "0.14.*", features = ["rayon"] }
 rayon = "~1"
 serde = { version = "1.0.*", features = ["derive"] }
@@ -36,7 +38,7 @@ thiserror = "1.0.*"
 
 mwa_hyperdrive_common = { path = "../common" }
 mwa_hyperdrive_beam =   { path = "../beam" }
-mwa_hyperdrive_cuda =   { path = "../cuda", optional = true, default_features = false }
+mwa_hyperdrive_cuda =   { path = "../cuda", optional = true }
 
 [dev-dependencies]
 indoc = "1.0.*"

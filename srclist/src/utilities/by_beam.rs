@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use itertools::Itertools;
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
+use ndarray::{Array1, Array2};
 use structopt::StructOpt;
 
 use crate::{
@@ -212,8 +213,7 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
     );
 
     // Set up the beam.
-    let delays = get_true_delays(&meta);
-    let beam = create_fee_beam_object(Delays::Available(delays), beam_file)?;
+    let beam = create_fee_beam_object(beam_file, 1, Delays::Full(get_dipole_delays(&meta)), None)?;
 
     // Apply any filters.
     let mut sl = if filter_points || filter_gaussians || filter_shapelets {
@@ -312,33 +312,19 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
     Ok(())
 }
 
-/// MWA metafits files may have delays listed as all 32. This is code for "bad
-/// observation, don't use". But, this has been a headache for researchers in
-/// the past. When this situation is encountered, issue a warning, but then get
-/// the actual observation's delays by iterating over each MWA tile's delays.
-// TODO: Get this in mwalib.
-fn get_true_delays(context: &mwalib::MetafitsContext) -> Vec<u32> {
-    if !context.delays.iter().any(|&d| d == 32) {
-        return context.delays.clone();
-    }
-    warn!("Metafits dipole delays contained 32s.");
-    warn!("This may indicate that the observation's data shouldn't be used.");
-    warn!("Proceeding to work out the true delays anyway...");
-
-    // Individual dipoles in MWA tiles might be dead (i.e. delay of 32). To get
-    // the true delays, iterate over all tiles until all values are non-32.
-    let mut delays = [32; 16];
-    for rf in &context.rf_inputs {
-        for (mwalib_delay, true_delay) in rf.dipole_delays.iter().zip(delays.iter_mut()) {
-            if *mwalib_delay != 32 {
-                *true_delay = *mwalib_delay;
-            }
-        }
-
-        // Are all delays non-32?
-        if delays.iter().all(|&d| d != 32) {
-            break;
-        }
-    }
-    delays.to_vec()
+/// Get the delays for each tile's dipoles.
+pub(crate) fn get_dipole_delays(context: &mwalib::MetafitsContext) -> Array2<u32> {
+    let mut delays = Array2::zeros((context.num_ants, 16));
+    delays
+        .outer_iter_mut()
+        .zip(
+            context
+                .rf_inputs
+                .iter()
+                .filter(|rf| rf.pol == mwalib::Pol::X),
+        )
+        .for_each(|(mut tile_delays, rf)| {
+            tile_delays.assign(&Array1::from(rf.dipole_delays.clone()));
+        });
+    delays
 }

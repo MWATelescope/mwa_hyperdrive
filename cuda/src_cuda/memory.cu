@@ -5,9 +5,10 @@
 #include "common.cuh"
 #include "memory.h"
 
-Addresses init_model(const size_t num_baselines, const size_t num_freqs, const size_t sbf_l, const size_t sbf_n,
-                     const FLOAT sbf_c, const FLOAT sbf_dx, const UVW *uvws, const FLOAT *freqs,
-                     const FLOAT *shapelet_basis_values, JonesF32 *vis) {
+Addresses init_model(int num_baselines, int num_freqs, int num_tiles, int sbf_l, int sbf_n, FLOAT sbf_c, FLOAT sbf_dx,
+                     UVW *uvws, FLOAT *freqs, FLOAT *shapelet_basis_values, void *d_fee_coeffs, int num_fee_beam_coeffs,
+                     int num_unique_fee_tiles, int num_unique_fee_freqs, uint64_t *d_beam_jones_map,
+                     void *d_beam_norm_jones, JonesF32 *vis) {
     UVW *d_uvws = NULL;
     size_t size_uvws = num_baselines * sizeof(UVW);
     cudaSoftCheck(cudaMalloc(&d_uvws, size_uvws));
@@ -24,13 +25,14 @@ Addresses init_model(const size_t num_baselines, const size_t num_freqs, const s
     cudaSoftCheck(cudaMemcpy(d_shapelet_basis_values, shapelet_basis_values, size_sbfs, cudaMemcpyHostToDevice));
 
     JonesF32 *d_vis = NULL;
-    size_t num_vis = num_baselines * num_freqs;
+    int num_vis = num_baselines * num_freqs;
     size_t size_vis = num_vis * sizeof(JonesF32);
     cudaSoftCheck(cudaMalloc(&d_vis, size_vis));
     cudaSoftCheck(cudaMemcpy(d_vis, vis, size_vis, cudaMemcpyHostToDevice));
 
     return Addresses{.num_freqs = num_freqs,
                      .num_vis = num_vis,
+                     .num_tiles = num_tiles,
                      .sbf_l = sbf_l,
                      .sbf_n = sbf_n,
                      .sbf_c = sbf_c,
@@ -38,6 +40,12 @@ Addresses init_model(const size_t num_baselines, const size_t num_freqs, const s
                      .d_uvws = d_uvws,
                      .d_freqs = d_freqs,
                      .d_shapelet_basis_values = d_shapelet_basis_values,
+                     .d_fee_coeffs = d_fee_coeffs,
+                     .num_fee_beam_coeffs = num_fee_beam_coeffs,
+                     .num_unique_fee_tiles = num_unique_fee_tiles,
+                     .num_unique_fee_freqs = num_unique_fee_freqs,
+                     .d_beam_jones_map = d_beam_jones_map,
+                     .d_beam_norm_jones = d_beam_norm_jones,
                      .d_vis = d_vis,
                      .host_vis = vis};
 }
@@ -46,9 +54,9 @@ void copy_vis(const Addresses *a) {
     cudaSoftCheck(cudaMemcpy(a->host_vis, a->d_vis, a->num_vis * sizeof(JonesF32), cudaMemcpyDeviceToHost));
 }
 
-void clear_vis(const Addresses *a) { cudaMemset(a->d_vis, 0.0, a->num_vis * sizeof(JonesF32)); }
+void clear_vis(Addresses *a) { cudaMemset(a->d_vis, 0.0, a->num_vis * sizeof(JonesF32)); }
 
-void destroy(const Addresses *a) {
+void destroy(Addresses *a) {
     cudaSoftCheck(cudaFree(a->d_uvws));
     cudaSoftCheck(cudaFree(a->d_freqs));
     cudaSoftCheck(cudaFree(a->d_shapelet_basis_values));

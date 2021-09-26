@@ -8,7 +8,7 @@ license = "MPL-2.0"
 [features]
 # Use single-precision floats. If this feature isn't enabled, then
 # double-precision floats are used.
-cuda-single = []
+cuda-single = ["mwa_hyperbeam_cuda/single"]
 
 [dependencies]
 cfg-if = "1.0.*"
@@ -16,3 +16,4 @@ cuda-runtime-sys = "0.3.0-alpha.1"
 
 [build-dependencies]
 cc = { version = "1.0.*", features = ["parallel"] }
+mwa_hyperbeam_cuda = { path = "/home/chj/Software/personal/mwa_hyperbeam/cuda" }

@@ -32,7 +32,7 @@ use mwalib::fitsio::{
 use mwalib::*;
 
 #[derive(Debug, Display, EnumIter, EnumString)]
-pub(crate) enum CalSolutionTypes {
+pub(crate) enum CalSolutionType {
     /// hyperdrive's preferred format.
     #[strum(serialize = "fits")]
     Fits,
@@ -65,11 +65,11 @@ impl CalibrationSolutions {
         unflagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), WriteSolutionsError> {
         let ext = file.as_ref().extension().and_then(|e| e.to_str());
-        match ext.and_then(|s| CalSolutionTypes::from_str(s).ok()) {
-            Some(CalSolutionTypes::Fits) => {
+        match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
+            Some(CalSolutionType::Fits) => {
                 self.write_hyperdrive_fits(file, tile_flags, unflagged_fine_chans)
             }
-            Some(CalSolutionTypes::Bin) => {
+            Some(CalSolutionType::Bin) => {
                 self.write_andre_binary(file, tile_flags, unflagged_fine_chans)
             }
             None => Err(WriteSolutionsError::UnsupportedExt {
@@ -78,7 +78,7 @@ impl CalibrationSolutions {
         }
     }
 
-    fn write_hyperdrive_fits<T: AsRef<Path>>(
+    pub(super) fn write_hyperdrive_fits<T: AsRef<Path>>(
         &self,
         file: T,
         tile_flags: &HashSet<usize>,
@@ -216,7 +216,7 @@ impl CalibrationSolutions {
     }
 
     /// Write a "André-Offringa calibrate format" calibration solutions binary file.
-    fn write_andre_binary<T: AsRef<Path>>(
+    pub(super) fn write_andre_binary<T: AsRef<Path>>(
         &self,
         file: T,
         tile_flags: &HashSet<usize>,

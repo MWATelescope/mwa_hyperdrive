@@ -4,19 +4,23 @@
 
 //! Tests on generating sky-model visibilities.
 
+use std::collections::HashSet;
+use std::ops::Deref;
+
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
 
 use super::*;
+use mwa_hyperdrive_beam::NoBeam;
 use mwa_hyperdrive_srclist::{
     constants::DEFAULT_SPEC_INDEX, ComponentList, ComponentType, FluxDensity, FluxDensityType,
     Source, SourceComponent, SourceList,
 };
 use mwa_rust_core::{pos::xyz, Jones, RADec, XyzGeodetic};
 
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 use mwa_hyperdrive_cuda as cuda;
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 use mwa_hyperdrive_srclist::ComponentListFFI;
 
 fn get_simple_point(pos: RADec, flux_density_scale: FluxDensityType) -> SourceComponent {
@@ -63,6 +67,9 @@ struct ObsParams {
     lst: f64,
     xyzs: Vec<XyzGeodetic>,
     uvws: Vec<UVW>,
+    beam: Box<dyn Beam>,
+    num_unflagged_cross_baselines: usize,
+    unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 }
 
 impl ObsParams {
@@ -108,7 +115,11 @@ impl ObsParams {
                 z: 0.0,
             },
         ];
-        let uvws = xyz::xyzs_to_uvws(&xyzs, phase_centre.to_hadec(lst));
+        let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
+        let uvws = xyz::xyzs_to_cross_uvws(&xyzs, phase_centre.to_hadec(lst));
+
+        let maps =
+            crate::calibrate::params::generate_tile_baseline_maps(xyzs.len(), &HashSet::new());
 
         Self {
             phase_centre,
@@ -117,6 +128,9 @@ impl ObsParams {
             lst,
             xyzs,
             uvws,
+            beam: Box::new(NoBeam),
+            num_unflagged_cross_baselines,
+            unflagged_baseline_to_tile_map: maps.unflagged_baseline_to_tile_map,
         }
     }
 
@@ -151,7 +165,11 @@ impl ObsParams {
                 z: 0.0,
             },
         ];
-        let uvws = xyz::xyzs_to_uvws(&xyzs, phase_centre.to_hadec(lst));
+        let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
+        let uvws = xyz::xyzs_to_cross_uvws(&xyzs, phase_centre.to_hadec(lst));
+
+        let maps =
+            crate::calibrate::params::generate_tile_baseline_maps(xyzs.len(), &HashSet::new());
 
         Self {
             phase_centre,
@@ -160,6 +178,9 @@ impl ObsParams {
             lst,
             xyzs,
             uvws,
+            beam: Box::new(NoBeam),
+            num_unflagged_cross_baselines,
+            unflagged_baseline_to_tile_map: maps.unflagged_baseline_to_tile_map,
         }
     }
 }
@@ -281,7 +302,7 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fds: ArrayVi
     }
 }
 
-#[cfg(feature = "cuda-double")]
+#[cfg(all(feature = "cuda", not(feature = "cuda-single")))]
 fn cuda_jones_to_jones(a: ArrayView2<cuda::JonesF64>) -> Array2<Jones<f64>> {
     a.mapv(|j| {
         Jones::from([
@@ -326,10 +347,13 @@ fn point_zenith_cpu() {
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
     model_points(
         visibilities.view_mut(),
+        obs.beam.deref(),
+        &comps.points.get_azels_mwa_parallel(obs.lst),
         &comps.points.lmns,
         comps.points.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
+        &obs.unflagged_baseline_to_tile_map,
     );
     assert_list_zenith_visibilities(visibilities.view(), comps.points.flux_densities.view());
 }
@@ -352,10 +376,13 @@ fn point_off_zenith_cpu() {
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
     model_points(
         visibilities.view_mut(),
+        obs.beam.deref(),
+        &comps.points.get_azels_mwa_parallel(obs.lst),
         &comps.points.lmns,
         comps.points.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
+        &obs.unflagged_baseline_to_tile_map,
     );
     assert_list_off_zenith_visibilities(visibilities.view(), comps.points.flux_densities.view());
 }
@@ -380,11 +407,14 @@ fn gaussian_zenith_cpu() {
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
     model_gaussians(
         visibilities.view_mut(),
+        obs.beam.deref(),
+        &comps.gaussians.get_azels_mwa_parallel(obs.lst),
         &comps.gaussians.lmns,
         &comps.gaussians.gaussian_params,
         comps.gaussians.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
+        &obs.unflagged_baseline_to_tile_map,
     );
     assert_list_zenith_visibilities(visibilities.view(), comps.gaussians.flux_densities.view());
 }
@@ -407,11 +437,14 @@ fn gaussian_off_zenith_cpu() {
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
     model_gaussians(
         visibilities.view_mut(),
+        obs.beam.deref(),
+        &comps.gaussians.get_azels_mwa_parallel(obs.lst),
         &comps.gaussians.lmns,
         &comps.gaussians.gaussian_params,
         comps.gaussians.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
+        &obs.unflagged_baseline_to_tile_map,
     );
     assert_list_off_zenith_visibilities(visibilities.view(), comps.gaussians.flux_densities.view());
 }
@@ -437,6 +470,8 @@ fn shapelet_zenith_cpu() {
     let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
     model_shapelets(
         visibilities.view_mut(),
+        obs.beam.deref(),
+        &comps.shapelets.get_azels_mwa_parallel(obs.lst),
         &comps.shapelets.lmns,
         &comps.shapelets.gaussian_params,
         &comps.shapelets.shapelet_coeffs,
@@ -444,6 +479,7 @@ fn shapelet_zenith_cpu() {
         comps.shapelets.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
+        &obs.unflagged_baseline_to_tile_map,
     );
     assert_list_zenith_visibilities(visibilities.view(), comps.shapelets.flux_densities.view());
 }
@@ -467,6 +503,8 @@ fn shapelet_off_zenith_cpu() {
     let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
     model_shapelets(
         visibilities.view_mut(),
+        obs.beam.deref(),
+        &comps.shapelets.get_azels_mwa_parallel(obs.lst),
         &comps.shapelets.lmns,
         &comps.shapelets.gaussian_params,
         &comps.shapelets.shapelet_coeffs,
@@ -474,14 +512,15 @@ fn shapelet_off_zenith_cpu() {
         comps.shapelets.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
+        &obs.unflagged_baseline_to_tile_map,
     );
     assert_list_off_zenith_visibilities(visibilities.view(), comps.shapelets.flux_densities.view());
 }
 
 // Put a single point source at zenith.
 #[test]
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
-fn point_zenith_gpu_double_list() {
+#[cfg(feature = "cuda")]
+fn point_zenith_gpu_list() {
     let obs = ObsParams::list();
 
     let mut srclist = SourceList::new();
@@ -495,8 +534,16 @@ fn point_zenith_gpu_double_list() {
         },
     );
     // Get the component parameters via `ComponentListFFI`.
-    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
-    let (points, _, _) = comps.to_c_types(None);
+    let comps = ComponentListFFI::new(
+        srclist,
+        &obs.freqs,
+        obs.phase_centre,
+        &crate::shapelets::SHAPELET_BASIS_VALUES,
+        crate::shapelets::SBF_L,
+        crate::shapelets::SBF_N,
+        crate::shapelets::SBF_C,
+        crate::shapelets::SBF_DX,
+    );
 
     let uvws: Vec<cuda::UVW> = obs
         .uvws
@@ -507,39 +554,25 @@ fn point_zenith_gpu_double_list() {
             w: uvw.w as _,
         })
         .collect();
-    let freqs: Vec<_> = obs.freqs.iter().map(|&f| f as _).collect();
-    let shapelet_basis_values: Vec<_> = crate::shapelets::SHAPELET_BASIS_VALUES
-        .iter()
-        .map(|&f| f as _)
-        .collect();
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    unsafe {
-        let addresses = cuda::init_model(
-            obs.uvws.len(),
-            obs.freqs.len(),
-            crate::shapelets::SBF_L,
-            crate::shapelets::SBF_N,
-            crate::shapelets::SBF_C as _,
-            crate::shapelets::SBF_DX as _,
-            uvws.as_ptr(),
-            freqs.as_ptr(),
-            shapelet_basis_values.as_ptr(),
-            visibilities.as_mut_ptr() as _,
-        );
-        cuda::model_points(&points, &addresses);
-        cuda::copy_vis(&addresses);
-        cuda::destroy(&addresses);
-    }
+    comps.model_timestep(
+        obs.beam.deref(),
+        obs.lst,
+        &obs.xyzs,
+        obs.num_unflagged_cross_baselines,
+        uvws.as_ptr(),
+        visibilities.as_mut_ptr() as _,
+    );
     let fds = cuda_jones_to_jones(comps.point_list_fds.view());
     assert_list_zenith_visibilities(visibilities.view(), fds.view());
 }
 
 // Put a single point source just off zenith.
 #[test]
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
-fn point_off_zenith_gpu_double_list() {
+#[cfg(feature = "cuda")]
+fn point_off_zenith_gpu_list() {
     let obs = ObsParams::list();
     let pos = RADec::new_degrees(1.0, -27.0);
 
@@ -550,8 +583,16 @@ fn point_off_zenith_gpu_double_list() {
             components: vec![get_simple_point(pos, obs.flux_density_scale.clone())],
         },
     );
-    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
-    let (points, _, _) = comps.to_c_types(None);
+    let comps = ComponentListFFI::new(
+        srclist,
+        &obs.freqs,
+        obs.phase_centre,
+        &crate::shapelets::SHAPELET_BASIS_VALUES,
+        crate::shapelets::SBF_L,
+        crate::shapelets::SBF_N,
+        crate::shapelets::SBF_C,
+        crate::shapelets::SBF_DX,
+    );
 
     let uvws: Vec<cuda::UVW> = obs
         .uvws
@@ -562,39 +603,25 @@ fn point_off_zenith_gpu_double_list() {
             w: uvw.w as _,
         })
         .collect();
-    let freqs: Vec<_> = obs.freqs.iter().map(|&f| f as _).collect();
-    let shapelet_basis_values: Vec<_> = crate::shapelets::SHAPELET_BASIS_VALUES
-        .iter()
-        .map(|&f| f as _)
-        .collect();
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    unsafe {
-        let addresses = cuda::init_model(
-            obs.uvws.len(),
-            obs.freqs.len(),
-            crate::shapelets::SBF_L,
-            crate::shapelets::SBF_N,
-            crate::shapelets::SBF_C as _,
-            crate::shapelets::SBF_DX as _,
-            uvws.as_ptr(),
-            freqs.as_ptr(),
-            shapelet_basis_values.as_ptr(),
-            visibilities.as_mut_ptr() as _,
-        );
-        cuda::model_points(&points, &addresses);
-        cuda::copy_vis(&addresses);
-        cuda::destroy(&addresses);
-    }
+    comps.model_timestep(
+        obs.beam.deref(),
+        obs.lst,
+        &obs.xyzs,
+        obs.num_unflagged_cross_baselines,
+        uvws.as_ptr(),
+        visibilities.as_mut_ptr() as _,
+    );
     let fds = cuda_jones_to_jones(comps.point_list_fds.view());
     assert_list_off_zenith_visibilities(visibilities.view(), fds.view());
 }
 
 // Put a single Gaussian source at zenith.
 #[test]
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
-fn gaussian_zenith_gpu_double_list() {
+#[cfg(feature = "cuda")]
+fn gaussian_zenith_gpu_list() {
     let obs = ObsParams::list();
 
     let mut srclist = SourceList::new();
@@ -608,8 +635,16 @@ fn gaussian_zenith_gpu_double_list() {
         },
     );
     // Get the component parameters via `ComponentListFFI`.
-    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
-    let (_, gaussians, _) = comps.to_c_types(None);
+    let comps = ComponentListFFI::new(
+        srclist,
+        &obs.freqs,
+        obs.phase_centre,
+        &crate::shapelets::SHAPELET_BASIS_VALUES,
+        crate::shapelets::SBF_L,
+        crate::shapelets::SBF_N,
+        crate::shapelets::SBF_C,
+        crate::shapelets::SBF_DX,
+    );
 
     let uvws: Vec<cuda::UVW> = obs
         .uvws
@@ -620,39 +655,25 @@ fn gaussian_zenith_gpu_double_list() {
             w: uvw.w as _,
         })
         .collect();
-    let freqs: Vec<_> = obs.freqs.iter().map(|&f| f as _).collect();
-    let shapelet_basis_values: Vec<_> = crate::shapelets::SHAPELET_BASIS_VALUES
-        .iter()
-        .map(|&f| f as _)
-        .collect();
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    unsafe {
-        let addresses = cuda::init_model(
-            obs.uvws.len(),
-            obs.freqs.len(),
-            crate::shapelets::SBF_L,
-            crate::shapelets::SBF_N,
-            crate::shapelets::SBF_C as _,
-            crate::shapelets::SBF_DX as _,
-            uvws.as_ptr(),
-            freqs.as_ptr(),
-            shapelet_basis_values.as_ptr(),
-            visibilities.as_mut_ptr() as _,
-        );
-        cuda::model_gaussians(&gaussians, &addresses);
-        cuda::copy_vis(&addresses);
-        cuda::destroy(&addresses);
-    }
+    comps.model_timestep(
+        obs.beam.deref(),
+        obs.lst,
+        &obs.xyzs,
+        obs.num_unflagged_cross_baselines,
+        uvws.as_ptr(),
+        visibilities.as_mut_ptr() as _,
+    );
     let fds = cuda_jones_to_jones(comps.gaussian_list_fds.view());
     assert_list_zenith_visibilities(visibilities.view(), fds.view());
 }
 
 // Put a single Gaussian source just off zenith.
 #[test]
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
-fn gaussian_off_zenith_gpu_double_list() {
+#[cfg(feature = "cuda")]
+fn gaussian_off_zenith_gpu_list() {
     let obs = ObsParams::list();
     let pos = RADec::new_degrees(1.0, -27.0);
 
@@ -663,8 +684,16 @@ fn gaussian_off_zenith_gpu_double_list() {
             components: vec![get_simple_gaussian(pos, obs.flux_density_scale.clone())],
         },
     );
-    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
-    let (_, gaussians, _) = comps.to_c_types(None);
+    let comps = ComponentListFFI::new(
+        srclist,
+        &obs.freqs,
+        obs.phase_centre,
+        &crate::shapelets::SHAPELET_BASIS_VALUES,
+        crate::shapelets::SBF_L,
+        crate::shapelets::SBF_N,
+        crate::shapelets::SBF_C,
+        crate::shapelets::SBF_DX,
+    );
 
     let uvws: Vec<cuda::UVW> = obs
         .uvws
@@ -675,38 +704,24 @@ fn gaussian_off_zenith_gpu_double_list() {
             w: uvw.w as _,
         })
         .collect();
-    let freqs: Vec<_> = obs.freqs.iter().map(|&f| f as _).collect();
-    let shapelet_basis_values: Vec<_> = crate::shapelets::SHAPELET_BASIS_VALUES
-        .iter()
-        .map(|&f| f as _)
-        .collect();
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    unsafe {
-        let addresses = cuda::init_model(
-            obs.uvws.len(),
-            obs.freqs.len(),
-            crate::shapelets::SBF_L,
-            crate::shapelets::SBF_N,
-            crate::shapelets::SBF_C as _,
-            crate::shapelets::SBF_DX as _,
-            uvws.as_ptr(),
-            freqs.as_ptr(),
-            shapelet_basis_values.as_ptr(),
-            visibilities.as_mut_ptr() as _,
-        );
-        cuda::model_gaussians(&gaussians, &addresses);
-        cuda::copy_vis(&addresses);
-        cuda::destroy(&addresses);
-    }
+    comps.model_timestep(
+        obs.beam.deref(),
+        obs.lst,
+        &obs.xyzs,
+        obs.num_unflagged_cross_baselines,
+        uvws.as_ptr(),
+        visibilities.as_mut_ptr() as _,
+    );
     let fds = cuda_jones_to_jones(comps.gaussian_list_fds.view());
     assert_list_off_zenith_visibilities(visibilities.view(), fds.view());
 }
 
 // Put a single shapelet source at zenith.
 #[test]
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 fn shapelet_zenith_gpu_list() {
     let obs = ObsParams::list();
 
@@ -721,9 +736,16 @@ fn shapelet_zenith_gpu_list() {
         },
     );
     // Get the component parameters via `ComponentListFFI`.
-    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
-    let shapelet_uvs = comps.get_shapelet_uvs(obs.lst, &obs.xyzs);
-    let (_, _, shapelets) = comps.to_c_types(Some(&shapelet_uvs));
+    let comps = ComponentListFFI::new(
+        srclist,
+        &obs.freqs,
+        obs.phase_centre,
+        &crate::shapelets::SHAPELET_BASIS_VALUES,
+        crate::shapelets::SBF_L,
+        crate::shapelets::SBF_N,
+        crate::shapelets::SBF_C,
+        crate::shapelets::SBF_DX,
+    );
 
     let uvws: Vec<cuda::UVW> = obs
         .uvws
@@ -734,38 +756,24 @@ fn shapelet_zenith_gpu_list() {
             w: uvw.w as _,
         })
         .collect();
-    let freqs: Vec<_> = obs.freqs.iter().map(|&f| f as _).collect();
-    let shapelet_basis_values: Vec<_> = crate::shapelets::SHAPELET_BASIS_VALUES
-        .iter()
-        .map(|&f| f as _)
-        .collect();
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    unsafe {
-        let addresses = cuda::init_model(
-            obs.uvws.len(),
-            obs.freqs.len(),
-            crate::shapelets::SBF_L,
-            crate::shapelets::SBF_N,
-            crate::shapelets::SBF_C as _,
-            crate::shapelets::SBF_DX as _,
-            uvws.as_ptr(),
-            freqs.as_ptr(),
-            shapelet_basis_values.as_ptr(),
-            visibilities.as_mut_ptr() as _,
-        );
-        cuda::model_shapelets(&shapelets, &addresses);
-        cuda::copy_vis(&addresses);
-        cuda::destroy(&addresses);
-    }
+    comps.model_timestep(
+        obs.beam.deref(),
+        obs.lst,
+        &obs.xyzs,
+        obs.num_unflagged_cross_baselines,
+        uvws.as_ptr(),
+        visibilities.as_mut_ptr() as _,
+    );
     let fds = cuda_jones_to_jones(comps.shapelet_list_fds.view());
     assert_list_zenith_visibilities(visibilities.view(), fds.view());
 }
 
 // Put a single shapelet source just off zenith.
 #[test]
-#[cfg(any(feature = "cuda-double", feature = "cuda-single"))]
+#[cfg(feature = "cuda")]
 fn shapelet_off_zenith_gpu_list() {
     let obs = ObsParams::list();
     let pos = RADec::new_degrees(1.0, -27.0);
@@ -778,9 +786,16 @@ fn shapelet_off_zenith_gpu_list() {
         },
     );
     // Get the component parameters via `ComponentListFFI`.
-    let comps = ComponentListFFI::new(srclist, &obs.freqs, obs.phase_centre);
-    let shapelet_uvs = comps.get_shapelet_uvs(obs.lst, &obs.xyzs);
-    let (_, _, shapelets) = comps.to_c_types(Some(&shapelet_uvs));
+    let comps = ComponentListFFI::new(
+        srclist,
+        &obs.freqs,
+        obs.phase_centre,
+        &crate::shapelets::SHAPELET_BASIS_VALUES,
+        crate::shapelets::SBF_L,
+        crate::shapelets::SBF_N,
+        crate::shapelets::SBF_C,
+        crate::shapelets::SBF_DX,
+    );
 
     let uvws: Vec<cuda::UVW> = obs
         .uvws
@@ -791,31 +806,17 @@ fn shapelet_off_zenith_gpu_list() {
             w: uvw.w as _,
         })
         .collect();
-    let freqs: Vec<_> = obs.freqs.iter().map(|&f| f as _).collect();
-    let shapelet_basis_values: Vec<_> = crate::shapelets::SHAPELET_BASIS_VALUES
-        .iter()
-        .map(|&f| f as _)
-        .collect();
 
     // Ignore applying the beam.
     let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    unsafe {
-        let addresses = cuda::init_model(
-            obs.uvws.len(),
-            obs.freqs.len(),
-            crate::shapelets::SBF_L,
-            crate::shapelets::SBF_N,
-            crate::shapelets::SBF_C as _,
-            crate::shapelets::SBF_DX as _,
-            uvws.as_ptr(),
-            freqs.as_ptr(),
-            shapelet_basis_values.as_ptr(),
-            visibilities.as_mut_ptr() as _,
-        );
-        cuda::model_shapelets(&shapelets, &addresses);
-        cuda::copy_vis(&addresses);
-        cuda::destroy(&addresses);
-    }
+    comps.model_timestep(
+        obs.beam.deref(),
+        obs.lst,
+        &obs.xyzs,
+        obs.num_unflagged_cross_baselines,
+        uvws.as_ptr(),
+        visibilities.as_mut_ptr() as _,
+    );
     let fds = cuda_jones_to_jones(comps.shapelet_list_fds.view());
     assert_list_off_zenith_visibilities(visibilities.view(), fds.view());
 }

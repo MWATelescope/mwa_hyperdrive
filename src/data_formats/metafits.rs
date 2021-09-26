@@ -8,7 +8,6 @@
 
 use std::path::Path;
 
-use log::warn;
 use ndarray::prelude::*;
 
 use mwa_rust_core::mwalib;
@@ -39,53 +38,50 @@ pub(crate) fn populate_metafits_context<T: AsRef<Path>>(
     Ok(context)
 }
 
-/// MWA metafits files may have delays listed as all 32. This is code for "bad
-/// observation, don't use". But, this has been a headache for researchers in
-/// the past. When this situation is encountered, issue a warning, but then get
-/// the actual observation's delays by iterating over each MWA tile's delays.
-pub(crate) fn get_true_delays(context: &MetafitsContext) -> Vec<u32> {
-    if !context.delays.iter().any(|&d| d == 32) {
-        return context.delays.clone();
+/// Get the delays for each tile's dipoles.
+pub(crate) fn get_dipole_delays(context: &mwalib::MetafitsContext) -> Array2<u32> {
+    let mut all_tile_delays = Array2::zeros((context.num_ants, 16));
+    for (i, mut tile_delays) in all_tile_delays.outer_iter_mut().enumerate() {
+        let rf_input_1 = &context.rf_inputs[2 * i];
+        let rf_input_2 = &context.rf_inputs[2 * i + 1];
+        let delays: Vec<_> = rf_input_1
+            .dipole_delays
+            .iter()
+            .zip(rf_input_2.dipole_delays.iter())
+            .map(|(&d_1, &d_2)| {
+                // The delays should be the same, modulo some being 32 (i.e.
+                // that dipole's component is dead). This code will pick the
+                // smaller delay of the two (delays are always <=32). If both
+                // are 32, there's nothing else that can be done.
+                d_1.min(d_2)
+            })
+            .collect();
+        tile_delays.assign(&Array1::from(delays));
     }
-    warn!("Metafits dipole delays contained 32s.");
-    warn!("This may indicate that the observation's data shouldn't be used.");
-    warn!("Proceeding to work out the true delays anyway...");
-
-    // Individual dipoles in MWA tiles might be dead (i.e. delay of 32). To get
-    // the true delays, iterate over all tiles until all values are non-32.
-    let mut delays = [32; 16];
-    for rf in &context.rf_inputs {
-        for (mwalib_delay, true_delay) in rf.dipole_delays.iter().zip(delays.iter_mut()) {
-            if *mwalib_delay != 32 {
-                *true_delay = *mwalib_delay;
-            }
-        }
-
-        // Are all delays non-32?
-        if delays.iter().all(|&d| d != 32) {
-            break;
-        }
-    }
-    delays.to_vec()
+    all_tile_delays
 }
 
 /// Get the gains for each tile's dipoles. If a dipole is "alive", its gain is
 /// one, otherwise it is "dead" and has a gain of zero.
-pub(crate) fn get_dipole_gains(context: &MetafitsContext) -> Array2<f64> {
-    let mut dipole_gains = Array2::from_elem(
-        (
-            context.rf_inputs.len() / 2,
-            context.rf_inputs[0].dipole_gains.len(),
-        ),
-        1.0,
-    );
-    for (mut dipole_gains_for_one_tile, rf_input) in dipole_gains.outer_iter_mut().zip(
-        context
-            .rf_inputs
-            .iter()
-            .filter(|rf_input| rf_input.pol == Pol::Y),
-    ) {
-        dipole_gains_for_one_tile.assign(&ArrayView1::from(&rf_input.dipole_gains));
+pub fn get_dipole_gains(context: &MetafitsContext) -> Array2<f64> {
+    let mut dipole_gains = Array2::zeros((
+        context.num_ants,
+        context.rf_inputs[0].dipole_gains.len() * 2,
+    ));
+    for (i, mut dipole_gains_for_one_tile) in dipole_gains.outer_iter_mut().enumerate() {
+        let rf_input_1 = &context.rf_inputs[2 * i];
+        let rf_input_2 = &context.rf_inputs[2 * i + 1];
+        let (rf_input_x, rf_input_y) = if rf_input_1.pol == Pol::X {
+            (rf_input_1, rf_input_2)
+        } else {
+            (rf_input_2, rf_input_1)
+        };
+        dipole_gains_for_one_tile
+            .slice_mut(s![..16])
+            .assign(&ArrayView1::from(&rf_input_x.dipole_gains));
+        dipole_gains_for_one_tile
+            .slice_mut(s![16..])
+            .assign(&ArrayView1::from(&rf_input_y.dipole_gains));
     }
     dipole_gains
 }

@@ -1,6 +1,6 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.2.0-alpha2"
+version = "0.2.0-alpha3"
 authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
 edition = "2018"
 license = "MPL-2.0"
@@ -22,12 +22,15 @@ members = [
 [profile.dev]
 opt-level = 2
 
+[profile.release]
+panic = "abort"
+
 [features]
 default = []
 # Use CUDA code with double-precision floats.
-cuda-double = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_srclist/cuda-double"]
+cuda = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_beam/cuda", "mwa_hyperdrive_srclist/cuda"]
 # Use CUDA code with single-precision floats.
-cuda-single = ["mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_srclist/cuda-single"]
+cuda-single = ["cuda", "mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_beam/cuda-single", "mwa_hyperdrive_srclist/cuda-single"]
 cfitsio-static = ["mwa_rust_core/cfitsio-static"]
 erfa-static = ["mwa_rust_core/erfa-static"]
 hdf5-static = ["mwa_hyperdrive_srclist/hdf5-static"]
@@ -36,34 +39,36 @@ all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 [dependencies]
 birli = { version = "0.1.9", default_features = false }
 byteorder = "1.4.3"
+cfg-if = "1.0.0"
 crossbeam-channel = "0.5.1"
 crossbeam-utils = "0.8.5"
 fern = { version = "0.6.0", features = ["chrono", "colored"] }
-flate2 = "1.0.20"
+flate2 = "1.0.21"
 glob = "0.3.0"
 hifitime = "2.2.3"
 indicatif = { version = "0.16.2", features = ["rayon"] }
 itertools = "0.10.1"
 lazy_static = "1.4.0"
 log = "0.4.14"
-mwa_rust_core = "0.1.2"
+# mwa_rust_core = "0.2.0"
+mwa_rust_core = { path = "/home/chj/Software/personal/mwa_rust_core" }
 ndarray = { version = "0.14.0", features = ["rayon"] }
 rayon = "1.5.1"
 regex = "1.5.4"
 # rubbl_casatables = "0.3.1"
 # Necessary until a new version is cut
 rubbl_casatables = { git = "https://github.com/pkgw/rubbl", rev = "7e0f5ea" }
-serde = { version = "1.0.128", features = ["derive"] }
-serde_json = "1.0.66"
-structopt = "0.3.22"
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.67"
+structopt = "0.3.23"
 strum = "0.21.0"
 strum_macros = "0.21.1"
-thiserror = "1.0.26"
+thiserror = "1.0.29"
 toml = "0.5.8"
 
 mwa_hyperdrive_common =  { path = "common" }
 mwa_hyperdrive_beam =    { path = "beam" }
-mwa_hyperdrive_cuda =    { path = "cuda", optional = true, default_features = false }
+mwa_hyperdrive_cuda =    { path = "cuda", optional = true }
 mwa_hyperdrive_srclist = { path = "srclist" }
 
 [dev-dependencies]

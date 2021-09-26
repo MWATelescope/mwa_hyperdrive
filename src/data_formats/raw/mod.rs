@@ -9,22 +9,23 @@ pub(crate) mod error;
 pub use error::*;
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use log::{debug, warn};
+use log::{debug, info, trace, warn};
+use mwa_rust_core::{
+    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    math::baseline_to_tiles,
+    time::gps_to_epoch,
+    Jones, RADec, XyzGeodetic,
+};
+use mwalib::{CorrelatorContext, Pol};
 use ndarray::prelude::*;
 
 use super::*;
 use crate::context::{FreqContext, ObsContext};
 use crate::flagging::aoflagger::AOFlags;
-use crate::glob::*;
-use crate::mwalib::{CorrelatorContext, Pol};
+use crate::mwalib;
 use mwa_hyperdrive_beam::Delays;
-use mwa_rust_core::{
-    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    time::gps_to_epoch,
-    Jones, RADec, XyzGeodetic,
-};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawData {
@@ -36,7 +37,7 @@ pub(crate) struct RawData {
 
     // Raw-data-specific things follow.
     /// The interface to the raw data via mwalib.
-    pub(crate) _mwalib_context: CorrelatorContext,
+    mwalib_context: CorrelatorContext,
 
     // TODO: Rename to something more general. Don't need actual AOFlagger flags.
     /// AOFlagger flags.
@@ -55,57 +56,33 @@ impl RawData {
         mwafs: Option<&[T]>,
         dipole_delays: &mut Delays,
     ) -> Result<Self, NewRawError> {
-        // The metafits argument could be a glob. If the specified
-        // metafits file can't be found, treat it as a glob and expand
-        // it to find a match.
-        let meta_pb = {
-            let pb = PathBuf::from(metadata.as_ref());
-            if pb.exists() {
-                pb
-            } else {
-                get_single_match_from_glob(metadata.as_ref().to_str().unwrap())?
-            }
-        };
-        // TODO: Test existence.
-        debug!("Using metafits: {}", meta_pb.display());
+        let meta_pb = metadata.as_ref();
+        let gpubox_pbs: Vec<&Path> = gpuboxes.iter().map(|p| p.as_ref()).collect();
+        trace!("Using metafits: {}", meta_pb.display());
+        trace!("Using gpubox files: {:#?}", gpubox_pbs);
 
-        let gpubox_pbs: Vec<PathBuf> = match gpuboxes.len() {
-            0 => return Err(NewRawError::NoGpuboxes),
-
-            // If a single gpubox file was specified, and it isn't a real
-            // file, treat it as a glob and expand it to find matches.
-            1 => {
-                let pb = gpuboxes[0].as_ref().to_path_buf();
-                if pb.exists() {
-                    vec![pb]
-                } else {
-                    let entries = get_all_matches_from_glob(pb.as_os_str().to_str().unwrap())?;
-                    if entries.is_empty() {
-                        return Err(NewRawError::SingleGpuboxNotAFileOrGlob);
-                    } else {
-                        entries
-                    }
-                }
-            }
-
-            // TODO: Test existence.
-            _ => gpuboxes.iter().map(|p| p.as_ref().to_path_buf()).collect(),
-        };
-        debug!("Using gpubox files: {:#?}", gpubox_pbs);
-
-        debug!("Creating mwalib context");
+        trace!("Creating mwalib context");
         let mwalib_context = CorrelatorContext::new(&meta_pb, &gpubox_pbs)?;
         let metafits_context = &mwalib_context.metafits_context;
-        let total_num_tiles = metafits_context.rf_inputs.len() / 2;
-        debug!("There are {} total tiles", total_num_tiles);
+        let total_num_tiles = metafits_context.num_ants;
+        trace!("There are {} total tiles", total_num_tiles);
 
         let tile_flags_set: HashSet<usize> = metafits_context
             .rf_inputs
             .iter()
-            .filter(|rf| rf.pol == Pol::Y && rf.flagged)
+            .filter(|rf| rf.pol == Pol::X && rf.flagged)
             .map(|rf_input| rf_input.ant as usize)
             .collect();
-        debug!("Found tile flags {:?}", &tile_flags_set);
+        debug!("Found metafits tile flags: {:?}", &tile_flags_set);
+
+        // Are there any unflagged tiles?
+        let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
+        debug!("There are {} unflagged tiles", num_unflagged_tiles);
+        if num_unflagged_tiles == 0 {
+            return Err(NewRawError::AllTilesFlagged);
+        }
+
+        // Check that the tile flags are sensible.
         for &f in &tile_flags_set {
             if f > total_num_tiles - 1 {
                 return Err(NewRawError::InvalidTileFlag {
@@ -115,34 +92,21 @@ impl RawData {
             }
         }
 
-        // There's a chance that some or all tiles are flagged due to their
-        // delays. Any delay == 32 is an indication that a dipole is "dead".
+        // All delays == 32 is an indication that this observation is "bad".
         let listed_delays = metafits_context.delays.clone();
-        // TODO: This should probably fail instead of throw a warning. All the
-        // user to proceed if they acknowledge the warning.
         debug!("Listed observation dipole delays: {:?}", &listed_delays);
-        let bad_obs = if listed_delays.iter().all(|&d| d == 32) {
+        if listed_delays.iter().all(|&d| d == 32) {
             warn!("This observation has been flagged as \"do not use\", according to the metafits delays!");
             true
         } else {
             false
         };
-        let ideal_delays = if listed_delays.iter().all(|&d| d != 32) {
-            listed_delays
-        } else {
-            metafits::get_true_delays(metafits_context)
-        };
-        debug!("Ideal observation dipole delays: {:?}", &ideal_delays);
         if matches!(dipole_delays, Delays::None) {
-            if bad_obs {
-                warn!("Using {:?} as dipole delays", &ideal_delays);
-            }
-            *dipole_delays = Delays::Available(ideal_delays);
+            *dipole_delays = Delays::Full(metafits::get_dipole_delays(metafits_context));
         }
 
         let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
         tile_flags.sort_unstable();
-        let num_unflagged_tiles = total_num_tiles - tile_flags.len();
         for &f in &tile_flags {
             if f > total_num_tiles - 1 {
                 return Err(NewRawError::InvalidTileFlag {
@@ -150,12 +114,6 @@ impl RawData {
                     max: total_num_tiles - 1,
                 });
             }
-        }
-
-        // Are there any unflagged tiles?
-        debug!("There are {} unflagged tiles", num_unflagged_tiles);
-        if num_unflagged_tiles == 0 {
-            return Err(NewRawError::AllTilesFlagged);
         }
 
         let fine_chan_flags_per_coarse_chan: Vec<usize> =
@@ -202,7 +160,7 @@ impl RawData {
             .timesteps
             .iter()
             .map(|t| gps_to_epoch(t.gps_time_ms as f64 / 1e3))
-            .collect::<Vec<_>>();
+            .collect();
 
         // Populate a frequency context struct.
         let mut fine_chan_freqs = Vec::with_capacity(
@@ -267,6 +225,7 @@ impl RawData {
         let tile_names: Vec<String> = metafits_context
             .rf_inputs
             .iter()
+            .filter(|rf| rf.pol == Pol::X)
             .map(|rf_input| rf_input.tile_name.clone())
             .collect();
 
@@ -286,6 +245,15 @@ impl RawData {
             dipole_gains_for_one_tile.assign(&ArrayView1::from(&rf_input.dipole_gains));
         }
 
+        match mwalib_context.metafits_context.geometric_delays_applied {
+            mwalib::GeometricDelaysApplied::No => (),
+
+            g => info!(
+                "No geometric delays will be applied; metafits indicates {}",
+                g
+            ),
+        }
+
         let obs_context = ObsContext {
             obsid: Some(metafits_context.obs_id),
             timesteps,
@@ -295,8 +263,9 @@ impl RawData {
             tile_names,
             tile_xyzs,
             tile_flags,
+            autocorrelations_present: true,
             fine_chan_flags_per_coarse_chan,
-            dipole_gains,
+            dipole_gains: Some(dipole_gains),
             time_res,
             array_longitude_rad: Some(MWA_LONG_RAD),
             array_latitude_rad: Some(MWA_LAT_RAD),
@@ -305,7 +274,7 @@ impl RawData {
         Ok(Self {
             obs_context,
             freq_context,
-            _mwalib_context: mwalib_context,
+            mwalib_context,
             _aoflags: aoflags,
         })
     }
@@ -320,13 +289,122 @@ impl InputData for RawData {
         &self.freq_context
     }
 
-    fn read(
+    fn get_input_data_type(&self) -> VisInputType {
+        VisInputType::Raw
+    }
+
+    fn read_crosses(
         &self,
         mut data_array: ArrayViewMut2<Jones<f32>>,
+        mut weights_array: ArrayViewMut2<f32>,
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        flagged_baselines: &HashSet<usize>,
         flagged_fine_chans: &HashSet<usize>,
-    ) -> Result<Array2<f32>, ReadInputDataError> {
-        todo!();
+    ) -> Result<(), ReadInputDataError> {
+        // TODO: Handle non-contiguous coarse channels.
+        // mwalib won't provide a context without gpubox files, so it is safe to
+        // unwrap `first` and `last`.
+        let coarse_chan_range = *self
+            .mwalib_context
+            .common_coarse_chan_indices
+            .first()
+            .unwrap()
+            ..*self
+                .mwalib_context
+                .common_coarse_chan_indices
+                .last()
+                .unwrap()
+                + 1;
+        let timestep_range = timestep..timestep + 1;
+
+        // Read in the data via Birli.
+        let (mut vis, flags) = birli::context_to_jones_array(
+            &self.mwalib_context,
+            &timestep_range,
+            &coarse_chan_range,
+            None,
+        );
+        let weights = birli::flags::flag_to_weight_array(&self.mwalib_context, flags.view());
+
+        // Correct the raw data.
+        if !self.mwalib_context.metafits_context.cable_delays_applied {
+            birli::correct_cable_lengths(&self.mwalib_context, &mut vis, &coarse_chan_range);
+        }
+        match self
+            .mwalib_context
+            .metafits_context
+            .geometric_delays_applied
+        {
+            mwalib::GeometricDelaysApplied::No => birli::correct_geometry(
+                &self.mwalib_context,
+                &mut vis,
+                &timestep_range,
+                &coarse_chan_range,
+                None,
+            ),
+
+            // Nothing to do; metafits indicates delay corrections have been
+            // applied, and this is reported to the user in the new method.
+            _ => (),
+        }
+
+        // Remove the extraneous time dimension; there's only ever one timestep.
+        let mut vis = vis.remove_axis(Axis(0));
+        let mut weights = weights.remove_axis(Axis(0));
+
+        // Apply the weights to the just-read-in visibilities. We don't care for
+        // negative weights; they just signal that the visibilities should be
+        // flagged.
+        ndarray::Zip::from(&mut vis)
+            .and(&mut weights)
+            .par_apply(|v, w| {
+                if *w < 0.0 {
+                    *w = 0.0;
+                }
+                *v *= *w;
+            });
+
+        // Write the visibilities to our `data_array`, ignoring any flagged
+        // baselines.
+        let mut data_array_bl_index = 0;
+        for (i_bl, (vis_bl, weights_bl)) in vis
+            .reversed_axes()
+            .outer_iter()
+            .zip(weights.reversed_axes().outer_iter())
+            .enumerate()
+        {
+            let (tile1, tile2) =
+                baseline_to_tiles(self.mwalib_context.metafits_context.num_ants, i_bl);
+
+            if let Some(_) = tile_to_unflagged_baseline_map.get(&(tile1, tile2)) {
+                let mut data_array_freq_index = 0;
+                for (i_freq, (&vis, &weight)) in vis_bl.iter().zip(weights_bl.iter()).enumerate() {
+                    if !flagged_fine_chans.contains(&i_freq) {
+                        // data_array[(data_array_bl_index, data_array_freq_index)] = vis;
+                        data_array[(data_array_bl_index, data_array_freq_index)] =
+                            Jones::from([vis[0], vis[1], vis[2], vis[3]]);
+                        weights_array[(data_array_bl_index, data_array_freq_index)] = weight;
+
+                        data_array_freq_index += 1;
+                    }
+                }
+
+                data_array_bl_index += 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn read_autos(
+        &self,
+        data_array: ArrayViewMut2<Jones<f32>>,
+        weights_array: ArrayViewMut2<f32>,
+        timestep: usize,
+        flagged_tiles: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(), ReadInputDataError> {
+        todo!()
     }
 }
