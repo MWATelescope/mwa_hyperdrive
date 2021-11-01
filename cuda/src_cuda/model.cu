@@ -4,32 +4,42 @@
 
 #include <stdlib.h>
 
-#include <cuda_runtime.h>
+#include <cuComplex.h>
 
 #include "common.cuh"
 #include "memory.h"
 #include "model.h"
 #include "types.h"
 
-#include "fee.h"
-
 // If SINGLE is enabled, use single-precision floats everywhere. Otherwise
 // default to double-precision.
 #ifdef SINGLE
-#define FLOAT4 float4
-#define SINCOS sincosf
-#define EXP    expf
-#define POW    powf
-#define FLOOR  floorf
-#define CUCONJ cuConjf
+#define FLOAT4    float4
+#define SINCOS    sincosf
+#define EXP       expf
+#define POW       powf
+#define FLOOR     floorf
+#define CUCOMPLEX cuFloatComplex
+#define CUCONJ    cuConjf
 #else
-#define FLOAT4 double4
-#define SINCOS sincos
-#define EXP    exp
-#define POW    pow
-#define FLOOR  floor
-#define CUCONJ cuConj
+#define FLOAT4    double4
+#define SINCOS    sincos
+#define EXP       exp
+#define POW       pow
+#define FLOOR     floor
+#define CUCOMPLEX cuDoubleComplex
+#define CUCONJ    cuConj
 #endif
+
+/**
+ * A Jones matrix using the specified precision and CUDA complex types.
+ */
+typedef struct JONES_C {
+    CUCOMPLEX j00;
+    CUCOMPLEX j01;
+    CUCOMPLEX j10;
+    CUCOMPLEX j11;
+} JONES_C;
 
 const FLOAT VEL_C = 299792458.0;
 const FLOAT LN_2 = 0.6931471805599453;
@@ -37,7 +47,7 @@ const FLOAT FRAC_PI_2 = 1.5707963267948966;
 const FLOAT SQRT_FRAC_PI_SQ_2_LN_2 = 2.6682231283184983;
 const FLOAT EXP_CONST = -((FRAC_PI_2 * FRAC_PI_2) / LN_2);
 
-inline __host__ __device__ JONES operator*(JONES a, FLOAT b) {
+inline __device__ JONES operator*(JONES a, FLOAT b) {
     JONES t;
     t.xx_re = a.xx_re * b;
     t.xx_im = a.xx_im * b;
@@ -50,7 +60,37 @@ inline __host__ __device__ JONES operator*(JONES a, FLOAT b) {
     return t;
 }
 
-inline __host__ __device__ void operator+=(JONES &a, JONES &b) {
+inline __device__ CUCOMPLEX operator+(CUCOMPLEX a, CUCOMPLEX b) {
+    CUCOMPLEX t;
+    t.x = a.x + b.x;
+    t.y = a.y + b.y;
+    return t;
+}
+
+inline __device__ CUCOMPLEX operator*(CUCOMPLEX a, CUCOMPLEX b) {
+    CUCOMPLEX t;
+    t.x = a.x * b.x - a.y * b.y;
+    t.y = a.x * b.y + a.y * b.x;
+    return t;
+}
+
+inline __device__ CUCOMPLEX operator*(CUCOMPLEX a, FLOAT b) {
+    CUCOMPLEX t;
+    t.x = a.x * b;
+    t.y = a.y * b;
+    return t;
+}
+
+inline __device__ JONES_C operator*(JONES_C a, FLOAT b) {
+    JONES_C t;
+    t.j00 = a.j00 * b;
+    t.j01 = a.j01 * b;
+    t.j10 = a.j10 * b;
+    t.j11 = a.j11 * b;
+    return t;
+}
+
+inline __device__ void operator+=(JONES &a, JONES &b) {
     a.xx_re += b.xx_re;
     a.xx_im += b.xx_im;
     a.xy_re += b.xy_re;
@@ -61,7 +101,7 @@ inline __host__ __device__ void operator+=(JONES &a, JONES &b) {
     a.yy_im += b.yy_im;
 }
 
-inline __host__ __device__ void operator+=(JonesF32 &a, JonesF64 &b) {
+inline __device__ void operator+=(JonesF32 &a, JonesF64 &b) {
     a.xx_re += (float)b.xx_re;
     a.xx_im += (float)b.xx_im;
     a.xy_re += (float)b.xy_re;
@@ -72,7 +112,7 @@ inline __host__ __device__ void operator+=(JonesF32 &a, JonesF64 &b) {
     a.yy_im += (float)b.yy_im;
 }
 
-inline __host__ __device__ FLOAT4 operator+(FLOAT4 a, FLOAT4 b) {
+inline __device__ FLOAT4 operator+(FLOAT4 a, FLOAT4 b) {
     FLOAT4 t;
     t.x = a.x - b.x;
     t.y = a.y - b.y;
@@ -81,7 +121,7 @@ inline __host__ __device__ FLOAT4 operator+(FLOAT4 a, FLOAT4 b) {
     return t;
 }
 
-inline __host__ __device__ FLOAT4 operator-(FLOAT4 a, FLOAT4 b) {
+inline __device__ FLOAT4 operator-(FLOAT4 a, FLOAT4 b) {
     FLOAT4 t;
     t.x = a.x - b.x;
     t.y = a.y - b.y;
@@ -90,7 +130,7 @@ inline __host__ __device__ FLOAT4 operator-(FLOAT4 a, FLOAT4 b) {
     return t;
 }
 
-inline __host__ __device__ FLOAT4 operator*(FLOAT4 a, FLOAT b) {
+inline __device__ FLOAT4 operator*(FLOAT4 a, FLOAT b) {
     FLOAT4 t;
     t.x = a.x * b;
     t.y = a.y * b;
@@ -99,18 +139,11 @@ inline __host__ __device__ FLOAT4 operator*(FLOAT4 a, FLOAT b) {
     return t;
 }
 
-inline __host__ __device__ void operator+=(FLOAT4 &a, FLOAT4 b) {
+inline __device__ void operator+=(FLOAT4 &a, FLOAT4 b) {
     a.x += b.x;
     a.y += b.y;
     a.z += b.z;
     a.w += b.w;
-}
-
-inline __host__ __device__ CUCOMPLEX operator*(CUCOMPLEX a, CUCOMPLEX b) {
-    CUCOMPLEX t;
-    t.x = a.x * b.x - a.y * b.y;
-    t.y = a.x * b.y + a.y * b.x;
-    return t;
 }
 
 /**
@@ -146,10 +179,9 @@ inline __device__ void complex_multiply(const JONES *fd, FLOAT real, FLOAT imag,
 /**
  * Multiply a Jones matrix by two beam Jones matrices (i.e. J1 . J . J2^H).
  */
-inline __device__ void apply_beam(const FEEJones *j1, JONES *j, const FEEJones *j2) {
-    // Cast j for convenience.
-    FEEJones *jm = (FEEJones *)j;
-    FEEJones temp;
+inline __device__ void apply_beam(const JONES_C *j1, JONES *j, const JONES_C *j2) {
+    JONES_C *jm = (JONES_C *)j;
+    JONES_C temp;
 
     // J1 . J
     temp.j00 = j1->j00 * jm->j00 + j1->j01 * jm->j10;
@@ -158,7 +190,7 @@ inline __device__ void apply_beam(const FEEJones *j1, JONES *j, const FEEJones *
     temp.j11 = j1->j10 * jm->j01 + j1->j11 * jm->j11;
 
     // J2^H
-    FEEJones j2h = FEEJones{
+    JONES_C j2h = JONES_C{
         .j00 = CUCONJ(j2->j00),
         .j01 = CUCONJ(j2->j10),
         .j10 = CUCONJ(j2->j01),
@@ -494,9 +526,9 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
  * Kernel for calculating point-source-component visibilities attenuated by the
  * FEE beam.
  */
-__global__ void model_points_fee_kernel(int num_freqs, int num_vis, UVW *d_uvws, FLOAT *d_freqs, Points d_comps,
-                                        FEEJones *d_beam_jones, uint64_t *d_beam_jones_map, int num_fee_freqs,
-                                        JonesF32 *d_vis) {
+__global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d_uvws, const FLOAT *d_freqs,
+                                        const Points d_comps, const JONES_C *d_beam_jones,
+                                        const uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
     // First tile idx  == blockIdx.x
     // Second tile idx == blockIdx.y
     // Frequency       == blockDim.z * blockIdx.z + threadIdx.x
@@ -550,8 +582,8 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, UVW *d_uvws,
 
     for (int i_comp = 0; i_comp < d_comps.num_power_law_points; i_comp++) {
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
-        FEEJones j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
-        FEEJones j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
         apply_beam(&j1, &fd, &j2);
 
         const LMN lmn = d_comps.power_law_lmns[i_comp];
@@ -562,10 +594,10 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, UVW *d_uvws,
     int i_fd = i_freq * d_comps.num_list_points;
     for (int i_comp = 0; i_comp < d_comps.num_list_points; i_comp++) {
         JONES fd = d_comps.list_fds[i_fd + i_comp];
-        FEEJones j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp +
-                                   d_comps.num_power_law_points];
-        FEEJones j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp +
-                                   d_comps.num_power_law_points];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp +
+                                  d_comps.num_power_law_points];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp +
+                                  d_comps.num_power_law_points];
         apply_beam(&j1, &fd, &j2);
 
         const LMN lmn = d_comps.list_lmns[i_comp];
@@ -580,8 +612,8 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, UVW *d_uvws,
  * Kernel for calculating Gaussian-source-component visibilities.
  */
 __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vis, const UVW *d_uvws,
-                                           const FLOAT *d_freqs, const Gaussians d_comps, FEEJones *d_beam_jones,
-                                           uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
+                                           const FLOAT *d_freqs, const Gaussians d_comps, JONES_C *d_beam_jones,
+                                           const uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
     // First tile idx  == blockIdx.x
     // Second tile idx == blockIdx.y
     // Frequency       == blockDim.z * blockIdx.z + threadIdx.x
@@ -636,8 +668,8 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
 
     for (size_t i_comp = 0; i_comp < d_comps.num_power_law_gaussians; i_comp++) {
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
-        FEEJones j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
-        FEEJones j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
         apply_beam(&j1, &fd, &j2);
 
         const LMN lmn = d_comps.power_law_lmns[i_comp];
@@ -661,10 +693,10 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
     int i_fd = i_freq * d_comps.num_list_gaussians;
     for (size_t i_comp = 0; i_comp < d_comps.num_list_gaussians; i_comp++) {
         JONES fd = d_comps.list_fds[i_fd + i_comp];
-        FEEJones j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp +
-                                   d_comps.num_power_law_gaussians];
-        FEEJones j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp +
-                                   d_comps.num_power_law_gaussians];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp +
+                                  d_comps.num_power_law_gaussians];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp +
+                                  d_comps.num_power_law_gaussians];
         apply_beam(&j1, &fd, &j2);
 
         const LMN lmn = d_comps.list_lmns[i_comp];
@@ -697,8 +729,8 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
 __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t num_vis, const UVW *d_uvws,
                                            const FLOAT *d_freqs, const Shapelets d_comps,
                                            const FLOAT *d_shapelet_basis_values, const size_t sbf_l, const size_t sbf_n,
-                                           const FLOAT sbf_c, const FLOAT sbf_dx, FEEJones *d_beam_jones,
-                                           uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
+                                           const FLOAT sbf_c, const FLOAT sbf_dx, JONES_C *d_beam_jones,
+                                           const uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
     // First tile idx  == blockIdx.x
     // Second tile idx == blockIdx.y
     // Frequency       == blockDim.z * blockIdx.z + threadIdx.x
@@ -816,8 +848,8 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
         imag2 = real * envelope_im + imag * envelope_re;
 
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
-        FEEJones j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
-        FEEJones j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
         apply_beam(&j1, &fd, &j2);
         complex_multiply(&fd, real2, imag2, &delta_vis);
     }
@@ -884,8 +916,8 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
         imag2 = real * envelope_im + imag * envelope_re;
 
         JONES fd = d_comps.list_fds[i_fd + i_comp];
-        FEEJones j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
-        FEEJones j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
         apply_beam(&j1, &fd, &j2);
         complex_multiply(&fd, real2, imag2, &delta_vis);
     }
@@ -893,58 +925,9 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     d_vis[i_vis] += delta_vis;
 }
 
-extern "C" int model_points(const Points *comps, const Addresses *a) {
-    LMN *d_pl_lmns = NULL;
-    size_t size_lmns = comps->num_power_law_points * sizeof(LMN);
-    cudaSoftCheck(cudaMalloc(&d_pl_lmns, size_lmns));
-    cudaSoftCheck(cudaMemcpy(d_pl_lmns, comps->power_law_lmns, size_lmns, cudaMemcpyHostToDevice));
-
-    JONES *d_pl_fds = NULL;
-    size_t size_fds = comps->num_power_law_points * sizeof(JONES);
-    cudaSoftCheck(cudaMalloc(&d_pl_fds, size_fds));
-    cudaSoftCheck(cudaMemcpy(d_pl_fds, comps->power_law_fds, size_fds, cudaMemcpyHostToDevice));
-
-    FLOAT *d_pl_sis = NULL;
-    size_t size_sis = comps->num_power_law_points * sizeof(FLOAT);
-    cudaSoftCheck(cudaMalloc(&d_pl_sis, size_sis));
-    cudaSoftCheck(cudaMemcpy(d_pl_sis, comps->power_law_sis, size_sis, cudaMemcpyHostToDevice));
-
-    LMN *d_list_lmns = NULL;
-    size_lmns = comps->num_list_points * sizeof(LMN);
-    cudaSoftCheck(cudaMalloc(&d_list_lmns, size_lmns));
-    cudaSoftCheck(cudaMemcpy(d_list_lmns, comps->list_lmns, size_lmns, cudaMemcpyHostToDevice));
-
-    JONES *d_list_fds = NULL;
-    size_fds = a->num_freqs * comps->num_list_points * sizeof(JONES);
-    cudaSoftCheck(cudaMalloc(&d_list_fds, size_fds));
-    cudaSoftCheck(cudaMemcpy(d_list_fds, comps->list_fds, size_fds, cudaMemcpyHostToDevice));
-
-    FLOAT *d_has = NULL;
-    FLOAT *d_decs = NULL;
-    if (a->num_fee_beam_coeffs != 0) {
-        size_t size_hadecs = (comps->num_power_law_points + comps->num_list_points) * sizeof(FLOAT);
-        cudaSoftCheck(cudaMalloc(&d_has, size_hadecs));
-        cudaSoftCheck(cudaMalloc(&d_decs, size_hadecs));
-        cudaSoftCheck(cudaMemcpy(d_has, comps->has, size_hadecs, cudaMemcpyHostToDevice));
-        cudaSoftCheck(cudaMemcpy(d_decs, comps->decs, size_hadecs, cudaMemcpyHostToDevice));
-    }
-
-    Points c = Points{
-        .has = d_has,
-        .decs = d_decs,
-
-        .num_power_law_points = comps->num_power_law_points,
-        .power_law_lmns = d_pl_lmns,
-        .power_law_fds = d_pl_fds,
-        .power_law_sis = d_pl_sis,
-
-        .num_list_points = comps->num_list_points,
-        .list_lmns = d_list_lmns,
-        .list_fds = d_list_fds,
-    };
-
+extern "C" int model_points(const Points *comps, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones) {
     dim3 gridDim, blockDim;
-    if (a->num_fee_beam_coeffs == 0) {
+    if (a->num_unique_beam_freqs == 0) {
         // Thread blocks are distributed by visibility (one visibility per
         // frequency and baseline).
         blockDim.x = 512;
@@ -952,19 +935,9 @@ extern "C" int model_points(const Points *comps, const Addresses *a) {
         gridDim.x = (int)ceil((double)a->num_vis / (double)blockDim.x);
         gridDim.y = 1;
 
-        model_points_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, a->d_uvws, a->d_freqs, c, a->d_vis);
+        model_points_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
     } else {
-        FEEJones *d_beam_jones = NULL;
-        size_t size_beam_jones = a->num_unique_fee_tiles * a->num_unique_fee_freqs *
-                                 (c.num_power_law_points + c.num_list_points) * sizeof(FEEJones);
-        cudaSoftCheck(cudaMalloc(&d_beam_jones, size_beam_jones));
-
-        int8_t parallactic = 1;
-        cuda_calc_jones_hadecs(d_has, d_decs, comps->num_power_law_points + comps->num_list_points,
-                               (FEECoeffs *)a->d_fee_coeffs, a->num_fee_beam_coeffs, (FEEJones *)a->d_beam_norm_jones,
-                               parallactic, d_beam_jones);
-
         // Thread blocks are distributed by tile indices (x is tile 0, y is tile
         // 1) and frequency (z).
         blockDim.x = 256;
@@ -974,107 +947,27 @@ extern "C" int model_points(const Points *comps, const Addresses *a) {
         gridDim.y = a->num_tiles;
         gridDim.z = (int)ceil((double)a->num_freqs / (double)blockDim.x);
 
-        model_points_fee_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, a->d_uvws, a->d_freqs, c, d_beam_jones,
-                                                       a->d_beam_jones_map, a->num_unique_fee_freqs, a->d_vis);
+        model_points_fee_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps,
+                                                       (JONES_C *)d_beam_jones, a->d_beam_jones_map,
+                                                       a->num_unique_beam_freqs, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
-        cudaSoftCheck(cudaFree(d_beam_jones));
-    }
-
-    cudaSoftCheck(cudaFree(d_pl_lmns));
-    cudaSoftCheck(cudaFree(d_pl_fds));
-    cudaSoftCheck(cudaFree(d_pl_sis));
-    cudaSoftCheck(cudaFree(d_list_lmns));
-    cudaSoftCheck(cudaFree(d_list_fds));
-    if (a->num_fee_beam_coeffs != 0) {
-        cudaSoftCheck(cudaFree(d_has));
-        cudaSoftCheck(cudaFree(d_decs));
     }
 
     return EXIT_SUCCESS;
 }
 
-extern "C" int model_gaussians(const Gaussians *comps, const Addresses *a) {
-    LMN *d_pl_lmns = NULL;
-    size_t size_lmns = comps->num_power_law_gaussians * sizeof(LMN);
-    cudaSoftCheck(cudaMalloc(&d_pl_lmns, size_lmns));
-    cudaSoftCheck(cudaMemcpy(d_pl_lmns, comps->power_law_lmns, size_lmns, cudaMemcpyHostToDevice));
-
-    JONES *d_pl_fds = NULL;
-    size_t size_fds = comps->num_power_law_gaussians * sizeof(JONES);
-    cudaSoftCheck(cudaMalloc(&d_pl_fds, size_fds));
-    cudaSoftCheck(cudaMemcpy(d_pl_fds, comps->power_law_fds, size_fds, cudaMemcpyHostToDevice));
-
-    FLOAT *d_pl_sis = NULL;
-    size_t size_sis = comps->num_power_law_gaussians * sizeof(FLOAT);
-    cudaSoftCheck(cudaMalloc(&d_pl_sis, size_sis));
-    cudaSoftCheck(cudaMemcpy(d_pl_sis, comps->power_law_sis, size_sis, cudaMemcpyHostToDevice));
-
-    GaussianParams *d_pl_gps = NULL;
-    size_t size_gps = comps->num_power_law_gaussians * sizeof(GaussianParams);
-    cudaSoftCheck(cudaMalloc(&d_pl_gps, size_gps));
-    cudaSoftCheck(cudaMemcpy(d_pl_gps, comps->power_law_gps, size_gps, cudaMemcpyHostToDevice));
-
-    LMN *d_list_lmns = NULL;
-    size_lmns = comps->num_list_gaussians * sizeof(LMN);
-    cudaSoftCheck(cudaMalloc(&d_list_lmns, size_lmns));
-    cudaSoftCheck(cudaMemcpy(d_list_lmns, comps->list_lmns, size_lmns, cudaMemcpyHostToDevice));
-
-    JONES *d_list_fds = NULL;
-    size_fds = a->num_freqs * comps->num_list_gaussians * sizeof(JONES);
-    cudaSoftCheck(cudaMalloc(&d_list_fds, size_fds));
-    cudaSoftCheck(cudaMemcpy(d_list_fds, comps->list_fds, size_fds, cudaMemcpyHostToDevice));
-
-    GaussianParams *d_list_gps = NULL;
-    size_gps = comps->num_list_gaussians * sizeof(GaussianParams);
-    cudaSoftCheck(cudaMalloc(&d_list_gps, size_gps));
-    cudaSoftCheck(cudaMemcpy(d_list_gps, comps->list_gps, size_gps, cudaMemcpyHostToDevice));
-
-    FLOAT *d_has = NULL;
-    FLOAT *d_decs = NULL;
-    if (a->num_fee_beam_coeffs != 0) {
-        size_t size_hadecs = (comps->num_power_law_gaussians + comps->num_list_gaussians) * sizeof(FLOAT);
-        cudaSoftCheck(cudaMalloc(&d_has, size_hadecs));
-        cudaSoftCheck(cudaMalloc(&d_decs, size_hadecs));
-        cudaSoftCheck(cudaMemcpy(d_has, comps->has, size_hadecs, cudaMemcpyHostToDevice));
-        cudaSoftCheck(cudaMemcpy(d_decs, comps->decs, size_hadecs, cudaMemcpyHostToDevice));
-    }
-
-    Gaussians c = Gaussians{
-        .has = d_has,
-        .decs = d_decs,
-
-        .num_power_law_gaussians = comps->num_power_law_gaussians,
-        .power_law_lmns = d_pl_lmns,
-        .power_law_fds = d_pl_fds,
-        .power_law_sis = d_pl_sis,
-        .power_law_gps = d_pl_gps,
-
-        .num_list_gaussians = comps->num_list_gaussians,
-        .list_lmns = d_list_lmns,
-        .list_fds = d_list_fds,
-        .list_gps = d_list_gps,
-    };
-
+extern "C" int model_gaussians(const Gaussians *comps, const Addresses *a, const UVW *d_uvws,
+                               const void *d_beam_jones) {
     dim3 gridDim, blockDim;
-    if (a->num_fee_beam_coeffs == 0) {
+    if (a->num_unique_beam_freqs == 0) {
         // Thread blocks are distributed by visibility (one visibility per frequency
         // and baseline).
         blockDim.x = 512;
         gridDim.x = (int)ceil((double)a->num_vis / (double)blockDim.x);
 
-        model_gaussians_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, a->d_uvws, a->d_freqs, c, a->d_vis);
+        model_gaussians_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
     } else {
-        FEEJones *d_beam_jones = NULL;
-        size_t size_beam_jones = a->num_unique_fee_tiles * a->num_unique_fee_freqs *
-                                 (c.num_power_law_gaussians + c.num_list_gaussians) * sizeof(FEEJones);
-        cudaSoftCheck(cudaMalloc(&d_beam_jones, size_beam_jones));
-
-        int8_t parallactic = 1;
-        cuda_calc_jones_hadecs(d_has, d_decs, comps->num_power_law_gaussians + comps->num_list_gaussians,
-                               (FEECoeffs *)a->d_fee_coeffs, a->num_fee_beam_coeffs, (FEEJones *)a->d_beam_norm_jones,
-                               parallactic, d_beam_jones);
-
         // Thread blocks are distributed by tile indices (x is tile 0, y is tile
         // 1) and frequency (z).
         blockDim.x = 256;
@@ -1084,144 +977,19 @@ extern "C" int model_gaussians(const Gaussians *comps, const Addresses *a) {
         gridDim.y = a->num_tiles;
         gridDim.z = (int)ceil((double)a->num_freqs / (double)blockDim.x);
 
-        model_gaussians_fee_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, a->d_uvws, a->d_freqs, c,
-                                                          d_beam_jones, a->d_beam_jones_map, a->num_unique_fee_freqs,
-                                                          a->d_vis);
+        model_gaussians_fee_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps,
+                                                          (JONES_C *)d_beam_jones, a->d_beam_jones_map,
+                                                          a->num_unique_beam_freqs, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
-        cudaSoftCheck(cudaFree(d_beam_jones));
-    }
-
-    cudaSoftCheck(cudaFree(d_pl_lmns));
-    cudaSoftCheck(cudaFree(d_pl_fds));
-    cudaSoftCheck(cudaFree(d_pl_sis));
-    cudaSoftCheck(cudaFree(d_pl_gps));
-    cudaSoftCheck(cudaFree(d_list_lmns));
-    cudaSoftCheck(cudaFree(d_list_fds));
-    cudaSoftCheck(cudaFree(d_list_gps));
-    if (a->num_fee_beam_coeffs != 0) {
-        cudaSoftCheck(cudaFree(d_has));
-        cudaSoftCheck(cudaFree(d_decs));
     }
 
     return EXIT_SUCCESS;
 }
 
-extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a) {
-    LMN *d_pl_lmns = NULL;
-    size_t size_lmns = comps->num_power_law_shapelets * sizeof(LMN);
-    cudaSoftCheck(cudaMalloc(&d_pl_lmns, size_lmns));
-    cudaSoftCheck(cudaMemcpy(d_pl_lmns, comps->power_law_lmns, size_lmns, cudaMemcpyHostToDevice));
-
-    JONES *d_pl_fds = NULL;
-    size_t size_fds = comps->num_power_law_shapelets * sizeof(JONES);
-    cudaSoftCheck(cudaMalloc(&d_pl_fds, size_fds));
-    cudaSoftCheck(cudaMemcpy(d_pl_fds, comps->power_law_fds, size_fds, cudaMemcpyHostToDevice));
-
-    FLOAT *d_pl_sis = NULL;
-    size_t size_sis = comps->num_power_law_shapelets * sizeof(FLOAT);
-    cudaSoftCheck(cudaMalloc(&d_pl_sis, size_sis));
-    cudaSoftCheck(cudaMemcpy(d_pl_sis, comps->power_law_sis, size_sis, cudaMemcpyHostToDevice));
-
-    GaussianParams *d_pl_gps = NULL;
-    size_t size_gps = comps->num_power_law_shapelets * sizeof(GaussianParams);
-    cudaSoftCheck(cudaMalloc(&d_pl_gps, size_gps));
-    cudaSoftCheck(cudaMemcpy(d_pl_gps, comps->power_law_gps, size_gps, cudaMemcpyHostToDevice));
-
-    ShapeletUV *d_pl_shapelet_uvs = NULL;
-    size_t num_bls = a->num_vis / a->num_freqs;
-    size_t size_shapelet_uvs = num_bls * comps->num_power_law_shapelets * sizeof(ShapeletUV);
-    cudaSoftCheck(cudaMalloc(&d_pl_shapelet_uvs, size_shapelet_uvs));
-    cudaSoftCheck(
-        cudaMemcpy(d_pl_shapelet_uvs, comps->power_law_shapelet_uvs, size_shapelet_uvs, cudaMemcpyHostToDevice));
-
-    size_t total_num_shapelet_coeffs = 0;
-    for (size_t i = 0; i < comps->num_power_law_shapelets; i++) {
-        total_num_shapelet_coeffs += comps->power_law_num_shapelet_coeffs[i];
-    }
-
-    ShapeletCoeff *d_pl_shapelet_coeffs = NULL;
-    size_t size_shapelet_coeffs = total_num_shapelet_coeffs * sizeof(ShapeletCoeff);
-    cudaSoftCheck(cudaMalloc(&d_pl_shapelet_coeffs, size_shapelet_coeffs));
-    cudaSoftCheck(cudaMemcpy(d_pl_shapelet_coeffs, comps->power_law_shapelet_coeffs, size_shapelet_coeffs,
-                             cudaMemcpyHostToDevice));
-
-    size_t *d_pl_num_shapelet_coeffs = NULL;
-    size_t size_num_shapelet_coeffs = comps->num_power_law_shapelets * sizeof(size_t);
-    cudaSoftCheck(cudaMalloc(&d_pl_num_shapelet_coeffs, size_num_shapelet_coeffs));
-    cudaSoftCheck(cudaMemcpy(d_pl_num_shapelet_coeffs, comps->power_law_num_shapelet_coeffs, size_num_shapelet_coeffs,
-                             cudaMemcpyHostToDevice));
-
-    LMN *d_list_lmns = NULL;
-    size_lmns = comps->num_list_shapelets * sizeof(LMN);
-    cudaSoftCheck(cudaMalloc(&d_list_lmns, size_lmns));
-    cudaSoftCheck(cudaMemcpy(d_list_lmns, comps->list_lmns, size_lmns, cudaMemcpyHostToDevice));
-
-    JONES *d_list_fds = NULL;
-    size_fds = a->num_freqs * comps->num_list_shapelets * sizeof(JONES);
-    cudaSoftCheck(cudaMalloc(&d_list_fds, size_fds));
-    cudaSoftCheck(cudaMemcpy(d_list_fds, comps->list_fds, size_fds, cudaMemcpyHostToDevice));
-
-    GaussianParams *d_list_gps = NULL;
-    size_gps = comps->num_list_shapelets * sizeof(GaussianParams);
-    cudaSoftCheck(cudaMalloc(&d_list_gps, size_gps));
-    cudaSoftCheck(cudaMemcpy(d_list_gps, comps->list_gps, size_gps, cudaMemcpyHostToDevice));
-
-    ShapeletUV *d_list_shapelet_uvs = NULL;
-    size_shapelet_uvs = num_bls * comps->num_list_shapelets * sizeof(ShapeletUV);
-    cudaSoftCheck(cudaMalloc(&d_list_shapelet_uvs, size_shapelet_uvs));
-    cudaSoftCheck(cudaMemcpy(d_list_shapelet_uvs, comps->list_shapelet_uvs, size_shapelet_uvs, cudaMemcpyHostToDevice));
-
-    total_num_shapelet_coeffs = 0;
-    for (size_t i = 0; i < comps->num_list_shapelets; i++) {
-        total_num_shapelet_coeffs += comps->list_num_shapelet_coeffs[i];
-    }
-
-    ShapeletCoeff *d_list_shapelet_coeffs = NULL;
-    size_shapelet_coeffs = total_num_shapelet_coeffs * sizeof(ShapeletCoeff);
-    cudaSoftCheck(cudaMalloc(&d_list_shapelet_coeffs, size_shapelet_coeffs));
-    cudaSoftCheck(
-        cudaMemcpy(d_list_shapelet_coeffs, comps->list_shapelet_coeffs, size_shapelet_coeffs, cudaMemcpyHostToDevice));
-
-    size_t *d_list_num_shapelet_coeffs = NULL;
-    size_num_shapelet_coeffs = comps->num_list_shapelets * sizeof(size_t);
-    cudaSoftCheck(cudaMalloc(&d_list_num_shapelet_coeffs, size_num_shapelet_coeffs));
-    cudaSoftCheck(cudaMemcpy(d_list_num_shapelet_coeffs, comps->list_num_shapelet_coeffs, size_num_shapelet_coeffs,
-                             cudaMemcpyHostToDevice));
-
-    FLOAT *d_has = NULL;
-    FLOAT *d_decs = NULL;
-    if (a->num_fee_beam_coeffs != 0) {
-        size_t size_hadecs = (comps->num_power_law_shapelets + comps->num_list_shapelets) * sizeof(FLOAT);
-        cudaSoftCheck(cudaMalloc(&d_has, size_hadecs));
-        cudaSoftCheck(cudaMalloc(&d_decs, size_hadecs));
-        cudaSoftCheck(cudaMemcpy(d_has, comps->has, size_hadecs, cudaMemcpyHostToDevice));
-        cudaSoftCheck(cudaMemcpy(d_decs, comps->decs, size_hadecs, cudaMemcpyHostToDevice));
-    }
-
-    Shapelets c = Shapelets{
-        .has = d_has,
-        .decs = d_decs,
-
-        .num_power_law_shapelets = comps->num_power_law_shapelets,
-        .power_law_lmns = d_pl_lmns,
-        .power_law_fds = d_pl_fds,
-        .power_law_sis = d_pl_sis,
-        .power_law_gps = d_pl_gps,
-        .power_law_shapelet_uvs = d_pl_shapelet_uvs,
-        .power_law_shapelet_coeffs = d_pl_shapelet_coeffs,
-        .power_law_num_shapelet_coeffs = d_pl_num_shapelet_coeffs,
-
-        .num_list_shapelets = comps->num_list_shapelets,
-        .list_lmns = d_list_lmns,
-        .list_fds = d_list_fds,
-        .list_gps = d_list_gps,
-        .list_shapelet_uvs = d_list_shapelet_uvs,
-        .list_shapelet_coeffs = d_list_shapelet_coeffs,
-        .list_num_shapelet_coeffs = d_list_num_shapelet_coeffs,
-    };
-
+extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a, const UVW *d_uvws,
+                               const void *d_beam_jones) {
     dim3 gridDim, blockDim;
-    if (a->num_fee_beam_coeffs == 0) {
+    if (a->num_unique_beam_freqs == 0) {
         // Thread blocks are distributed by visibility (one visibility per frequency
         // and baseline).
         dim3 blocks, threads;
@@ -1230,21 +998,11 @@ extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a) {
         blocks.x = (int)ceil((double)a->num_vis / (double)threads.x);
         blocks.y = 1;
 
-        model_shapelets_kernel<<<blocks, threads>>>(a->num_freqs, a->num_vis, a->d_uvws, a->d_freqs, c,
+        model_shapelets_kernel<<<blocks, threads>>>(a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps,
                                                     a->d_shapelet_basis_values, a->sbf_l, a->sbf_n, a->sbf_c, a->sbf_dx,
                                                     a->d_vis);
         cudaCheck(cudaPeekAtLastError());
     } else {
-        FEEJones *d_beam_jones = NULL;
-        size_t size_beam_jones = a->num_unique_fee_tiles * a->num_unique_fee_freqs *
-                                 (c.num_power_law_shapelets + c.num_list_shapelets) * sizeof(FEEJones);
-        cudaSoftCheck(cudaMalloc(&d_beam_jones, size_beam_jones));
-
-        int8_t parallactic = 1;
-        cuda_calc_jones_hadecs(d_has, d_decs, comps->num_power_law_shapelets + comps->num_list_shapelets,
-                               (FEECoeffs *)a->d_fee_coeffs, a->num_fee_beam_coeffs, (FEEJones *)a->d_beam_norm_jones,
-                               parallactic, d_beam_jones);
-
         // Thread blocks are distributed by tile indices (x is tile 0, y is tile
         // 1) and frequency (z).
         blockDim.x = 256;
@@ -1255,105 +1013,10 @@ extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a) {
         gridDim.z = (int)ceil((double)a->num_freqs / (double)blockDim.x);
 
         model_shapelets_fee_kernel<<<gridDim, blockDim>>>(
-            a->num_freqs, a->num_vis, a->d_uvws, a->d_freqs, c, a->d_shapelet_basis_values, a->sbf_l, a->sbf_n,
-            a->sbf_c, a->sbf_dx, d_beam_jones, a->d_beam_jones_map, a->num_unique_fee_freqs, a->d_vis);
+            a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps, a->d_shapelet_basis_values, a->sbf_l, a->sbf_n,
+            a->sbf_c, a->sbf_dx, (JONES_C *)d_beam_jones, a->d_beam_jones_map, a->num_unique_beam_freqs, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
-        cudaSoftCheck(cudaFree(d_beam_jones));
     }
-
-    cudaSoftCheck(cudaFree(d_pl_lmns));
-    cudaSoftCheck(cudaFree(d_pl_fds));
-    cudaSoftCheck(cudaFree(d_pl_sis));
-    cudaSoftCheck(cudaFree(d_pl_gps));
-    cudaSoftCheck(cudaFree(d_pl_shapelet_uvs));
-    cudaSoftCheck(cudaFree(d_pl_shapelet_coeffs));
-    cudaSoftCheck(cudaFree(d_pl_num_shapelet_coeffs));
-    cudaSoftCheck(cudaFree(d_list_lmns));
-    cudaSoftCheck(cudaFree(d_list_fds));
-    cudaSoftCheck(cudaFree(d_list_gps));
-    cudaSoftCheck(cudaFree(d_list_shapelet_uvs));
-    cudaSoftCheck(cudaFree(d_list_shapelet_coeffs));
-    cudaSoftCheck(cudaFree(d_list_num_shapelet_coeffs));
-    if (a->num_fee_beam_coeffs != 0) {
-        cudaSoftCheck(cudaFree(d_has));
-        cudaSoftCheck(cudaFree(d_decs));
-    }
-
-    return EXIT_SUCCESS;
-}
-
-extern "C" int model_timestep_no_beam(int num_baselines, int num_freqs, UVW *uvws, FLOAT *freqs, Points *points,
-                                      Gaussians *gaussians, Shapelets *shapelets, FLOAT *shapelet_basis_values,
-                                      int sbf_l, int sbf_n, FLOAT sbf_c, FLOAT sbf_dx, JonesF32 *vis) {
-    int status = 0;
-
-    // Addresses a = init_model(num_baselines, num_freqs, 0, sbf_l, sbf_n, sbf_c, sbf_dx, uvws, freqs,
-    //                          shapelet_basis_values, NULL, 0, vis);
-    Addresses a = init_model(num_baselines, num_freqs, 0, sbf_l, sbf_n, sbf_c, sbf_dx, uvws, freqs,
-                             shapelet_basis_values, NULL, 0, 0, 0, NULL, NULL, vis);
-
-    if (points != NULL && (points->num_power_law_points > 0 || points->num_list_points > 0)) {
-        status = model_points(points, &a);
-        if (status != EXIT_SUCCESS) {
-            return status;
-        }
-    }
-
-    if (gaussians != NULL && (gaussians->num_power_law_gaussians > 0 || gaussians->num_list_gaussians > 0)) {
-        status = model_gaussians(gaussians, &a);
-        if (status != EXIT_SUCCESS) {
-            return status;
-        }
-    }
-
-    if (shapelets != NULL && (shapelets->num_power_law_shapelets > 0 || shapelets->num_list_shapelets > 0)) {
-        status = model_shapelets(shapelets, &a);
-        if (status != EXIT_SUCCESS) {
-            return status;
-        }
-    }
-
-    copy_vis(&a);
-    destroy(&a);
-
-    return EXIT_SUCCESS;
-}
-
-extern "C" int model_timestep_fee_beam(int num_baselines, int num_freqs, int num_tiles, UVW *uvws, FLOAT *freqs,
-                                       Points *points, Gaussians *gaussians, Shapelets *shapelets,
-                                       FLOAT *shapelet_basis_values, int sbf_l, int sbf_n, FLOAT sbf_c, FLOAT sbf_dx,
-                                       void *d_beam_coeffs, int num_beam_coeffs, int num_unique_fee_tiles,
-                                       int num_unique_fee_freqs, uint64_t *d_beam_jones_map, void *d_beam_norm_jones,
-                                       JonesF32 *vis) {
-    int status = 0;
-
-    Addresses a = init_model(num_baselines, num_freqs, num_tiles, sbf_l, sbf_n, sbf_c, sbf_dx, uvws, freqs,
-                             shapelet_basis_values, d_beam_coeffs, num_beam_coeffs, num_unique_fee_tiles,
-                             num_unique_fee_freqs, d_beam_jones_map, d_beam_norm_jones, vis);
-
-    if (points != NULL && (points->num_power_law_points > 0 || points->num_list_points > 0)) {
-        status = model_points(points, &a);
-        if (status != EXIT_SUCCESS) {
-            return status;
-        }
-    }
-
-    if (gaussians != NULL && (gaussians->num_power_law_gaussians > 0 || gaussians->num_list_gaussians > 0)) {
-        status = model_gaussians(gaussians, &a);
-        if (status != EXIT_SUCCESS) {
-            return status;
-        }
-    }
-
-    if (shapelets != NULL && (shapelets->num_power_law_shapelets > 0 || shapelets->num_list_shapelets > 0)) {
-        status = model_shapelets(shapelets, &a);
-        if (status != EXIT_SUCCESS) {
-            return status;
-        }
-    }
-
-    copy_vis(&a);
-    destroy(&a);
 
     return EXIT_SUCCESS;
 }

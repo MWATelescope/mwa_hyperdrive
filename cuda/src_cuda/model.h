@@ -20,21 +20,21 @@ extern "C" {
  * sky-model point-source components. See the documentation of `model_timestep`
  * for more info.
  */
-int model_points(const Points *points, const Addresses *a);
+int model_points(const Points *points, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
  * sky-model Gaussian components. See the documentation of `model_timestep` for
  * more info.
  */
-int model_gaussians(const Gaussians *gaussians, const Addresses *a);
+int model_gaussians(const Gaussians *gaussians, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
  * sky-model shapelet components. See the documentation of `model_timestep` for
  * more info.
  */
-int model_shapelets(const Shapelets *shapelets, const Addresses *a);
+int model_shapelets(const Shapelets *shapelets, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple

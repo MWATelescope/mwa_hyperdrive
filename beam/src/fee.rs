@@ -13,6 +13,13 @@ use ndarray::prelude::*;
 
 use super::{cache::JonesHash, Beam, BeamError, BeamType, Delays};
 
+cfg_if::cfg_if! {
+    if #[cfg(feature = "cuda")] {
+        use mwa_hyperbeam::cuda::*;
+        use super::{BeamCUDA, CudaFloat};
+    }
+}
+
 /// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [Beam]
 /// trait.
 pub struct FEEBeam {
@@ -197,15 +204,49 @@ impl Beam for FEEBeam {
     }
 
     #[cfg(feature = "cuda")]
-    fn get_device_pointers(
+    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
+        let cuda_beam = self.hyperbeam_object.cuda_prepare(
+            freqs_hz,
+            self.delays.view(),
+            self.gains.view(),
+            true,
+        )?;
+        Ok(Box::new(FEEBeamCUDA {
+            hyperbeam_object: cuda_beam,
+        }))
+    }
+}
+
+#[cfg(feature = "cuda")]
+pub struct FEEBeamCUDA {
+    hyperbeam_object: mwa_hyperbeam::fee::FEEBeamCUDA,
+}
+
+#[cfg(feature = "cuda")]
+impl BeamCUDA for FEEBeamCUDA {
+    unsafe fn calc_jones(
         &self,
-        freqs_hz: &[u32],
-    ) -> Option<mwa_hyperbeam_cuda::fee::FEEDeviceCoeffPointers> {
-        let coeffs = self
-            .hyperbeam_object
-            .cuda_prepare(freqs_hz, self.delays.view(), self.gains.view(), true)
-            .unwrap();
-        Some(coeffs.copy_to_device())
+        azels: &[AzEl],
+    ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError> {
+        let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = azels
+            .iter()
+            .map(|&azel| (azel.az as CudaFloat, azel.za() as CudaFloat))
+            .unzip();
+        self.hyperbeam_object
+            .calc_jones_device(&azs, &zas, true)
+            .map_err(BeamError::from)
+    }
+
+    fn get_beam_type(&self) -> BeamType {
+        BeamType::FEE
+    }
+
+    fn get_beam_jones_map(&self) -> *const u64 {
+        self.hyperbeam_object.get_beam_jones_map()
+    }
+
+    fn get_num_unique_freqs(&self) -> i32 {
+        self.hyperbeam_object.get_num_unique_freqs()
     }
 }
 
@@ -270,8 +311,7 @@ mod tests {
             .calc_jones_array(&azs, &zas, freq as u32, &delays, &amps, true)
             .unwrap();
         // Put the hyperbeam results into hyperdrive `Jones` objects.
-        let hyperbeam_values = hyperbeam_values.mapv(|v| Jones::from(v));
-        // let hyperbeam_values = Array1::from(hyperbeam_values.to_vec());
+        let hyperbeam_values = Array1::from(hyperbeam_values.to_vec());
 
         // Compare these with the hyperdrive `Beam` trait.
         let gains = array![amps];

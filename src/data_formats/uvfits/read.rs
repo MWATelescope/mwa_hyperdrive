@@ -308,7 +308,6 @@ impl InputData for Uvfits {
         mut weights_array: ArrayViewMut2<f32>,
         timestep_index: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        _flagged_baselines: &HashSet<usize>,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         let row_range_start = timestep_index * self.step;

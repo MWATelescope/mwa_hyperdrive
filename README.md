@@ -84,7 +84,7 @@ context from the metafits file.
   [list](https://developer.nvidia.com/cuda-gpus) to determine what compute
   capability a GPU has.
 
-- A Rust compiler with a version >= 1.53.0
+- A Rust compiler with a version >= 1.56.0
 
   `https://www.rust-lang.org/tools/install`
 
@@ -108,8 +108,8 @@ context from the metafits file.
   - The library dir can be specified manually with CUDA_LIB
   - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
 
-To compile a library statically, use e.g. `ERFA_STATIC=1`. To compile all
-libraries statically, use `PKG_CONFIG_ALL_STATIC=1`.
+To link a library statically, use e.g. `ERFA_STATIC=1`. To link all libraries
+statically, use `PKG_CONFIG_ALL_STATIC=1`.
 
 Memory requirements can't be specified yet, as the code is still in development.
 </details>

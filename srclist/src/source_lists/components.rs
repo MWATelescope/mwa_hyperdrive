@@ -4,11 +4,6 @@
 
 //! Sky-model component types.
 
-#[cfg(feature = "cuda")]
-mod ffi;
-#[cfg(feature = "cuda")]
-pub use ffi::*;
-
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -223,11 +218,38 @@ impl ShapeletComponentParams {
             .zip(self.radecs.par_iter())
             .for_each(|(mut baseline_uvws, radec)| {
                 let hadec = radec.to_hadec(lst_rad);
-                let uvws_row = xyz::xyzs_to_cross_uvws_parallel(tile_xyzs, hadec);
+                let uvws_row = xyzs_to_cross_uvws_parallel(tile_xyzs, hadec);
                 baseline_uvws.assign(&Array1::from(uvws_row));
             });
         shapelet_uvws
     }
+}
+
+// TODO: Have in mwa_rust_core
+/// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
+/// having to form [XyzGeodetic] baselines first. This function performs
+/// calculations in parallel. Cross-correlation baselines only.
+fn xyzs_to_cross_uvws_parallel(
+    xyzs: &[mwa_rust_core::XyzGeodetic],
+    phase_centre: mwa_rust_core::HADec,
+) -> Vec<UVW> {
+    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
+    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
+    // Get a UVW for each tile.
+    let tile_uvws: Vec<UVW> = xyzs
+        .par_iter()
+        .map(|&xyz| UVW::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec))
+        .collect();
+    // Take the difference of every pair of UVWs.
+    let num_tiles = xyzs.len();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    (0..num_baselines)
+        .into_par_iter()
+        .map(|i_bl| {
+            let (i, j) = mwa_rust_core::math::cross_correlation_baseline_to_tiles(num_tiles, i_bl);
+            tile_uvws[i] - tile_uvws[j]
+        })
+        .collect()
 }
 
 // Get the instrumental flux densities for a bunch of component flux densities.
@@ -235,7 +257,7 @@ impl ShapeletComponentParams {
 //
 // These don't change with time, so we can save a lot of computation by just
 // doing this once.
-fn get_instrumental_flux_densities(
+pub fn get_instrumental_flux_densities(
     comp_fds: &[FluxDensityType],
     unflagged_fine_chan_freqs: &[f64],
 ) -> Array2<Jones<f64>> {
@@ -538,193 +560,193 @@ mod tests {
         source_list
     }
 
-    fn get_instrumental_flux_densities_for_srclist(
-        srclist: &SourceList,
-        freqs: &[f64],
-    ) -> Array2<Jones<f64>> {
-        let mut comp_fds: Vec<FluxDensityType> = vec![];
-        for comp in srclist.iter().flat_map(|(_, src)| &src.components) {
-            match comp.comp_type {
-                ComponentType::Point => {
-                    comp_fds.push(comp.flux_type.clone());
-                }
-                ComponentType::Gaussian { .. } => {
-                    comp_fds.push(comp.flux_type.clone());
-                }
-                ComponentType::Shapelet { .. } => {
-                    comp_fds.push(comp.flux_type.clone());
-                }
-            }
-        }
+    // fn get_instrumental_flux_densities_for_srclist(
+    //     srclist: &SourceList,
+    //     freqs: &[f64],
+    // ) -> Array2<Jones<f64>> {
+    //     let mut comp_fds: Vec<FluxDensityType> = vec![];
+    //     for comp in srclist.iter().flat_map(|(_, src)| &src.components) {
+    //         match comp.comp_type {
+    //             ComponentType::Point => {
+    //                 comp_fds.push(comp.flux_type.clone());
+    //             }
+    //             ComponentType::Gaussian { .. } => {
+    //                 comp_fds.push(comp.flux_type.clone());
+    //             }
+    //             ComponentType::Shapelet { .. } => {
+    //                 comp_fds.push(comp.flux_type.clone());
+    //             }
+    //         }
+    //     }
 
-        get_instrumental_flux_densities(&comp_fds, freqs)
-    }
+    //     get_instrumental_flux_densities(&comp_fds, freqs)
+    // }
 
-    #[test]
-    fn test_beam_correct_flux_densities_no_beam() {
-        let freqs = [170e6];
-        let lst = 6.261977848;
-        let dipole_gains = [1.0; 16];
+    // #[test]
+    // fn test_beam_correct_flux_densities_no_beam() {
+    //     let freqs = [170e6];
+    //     let lst = 6.261977848;
+    //     let dipole_gains = [1.0; 16];
 
-        let beam: Box<dyn Beam> = Box::new(NoBeam);
-        let srclist = get_small_source_list();
-        let inst_flux_densities = get_instrumental_flux_densities_for_srclist(&srclist, &freqs);
-        let result = match beam_correct_flux_densities_inner(
-            inst_flux_densities.view(),
-            beam.deref(),
-            &srclist.get_azel_mwa(lst),
-            &dipole_gains,
-            &freqs,
-        ) {
-            Ok(fds) => fds,
-            Err(e) => panic!("{}", e),
-        };
-        let num_components = srclist.values().fold(0, |a, src| a + src.components.len());
-        assert_eq!(result.dim(), (freqs.len(), num_components));
+    //     let beam: Box<dyn Beam> = Box::new(NoBeam);
+    //     let srclist = get_small_source_list();
+    //     let inst_flux_densities = get_instrumental_flux_densities_for_srclist(&srclist, &freqs);
+    //     let result = match beam_correct_flux_densities_inner(
+    //         inst_flux_densities.view(),
+    //         beam.deref(),
+    //         &srclist.get_azel_mwa(lst),
+    //         &dipole_gains,
+    //         &freqs,
+    //     ) {
+    //         Ok(fds) => fds,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     let num_components = srclist.values().fold(0, |a, src| a + src.components.len());
+    //     assert_eq!(result.dim(), (freqs.len(), num_components));
 
-        // Hand-verified results.
-        let expected_comp_fd_1 = Jones::from([
-            Complex::new(2.7473072919275476, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(2.7473072919275476, 0.0),
-        ]);
-        let expected_comp_fd_2 = Jones::from([
-            Complex::new(1.7047163998893684, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(1.7047163998893684, 0.0),
-        ]);
-        assert_abs_diff_eq!(result[[0, 0]], expected_comp_fd_1, epsilon = 1e-10);
-        assert_abs_diff_eq!(result[[0, 1]], expected_comp_fd_2, epsilon = 1e-10);
-    }
+    //     // Hand-verified results.
+    //     let expected_comp_fd_1 = Jones::from([
+    //         Complex::new(2.7473072919275476, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(2.7473072919275476, 0.0),
+    //     ]);
+    //     let expected_comp_fd_2 = Jones::from([
+    //         Complex::new(1.7047163998893684, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(1.7047163998893684, 0.0),
+    //     ]);
+    //     assert_abs_diff_eq!(result[[0, 0]], expected_comp_fd_1, epsilon = 1e-10);
+    //     assert_abs_diff_eq!(result[[0, 1]], expected_comp_fd_2, epsilon = 1e-10);
+    // }
 
-    #[test]
-    #[serial]
-    fn test_beam_correct_flux_densities_170_mhz() {
-        let freqs = [170e6];
-        let lst = 6.261977848;
-        let dipole_delays = array![[0; 16]];
+    // #[test]
+    // #[serial]
+    // fn test_beam_correct_flux_densities_170_mhz() {
+    //     let freqs = [170e6];
+    //     let lst = 6.261977848;
+    //     let dipole_delays = vec![0; 16];
 
-        let beam: Box<dyn Beam> =
-            Box::new(FEEBeam::new_from_env(Delays::Available(dipole_delays), None).unwrap());
-        let srclist = get_small_source_list();
-        let inst_flux_densities = get_instrumental_flux_densities_for_srclist(&srclist, &freqs);
+    //     let beam: Box<dyn Beam> =
+    //         Box::new(FEEBeam::new_from_env(1, Delays::Partial(dipole_delays), None).unwrap());
+    //     let srclist = get_small_source_list();
+    //     let inst_flux_densities = get_instrumental_flux_densities_for_srclist(&srclist, &freqs);
 
-        let result = match beam_correct_flux_densities_inner(
-            inst_flux_densities.view(),
-            beam.deref(),
-            &srclist.get_azel_mwa(lst),
-            &dipole_gains,
-            &freqs,
-        ) {
-            Ok(fds) => fds,
-            Err(e) => panic!("{}", e),
-        };
-        let num_components = srclist.values().fold(0, |a, src| a + src.components.len());
-        assert_eq!(result.dim(), (freqs.len(), num_components));
+    //     let result = match beam_correct_flux_densities_inner(
+    //         inst_flux_densities.view(),
+    //         beam.deref(),
+    //         &srclist.get_azel_mwa(lst),
+    //         &dipole_gains,
+    //         &freqs,
+    //     ) {
+    //         Ok(fds) => fds,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     let num_components = srclist.values().fold(0, |a, src| a + src.components.len());
+    //     assert_eq!(result.dim(), (freqs.len(), num_components));
 
-        // Hand-verified results.
-        let expected_comp_fd_1 = Jones::from([
-            Complex::new(2.7473072919275476, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(2.7473072919275476, 0.0),
-        ]);
-        let expected_jones_1 = Jones::from([
-            Complex::new(0.7750324863535399, 0.24282289190335862),
-            Complex::new(-0.009009420577898178, -0.002856655664463373),
-            Complex::new(0.01021394523909512, 0.0033072019611734838),
-            Complex::new(0.7814897063974989, 0.25556799755364396),
-        ]);
-        assert_abs_diff_eq!(
-            result[[0, 0]],
-            expected_jones_1 * expected_comp_fd_1 * expected_jones_1.h(),
-            epsilon = 1e-10
-        );
+    //     // Hand-verified results.
+    //     let expected_comp_fd_1 = Jones::from([
+    //         Complex::new(2.7473072919275476, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(2.7473072919275476, 0.0),
+    //     ]);
+    //     let expected_jones_1 = Jones::from([
+    //         Complex::new(0.7750324863535399, 0.24282289190335862),
+    //         Complex::new(-0.009009420577898178, -0.002856655664463373),
+    //         Complex::new(0.01021394523909512, 0.0033072019611734838),
+    //         Complex::new(0.7814897063974989, 0.25556799755364396),
+    //     ]);
+    //     assert_abs_diff_eq!(
+    //         result[[0, 0]],
+    //         expected_jones_1 * expected_comp_fd_1 * expected_jones_1.h(),
+    //         epsilon = 1e-10
+    //     );
 
-        let expected_comp_fd_2 = Jones::from([
-            Complex::new(1.7047163998893684, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(1.7047163998893684, 0.0),
-        ]);
-        let expected_jones_2 = Jones::from([
-            Complex::new(0.9455907247090378, 0.3049292024132071),
-            Complex::new(-0.010712295162757346, -0.0033779555969525588),
-            Complex::new(0.010367761993275826, 0.003441723575945327),
-            Complex::new(0.9450219468106582, 0.30598012238683214),
-        ]);
-        assert_abs_diff_eq!(
-            result[[0, 1]],
-            expected_jones_2 * expected_comp_fd_2 * expected_jones_2.h(),
-            epsilon = 1e-10
-        );
-    }
+    //     let expected_comp_fd_2 = Jones::from([
+    //         Complex::new(1.7047163998893684, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(1.7047163998893684, 0.0),
+    //     ]);
+    //     let expected_jones_2 = Jones::from([
+    //         Complex::new(0.9455907247090378, 0.3049292024132071),
+    //         Complex::new(-0.010712295162757346, -0.0033779555969525588),
+    //         Complex::new(0.010367761993275826, 0.003441723575945327),
+    //         Complex::new(0.9450219468106582, 0.30598012238683214),
+    //     ]);
+    //     assert_abs_diff_eq!(
+    //         result[[0, 1]],
+    //         expected_jones_2 * expected_comp_fd_2 * expected_jones_2.h(),
+    //         epsilon = 1e-10
+    //     );
+    // }
 
-    #[test]
-    #[serial]
-    // Same as above, but with a different frequency.
-    fn test_beam_correct_flux_densities_180_mhz() {
-        let freqs = [180e6];
-        let lst = 6.261977848;
-        let dipole_delays = vec![0; 16];
-        let dipole_gains = [1.0; 16];
+    // #[test]
+    // #[serial]
+    // // Same as above, but with a different frequency.
+    // fn test_beam_correct_flux_densities_180_mhz() {
+    //     let freqs = [180e6];
+    //     let lst = 6.261977848;
+    //     let dipole_delays = vec![0; 16];
+    //     let dipole_gains = [1.0; 16];
 
-        let beam: Box<dyn Beam> =
-            Box::new(FEEBeam::new_from_env(Delays::Available(dipole_delays)).unwrap());
-        let srclist = get_small_source_list();
-        let inst_flux_densities = get_instrumental_flux_densities_for_srclist(&srclist, &freqs);
-        let result = match beam_correct_flux_densities_inner(
-            inst_flux_densities.view(),
-            beam.deref(),
-            &srclist.get_azel_mwa(lst),
-            &dipole_gains,
-            &freqs,
-        ) {
-            Ok(fds) => fds,
-            Err(e) => panic!("{}", e),
-        };
-        let num_components = srclist.values().fold(0, |a, src| a + src.components.len());
-        assert_eq!(result.dim(), (freqs.len(), num_components));
+    //     let beam: Box<dyn Beam> =
+    //         create_fee_beam_object(None, 1, Delays::Partial(dipole_delays), None).unwrap();
+    //     let srclist = get_small_source_list();
+    //     let inst_flux_densities = get_instrumental_flux_densities_for_srclist(&srclist, &freqs);
+    //     let result = match beam_correct_flux_densities_inner(
+    //         inst_flux_densities.view(),
+    //         beam.deref(),
+    //         &srclist.get_azel_mwa(lst),
+    //         &dipole_gains,
+    //         &freqs,
+    //     ) {
+    //         Ok(fds) => fds,
+    //         Err(e) => panic!("{}", e),
+    //     };
+    //     let num_components = srclist.values().fold(0, |a, src| a + src.components.len());
+    //     assert_eq!(result.dim(), (freqs.len(), num_components));
 
-        // Hand-verified results.
-        let expected_comp_fd_1 = Jones::from([
-            Complex::new(2.60247, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(2.60247, 0.0),
-        ]);
-        let expected_jones_1 = Jones::from([
-            Complex::new(0.7731976406423393, 0.17034253171231564),
-            Complex::new(-0.009017301710718753, -0.001961964125441071),
-            Complex::new(0.010223521132619665, 0.002456914956330356),
-            Complex::new(0.7838681411558177, 0.186582048535625),
-        ]);
-        assert_abs_diff_eq!(
-            result[[0, 0]],
-            expected_jones_1 * expected_comp_fd_1 * expected_jones_1.h(),
-            epsilon = 1e-10
-        );
+    //     // Hand-verified results.
+    //     let expected_comp_fd_1 = Jones::from([
+    //         Complex::new(2.60247, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(2.60247, 0.0),
+    //     ]);
+    //     let expected_jones_1 = Jones::from([
+    //         Complex::new(0.7731976406423393, 0.17034253171231564),
+    //         Complex::new(-0.009017301710718753, -0.001961964125441071),
+    //         Complex::new(0.010223521132619665, 0.002456914956330356),
+    //         Complex::new(0.7838681411558177, 0.186582048535625),
+    //     ]);
+    //     assert_abs_diff_eq!(
+    //         result[[0, 0]],
+    //         expected_jones_1 * expected_comp_fd_1 * expected_jones_1.h(),
+    //         epsilon = 1e-10
+    //     );
 
-        let expected_comp_fd_2 = Jones::from([
-            Complex::new(1.61824, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(1.61824, 0.0),
-        ]);
-        let expected_jones_2 = Jones::from([
-            Complex::new(0.9682339089232415, 0.2198904292735457),
-            Complex::new(-0.01090619422142064, -0.0023800302690927533),
-            Complex::new(0.010687354909991509, 0.002535994729487373),
-            Complex::new(0.9676157155647803, 0.22121720658375732),
-        ]);
-        assert_abs_diff_eq!(
-            result[[0, 1]],
-            expected_jones_2 * expected_comp_fd_2 * expected_jones_2.h(),
-            epsilon = 1e-10
-        );
-    }
+    //     let expected_comp_fd_2 = Jones::from([
+    //         Complex::new(1.61824, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(0.0, 0.0),
+    //         Complex::new(1.61824, 0.0),
+    //     ]);
+    //     let expected_jones_2 = Jones::from([
+    //         Complex::new(0.9682339089232415, 0.2198904292735457),
+    //         Complex::new(-0.01090619422142064, -0.0023800302690927533),
+    //         Complex::new(0.010687354909991509, 0.002535994729487373),
+    //         Complex::new(0.9676157155647803, 0.22121720658375732),
+    //     ]);
+    //     assert_abs_diff_eq!(
+    //         result[[0, 1]],
+    //         expected_jones_2 * expected_comp_fd_2 * expected_jones_2.h(),
+    //         epsilon = 1e-10
+    //     );
+    // }
 
     #[test]
     fn test_split_components() {

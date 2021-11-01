@@ -434,8 +434,6 @@ fn bindgen_test_layout_JonesF64() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Points {
-    pub has: *mut f64,
-    pub decs: *mut f64,
     pub num_power_law_points: usize,
     pub power_law_lmns: *mut LMN,
     pub power_law_fds: *mut JonesF64,
@@ -448,7 +446,7 @@ pub struct Points {
 fn bindgen_test_layout_Points() {
     assert_eq!(
         ::std::mem::size_of::<Points>(),
-        72usize,
+        56usize,
         concat!("Size of: ", stringify!(Points))
     );
     assert_eq!(
@@ -457,28 +455,8 @@ fn bindgen_test_layout_Points() {
         concat!("Alignment of ", stringify!(Points))
     );
     assert_eq!(
-        unsafe { &(*(::std::ptr::null::<Points>())).has as *const _ as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(Points),
-            "::",
-            stringify!(has)
-        )
-    );
-    assert_eq!(
-        unsafe { &(*(::std::ptr::null::<Points>())).decs as *const _ as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(Points),
-            "::",
-            stringify!(decs)
-        )
-    );
-    assert_eq!(
         unsafe { &(*(::std::ptr::null::<Points>())).num_power_law_points as *const _ as usize },
-        16usize,
+        0usize,
         concat!(
             "Offset of field: ",
             stringify!(Points),
@@ -488,7 +466,7 @@ fn bindgen_test_layout_Points() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Points>())).power_law_lmns as *const _ as usize },
-        24usize,
+        8usize,
         concat!(
             "Offset of field: ",
             stringify!(Points),
@@ -498,7 +476,7 @@ fn bindgen_test_layout_Points() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Points>())).power_law_fds as *const _ as usize },
-        32usize,
+        16usize,
         concat!(
             "Offset of field: ",
             stringify!(Points),
@@ -508,7 +486,7 @@ fn bindgen_test_layout_Points() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Points>())).power_law_sis as *const _ as usize },
-        40usize,
+        24usize,
         concat!(
             "Offset of field: ",
             stringify!(Points),
@@ -518,7 +496,7 @@ fn bindgen_test_layout_Points() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Points>())).num_list_points as *const _ as usize },
-        48usize,
+        32usize,
         concat!(
             "Offset of field: ",
             stringify!(Points),
@@ -528,7 +506,7 @@ fn bindgen_test_layout_Points() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Points>())).list_lmns as *const _ as usize },
-        56usize,
+        40usize,
         concat!(
             "Offset of field: ",
             stringify!(Points),
@@ -538,7 +516,7 @@ fn bindgen_test_layout_Points() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Points>())).list_fds as *const _ as usize },
-        64usize,
+        48usize,
         concat!(
             "Offset of field: ",
             stringify!(Points),
@@ -551,8 +529,6 @@ fn bindgen_test_layout_Points() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Gaussians {
-    pub has: *mut f64,
-    pub decs: *mut f64,
     pub num_power_law_gaussians: usize,
     pub power_law_lmns: *mut LMN,
     pub power_law_fds: *mut JonesF64,
@@ -567,7 +543,7 @@ pub struct Gaussians {
 fn bindgen_test_layout_Gaussians() {
     assert_eq!(
         ::std::mem::size_of::<Gaussians>(),
-        88usize,
+        72usize,
         concat!("Size of: ", stringify!(Gaussians))
     );
     assert_eq!(
@@ -576,30 +552,10 @@ fn bindgen_test_layout_Gaussians() {
         concat!("Alignment of ", stringify!(Gaussians))
     );
     assert_eq!(
-        unsafe { &(*(::std::ptr::null::<Gaussians>())).has as *const _ as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(Gaussians),
-            "::",
-            stringify!(has)
-        )
-    );
-    assert_eq!(
-        unsafe { &(*(::std::ptr::null::<Gaussians>())).decs as *const _ as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(Gaussians),
-            "::",
-            stringify!(decs)
-        )
-    );
-    assert_eq!(
         unsafe {
             &(*(::std::ptr::null::<Gaussians>())).num_power_law_gaussians as *const _ as usize
         },
-        16usize,
+        0usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -609,7 +565,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).power_law_lmns as *const _ as usize },
-        24usize,
+        8usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -619,7 +575,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).power_law_fds as *const _ as usize },
-        32usize,
+        16usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -629,7 +585,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).power_law_sis as *const _ as usize },
-        40usize,
+        24usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -639,7 +595,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).power_law_gps as *const _ as usize },
-        48usize,
+        32usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -649,7 +605,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).num_list_gaussians as *const _ as usize },
-        56usize,
+        40usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -659,7 +615,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).list_lmns as *const _ as usize },
-        64usize,
+        48usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -669,7 +625,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).list_fds as *const _ as usize },
-        72usize,
+        56usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -679,7 +635,7 @@ fn bindgen_test_layout_Gaussians() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Gaussians>())).list_gps as *const _ as usize },
-        80usize,
+        64usize,
         concat!(
             "Offset of field: ",
             stringify!(Gaussians),
@@ -692,8 +648,6 @@ fn bindgen_test_layout_Gaussians() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Shapelets {
-    pub has: *mut f64,
-    pub decs: *mut f64,
     pub num_power_law_shapelets: usize,
     pub power_law_lmns: *mut LMN,
     pub power_law_fds: *mut JonesF64,
@@ -714,7 +668,7 @@ pub struct Shapelets {
 fn bindgen_test_layout_Shapelets() {
     assert_eq!(
         ::std::mem::size_of::<Shapelets>(),
-        136usize,
+        120usize,
         concat!("Size of: ", stringify!(Shapelets))
     );
     assert_eq!(
@@ -723,30 +677,10 @@ fn bindgen_test_layout_Shapelets() {
         concat!("Alignment of ", stringify!(Shapelets))
     );
     assert_eq!(
-        unsafe { &(*(::std::ptr::null::<Shapelets>())).has as *const _ as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(Shapelets),
-            "::",
-            stringify!(has)
-        )
-    );
-    assert_eq!(
-        unsafe { &(*(::std::ptr::null::<Shapelets>())).decs as *const _ as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(Shapelets),
-            "::",
-            stringify!(decs)
-        )
-    );
-    assert_eq!(
         unsafe {
             &(*(::std::ptr::null::<Shapelets>())).num_power_law_shapelets as *const _ as usize
         },
-        16usize,
+        0usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -756,7 +690,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).power_law_lmns as *const _ as usize },
-        24usize,
+        8usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -766,7 +700,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).power_law_fds as *const _ as usize },
-        32usize,
+        16usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -776,7 +710,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).power_law_sis as *const _ as usize },
-        40usize,
+        24usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -786,7 +720,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).power_law_gps as *const _ as usize },
-        48usize,
+        32usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -798,7 +732,7 @@ fn bindgen_test_layout_Shapelets() {
         unsafe {
             &(*(::std::ptr::null::<Shapelets>())).power_law_shapelet_uvs as *const _ as usize
         },
-        56usize,
+        40usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -810,7 +744,7 @@ fn bindgen_test_layout_Shapelets() {
         unsafe {
             &(*(::std::ptr::null::<Shapelets>())).power_law_shapelet_coeffs as *const _ as usize
         },
-        64usize,
+        48usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -822,7 +756,7 @@ fn bindgen_test_layout_Shapelets() {
         unsafe {
             &(*(::std::ptr::null::<Shapelets>())).power_law_num_shapelet_coeffs as *const _ as usize
         },
-        72usize,
+        56usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -832,7 +766,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).num_list_shapelets as *const _ as usize },
-        80usize,
+        64usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -842,7 +776,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).list_lmns as *const _ as usize },
-        88usize,
+        72usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -852,7 +786,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).list_fds as *const _ as usize },
-        96usize,
+        80usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -862,7 +796,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).list_gps as *const _ as usize },
-        104usize,
+        88usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -872,7 +806,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).list_shapelet_uvs as *const _ as usize },
-        112usize,
+        96usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -882,7 +816,7 @@ fn bindgen_test_layout_Shapelets() {
     );
     assert_eq!(
         unsafe { &(*(::std::ptr::null::<Shapelets>())).list_shapelet_coeffs as *const _ as usize },
-        120usize,
+        104usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -894,7 +828,7 @@ fn bindgen_test_layout_Shapelets() {
         unsafe {
             &(*(::std::ptr::null::<Shapelets>())).list_num_shapelet_coeffs as *const _ as usize
         },
-        128usize,
+        112usize,
         concat!(
             "Offset of field: ",
             stringify!(Shapelets),
@@ -908,7 +842,12 @@ extern "C" {
     #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
     #[doc = " sky-model point-source components. See the documentation of `model_timestep`"]
     #[doc = " for more info."]
-    pub fn model_points(points: *const Points, a: *const Addresses) -> ::std::os::raw::c_int;
+    pub fn model_points(
+        points: *const Points,
+        a: *const Addresses,
+        d_uvws: *const UVW,
+        d_beam_jones: *const ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
 }
 extern "C" {
     #[doc = " Generate sky-model visibilities for a single timestep given multiple"]
@@ -917,6 +856,8 @@ extern "C" {
     pub fn model_gaussians(
         gaussians: *const Gaussians,
         a: *const Addresses,
+        d_uvws: *const UVW,
+        d_beam_jones: *const ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -926,6 +867,8 @@ extern "C" {
     pub fn model_shapelets(
         shapelets: *const Shapelets,
         a: *const Addresses,
+        d_uvws: *const UVW,
+        d_beam_jones: *const ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {

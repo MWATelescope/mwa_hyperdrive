@@ -6,6 +6,11 @@
 
 #![allow(dead_code)]
 
+#[cfg(tests)]
+mod tests;
+
+use std::collections::{HashMap, HashSet};
+
 use crate::c64;
 
 // Make traditional trigonometry possible.
@@ -65,30 +70,33 @@ pub(crate) fn cexp(x: f64) -> c64 {
     c64::new(re, im)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use approx::assert_abs_diff_eq;
-    use std::f64::consts::*;
+pub(crate) struct TileBaselineMaps {
+    pub(crate) tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
+    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+}
 
-    #[test]
-    fn test_sin() {
-        assert_abs_diff_eq!(sin(FRAC_PI_6), 0.5);
-    }
+impl TileBaselineMaps {
+    pub(crate) fn new(total_num_tiles: usize, tile_flags: &HashSet<usize>) -> TileBaselineMaps {
+        let mut tile_to_unflagged_baseline_map = HashMap::new();
+        let mut unflagged_baseline_to_tile_map = HashMap::new();
+        let mut bl = 0;
+        for tile1 in 0..total_num_tiles {
+            if tile_flags.contains(&tile1) {
+                continue;
+            }
+            for tile2 in tile1 + 1..total_num_tiles {
+                if tile_flags.contains(&tile2) {
+                    continue;
+                }
+                tile_to_unflagged_baseline_map.insert((tile1, tile2), bl);
+                unflagged_baseline_to_tile_map.insert(bl, (tile1, tile2));
+                bl += 1;
+            }
+        }
 
-    #[test]
-    fn test_cos() {
-        assert_abs_diff_eq!(cos(FRAC_PI_3), 0.5);
-    }
-
-    #[test]
-    fn atan2_is_correct() {
-        assert_abs_diff_eq!(atan2(-2.0, 1.0), -1.1071487177940904);
-        assert_abs_diff_eq!(atan2(1.0, -1.0), 3.0 * FRAC_PI_4);
-    }
-
-    #[test]
-    fn test_cexp() {
-        assert_abs_diff_eq!(cexp(PI), c64::new(-1.0, 0.0));
+        Self {
+            tile_to_unflagged_baseline_map,
+            unflagged_baseline_to_tile_map,
+        }
     }
 }

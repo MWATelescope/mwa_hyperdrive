@@ -28,6 +28,7 @@ use mwa_rust_core::{
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
+        MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD,
     },
     time::{casacore_utc_to_epoch, epoch_as_gps_seconds},
     Jones, RADec, XyzGeocentric,
@@ -42,13 +43,21 @@ pub(crate) struct MS {
     /// Frequency metadata.
     freq_context: FreqContext,
 
-    // MS-specific things follow.
     /// The path to the measurement set on disk.
     pub(crate) ms: PathBuf,
 
     /// The "stride" of the data, i.e. the number of rows (baselines) before the
     /// time index changes.
     step: usize,
+}
+
+pub(crate) enum MsFlavour {
+    Birli,
+
+    Cotter,
+
+    /// Generic?
+    CASA,
 }
 
 impl MS {
@@ -86,13 +95,19 @@ impl MS {
         // intention, but there should be a way to read the "String" types, not
         // just "Table" types from the table keywords.
         // Was this measurement set created by cotter?
-        let cotter = {
-            // TODO: Allow rubbl to read table keywords, otherwise this will
-            // match Birli too.
-            read_table(&ms, Some("MWA_TILE_POINTING")).is_ok()
+        let flavour = {
+            let mut history_table = read_table(&ms, Some("HISTORY"))?;
+            let app: String = history_table.get_cell("APPLICATION", 0).unwrap();
+            if app.starts_with("Birli") {
+                MsFlavour::Birli
+            } else if read_table(&ms, Some("MWA_TILE_POINTING")).is_ok() {
+                // We're assuming that only Cotter is left as it knows about MWA
+                // stuff.
+                MsFlavour::Cotter
+            } else {
+                MsFlavour::CASA
+            }
         };
-        // let table_keywords = main_table.table_keyword_names().unwrap();
-        // let cotter = table_keywords.contains(&"MWA_COTTER_VERSION".to_string());
 
         // Get the tile names and XYZ positions.
         let mut antenna_table = read_table(&ms, Some("ANTENNA"))?;
@@ -111,16 +126,15 @@ impl MS {
                 Ok(())
             })
             .unwrap();
-        let tile_xyzs = if cotter {
-            casacore_positions_to_local_xyz(
+        let tile_xyzs = match flavour {
+            MsFlavour::Birli => casacore_positions_to_local_xyz_mwa(&casacore_positions)?,
+            MsFlavour::Cotter => casacore_positions_to_local_xyz(
                 &casacore_positions,
                 COTTER_MWA_LONGITUDE_RADIANS,
                 COTTER_MWA_LATITUDE_RADIANS,
                 COTTER_MWA_HEIGHT_METRES,
-            )?
-        } else {
-            // TODO: Get actual array coordinates.
-            casacore_positions_to_local_xyz_mwa(&casacore_positions)?
+            )?,
+            MsFlavour::CASA => todo!(),
         };
         let total_num_tiles = tile_xyzs.len();
         trace!("There are {} total tiles", total_num_tiles);
@@ -292,10 +306,15 @@ impl MS {
                 Ok(mut mwa_subband_table) => {
                     let zero_indexed_coarse_chans: Vec<i32> =
                         mwa_subband_table.get_col_as_vec("NUMBER").unwrap();
-                    zero_indexed_coarse_chans
+                    let one_indexed_coarse_chans: Vec<u32> = zero_indexed_coarse_chans
                         .into_iter()
                         .map(|cc_num| (cc_num + 1) as _)
-                        .collect()
+                        .collect();
+                    if one_indexed_coarse_chans.is_empty() {
+                        vec![1]
+                    } else {
+                        one_indexed_coarse_chans
+                    }
                 }
             }
         };
@@ -399,9 +418,7 @@ impl MS {
         // that, otherwise we must assume all dipoles are alive.
         let dipole_gains: Option<Array2<f64>> = match metafits {
             None => {
-                if cotter {
-                    warn!("cotter does not supply dead dipole information.");
-                }
+                warn!("Measurement sets do not supply dead dipole information.");
                 warn!("Without a metafits file, we must assume all dipoles are alive.");
                 warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
                 None
@@ -442,70 +459,77 @@ impl MS {
 
         // Get the observation's flagged channels per coarse band.
         // TODO: Detect Birli.
-        let fine_chan_flags_per_coarse_chan = if cotter {
-            // cotter doesn't list this conveniently. It's possible to inspect
-            // the FLAG column in the main ms table, but, that would use huge
-            // amount of IO, and there's no guarantee that any cell of that
-            // column contains only default fine-channel flags; there may also
-            // be RFI flags. So, we inspect the command-line options! (Sorry. At
-            // least I wrote this comment.) cotter flags 80 kHz at the edges by
-            // default, as well as the centre channel.
-            let mut history_table = read_table(&ms, Some("HISTORY"))?;
-            // For whatever reason, the CLI_COMMAND column needs to be accessed as a
-            // vector, even though it only has one element.
-            let cli_command: Vec<String> = history_table.get_cell_as_vec("CLI_COMMAND", 0).unwrap();
-            debug!("cotter CLI command: {:?}", cli_command);
-
-            // cotter CLI args are *always* split by whitespace; no equals
-            // symbol allowed.
-            let mut str_iter = cli_command[0].split_whitespace();
-            match str_iter.next() {
-                Some(exe) => exe.contains("cotter"),
-                // TODO
-                None => panic!("measurement set not from cotter!"),
-            };
-
-            // If -edgewidth is specified, then a custom amount of channels is
-            // flagged at the coarse channel edges. The default is 80 kHz.
-            let mut ew_iter = str_iter.clone();
-            let edgewidth = match ew_iter.find(|&s| s.contains("-edgewidth")) {
-                Some(_) => {
-                    let ew_str = ew_iter.next().unwrap();
-                    // The string may be quoted; remove those so it can be
-                    // parsed as a float.
-                    let ew_str = ew_str.trim_matches('\"');
-                    let ew = ew_str.parse::<f64>().unwrap() * 1e3;
-                    debug!("cotter -edgewidth: {} kHz", ew);
-                    ew
-                }
-                None => {
-                    debug!(
-                        "Assuming cotter is using default edgewidth of {} kHz",
-                        COTTER_DEFAULT_EDGEWIDTH / 1e3
-                    );
-                    COTTER_DEFAULT_EDGEWIDTH
-                }
-            };
-            // If -noflagdcchannels is specified, then the centre channel of
-            // each coarse channel is not flagged. Without this flag, the centre
-            // channels are flagged.
-            let noflagdcchannels = str_iter.any(|s| s.contains("-noflagdcchannels"));
-            debug!("cotter -noflagdcchannels: {}", noflagdcchannels);
-
-            let num_edge_channels = (edgewidth / native_fine_chan_width).round() as _;
-            let mut fine_chan_flags = vec![];
-            for ec in 0..num_edge_channels {
-                fine_chan_flags.push(ec);
-                fine_chan_flags.push(freq_context.num_fine_chans_per_coarse_chan - ec - 1);
+        let fine_chan_flags_per_coarse_chan = match flavour {
+            MsFlavour::Birli => {
+                warn!("Assuming no fine channel flags - TODO on Chris!");
+                vec![]
             }
-            if !noflagdcchannels {
-                fine_chan_flags.push(freq_context.num_fine_chans_per_coarse_chan / 2);
+
+            MsFlavour::Cotter => {
+                // cotter doesn't list this conveniently. It's possible to inspect
+                // the FLAG column in the main ms table, but, that would use huge
+                // amount of IO, and there's no guarantee that any cell of that
+                // column contains only default fine-channel flags; there may also
+                // be RFI flags. So, we inspect the command-line options! (Sorry. At
+                // least I wrote this comment.) cotter flags 80 kHz at the edges by
+                // default, as well as the centre channel.
+                let mut history_table = read_table(&ms, Some("HISTORY"))?;
+                // For whatever reason, the CLI_COMMAND column needs to be accessed as a
+                // vector, even though it only has one element.
+                let cli_command: Vec<String> =
+                    history_table.get_cell_as_vec("CLI_COMMAND", 0).unwrap();
+                debug!("cotter CLI command: {:?}", cli_command);
+
+                // cotter CLI args are *always* split by whitespace; no equals
+                // symbol allowed.
+                let mut str_iter = cli_command[0].split_whitespace();
+                match str_iter.next() {
+                    Some(exe) => exe.contains("cotter"),
+                    // TODO
+                    None => panic!("measurement set not from cotter!"),
+                };
+
+                // If -edgewidth is specified, then a custom amount of channels is
+                // flagged at the coarse channel edges. The default is 80 kHz.
+                let mut ew_iter = str_iter.clone();
+                let edgewidth = match ew_iter.find(|&s| s.contains("-edgewidth")) {
+                    Some(_) => {
+                        let ew_str = ew_iter.next().unwrap();
+                        // The string may be quoted; remove those so it can be
+                        // parsed as a float.
+                        let ew_str = ew_str.trim_matches('\"');
+                        let ew = ew_str.parse::<f64>().unwrap() * 1e3;
+                        debug!("cotter -edgewidth: {} kHz", ew);
+                        ew
+                    }
+                    None => {
+                        debug!(
+                            "Assuming cotter is using default edgewidth of {} kHz",
+                            COTTER_DEFAULT_EDGEWIDTH / 1e3
+                        );
+                        COTTER_DEFAULT_EDGEWIDTH
+                    }
+                };
+                // If -noflagdcchannels is specified, then the centre channel of
+                // each coarse channel is not flagged. Without this flag, the centre
+                // channels are flagged.
+                let noflagdcchannels = str_iter.any(|s| s.contains("-noflagdcchannels"));
+                debug!("cotter -noflagdcchannels: {}", noflagdcchannels);
+
+                let num_edge_channels = (edgewidth / native_fine_chan_width).round() as _;
+                let mut fine_chan_flags = vec![];
+                for ec in 0..num_edge_channels {
+                    fine_chan_flags.push(ec);
+                    fine_chan_flags.push(freq_context.num_fine_chans_per_coarse_chan - ec - 1);
+                }
+                if !noflagdcchannels {
+                    fine_chan_flags.push(freq_context.num_fine_chans_per_coarse_chan / 2);
+                }
+                fine_chan_flags.sort_unstable();
+                fine_chan_flags
             }
-            fine_chan_flags.sort_unstable();
-            fine_chan_flags
-        } else {
-            warn!("Assuming no fine channel flags - TODO on Chris!");
-            vec![]
+
+            MsFlavour::CASA => todo!(),
         };
 
         let obs_context = ObsContext {
@@ -555,7 +579,6 @@ impl InputData for MS {
         mut weights_array: ArrayViewMut2<f32>,
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        _flagged_baselines: &HashSet<usize>,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         // When reading in a new timestep's data, these indices should be

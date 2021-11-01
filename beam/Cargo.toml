@@ -2,26 +2,23 @@
 name = "mwa_hyperdrive_beam"
 version = "0.0.0"
 authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
-edition = "2018"
+edition = "2021"
 license = "MPL-2.0"
 
 [features]
 hdf5-static = ["mwa_hyperbeam/hdf5-static"]
-cuda = ["mwa_hyperbeam_cuda/cuda"]
-cuda-single = ["mwa_hyperbeam_cuda/single"]
+cuda = ["mwa_hyperbeam/cuda"]
+cuda-single = ["mwa_hyperbeam/cuda-single"]
 
 [dependencies]
+cfg-if = "1.0.*"
 dashmap = "4.0.*"
 log = "0.4.*"
 rayon = "~1"
-# mwa_hyperbeam = { git = "https://github.com/cjordan/mwa_hyperbeam", branch = "parallactic" }
-mwa_hyperbeam = { path = "/home/chj/Software/personal/mwa_hyperbeam" }
-# mwa_rust_core = "0.2.*"
-mwa_rust_core = { path = "/home/chj/Software/personal/mwa_rust_core" }
+mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "v0.4.0-WIP" }
+mwa_rust_core = "0.2.*"
 ndarray = "0.14.*"
 thiserror = "1.0.*"
-
-mwa_hyperbeam_cuda = { path = "/home/chj/Software/personal/mwa_hyperbeam/cuda", optional = true }
 
 [dev-dependencies]
 approx = { version = "0.4.*", features = ["num-complex"] }

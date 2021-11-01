@@ -299,7 +299,6 @@ impl InputData for RawData {
         mut weights_array: ArrayViewMut2<f32>,
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_baselines: &HashSet<usize>,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         // TODO: Handle non-contiguous coarse channels.

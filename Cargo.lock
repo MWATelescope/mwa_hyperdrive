@@ -108,9 +108,9 @@ dependencies = [
 
 [[package]]
 name = "birli"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "242bf288693a3e87804bbee1f29e368a497744b1d4cb6b5c4a685060263a725f"
+checksum = "2d51c9c4182f5efa70fd67e7c37fda84562e0f48853a2c55e3cc593de520e97b"
 dependencies = [
  "cfg-if 1.0.0",
  "clap",
@@ -122,8 +122,8 @@ dependencies = [
  "itertools",
  "libc",
  "log",
- "mwa_rust_core 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ndarray",
+ "mwa_rust_core",
+ "ndarray 0.14.0",
  "rayon",
  "regex",
  "serde",
@@ -641,27 +641,27 @@ checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
 
 [[package]]
 name = "hdf5"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a863396b1828dcb188209e0d3e380433415cc4c253f80fa367b5154cc3073db0"
+checksum = "b5c31bb899c52eef31a924a99bea231f3330890ef4dd074776fb6e77327d74ab"
 dependencies = [
  "bitflags",
+ "cfg-if 1.0.0",
  "hdf5-derive",
  "hdf5-sys",
  "hdf5-types",
  "lazy_static",
  "libc",
- "ndarray",
- "num-integer",
- "num-traits",
+ "ndarray 0.15.3",
  "parking_lot",
+ "paste",
 ]
 
 [[package]]
 name = "hdf5-derive"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eddba76f9d15423c8737a3f376128e3b556f01cd8927e44736ea8cc63bbcc02"
+checksum = "16d8f70301b7d879dfd719c62ee7d37d95d36db7e217641e56154da3799dc263"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -670,18 +670,18 @@ dependencies = [
 
 [[package]]
 name = "hdf5-src"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64a324a112cc0e45c565b34f6fbd3fcccc680c0b10d633b27ab2f4015a17599e"
+checksum = "ec1b0dc8ba854a5cc38aae47531c191ee9e846bbd5324dd94dd1ac5ec63218a8"
 dependencies = [
  "cmake",
 ]
 
 [[package]]
 name = "hdf5-sys"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15fa1f3c5b34a7dd3815fc68aa8d64f0682e500b393b77b88f8dac206d2b16a9"
+checksum = "740ac0d726cce2e93d4c7716d2d53fa744130d51618ea217cd133fd4c02b95f4"
 dependencies = [
  "hdf5-src",
  "libc",
@@ -695,11 +695,13 @@ dependencies = [
 
 [[package]]
 name = "hdf5-types"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4523a5d946b3ef2a0aa1d3643a844c581794dee09934c4a8e1ffb6dbb878872e"
+checksum = "67b5b368aeaeba724e006807d8535659bf31ecd605292b372d7e01feb4035b28"
 dependencies = [
  "ascii",
+ "cfg-if 1.0.0",
+ "hdf5-sys",
  "libc",
 ]
 
@@ -852,9 +854,9 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.6.7"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "351a32417a12d5f7e82c368a66781e307834dae04c6ce0cd4456d52989229883"
+checksum = "c0cf036d15402bea3c5d4de17b3fce76b3e4a56ebc1f577be0e7a72f7c607cf0"
 dependencies = [
  "cfg-if 1.0.0",
  "winapi",
@@ -918,6 +920,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "matrixmultiply"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a8a15b776d9dfaecd44b03c5828c2199cddff5247215858aac14624f8d6b741"
+dependencies = [
+ "rawpointer",
+]
+
+[[package]]
 name = "memchr"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -945,31 +956,24 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.4.0"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=v0.4.0-WIP#1dcf69ef46918e1fa83c6ad3d9ca507f788ad350"
 dependencies = [
  "cbindgen",
+ "cc",
+ "cfg-if 1.0.0",
+ "cuda-runtime-sys",
  "dashmap",
  "hdf5",
  "hdf5-sys",
- "mwa_hyperbeam_cuda",
- "mwa_rust_core 0.2.0",
- "ndarray",
+ "mwa_rust_core",
+ "ndarray 0.14.0",
  "rayon",
  "thiserror",
 ]
 
 [[package]]
-name = "mwa_hyperbeam_cuda"
-version = "0.1.0"
-dependencies = [
- "cfg-if 1.0.0",
- "cuda-runtime-sys",
- "mwa_rust_core 0.2.0",
- "ndarray",
-]
-
-[[package]]
 name = "mwa_hyperdrive"
-version = "0.2.0-alpha3"
+version = "0.2.0-alpha4"
 dependencies = [
  "approx",
  "assert_cmd",
@@ -992,8 +996,8 @@ dependencies = [
  "mwa_hyperdrive_common",
  "mwa_hyperdrive_cuda",
  "mwa_hyperdrive_srclist",
- "mwa_rust_core 0.2.0",
- "ndarray",
+ "mwa_rust_core",
+ "ndarray 0.14.0",
  "rayon",
  "regex",
  "rubbl_casatables",
@@ -1013,12 +1017,12 @@ name = "mwa_hyperdrive_beam"
 version = "0.0.0"
 dependencies = [
  "approx",
+ "cfg-if 1.0.0",
  "dashmap",
  "log",
  "mwa_hyperbeam",
- "mwa_hyperbeam_cuda",
- "mwa_rust_core 0.2.0",
- "ndarray",
+ "mwa_rust_core",
+ "ndarray 0.14.0",
  "rayon",
  "serial_test",
  "thiserror",
@@ -1042,7 +1046,8 @@ dependencies = [
  "cc",
  "cfg-if 1.0.0",
  "cuda-runtime-sys",
- "mwa_hyperbeam_cuda",
+ "mwa_hyperdrive_beam",
+ "mwa_hyperdrive_srclist",
 ]
 
 [[package]]
@@ -1057,9 +1062,8 @@ dependencies = [
  "log",
  "mwa_hyperdrive_beam",
  "mwa_hyperdrive_common",
- "mwa_hyperdrive_cuda",
- "mwa_rust_core 0.2.0",
- "ndarray",
+ "mwa_rust_core",
+ "ndarray 0.14.0",
  "rayon",
  "serde",
  "serde_json",
@@ -1069,21 +1073,6 @@ dependencies = [
  "strum",
  "strum_macros",
  "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "mwa_rust_core"
-version = "0.2.0"
-dependencies = [
- "approx",
- "erfa-sys",
- "hifitime",
- "log",
- "mwalib",
- "num-complex 0.3.1",
- "num-traits",
- "rayon",
  "thiserror",
 ]
 
@@ -1132,12 +1121,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c0d5c9540a691d153064dc47a4db2504587a75eae07bf1d73f7a596ebc73c04"
 dependencies = [
  "approx",
- "matrixmultiply",
+ "matrixmultiply 0.2.4",
  "num-complex 0.3.1",
  "num-integer",
  "num-traits",
  "rawpointer",
  "rayon",
+]
+
+[[package]]
+name = "ndarray"
+version = "0.15.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08e854964160a323e65baa19a0b1a027f76d590faba01f05c0cbc3187221a8c9"
+dependencies = [
+ "matrixmultiply 0.3.1",
+ "num-complex 0.4.0",
+ "num-integer",
+ "num-traits",
+ "rawpointer",
 ]
 
 [[package]]
@@ -1180,6 +1182,15 @@ name = "num-complex"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "747d632c0c558b87dbabbe6a82f3b4ae03720d0646ac5b7b4dae89394be5f2c5"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26873667bbbb7c5182d4a37c1add32cdf09f841af72da53318fdb81543c15085"
 dependencies = [
  "num-traits",
 ]
@@ -1293,6 +1304,12 @@ dependencies = [
  "smallvec",
  "winapi",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acbf547ad0c65e31259204bd90935776d1c693cec2f4ff7abb7a1bbbd40dfe58"
 
 [[package]]
 name = "percent-encoding"
@@ -1580,35 +1597,39 @@ dependencies = [
 
 [[package]]
 name = "rubbl_casatables"
-version = "0.0.0-dev.0"
-source = "git+https://github.com/pkgw/rubbl?rev=7e0f5ea#7e0f5ea6f885b1b5aded10063dae359099146d16"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c478d29b8092cfed8eb33d953e4dcffce20f2c70e854bbcef0d38a68900a4f97"
 dependencies = [
  "cc",
  "failure",
  "failure_derive",
- "ndarray",
+ "ndarray 0.14.0",
  "rubbl_casatables_impl",
  "rubbl_core",
 ]
 
 [[package]]
 name = "rubbl_casatables_impl"
-version = "0.0.0-dev.0"
-source = "git+https://github.com/pkgw/rubbl?rev=7e0f5ea#7e0f5ea6f885b1b5aded10063dae359099146d16"
+version = "0.2.31105"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6edecb633b7374c2312267bfa12009aa71a006833f3f420480fba1d09756ca10"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "rubbl_core"
-version = "0.0.0-dev.0"
-source = "git+https://github.com/pkgw/rubbl?rev=7e0f5ea#7e0f5ea6f885b1b5aded10063dae359099146d16"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30757883f9a8cd24076742d849e9c3461057bd546c760e6a204e3bd0c4aee7c8"
 dependencies = [
+ "approx",
  "byteorder",
  "clap",
  "failure",
  "failure_derive",
- "ndarray",
+ "ndarray 0.14.0",
  "num-complex 0.3.1",
  "termcolor",
 ]
@@ -2121,9 +2142,9 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "winreg"
-version = "0.8.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d107f8c6e916235c4c01cabb3e8acf7bea8ef6a63ca2e7fa0527c049badfc48c"
+checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "serde",
  "winapi",

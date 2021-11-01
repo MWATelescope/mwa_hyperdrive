@@ -33,13 +33,15 @@ use crate::{
     model,
     time::mjd_to_epoch,
 };
-use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
+use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, BeamCUDA, Delays};
 use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList, SourceList};
 
-#[cfg(feature = "cuda")]
-use mwa_hyperdrive_cuda as cuda;
-#[cfg(feature = "cuda")]
-use mwa_hyperdrive_srclist::ComponentListFFI;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "cuda")] {
+        use mwa_hyperdrive_cuda as cuda;
+        use cuda::modeller::SkyModellerCuda;
+    }
+}
 
 #[derive(StructOpt, Debug, Default, Deserialize)]
 pub struct SimulateVisArgs {
@@ -156,7 +158,7 @@ struct SimVisParams {
 
 impl SimVisParams {
     /// Convert arguments into parameters.
-    fn new(args: SimulateVisArgs) -> Result<Self, SimulateVisError> {
+    fn new(args: SimulateVisArgs, using_cpu: bool) -> Result<Self, SimulateVisError> {
         debug!("{:#?}", &args);
 
         // Expose all the struct fields to ensure they're all used.
@@ -392,7 +394,7 @@ pub fn simulate_vis(
         info!("Generating sky model visibilities on the GPU (single precision)");
     }
 
-    let params = SimVisParams::new(args)?;
+    let params = SimVisParams::new(args, cpu)?;
 
     if dry_run {
         info!("Dry run -- exiting now.");
@@ -440,9 +442,9 @@ pub fn simulate_vis(
         &fine_chan_flags,
     )?;
 
-    // Split the sky-model components (for efficiency). Use an Either to hold
-    // one type or the other (the types differ between CPU and GPU code).
-    let sky_model_comps = if cpu {
+    // Create a "modeller" object. Use an Either to hold one type or the other
+    // (the types differ between CPU and GPU code).
+    let modeller = if cpu {
         Either::Left(ComponentList::new(
             &params.source_list,
             &params.fine_chan_freqs,
@@ -450,17 +452,19 @@ pub fn simulate_vis(
         ))
     } else {
         #[cfg(feature = "cuda")]
-        {
-            Either::Right(ComponentListFFI::new(
-                params.source_list,
+        unsafe {
+            Either::Right(SkyModellerCuda::new(
+                params.beam.deref(),
+                &params.source_list,
                 &params.fine_chan_freqs,
+                &params.xyzs,
                 params.phase_centre,
                 &crate::shapelets::SHAPELET_BASIS_VALUES,
                 crate::shapelets::SBF_L,
                 crate::shapelets::SBF_N,
                 crate::shapelets::SBF_C,
                 crate::shapelets::SBF_DX,
-            ))
+            )?)
         }
 
         // It doesn't matter what goes in Right when we're not using CUDA.
@@ -487,12 +491,12 @@ pub fn simulate_vis(
         let lst_diff = (timestep - params.timesteps[0]).in_seconds();
         let lst = params.metafits.lst_rad + lst_diff * SOLAR2SIDEREAL * DS2R;
         let hadec_phase_centre = params.phase_centre.to_hadec(lst);
-        let uvws = xyz::xyzs_to_cross_uvws_parallel(&params.xyzs, hadec_phase_centre);
+        let uvws = xyzs_to_cross_uvws_parallel(&params.xyzs, hadec_phase_centre);
 
         if cpu {
             model::model_timestep(
                 vis_model.view_mut(),
-                sky_model_comps.as_ref().unwrap_left(),
+                modeller.as_ref().unwrap_left(),
                 params.beam.deref(),
                 lst,
                 &params.xyzs,
@@ -501,33 +505,13 @@ pub fn simulate_vis(
                 &params.baseline_to_tile_map,
             )?;
         } else {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "cuda")] {
-                    let cuda_uvws: Vec<cuda::UVW> = uvws
-                        .iter()
-                        .map(|&uvw| cuda::UVW {
-                            u: uvw.u as _,
-                            v: uvw.v as _,
-                            w: uvw.w as _,
-                        })
-                        .collect();
-
-                    let cuda_result = sky_model_comps.as_ref().unwrap_right().model_timestep(
-                        params.beam.deref(),
-                        lst,
-                        &params.xyzs,
-                        params.baseline_to_tile_map.len(),
-                        cuda_uvws.as_ptr(),
-                        vis_model.as_mut_ptr() as _,
-                    );
-                    // TODO: Handle cuda_result.
-                    if cuda_result != 0 {
-                        panic!(
-                            "cuda::model_timestep exited with CUDA error code {}",
-                            cuda_result
-                        );
-                    }
-                }
+            #[cfg(feature = "cuda")]
+            unsafe {
+                modeller.as_ref().unwrap_right().model_timestep(
+                    vis_model.view_mut(),
+                    lst,
+                    &uvws,
+                )?;
             }
         }
         // Write the visibilities out.
@@ -559,4 +543,33 @@ pub fn simulate_vis(
     );
 
     Ok(())
+}
+
+// TODO: Have in mwa_rust_core
+/// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
+/// having to form [XyzGeodetic] baselines first. This function performs
+/// calculations in parallel. Cross-correlation baselines only.
+fn xyzs_to_cross_uvws_parallel(
+    xyzs: &[mwa_rust_core::XyzGeodetic],
+    phase_centre: mwa_rust_core::HADec,
+) -> Vec<mwa_rust_core::UVW> {
+    use rayon::prelude::*;
+
+    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
+    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
+    // Get a UVW for each tile.
+    let tile_uvws: Vec<mwa_rust_core::UVW> = xyzs
+        .par_iter()
+        .map(|&xyz| mwa_rust_core::UVW::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec))
+        .collect();
+    // Take the difference of every pair of UVWs.
+    let num_tiles = xyzs.len();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    (0..num_baselines)
+        .into_par_iter()
+        .map(|i_bl| {
+            let (i, j) = mwa_rust_core::math::cross_correlation_baseline_to_tiles(num_tiles, i_bl);
+            tile_uvws[i] - tile_uvws[j]
+        })
+        .collect()
 }

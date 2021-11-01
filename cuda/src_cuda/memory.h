@@ -13,8 +13,8 @@ extern "C" {
 #endif // __cplusplus
 
 /**
- * The return type of `allocate_init`. All pointers are to device memory, except
- * `host_vis`.
+ * Common things needed to perform modelling. All pointers are to device
+ * memory.
  */
 typedef struct Addresses {
     int num_freqs;
@@ -24,17 +24,11 @@ typedef struct Addresses {
     int sbf_n;
     FLOAT sbf_c;
     FLOAT sbf_dx;
-    UVW *d_uvws;
     FLOAT *d_freqs;
     FLOAT *d_shapelet_basis_values;
-    void *d_fee_coeffs;
-    int num_fee_beam_coeffs;
-    int num_unique_fee_tiles;
-    int num_unique_fee_freqs;
-    uint64_t *d_beam_jones_map;
-    void *d_beam_norm_jones;
+    int num_unique_beam_freqs;
+    const uint64_t *d_beam_jones_map;
     JonesF32 *d_vis;
-    JonesF32 *host_vis;
 } Addresses;
 
 /**

@@ -21,8 +21,16 @@ pub use fee::*;
 use mwa_rust_core::{AzEl, Jones};
 use ndarray::prelude::*;
 
-#[cfg(feature = "cuda")]
-pub use mwa_hyperbeam_cuda::fee::write_fee_cuda_file;
+// Set a compile-time variable type.
+cfg_if::cfg_if! {
+    if #[cfg(feature = "cuda-single")] {
+        pub use mwa_hyperbeam::cuda::*;
+        pub type CudaFloat = f32;
+    } else if #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] {
+        pub use mwa_hyperbeam::cuda::*;
+        pub type CudaFloat = f64;
+    }
+}
 
 /// Supported beam types.
 pub enum BeamType {
@@ -67,10 +75,38 @@ pub trait Beam: Sync + Send {
     fn empty_coeff_cache(&self);
 
     #[cfg(feature = "cuda")]
-    fn get_device_pointers(
+    /// Using the tile information from this [Beam] and frequencies to be used,
+    /// return a [BeamCUDA]. This object only needs pointings to calculate beam
+    /// response [Jones] matrices.
+    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
+}
+
+/// A trait abstracting beam code functions on a CUDA-capable device.
+#[cfg(feature = "cuda")]
+pub trait BeamCUDA {
+    /// Calculate the Jones matrices for an [AzEl] direction. The pointing
+    /// information is not needed because it was provided when `self` was
+    /// created.
+    ///
+    /// # Safety
+    ///
+    /// This function interfaces directly with the CUDA API. Rust errors attempt
+    /// to catch problems but there are no guarantees.
+    unsafe fn calc_jones(
         &self,
-        freqs_hz: &[u32],
-    ) -> Option<mwa_hyperbeam_cuda::fee::FEEDeviceCoeffPointers>;
+        azels: &[AzEl],
+    ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError>;
+
+    /// Get the type of beam.
+    fn get_beam_type(&self) -> BeamType;
+
+    /// Get a pointer to the device beam Jones map. This is necessary to access
+    /// de-duplicated beam Jones matrices on the device.
+    fn get_beam_jones_map(&self) -> *const u64;
+
+    /// Get the number of de-duplicated frequencies associated with this
+    /// [BeamCUDA].
+    fn get_num_unique_freqs(&self) -> i32;
 }
 
 /// An enum to track whether MWA dipole delays are provided and/or necessary.
@@ -123,11 +159,42 @@ impl Beam for NoBeam {
     fn empty_coeff_cache(&self) {}
 
     #[cfg(feature = "cuda")]
-    fn get_device_pointers(
+    unsafe fn prepare_cuda_beam(&self, _freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
+        let obj = NoBeamCUDA {
+            beam_jones_map: DevicePointer::copy_to_device(&[0])?,
+        };
+        Ok(Box::new(obj))
+    }
+}
+
+/// A beam implementation that returns only identity Jones matrices for all beam
+/// calculations.
+#[cfg(feature = "cuda")]
+pub struct NoBeamCUDA {
+    beam_jones_map: DevicePointer<u64>,
+}
+
+#[cfg(feature = "cuda")]
+impl BeamCUDA for NoBeamCUDA {
+    unsafe fn calc_jones(
         &self,
-        _freqs_hz: &[u32],
-    ) -> Option<mwa_hyperbeam_cuda::fee::FEEDeviceCoeffPointers> {
-        None
+        azels: &[AzEl],
+    ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError> {
+        let identities: Array3<Jones<CudaFloat>> =
+            Array3::from_elem((1, 1, azels.len()), Jones::identity());
+        DevicePointer::copy_to_device(identities.as_slice().unwrap()).map_err(BeamError::from)
+    }
+
+    fn get_beam_type(&self) -> BeamType {
+        BeamType::None
+    }
+
+    fn get_beam_jones_map(&self) -> *const u64 {
+        self.beam_jones_map.get()
+    }
+
+    fn get_num_unique_freqs(&self) -> i32 {
+        1
     }
 }
 
@@ -150,7 +217,7 @@ mod tests {
         ];
         let beam = NoBeam;
         for azel in azels {
-            let j = beam.calc_jones(azel, 150e6 as _, 0).unwrap();
+            let j = beam.calc_jones(azel, 150e6, 0).unwrap();
             assert_abs_diff_eq!(j, Jones::identity());
         }
     }

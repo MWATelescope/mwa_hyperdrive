@@ -2,18 +2,23 @@
 name = "mwa_hyperdrive_cuda"
 version = "0.0.0"
 authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
-edition = "2018"
+edition = "2021"
 license = "MPL-2.0"
 
 [features]
 # Use single-precision floats. If this feature isn't enabled, then
 # double-precision floats are used.
-cuda-single = ["mwa_hyperbeam_cuda/single"]
+cuda-single = []
+# Link the CUDA library statically.
+static = []
 
 [dependencies]
 cfg-if = "1.0.*"
 cuda-runtime-sys = "0.3.0-alpha.1"
 
+mwa_hyperdrive_beam    = { path = "../beam" }
+mwa_hyperdrive_srclist = { path = "../srclist" }
+
 [build-dependencies]
 cc = { version = "1.0.*", features = ["parallel"] }
-mwa_hyperbeam_cuda = { path = "/home/chj/Software/personal/mwa_hyperbeam/cuda" }
+cfg-if = "1.0.*"

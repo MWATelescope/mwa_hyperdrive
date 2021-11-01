@@ -3,7 +3,6 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::env;
-use std::path::PathBuf;
 
 // This code is adapted from pkg-config-rs
 // (https://github.com/rust-lang/pkg-config-rs).
@@ -25,21 +24,31 @@ fn infer_static(name: &str) -> bool {
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    // Attempt to read HYPERDRIVE_CUDA_COMPUTE.
+    // Attempt to read HYPERDRIVE_CUDA_COMPUTE. HYPERBEAM_CUDA_COMPUTE can be
+    // used instead, too.
+    let mut compute_var = "HYPERDRIVE_CUDA_COMPUTE";
     println!("cargo:rerun-if-env-changed=HYPERDRIVE_CUDA_COMPUTE");
-    let compute = match env::var("HYPERDRIVE_CUDA_COMPUTE") {
-        Ok(c) => c,
-        Err(e) => panic!(
+    println!("cargo:rerun-if-env-changed=HYPERBEAM_CUDA_COMPUTE");
+    let compute = match (
+        env::var("HYPERDRIVE_CUDA_COMPUTE"),
+        env::var("HYPERBEAM_CUDA_COMPUTE"),
+    ) {
+        (Ok(c), _) => c,
+        (Err(_), Ok(c)) => {
+            compute_var = "HYPERBEAM_CUDA_COMPUTE";
+            c
+        }
+        (Err(e), Err(_)) => panic!(
             "Problem reading env. variable HYPERDRIVE_CUDA_COMPUTE ! {}",
             e
         ),
     };
     // Check that there's only two numeric characters.
     if compute.parse::<u16>().is_err() {
-        panic!("HYPERDRIVE_CUDA_COMPUTE couldn't be parsed into a number!")
+        panic!("{} couldn't be parsed into a number!", compute_var)
     }
     if compute.len() != 2 {
-        panic!("HYPERDRIVE_CUDA_COMPUTE is not a two-digit number!")
+        panic!("{} is not a two-digit number!", compute_var)
     }
 
     // Compile all CUDA source files into a single library. Find .cu, .h and
@@ -69,49 +78,50 @@ fn main() {
         }
     }
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    // Add the FEE beam code!
-    let mut fee_include = out_dir.clone();
-    fee_include.push("fee.h");
-    mwa_hyperbeam_cuda::fee::write_fee_cuda_file(&fee_include).unwrap();
-
     let mut cuda_target = cc::Build::new();
     cuda_target
         .cuda(true)
         .flag("-cudart=static")
         .flag("-gencode")
-        // Using the specified HYPERDRIVE_CUDA_COMPUTE
+        // Using the specified CUDA compute
         .flag(&format!("arch=compute_{c},code=sm_{c}", c = compute))
         .define(
             // The DEBUG env. variable is set by cargo. If running "cargo build
             // --release", DEBUG is "false", otherwise "true". C/C++/CUDA like
             // the compile option "NDEBUG" to be defined when using assert.h, so
             // if appropriate, define that here. We also define "DEBUG" so that
-            // could be used.
+            // can be used.
             match env::var("DEBUG").as_deref() {
                 Ok("false") => "NDEBUG",
                 _ => "DEBUG",
             },
             None,
-        )
-        .include(&out_dir);
+        );
 
     // If we're told to, use single-precision floats. The default in the CUDA
     // code is to use double-precision.
     #[cfg(feature = "cuda-single")]
     cuda_target.define("SINGLE", None);
 
-    cuda_target.files(&cuda_files).compile("hyperdrive_cu");
+    cuda_target
+        .file("src_cuda/model.cu")
+        .compile("hyperdrive_cu");
 
     // Link CUDA. If the library path manually specified, search there.
     if let Ok(lib_dir) = env::var("CUDA_LIB") {
         println!("cargo:rustc-link-search=native={}", lib_dir);
     }
 
-    if infer_static("cuda") {
-        // CUDA ships its static library as cudart_static.a, not cudart.a
-        println!("cargo:rustc-link-lib=static=cudart_static");
-    } else {
-        println!("cargo:rustc-link-lib=cudart");
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "static")] {
+            // CUDA ships its static library as cudart_static.a, not cudart.a
+            println!("cargo:rustc-link-lib=static=cudart_static");
+        } else {
+            if infer_static("cuda") {
+                println!("cargo:rustc-link-lib=static=cudart_static");
+            } else {
+                println!("cargo:rustc-link-lib=cudart");
+            }
+        }
     }
 }

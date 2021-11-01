@@ -11,6 +11,7 @@ use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
 
 use super::*;
+use crate::math::TileBaselineMaps;
 use mwa_hyperdrive_beam::NoBeam;
 use mwa_hyperdrive_srclist::{
     constants::DEFAULT_SPEC_INDEX, ComponentList, ComponentType, FluxDensity, FluxDensityType,
@@ -118,8 +119,7 @@ impl ObsParams {
         let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyz::xyzs_to_cross_uvws(&xyzs, phase_centre.to_hadec(lst));
 
-        let maps =
-            crate::calibrate::params::generate_tile_baseline_maps(xyzs.len(), &HashSet::new());
+        let maps = TileBaselineMaps::new(xyzs.len(), &HashSet::new());
 
         Self {
             phase_centre,
@@ -168,8 +168,7 @@ impl ObsParams {
         let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyz::xyzs_to_cross_uvws(&xyzs, phase_centre.to_hadec(lst));
 
-        let maps =
-            crate::calibrate::params::generate_tile_baseline_maps(xyzs.len(), &HashSet::new());
+        let maps = TileBaselineMaps::new(xyzs.len(), &HashSet::new());
 
         Self {
             phase_centre,

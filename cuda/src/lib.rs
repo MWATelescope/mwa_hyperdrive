@@ -9,16 +9,26 @@
 // This is needed only because tests inside bindgen-produced files (model_*.rs
 // and memory_*.rs) trigger the warning.
 #![allow(deref_nullptr)]
-
 // Link hyperdrive_cu produced from build.rs
-#[link(name = "hyperdrive_cu", kind = "static")]
+#![link(name = "hyperdrive_cu", kind = "static")]
 
+// Import Rust bindings to the CUDA code specific to the precision we're using,
+// and set corresponding compile-time types.
 cfg_if::cfg_if! {
-if #[cfg(feature = "cuda-single")] {
-    include!("model_single.rs");
-    include!("memory_single.rs");
-} else {
-    include!("model_double.rs");
-    include!("memory_double.rs");
+    if #[cfg(feature = "cuda-single")] {
+        include!("model_single.rs");
+        include!("memory_single.rs");
+        pub type CudaFloat = f32;
+        pub(crate) type CudaJones = JonesF32;
+    } else {
+        include!("model_double.rs");
+        include!("memory_double.rs");
+        pub type CudaFloat = f64;
+        pub(crate) type CudaJones = JonesF64;
+    }
 }
-}
+
+pub mod modeller;
+pub use modeller::SkyModellerCuda;
+
+pub use mwa_hyperdrive_beam::{CudaError, DevicePointer};

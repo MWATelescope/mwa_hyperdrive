@@ -86,6 +86,8 @@ lazy_static::lazy_static! {
 
 // External re-exports.
 pub use mwa_rust_core;
+pub use ndarray;
+pub use rayon;
 
 #[cfg(test)]
 mod tests {

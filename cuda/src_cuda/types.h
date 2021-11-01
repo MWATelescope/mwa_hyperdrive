@@ -131,9 +131,6 @@ typedef struct JonesF64 {
  * All the parameters needed to describe point-source components.
  */
 typedef struct Points {
-    FLOAT *has;
-    FLOAT *decs;
-
     size_t num_power_law_points;
     LMN *power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
@@ -151,9 +148,6 @@ typedef struct Points {
  * All the parameters needed to describe Gaussian components.
  */
 typedef struct Gaussians {
-    FLOAT *has;
-    FLOAT *decs;
-
     size_t num_power_law_gaussians;
     LMN *power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
@@ -173,9 +167,6 @@ typedef struct Gaussians {
  * All the parameters needed to describe Shapelet components.
  */
 typedef struct Shapelets {
-    FLOAT *has;
-    FLOAT *decs;
-
     size_t num_power_law_shapelets;
     LMN *power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.

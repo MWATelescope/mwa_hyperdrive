@@ -35,7 +35,9 @@ use mwa_rust_core::{
 use rayon::prelude::*;
 
 use super::solutions::CalSolutionType;
-use crate::{constants::*, data_formats::VisOutputType, data_formats::*, glob::*};
+use crate::{
+    constants::*, data_formats::VisOutputType, data_formats::*, glob::*, math::TileBaselineMaps,
+};
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_srclist::{
     constants::*, veto_sources, FluxDensityType, SourceList, SourceListType,
@@ -640,7 +642,7 @@ impl CalibrateParams {
         } else {
             obs_context.autocorrelations_present
         };
-        let tile_baseline_maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
+        let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
 
         let (unflagged_tile_xyzs, unflagged_tile_names) = obs_context
             .tile_xyzs
@@ -898,38 +900,6 @@ impl CalibrateParams {
     }
 }
 
-pub(crate) struct TileBaselineMaps {
-    pub(crate) tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
-    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
-}
-
-pub(crate) fn generate_tile_baseline_maps(
-    total_num_tiles: usize,
-    tile_flags: &HashSet<usize>,
-) -> TileBaselineMaps {
-    let mut tile_to_unflagged_baseline_map = HashMap::new();
-    let mut unflagged_baseline_to_tile_map = HashMap::new();
-    let mut bl = 0;
-    for tile1 in 0..total_num_tiles {
-        if tile_flags.contains(&tile1) {
-            continue;
-        }
-        for tile2 in tile1 + 1..total_num_tiles {
-            if tile_flags.contains(&tile2) {
-                continue;
-            }
-            tile_to_unflagged_baseline_map.insert((tile1, tile2), bl);
-            unflagged_baseline_to_tile_map.insert(bl, (tile1, tile2));
-            bl += 1;
-        }
-    }
-
-    TileBaselineMaps {
-        tile_to_unflagged_baseline_map,
-        unflagged_baseline_to_tile_map,
-    }
-}
-
 /// Get the flagged cross-correlation baseline indices from flagged tile
 /// indices. If all 128 tiles are flagged in a 128-element array, then this set
 /// will have 8128 flags.
@@ -1057,22 +1027,6 @@ fn can_write_to_file<T: AsRef<Path>>(file: T) -> Result<(), InvalidArgsError> {
 mod tests {
     use super::*;
     use crate::tests::{full_obsids::*, reduced_obsids::*, *};
-
-    #[test]
-    fn test_generate_tile_baseline_maps() {
-        let total_num_tiles = 128;
-        let mut tile_flags = HashSet::new();
-        let maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
-        assert_eq!(maps.tile_to_unflagged_baseline_map[&(0, 1)], 0);
-        assert_eq!(maps.unflagged_baseline_to_tile_map[&0], (0, 1));
-
-        tile_flags.insert(1);
-        let maps = generate_tile_baseline_maps(total_num_tiles, &tile_flags);
-        assert_eq!(maps.tile_to_unflagged_baseline_map[&(0, 2)], 0);
-        assert_eq!(maps.tile_to_unflagged_baseline_map[&(2, 3)], 126);
-        assert_eq!(maps.unflagged_baseline_to_tile_map[&0], (0, 2));
-        assert_eq!(maps.unflagged_baseline_to_tile_map[&126], (2, 3));
-    }
 
     #[test]
     fn test_get_flagged_baselines_set() {
