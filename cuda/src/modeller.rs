@@ -4,7 +4,7 @@
 
 //! Types to generate sky-models with CUDA.
 
-use mwa_rust_core::{constants::MWA_LAT_RAD, AzEl, HADec, Jones, RADec, XyzGeodetic, LMN, UVW};
+use mwa_rust_core::{AzEl, HADec, Jones, RADec, XyzGeodetic, LMN, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
@@ -140,32 +140,35 @@ impl<'a> SkyModellerCuda<'a> {
         let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_list_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
-        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))]
-        let jones_to_cuda_jones = |j: Jones<f64>| -> cuda::JonesF64 {
-            cuda::JonesF64 {
-                xx_re: j[0].re,
-                xx_im: j[0].im,
-                xy_re: j[1].re,
-                xy_im: j[1].im,
-                yx_re: j[2].re,
-                yx_im: j[2].im,
-                yy_re: j[3].re,
-                yy_im: j[3].im,
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "cuda-single")] {
+                let jones_to_cuda_jones = |j: Jones<f64>| -> cuda::JonesF32 {
+                    cuda::JonesF32 {
+                        xx_re: j[0].re as f32,
+                        xx_im: j[0].im as f32,
+                        xy_re: j[1].re as f32,
+                        xy_im: j[1].im as f32,
+                        yx_re: j[2].re as f32,
+                        yx_im: j[2].im as f32,
+                        yy_re: j[3].re as f32,
+                        yy_im: j[3].im as f32,
+                    }
+                };
+            } else {
+                let jones_to_cuda_jones = |j: Jones<f64>| -> cuda::JonesF64 {
+                    cuda::JonesF64 {
+                        xx_re: j[0].re,
+                        xx_im: j[0].im,
+                        xy_re: j[1].re,
+                        xy_im: j[1].im,
+                        yx_re: j[2].re,
+                        yx_im: j[2].im,
+                        yy_re: j[3].re,
+                        yy_im: j[3].im,
+                    }
+                };
             }
-        };
-        #[cfg(feature = "cuda-single")]
-        let jones_to_cuda_jones = |j: Jones<f64>| -> cuda::JonesF32 {
-            cuda::JonesF32 {
-                xx_re: j[0].re as f32,
-                xx_im: j[0].im as f32,
-                xy_re: j[1].re as f32,
-                xy_im: j[1].im as f32,
-                yx_re: j[2].re as f32,
-                yx_im: j[2].im as f32,
-                yy_re: j[3].re as f32,
-                yy_im: j[3].im as f32,
-            }
-        };
+        }
 
         for comp in source_list.iter().flat_map(|(_, src)| &src.components) {
             let radec = comp.radec;
@@ -424,21 +427,21 @@ impl<'a> SkyModellerCuda<'a> {
             shapelet_list_coeff_lens,
         } = self;
 
-        let to_azels = |x: &[RADec]| -> Vec<AzEl> {
-            x.par_iter()
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(MWA_LAT_RAD))
-                .collect()
-        };
-
         let cuda_uvws: Vec<cuda::UVW> = uvws
             .iter()
             .map(|&uvw| cuda::UVW {
-                u: uvw.u as _,
-                v: uvw.v as _,
-                w: uvw.w as _,
+                u: uvw.u as CudaFloat,
+                v: uvw.v as CudaFloat,
+                w: uvw.w as CudaFloat,
             })
             .collect();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
+
+        let to_azels = |x: &[RADec]| -> Vec<AzEl> {
+            x.par_iter()
+                .map(|radec| radec.to_hadec(lst_rad).to_azel_mwa())
+                .collect()
+        };
 
         if !self.point_power_law_radecs.is_empty() || !self.point_list_radecs.is_empty() {
             let point_beam_jones = {
@@ -576,37 +579,6 @@ impl<'a> SkyModellerCuda<'a> {
         }
     }
 
-    fn get_shapelet_uvs_inner(
-        radecs: &[RADec],
-        lst_rad: f64,
-        tile_xyzs: &[XyzGeodetic],
-    ) -> Array2<cuda::ShapeletUV> {
-        let n = tile_xyzs.len();
-        let num_baselines = (n * (n - 1)) / 2;
-
-        let mut shapelet_uvs: Array2<cuda::ShapeletUV> = Array2::from_elem(
-            (num_baselines, radecs.len()),
-            cuda::ShapeletUV { u: 0.0, v: 0.0 },
-        );
-        shapelet_uvs
-            .axis_iter_mut(Axis(1))
-            .into_par_iter()
-            .zip(radecs.par_iter())
-            .for_each(|(mut baseline_uv, radec)| {
-                let hadec = radec.to_hadec(lst_rad);
-                let shapelet_uvs: Vec<cuda::ShapeletUV> =
-                    xyzs_to_cross_uvws_parallel(tile_xyzs, hadec)
-                        .into_iter()
-                        .map(|uvw| cuda::ShapeletUV {
-                            u: uvw.u as _,
-                            v: uvw.v as _,
-                        })
-                        .collect();
-                baseline_uv.assign(&Array1::from(shapelet_uvs));
-            });
-        shapelet_uvs
-    }
-
     /// Shapelets need their own special kind of UVW coordinates. Each shapelet
     /// component's position is treated as the phase centre. This function uses
     /// the FFI type [cuda::ShapeletUV]; the W isn't actually used in
@@ -616,12 +588,12 @@ impl<'a> SkyModellerCuda<'a> {
     /// second.
     fn get_shapelet_uvs(&self, lst_rad: f64) -> ShapeletUVs {
         ShapeletUVs {
-            power_law: Self::get_shapelet_uvs_inner(
+            power_law: get_shapelet_uvs_inner(
                 &self.shapelet_power_law_radecs,
                 lst_rad,
                 self.tile_xyzs,
             ),
-            list: Self::get_shapelet_uvs_inner(&self.shapelet_list_radecs, lst_rad, self.tile_xyzs),
+            list: get_shapelet_uvs_inner(&self.shapelet_list_radecs, lst_rad, self.tile_xyzs),
         }
     }
 }
@@ -637,6 +609,36 @@ impl std::fmt::Debug for SkyModellerCuda<'_> {
 struct ShapeletUVs {
     power_law: Array2<cuda::ShapeletUV>,
     list: Array2<cuda::ShapeletUV>,
+}
+
+fn get_shapelet_uvs_inner(
+    radecs: &[RADec],
+    lst_rad: f64,
+    tile_xyzs: &[XyzGeodetic],
+) -> Array2<cuda::ShapeletUV> {
+    let n = tile_xyzs.len();
+    let num_baselines = (n * (n - 1)) / 2;
+
+    let mut shapelet_uvs: Array2<cuda::ShapeletUV> = Array2::from_elem(
+        (num_baselines, radecs.len()),
+        cuda::ShapeletUV { u: 0.0, v: 0.0 },
+    );
+    shapelet_uvs
+        .axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .zip(radecs.par_iter())
+        .for_each(|(mut baseline_uv, radec)| {
+            let hadec = radec.to_hadec(lst_rad);
+            let shapelet_uvs: Vec<cuda::ShapeletUV> = xyzs_to_cross_uvws_parallel(tile_xyzs, hadec)
+                .into_iter()
+                .map(|uvw| cuda::ShapeletUV {
+                    u: uvw.u as CudaFloat,
+                    v: uvw.v as CudaFloat,
+                })
+                .collect();
+            baseline_uv.assign(&Array1::from(shapelet_uvs));
+        });
+    shapelet_uvs
 }
 
 /// There are a variable number of shapelet coefficients for each shapelet

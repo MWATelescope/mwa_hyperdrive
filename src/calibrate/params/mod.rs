@@ -292,7 +292,7 @@ impl CalibrateParams {
         let freq_context = input_data.get_freq_context();
 
         let beam: Box<dyn Beam> = if no_beam {
-            create_no_beam_object()
+            create_no_beam_object(obs_context.tile_xyzs.len())
         } else {
             create_fee_beam_object(
                 beam_file,

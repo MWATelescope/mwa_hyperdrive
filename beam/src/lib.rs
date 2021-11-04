@@ -128,7 +128,11 @@ pub enum Delays {
 
 /// A beam implementation that returns only identity Jones matrices for all beam
 /// calculations.
-pub struct NoBeam;
+pub struct NoBeam {
+    /// This is needed for the CUDA "beam jones map".
+    #[cfg(feature = "cuda")]
+    num_tiles: usize,
+}
 
 impl Beam for NoBeam {
     fn calc_jones(
@@ -159,9 +163,12 @@ impl Beam for NoBeam {
     fn empty_coeff_cache(&self) {}
 
     #[cfg(feature = "cuda")]
-    unsafe fn prepare_cuda_beam(&self, _freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
+    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
         let obj = NoBeamCUDA {
-            beam_jones_map: DevicePointer::copy_to_device(&[0])?,
+            beam_jones_map: DevicePointer::copy_to_device(&vec![
+                0;
+                self.num_tiles * freqs_hz.len()
+            ])?,
         };
         Ok(Box::new(obj))
     }
@@ -199,8 +206,16 @@ impl BeamCUDA for NoBeamCUDA {
 }
 
 /// Create a "no beam" object.
-pub fn create_no_beam_object() -> Box<dyn Beam> {
-    Box::new(NoBeam)
+pub fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "cuda")] {
+            Box::new(NoBeam {
+                num_tiles
+            })
+        } else {
+            Box::new(NoBeam {})
+        }
+    }
 }
 
 #[cfg(test)]
@@ -215,7 +230,7 @@ mod tests {
             AzEl { az: 1.0, el: 0.1 },
             AzEl { az: -1.0, el: 0.2 },
         ];
-        let beam = NoBeam;
+        let beam = create_no_beam_object(1);
         for azel in azels {
             let j = beam.calc_jones(azel, 150e6, 0).unwrap();
             assert_abs_diff_eq!(j, Jones::identity());

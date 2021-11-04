@@ -540,7 +540,7 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
     if (i_freq >= num_freqs)
         return;
 
-    int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x;
+    int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x - 1;
     // `i_vis` indexes over baselines and frequencies, with frequencies moving
     // faster than baselines.
     int i_vis = i_bl * num_freqs + i_freq;
@@ -625,7 +625,7 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
     if (i_freq >= num_freqs)
         return;
 
-    int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x;
+    int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x - 1;
     // `i_vis` indexes over baselines and frequencies, with frequencies moving
     // faster than baselines.
     int i_vis = i_bl * num_freqs + i_freq;
@@ -742,7 +742,7 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     if (i_freq >= num_freqs)
         return;
 
-    int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x;
+    int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x - 1;
     // `i_vis` indexes over baselines and frequencies, with frequencies moving
     // faster than baselines.
     int i_vis = i_bl * num_freqs + i_freq;

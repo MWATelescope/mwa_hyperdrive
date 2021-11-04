@@ -33,11 +33,12 @@ use crate::{
     model,
     time::mjd_to_epoch,
 };
-use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, BeamCUDA, Delays};
+use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList, SourceList};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "cuda")] {
+        use mwa_hyperdrive_beam::BeamCUDA;
         use mwa_hyperdrive_cuda as cuda;
         use cuda::modeller::SkyModellerCuda;
     }
@@ -341,7 +342,7 @@ impl SimVisParams {
                 });
         }
         let beam = if no_beam {
-            create_no_beam_object()
+            create_no_beam_object(xyzs.len())
         } else {
             create_fee_beam_object(
                 beam_file,
