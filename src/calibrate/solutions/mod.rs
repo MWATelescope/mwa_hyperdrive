@@ -8,6 +8,8 @@
 //! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
 
 mod error;
+#[cfg(feature = "plotting")]
+mod plotting;
 
 pub(crate) use error::*;
 
@@ -19,8 +21,11 @@ use std::path::Path;
 use std::str::FromStr;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-use hifitime::Epoch;
-use marlu::{time::epoch_as_gps_seconds, Jones};
+use hifitime::{Duration, Epoch};
+use marlu::{
+    time::{epoch_as_gps_seconds, gps_to_epoch},
+    Jones,
+};
 use mwalib::{
     fitsio::{
         errors::check_status as fits_check_status,
@@ -51,12 +56,14 @@ pub struct CalibrationSolutions {
     pub total_num_tiles: usize,
     pub total_num_fine_freq_chans: usize,
 
-    /// The centroid timesteps used to produce these calibration solutions.
-    pub timesteps: Vec<Epoch>,
+    /// The start timestamps of each timeblock used to produce these calibration
+    /// solutions.
+    pub start_timestamps: Vec<Epoch>,
     pub obsid: Option<u32>,
 
-    /// The time resolution of the calibration solutions. Only really useful if
-    /// there are multiple timeblocks.
+    /// The number of seconds per timeblock, or, the time resolution of the
+    /// calibration solutions. Only really useful if there are multiple
+    /// timeblocks.
     pub time_res: Option<f64>,
 }
 
@@ -98,7 +105,7 @@ impl CalibrationSolutions {
             unsafe {
                 let keyname = CString::new("OBSID").unwrap();
                 let value = CString::new(obsid.to_string()).unwrap();
-                let comment = CString::new("The MWA observational ID").unwrap();
+                let comment = CString::new("The MWA observation ID").unwrap();
                 let mut status = 0;
                 // ffpkys = fits_write_key_str
                 fitsio_sys::ffpkys(
@@ -117,7 +124,7 @@ impl CalibrationSolutions {
             unsafe {
                 let keyname = CString::new("TIMERES").unwrap();
                 let value = CString::new(format!("{:.2}", time_res)).unwrap();
-                let comment = CString::new("The time resolution of the solutions").unwrap();
+                let comment = CString::new("The number of seconds per timeblock").unwrap();
                 let mut status = 0;
                 fitsio_sys::ffpkys(
                     fptr.as_raw(),    /* I - FITS file pointer        */
@@ -130,17 +137,18 @@ impl CalibrationSolutions {
             }
         }
 
-        // Write the timesteps as a comma separated list in a string.
-        let timesteps = self
-            .timesteps
+        // Write the start timestamps as a comma separated list in a string.
+        let start_timestamps = self
+            .start_timestamps
             .iter()
             .map(|&t| format!("{:.2}", epoch_as_gps_seconds(t)))
             .collect::<Vec<_>>()
             .join(",");
         unsafe {
-            let keyname = CString::new("TMESTEPS").unwrap();
-            let value = CString::new(timesteps).unwrap();
-            let comment = CString::new("GPS timesteps used for these solutions").unwrap();
+            let keyname = CString::new("TIMESTAMPS").unwrap();
+            let value = CString::new(start_timestamps).unwrap();
+            let comment =
+                CString::new("Start GPS timesteps used for these solution timeblocks").unwrap();
             let mut status = 0;
             // ffpkls = fits_write_key_longstr
             fitsio_sys::ffpkls(
@@ -242,13 +250,13 @@ impl CalibrationSolutions {
         // looks like only 0.0 is ever written. I don't know what AIPS time is,
         // and I hate leap seconds, so GPS it is.
         bin_file.write_f64::<LittleEndian>(
-            self.timesteps
+            self.start_timestamps
                 .first()
                 .map(|&t| epoch_as_gps_seconds(t))
                 .unwrap_or(0.0),
         )?;
         bin_file.write_f64::<LittleEndian>(
-            self.timesteps
+            self.start_timestamps
                 .last()
                 .map(|&t| epoch_as_gps_seconds(t))
                 .unwrap_or(0.0),
@@ -310,14 +318,14 @@ impl CalibrationSolutions {
         let hdu = fits_open_hdu!(&mut fptr, 0)?;
         let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
         let time_res = get_optional_fits_key!(&mut fptr, &hdu, "TIMERES")?;
-        let timesteps: Vec<Epoch> = {
-            let timesteps: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "TMESTEPS")?;
-            match timesteps {
+        let start_timestamps: Vec<Epoch> = {
+            let timestamps: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "TIMESTAMPS")?;
+            match timestamps {
                 None => vec![],
                 Some(s) => s
                     .split(',')
                     .map(|ss| match ss.parse::<f64>() {
-                        Ok(float) => Ok(Epoch::from_tai_seconds(float + 19.0)),
+                        Ok(float) => Ok(gps_to_epoch(float)),
                         Err(_) => Err(ReadSolutionsError::Parse {
                             file: file.display().to_string(),
                             key: "TMESTEPS",
@@ -365,7 +373,7 @@ impl CalibrationSolutions {
             num_timeblocks,
             total_num_tiles,
             total_num_fine_freq_chans,
-            timesteps,
+            start_timestamps,
             obsid,
             time_res,
         })
@@ -411,13 +419,13 @@ impl CalibrationSolutions {
         let start_time = if t.abs() < f64::EPSILON {
             None
         } else {
-            Some(Epoch::from_tai_seconds(t + 19.0))
+            Some(gps_to_epoch(t))
         };
         let t = bin_file.read_f64::<LittleEndian>()?;
         let end_time = if t.abs() < f64::EPSILON {
             None
         } else {
-            Some(Epoch::from_tai_seconds(t + 19.0))
+            Some(gps_to_epoch(t))
         };
         let mut di_jones_vec = vec![
             0.0;
@@ -452,14 +460,42 @@ impl CalibrationSolutions {
             num_timeblocks,
             total_num_tiles,
             total_num_fine_freq_chans,
-            timesteps: match (start_time, end_time) {
+            // We'd really like to have the *actual* start times of each
+            // timeblock, but this isn't possible with this format. Here is the
+            // best effort.
+            start_timestamps: match (start_time, end_time) {
                 (None, None) => vec![],
                 (Some(t), None) => vec![t],
                 (None, Some(t)) => vec![t],
-                (Some(s), Some(e)) => vec![s, e],
+                (Some(s), Some(e)) => {
+                    let duration = e - s;
+                    let average_duration_per_timeblock =
+                        duration.in_seconds() / num_timeblocks as f64;
+                    let mut start_timestamps = vec![];
+                    for i_timeblock in 0..num_timeblocks {
+                        let start: Epoch = s + i_timeblock as f64
+                            * Duration::from_f64(
+                                average_duration_per_timeblock,
+                                hifitime::TimeUnit::Second,
+                            );
+                        start_timestamps.push(start);
+                    }
+                    start_timestamps
+                }
             },
             obsid: None,
             time_res: None,
         })
+    }
+
+    #[cfg(feature = "plotting")]
+    pub fn plot<T: AsRef<Path>, S: AsRef<str>>(
+        &self,
+        filename_base: T,
+        plot_title: &str,
+        ref_tile: Option<usize>,
+        tile_names: Option<&[S]>,
+    ) -> Result<Vec<String>, ()> {
+        plotting::plot_sols(self, filename_base, plot_title, ref_tile, tile_names)
     }
 }

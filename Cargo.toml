@@ -27,11 +27,13 @@ opt-level = 2
 panic = "abort"
 
 [features]
-default = []
+default = ["plotting"]
 # Use CUDA code with double-precision floats.
 cuda = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_beam/cuda", "mwa_hyperdrive_srclist/cuda"]
 # Use CUDA code with single-precision floats.
 cuda-single = ["cuda", "mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_beam/cuda-single", "mwa_hyperdrive_srclist/cuda-single"]
+# Enable plotting.
+plotting = ["plotters"]
 cfitsio-static = ["mwa_hyperdrive_common/cfitsio-static", "birli/cfitsio-static"]
 erfa-static = ["mwa_hyperdrive_common/erfa-static", "birli/erfa-static"]
 hdf5-static = ["mwa_hyperdrive_srclist/hdf5-static"]
@@ -50,6 +52,8 @@ regex = "1.5.4"
 serde = { version = "1.0.133", features = ["derive"] }
 strum = "0.21.0"
 strum_macros = "0.21.1"
+
+plotters = { version = "0.3.1", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "point_series"], optional = true }
 
 mwa_hyperdrive_common =  { path = "common" }
 mwa_hyperdrive_beam =    { path = "beam" }

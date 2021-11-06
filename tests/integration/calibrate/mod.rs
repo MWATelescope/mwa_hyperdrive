@@ -71,14 +71,14 @@ fn test_1090008640_woden() {
     let bin_sols = CalibrationSolutions::read_solutions_from_ext(&solutions_path).unwrap();
     assert_eq!(bin_sols.di_jones.dim(), (1, 128, 32));
     assert_abs_diff_eq!(
-        bin_sols.timesteps.first().unwrap().as_gpst_seconds(),
+        bin_sols.start_timestamps.first().unwrap().as_gpst_seconds(),
         // 1090008642 is the obsid + 2s, which is the centroid of the first and
         // only timestep.
         1090008642.0,
         epsilon = 1e-3
     );
     assert_abs_diff_eq!(
-        bin_sols.timesteps.last().unwrap().as_gpst_seconds(),
+        bin_sols.start_timestamps.last().unwrap().as_gpst_seconds(),
         1090008642.0,
         epsilon = 1e-3
     );
@@ -109,12 +109,12 @@ fn test_1090008640_woden() {
     let hyp_sols = CalibrationSolutions::read_solutions_from_ext(&solutions_path).unwrap();
     assert_eq!(hyp_sols.di_jones.dim(), bin_sols.di_jones.dim());
     assert_abs_diff_eq!(
-        hyp_sols.timesteps.first().unwrap().as_gpst_seconds(),
+        hyp_sols.start_timestamps.first().unwrap().as_gpst_seconds(),
         1090008642.0,
         epsilon = 1e-3
     );
     assert_abs_diff_eq!(
-        hyp_sols.timesteps.last().unwrap().as_gpst_seconds(),
+        hyp_sols.start_timestamps.last().unwrap().as_gpst_seconds(),
         1090008642.0,
         epsilon = 1e-3
     );

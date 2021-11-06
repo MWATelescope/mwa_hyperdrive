@@ -498,15 +498,19 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
     let num_unflagged_tiles = total_num_tiles - params.tile_flags.len();
     let total_num_fine_freq_chans = freq_context.fine_chan_freqs.len();
     let shape = (num_timeblocks, num_unflagged_tiles, num_chanblocks);
+
     let mut sols = CalibrationSolutions {
         di_jones: Array3::from_elem(shape, Jones::identity()),
         num_timeblocks,
         total_num_tiles,
         total_num_fine_freq_chans,
-        timesteps: params
-            .timesteps
-            .iter()
-            .map(|&ts| obs_context.timesteps[ts])
+        start_timestamps: (0..num_timeblocks)
+            .into_iter()
+            .map(|i_timeblock| {
+                let timeblock_length = params.time_average_factor;
+                let timeblock_start = i_timeblock * timeblock_length;
+                obs_context.timesteps[params.timesteps[timeblock_start]]
+            })
             .collect(),
         obsid: obs_context.obsid,
         time_res: obs_context

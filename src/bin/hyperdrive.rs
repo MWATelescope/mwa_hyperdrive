@@ -7,10 +7,10 @@
 use std::path::PathBuf;
 
 use clap::{AppSettings, Parser};
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 
 use mwa_hyperdrive::{
-    calibrate::{args::CalibrateUserArgs, di_calibrate},
+    calibrate::{args::CalibrateUserArgs, di_calibrate, solutions::CalibrationSolutions},
     simulate_vis::{simulate_vis, SimulateVisArgs},
     HyperdriveError,
 };
@@ -74,6 +74,26 @@ enum Args {
         cpu: bool,
     },
 
+    /// Plot calibration solutions.
+    #[cfg(feature = "plotting")]
+    SolutionsPlot {
+        #[clap(name = "SOLUTIONS_FILES", parse(from_os_str))]
+        files: Vec<PathBuf>,
+
+        /// The metafits file associated with the solutions. This provides
+        /// additional information on the plots, like the antenna names.
+        #[clap(short, long, parse(from_str))]
+        metafits: Option<PathBuf>,
+
+        #[clap(short, long)]
+        ref_ant: Option<usize>,
+
+        /// The verbosity of the program. Increase by specifying multiple times
+        /// (e.g. -vv). The default is to print only high-level information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
+    },
+
     SrclistByBeam {
         #[clap(flatten)]
         args: ByBeamArgs,
@@ -119,6 +139,8 @@ fn try_main() -> Result<(), HyperdriveError> {
     let verbosity = match &args {
         Args::DiCalibrate { verbosity, .. } => verbosity,
         Args::SimulateVis { verbosity, .. } => verbosity,
+        #[cfg(feature = "plotting")]
+        Args::SolutionsPlot { verbosity, .. } => verbosity,
         Args::SrclistByBeam { args, .. } => &args.verbosity,
         Args::SrclistConvert { args, .. } => &args.verbosity,
         Args::SrclistShift { args, .. } => &args.verbosity,
@@ -133,6 +155,8 @@ fn try_main() -> Result<(), HyperdriveError> {
         match args {
             Args::DiCalibrate { .. } => "di-calibrate",
             Args::SimulateVis { .. } => "simulate-vis",
+            #[cfg(feature = "plotting")]
+            Args::SolutionsPlot { .. } => "solutions-plot",
             Args::SrclistByBeam { .. } => "srclist-by-beam",
             Args::SrclistConvert { .. } => "srclist-convert",
             Args::SrclistShift { .. } => "srclist-shift",
@@ -184,6 +208,48 @@ fn try_main() -> Result<(), HyperdriveError> {
             simulate_vis(args, cpu, dry_run)?;
 
             info!("hyperdrive simulate-vis complete.");
+        }
+
+        #[cfg(feature = "plotting")]
+        Args::SolutionsPlot {
+            files,
+            ref_ant,
+            metafits,
+            verbosity: _,
+        } => {
+            if metafits.is_none() {
+                warn!("No metafits supplied; the obsid and tile names won't be on the plots");
+            }
+
+            let mwalib_context = metafits.map(|m| mwalib::MetafitsContext::new(&m, None).unwrap());
+            let tile_names: Option<Vec<&str>> = mwalib_context.as_ref().map(|m| {
+                m.rf_inputs
+                    .iter()
+                    .filter(|rf| rf.pol == mwalib::Pol::X)
+                    .map(|rf| rf.tile_name.as_str())
+                    .collect()
+            });
+
+            for solutions_file in files {
+                let sols = CalibrationSolutions::read_solutions_from_ext(&solutions_file).unwrap();
+                let base = solutions_file
+                    .file_stem()
+                    .and_then(|os_str| os_str.to_str())
+                    .expect("Calibration solutions filename contains invalid UTF-8");
+                let plot_title = format!(
+                    "obsid {}",
+                    mwalib_context
+                        .as_ref()
+                        .map(|m| m.obs_id)
+                        .or(sols.obsid)
+                        .map(|o| o.to_string())
+                        .unwrap_or_else(|| "<unknown>".to_string())
+                );
+                let plot_files = sols
+                    .plot(base, &plot_title, ref_ant, tile_names.as_deref())
+                    .unwrap();
+                info!("Wrote {:?}", plot_files);
+            }
         }
 
         // Source list utilities.
