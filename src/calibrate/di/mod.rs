@@ -47,7 +47,7 @@ cfg_if::cfg_if! {
 /// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
 /// having to form [XyzGeodetic] baselines first. This function performs
 /// calculations in parallel. Cross-correlation baselines only.
-fn xyzs_to_cross_uvws_parallel(xyzs: &[XyzGeodetic], phase_centre: HADec) -> Vec<UVW> {
+pub(crate) fn xyzs_to_cross_uvws_parallel(xyzs: &[XyzGeodetic], phase_centre: HADec) -> Vec<UVW> {
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
     // Get a UVW for each tile.
@@ -756,11 +756,19 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
                     // Write out the visibilities.
                     let epoch = obs_context.timesteps[timestep];
+                    let precession_info = precess_time(
+                        obs_context.phase_centre,
+                        epoch,
+                        params.array_longitude,
+                        params.array_latitude,
+                    );
+                    let precessed_tile_xyzs =
+                        precession_info.precess_xyz_parallel(&obs_context.tile_xyzs);
                     let uvws = xyzs_to_cross_uvws_parallel(
-                        &obs_context.tile_xyzs,
+                        &precessed_tile_xyzs,
                         obs_context
                             .phase_centre
-                            .to_hadec(get_lmst(epoch, params.array_longitude)),
+                            .to_hadec(precession_info.lmst_j2000),
                     );
 
                     if params.using_autos {

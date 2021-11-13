@@ -739,19 +739,19 @@ impl<'a> UvfitsWriter<'a> {
                     // XX
                     jones[0].re,
                     jones[0].im,
-                    *weight,
+                    if jones[0].re.is_nan() { 0.0 } else { *weight },
                     // YY
                     jones[3].re,
                     jones[3].im,
-                    *weight,
+                    if jones[3].re.is_nan() { 0.0 } else { *weight },
                     // XY
                     jones[1].re,
                     jones[1].im,
-                    *weight,
+                    if jones[1].re.is_nan() { 0.0 } else { *weight },
                     // YX
                     jones[2].re,
                     jones[2].im,
-                    *weight,
+                    if jones[2].re.is_nan() { 0.0 } else { *weight },
                 ]);
                 unflagged_chan_index += 1;
             };

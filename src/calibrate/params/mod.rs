@@ -786,6 +786,36 @@ impl CalibrateParams {
             }
             None => info!("Input data freq. resolution unknown"),
         }
+
+        info!(
+            "Total number of fine channels:     {}",
+            self.freq.num_fine_chans
+        );
+        info!(
+            "Number of unflagged fine channels: {}",
+            self.freq.unflagged_fine_chans.len()
+        );
+        if log_enabled!(Debug) {
+            let mut unflagged_fine_chans: Vec<_> = self.freq.unflagged_fine_chans.iter().collect();
+            unflagged_fine_chans.sort_unstable();
+            match unflagged_fine_chans.as_slice() {
+                [] => unreachable!(), // Handled by data-reading code.
+                [f] => info!("Only unflagged fine-channel: {}", f),
+                [f_0, .., f_n] => {
+                    info!("First unflagged fine-channel: {}", f_0);
+                    info!("Last unflagged fine-channel:  {}", f_n);
+                }
+            }
+        }
+        info!(
+            "Input data's fine-channel flags per coarse channel: {:?}",
+            obs_context.fine_chan_flags_per_coarse_chan
+        );
+        {
+            let mut fine_chan_flags_vec = self.freq.fine_chan_flags.iter().collect::<Vec<_>>();
+            fine_chan_flags_vec.sort_unstable();
+            debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
+        }
         match self.freq.unflagged_fine_chan_freqs.as_slice() {
             [] => unreachable!(), // Handled by data-reading code.
             [f] => info!("Only unflagged fine-channel frequency: {:.2} MHz", f / 1e6),
@@ -799,32 +829,6 @@ impl CalibrateParams {
                     f_n / 1e6
                 );
             }
-        }
-        info!(
-            "Number of unflagged fine channels: {}",
-            self.freq.unflagged_fine_chans.len()
-        );
-        if log_enabled!(Debug) {
-            let mut unflagged_fine_chans: Vec<_> = self.freq.unflagged_fine_chans.iter().collect();
-            unflagged_fine_chans.sort_unstable();
-            match unflagged_fine_chans.as_slice() {
-                [] => unreachable!(), // Handled by data-reading code.
-                [f] => debug!("Only unflagged fine-channel: {}", f),
-                [f_0, .., f_n] => {
-                    debug!("First unflagged fine-channel: {}", f_0);
-                    debug!("Last unflagged fine-channel:  {}", f_n);
-                }
-            }
-        }
-
-        debug!(
-            "Input data's fine-channel flags per coarse channel: {:?}",
-            obs_context.fine_chan_flags_per_coarse_chan
-        );
-        {
-            let mut fine_chan_flags_vec = self.freq.fine_chan_flags.iter().collect::<Vec<_>>();
-            fine_chan_flags_vec.sort_unstable();
-            debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
         }
 
         info!(

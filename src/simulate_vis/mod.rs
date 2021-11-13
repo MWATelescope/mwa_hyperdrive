@@ -16,7 +16,7 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Either;
 use log::{debug, info};
 use mwa_rust_core::{
-    constants::{DS2R, SOLAR2SIDEREAL},
+    constants::{DS2R, MWA_LAT_RAD, MWA_LONG_RAD, SOLAR2SIDEREAL},
     mwalib,
     pos::xyz,
     time::epoch_as_gps_seconds,
@@ -31,6 +31,7 @@ use crate::{
     data_formats::{metafits, uvfits::UvfitsWriter},
     glob::get_single_match_from_glob,
     model,
+    precession::precess_time,
     time::mjd_to_epoch,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
@@ -489,17 +490,21 @@ pub fn simulate_vis(
 
     // Generate the visibilities.
     for &timestep in params.timesteps.iter() {
-        let lst_diff = (timestep - params.timesteps[0]).in_seconds();
-        let lst = params.metafits.lst_rad + lst_diff * SOLAR2SIDEREAL * DS2R;
-        let hadec_phase_centre = params.phase_centre.to_hadec(lst);
-        let uvws = xyzs_to_cross_uvws_parallel(&params.xyzs, hadec_phase_centre);
+        let precession_info =
+            precess_time(params.phase_centre, timestep, MWA_LONG_RAD, MWA_LAT_RAD);
+        // Apply precession to the tile XYZ positions.
+        let precessed_tile_xyzs = precession_info.precess_xyz_parallel(&params.xyzs);
+        let uvws = xyzs_to_cross_uvws_parallel(
+            &precessed_tile_xyzs,
+            params.phase_centre.to_hadec(precession_info.lmst_j2000),
+        );
 
         if cpu {
             model::model_timestep(
                 vis_model.view_mut(),
                 modeller.as_ref().unwrap_left(),
                 params.beam.deref(),
-                lst,
+                precession_info.lmst_j2000,
                 &params.xyzs,
                 &uvws,
                 &params.fine_chan_freqs,
@@ -510,7 +515,7 @@ pub fn simulate_vis(
             unsafe {
                 modeller.as_ref().unwrap_right().model_timestep(
                     vis_model.view_mut(),
-                    lst,
+                    precession_info.lmst_j2000,
                     &uvws,
                 )?;
             }

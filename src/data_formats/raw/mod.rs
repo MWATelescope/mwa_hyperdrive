@@ -143,9 +143,9 @@ impl RawData {
             f.trim(metafits_context);
 
             // Ensure that there is a mwaf file for each specified gpubox file.
-            for cc in &mwalib_context.coarse_chans {
-                if !f.gpubox_nums.contains(&(cc.gpubox_number as u8)) {
-                    return Err(NewRawError::GpuboxFileMissingMwafFile(cc.gpubox_number));
+            for &cc in &mwalib_context.common_good_coarse_chan_indices {
+                if !f.gpubox_nums.contains(&(cc as u8)) {
+                    return Err(NewRawError::GpuboxFileMissingMwafFile(cc));
                 }
             }
             Some(f)
@@ -155,11 +155,12 @@ impl RawData {
 
         let time_res = Some(metafits_context.corr_int_time_ms as f64 / 1e3);
 
-        // TODO: Which timesteps are good ones?
         let timesteps: Vec<hifitime::Epoch> = mwalib_context
             .timesteps
             .iter()
-            .map(|t| gps_to_epoch(t.gps_time_ms as f64 / 1e3))
+            .enumerate()
+            .filter(|(i, _)| mwalib_context.common_good_timestep_indices.contains(i))
+            .map(|(_, t)| gps_to_epoch(t.gps_time_ms as f64 / 1e3))
             .collect();
 
         // Populate a frequency context struct.
@@ -167,8 +168,14 @@ impl RawData {
             metafits_context.num_corr_fine_chans_per_coarse
                 * metafits_context.metafits_coarse_chans.len(),
         );
-        // TODO: I'm suspicious that the start channel freq is incorrect.
-        for cc in &mwalib_context.coarse_chans {
+        let common_good_coarse_chans: Vec<&mwalib::CoarseChannel> = mwalib_context
+            .coarse_chans
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mwalib_context.common_good_coarse_chan_indices.contains(i))
+            .map(|(_, cc)| cc)
+            .collect();
+        for cc in &common_good_coarse_chans {
             let mut cc_freqs = Array1::range(
                 cc.chan_start_hz as f64,
                 cc.chan_end_hz as f64,
@@ -179,26 +186,23 @@ impl RawData {
         }
 
         let freq_context = FreqContext {
-            coarse_chan_nums: mwalib_context
-                .coarse_chans
+            coarse_chan_nums: common_good_coarse_chans
                 .iter()
                 .map(|cc| cc.corr_chan_number as u32)
                 .collect(),
-            coarse_chan_freqs: mwalib_context
-                .coarse_chans
+            coarse_chan_freqs: common_good_coarse_chans
                 .iter()
                 .map(|cc| cc.chan_centre_hz as f64)
                 .collect(),
-            coarse_chan_width: mwalib_context.coarse_chans[0].chan_width_hz as f64,
-            total_bandwidth: mwalib_context
-                .coarse_chans
+            coarse_chan_width: metafits_context.corr_fine_chan_width_hz as f64,
+            total_bandwidth: common_good_coarse_chans
                 .iter()
                 .map(|cc| cc.chan_width_hz as f64)
                 .sum(),
-            fine_chan_range: 0..mwalib_context.coarse_chans.len()
-                * mwalib_context
-                    .metafits_context
-                    .num_corr_fine_chans_per_coarse,
+            fine_chan_range: common_good_coarse_chans.first().unwrap().corr_chan_number
+                * metafits_context.num_corr_fine_chans_per_coarse
+                ..common_good_coarse_chans.last().unwrap().corr_chan_number
+                    * metafits_context.num_corr_fine_chans_per_coarse,
             fine_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
             native_fine_chan_width: Some(metafits_context.corr_fine_chan_width_hz as f64),
@@ -257,7 +261,11 @@ impl RawData {
         let obs_context = ObsContext {
             obsid: Some(metafits_context.obs_id),
             timesteps,
-            unflagged_timestep_indices: 0..mwalib_context.timesteps.len(),
+            unflagged_timestep_indices: *mwalib_context
+                .common_good_timestep_indices
+                .first()
+                .unwrap()
+                ..*mwalib_context.common_good_timestep_indices.last().unwrap(),
             phase_centre,
             pointing_centre,
             tile_names,
@@ -306,12 +314,12 @@ impl InputData for RawData {
         // unwrap `first` and `last`.
         let coarse_chan_range = *self
             .mwalib_context
-            .common_coarse_chan_indices
+            .common_good_coarse_chan_indices
             .first()
             .unwrap()
             ..*self
                 .mwalib_context
-                .common_coarse_chan_indices
+                .common_good_coarse_chan_indices
                 .last()
                 .unwrap()
                 + 1;
@@ -345,7 +353,9 @@ impl InputData for RawData {
 
             // Nothing to do; metafits indicates delay corrections have been
             // applied, and this is reported to the user in the new method.
-            _ => (),
+            mwalib::GeometricDelaysApplied::AzElTracking
+            | mwalib::GeometricDelaysApplied::TilePointing
+            | mwalib::GeometricDelaysApplied::Zenith => (),
         }
 
         // Remove the extraneous time dimension; there's only ever one timestep.
@@ -376,7 +386,10 @@ impl InputData for RawData {
             let (tile1, tile2) =
                 baseline_to_tiles(self.mwalib_context.metafits_context.num_ants, i_bl);
 
-            if let Some(_) = tile_to_unflagged_baseline_map.get(&(tile1, tile2)) {
+            if tile_to_unflagged_baseline_map
+                .get(&(tile1, tile2))
+                .is_some()
+            {
                 let mut data_array_freq_index = 0;
                 for (i_freq, (&vis, &weight)) in vis_bl.iter().zip(weights_bl.iter()).enumerate() {
                     if !flagged_fine_chans.contains(&i_freq) {

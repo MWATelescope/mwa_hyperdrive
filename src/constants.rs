@@ -15,7 +15,7 @@ pub(crate) const DEFAULT_STOP_THRESHOLD: f64 = 1e-8;
 /// The minimum threshold to satisfy convergence when performing "MitchCal" in
 /// direction-independent calibration. Reaching this threshold counts as
 /// "converged", but it's not as good as the stop threshold.
-pub(crate) const DEFAULT_MIN_THRESHOLD: f64 = 1e-5;
+pub(crate) const DEFAULT_MIN_THRESHOLD: f64 = 1e-4;
 
 /// The default calibration solutions filename to use.
 pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions.bin";
