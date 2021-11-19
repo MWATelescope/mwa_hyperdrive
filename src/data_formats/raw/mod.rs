@@ -20,11 +20,15 @@ use mwa_rust_core::{
 };
 use mwalib::{CorrelatorContext, Pol};
 use ndarray::prelude::*;
+use rayon::prelude::*;
 
 use super::*;
-use crate::context::{FreqContext, ObsContext};
-use crate::flagging::aoflagger::AOFlags;
-use crate::mwalib;
+use crate::{
+    constants::EMPIRICAL_GAINS_40KHZ,
+    context::{FreqContext, ObsContext},
+    flagging::aoflagger::AOFlags,
+    mwalib,
+};
 use mwa_hyperdrive_beam::Delays;
 
 /// Raw MWA data, i.e. gpubox files.
@@ -38,6 +42,10 @@ pub(crate) struct RawData {
     // Raw-data-specific things follow.
     /// The interface to the raw data via mwalib.
     mwalib_context: CorrelatorContext,
+
+    /// The polyphase filter bank gains to be used to correct the bandpass shape
+    /// for each coarse channel.
+    pfb_gains: Option<Vec<f64>>,
 
     // TODO: Rename to something more general. Don't need actual AOFlagger flags.
     /// AOFlagger flags.
@@ -258,6 +266,19 @@ impl RawData {
             ),
         }
 
+        // TODO: Supply gains for all frequency resolutions.
+        let pfb_gains =
+            if (freq_context.native_fine_chan_width.unwrap() - 40000.0).abs() < f64::EPSILON {
+                // TODO: Allow the user to select which PFB gains to use.
+                info!("Using 'RTS empirical' PFB gains");
+                // Multiplication is cheaper than division; do the division once
+                // so these values can be multiplied later.
+                Some(EMPIRICAL_GAINS_40KHZ.iter().map(|&g| 1.0 / g).collect())
+            } else {
+                info!("Not using any PFB gains (only 40kHz currently supported)");
+                None
+            };
+
         let obs_context = ObsContext {
             obsid: Some(metafits_context.obs_id),
             timesteps,
@@ -283,6 +304,7 @@ impl RawData {
             obs_context,
             freq_context,
             mwalib_context,
+            pfb_gains,
             _aoflags: aoflags,
         })
     }
@@ -371,7 +393,63 @@ impl InputData for RawData {
                 if *w < 0.0 {
                     *w = 0.0;
                 }
-                *v *= *w;
+                // Do the multiplication at double precision.
+                let vd: Jones<f64> = Jones::from(*v) * *w as f64;
+                *v = Jones::from(vd);
+            });
+
+        // Apply the PFB gains.
+        if let Some(pfb) = &self.pfb_gains {
+            vis.outer_iter_mut()
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(i_freq, mut vis_bl)| {
+                    let pfb_gain = pfb[i_freq % pfb.len()];
+                    vis_bl.iter_mut().for_each(|v| {
+                        // Do the multiplication at double precision.
+                        let vd: Jones<f64> = Jones::from(*v) * pfb_gain as f64;
+                        *v = Jones::from(vd);
+                    });
+                });
+        }
+
+        // Apply the digital gains.
+        vis.axis_iter_mut(Axis(1))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i_bl, mut vis_chan)| {
+                let (tile1, tile2) =
+                    baseline_to_tiles(self.mwalib_context.metafits_context.num_ants, i_bl);
+                let tile_gains: Vec<&Vec<u32>> = self
+                    .mwalib_context
+                    .metafits_context
+                    .rf_inputs
+                    .iter()
+                    // Discard every second RF input; the digital gains are the same for
+                    // both.
+                    .filter(|rf| rf.pol == Pol::X)
+                    .enumerate()
+                    .filter(|(i, _)| *i == tile1 || *i == tile2)
+                    .map(|(_, rf)| &rf.digital_gains)
+                    .collect();
+
+                vis_chan.iter_mut().enumerate().for_each(|(i_chan, v)| {
+                    let mut gain = tile_gains[0][i_chan
+                        / self
+                            .mwalib_context
+                            .metafits_context
+                            .num_corr_fine_chans_per_coarse];
+                    let i = if tile1 != tile2 { 1 } else { 0 };
+                    gain *= tile_gains[i][i_chan
+                        / self
+                            .mwalib_context
+                            .metafits_context
+                            .num_corr_fine_chans_per_coarse];
+
+                    // Do the multiplication at double precision.
+                    let vd: Jones<f64> = Jones::from(*v) / gain as f64;
+                    *v = Jones::from(vd);
+                });
             });
 
         // Write the visibilities to our `data_array`, ignoring any flagged

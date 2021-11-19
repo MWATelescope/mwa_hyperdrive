@@ -305,12 +305,20 @@ impl FluxDensityType {
                     // Fortunately, no fancy linalg is needed because A^T A is
                     // always 2x2 here.
                     let det = c[0] * c[3] - c[1] * c[2];
-                    if det > 10000.0 {
-                        // Bad determinant; abort.
-                        return;
+                    let c_inv = vec![c[3] / det, -c[1] / det, -c[2] / det, c[0] / det];
+                    {
+                        // Get the condition number of C with the 1-norm.
+                        let norm_1_c = (c[0].abs() + c[2].abs()).max(c[1].abs() + c[3].abs());
+                        let norm_1_c_inv =
+                            (c_inv[0].abs() + c_inv[2].abs()).max(c_inv[1].abs() + c_inv[3].abs());
+                        let cond = norm_1_c * norm_1_c_inv;
+                        if cond > 10000.0 {
+                            // Bad condition number; abort.
+                            return;
+                        }
                     }
-                    let c = Array2::from_shape_vec((2, 2), vec![c[3], -c[1], -c[2], c[0]]).unwrap()
-                        / det;
+                    // Shadow c with c_inv.
+                    let c = Array2::from_shape_vec((2, 2), c_inv).unwrap() / det;
 
                     // x = (A^T A)^-1 A^T b
                     let x = c.dot(&at).dot(&b).to_vec();

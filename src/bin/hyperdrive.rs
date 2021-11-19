@@ -22,7 +22,11 @@ use mwa_hyperdrive_srclist::utilities::*;
             author = env!("CARGO_PKG_HOMEPAGE"),
             global_settings = &[AppSettings::ColoredHelp,
                                 AppSettings::ArgRequiredElseHelp,
-                                AppSettings::DeriveDisplayOrder])]
+                                AppSettings::DeriveDisplayOrder,
+                                AppSettings::UnifiedHelpMessage,
+                                AppSettings::DisableHelpSubcommand,
+                                AppSettings::InferSubcommands,
+                                ])]
 enum Args {
     /// Perform direction-independent calibration on the input MWA data.
     ///

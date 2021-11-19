@@ -19,7 +19,7 @@ fn test_1090008640_woden() {
     // Reading from a uvfits file without a metafits file should fail.
     let cmd = hyperdrive()
         .args(&[
-            "calibrate",
+            "di-calibrate",
             "--data",
             "test_files/1090008640_WODEN/output_band01.uvfits",
             "--source-list",
@@ -33,7 +33,7 @@ fn test_1090008640_woden() {
     // This time give the metafits file.
     let cmd = hyperdrive()
         .args(&[
-            "calibrate",
+            "di-calibrate",
             "--data",
             "test_files/1090008640_WODEN/output_band01.uvfits",
             "test_files/1090008640_WODEN/1090008640.metafits",
@@ -89,7 +89,7 @@ fn test_1090008640_woden() {
 
     let cmd = hyperdrive()
         .args(&[
-            "calibrate",
+            "di-calibrate",
             "--data",
             "test_files/1090008640_WODEN/output_band01.uvfits",
             "test_files/1090008640_WODEN/1090008640.metafits",

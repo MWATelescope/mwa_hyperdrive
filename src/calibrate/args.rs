@@ -165,7 +165,7 @@ pub struct CalibrateUserArgs {
 
     /// If specified, pretend all fine channels in the input data are unflagged.
     #[structopt(long)]
-    pub ignore_input_data_fine_channels_flags: bool,
+    pub ignore_input_data_fine_channel_flags: bool,
 
     /// When writing out calibrated visibilities, don't include
     /// auto-correlations.
@@ -184,6 +184,30 @@ pub struct CalibrateUserArgs {
     /// 0 767 are the first and last fine channels for 40 kHz data.
     #[structopt(long)]
     pub fine_chan_flags: Option<Vec<usize>>,
+
+    /// When writing out calibrated visibilities, average this many timesteps
+    /// together. Also supports a target time resolution (e.g. 8s). The value
+    /// must be a multiple of the input data's time resolution. The default is
+    /// to preserve the input data's time resolution.
+    ///
+    /// e.g. If the input data is in 0.5s resolution and this variable was 4,
+    /// then we average 2s worth of calibrated data together before writing the
+    /// data out. If the variable was instead 4s, then 8 calibrated timesteps
+    /// are averaged together before writing the data out.
+    #[structopt(long)]
+    pub output_vis_time_average: Option<String>,
+
+    /// When writing out calibrated visibilities, average this many fine freq.
+    /// channels together. Also supports a target freq. resolution (e.g. 80kHz).
+    /// The value must be a multiple of the input data's freq. resolution. The
+    /// default is to preserve the input data's freq. resolution.
+    ///
+    /// e.g. If the input data is in 40kHz resolution and this variable was 4,
+    /// then we average 160kHz worth of calibrated data together before writing
+    /// the data out. If the variable was instead 80kHz, then 2 calibrated fine
+    /// freq. channels are averaged together before writing the data out.
+    #[structopt(long)]
+    pub output_vis_freq_average: Option<String>,
 
     #[structopt(long, help = MAX_ITERATIONS_HELP.as_str())]
     pub max_iterations: Option<usize>,
@@ -294,10 +318,12 @@ impl CalibrateUserArgs {
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
-            ignore_input_data_fine_channels_flags,
+            ignore_input_data_fine_channel_flags,
             ignore_autos,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
+            output_vis_time_average,
+            output_vis_freq_average,
             max_iterations,
             stop_thresh,
             min_thresh,
@@ -326,13 +352,15 @@ impl CalibrateUserArgs {
             ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
                 || ignore_input_data_tile_flags,
             delays: cli_args.delays.or(delays),
-            ignore_input_data_fine_channels_flags: cli_args.ignore_input_data_fine_channels_flags
-                || ignore_input_data_fine_channels_flags,
+            ignore_input_data_fine_channel_flags: cli_args.ignore_input_data_fine_channel_flags
+                || ignore_input_data_fine_channel_flags,
             ignore_autos: cli_args.ignore_autos || ignore_autos,
             fine_chan_flags_per_coarse_chan: cli_args
                 .fine_chan_flags_per_coarse_chan
                 .or(fine_chan_flags_per_coarse_chan),
             fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
+            output_vis_time_average: cli_args.output_vis_time_average.or(output_vis_time_average),
+            output_vis_freq_average: cli_args.output_vis_freq_average.or(output_vis_freq_average),
             max_iterations: cli_args.max_iterations.or(max_iterations),
             stop_thresh: cli_args.stop_thresh.or(stop_thresh),
             min_thresh: cli_args.min_thresh.or(min_thresh),

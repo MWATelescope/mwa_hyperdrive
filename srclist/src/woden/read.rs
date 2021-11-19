@@ -836,10 +836,7 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
         let (fd, si) = match &comp.flux_type {
             FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
@@ -849,10 +846,7 @@ mod tests {
         assert_abs_diff_eq!(fd.q, 0.0);
         assert_abs_diff_eq!(*si, -0.8);
 
-        assert!(match &comp.comp_type {
-            ComponentType::Point => true,
-            _ => false,
-        });
+        assert!(matches!(&comp.comp_type, ComponentType::Point));
     }
 
     #[test]
@@ -877,10 +871,7 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
         let (fd, si) = match &comp.flux_type {
             FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
@@ -893,10 +884,7 @@ mod tests {
         assert_abs_diff_eq!(fd.q, 0.0);
         assert_abs_diff_eq!(*si, -0.8);
 
-        assert!(match &comp.comp_type {
-            ComponentType::Point => true,
-            _ => false,
-        });
+        assert!(matches!(&comp.comp_type, ComponentType::Point));
     }
 
     #[test]
@@ -920,10 +908,7 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
         let (fd, si) = match &comp.flux_type {
             FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
@@ -934,10 +919,7 @@ mod tests {
         assert_abs_diff_eq!(fd.v, 0.2);
         assert_abs_diff_eq!(*si, -0.5);
 
-        assert!(match &comp.comp_type {
-            ComponentType::Point => true,
-            _ => false,
-        });
+        assert!(matches!(&comp.comp_type, ComponentType::Point));
     }
 
     #[test]
@@ -962,10 +944,7 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
         let (fd, si) = match &comp.flux_type {
             FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
@@ -975,10 +954,7 @@ mod tests {
         assert_abs_diff_eq!(fd.q, 0.0);
         assert_abs_diff_eq!(*si, -0.8);
 
-        assert!(match &comp.comp_type {
-            ComponentType::Gaussian { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(&comp.comp_type, ComponentType::Gaussian { .. }));
         match &comp.comp_type {
             ComponentType::Gaussian { maj, min, pa } => {
                 assert_abs_diff_eq!(*maj, (6.0 / 60.0_f64).to_radians());
@@ -1012,10 +988,7 @@ mod tests {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.378 * DH2R);
         assert_abs_diff_eq!(comp.radec.dec, -37.2_f64.to_radians());
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
         let (fd, si) = match &comp.flux_type {
             FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
@@ -1025,10 +998,7 @@ mod tests {
         assert_abs_diff_eq!(fd.q, 0.0);
         assert_abs_diff_eq!(*si, -0.8);
 
-        assert!(match &comp.comp_type {
-            ComponentType::Shapelet { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(&comp.comp_type, ComponentType::Shapelet { .. }));
         match &comp.comp_type {
             ComponentType::Shapelet {
                 maj,
@@ -1042,7 +1012,7 @@ mod tests {
 
                 assert_eq!(coeffs[0].n1, 0);
                 assert_eq!(coeffs[0].n2, 0);
-                assert_eq!(coeffs[0].value, 1.0);
+                assert_abs_diff_eq!(coeffs[0].value, 1.0);
             }
             _ => unreachable!(),
         }

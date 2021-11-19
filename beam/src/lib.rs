@@ -25,9 +25,11 @@ use ndarray::prelude::*;
 cfg_if::cfg_if! {
     if #[cfg(feature = "cuda-single")] {
         pub use mwa_hyperbeam::cuda::*;
+        /// f32 (using the "cuda-single" feature)
         pub type CudaFloat = f32;
     } else if #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] {
         pub use mwa_hyperbeam::cuda::*;
+        /// f64 (using the "cuda" feature and not "cuda-single")
         pub type CudaFloat = f64;
     }
 }

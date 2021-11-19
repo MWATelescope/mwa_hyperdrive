@@ -57,6 +57,36 @@ pub enum InvalidArgsError {
     #[error("Cannot write calibration outputs to a file type '{ext}'.\nSupported formats are: {} (calibration solutions)\n                     : {} (visibility files)", *crate::calibrate::args::CAL_SOLUTION_EXTENSIONS, *crate::calibrate::args::VIS_OUTPUT_EXTENSIONS)]
     CalibrationOutputFile { ext: String },
 
+    #[error("Error when parsing time average factor: {0}")]
+    ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),
+
+    #[error("Error when parsing freq. average factor: {0}")]
+    ParseOutputVisFreqAverageFactor(crate::unit_parsing::UnitParseError),
+
+    #[error("Output vis. time average factor isn't an integer")]
+    OutputVisTimeFactorNotInteger,
+
+    #[error("Output vis. freq. average factor isn't an integer")]
+    OutputVisFreqFactorNotInteger,
+
+    #[error("Output vis. time average factor cannot be 0")]
+    OutputVisTimeAverageFactorZero,
+
+    #[error("Output vis. freq. average factor cannot be 0")]
+    OutputVisFreqAverageFactorZero,
+
+    #[error("Output vis. time resolution isn't a multiple of input data's: {out} vs {inp}")]
+    OutputVisTimeResNotMulitple { out: f64, inp: f64 },
+
+    #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} vs {inp}")]
+    OutputVisFreqResNotMulitple { out: f64, inp: f64 },
+
+    #[error("Output vis. time resolution cannot be 0")]
+    OutputVisTimeResZero,
+
+    #[error("Output vis. freq. resolution cannot be 0")]
+    OutputVisFreqResZero,
+
     #[error("Cannot write to the specified file '{file}'. Do you have write permissions set?")]
     FileNotWritable { file: String },
 

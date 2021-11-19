@@ -36,7 +36,11 @@ use rayon::prelude::*;
 
 use super::solutions::CalSolutionType;
 use crate::{
-    constants::*, data_formats::VisOutputType, data_formats::*, glob::*, math::TileBaselineMaps,
+    constants::*,
+    data_formats::*,
+    glob::*,
+    math::TileBaselineMaps,
+    unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat},
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_srclist::{
@@ -83,7 +87,8 @@ pub struct CalibrateParams {
     /// then we average 2s worth of data together during calibration.
     pub(crate) time_average_factor: usize,
 
-    /// The timestep indices to use in calibration.
+    /// The timestep indices to use in calibration. These are sorted
+    /// ascendingly.
     pub(crate) timesteps: Vec<usize>,
 
     /// Given two antenna numbers, get the unflagged baseline number. e.g. If
@@ -146,6 +151,14 @@ pub struct CalibrateParams {
     /// detailed by [crate::data_formats::VisOutputType].
     pub(crate) output_vis_filenames: Vec<(VisOutputType, PathBuf)>,
 
+    /// The number of calibrated time samples to average together before writing
+    /// out calibrated visibilities.
+    pub(crate) output_vis_time_average_factor: usize,
+
+    /// The number of calibrated frequencies samples to average together before
+    /// writing out calibrated visibilities.
+    pub(crate) output_vis_freq_average_factor: usize,
+
     #[cfg(feature = "cuda")]
     /// If enabled, use the CPU to generate sky-model visibilites. Otherwise,
     /// use the GPU.
@@ -165,24 +178,26 @@ impl CalibrateParams {
             data,
             outputs,
             model_filename,
-            beam_file,
-            unity_dipole_gains,
-            delays,
-            no_beam,
             source_list,
             source_list_type,
             num_sources,
             source_dist_cutoff,
             veto_threshold,
+            beam_file,
+            unity_dipole_gains,
+            delays,
+            no_beam,
             time_average_factor,
             // freq_average_factor,
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
-            ignore_input_data_fine_channels_flags,
+            ignore_input_data_fine_channel_flags,
             ignore_autos,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
+            output_vis_time_average,
+            output_vis_freq_average,
             max_iterations,
             stop_thresh,
             min_thresh,
@@ -439,7 +454,7 @@ impl CalibrateParams {
                 Some(flags) => flags.into_iter().collect(),
                 None => HashSet::new(),
             };
-        if !ignore_input_data_fine_channels_flags {
+        if !ignore_input_data_fine_channel_flags {
             for &obs_fine_chan_flag in &obs_context.fine_chan_flags_per_coarse_chan {
                 fine_chan_flags_per_coarse_chan.insert(obs_fine_chan_flag);
             }
@@ -637,6 +652,121 @@ impl CalibrateParams {
             }
         };
 
+        // Handle output visibility arguments.
+        let (output_vis_time_average_factor, output_vis_freq_average_factor) =
+            if output_vis_filenames.is_empty() {
+                // If we're not writing out calibrated visibilities but arguments
+                // are set for them, issue warnings.
+                match (output_vis_time_average, output_vis_freq_average) {
+                    (Some(_), Some(_)) => {
+                        warn!("Not writing out calibrated visibilities, but");
+                        warn!("    \"output_vis_time_average_factor\" and");
+                        warn!("    \"output_vis_freq_average_factor\" are set.");
+                    }
+
+                    (Some(_), None) => {
+                        warn!("Not writing out calibrated visibilities, but");
+                        warn!("    \"output_vis_time_average_factor\" is set.");
+                    }
+
+                    (None, Some(_)) => {
+                        warn!("Not writing out calibrated visibilities, but");
+                        warn!("    \"output_vis_freq_average_factor\" is set.");
+                    }
+
+                    (None, None) => (),
+                }
+                (1, 1)
+            } else {
+                // Parse and verify user input (specified resolutions must
+                // evenly divide the input data's resolutions).
+                let time_factor = match output_vis_time_average.map(|f| parse_time(&f)) {
+                    None => 1.0,
+                    Some(Ok((factor, TimeFormat::NoUnit))) => {
+                        // Reject non-integer floats.
+                        if factor.fract().abs() > 1e-6 {
+                            return Err(InvalidArgsError::OutputVisTimeFactorNotInteger);
+                        }
+                        // Zero is not allowed.
+                        if factor < f64::EPSILON {
+                            return Err(InvalidArgsError::OutputVisTimeAverageFactorZero);
+                        }
+
+                        factor
+                    }
+                    Some(Ok((out_res, time_format))) => {
+                        // If the time resolution isn't determined, it's because
+                        // there's only one timestep. In this case, it doesn't
+                        // matter what the output time resolution is; only one
+                        // timestep goes into it.
+                        let ratio = out_res / obs_context.time_res.unwrap_or(1.0)
+                            * match time_format {
+                                TimeFormat::S | TimeFormat::NoUnit => 1.0,
+                                TimeFormat::Ms => 1000.0,
+                            };
+                        // Reject non-integer floats.
+                        if ratio.fract().abs() > 1e-6 {
+                            return Err(InvalidArgsError::OutputVisTimeResNotMulitple {
+                                out: out_res,
+                                inp: obs_context.time_res.unwrap(),
+                            });
+                        }
+                        // Zero is not allowed.
+                        if ratio < f64::EPSILON {
+                            return Err(InvalidArgsError::OutputVisTimeResZero);
+                        }
+
+                        ratio
+                    }
+                    Some(Err(e)) => {
+                        return Err(InvalidArgsError::ParseOutputVisTimeAverageFactor(e))
+                    }
+                };
+                let freq_factor = match output_vis_freq_average.map(|f| parse_freq(&f)) {
+                    None => 1.0,
+                    Some(Ok((factor, FreqFormat::NoUnit))) => {
+                        // Reject non-integer floats.
+                        if factor.fract().abs() > 1e-6 {
+                            return Err(InvalidArgsError::OutputVisFreqFactorNotInteger);
+                        }
+                        // Zero is not allowed.
+                        if factor < f64::EPSILON {
+                            return Err(InvalidArgsError::OutputVisFreqAverageFactorZero);
+                        }
+
+                        factor
+                    }
+                    Some(Ok((out_res, freq_format))) => {
+                        // If the frequency resolution isn't determined, it's
+                        // because there's only one fine channel. In this case,
+                        // it doesn't matter what the output freq. resolution
+                        // is; only one channel goes into it.
+                        let ratio = out_res / freq_context.native_fine_chan_width.unwrap_or(1.0)
+                            * match freq_format {
+                                FreqFormat::Hz | FreqFormat::NoUnit => 1.0,
+                                FreqFormat::kHz => 1000.0,
+                            };
+                        if ratio.fract().abs() > 1e-6 {
+                            return Err(InvalidArgsError::OutputVisFreqResNotMulitple {
+                                out: out_res,
+                                inp: freq_context.native_fine_chan_width.unwrap(),
+                            });
+                        }
+                        // Zero is not allowed.
+                        if ratio < f64::EPSILON {
+                            return Err(InvalidArgsError::OutputVisFreqResZero);
+                        }
+
+                        ratio
+                    }
+                    Some(Err(e)) => {
+                        return Err(InvalidArgsError::ParseOutputVisFreqAverageFactor(e))
+                    }
+                };
+
+                (time_factor as usize, freq_factor as usize)
+            };
+
         let using_autos = if ignore_autos {
             false
         } else {
@@ -683,6 +813,8 @@ impl CalibrateParams {
             min_threshold,
             output_solutions_filenames,
             output_vis_filenames,
+            output_vis_time_average_factor,
+            output_vis_freq_average_factor,
             #[cfg(feature = "cuda")]
             cpu_vis_gen: cpu,
         };
@@ -880,6 +1012,33 @@ impl CalibrateParams {
                     .map(|(_, pb)| pb.display())
                     .join(", ")
             );
+
+            info!("Averaging output calibrated visibilities");
+            if let Some(tr) = obs_context.time_res {
+                info!(
+                    "    {}x in time  ({}s)",
+                    self.output_vis_time_average_factor,
+                    tr * self.output_vis_time_average_factor as f64
+                );
+            } else {
+                info!(
+                    "    {}x (only one timestep)",
+                    self.output_vis_time_average_factor
+                );
+            }
+
+            if let Some(fr) = freq_context.native_fine_chan_width {
+                info!(
+                    "    {}x in freq. ({}kHz)",
+                    self.output_vis_freq_average_factor,
+                    fr * self.output_vis_freq_average_factor as f64 / 1000.0
+                );
+            } else {
+                info!(
+                    "    {}x (only one fine channel)",
+                    self.output_vis_freq_average_factor
+                );
+            }
         }
     }
 

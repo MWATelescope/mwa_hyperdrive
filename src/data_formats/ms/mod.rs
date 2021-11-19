@@ -435,7 +435,11 @@ impl MS {
             coarse_chan_width
         } else {
             fine_chan_freqs_hz[1] - fine_chan_freqs_hz[0]
-        };
+        }
+        // We're unlikely to ever have a fraction of a Hz as the channel
+        // resolution. Sometimes this number has a fractional component, for
+        // some reason.
+        .round();
         let num_fine_chans_per_coarse_chan =
             (total_bandwidth_hz / coarse_chan_nums.len() as f64 / native_fine_chan_width).round()
                 as _;

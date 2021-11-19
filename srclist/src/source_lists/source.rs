@@ -89,7 +89,7 @@ impl SourceComponent {
 
 #[cfg(test)]
 mod tests {
-    use std::f64::consts::{FRAC_PI_4, PI};
+    use std::f64::consts::{FRAC_PI_4, LOG2_10, PI};
 
     use approx::*;
 
@@ -193,7 +193,7 @@ mod tests {
         };
 
         let si = fds[0].calc_spec_index(&fds[1]);
-        assert_abs_diff_eq!(si, -3.321928094887362, epsilon = 1e-10);
+        assert_abs_diff_eq!(si, -LOG2_10, epsilon = 1e-10);
     }
 
     #[test]
@@ -269,7 +269,7 @@ mod tests {
         // Calculate the estimated flux density manually.
         // si should be -3.321928094887362 (this is also tested above).
         let si = fds[0].calc_spec_index(&fds[1]);
-        assert_abs_diff_eq!(si, -3.321928094887362, epsilon = 1e-10);
+        assert_abs_diff_eq!(si, -LOG2_10, epsilon = 1e-10);
         let freq_ratio = calc_flux_ratio(desired_freq, fds[1].freq, si);
         let manual = fds[1].clone() * freq_ratio;
 
