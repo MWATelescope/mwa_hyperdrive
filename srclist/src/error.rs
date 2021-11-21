@@ -4,7 +4,10 @@
 
 use thiserror::Error;
 
-use crate::{read::SourceListError, VetoError, HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED};
+use crate::{
+    read::SourceListError, VetoError, HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED,
+    SOURCE_LIST_TYPES_COMMA_SEPARATED,
+};
 
 /// Errors associated with reading in any kind of source list.
 #[derive(Error, Debug)]
@@ -262,6 +265,9 @@ pub enum WriteSourceListError {
 
     #[error("Not enough information was provided to write the output source list. Please specify an output type.")]
     NotEnoughInfo,
+
+    #[error("Unrecognised source list type. Supported types are: {}", *SOURCE_LIST_TYPES_COMMA_SEPARATED)]
+    InvalidFormat,
 
     #[error("'{0}' is an invalid file type for a hyperdrive-style source list; must have one of the following extensions: {}", *HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED)]
     InvalidHyperdriveFormat(String),

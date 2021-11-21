@@ -172,19 +172,22 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
             output_pb
         }
     };
-    let output_type = match output_type {
-        Some(t) => {
+    let output_ext = output_path.extension().and_then(|e| e.to_str());
+    let hyp_file_type = output_ext.and_then(|e| HyperdriveFileType::from_str(e).ok());
+    let output_type = match (output_type, &hyp_file_type) {
+        (Some(t), _) => {
             // Try to parse the specified output type.
             match SourceListType::from_str(t.as_ref()) {
                 Ok(t) => t,
-                Err(_) => return Err(WriteSourceListError::NotEnoughInfo.into()),
+                Err(_) => return Err(WriteSourceListError::InvalidFormat.into()),
             }
         }
+
+        (None, Some(_)) => SourceListType::Hyperdrive,
+
         // Use the input source list type as the output type.
-        None => sl_type,
+        (None, None) => sl_type,
     };
-    let output_ext = output_path.extension().and_then(|e| e.to_str());
-    let output_file_type = output_ext.and_then(|e| HyperdriveFileType::from_str(e).ok());
 
     // Open the metafits.
     trace!("Attempting to open the metafits file");
@@ -272,7 +275,7 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
     trace!("Attempting to write output source list");
     let mut f = BufWriter::new(File::create(&output_path)?);
 
-    match (output_type, output_file_type) {
+    match (output_type, hyp_file_type) {
         (SourceListType::Hyperdrive, None) => {
             return Err(WriteSourceListError::InvalidHyperdriveFormat(
                 output_ext.unwrap_or("<no extension>").to_string(),
