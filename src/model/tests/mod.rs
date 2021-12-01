@@ -68,7 +68,9 @@ struct ObsParams {
     uvws: Vec<UVW>,
     beam: Box<dyn Beam>,
     num_unflagged_cross_baselines: usize,
-    unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    tile_flags: HashSet<usize>,
+    array_latitude_rad: f64,
 }
 
 impl ObsParams {
@@ -117,7 +119,9 @@ impl ObsParams {
         let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyzs_to_cross_uvws_parallel(&xyzs, phase_centre.to_hadec(lst));
         let beam = create_no_beam_object(xyzs.len());
-        let maps = TileBaselineMaps::new(xyzs.len(), &HashSet::new());
+        let tile_flags = HashSet::new();
+        let maps = TileBaselineMaps::new(xyzs.len(), &tile_flags);
+        let array_latitude_rad = MWA_LAT_RAD;
 
         Self {
             phase_centre,
@@ -128,7 +132,9 @@ impl ObsParams {
             uvws,
             beam,
             num_unflagged_cross_baselines,
-            unflagged_baseline_to_tile_map: maps.unflagged_baseline_to_tile_map,
+            unflagged_cross_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+            tile_flags,
+            array_latitude_rad,
         }
     }
 
@@ -166,7 +172,9 @@ impl ObsParams {
         let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyzs_to_cross_uvws_parallel(&xyzs, phase_centre.to_hadec(lst));
         let beam = create_no_beam_object(xyzs.len());
-        let maps = TileBaselineMaps::new(xyzs.len(), &HashSet::new());
+        let tile_flags = HashSet::new();
+        let maps = TileBaselineMaps::new(xyzs.len(), &tile_flags);
+        let array_latitude_rad = MWA_LAT_RAD;
 
         Self {
             phase_centre,
@@ -177,7 +185,9 @@ impl ObsParams {
             uvws,
             beam,
             num_unflagged_cross_baselines,
-            unflagged_baseline_to_tile_map: maps.unflagged_baseline_to_tile_map,
+            unflagged_cross_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+            tile_flags,
+            array_latitude_rad,
         }
     }
 
@@ -189,7 +199,9 @@ impl ObsParams {
                 &srclist,
                 &self.freqs,
                 &self.xyzs,
+                &self.tile_flags,
                 self.phase_centre,
+                self.array_latitude_rad,
                 &crate::shapelets::SHAPELET_BASIS_VALUES,
                 crate::shapelets::SBF_L,
                 crate::shapelets::SBF_N,
@@ -329,7 +341,7 @@ fn point_zenith_cpu() {
         comps.points.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
-        &obs.unflagged_baseline_to_tile_map,
+        &obs.unflagged_cross_baseline_to_tile_map,
     );
     assert_list_zenith_visibilities(visibilities.view());
 }
@@ -358,7 +370,7 @@ fn point_off_zenith_cpu() {
         comps.points.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
-        &obs.unflagged_baseline_to_tile_map,
+        &obs.unflagged_cross_baseline_to_tile_map,
     );
     assert_list_off_zenith_visibilities(visibilities.view());
 }
@@ -390,7 +402,7 @@ fn gaussian_zenith_cpu() {
         comps.gaussians.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
-        &obs.unflagged_baseline_to_tile_map,
+        &obs.unflagged_cross_baseline_to_tile_map,
     );
     assert_list_zenith_visibilities(visibilities.view());
 }
@@ -420,7 +432,7 @@ fn gaussian_off_zenith_cpu() {
         comps.gaussians.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
-        &obs.unflagged_baseline_to_tile_map,
+        &obs.unflagged_cross_baseline_to_tile_map,
     );
     assert_list_off_zenith_visibilities(visibilities.view());
 }
@@ -455,7 +467,7 @@ fn shapelet_zenith_cpu() {
         comps.shapelets.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
-        &obs.unflagged_baseline_to_tile_map,
+        &obs.unflagged_cross_baseline_to_tile_map,
     );
     assert_list_zenith_visibilities(visibilities.view());
 }
@@ -488,7 +500,7 @@ fn shapelet_off_zenith_cpu() {
         comps.shapelets.flux_densities.view(),
         &obs.uvws,
         &obs.freqs,
-        &obs.unflagged_baseline_to_tile_map,
+        &obs.unflagged_cross_baseline_to_tile_map,
     );
     assert_list_off_zenith_visibilities(visibilities.view());
 }

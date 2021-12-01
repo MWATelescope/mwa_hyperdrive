@@ -49,7 +49,7 @@ pub enum SourceListType {
 
 /// All of the possible file extensions that a hyperdrive-style sky-model source
 /// list can have.
-#[derive(Debug, Display, EnumIter, EnumString)]
+#[derive(Debug, Display, Clone, Copy, EnumIter, EnumString)]
 pub enum HyperdriveFileType {
     #[strum(serialize = "yaml")]
     Yaml,

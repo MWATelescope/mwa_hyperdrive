@@ -17,12 +17,10 @@ use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
 use hifitime::{Duration, Epoch, TimeUnit};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::{Either, Itertools};
+use itertools::Either;
 use log::{debug, info, trace};
 use mwa_hyperdrive_srclist::ComponentList;
-use mwa_rust_core::{
-    math::cross_correlation_baseline_to_tiles, precession::get_lmst, HADec, Jones, XyzGeodetic, UVW,
-};
+use mwa_rust_core::{math::cross_correlation_baseline_to_tiles, HADec, Jones, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
@@ -92,7 +90,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
     let freq_context = params.input_data.get_freq_context();
 
     trace!("Allocating memory for input data visibilities and model visibilities");
-    let num_unflagged_cross_baselines = params.unflagged_baseline_to_tile_map.len();
+    let num_unflagged_cross_baselines = params.unflagged_cross_baseline_to_tile_map.len();
     let num_unflagged_fine_chans = params.freq.unflagged_fine_chans.len();
     let vis_shape = (
         params.timesteps.len(),
@@ -200,7 +198,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     vis_data_slice,
                     vis_weight_slice.view_mut(),
                     timestep,
-                    &params.tile_to_unflagged_baseline_map,
+                    &params.tile_to_unflagged_cross_baseline_map,
                     &params.freq.fine_chan_flags,
                 );
                 let read_failed = read_result.is_err();
@@ -252,7 +250,9 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                             &params.source_list,
                             &params.freq.unflagged_fine_chan_freqs,
                             &params.unflagged_tile_xyzs,
+                            &params.tile_flags,
                             obs_context.phase_centre,
+                            params.array_latitude,
                             &crate::shapelets::SHAPELET_BASIS_VALUES,
                             crate::shapelets::SBF_L,
                             crate::shapelets::SBF_N,
@@ -314,7 +314,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         &precessed_tile_xyzs,
                         &uvws,
                         &params.freq.unflagged_fine_chan_freqs,
-                        &params.unflagged_baseline_to_tile_map,
+                        &params.unflagged_cross_baseline_to_tile_map,
                     )
                     .map_err(CalibrateError::from)
                 } else {
@@ -383,7 +383,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     params.freq.num_fine_chans / 2,
                     obs_context.phase_centre,
                     obs_name.as_deref(),
-                    &params.unflagged_baseline_to_tile_map,
+                    &params.unflagged_cross_baseline_to_tile_map,
                     &params.freq.fine_chan_flags,
                 );
                 // Handle any errors during output model file creation.
@@ -569,7 +569,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         .to_string(),
     );
     info!(
-        "All timeblocks: {}/{} chanblocks converged",
+        "All timesteps: {}/{} chanblocks converged",
         total_converged_count, num_chanblocks
     );
 
@@ -652,7 +652,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                     .enumerate()
                     .for_each(|(i_baseline, (mut data_chans, weights_chans))| {
                         if let Some(&(tile1, tile2)) =
-                            params.unflagged_baseline_to_tile_map.get(&i_baseline)
+                            params.unflagged_cross_baseline_to_tile_map.get(&i_baseline)
                         {
                             // Convert the tile numbers to tile indices.
                             let tile1 = unflagged_tile_indices[&tile1];
@@ -663,7 +663,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                                 .enumerate()
                                 .for_each(|(i_freq, (data_chan, weight_chan))| {
                                     // TODO: This assumes one timeblock
-                                    // TODO: This assumes #freqs == #freqblocks
+                                    // TODO: This assumes #freqs == #chanblocks
                                     let sol1 = sols.di_jones[(0, tile1, i_freq)];
                                     let sol2 = sols.di_jones[(0, tile2, i_freq)];
                                     // Promote the data before demoting it again.
@@ -677,7 +677,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                                     // J1 * D * J2^H
                                     d = sol1.inv() * d;
                                     d *= sol2.inv().h();
-                                    *data_chan = d.into();
+                                    *data_chan = Jones::from(d);
                                 });
                         } else {
                             data_chans.fill(Jones::nan())
@@ -718,9 +718,9 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
 
         let (vis_data, vis_weights) = if params.output_vis_time_average_factor > 1 {
             let mut out_vis_data: Array3<Jones<f32>> =
-                Array3::zeros((out_timesteps.len(), vis_data.dim().1, vis_data.dim().2));
+                Array3::zeros((out_timestamps.len(), vis_data.dim().1, vis_data.dim().2));
             let mut out_vis_weights: Array3<f32> =
-                Array3::zeros((out_timesteps.len(), vis_data.dim().1, vis_data.dim().2));
+                Array3::zeros((out_timestamps.len(), vis_data.dim().1, vis_data.dim().2));
             // `num_merged` is used to track how to average the visibilities
             // after accumulating them.
             let mut num_merged: Array2<u32> =
@@ -902,11 +902,11 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         / params.output_vis_freq_average_factor as f64;
                     let mut writer = UvfitsWriter::new(
                         &file,
-                        out_timesteps.len(),
-                        params.get_num_baselines(),
+                        out_timestamps.len(),
+                        params.get_num_unflagged_baselines(),
                         num_fine_chans,
                         params.using_autos,
-                        obs_context.timesteps[out_timesteps[0][0].0],
+                        out_timestamps[0],
                         freq_context
                             .native_fine_chan_width
                             .map(|w| w * params.output_vis_freq_average_factor as f64),
@@ -914,7 +914,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                         num_fine_chans / 2,
                         obs_context.phase_centre,
                         obs_name.as_deref(),
-                        &params.unflagged_baseline_to_tile_map,
+                        &params.unflagged_cross_baseline_to_tile_map,
                         &flagged_fine_chans,
                     )?;
 
@@ -931,7 +931,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                             params.array_latitude,
                         );
                         let precessed_tile_xyzs =
-                            precession_info.precess_xyz_parallel(&obs_context.tile_xyzs);
+                            precession_info.precess_xyz_parallel(&params.unflagged_tile_xyzs);
                         let uvws = xyzs_to_cross_uvws_parallel(
                             &precessed_tile_xyzs,
                             obs_context
@@ -992,13 +992,15 @@ fn calibrate_timeblock(
         .reversed_axes();
 
     let pb = ProgressBar::new(num_chanblocks as _)
-            .with_style(
-                ProgressStyle::default_bar()
-                    .template("{msg}: [{wide_bar:.blue}] {pos:3}/{len:3} converged ({elapsed_precise}<{eta_precise})")
-                    .progress_chars("=> "),
-            )
-            .with_position(0)
-            .with_message(progress_bar_msg);
+        .with_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{msg}: [{wide_bar:.blue}] {pos:3}/{len:3} ({elapsed_precise}<{eta_precise})",
+                )
+                .progress_chars("=> "),
+        )
+        .with_position(0)
+        .with_message(progress_bar_msg);
     pb.set_draw_target(ProgressDrawTarget::stdout());
 
     let time_range_start = timeblock * timeblock_length;
@@ -1044,14 +1046,13 @@ fn calibrate_timeblock(
                     cal_result.max_precision,
                     stop_threshold
                 ));
-                pb.inc(1);
             } else {
                 status_str.push_str(&format!(
                     ": converged ({:>2}): {:e} > {:.5e}",
                     cal_result.num_iterations, stop_threshold, cal_result.max_precision
                 ));
-                pb.inc(1);
             }
+            pb.inc(1);
             pb.println(status_str);
             cal_result
         })
@@ -1208,8 +1209,8 @@ struct CalibrationResult {
 }
 
 /// Calibrate the antennas of the array by comparing the observed input data
-/// against our generated model. Return information on this process
-/// ([CalibrationResult]).
+/// against our generated model. Return information on this process in a
+/// [CalibrationResult].
 ///
 /// This function is intended to be run in parallel; for that reason, no
 /// parallel code is inside this function.
@@ -1281,7 +1282,6 @@ fn calibrate(
         // On every even iteration, we test for convergence and set the new gain
         // solution as the average of the last two, as per Stefcal. This speeds
         // up convergence.
-        // if iteration == 1 || iteration % 2 == 0 {
         if iteration % 2 == 0 {
             // Update the DI Jones matrices, and for each pair of Jones matrices
             // in new_jones and di_jones, form a maximum "distance" between
@@ -1295,14 +1295,19 @@ fn calibrate(
                 .for_each(|(((mut di_jones, new_jones), mut antenna_precision), _)| {
                     // antenna_precision = sum(norm_sqr(new_jones - di_jones)) / num_freqs
                     let jones_diff_sum = (&new_jones - &di_jones).into_iter().fold(
-                        // TODO: Use a stack array instead of a heap-allocated one
-                        Array1::zeros(4),
+                        [0.0, 0.0, 0.0, 0.0],
                         |acc, diff_jones| {
                             let norm = diff_jones.norm_sqr();
-                            acc + array![norm[0], norm[1], norm[2], norm[3]]
+                            [
+                                acc[0] + norm[0],
+                                acc[1] + norm[1],
+                                acc[2] + norm[2],
+                                acc[3] + norm[3],
+                            ]
                         },
                     );
-                    antenna_precision.assign(&(jones_diff_sum / di_jones.len() as f64));
+                    antenna_precision
+                        .assign(&(Array1::from(jones_diff_sum.to_vec()) / di_jones.len() as f64));
 
                     // di_jones = 0.5 * (di_jones + new_jones)
                     di_jones += &new_jones;

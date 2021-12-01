@@ -153,7 +153,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         Err(e) => return Err(e),
     };
     match (
-        file.ends_with(".metafits"),
+        file.ends_with(".metafits") || file.ends_with("_metafits.fits"),
         RE_GPUBOX.is_match(file),
         RE_MWAX.is_match(file),
         file.ends_with(".mwaf"),
@@ -217,6 +217,10 @@ mod tests {
 
     fn make_metafits(dir: &Path) -> TempPath {
         make_file(dir, ".metafits")
+    }
+
+    fn make_metafits2(dir: &Path) -> TempPath {
+        make_file(dir, "_metafits.fits")
     }
 
     fn make_ms(dir: &Path) -> TempPath {
@@ -298,6 +302,13 @@ mod tests {
         let mut input = InputDataTypesTemp::default();
         let dir = make_new_dir();
         let metafits = make_metafits(dir.path());
+        let result = file_checker(&mut input, metafits.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.metafits.len(), 1);
+
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let metafits = make_metafits2(dir.path());
         let result = file_checker(&mut input, metafits.to_str().unwrap());
         assert!(result.is_ok());
         assert_eq!(input.metafits.len(), 1);

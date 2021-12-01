@@ -55,7 +55,10 @@ impl FEEBeam {
         // Complain if the dimensions of delays and gains don't match.
         // TODO: Tidy.
         if delays.dim().0 != gains.dim().0 {
-            panic!("The dimensions of the delays doesn't match the gains");
+            return Err(BeamError::DelayGainsDimensionMismatch {
+                delays: delays.dim().0,
+                gains: gains.dim().0,
+            });
         }
 
         // Are all the delays the same? If so, keep a record of that for

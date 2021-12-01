@@ -47,7 +47,7 @@ fn test_1090008640_woden() {
         .ok();
     assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
     let (stdout, stderr) = get_cmd_output(cmd);
-    assert!(stderr.is_empty());
+    assert!(stderr.is_empty(), "{}", stderr);
 
     // Verify that none of the calibration solutions are failures (i.e. not set
     // to NaN).

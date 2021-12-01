@@ -1,6 +1,6 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.2.0-alpha6"
+version = "0.2.0-alpha7"
 authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
 edition = "2021"
 rust-version = "1.56"

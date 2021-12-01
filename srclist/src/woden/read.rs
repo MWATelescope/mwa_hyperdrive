@@ -31,6 +31,7 @@ use log::warn;
 use mwa_rust_core::constants::DH2R;
 
 use super::*;
+use mwa_hyperdrive_common::log;
 
 /// Parse a buffer containing a WODEN-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(

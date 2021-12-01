@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperdrive"
-version = "0.2.0-alpha6"
+version = "0.2.0-alpha7"
 dependencies = [
  "approx",
  "assert_cmd",
@@ -1059,7 +1059,6 @@ dependencies = [
  "indoc",
  "itertools",
  "lazy_static",
- "log",
  "mwa_hyperdrive_beam",
  "mwa_hyperdrive_common",
  "mwa_rust_core",

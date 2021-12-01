@@ -54,7 +54,7 @@ pub(crate) struct UvfitsWriter<'a> {
 
     /// A map from an unflagged cross-correlation baseline to its constituent
     /// antennas.
-    unflagged_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
+    unflagged_cross_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
 
     /// Unflagged tile indices. uvfits must internally refer to tiles in the
     /// antenna tables by their indices, not by MWA tile indices. Ascendingly
@@ -86,7 +86,7 @@ impl<'a> UvfitsWriter<'a> {
         centre_freq_chan: usize,
         phase_centre: RADec,
         obs_name: Option<&str>,
-        unflagged_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
+        unflagged_cross_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
         flagged_channels: &'a HashSet<usize>,
     ) -> Result<UvfitsWriter<'a>, UvfitsWriteError> {
         // Delete any file that already exists.
@@ -108,7 +108,6 @@ impl<'a> UvfitsWriter<'a> {
         fits_check_status(status)?;
 
         // Initialise the group header. Copied from cotter. -32 means FLOAT_IMG.
-        let naxis = 6;
         let mut naxes = [0, 3, 4, num_chans as i64, 1, 1];
         let num_group_params = 5;
         let total_num_rows = num_timesteps * num_baselines;
@@ -117,7 +116,7 @@ impl<'a> UvfitsWriter<'a> {
                 fptr,                  /* I - FITS file pointer                        */
                 1,                     /* I - does file conform to FITS standard? 1/0  */
                 -32,                   /* I - number of bits per data value pixel      */
-                naxis,                 /* I - number of axes in the data array         */
+                naxes.len() as i32,    /* I - number of axes in the data array         */
                 naxes.as_mut_ptr(),    /* I - length of each data axis                 */
                 num_group_params,      /* I - number of group parameters (usually 0)   */
                 total_num_rows as i64, /* I - number of random groups (usually 1 or 0) */
@@ -228,7 +227,7 @@ impl<'a> UvfitsWriter<'a> {
         // Get the unflagged tile indices; get the unique tiles in the baseline
         // map.
         let mut unflagged_antenna_set = HashSet::new();
-        for &(tile1, tile2) in unflagged_baseline_to_ants_map.values() {
+        for &(tile1, tile2) in unflagged_cross_baseline_to_ants_map.values() {
             unflagged_antenna_set.insert(tile1);
             unflagged_antenna_set.insert(tile2);
         }
@@ -252,7 +251,7 @@ impl<'a> UvfitsWriter<'a> {
             centre_freq: centre_freq_hz,
             start_epoch,
             autocorrelations_present,
-            unflagged_baseline_to_ants_map,
+            unflagged_cross_baseline_to_ants_map,
             unflagged_ants,
             unflagged_antenna_map,
             flagged_channels,
@@ -531,11 +530,11 @@ impl<'a> UvfitsWriter<'a> {
     /// file for every call would be a problem, and keeping the file open in
     /// [UvfitsWriter] would mean the struct is not thread safe.
     ///
-    /// `tile_index1` and `tile_index2` are expected to be zero indexed; they
-    /// are made one indexed by this function.
-    // TODO: Assumes that all fine channels are written in `vis.` This needs to
+    /// `tile_index1` and `tile_index2` are expected to be zero-indexed; they
+    /// are made one-indexed by this function.
+    // TODO: Assumes that all fine channels are written in `vis`. This needs to
     // be updated to add visibilities to an existing uvfits row.
-    pub(crate) fn write_vis(
+    pub(super) fn write_vis(
         &mut self,
         uvfits: &mut FitsFile,
         uvw: UVW,
@@ -590,26 +589,28 @@ impl<'a> UvfitsWriter<'a> {
     ) -> Result<(), UvfitsWriteError> {
         let mut uvfits = self.open()?;
 
-        let num_cross_baselines = cross_vis.len_of(Axis(0));
-        let num_chans = cross_vis.len_of(Axis(1));
-        debug_assert_eq!(num_cross_baselines, uvws.len());
-        debug_assert_eq!(num_cross_baselines, self.num_baselines);
-        debug_assert_eq!(num_chans, self.num_chans);
+        {
+            let num_cross_baselines = cross_vis.len_of(Axis(0));
+            let num_chans = cross_vis.len_of(Axis(1));
+            debug_assert_eq!(num_cross_baselines, uvws.len());
+            debug_assert_eq!(num_cross_baselines, self.num_baselines);
+            debug_assert_eq!(num_chans, self.num_chans);
+        }
 
         // Write out all the baselines of the timestep we received.
         let mut vis: Vec<f32> = Vec::with_capacity(5 + 12 * self.num_chans);
         // Ignore the first 5 elements; those get overwritten with group
         // parameters.
         vis.extend_from_slice(&[0.0; 5]);
-        for (baseline, uvw) in (0..num_cross_baselines).into_iter().zip(uvws.iter()) {
-            let (ant1, ant2) = match self.unflagged_baseline_to_ants_map.get(&baseline) {
+        for (i_bl, uvw) in uvws.iter().enumerate() {
+            let (ant1, ant2) = match self.unflagged_cross_baseline_to_ants_map.get(&i_bl) {
                 Some(&(ant1, ant2)) => (ant1, ant2),
                 None => continue,
             };
             self.unpack_freqs(
                 &mut vis,
-                cross_vis.index_axis(Axis(0), baseline),
-                cross_weights.index_axis(Axis(0), baseline),
+                cross_vis.index_axis(Axis(0), i_bl),
+                cross_weights.index_axis(Axis(0), i_bl),
             );
             // Convert the antenna indices to uvfits antenna indices.
             let uvfits_ant1 = self.unflagged_antenna_map[&ant1];
@@ -655,11 +656,11 @@ impl<'a> UvfitsWriter<'a> {
         vis.extend_from_slice(&[0.0; 5]);
         let mut auto_ant_index = 0;
         for (baseline, uvw) in (0..num_cross_baselines).into_iter().zip(uvws.iter()) {
-            let (cross_ant1, cross_ant2) = match self.unflagged_baseline_to_ants_map.get(&baseline)
-            {
-                Some(&(ant1, ant2)) => (ant1, ant2),
-                None => continue,
-            };
+            let (cross_ant1, cross_ant2) =
+                match self.unflagged_cross_baseline_to_ants_map.get(&baseline) {
+                    Some(&(ant1, ant2)) => (ant1, ant2),
+                    None => continue,
+                };
 
             // Before we write cross-correlations, write out the autos. We know
             // when this needs to be if `cross_ant1` has changed as we iterate

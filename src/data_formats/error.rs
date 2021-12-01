@@ -8,7 +8,10 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ReadInputDataError {
-    #[error("Output {array_type} array did not have expected {expected_len} elements on axis {axis_num}!")]
+    #[error("The supplied mwaf files don't have flags for timestep {timestep} (GPS time {gps})")]
+    MwafFlagsMissingForTimestep { timestep: usize, gps: f64 },
+
+    #[error("Output {array_type} array did not have expected {expected_len} elements on axis {axis_num}")]
     BadArraySize {
         array_type: &'static str,
         expected_len: usize,

@@ -47,10 +47,6 @@ bindgen "${SCRIPTPATH}"/src_cuda/model.h \
 bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-function "model_.*" \
     --blocklist-type "__uint64_t" \
-    --allowlist-function "init_model" \
-    --allowlist-function "copy_vis" \
-    --allowlist-function "clear_vis" \
-    --allowlist-function "destroy" \
     --blocklist-type "UVW" \
     --blocklist-type "LMN" \
     --blocklist-type "JonesF.*" \
@@ -61,10 +57,6 @@ bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
 bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-function "model_.*" \
     --blocklist-type "__uint64_t" \
-    --allowlist-function "init_model" \
-    --allowlist-function "copy_vis" \
-    --allowlist-function "clear_vis" \
-    --allowlist-function "destroy" \
     --blocklist-type "UVW" \
     --blocklist-type "LMN" \
     --blocklist-type "JonesF.*" \

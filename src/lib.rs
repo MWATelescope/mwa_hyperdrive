@@ -16,6 +16,7 @@ pub(crate) mod error;
 pub(crate) mod flagging;
 pub(crate) mod glob;
 pub(crate) mod math;
+pub(crate) mod pfb_gains;
 pub(crate) mod shapelets;
 pub(crate) mod unit_parsing;
 

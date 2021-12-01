@@ -15,6 +15,7 @@ use serde::Deserialize;
 use structopt::StructOpt;
 
 use crate::*;
+use mwa_hyperdrive_common::log;
 
 /// Shift the sources in a source list. Useful to correct for the ionosphere.
 /// The shifts must be detailed in a .json file, with source names as keys

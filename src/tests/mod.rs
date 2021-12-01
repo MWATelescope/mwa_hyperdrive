@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code for easing testing. This module should only be used during testing.
+//! Code for easing testing.
 
 pub(crate) mod calibrate;
 pub(crate) mod full_obsids;

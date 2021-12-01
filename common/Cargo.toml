@@ -5,10 +5,10 @@ edition = "2018"
 license = "MPL-2.0"
 
 [dependencies]
-atty = "0.2.14"
-chrono = "0.4.19"
-fern = { version = "0.6.0", features = ["chrono", "colored"] }
-log = "0.4.14"
+atty = "0.2.*"
+chrono = "0.4.*"
+fern = { version = "0.6.*", features = ["chrono", "colored"] }
+log = "0.4.*"
 
 [build-dependencies]
 built = { version = "0.5.*", features = ["chrono", "git2"] }

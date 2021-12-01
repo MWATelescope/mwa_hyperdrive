@@ -1,77 +1,120 @@
 # mwa_hyperdrive
 
-Calibration software for the Murchison Widefield Array (MWA) radio telescope.
+<div class="bg-gray-dark" align="center" style="background-color:#24292e">
+<img src="doc/hyperdrive.png" height="200px" alt="hyperdrive logo">
+<br/>
+<a href="https://docs.rs/crate/mwa_hyperdrive"><img src="https://docs.rs/mwa_hyperdrive/badge.svg" alt="docs"></a>
+<img src="https://github.com/MWATelescope/mwa_hyperdrive/workflows/Tests/badge.svg" alt="Cross-platform%20tests">
+</div>
 
-Currently in heavy development. Aims to provide feature parity with and exceed
-the MWA Real-Time System (RTS).
+Calibration software for the Murchison Widefield Array (MWA) radio telescope.
+Aims to provide feature parity with and exceed the MWA Real-Time System (RTS).
+
+Currently in heavy development.
 
 ## Usage
-The MWA_BEAM_FILE environment variable must be set and gives the path to the MWA
+A comprehensive use guide can be found on the [wiki](https://github.com/MWATelescope/mwa_hyperdrive/wiki), but below are some TL;DR examples.
+
+Many `hyperdrive` functions require the beam code to function. The
+`MWA_BEAM_FILE` environment variable must be set and gives the path to the MWA
 FEE beam HDF5 file. See the README for
 [`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam) for more info.
 
 ### Calibration
-Work in progress!
+<details>
+At present, only direction-independent calibration is supported, but
+direction-dependent calibration is planned.
+
+By default, only calibration solutions are written out (to a default filename):
+
+    # -d is short for --data
+
+    # Raw MWA data (MWAX or legacy)
+    hyperdrive di-calibrate -d *ch???*.fits *gpubox*.fits *.metafits -s srclist.yaml
+
+    # Measurement sets
+    hyperdrive di-calibrate -d *.ms *.metafits -s srclist.yaml
+
+    # uvfits
+    hyperdrive di-calibrate -d *.uvfits *.metafits -s srclist.yaml
+
+The output solutions file can be customised, and even multiple files of
+different types written:
+
+    # Using an alias to help keep the examples clear
+    alias HYP_CAL="hyperdrive di-calibrate -d *.ms *.metafits -s srclist.yaml"
+    # -o is short for --outputs
+    HYP_CAL -o hyp_sol.bin hyp_sol.fits
+
+The output could also be calibrated visibilities (this does not mean the
+solutions can't be written out too):
+
+    HYP_CAL -o hyp_cal.uvfits hyp_sol.bin
+
+Output calibrated visibilities can be averaged in multiples:
+
+    HYP_CAL -o hyp_cal.uvfits \
+            --output-vis-time-average 4
+            --output-vis-freq-average 2
+
+or to a target resolution:
+
+    HYP_CAL -o hyp_cal.uvfits \
+            --output-vis-time-average 8s
+            --output-vis-freq-average 80kHz
+
+</details>
 
 ### Source lists
-See the README in the `srclist` directory.
+<details>
+A number of sky-model source list utilities are available. At the time of
+writing, the following subcommands are available (output edited for clarity):
+
+    $ hyperdrive
+    hyperdrive 0.2.0-alpha6
+    ...
+
+    SUBCOMMANDS:
+        srclist-by-beam
+        srclist-convert
+        srclist-shift
+        srclist-verify
+
+Each of these subcommands have their own associated help, e.g.
+
+    hyperdrive srclist-by-beam --help
+
+Perhaps the most common operation is `srclist-by-beam`. This routine effectively
+reduces an existing source list to the top `n` brightest sources given a
+pointing and target frequencies (determined by a metafits file):
+
+    hyperdrive srclist-by-beam \
+               srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt \
+               -m *.metafits \
+               -n 1000 \
+               srclist_1000.yaml
+</details>
 
 ### Visibility Simulation
 <details>
 
-`hyperdrive` can simulate MWA visibilities from a source catalogue, similar to
-Jack Line's [`WODEN`](https://github.com/JLBLine/WODEN), although `WODEN` should
-be instead of `hyperdrive` for this purpose.
+`hyperdrive` can generate visibilities from a sky-model source list (output
+visibilities are saved to a default filename):
 
-The help text containing all possible options can be seen with:
+    hyperdrive simulate-vis \
+               -s srclist.yaml \
+               -m *.metafits
 
-    hyperdrive simulate-vis -h
+Many options are available, but perhaps some of the more interesting ones are
+being able to filter specific kinds of sky-model sources (`--filter-gaussians`
+also available):
 
-While all options can be specified as command line arguments, they may also be
-specified as `.toml` or `.json` parameter files, e.g.
-
-`hyperdrive.toml`
-```toml
-source_list = "/home/chj/wodanlist_VLA-ForA.txt"
-metafits = "/home/chj/1102865128.metafits"
-ra = 50.67
-dec = -37.20
-fine_channel_width = 80
-bands = [1,2,3]
-steps = 14
-time_res = 8.0
-```
-
-`hyperdrive.json`
-```json
-{
-    "source_list": "/home/chj/wodanlist_VLA-ForA.txt",
-    "metafits": "/home/chj/1102865128.metafits",
-    "ra": 50.67,
-    "dec": -37.20,
-    "fine_channel_width": 80,
-    "num_bands": 3,
-    "steps": 14,
-    "time_res": 8.0
-}
-```
-
-Run with:
-
-    hyperdrive simulate-vis </path/to/param/file.toml_or_json>
-
-Any command-line arguments specified alongside a parameter file will *override*
-the parameter file's settings.
-
-#### Verification
-To check if arguments could be used with `simulate-vis`, one should check with
-the dry run option:
-
-    hyperdrive simulate-vis --dry-run <args>
-
-If valid, this routine will print out the args as well as the observation
-context from the metafits file.
-
+    hyperdrive simulate-vis \
+               -s srclist.yaml \
+               -m *.metafits \
+               --filter-points \
+               --filter-shapelets \
+               -o model_gaussians.uvfits
 </details>
 
 ## Installation
@@ -152,7 +195,8 @@ Memory requirements can't be specified yet, as the code is still in development.
 
 ## Troubleshooting
 
-Run `hyperdrive` again, but this time with the debug build:
+Run `hyperdrive` again, but this time with the debug build (i.e. no `--release`
+flag):
 
     cargo build
     ./target/debug/hyperdrive <your settings here>
@@ -166,7 +210,3 @@ new GitHub issue.
     This project is called `mwa_hyperdrive` so that it cannot be confused with
     other projects involving the word `hyperdrive`, but the binary is called
     `hyperdrive` to help users' fingers.
-
-- `hyperdrive` source list format
-
-    See the README in the `mwa_hyperdrive_srclist` directory.

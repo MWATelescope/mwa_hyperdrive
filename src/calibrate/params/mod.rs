@@ -11,6 +11,8 @@
 
 pub(crate) mod error;
 pub(crate) mod freq;
+#[cfg(test)]
+mod tests;
 
 mod filenames;
 
@@ -40,6 +42,7 @@ use crate::{
     data_formats::*,
     glob::*,
     math::TileBaselineMaps,
+    pfb_gains::{PfbFlavour, DEFAULT_PFB_FLAVOUR},
     unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat},
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
@@ -91,22 +94,21 @@ pub struct CalibrateParams {
     /// ascendingly.
     pub(crate) timesteps: Vec<usize>,
 
-    /// Given two antenna numbers, get the unflagged baseline number. e.g. If
-    /// antenna 1 (i.e. the second antenna) is flagged, then the first baseline
-    /// (i.e. 0) is between antenna 0 and antenna 2.
+    /// Given two antenna indices, get the unflagged cross-correlation baseline
+    /// index. e.g. If antenna 1 (i.e. the second antenna) is flagged, then the
+    /// first baseline (i.e. 0) is between antenna 0 and antenna 2.
     ///
     /// This exists because some tiles may be flagged, so some baselines may be
     /// flagged.
-    pub(crate) tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
+    pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
 
-    /// Given an unflagged baseline number, get the tile number pair that
+    /// Given an unflagged baseline index, get the tile index pair that
     /// contribute to it. e.g. If tile 1 (i.e. the second tile) is flagged, then
-    /// the second unflagged baseline (i.e. 0) is between tile 0 and tile 2 (the
-    /// first is tile 0 and tile 0).
+    /// the first unflagged baseline (i.e. 0) is between tile 0 and tile 2.
     ///
     /// This exists because some tiles may be flagged, so some baselines may be
     /// flagged.
-    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    pub(crate) unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
     /// Are auto-correlations being included?
     pub(crate) using_autos: bool,
@@ -196,6 +198,10 @@ impl CalibrateParams {
             ignore_autos,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
+            pfb_flavour,
+            no_digital_gains,
+            no_geometric_correction,
+            no_cable_length_correction,
             output_vis_time_average,
             output_vis_freq_average,
             max_iterations,
@@ -244,8 +250,24 @@ impl CalibrateParams {
         ) {
             // Valid input for reading raw data.
             (Some(meta), Some(gpuboxes), mwafs, None, None) => {
-                let input_data =
-                    RawData::new(&meta, &gpuboxes, mwafs.as_deref(), &mut dipole_delays)?;
+                let pfb_flavour = match pfb_flavour {
+                    None => DEFAULT_PFB_FLAVOUR,
+                    Some(s) => match PfbFlavour::from_str(&s.to_lowercase()) {
+                        Err(_) => return Err(InvalidArgsError::ParsePfbFlavour(s)),
+                        Ok(p) => p,
+                    },
+                };
+
+                let input_data = RawData::new(
+                    &meta,
+                    &gpuboxes,
+                    mwafs.as_deref(),
+                    &mut dipole_delays,
+                    pfb_flavour,
+                    !no_digital_gains,
+                    !no_cable_length_correction,
+                    !no_geometric_correction,
+                )?;
 
                 // Print some high-level information.
                 let obs_context = input_data.get_obs_context();
@@ -254,6 +276,11 @@ impl CalibrateParams {
                 info!("Calibrating obsid {}", obs_context.obsid.unwrap());
                 info!("Using metafits: {}", meta.display());
                 info!("Using {} gpubox files", gpuboxes.len());
+                match pfb_flavour {
+                    PfbFlavour::None => info!("Not doing any PFB correction"),
+                    PfbFlavour::Empirical => info!("Using 'RTS empirical' PFB gains"),
+                    PfbFlavour::Levine => info!("Using 'Alan Levine' PFB gains"),
+                }
                 debug!("gpubox files: {:?}", &gpuboxes);
                 match mwafs {
                     Some(_) => info!("Using supplied mwaf flags"),
@@ -435,8 +462,53 @@ impl CalibrateParams {
         let total_num_tiles = obs_context.tile_xyzs.len();
 
         // Assign the tile flags.
+        if log_enabled!(Debug) {
+            debug!(
+                "All tile indices and names: {:?}",
+                obs_context
+                    .tile_names
+                    .iter()
+                    .enumerate()
+                    .collect::<Vec<_>>()
+            );
+        }
         let mut tile_flags: HashSet<usize> = match tile_flags {
-            Some(flags) => flags.into_iter().collect(),
+            Some(flags) => {
+                // We need to convert the strings into antenna indices. The
+                // strings are either indicies themselves or antenna names.
+                let mut tile_flags = HashSet::new();
+
+                for flag in flags {
+                    // Try to parse a naked number.
+                    match flag.trim().parse().ok() {
+                        Some(n) => {
+                            if n >= total_num_tiles {
+                                return Err(InvalidArgsError::InvalidTileFlag {
+                                    got: n,
+                                    max: total_num_tiles - 1,
+                                });
+                            }
+                            tile_flags.insert(n);
+                        }
+                        None => {
+                            // Check if this is an antenna name.
+                            match obs_context
+                                .tile_names
+                                .iter()
+                                .enumerate()
+                                .find(|(_, name)| name.to_lowercase() == flag.to_lowercase())
+                            {
+                                // If there are no matches, complain that
+                                // the user input is no good.
+                                None => return Err(InvalidArgsError::BadTileFlag(flag)),
+                                Some((i, _)) => tile_flags.insert(i),
+                            };
+                        }
+                    }
+                }
+
+                tile_flags
+            }
             None => HashSet::new(),
         };
         if !ignore_input_data_tile_flags {
@@ -529,15 +601,6 @@ impl CalibrateParams {
             fine_chan_flags,
         };
 
-        // Print out some coordinates, including their precessed counterparts
-        // (if applicable).
-        let precession_info = precess_time(
-            obs_context.phase_centre,
-            obs_context.timesteps[0],
-            array_longitude,
-            array_latitude,
-        );
-
         let mut source_list: SourceList = {
             // Handle the source list argument.
             let sl_pb: PathBuf = match source_list {
@@ -583,6 +646,14 @@ impl CalibrateParams {
         if num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
+        // Print out some coordinates, including their precessed counterparts
+        // (if applicable).
+        let precession_info = precess_time(
+            obs_context.phase_centre,
+            obs_context.timesteps[0],
+            array_longitude,
+            array_latitude,
+        );
         veto_sources(
             &mut source_list,
             precession_info
@@ -801,8 +872,10 @@ impl CalibrateParams {
             freq: freq_struct,
             time_average_factor,
             timesteps: timesteps_to_use,
-            tile_to_unflagged_baseline_map: tile_baseline_maps.tile_to_unflagged_baseline_map,
-            unflagged_baseline_to_tile_map: tile_baseline_maps.unflagged_baseline_to_tile_map,
+            tile_to_unflagged_cross_baseline_map: tile_baseline_maps
+                .tile_to_unflagged_cross_baseline_map,
+            unflagged_cross_baseline_to_tile_map: tile_baseline_maps
+                .unflagged_cross_baseline_to_tile_map,
             using_autos,
             unflagged_tile_names,
             unflagged_tile_xyzs,
@@ -818,11 +891,11 @@ impl CalibrateParams {
             #[cfg(feature = "cuda")]
             cpu_vis_gen: cpu,
         };
-        params.log_param_info(&precession_info);
+        params.log_param_info(&precession_info)?;
         Ok(params)
     }
 
-    fn log_param_info(&self, precession_info: &PrecessionInfo) {
+    fn log_param_info(&self, precession_info: &PrecessionInfo) -> Result<(), InvalidArgsError> {
         let obs_context = self.input_data.get_obs_context();
         let freq_context = self.input_data.get_freq_context();
 
@@ -836,17 +909,9 @@ impl CalibrateParams {
             precession_info.array_latitude_j2000.to_degrees()
         );
         info!(
-            "Phase centre:                  ({:.4}°, {:.4}°)",
+            "Phase centre (J2000):          ({:.4}°, {:.4}°)",
             obs_context.phase_centre.ra.to_degrees(),
             obs_context.phase_centre.dec.to_degrees()
-        );
-        let pc_j2000 = precession_info
-            .hadec_j2000
-            .to_radec(precession_info.lmst_j2000);
-        info!(
-            "Phase centre (J2000):          ({:.4}°, {:.4}°)",
-            pc_j2000.ra.to_degrees(),
-            pc_j2000.dec.to_degrees()
         );
         if let Some(pc) = obs_context.pointing_centre {
             info!(
@@ -867,18 +932,44 @@ impl CalibrateParams {
         let total_num_tiles = obs_context.tile_xyzs.len();
         info!("Total number of tiles:           {}", total_num_tiles);
         let num_unflagged_tiles = total_num_tiles - self.tile_flags.len();
-        info!("Total number of unflagged tiles: {}", num_unflagged_tiles);
+        info!("Number of unflagged tiles:       {}", num_unflagged_tiles);
         {
             // Print out the tile flags. Use a vector to sort ascendingly.
             let mut tile_flags = self.tile_flags.iter().collect::<Vec<_>>();
             tile_flags.sort_unstable();
             info!("Tile flags: {:?}", tile_flags);
         }
+        if num_unflagged_tiles == 0 {
+            return Err(InvalidArgsError::NoTiles);
+        }
+        if log_enabled!(Debug) {
+            debug!("Tile indices, names and statuses:");
+            obs_context
+                .tile_names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let flagged = self.tile_flags.contains(&i);
+                    (i, name, if flagged { "  flagged" } else { "unflagged" })
+                })
+                .for_each(|(i, name, status)| {
+                    debug!("    {:3}: {:10}: {}", i, name, status);
+                })
+        }
 
-        info!("Available timesteps: {:?}", 0..obs_context.timesteps.len());
         info!(
-            "Unflagged timesteps: {:?}",
-            obs_context.unflagged_timestep_indices
+            "{}",
+            range_or_comma_separated(
+                &obs_context.all_timestep_indices,
+                Some("Available timesteps:")
+            )
+        );
+        info!(
+            "{}",
+            range_or_comma_separated(
+                &obs_context.unflagged_timestep_indices,
+                Some("Unflagged timesteps:")
+            )
         );
         // We don't require the timesteps to be used in calibration to be
         // sequential. But if they are, it looks a bit neater to print them out
@@ -889,7 +980,10 @@ impl CalibrateParams {
         );
 
         match self.timesteps.as_slice() {
-            [] => unreachable!(), // Handled by data-reading code.
+            [] => {
+                info!("No timesteps being used!");
+                return Err(InvalidArgsError::NoTimesteps);
+            }
             [t] => info!(
                 "Only timestep (GPS): {:.2}",
                 epoch_as_gps_seconds(obs_context.timesteps[*t])
@@ -932,10 +1026,10 @@ impl CalibrateParams {
             unflagged_fine_chans.sort_unstable();
             match unflagged_fine_chans.as_slice() {
                 [] => unreachable!(), // Handled by data-reading code.
-                [f] => info!("Only unflagged fine-channel: {}", f),
+                [f] => debug!("Only unflagged fine-channel: {}", f),
                 [f_0, .., f_n] => {
-                    info!("First unflagged fine-channel: {}", f_0);
-                    info!("Last unflagged fine-channel:  {}", f_n);
+                    debug!("First unflagged fine-channel: {}", f_0);
+                    debug!("Last unflagged fine-channel:  {}", f_n);
                 }
             }
         }
@@ -949,7 +1043,7 @@ impl CalibrateParams {
             debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
         }
         match self.freq.unflagged_fine_chan_freqs.as_slice() {
-            [] => unreachable!(), // Handled by data-reading code.
+            [] => return Err(InvalidArgsError::NoChannels),
             [f] => info!("Only unflagged fine-channel frequency: {:.2} MHz", f / 1e6),
             [f_0, .., f_n] => {
                 info!(
@@ -1040,6 +1134,8 @@ impl CalibrateParams {
                 );
             }
         }
+
+        Ok(())
     }
 
     pub(crate) fn get_num_timeblocks(&self) -> usize {
@@ -1051,9 +1147,9 @@ impl CalibrateParams {
             as _
     }
 
-    /// The number of baselines, including auto-correlation "baselines" if these
-    /// are included.
-    pub(crate) fn get_num_baselines(&self) -> usize {
+    /// The number of unflagged baselines, including auto-correlation
+    /// "baselines" if these are included.
+    pub(crate) fn get_num_unflagged_baselines(&self) -> usize {
         let n = self.unflagged_tile_xyzs.len();
         if self.using_autos {
             (n * (n + 1)) / 2
@@ -1105,7 +1201,14 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
     }
 
     if is_sequential {
-        let suffix = format!("{:?}", (collection[0]..collection.last().unwrap() + 1));
+        let suffix = if collection.len() == 1 {
+            format!("[{}]", collection[0])
+        } else {
+            format!(
+                "[{:?})",
+                (*collection.first().unwrap()..*collection.last().unwrap() + 1)
+            )
+        };
         if let Some(p) = prefix {
             format!("{} {}", p, suffix)
         } else {
@@ -1118,7 +1221,7 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
             .collect::<Vec<_>>()
             .join(", ");
         if let Some(p) = prefix {
-            format!("{} {}", p, suffix)
+            format!("{} [{}]", p, suffix)
         } else {
             suffix
         }
@@ -1184,210 +1287,4 @@ fn can_write_to_file<T: AsRef<Path>>(file: T) -> Result<(), InvalidArgsError> {
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tests::{full_obsids::*, reduced_obsids::*, *};
-
-    #[test]
-    fn test_get_flagged_baselines_set() {
-        let total_num_tiles = 128;
-        let mut tile_flags = HashSet::new();
-        let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
-        assert!(flagged_baselines.is_empty());
-
-        tile_flags.insert(127);
-        let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
-        assert_eq!(flagged_baselines.len(), 127);
-        assert!(flagged_baselines.contains(&126));
-        assert!(flagged_baselines.contains(&252));
-        assert!(flagged_baselines.contains(&8127));
-    }
-
-    // #[test]
-    // fn test_new_params() {
-    //     let args = get_1090008640_smallest();
-    //     let params = match args.into_params() {
-    //         Ok(p) => p,
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     // The default time resolution should be 2.0s, as per the metafits.
-    //     assert_abs_diff_eq!(params.time_res.unwrap(), 2.0);
-    //     // The default freq resolution should be 40kHz, as per the metafits.
-    //     assert_abs_diff_eq!(params.freq.res.unwrap(), 40e3, epsilon = 1e-10);
-    // }
-
-    // #[test]
-    // fn test_new_params_time_averaging() {
-    //     // The native time resolution is 2.0s.
-    //     let mut args = get_1090008640_smallest();
-    //     // 4.0 should be a multiple of 2.0s
-    //     args.time_res = Some(4.0);
-    //     let params = match args.into_params() {
-    //         Ok(p) => p,
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     assert_abs_diff_eq!(params.time_res.unwrap(), 4.0);
-
-    //     let mut args = get_1090008640();
-    //     // 8.0 should be a multiple of 2.0s
-    //     args.time_res = Some(8.0);
-    //     let params = match args.into_params() {
-    //         Ok(p) => p,
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     assert_abs_diff_eq!(params.time_res.unwrap(), 8.0);
-    // }
-
-    // #[test]
-    // fn test_new_params_time_averaging_fail() {
-    //     // The native time resolution is 2.0s.
-    //     let mut args = get_1090008640_smallest();
-    //     // 2.01 is not a multiple of 2.0s
-    //     args.time_res = Some(2.01);
-    //     let result = args.into_params();
-    //     assert!(
-    //         result.is_err(),
-    //         "Expected CalibrateParams to have not been successfully created"
-    //     );
-
-    //     let mut args = get_1090008640_smallest();
-    //     // 3.0 is not a multiple of 2.0s
-    //     args.time_res = Some(3.0);
-    //     let result = args.into_params();
-    //     assert!(
-    //         result.is_err(),
-    //         "Expected CalibrateParams to have not been successfully created"
-    //     );
-    // }
-
-    // #[test]
-    // fn test_new_params_freq_averaging() {
-    //     // The native freq. resolution is 40kHz.
-    //     let mut args = get_1090008640_smallest();
-    //     // 80e3 should be a multiple of 40kHz
-    //     args.freq_res = Some(80e3);
-    //     let params = match args.into_params() {
-    //         Ok(p) => p,
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
-
-    //     let mut args = get_1090008640_smallest();
-    //     // 200e3 should be a multiple of 40kHz
-    //     args.freq_res = Some(200e3);
-    //     let params = match args.into_params() {
-    //         Ok(p) => p,
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     assert_abs_diff_eq!(params.freq.res, 200e3, epsilon = 1e-10);
-    // }
-
-    // #[test]
-    // fn test_new_params_freq_averaging_fail() {
-    //     // The native freq. resolution is 40kHz.
-    //     let mut args = get_1090008640_smallest();
-    //     // 10e3 is not a multiple of 40kHz
-    //     args.freq_res = Some(10e3);
-    //     let result = args.into_params();
-    //     assert!(
-    //         result.is_err(),
-    //         "Expected CalibrateParams to have not been successfully created"
-    //     );
-
-    //     let mut args = get_1090008640_smallest();
-
-    //     // 79e3 is not a multiple of 40kHz
-    //     args.freq_res = Some(79e3);
-    //     let result = args.into_params();
-    //     assert!(
-    //         result.is_err(),
-    //         "Expected CalibrateParams to have not been successfully created"
-    //     );
-    // }
-
-    #[test]
-    fn test_new_params_tile_flags() {
-        // 1090008640 has no flagged tiles in its metafits.
-        let mut args = get_1090008640_smallest();
-        // Manually flag antennas 1, 2 and 3.
-        args.tile_flags = Some(vec![1, 2, 3]);
-        let params = match args.into_params() {
-            Ok(p) => p,
-            Err(e) => panic!("{}", e),
-        };
-        assert_eq!(params.tile_flags.len(), 3);
-        assert!(params.tile_flags.contains(&1));
-        assert!(params.tile_flags.contains(&2));
-        assert!(params.tile_flags.contains(&3));
-        assert_eq!(params.unflagged_baseline_to_tile_map.len(), 7750);
-        assert_eq!(params.tile_to_unflagged_baseline_map.len(), 7750);
-
-        assert_eq!(params.unflagged_baseline_to_tile_map[&0], (0, 4));
-        assert_eq!(params.unflagged_baseline_to_tile_map[&1], (0, 5));
-        assert_eq!(params.unflagged_baseline_to_tile_map[&2], (0, 6));
-        assert_eq!(params.unflagged_baseline_to_tile_map[&3], (0, 7));
-
-        assert_eq!(params.tile_to_unflagged_baseline_map[&(0, 4)], 0);
-        assert_eq!(params.tile_to_unflagged_baseline_map[&(0, 5)], 1);
-        assert_eq!(params.tile_to_unflagged_baseline_map[&(0, 6)], 2);
-        assert_eq!(params.tile_to_unflagged_baseline_map[&(0, 7)], 3);
-    }
-
-    // The following tests use full MWA data.
-
-    #[test]
-    #[serial]
-    #[ignore]
-    fn test_new_params_real_data() {
-        let args = get_1065880128();
-        let result = args.into_params();
-        assert!(
-            result.is_ok(),
-            "Expected CalibrateParams to have been successfully created"
-        );
-    }
-
-    // #[test]
-    // #[serial]
-    // #[ignore]
-    // fn test_lst_from_timestep_native_real() {
-    //     let args = get_1065880128();
-    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-    //     {
-    //         Ok(c) => c,
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
-    //     let new_lst = lst_from_timestep(0, &context, time_res);
-    //     // gpstime 1065880126.25
-    //     assert_abs_diff_eq!(new_lst, 6.074695614533638, epsilon = 1e-10);
-
-    //     let new_lst = lst_from_timestep(1, &context, time_res);
-    //     // gpstime 1065880126.75
-    //     assert_abs_diff_eq!(new_lst, 6.074732075112903, epsilon = 1e-10);
-    // }
-
-    // #[test]
-    // #[serial]
-    // #[ignore]
-    // fn test_lst_from_timestep_averaged_real() {
-    //     let args = get_1065880128();
-    //     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-    //     {
-    //         Ok(c) => c,
-    //         Err(e) => panic!("{}", e),
-    //     };
-    //     // The native time res. is 0.5s, let's make our target 2s here.
-    //     let time_res = 2.0;
-    //     let new_lst = lst_from_timestep(0, &context, time_res);
-    //     // gpstime 1065880127
-    //     assert_abs_diff_eq!(new_lst, 6.074750305402534, epsilon = 1e-10);
-
-    //     let new_lst = lst_from_timestep(1, &context, time_res);
-    //     // gpstime 1065880129
-    //     assert_abs_diff_eq!(new_lst, 6.074896147719591, epsilon = 1e-10);
-    // }
 }

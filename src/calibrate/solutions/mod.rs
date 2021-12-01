@@ -263,19 +263,13 @@ impl CalibrationSolutions {
                             // This is a Jones matrix of all NaN.
                             Jones::default().inv()
                         } else {
-                            di_jones_per_time[[unflagged_tile_index, unflagged_chan_index]].inv()
+                            di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)].inv()
                         };
 
                         LittleEndian::write_f64_into(
                             &[
-                                j[0].re as _,
-                                j[0].im as _,
-                                j[1].re as _,
-                                j[1].im as _,
-                                j[2].re as _,
-                                j[2].im as _,
-                                j[3].re as _,
-                                j[3].im as _,
+                                j[0].re, j[0].im, j[1].re, j[1].im, j[2].re, j[2].im, j[3].re,
+                                j[3].im,
                             ],
                             &mut buf,
                         );

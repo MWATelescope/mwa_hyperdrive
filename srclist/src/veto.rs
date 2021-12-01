@@ -8,17 +8,18 @@
 //! its brightness too severely (veto), or we request a certain number of
 //! sources (say N) and there are more than N sources in the source list.
 
-use log::{debug, trace};
+use log::{debug, trace, log_enabled, Level::Trace};
 use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
 
-use crate::{constants::*, SourceList, FluxDensity};
+use crate::{FluxDensity, SourceList, constants::*};
 use mwa_rust_core::{RADec, Jones};
 use mwa_hyperdrive_beam::{BeamError, Beam};
+use mwa_hyperdrive_common::log;
 
 #[derive(Debug)]
-struct RankedSource {
-    name: String,
+struct RankedSource<'a> {
+    name: &'a String,
     apparent_fd: f64,
 }
 
@@ -57,7 +58,8 @@ pub fn veto_sources(
 ) -> Result<Option<String>, VetoError> {
     let dist_cutoff = source_dist_cutoff_deg.to_radians();
 
-    let (vetoed_sources, mut not_vetoed_sources): (Vec<Result<String, VetoError>>, Vec<RankedSource>) = source_list
+    // TODO: This step is relatively expensive!
+    let (vetoed_sources, mut not_vetoed_sources): (Vec<Result<&String, VetoError>>, Vec<RankedSource>) = source_list
         .par_iter()
         .partition_map(|(source_name, source)| {
             // For this source, work out its smallest flux density at any of the
@@ -71,18 +73,17 @@ pub fn veto_sources(
             for comp in &source.components {
                 let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                 if azel.el.to_degrees() < ELEVATION_LIMIT {
-                    trace!("A component's elevation ({}°, source {}) was below the limit ({}°)",
-                    azel.el.to_degrees(),
-                    source_name,
-                    ELEVATION_LIMIT);
-                    return Either::Left(Ok(source_name.clone()));
+                    if log_enabled!(Trace) {
+                        trace!("A component's elevation ({}°, source {}) was below the limit ({}°)", azel.el.to_degrees(), source_name, ELEVATION_LIMIT);
+                    }
+                    return Either::Left(Ok(source_name));
                 }
                 let separation = comp.radec.separation(phase_centre);
                 if separation > dist_cutoff {
-                    trace!("A component (source {}) was too far from the phase centre (separation {}°)",
-                    source_name,
-                    separation);
-                    return Either::Left(Ok(source_name.clone()));
+                    if log_enabled!(Trace) {
+                        trace!("A component (source {}) was too far from the phase centre (separation {}°)", source_name, separation);
+                    }
+                    return Either::Left(Ok(source_name));
                 }
                 azels.push(azel);
             }
@@ -114,20 +115,22 @@ pub fn veto_sources(
                 }
                 
                 if fd < veto_threshold {
-                    trace!(
-                        "Source {}'s XX+YY brightness ({} Jy) is less than the veto threshold ({} Jy)",
-                        source_name,
-                        fd,
-                        veto_threshold
-                    );
-                    return Either::Left(Ok(source_name.clone()));
+                    if log_enabled!(Trace) {
+                        trace!(
+                            "Source {}'s XX+YY brightness ({} Jy) is less than the veto threshold ({} Jy)",
+                            source_name,
+                            fd,
+                            veto_threshold
+                        );
+                    }
+                    return Either::Left(Ok(source_name));
                 }
                 smallest_fd = fd.min(smallest_fd);
             }
 
             // If we got this far, the source should not be vetoed.
             Either::Right(RankedSource {
-                name: source_name.clone(),
+                name: source_name,
                 apparent_fd: smallest_fd,
             })
         });
@@ -151,6 +154,9 @@ pub fn veto_sources(
         }
     }
 
+    let first_name = not_vetoed_sources.first().map(|rs| rs.name.clone());
+    drop(not_vetoed_sources);
+
     debug!(
         "{} sources were vetoed from the source list",
         vetoed_sources.len()
@@ -160,8 +166,12 @@ pub fn veto_sources(
         vetoed_sources.len(),
         vetoed_sources
     );
-    for name in &vetoed_sources {
-        source_list.remove(name);
+
+    // TODO: Please, someone, help me!
+    let asdf: Vec<String> = vetoed_sources.iter().map(|s| s.to_owned().to_owned()).collect();
+    drop(vetoed_sources);
+    for name in asdf {
+        source_list.remove(&name);
     }
 
     // If there are fewer sources than requested after vetoing, we need to bail
@@ -175,7 +185,7 @@ pub fn veto_sources(
         }
     }
 
-    Ok(not_vetoed_sources.first().map(|rs| rs.name.clone()))
+    Ok(first_name)
 }
 
 /// Convert a Stokes flux densities into instrumental flux densities, and
@@ -205,250 +215,212 @@ pub enum VetoError {
     Beam(#[from] BeamError),
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::precession::get_lmst;
-//     use crate::tests::*;
-//     use crate::{
-//         read::read_source_list_file, ComponentList, ComponentType, Source, SourceComponent,
-//     };
-//     use mwa_rust_core::constants::MWA_LONG_RAD;
-//     use reduced_obsids::get_1090008640_smallest;
+#[cfg(test)]
+mod tests {
+    use std::ops::Deref;
 
-//     #[test]
-//     fn test_beam_attenuated_flux_density_no_beam() {
-//         let mut args = get_1090008640_smallest();
-//         args.no_beam = true;
-//         let params = args.into_params().unwrap();
-//         let obs_context = params.input_data.get_obs_context();
-//         let phase = &obs_context.phase_centre;
-//         let lmst = get_lmst(obs_context.timesteps[0], MWA_LONG_RAD);
-//         let phase_azel = phase.to_hadec(lmst).to_azel_mwa();
+    use mwa_hyperdrive_beam::{Delays, create_fee_beam_object, create_no_beam_object};
+    use mwa_rust_core::{AzEl, constants::MWA_LAT_RAD};
+    use approx::assert_abs_diff_eq;
+    use serial_test::*;
 
-//         let jones_pointing_centre = params
-//             .beam
-//             .calc_jones(&phase_azel, 180e6 as _, &[1.0; 16])
-//             .unwrap();
-//         let radec_null =
-//             RADec::new_degrees(phase.ra.to_degrees() + 80.0, phase.dec.to_degrees() + 80.0);
-//         assert!(radec_null.dec.to_degrees() > -90.0);
-//         assert!(radec_null.dec.to_degrees() < 90.0);
-//         let azel_null = radec_null.to_hadec(lmst).to_azel_mwa();
-//         let jones_null = params
-//             .beam
-//             .calc_jones(&azel_null, 180e6 as _, &[1.0; 16])
-//             .unwrap();
-//         let fd = FluxDensity {
-//             freq: 180e6,
-//             i: 1.0,
-//             q: 0.0,
-//             u: 0.0,
-//             v: 0.0,
-//         };
-//         let bafd_pc = get_beam_attenuated_flux_density(&fd, &jones_pointing_centre);
-//         assert_abs_diff_eq!(bafd_pc, 1.9822303442965272, epsilon = 1e-10);
+    use super::*;
+    use crate::{ComponentType, FluxDensityType, Source, SourceComponent, read::read_source_list_file};
 
-//         let bafd_null = get_beam_attenuated_flux_density(&fd, &jones_null);
-//         assert_abs_diff_eq!(bafd_null, 0.0000000005317170873153842, epsilon = 1e-10);
-//     }
+    #[test]
+    fn test_beam_attenuated_flux_density_no_beam() {
+        let beam = create_no_beam_object(1);
+        let jones_pointing_centre = beam
+            .calc_jones(AzEl::new_degrees(0.0, 90.0), 180e6, 0)
+            .unwrap();
+        let jones_null = beam
+            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, 0)
+            .unwrap();
+        let fd = FluxDensity {
+            freq: 180e6,
+            i: 1.0,
+            q: 0.0,
+            u: 0.0,
+            v: 0.0,
+        };
+        let bafd_pc = get_beam_attenuated_flux_density(&fd, jones_pointing_centre);
+        assert_abs_diff_eq!(bafd_pc, 2.0);
 
-//     #[test]
-//     #[serial]
-//     fn test_beam_attenuated_flux_density_fee_beam() {
-//         let mut args = get_1090008640_smallest();
-//         args.no_beam = false;
-//         let params = args.into_params().unwrap();
-//         let obs_context = params.input_data.get_obs_context();
-//         let phase = &obs_context.phase_centre;
-//         let lmst = get_lmst(obs_context.timesteps[0], MWA_LONG_RAD);
-//         let phase_azel = phase.to_hadec(lmst).to_azel_mwa();
+        let bafd_null = get_beam_attenuated_flux_density(&fd, jones_null);
+        assert_abs_diff_eq!(bafd_null, 2.0);
+    }
 
-//         let jones_pointing_centre = params
-//             .beam
-//             .calc_jones(&phase_azel, 180e6 as _, &[1.0; 16])
-//             .unwrap();
-//         let radec_null =
-//             RADec::new_degrees(phase.ra.to_degrees() + 80.0, phase.dec.to_degrees() + 80.0);
-//         assert!(radec_null.dec.to_degrees() > -90.0);
-//         assert!(radec_null.dec.to_degrees() < 90.0);
-//         let azel_null = radec_null.to_hadec(lmst).to_azel_mwa();
-//         let jones_null = params
-//             .beam
-//             .calc_jones(&azel_null, 180e6 as _, &[1.0; 16])
-//             .unwrap();
-//         let fd = FluxDensity {
-//             freq: 180e6,
-//             i: 1.0,
-//             q: 0.0,
-//             u: 0.0,
-//             v: 0.0,
-//         };
-//         let bafd_pc = get_beam_attenuated_flux_density(&fd, &jones_pointing_centre);
-//         assert_abs_diff_eq!(bafd_pc, 1.9822303442965272, epsilon = 1e-10);
+    #[test]
+    #[serial]
+    fn test_beam_attenuated_flux_density_fee_beam() {
+        let beam_file: Option<&str> = None;
+        let beam = create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let jones_pointing_centre = beam
+            .calc_jones(AzEl::new_degrees(0.0, 89.0), 180e6, 0)
+            .unwrap();
+        let jones_null = beam
+            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, 0)
+            .unwrap();
+        let fd = FluxDensity {
+            freq: 180e6,
+            i: 1.0,
+            q: 0.0,
+            u: 0.0,
+            v: 0.0,
+        };
+        let bafd_pc = get_beam_attenuated_flux_density(&fd, jones_pointing_centre);
+        assert_abs_diff_eq!(bafd_pc, 1.9857884953095866);
 
-//         let bafd_null = get_beam_attenuated_flux_density(&fd, &jones_null);
-//         assert_abs_diff_eq!(bafd_null, 0.0000000005317170873153842, epsilon = 1e-10);
-//     }
+        let bafd_null = get_beam_attenuated_flux_density(&fd, jones_null);
+        assert_abs_diff_eq!(bafd_null, 0.002789795062384414);
+    }
 
-//     // #[test]
-//     // #[serial]
-//     // fn veto() {
-//     //     let mut args = get_1090008640_smallest();
-//     //     args.no_beam = false;
-//     //     let (source_list, _) = read_source_list_file(args.source_list.unwrap(), None).unwrap();
-//     //     let mut params = args.into_params().unwrap();
-//     //     let obs_context = params.input_data.get_obs_context();
-//     //     let lmst = get_lmst(obs_context.timesteps[0], MWA_LONG_RAD);
+    #[test]
+    #[serial]
+    fn veto() {
+        let beam_file: Option<&str> = None;
+        let beam = create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let (mut source_list, _) = read_source_list_file("../test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
-//     //     // For testing's sake, keep only the following bright sources.
-//     //     let sources = &[
-//     //         "J002549-260211",
-//     //         "J004616-420739",
-//     //         "J233426-412520",
-//     //         "J235701-344532",
-//     //     ];
-//     //     let keys: Vec<String> = source_list.keys().cloned().collect();
-//     //     for source_name in keys {
-//     //         if !sources.contains(&source_name.as_str()) {
-//     //             source_list.remove(source_name.as_str());
-//     //         }
-//     //     }
+        // For testing's sake, keep only the following bright sources.
+        let sources = &[
+            "J002549-260211",
+            "J004616-420739",
+            "J233426-412520",
+            "J235701-344532",
+        ];
+        let keys: Vec<String> = source_list.keys().cloned().collect();
+        for source_name in keys {
+            if !sources.contains(&source_name.as_str()) {
+                source_list.remove(source_name.as_str());
+            }
+        }
 
-//     //     // Add some sources that are in beam nulls. Despite being very bright,
-//     //     // they should be vetoed.
-//     //     source_list.insert(
-//     //         "bad_source1".to_string(),
-//     //         Source {
-//     //             components: vec![SourceComponent {
-//     //                 radec: RADec::new_degrees(330.0, -80.0),
-//     //                 comp_type: ComponentType::Point,
-//     //                 flux_type: FluxDensityType::PowerLaw {
-//     //                     si: -0.8,
-//     //                     fd: FluxDensity {
-//     //                         freq: 180e6,
-//     //                         i: 10.0,
-//     //                         q: 0.0,
-//     //                         u: 0.0,
-//     //                         v: 0.0,
-//     //                     },
-//     //                 },
-//     //             }],
-//     //         },
-//     //     );
-//     //     source_list.insert(
-//     //         "bad_source2".to_string(),
-//     //         Source {
-//     //             components: vec![SourceComponent {
-//     //                 radec: RADec::new_degrees(30.0, -80.0),
-//     //                 comp_type: ComponentType::Point,
-//     //                 flux_type: FluxDensityType::PowerLaw {
-//     //                     si: -0.8,
-//     //                     fd: FluxDensity {
-//     //                         freq: 180e6,
-//     //                         i: 10.0,
-//     //                         q: 0.0,
-//     //                         u: 0.0,
-//     //                         v: 0.0,
-//     //                     },
-//     //                 },
-//     //             }],
-//     //         },
-//     //     );
-//     //     source_list.insert(
-//     //         "bad_source3".to_string(),
-//     //         Source {
-//     //             components: vec![SourceComponent {
-//     //                 radec: RADec::new_degrees(285.0, 40.0),
-//     //                 comp_type: ComponentType::Point,
-//     //                 flux_type: FluxDensityType::PowerLaw {
-//     //                     si: -0.8,
-//     //                     fd: FluxDensity {
-//     //                         freq: 180e6,
-//     //                         i: 10.0,
-//     //                         q: 0.0,
-//     //                         u: 0.0,
-//     //                         v: 0.0,
-//     //                     },
-//     //                 },
-//     //             }],
-//     //         },
-//     //     );
+        // Add some sources that are in beam nulls. Despite being very bright,
+        // they should be vetoed.
+        source_list.insert(
+            "bad_source1".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(330.0, -80.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
+        source_list.insert(
+            "bad_source2".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(30.0, -80.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
+        source_list.insert(
+            "bad_source3".to_string(),
+            Source {
+                components: vec![SourceComponent {
+                    radec: RADec::new_degrees(285.0, 40.0),
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: -0.8,
+                        fd: FluxDensity {
+                            freq: 180e6,
+                            i: 10.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }],
+            },
+        );
 
-//     //     // Replace the sky model components in params.
-//     //     params.sky_model_comps = ComponentList::new(
-//     //         source_list,
-//     //         &params.freq.unflagged_fine_chan_freqs,
-//     //         params.get_obs_context().phase_centre,
-//     //     )
-//     //     .unwrap();
+        let phase_centre = RADec::new_degrees(0.0, -27.0);
+        let result = veto_sources(
+            &mut source_list,
+            phase_centre,
+            0.0,
+            MWA_LAT_RAD,
+            &[167.68e6, 197.12e6],
+            beam.deref(),
+            None,
+            180.0,
+            0.1,
+        );
+        assert!(result.is_ok());
+        result.unwrap();
 
-//     //     let result = veto_sources(
-//     //         &mut params.source_list,
-//     //         &obs_context.phase_centre,
-//     //         lmst,
-//     //         MWA_LAT_RAD,
-//     //         &params.input_data.get_freq_context().coarse_chan_freqs,
-//     //         params.beam.deref(),
-//     //         None,
-//     //         180.0,
-//     //         20.0,
-//     //     );
-//     //     assert!(result.is_ok());
-//     //     result.unwrap();
-//     //     // Only the first four are kept.
-//     //     assert_eq!(
-//     //         params.source_list.len(),
-//     //         4,
-//     //         "Expected only five sources to not get vetoed: {:#?}",
-//     //         params.source_list.keys()
-//     //     );
-//     // }
+        // Only the first four sources are kept.
+        assert_eq!(
+            source_list.len(),
+            4,
+            "Expected only five sources to not get vetoed: {:#?}",
+            source_list.keys()
+        );
+    }
 
-//     // #[test]
-//     // #[serial]
-//     // fn top_n_sources() {
-//     //     let mut args = get_1090008640_smallest();
-//     //     args.no_beam = false;
-//     //     let mut params = args.into_params().unwrap();
-//     //     let obs_context = params.input_data.get_obs_context();
-//     //     let lmst = get_lmst(obs_context.timesteps[0], MWA_LONG_RAD);
+    #[test]
+    fn top_n_sources() {
+        let beam = create_no_beam_object(1);
+        let (mut source_list, _) = read_source_list_file("../test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
-//     //     // For testing's sake, keep only the following sources.
-//     //     let sources = &[
-//     //         "J000042-342358",
-//     //         "J000045-272248",
-//     //         "J000105-165921",
-//     //         "J000143-305731",
-//     //         "J000217-253912",
-//     //         "J000245-302825",
-//     //     ];
-//     //     let keys: Vec<String> = params.source_list.keys().cloned().collect();
-//     //     for source_name in keys {
-//     //         if !sources.contains(&source_name.as_str()) {
-//     //             params.source_list.remove(source_name.as_str());
-//     //         }
-//     //     }
+        // For testing's sake, keep only the following sources.
+        let sources = &[
+            "J000042-342358",
+            "J000045-272248",
+            "J000105-165921",
+            "J000143-305731",
+            "J000217-253912",
+            "J000245-302825",
+        ];
+        let keys: Vec<String> = source_list.keys().cloned().collect();
+        for source_name in keys {
+            if !sources.contains(&source_name.as_str()) {
+                source_list.remove(source_name.as_str());
+            }
+        }
 
-//     //     let result = veto_sources(
-//     //         &mut params.source_list,
-//     //         &obs_context.phase_centre,
-//     //         lmst,
-//     //         MWA_LAT_RAD,
-//     //         &params.input_data.get_freq_context().coarse_chan_freqs,
-//     //         params.beam.deref(),
-//     //         Some(3),
-//     //         180.0,
-//     //         0.1,
-//     //     );
-//     //     assert!(result.is_ok(), "{:?}", result.unwrap_err());
-//     //     result.unwrap();
-//     //     for &name in &["J000042-342358", "J000105-165921", "J000143-305731"] {
-//     //         assert!(
-//     //             &params.source_list.contains_key(name),
-//     //             "Expected to find {} in the source list after vetoing",
-//     //             name
-//     //         );
-//     //     }
-//     // }
-// }
+        let phase_centre = RADec::new_degrees(0.0, -27.0);
+        let result = veto_sources(
+            &mut source_list,
+            phase_centre,
+            0.0,
+            MWA_LAT_RAD,
+            &[167.68e6, 197.12e6],
+            beam.deref(),
+            Some(3),
+            180.0,
+            0.1,
+        );
+        assert!(result.is_ok(), "{:?}", result.unwrap_err());
+        result.unwrap();
+        for &name in &["J000042-342358", "J000105-165921", "J000143-305731"] {
+            assert!(
+                &source_list.contains_key(name),
+                "Expected to find {} in the source list after vetoing",
+                name
+            );
+        }
+    }
+}

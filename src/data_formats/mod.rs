@@ -43,6 +43,20 @@ pub(crate) trait InputData: Sync + Send {
 
     fn get_input_data_type(&self) -> VisInputType;
 
+    /// Read cross- and auto-correlation visibilities for all frequencies and
+    /// baselines in a single timestep into corresponding arrays.
+    fn read_crosses_and_autos(
+        &self,
+        cross_data_array: ArrayViewMut2<Jones<f32>>,
+        cross_weights_array: ArrayViewMut2<f32>,
+        auto_data_array: ArrayViewMut2<Jones<f32>>,
+        auto_weights_array: ArrayViewMut2<f32>,
+        timestep: usize,
+        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        flagged_tiles: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(), ReadInputDataError>;
+
     /// Read cross-correlation visibilities for all frequencies and baselines in
     /// a single timestep into the `data_array` and similar for the weights.
     fn read_crosses(

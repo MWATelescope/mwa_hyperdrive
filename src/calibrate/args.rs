@@ -16,20 +16,23 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use log::debug;
+use mwa_rust_core::constants::{MWA_LAT_RAD, MWA_LONG_RAD};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
 
-use crate::calibrate::{
-    params::{CalibrateParams, InvalidArgsError},
-    solutions::CalSolutionType,
+use crate::{
+    calibrate::{
+        params::{CalibrateParams, InvalidArgsError},
+        solutions::CalSolutionType,
+    },
+    data_formats::VisOutputType,
+    pfb_gains::{DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
+    *,
 };
-use crate::data_formats::VisOutputType;
-use crate::*;
 use mwa_hyperdrive_srclist::{SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP};
-use mwa_rust_core::constants::{MWA_LAT_RAD, MWA_LONG_RAD};
 
 #[derive(Debug, Display, EnumIter, EnumString)]
 enum ArgFileTypes {
@@ -52,24 +55,25 @@ lazy_static::lazy_static! {
     static ref MODEL_FILENAME_HELP: String = format!("The path to the file where the generated sky-model visibilities are written. If this argument isn't supplied, then no file is written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
 
     static ref SOURCE_LIST_TYPE_HELP: String =
-        format!(r#"The type of sky-model source list. Valid types are: {}
+        format!("The type of sky-model source list. Valid types are: {}. If not specified, all types are attempted", *mwa_hyperdrive_srclist::SOURCE_LIST_TYPES_COMMA_SEPARATED);
 
-If not specified, the program will try all types"#, *mwa_hyperdrive_srclist::SOURCE_LIST_TYPES_COMMA_SEPARATED);
+    static ref PFB_FLAVOUR_HELP: String =
+        format!("The 'flavour' of poly-phase filter bank corrections applied to raw MWA data. The default is '{}'. Valid flavours are: {}", DEFAULT_PFB_FLAVOUR, *PFB_FLAVOURS);
 
     static ref MAX_ITERATIONS_HELP: String =
         format!("The maximum number of times to iterate when performing \"MitchCal\". Default: {}", DEFAULT_MAX_ITERATIONS);
 
     static ref STOP_THRESHOLD_HELP: String =
-        format!("The threshold at which we stop convergence when performing \"MitchCal\". Default: {:e}", DEFAULT_STOP_THRESHOLD);
+        format!("The threshold at which we stop iterating when performing \"MitchCal\". Default: {:e}", DEFAULT_STOP_THRESHOLD);
 
     static ref MIN_THRESHOLD_HELP: String =
-        format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Reaching this threshold counts as converged, but iteration will continue until max iterations or the stop threshold is reached. Default: {:e}", DEFAULT_MIN_THRESHOLD);
+        format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Even when this threshold is exceeded, iteration will continue until max iterations or the stop threshold is reached. Default: {:e}", DEFAULT_MIN_THRESHOLD);
 
     static ref ARRAY_LONGITUDE_HELP: String =
-        format!("The Earth longitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LONG_RAD.to_degrees());
+        format!("The Earth longitude of the instrumental array [degrees]. Default (MWA): {}°", MWA_LONG_RAD.to_degrees());
 
     static ref ARRAY_LATITUDE_HELP: String =
-        format!("The Earth latitude of the instrumental array [degrees]. Default (MWA): {}", MWA_LAT_RAD.to_degrees());
+        format!("The Earth latitude of the instrumental array [degrees]. Default (MWA): {}°", MWA_LAT_RAD.to_degrees());
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -77,7 +81,7 @@ If not specified, the program will try all types"#, *mwa_hyperdrive_srclist::SOU
 //
 // These are digested by hyperdrive and used to eventually populate
 // [CalibrateParams], which is used throughout hyperdrive's calibration code.
-#[derive(StructOpt, Debug, Default, Serialize, Deserialize)]
+#[derive(StructOpt, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CalibrateUserArgs {
     /// Paths to input data files to be calibrated. These can include a metafits
     /// file, gpubox files, mwaf files, a measurement set and/or uvfits files.
@@ -98,11 +102,9 @@ pub struct CalibrateUserArgs {
     pub source_list_type: Option<String>,
 
     /// The number of sources to use in the source list. The default is to use
-    /// them all.
-    ///
-    /// Example: If 1000 sources are specified here, then the top 1000 sources
-    /// are used (based on their flux densities after the beam attenuation)
-    /// within the specified source distance cutoff.
+    /// them all. Example: If 1000 sources are specified here, then the top 1000
+    /// sources are used (based on their flux densities after the beam
+    /// attenuation) within the specified source distance cutoff.
     #[structopt(short, long)]
     pub num_sources: Option<usize>,
 
@@ -132,10 +134,9 @@ pub struct CalibrateUserArgs {
     pub no_beam: bool,
 
     /// The number of time samples to average together before calibrating. If
-    /// this is 0, then all data is averaged together. Default: 0
-    ///
-    /// e.g. If the input data is in 0.5s resolution and this variable was 4,
-    /// then we average 2s worth of data together during calibration.
+    /// this is 0, then all data are averaged together. Default: 0. e.g. If the
+    /// input data is in 0.5s resolution and this variable was 4, then we
+    /// produce calibration solutions for every 2s worth of data.
     #[structopt(short, long)]
     pub time_average_factor: Option<usize>,
 
@@ -153,11 +154,11 @@ pub struct CalibrateUserArgs {
     #[structopt(long)]
     pub timesteps: Option<Vec<usize>>,
 
-    /// Additional tiles to be flagged. These values correspond to values in the
-    /// "Antenna" column of HDU 2 in the metafits file, e.g. 0 3 127. These
-    /// values should also be the same as FHD tile flags.
+    /// Additional tiles to be flagged. These values correspond to either the
+    /// values in the "Antenna" column of HDU 2 in the metafits file (e.g. 0 3
+    /// 127), or the "TileName" (e.g. Tile011).
     #[structopt(long)]
-    pub tile_flags: Option<Vec<usize>>,
+    pub tile_flags: Option<Vec<String>>,
 
     /// If specified, pretend that all tiles are unflagged in the input data.
     #[structopt(long)]
@@ -173,10 +174,9 @@ pub struct CalibrateUserArgs {
     pub ignore_autos: bool,
 
     /// The fine channels to be flagged in each coarse channel. e.g. 0 1 16 30
-    /// 31 are typical for 40 kHz data.
-    ///
-    /// If this is not specified, it defaults to flagging the centre channel, as
-    /// well as 80 kHz (or as close to this as possible) at the edges.
+    /// 31 are typical for 40 kHz data. If this is not specified, it defaults to
+    /// flagging 80 kHz (or as close to this as possible) at the edges, as well
+    /// as the centre channel for non-MWAX data.
     #[structopt(long)]
     pub fine_chan_flags_per_coarse_chan: Option<Vec<usize>>,
 
@@ -185,27 +185,44 @@ pub struct CalibrateUserArgs {
     #[structopt(long)]
     pub fine_chan_flags: Option<Vec<usize>>,
 
+    #[structopt(long, help = PFB_FLAVOUR_HELP.as_str())]
+    pub pfb_flavour: Option<String>,
+
+    /// When reading in raw MWA data, don't apply digital gains.
+    #[structopt(long)]
+    pub no_digital_gains: bool,
+
+    /// When reading in raw MWA data, don't apply cable length corrections. Note
+    /// that some data may have already had the correction applied before it was
+    /// written.
+    #[structopt(long)]
+    pub no_cable_length_correction: bool,
+
+    /// When reading in raw MWA data, don't apply geometric corrections. Note
+    /// that some data may have already had the correction applied before it was
+    /// written.
+    #[structopt(long)]
+    pub no_geometric_correction: bool,
+
     /// When writing out calibrated visibilities, average this many timesteps
     /// together. Also supports a target time resolution (e.g. 8s). The value
     /// must be a multiple of the input data's time resolution. The default is
-    /// to preserve the input data's time resolution.
-    ///
-    /// e.g. If the input data is in 0.5s resolution and this variable was 4,
-    /// then we average 2s worth of calibrated data together before writing the
-    /// data out. If the variable was instead 4s, then 8 calibrated timesteps
-    /// are averaged together before writing the data out.
+    /// to preserve the input data's time resolution. e.g. If the input data is
+    /// in 0.5s resolution and this variable is 4, then we average 2s worth of
+    /// calibrated data together before writing the data out. If the variable is
+    /// instead 4s, then 8 calibrated timesteps are averaged together before
+    /// writing the data out.
     #[structopt(long)]
     pub output_vis_time_average: Option<String>,
 
     /// When writing out calibrated visibilities, average this many fine freq.
     /// channels together. Also supports a target freq. resolution (e.g. 80kHz).
     /// The value must be a multiple of the input data's freq. resolution. The
-    /// default is to preserve the input data's freq. resolution.
-    ///
-    /// e.g. If the input data is in 40kHz resolution and this variable was 4,
-    /// then we average 160kHz worth of calibrated data together before writing
-    /// the data out. If the variable was instead 80kHz, then 2 calibrated fine
-    /// freq. channels are averaged together before writing the data out.
+    /// default is to preserve the input data's freq. resolution. e.g. If the
+    /// input data is in 40kHz resolution and this variable is 4, then we
+    /// average 160kHz worth of calibrated data together before writing the data
+    /// out. If the variable is instead 80kHz, then 2 calibrated fine freq.
+    /// channels are averaged together before writing the data out.
     #[structopt(long)]
     pub output_vis_freq_average: Option<String>,
 
@@ -322,6 +339,10 @@ impl CalibrateUserArgs {
             ignore_autos,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
+            pfb_flavour,
+            no_digital_gains,
+            no_cable_length_correction,
+            no_geometric_correction,
             output_vis_time_average,
             output_vis_freq_average,
             max_iterations,
@@ -359,6 +380,11 @@ impl CalibrateUserArgs {
                 .fine_chan_flags_per_coarse_chan
                 .or(fine_chan_flags_per_coarse_chan),
             fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
+            pfb_flavour: cli_args.pfb_flavour.or(pfb_flavour),
+            no_digital_gains: cli_args.no_digital_gains || no_digital_gains,
+            no_cable_length_correction: cli_args.no_cable_length_correction
+                || no_cable_length_correction,
+            no_geometric_correction: cli_args.no_geometric_correction || no_geometric_correction,
             output_vis_time_average: cli_args.output_vis_time_average.or(output_vis_time_average),
             output_vis_freq_average: cli_args.output_vis_freq_average.or(output_vis_freq_average),
             max_iterations: cli_args.max_iterations.or(max_iterations),

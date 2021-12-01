@@ -34,6 +34,15 @@ pub enum InvalidArgsError {
     )]
     BadDelays,
 
+    #[error("The data either contains no tiles or all tiles are flagged")]
+    NoTiles,
+
+    #[error("The data either contains no frequency channels or all channels are flagged")]
+    NoChannels,
+
+    #[error("The data either contains no timesteps or no timesteps are being used")]
+    NoTimesteps,
+
     #[error("The number of specified sources was 0, or the size of the source list was 0")]
     NoSources,
 
@@ -46,8 +55,11 @@ pub enum InvalidArgsError {
     #[error("Timestep {got} was requested but it isn't available; the last timestep is {last}")]
     UnavailableTimestep { got: usize, last: usize },
 
-    #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
+    #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}")]
     InvalidTileFlag { got: usize, max: usize },
+
+    #[error("Bad flag value: '{0}' is neither an integer or an available antenna name. Run with extra verbosity to see all tile names.")]
+    BadTileFlag(String),
 
     #[error(
         "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::calibrate::args::VIS_OUTPUT_EXTENSIONS
@@ -56,6 +68,9 @@ pub enum InvalidArgsError {
 
     #[error("Cannot write calibration outputs to a file type '{ext}'.\nSupported formats are: {} (calibration solutions)\n                     : {} (visibility files)", *crate::calibrate::args::CAL_SOLUTION_EXTENSIONS, *crate::calibrate::args::VIS_OUTPUT_EXTENSIONS)]
     CalibrationOutputFile { ext: String },
+
+    #[error("Could not parse PFB flavour '{0}'.\nSupported flavours are: {}", *crate::pfb_gains::PFB_FLAVOURS)]
+    ParsePfbFlavour(String),
 
     #[error("Error when parsing time average factor: {0}")]
     ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),

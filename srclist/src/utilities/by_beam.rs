@@ -21,6 +21,7 @@ use crate::{
     CONVERT_OUTPUT_TYPE_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
+use mwa_hyperdrive_common::log;
 use mwa_rust_core::{mwalib, RADec};
 
 /// Reduce a sky-model source list to the top N brightest sources, given

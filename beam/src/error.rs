@@ -11,6 +11,9 @@ pub enum BeamError {
     #[error("Tried to create a beam object, but MWA dipole delay information isn't available!")]
     NoDelays,
 
+    #[error("The number of delays per tile ({delays}) didn't match the number of gains per tile ({gains})")]
+    DelayGainsDimensionMismatch { delays: usize, gains: usize },
+
     #[error("hyperbeam error: {0}")]
     Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
 

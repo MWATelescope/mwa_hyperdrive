@@ -19,6 +19,7 @@ use crate::{
     ao, hyperdrive, rts, woden, HyperdriveFileType, SourceList, SourceListType, SrclistError,
     WriteSourceListError, CONVERT_INPUT_TYPE_HELP, CONVERT_OUTPUT_TYPE_HELP,
 };
+use mwa_hyperdrive_common::log;
 
 /// Convert a sky-model source list from one format to another.
 ///

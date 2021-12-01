@@ -4,6 +4,8 @@
 
 //! Types to generate sky-models with CUDA.
 
+use std::collections::HashSet;
+
 use mwa_rust_core::{AzEl, HADec, Jones, RADec, XyzGeodetic, LMN, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
@@ -25,9 +27,22 @@ use mwa_hyperdrive_srclist::{
 // TODO: Curved power laws.
 pub struct SkyModellerCuda<'a> {
     cuda_beam: Box<dyn BeamCUDA>,
+    /// The latitude of the array we're using.
+    array_latitude_rad: f64,
 
     freqs: Vec<CudaFloat>,
-    tile_xyzs: &'a [XyzGeodetic],
+
+    /// The [XyzGeodetic] positions of each of the unflagged tiles.
+    unflagged_tile_xyzs: &'a [XyzGeodetic],
+
+    /// A simple map from an absolute tile index into an unflagged tile index.
+    /// This is important because CUDA will use tile indices from 0 to the
+    /// length of `unflagged_tile_xyzs`, but the beam code has dipole delays and
+    /// dipole gains available for *all* tiles. So if tile 32 is flagged, any
+    /// CUDA thread with a tile index of 32 would naively get the flagged beam
+    /// info. This map would make tile index go to the next unflagged tile,
+    /// perhaps 33.
+    tile_index_to_unflagged_tile_index_map: DevicePointer<i32>,
 
     sbf_l: i32,
     sbf_n: i32,
@@ -100,7 +115,9 @@ impl<'a> SkyModellerCuda<'a> {
         source_list: &SourceList,
         unflagged_fine_chan_freqs: &[f64],
         unflagged_tile_xyzs: &'a [XyzGeodetic],
+        tile_flags: &HashSet<usize>,
         phase_centre: RADec,
+        array_latitude_rad: f64,
         shapelet_basis_values: &[f64],
         sbf_l: usize,
         sbf_n: usize,
@@ -174,9 +191,9 @@ impl<'a> SkyModellerCuda<'a> {
             let radec = comp.radec;
             let LMN { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
             let lmn = cuda::LMN {
-                l: l as _,
-                m: m as _,
-                n: n as _,
+                l: l as CudaFloat,
+                m: m as CudaFloat,
+                n: n as CudaFloat,
             };
             match &comp.comp_type {
                 ComponentType::Point => match comp.flux_type {
@@ -187,7 +204,7 @@ impl<'a> SkyModellerCuda<'a> {
                         let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
                         let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
                         point_power_law_fds.push(cuda_inst_fd);
-                        point_power_law_sis.push(si as _);
+                        point_power_law_sis.push(si as CudaFloat);
                     }
 
                     FluxDensityType::CurvedPowerLaw { .. } => todo!(),
@@ -201,9 +218,9 @@ impl<'a> SkyModellerCuda<'a> {
 
                 ComponentType::Gaussian { maj, min, pa } => {
                     let gp = cuda::GaussianParams {
-                        maj: *maj as _,
-                        min: *min as _,
-                        pa: *pa as _,
+                        maj: *maj as CudaFloat,
+                        min: *min as CudaFloat,
+                        pa: *pa as CudaFloat,
                     };
                     match comp.flux_type {
                         FluxDensityType::PowerLaw { si, .. } => {
@@ -214,7 +231,7 @@ impl<'a> SkyModellerCuda<'a> {
                             let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
                             let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
                             gaussian_power_law_fds.push(cuda_inst_fd);
-                            gaussian_power_law_sis.push(si as _);
+                            gaussian_power_law_sis.push(si as CudaFloat);
                             gaussian_power_law_gps.push(gp);
                         }
 
@@ -236,9 +253,9 @@ impl<'a> SkyModellerCuda<'a> {
                     coeffs,
                 } => {
                     let gp = cuda::GaussianParams {
-                        maj: *maj as _,
-                        min: *min as _,
-                        pa: *pa as _,
+                        maj: *maj as CudaFloat,
+                        min: *min as CudaFloat,
+                        pa: *pa as CudaFloat,
                     };
                     match comp.flux_type {
                         FluxDensityType::PowerLaw { si, .. } => {
@@ -250,7 +267,7 @@ impl<'a> SkyModellerCuda<'a> {
                             let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
                             let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
                             shapelet_power_law_fds.push(cuda_inst_fd);
-                            shapelet_power_law_sis.push(si as _);
+                            shapelet_power_law_sis.push(si as CudaFloat);
                             shapelet_power_law_gps.push(gp);
                             shapelet_power_law_coeffs.push(coeffs.clone());
                         }
@@ -291,8 +308,10 @@ impl<'a> SkyModellerCuda<'a> {
                 .iter()
                 .map(|&f| (f as u32, f as CudaFloat))
                 .unzip();
-        let shapelet_basis_values: Vec<CudaFloat> =
-            shapelet_basis_values.iter().map(|&f| f as _).collect();
+        let shapelet_basis_values: Vec<CudaFloat> = shapelet_basis_values
+            .iter()
+            .map(|&f| f as CudaFloat)
+            .collect();
 
         let n = unflagged_tile_xyzs.len();
         let num_baselines = (n * (n - 1)) / 2;
@@ -311,11 +330,27 @@ impl<'a> SkyModellerCuda<'a> {
         let d_freqs = DevicePointer::copy_to_device(&unflagged_fine_chan_freqs_floats)?;
         let d_shapelet_basis_values = DevicePointer::copy_to_device(&shapelet_basis_values)?;
 
+        let mut tile_index_to_unflagged_tile_index_map: Vec<i32> =
+            Vec::with_capacity(unflagged_tile_xyzs.len());
+        let mut i_unflagged_tile = 0;
+        for i_tile in 0..unflagged_tile_xyzs.len() + tile_flags.len() {
+            if tile_flags.contains(&i_tile) {
+                i_unflagged_tile += 1;
+                continue;
+            }
+            tile_index_to_unflagged_tile_index_map.push(i_unflagged_tile as i32);
+            i_unflagged_tile += 1;
+        }
+        let d_tile_index_to_unflagged_tile_index_map =
+            DevicePointer::copy_to_device(&tile_index_to_unflagged_tile_index_map)?;
+
         Ok(Self {
             cuda_beam: beam.prepare_cuda_beam(&unflagged_fine_chan_freqs_ints)?,
+            array_latitude_rad,
 
             freqs: unflagged_fine_chan_freqs_floats,
-            tile_xyzs: unflagged_tile_xyzs,
+            unflagged_tile_xyzs,
+            tile_index_to_unflagged_tile_index_map: d_tile_index_to_unflagged_tile_index_map,
 
             sbf_l: sbf_l.try_into().unwrap(),
             sbf_n: sbf_n.try_into().unwrap(),
@@ -383,9 +418,11 @@ impl<'a> SkyModellerCuda<'a> {
         // Expose all the struct fields to ensure they're all used.
         let Self {
             cuda_beam,
+            array_latitude_rad,
 
             freqs,
-            tile_xyzs: _,
+            unflagged_tile_xyzs: _,
+            tile_index_to_unflagged_tile_index_map: _,
 
             sbf_l: _,
             sbf_n: _,
@@ -439,11 +476,11 @@ impl<'a> SkyModellerCuda<'a> {
 
         let to_azels = |x: &[RADec]| -> Vec<AzEl> {
             x.par_iter()
-                .map(|radec| radec.to_hadec(lst_rad).to_azel_mwa())
+                .map(|radec| radec.to_hadec(lst_rad).to_azel(*array_latitude_rad))
                 .collect()
         };
 
-        if !self.point_power_law_radecs.is_empty() || !self.point_list_radecs.is_empty() {
+        if !point_power_law_radecs.is_empty() || !point_list_radecs.is_empty() {
             let point_beam_jones = {
                 let mut azels = to_azels(point_power_law_radecs);
                 let mut list_azels = to_azels(point_list_radecs);
@@ -470,7 +507,7 @@ impl<'a> SkyModellerCuda<'a> {
             cuda_status_to_error(cuda_status, error_str)?;
         }
 
-        if !self.gaussian_power_law_radecs.is_empty() || !self.gaussian_list_radecs.is_empty() {
+        if !gaussian_power_law_radecs.is_empty() || !gaussian_list_radecs.is_empty() {
             let gaussian_beam_jones = {
                 let mut azels = to_azels(gaussian_power_law_radecs);
                 let mut list_azels = to_azels(gaussian_list_radecs);
@@ -499,7 +536,7 @@ impl<'a> SkyModellerCuda<'a> {
             cuda_status_to_error(cuda_status, error_str)?;
         }
 
-        if !self.shapelet_power_law_radecs.is_empty() || !self.shapelet_list_radecs.is_empty() {
+        if !shapelet_power_law_radecs.is_empty() || !shapelet_list_radecs.is_empty() {
             let shapelet_beam_jones = {
                 let mut azels = to_azels(shapelet_power_law_radecs);
                 let mut list_azels = to_azels(shapelet_list_radecs);
@@ -560,7 +597,7 @@ impl<'a> SkyModellerCuda<'a> {
 
     /// Get a populated [cuda::Addresses]. This should never outlive `self`.
     fn get_addresses(&self) -> cuda::Addresses {
-        let n = self.tile_xyzs.len();
+        let n = self.unflagged_tile_xyzs.len();
         let num_baselines = (n * (n - 1)) / 2;
 
         cuda::Addresses {
@@ -575,6 +612,9 @@ impl<'a> SkyModellerCuda<'a> {
             d_shapelet_basis_values: self.d_shapelet_basis_values.get_mut(),
             num_unique_beam_freqs: self.cuda_beam.get_num_unique_freqs(),
             d_beam_jones_map: self.cuda_beam.get_beam_jones_map(),
+            d_tile_index_to_unflagged_tile_index_map: self
+                .tile_index_to_unflagged_tile_index_map
+                .get(),
             d_vis: self.d_vis.get_mut().cast(),
         }
     }
@@ -591,9 +631,13 @@ impl<'a> SkyModellerCuda<'a> {
             power_law: get_shapelet_uvs_inner(
                 &self.shapelet_power_law_radecs,
                 lst_rad,
-                self.tile_xyzs,
+                self.unflagged_tile_xyzs,
             ),
-            list: get_shapelet_uvs_inner(&self.shapelet_list_radecs, lst_rad, self.tile_xyzs),
+            list: get_shapelet_uvs_inner(
+                &self.shapelet_list_radecs,
+                lst_rad,
+                self.unflagged_tile_xyzs,
+            ),
         }
     }
 }
@@ -657,7 +701,7 @@ fn get_flattened_coeffs(
             coeffs.push(cuda::ShapeletCoeff {
                 n1: coeff.n1,
                 n2: coeff.n2,
-                value: coeff.value as _,
+                value: coeff.value as CudaFloat,
             })
         }
     }

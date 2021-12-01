@@ -10,6 +10,7 @@ use log::info;
 use structopt::StructOpt;
 
 use crate::{read::read_source_list_file, SrclistError};
+use mwa_hyperdrive_common::log;
 
 /// Verify that sky-model source lists can be read by hyperdrive.
 ///

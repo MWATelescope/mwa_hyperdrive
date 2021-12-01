@@ -195,8 +195,9 @@ impl Uvfits {
                 jd_to_epoch(jd)
             })
             .collect();
+        let all_timestep_indices = (0..timesteps.len()).into_iter().collect();
         // TODO: Determine flagging!
-        let unflagged_timestep_indices = 0..timesteps.len();
+        let unflagged_timestep_indices: Vec<usize> = (0..timesteps.len()).into_iter().collect();
         let time_res: Option<f64> = match (timesteps.first(), timesteps.get(1)) {
             (Some(&first), Some(&second)) => {
                 let time_res = (second - first).in_unit_f64(hifitime::TimeUnit::Second);
@@ -206,13 +207,14 @@ impl Uvfits {
                     // Need to remove a number from the result of .as_gpst_seconds(), as
                     // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
                     // expect GPS timestamps to be "leading edge", not centroids.
-                    epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.start])
+                    epoch_as_gps_seconds(timesteps[*unflagged_timestep_indices.first().unwrap()])
                         - time_res / 2.0
                 );
                 debug!(
                     "Last good GPS timestep:  {:.2}",
-                    epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.end - 1])
-                        - time_res / 2.0
+                    epoch_as_gps_seconds(
+                        timesteps[*unflagged_timestep_indices.last().unwrap() - 1]
+                    ) - time_res / 2.0
                 );
                 Some(time_res)
             }
@@ -264,6 +266,7 @@ impl Uvfits {
         let obs_context = ObsContext {
             obsid,
             timesteps,
+            all_timestep_indices,
             unflagged_timestep_indices,
             phase_centre,
             pointing_centre,
@@ -300,6 +303,20 @@ impl InputData for Uvfits {
 
     fn get_input_data_type(&self) -> VisInputType {
         VisInputType::Uvfits
+    }
+
+    fn read_crosses_and_autos(
+        &self,
+        cross_data_array: ArrayViewMut2<Jones<f32>>,
+        cross_weights_array: ArrayViewMut2<f32>,
+        auto_data_array: ArrayViewMut2<Jones<f32>>,
+        auto_weights_array: ArrayViewMut2<f32>,
+        timestep: usize,
+        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        flagged_tiles: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(), ReadInputDataError> {
+        todo!()
     }
 
     fn read_crosses(
@@ -898,10 +915,12 @@ fn get_freq_context(
     }
 
     Ok(FreqContext {
-        // TODO
+        // TODO - populate properly. The values don't matter until we want to
+        // use coarse channel information.
         coarse_chan_nums: vec![1],
         coarse_chan_freqs: vec![150e6],
         coarse_chan_width: 40e3 * 32.0,
+
         total_bandwidth: fine_chan_freqs[metadata.num_fine_freq_chans - 1] - fine_chan_freqs[0]
             + fine_chan_width,
         fine_chan_range: 0..metadata.num_fine_freq_chans,

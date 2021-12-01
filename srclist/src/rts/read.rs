@@ -10,6 +10,7 @@
 use log::warn;
 
 use super::*;
+use mwa_hyperdrive_common::log;
 use mwa_rust_core::constants::DH2R;
 
 /// Parse a buffer containing an RTS-style source list into a `SourceList`.

@@ -6,7 +6,7 @@
 
 #![allow(dead_code)]
 
-#[cfg(tests)]
+#[cfg(test)]
 mod tests;
 
 use std::collections::{HashMap, HashSet};
@@ -70,15 +70,33 @@ pub(crate) fn cexp(x: f64) -> c64 {
     c64::new(re, im)
 }
 
+/// Is the supplied number prime? This isn't necessarily efficient code; it's
+/// used just for testing. Stolen from
+/// https://stackoverflow.com/questions/55790537/calculating-prime-numbers-in-rust
+pub(crate) fn is_prime(n: usize) -> bool {
+    let limit = (n as f64).sqrt() as usize;
+    if n < 2 {
+        return false;
+    }
+
+    for i in 2..=limit {
+        if n % i == 0 {
+            return false;
+        }
+    }
+
+    true
+}
+
 pub(crate) struct TileBaselineMaps {
-    pub(crate) tile_to_unflagged_baseline_map: HashMap<(usize, usize), usize>,
-    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
+    pub(crate) unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 }
 
 impl TileBaselineMaps {
     pub(crate) fn new(total_num_tiles: usize, tile_flags: &HashSet<usize>) -> TileBaselineMaps {
-        let mut tile_to_unflagged_baseline_map = HashMap::new();
-        let mut unflagged_baseline_to_tile_map = HashMap::new();
+        let mut tile_to_unflagged_cross_baseline_map = HashMap::new();
+        let mut unflagged_cross_baseline_to_tile_map = HashMap::new();
         let mut bl = 0;
         for tile1 in 0..total_num_tiles {
             if tile_flags.contains(&tile1) {
@@ -88,15 +106,15 @@ impl TileBaselineMaps {
                 if tile_flags.contains(&tile2) {
                     continue;
                 }
-                tile_to_unflagged_baseline_map.insert((tile1, tile2), bl);
-                unflagged_baseline_to_tile_map.insert(bl, (tile1, tile2));
+                tile_to_unflagged_cross_baseline_map.insert((tile1, tile2), bl);
+                unflagged_cross_baseline_to_tile_map.insert(bl, (tile1, tile2));
                 bl += 1;
             }
         }
 
         Self {
-            tile_to_unflagged_baseline_map,
-            unflagged_baseline_to_tile_map,
+            tile_to_unflagged_cross_baseline_map,
+            unflagged_cross_baseline_to_tile_map,
         }
     }
 }

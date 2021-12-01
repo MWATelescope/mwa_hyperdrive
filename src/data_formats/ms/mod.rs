@@ -199,7 +199,7 @@ impl MS {
                 0
             };
         trace!("MS step: {}", step);
-        let unflagged_timestep_indices = {
+        let unflagged_timestep_indices: Vec<usize> = {
             // The first and last good timestep indicies.
             let mut first: Option<usize> = None;
             let mut last: Option<usize> = None;
@@ -228,7 +228,9 @@ impl MS {
                 (Some(f), None) => f..main_table.n_rows() as usize / step,
                 _ => return Err(NewMSError::AllFlagged),
             }
-        };
+        }
+        .into_iter()
+        .collect();
 
         // Get the unique times in the MS.
         let utc_times: Vec<f64> = main_table.get_col_as_vec("TIME").unwrap();
@@ -254,32 +256,36 @@ impl MS {
             Some(utc_timesteps[1] - utc_timesteps[0])
         };
 
-        let timesteps: Vec<hifitime::Epoch> = utc_timesteps
-            .into_par_iter()
+        let (all_timestep_indices, timesteps): (Vec<usize>, Vec<hifitime::Epoch>) = utc_timesteps
+            .into_iter()
+            .enumerate()
             // casacore keeps the stores the times as centroids, so no
             // correction is needed. Undo the multiply by a big number from
             // above.
-            .map(|utc| casacore_utc_to_epoch(utc))
-            .collect();
-        if let Some(time_res) = time_res {
-            debug!(
-                "First good timestep (GPS): {:.2}",
-                // Need to remove a number from the result of .as_gpst_seconds(), as
-                // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
-                // expect GPS timestamps to be "leading edge", not centroids.
-                epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.start]) - time_res / 2.0
-            );
-            debug!(
-                "Last good timestep  (GPS): {:.2}",
-                epoch_as_gps_seconds(timesteps[unflagged_timestep_indices.end - 1])
-                    - time_res / 2.0
-            );
-        } else {
-            // No time resolution; just print out the first GPS timestep.
-            debug!(
-                "Only timestep (GPS): {:.2}",
-                epoch_as_gps_seconds(timesteps[0])
-            );
+            .map(|(i, utc)| (i, casacore_utc_to_epoch(utc)))
+            .unzip();
+        match timesteps.as_slice() {
+            // Handled above; measurement sets aren't allowed to be empty.
+            [] => unreachable!(),
+            [t] => debug!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
+            [t0, .., tn] => {
+                // The time resolution is specified if there's more than one
+                // timestep.
+                let time_res = time_res.unwrap();
+                debug!(
+                    "First good timestep (GPS): {:.2}",
+                    // We expect GPS timestamps to be "leading edge", not
+                    // centroids.
+                    epoch_as_gps_seconds(timesteps[*unflagged_timestep_indices.first().unwrap()])
+                        - time_res / 2.0
+                );
+                debug!(
+                    "Last good timestep  (GPS): {:.2}",
+                    epoch_as_gps_seconds(
+                        timesteps[*unflagged_timestep_indices.last().unwrap() - 1]
+                    ) - time_res / 2.0
+                );
+            }
         }
 
         // Get the frequency information.
@@ -539,6 +545,7 @@ impl MS {
         let obs_context = ObsContext {
             obsid,
             timesteps,
+            all_timestep_indices,
             unflagged_timestep_indices,
             phase_centre,
             pointing_centre,
@@ -575,6 +582,20 @@ impl InputData for MS {
 
     fn get_input_data_type(&self) -> VisInputType {
         VisInputType::MeasurementSet
+    }
+
+    fn read_crosses_and_autos(
+        &self,
+        cross_data_array: ArrayViewMut2<Jones<f32>>,
+        cross_weights_array: ArrayViewMut2<f32>,
+        auto_data_array: ArrayViewMut2<Jones<f32>>,
+        auto_weights_array: ArrayViewMut2<f32>,
+        timestep: usize,
+        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        flagged_tiles: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<usize>,
+    ) -> Result<(), ReadInputDataError> {
+        todo!()
     }
 
     fn read_crosses(

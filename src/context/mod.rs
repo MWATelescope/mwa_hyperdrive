@@ -29,13 +29,13 @@ pub(crate) struct ObsContext {
     /// timesteps.
     pub(crate) timesteps: Vec<Epoch>,
 
-    /// The timestep indices of the input data that aren't totally flagged
-    /// (exclusive). This always contains at least one index.
-    pub(crate) unflagged_timestep_indices: Range<usize>,
+    /// The *available* timestep indices of the input data. This does not
+    /// necessarily start at 0.
+    pub(crate) all_timestep_indices: Vec<usize>,
 
-    // /// The Local Mean Sidereal Time in the __middle__ of the first timestep
-    // /// (even if its flagged) \[radians\].
-    // pub(crate) lst0: f64,
+    /// The timestep indices of the input data that aren't totally flagged.
+    pub(crate) unflagged_timestep_indices: Vec<usize>,
+
     /// The observation phase centre.
     pub(super) phase_centre: RADec,
 

@@ -26,7 +26,7 @@ use super::*;
 fn get_truncated_date_string(epoch: Epoch) -> String {
     let (year, month, day, _, _, _, _) = epoch.as_gregorian_utc();
     format!(
-        "{year}-{month}-{day}T00:00:00.0",
+        "{year}-{month:02}-{day:02}T00:00:00.0",
         year = year,
         month = month,
         day = day

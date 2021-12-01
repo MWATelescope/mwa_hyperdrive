@@ -24,7 +24,6 @@ all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 cfg-if = "1.0.*"
 itertools = "0.10.*"
 lazy_static = "1.4.*"
-log = "0.4.*"
 mwa_rust_core = "0.2.*"
 ndarray = { version = "0.14.*", features = ["rayon"] }
 rayon = "~1"

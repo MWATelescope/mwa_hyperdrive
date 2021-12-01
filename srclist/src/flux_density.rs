@@ -10,6 +10,12 @@ use serde::{Deserialize, Serialize};
 use crate::constants::*;
 use mwa_rust_core::{Complex, Jones};
 
+/// When converting a list to a power law, this is the maximum condition number
+/// allowed for the power law fit. This setting is somewhat subjective;
+/// condition numbers just less than this look fine to me.
+const ILL_CONDITIONED_LIMIT: f64 = 1e7;
+/// When converting a list to a power law, this is the maximum fractional
+/// difference allowed between the fit and the original list flux densities.
 const LIST_TO_POWER_LAW_MAX_DIFF: f64 = 0.01; // 1%
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -278,13 +284,15 @@ impl FluxDensityType {
                     // Solving for the spectral index and reference flux
                     // density.
 
-                    // S = S_0 \nu ^ \alpha
+                    // S_0 \nu ^ \alpha = S
                     // Arrange this as Ax = b
-                    // ln(S) = ln(S_0) + \alpha * ln(\nu)
+                    // ln(S_0 \nu ^ \alpha) = ln(S)
+                    // ln(S_0) + ln(\nu ^ \alpha) = ln(S)
+                    // ln(S_0) + \alpha * ln(\nu) = ln(S)
+                    // A_i = [ln(\nu_i), 1]
                     // x_0 = \alpha
                     // x_1 = ln(S_0)
-                    // A_i = [ln(\nu_i), 1]
-                    // b = ln(S)
+                    // b_i = ln(S_i)
 
                     let mut a = Array2::ones((fds.len(), 2));
                     a.outer_iter_mut()
@@ -312,13 +320,13 @@ impl FluxDensityType {
                         let norm_1_c_inv =
                             (c_inv[0].abs() + c_inv[2].abs()).max(c_inv[1].abs() + c_inv[3].abs());
                         let cond = norm_1_c * norm_1_c_inv;
-                        if cond > 10000.0 {
+                        if cond > ILL_CONDITIONED_LIMIT {
                             // Bad condition number; abort.
                             return;
                         }
                     }
                     // Shadow c with c_inv.
-                    let c = Array2::from_shape_vec((2, 2), c_inv).unwrap() / det;
+                    let c = Array2::from_shape_vec((2, 2), c_inv).unwrap();
 
                     // x = (A^T A)^-1 A^T b
                     let x = c.dot(&at).dot(&b).to_vec();
@@ -518,6 +526,42 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn test_many_convert_bad_list_to_power_law() {
+        // This source is deliberately poorly conditioned; it should not be
+        // converted.
+        let mut fdt = FluxDensityType::List {
+            fds: vec![
+                FluxDensity {
+                    freq: 120e6,
+                    i: 1.0,
+                    ..Default::default()
+                },
+                FluxDensity {
+                    freq: 140e6,
+                    i: 2.0,
+                    ..Default::default()
+                },
+                FluxDensity {
+                    freq: 160e6,
+                    i: 0.5,
+                    ..Default::default()
+                },
+                FluxDensity {
+                    freq: 180e6,
+                    i: 3.0,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        // This is definitely a list.
+        assert!(matches!(fdt, FluxDensityType::List { .. }));
+        fdt.convert_list_to_power_law();
+        // It's not been converted to a power law.
+        assert!(matches!(fdt, FluxDensityType::List { .. }));
     }
 
     #[test]

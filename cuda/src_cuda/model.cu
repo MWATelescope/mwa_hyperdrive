@@ -528,7 +528,8 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
  */
 __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d_uvws, const FLOAT *d_freqs,
                                         const Points d_comps, const JONES_C *d_beam_jones,
-                                        const uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
+                                        const uint64_t *d_beam_jones_map, int num_fee_freqs,
+                                        const int *d_tile_index_to_unflagged_tile_index_map, JonesF32 *d_vis) {
     // First tile idx  == blockIdx.x
     // Second tile idx == blockIdx.y
     // Frequency       == blockDim.z * blockIdx.z + threadIdx.x
@@ -572,10 +573,11 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
     // Every element of the beam Jones map is actually a pair of ints; access
     // the right element, then disentangle the upper and lower bits to get the
     // indices.
-    uint64_t beam_jones_indices = d_beam_jones_map[blockIdx.x * num_freqs + i_freq];
+    uint64_t beam_jones_indices =
+        d_beam_jones_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.x] * num_freqs + i_freq];
     int j1_i_row = beam_jones_indices >> 32;
     int j1_i_col = beam_jones_indices & 0xffffffff;
-    beam_jones_indices = d_beam_jones_map[blockIdx.y * num_freqs + i_freq];
+    beam_jones_indices = d_beam_jones_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.y] * num_freqs + i_freq];
     int j2_i_row = beam_jones_indices >> 32;
     int j2_i_col = beam_jones_indices & 0xffffffff;
     int num_directions = d_comps.num_power_law_points + d_comps.num_list_points;
@@ -593,7 +595,7 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
 
     int i_fd = i_freq * d_comps.num_list_points;
     for (int i_comp = 0; i_comp < d_comps.num_list_points; i_comp++) {
-        JONES fd = d_comps.list_fds[i_fd + i_comp];
+        fd = d_comps.list_fds[i_fd + i_comp];
         JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp +
                                   d_comps.num_power_law_points];
         JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp +
@@ -613,7 +615,8 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
  */
 __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vis, const UVW *d_uvws,
                                            const FLOAT *d_freqs, const Gaussians d_comps, JONES_C *d_beam_jones,
-                                           const uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
+                                           const uint64_t *d_beam_jones_map, int num_fee_freqs,
+                                           const int *d_tile_index_to_unflagged_tile_index_map, JonesF32 *d_vis) {
     // First tile idx  == blockIdx.x
     // Second tile idx == blockIdx.y
     // Frequency       == blockDim.z * blockIdx.z + threadIdx.x
@@ -658,10 +661,11 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
     // Every element of the beam Jones map is actually a pair of ints; access
     // the right element, then disentangle the upper and lower bits to get the
     // indices.
-    uint64_t beam_jones_indices = d_beam_jones_map[blockIdx.x * num_freqs + i_freq];
+    uint64_t beam_jones_indices =
+        d_beam_jones_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.x] * num_freqs + i_freq];
     int j1_i_row = beam_jones_indices >> 32;
     int j1_i_col = beam_jones_indices & 0xffffffff;
-    beam_jones_indices = d_beam_jones_map[blockIdx.y * num_freqs + i_freq];
+    beam_jones_indices = d_beam_jones_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.y] * num_freqs + i_freq];
     int j2_i_row = beam_jones_indices >> 32;
     int j2_i_col = beam_jones_indices & 0xffffffff;
     int num_directions = d_comps.num_power_law_gaussians + d_comps.num_list_gaussians;
@@ -692,7 +696,7 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
 
     int i_fd = i_freq * d_comps.num_list_gaussians;
     for (size_t i_comp = 0; i_comp < d_comps.num_list_gaussians; i_comp++) {
-        JONES fd = d_comps.list_fds[i_fd + i_comp];
+        fd = d_comps.list_fds[i_fd + i_comp];
         JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp +
                                   d_comps.num_power_law_gaussians];
         JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp +
@@ -730,7 +734,8 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
                                            const FLOAT *d_freqs, const Shapelets d_comps,
                                            const FLOAT *d_shapelet_basis_values, const size_t sbf_l, const size_t sbf_n,
                                            const FLOAT sbf_c, const FLOAT sbf_dx, JONES_C *d_beam_jones,
-                                           const uint64_t *d_beam_jones_map, int num_fee_freqs, JonesF32 *d_vis) {
+                                           const uint64_t *d_beam_jones_map, int num_fee_freqs,
+                                           const int *d_tile_index_to_unflagged_tile_index_map, JonesF32 *d_vis) {
     // First tile idx  == blockIdx.x
     // Second tile idx == blockIdx.y
     // Frequency       == blockDim.z * blockIdx.z + threadIdx.x
@@ -775,10 +780,11 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     // Every element of the beam Jones map is actually a pair of ints; access
     // the right element, then disentangle the upper and lower bits to get the
     // indices.
-    uint64_t beam_jones_indices = d_beam_jones_map[blockIdx.x * num_freqs + i_freq];
+    uint64_t beam_jones_indices =
+        d_beam_jones_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.x] * num_freqs + i_freq];
     int j1_i_row = beam_jones_indices >> 32;
     int j1_i_col = beam_jones_indices & 0xffffffff;
-    beam_jones_indices = d_beam_jones_map[blockIdx.y * num_freqs + i_freq];
+    beam_jones_indices = d_beam_jones_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.y] * num_freqs + i_freq];
     int j2_i_row = beam_jones_indices >> 32;
     int j2_i_col = beam_jones_indices & 0xffffffff;
     int num_directions = d_comps.num_power_law_shapelets + d_comps.num_list_shapelets;
@@ -915,7 +921,7 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
         real2 = real * envelope_re - imag * envelope_im;
         imag2 = real * envelope_im + imag * envelope_re;
 
-        JONES fd = d_comps.list_fds[i_fd + i_comp];
+        fd = d_comps.list_fds[i_fd + i_comp];
         JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * j1_i_row) + num_directions * j1_i_col) + i_comp];
         JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * j2_i_row) + num_directions * j2_i_col) + i_comp];
         apply_beam(&j1, &fd, &j2);
@@ -947,9 +953,9 @@ extern "C" int model_points(const Points *comps, const Addresses *a, const UVW *
         gridDim.y = a->num_tiles;
         gridDim.z = (int)ceil((double)a->num_freqs / (double)blockDim.x);
 
-        model_points_fee_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps,
-                                                       (JONES_C *)d_beam_jones, a->d_beam_jones_map,
-                                                       a->num_unique_beam_freqs, a->d_vis);
+        model_points_fee_kernel<<<gridDim, blockDim>>>(
+            a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps, (JONES_C *)d_beam_jones, a->d_beam_jones_map,
+            a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
     }
 
@@ -977,9 +983,9 @@ extern "C" int model_gaussians(const Gaussians *comps, const Addresses *a, const
         gridDim.y = a->num_tiles;
         gridDim.z = (int)ceil((double)a->num_freqs / (double)blockDim.x);
 
-        model_gaussians_fee_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps,
-                                                          (JONES_C *)d_beam_jones, a->d_beam_jones_map,
-                                                          a->num_unique_beam_freqs, a->d_vis);
+        model_gaussians_fee_kernel<<<gridDim, blockDim>>>(
+            a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps, (JONES_C *)d_beam_jones, a->d_beam_jones_map,
+            a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
     }
 
@@ -1014,7 +1020,8 @@ extern "C" int model_shapelets(const Shapelets *comps, const Addresses *a, const
 
         model_shapelets_fee_kernel<<<gridDim, blockDim>>>(
             a->num_freqs, a->num_vis, d_uvws, a->d_freqs, *comps, a->d_shapelet_basis_values, a->sbf_l, a->sbf_n,
-            a->sbf_c, a->sbf_dx, (JONES_C *)d_beam_jones, a->d_beam_jones_map, a->num_unique_beam_freqs, a->d_vis);
+            a->sbf_c, a->sbf_dx, (JONES_C *)d_beam_jones, a->d_beam_jones_map, a->num_unique_beam_freqs,
+            a->d_tile_index_to_unflagged_tile_index_map, a->d_vis);
         cudaCheck(cudaPeekAtLastError());
     }
 

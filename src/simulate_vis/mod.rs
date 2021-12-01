@@ -16,9 +16,8 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Either;
 use log::{debug, info};
 use mwa_rust_core::{
-    constants::{DS2R, MWA_LAT_RAD, MWA_LONG_RAD, SOLAR2SIDEREAL},
+    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     mwalib,
-    pos::xyz,
     time::epoch_as_gps_seconds,
     Jones, RADec, XyzGeodetic,
 };
@@ -39,7 +38,6 @@ use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList, SourceL
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "cuda")] {
-        use mwa_hyperdrive_beam::BeamCUDA;
         use mwa_hyperdrive_cuda as cuda;
         use cuda::modeller::SkyModellerCuda;
     }
@@ -151,16 +149,25 @@ struct SimVisParams {
     /// A map from baseline index to the baseline's constituent tiles.
     baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
+    /// Flagged tiles.
+    tile_flags: HashSet<usize>,
+
     /// Timesteps to be simulated.
     timesteps: Vec<Epoch>,
 
     /// Interface to beam code.    
     beam: Box<dyn Beam>,
+
+    /// The Earth latitude location of the interferometer \[radians\].
+    array_latitude_rad: f64,
+
+    /// The Earth longitude location of the interferometer \[radians\].
+    array_longitude_rad: f64,
 }
 
 impl SimVisParams {
     /// Convert arguments into parameters.
-    fn new(args: SimulateVisArgs, using_cpu: bool) -> Result<Self, SimulateVisError> {
+    fn new(args: SimulateVisArgs) -> Result<Self, SimulateVisError> {
         debug!("{:#?}", &args);
 
         // Expose all the struct fields to ensure they're all used.
@@ -369,8 +376,11 @@ impl SimVisParams {
             fine_chan_freqs,
             xyzs,
             baseline_to_tile_map,
+            tile_flags,
             timesteps,
             beam,
+            array_latitude_rad: MWA_LAT_RAD,
+            array_longitude_rad: MWA_LONG_RAD,
         })
     }
 }
@@ -396,7 +406,7 @@ pub fn simulate_vis(
         info!("Generating sky model visibilities on the GPU (single precision)");
     }
 
-    let params = SimVisParams::new(args, cpu)?;
+    let params = SimVisParams::new(args)?;
 
     if dry_run {
         info!("Dry run -- exiting now.");
@@ -460,7 +470,9 @@ pub fn simulate_vis(
                 &params.source_list,
                 &params.fine_chan_freqs,
                 &params.xyzs,
+                &params.tile_flags,
                 params.phase_centre,
+                params.array_latitude_rad,
                 &crate::shapelets::SHAPELET_BASIS_VALUES,
                 crate::shapelets::SBF_L,
                 crate::shapelets::SBF_N,
@@ -490,8 +502,12 @@ pub fn simulate_vis(
 
     // Generate the visibilities.
     for &timestep in params.timesteps.iter() {
-        let precession_info =
-            precess_time(params.phase_centre, timestep, MWA_LONG_RAD, MWA_LAT_RAD);
+        let precession_info = precess_time(
+            params.phase_centre,
+            timestep,
+            params.array_longitude_rad,
+            params.array_latitude_rad,
+        );
         // Apply precession to the tile XYZ positions.
         let precessed_tile_xyzs = precession_info.precess_xyz_parallel(&params.xyzs);
         let uvws = xyzs_to_cross_uvws_parallel(

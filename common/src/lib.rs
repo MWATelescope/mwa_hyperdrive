@@ -4,6 +4,10 @@
 
 //! Code to be shared between hyperdrive-related binaries.
 
+pub use chrono;
+pub use fern;
+pub use log;
+
 use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 

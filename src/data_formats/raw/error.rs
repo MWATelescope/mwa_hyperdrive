@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::flagging::error::MwafMergeError;
+use crate::flagging::MwafMergeError;
 use mwa_rust_core::mwalib;
 
 #[derive(Error, Debug)]
