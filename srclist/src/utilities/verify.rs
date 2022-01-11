@@ -6,25 +6,25 @@
 
 use std::path::{Path, PathBuf};
 
+use clap::Parser;
 use log::info;
-use structopt::StructOpt;
 
 use crate::{read::read_source_list_file, SrclistError};
-use mwa_hyperdrive_common::log;
+use mwa_hyperdrive_common::{clap, log};
 
 /// Verify that sky-model source lists can be read by hyperdrive.
 ///
 /// See for more info:
 /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 pub struct VerifyArgs {
     /// Path to the source list(s) to be verified.
-    #[structopt(name = "SOURCE_LISTS", parse(from_os_str))]
+    #[clap(name = "SOURCE_LISTS", parse(from_os_str))]
     pub source_lists: Vec<PathBuf>,
 
     /// The verbosity of the program. The default is to print high-level
     /// information.
-    #[structopt(short, long, parse(from_occurrences))]
+    #[clap(short, long, parse(from_occurrences))]
     pub verbosity: u8,
 }
 

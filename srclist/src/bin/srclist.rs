@@ -4,35 +4,34 @@
 
 //! Utilities for source list files.
 
-use structopt::{clap::AppSettings, StructOpt};
+use clap::{AppSettings, Parser};
 
-use mwa_hyperdrive_common::setup_logging;
+use mwa_hyperdrive_common::{clap, setup_logging};
 use mwa_hyperdrive_srclist::{utilities::*, *};
 
-#[derive(StructOpt, Debug)]
-#[structopt(name = "hyperdrive srclist", about,
-            author = env!("CARGO_PKG_HOMEPAGE"),
-            global_settings = &[AppSettings::ColoredHelp,
-                                AppSettings::ArgRequiredElseHelp,
-                                AppSettings::DeriveDisplayOrder])]
+#[derive(Parser, Debug)]
+#[clap(name = "hyperdrive srclist", about,
+            author = env!("CARGO_PKG_HOMEPAGE"))]
+#[clap(global_setting(AppSettings::ArgRequiredElseHelp))]
+#[clap(global_setting(AppSettings::DeriveDisplayOrder))]
 enum Args {
     ByBeam {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: ByBeamArgs,
     },
 
     Convert {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: ConvertArgs,
     },
 
     Shift {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: ShiftArgs,
     },
 
     Verify {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: VerifyArgs,
     },
 }
@@ -48,7 +47,7 @@ fn main() {
 }
 
 fn try_main() -> Result<(), SrclistError> {
-    match Args::from_args() {
+    match Args::parse() {
         Args::ByBeam { args } => {
             setup_logging(args.verbosity).expect("Failed to initialise logging.");
             args.run()?

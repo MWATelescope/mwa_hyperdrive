@@ -13,6 +13,7 @@ mod tests;
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, LN_2};
 
+use marlu::{AzEl, Complex, Jones, XyzGeodetic, LMN, UVW};
 use ndarray::{parallel::prelude::*, prelude::*};
 
 use crate::{
@@ -21,8 +22,8 @@ use crate::{
     shapelets::*,
 };
 use mwa_hyperdrive_beam::Beam;
+use mwa_hyperdrive_common::{marlu, ndarray};
 use mwa_hyperdrive_srclist::{ComponentList, GaussianParams, PerComponentParams, ShapeletCoeff};
-use mwa_rust_core::{constants::VEL_C, AzEl, Complex, Jones, XyzGeodetic, LMN, UVW};
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 

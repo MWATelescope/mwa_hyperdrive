@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <stdlib.h>
-
 #include "types.h"
 
 #ifdef __cplusplus
@@ -27,7 +25,8 @@ typedef struct Addresses {
     const FLOAT *d_freqs;
     const FLOAT *d_shapelet_basis_values;
     int num_unique_beam_freqs;
-    const uint64_t *d_beam_jones_map;
+    const int *d_tile_map;
+    const int *d_freq_map;
     const int *d_tile_index_to_unflagged_tile_index_map;
     JonesF32 *d_vis;
 } Addresses;

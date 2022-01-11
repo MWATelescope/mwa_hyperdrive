@@ -9,6 +9,11 @@ use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
+use marlu::{
+    c32,
+    time::{epoch_as_gps_seconds, jd_to_epoch},
+    Jones, RADec, XyzGeodetic,
+};
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -22,11 +27,7 @@ use crate::{
     glob::get_single_match_from_glob,
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_rust_core::{
-    c32, mwalib,
-    time::{epoch_as_gps_seconds, jd_to_epoch},
-    Jones, RADec, XyzGeodetic,
-};
+use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
 
 pub(crate) struct Uvfits {
     /// Observation metadata.

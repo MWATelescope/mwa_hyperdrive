@@ -15,6 +15,7 @@ use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
 use crate::glob::{get_all_matches_from_glob, GlobError};
+use mwa_hyperdrive_common::{lazy_static, thiserror};
 
 lazy_static::lazy_static! {
     // gpubox files should not be renamed in any way! This includes the case of

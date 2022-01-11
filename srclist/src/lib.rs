@@ -7,20 +7,21 @@
 
 pub mod ao;
 pub mod constants;
-pub mod flux_density;
 pub mod hyperdrive;
 pub mod read;
 pub mod rts;
-pub mod source_lists;
+pub mod types;
 pub mod utilities;
 pub mod woden;
 
 mod error;
+#[cfg(test)]
+mod jones_test;
 mod veto;
 
+use constants::*;
 pub use error::*;
-pub use flux_density::*;
-pub use source_lists::*;
+pub use types::*;
 pub use utilities::*;
 pub use veto::*;
 
@@ -28,8 +29,7 @@ use itertools::Itertools;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 
-use constants::*;
-use mwa_rust_core::RADec;
+use mwa_hyperdrive_common::{itertools, lazy_static};
 
 /// All of the possible sky-model sources list types.
 #[derive(Debug, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
@@ -85,15 +85,16 @@ lazy_static::lazy_static! {
 }
 
 // External re-exports.
-pub use mwa_rust_core;
-pub use ndarray;
-pub use rayon;
+pub use mwa_hyperdrive_common::{marlu, ndarray, rayon};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use approx::assert_abs_diff_eq;
     use std::io::Cursor;
+
+    use approx::assert_abs_diff_eq;
+    use marlu::RADec;
+
+    use super::*;
 
     fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
         assert_eq!(sl1.len(), sl2.len());

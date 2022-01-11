@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use mwa_rust_core::Jones;
+use approx::assert_abs_diff_eq;
+use marlu::Jones;
 use ndarray::prelude::*;
 
 use super::*;
-
-use approx::assert_abs_diff_eq;
+use crate::jones_test::TestJones;
 
 #[test]
 /// Make the data be twice the model.
@@ -66,6 +66,9 @@ fn test_calibrate_trivial() {
             assert_eq!(result.num_failed, 0);
 
             let expected = Array1::from_elem(di_jones_slice.len(), Jones::identity() * 2.0);
+
+            let di_jones_slice = di_jones_slice.mapv(TestJones::from);
+            let expected = expected.mapv(TestJones::from);
             assert_abs_diff_eq!(di_jones_slice, expected, epsilon = 1e-10);
         }
     }

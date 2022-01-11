@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::*;
 use error::ReadSourceListError;
-use mwa_hyperdrive_common::log;
+use mwa_hyperdrive_common::{log, thiserror};
 
 /// Given the path to a sky-model source list file (and optionally its type,
 /// e.g. "RTS style"), return a [SourceList] object. The [SourceListType] is

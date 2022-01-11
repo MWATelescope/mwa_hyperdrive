@@ -43,14 +43,22 @@ pub(crate) fn parse_time(s: &str) -> Result<(f64, TimeFormat), UnitParseError> {
             let prefix = s.trim().trim_end_matches(char::is_alphabetic).trim();
             let number: f64 = match prefix.parse() {
                 Ok(n) => n,
-                Err(_) => return Err(UnitParseError::GotTimeUnitButCantParse(s.to_string())),
+                Err(_) => {
+                    return Err(UnitParseError::GotTimeUnitButCantParse {
+                        input: s.to_string(),
+                        unit: time_format_str,
+                    })
+                }
             };
             return Ok((number, time_format));
         }
     }
 
     // If we made it this far, we don't know how to parse the string.
-    Err(UnitParseError::Unknown(s.to_string()))
+    Err(UnitParseError::Unknown {
+        input: s.to_string(),
+        unit_type: "time",
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, EnumIter, EnumString, IntoStaticStr)]
@@ -91,5 +99,8 @@ pub(crate) fn parse_freq(s: &str) -> Result<(f64, FreqFormat), UnitParseError> {
     }
 
     // If we made it this far, we don't know how to parse the string.
-    Err(UnitParseError::Unknown(s.to_string()))
+    Err(UnitParseError::Unknown {
+        input: s.to_string(),
+        unit_type: "frequency",
+    })
 }

@@ -23,4 +23,4 @@ pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions
 // sqrt(pi^2 / (2 ln(2)))
 pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.6682231283184983;
 
-pub(crate) use mwa_rust_core::constants::*;
+pub(crate) use mwa_hyperdrive_common::marlu::constants::*;

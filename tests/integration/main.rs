@@ -8,6 +8,7 @@
 //! https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html
 
 mod calibrate;
+mod jones_test;
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ use std::process::Output;
 use std::str::from_utf8;
 
 use assert_cmd::{output::OutputError, Command};
+use jones_test::*;
 use tempfile::TempDir;
 
 fn hyperdrive() -> Command {

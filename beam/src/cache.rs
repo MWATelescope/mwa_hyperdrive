@@ -12,7 +12,9 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use mwa_rust_core::AzEl;
+use marlu::AzEl;
+
+use mwa_hyperdrive_common::marlu;
 
 /// A special hash used to determine what's in our Jones cache.
 #[derive(Hash, Clone, Copy, Debug, Eq, PartialEq)]

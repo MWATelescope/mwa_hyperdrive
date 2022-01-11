@@ -9,72 +9,72 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use clap::Parser;
 use itertools::Itertools;
 use log::{debug, info, trace, warn};
-use mwa_rust_core::{mwalib, RADec};
+use marlu::RADec;
 use rayon::prelude::*;
-use structopt::StructOpt;
 
 use crate::{
     ao, hyperdrive, rts, woden, HyperdriveFileType, SourceList, SourceListType, SrclistError,
     WriteSourceListError, CONVERT_INPUT_TYPE_HELP, CONVERT_OUTPUT_TYPE_HELP,
 };
-use mwa_hyperdrive_common::log;
+use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, rayon};
 
 /// Convert a sky-model source list from one format to another.
 ///
 /// See for more info:
 /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 pub struct ConvertArgs {
-    #[structopt(short = "i", long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'i', long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
     pub input_type: Option<String>,
 
     /// Path to the source list to be converted.
-    #[structopt(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
+    #[clap(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
     pub input_source_list: PathBuf,
 
-    #[structopt(short = "o", long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'o', long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
     pub output_type: Option<String>,
 
     /// Path to the output source list. If the file extension is .json or .yaml,
     /// then it will written in the hyperdrive source list format. If it is
     /// .txt, then the --output-type flag should be used to specify the type of
     /// source list to be written.
-    #[structopt(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+    #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
     pub output_source_list: PathBuf,
 
     /// Attempt to convert flux density lists to power laws. See the online help
     /// for more information.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     pub convert_lists: bool,
 
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source. This is suitable
     /// for an "RTS patch source list".
-    #[structopt(long)]
+    #[clap(long)]
     pub collapse_into_single_source: bool,
 
     /// Path to the metafits file. Only needed if collapse-into-single-source is
     /// used.
-    #[structopt(short = "m", long, parse(from_str))]
+    #[clap(short = 'm', long, parse(from_str))]
     pub metafits: Option<PathBuf>,
 
     /// Don't include point components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_points: bool,
 
     /// Don't include Gaussian components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_gaussians: bool,
 
     /// Don't include shapelet components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_shapelets: bool,
 
     /// The verbosity of the program. The default is to print high-level
     /// information.
-    #[structopt(short, long, parse(from_occurrences))]
+    #[clap(short, long, parse(from_occurrences))]
     pub verbosity: u8,
 }
 

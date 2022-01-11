@@ -14,11 +14,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use clap::Parser;
 use itertools::Itertools;
 use log::debug;
-use mwa_rust_core::constants::{MWA_LAT_RAD, MWA_LONG_RAD};
 use serde::{Deserialize, Serialize};
-use structopt::StructOpt;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
@@ -28,10 +27,11 @@ use crate::{
         params::{CalibrateParams, InvalidArgsError},
         solutions::CalSolutionType,
     },
+    constants::*,
     data_formats::VisOutputType,
     pfb_gains::{DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
-    *,
 };
+use mwa_hyperdrive_common::{clap, itertools, lazy_static, log, serde_json, thiserror, toml};
 use mwa_hyperdrive_srclist::{SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP};
 
 #[derive(Debug, Display, EnumIter, EnumString)]
@@ -81,128 +81,30 @@ lazy_static::lazy_static! {
 //
 // These are digested by hyperdrive and used to eventually populate
 // [CalibrateParams], which is used throughout hyperdrive's calibration code.
-#[derive(StructOpt, Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CalibrateUserArgs {
     /// Paths to input data files to be calibrated. These can include a metafits
     /// file, gpubox files, mwaf files, a measurement set and/or uvfits files.
-    #[structopt(short, long)]
+    #[clap(short, long, multiple_values(true), help_heading = "INPUT FILES")]
     pub data: Option<Vec<String>>,
 
-    #[structopt(short, long, help = DI_CALIBRATE_OUTPUT_HELP.as_str())]
-    pub outputs: Option<Vec<PathBuf>>,
-
-    #[structopt(short, long, help = MODEL_FILENAME_HELP.as_str())]
-    pub model_filename: Option<PathBuf>,
-
     /// Path to the sky-model source list file.
-    #[structopt(short, long)]
+    #[clap(short, long, help_heading = "INPUT FILES")]
     pub source_list: Option<String>,
 
-    #[structopt(long, help = SOURCE_LIST_TYPE_HELP.as_str())]
+    #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
     pub source_list_type: Option<String>,
 
-    /// The number of sources to use in the source list. The default is to use
-    /// them all. Example: If 1000 sources are specified here, then the top 1000
-    /// sources are used (based on their flux densities after the beam
-    /// attenuation) within the specified source distance cutoff.
-    #[structopt(short, long)]
-    pub num_sources: Option<usize>,
+    #[clap(short, long, multiple_values(true), help = DI_CALIBRATE_OUTPUT_HELP.as_str(), help_heading = "OUTPUT FILES")]
+    pub outputs: Option<Vec<PathBuf>>,
 
-    #[structopt(long, help = SOURCE_DIST_CUTOFF_HELP.as_str())]
-    pub source_dist_cutoff: Option<f64>,
-
-    #[structopt(long, help = VETO_THRESHOLD_HELP.as_str())]
-    pub veto_threshold: Option<f64>,
-
-    /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
-    /// provided by the MWA_BEAM_FILE environment variable.
-    #[structopt(long)]
-    pub beam_file: Option<PathBuf>,
-
-    /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
-    /// the metafits file.
-    #[structopt(long)]
-    pub unity_dipole_gains: bool,
-
-    /// If specified, use these dipole delays for the MWA pointing.
-    #[structopt(long)]
-    pub delays: Option<Vec<u32>>,
-
-    /// Don't apply a beam response when generating a sky model. The default is
-    /// to use the FEE beam.
-    #[structopt(long)]
-    pub no_beam: bool,
-
-    /// The number of time samples to average together before calibrating. If
-    /// this is 0, then all data are averaged together. Default: 0. e.g. If the
-    /// input data is in 0.5s resolution and this variable was 4, then we
-    /// produce calibration solutions for every 2s worth of data.
-    #[structopt(short, long)]
-    pub time_average_factor: Option<usize>,
-
-    // /// The number of fine-frequency channels to average together before
-    // /// calibrating. If this is 0, then all data is averaged together. Default:
-    // /// 1
-    // ///
-    // /// e.g. If the input data is in 20kHz resolution and this variable was 2,
-    // /// then we average 40kHz worth of data together during calibration.
-    // #[structopt(short, long)]
-    // pub freq_average_factor: Option<usize>,
-    /// The timesteps to use from the input data. The timesteps will be
-    /// ascendingly sorted for calibration. No duplicates are allowed. The
-    /// default is to use all unflagged timesteps.
-    #[structopt(long)]
-    pub timesteps: Option<Vec<usize>>,
-
-    /// Additional tiles to be flagged. These values correspond to either the
-    /// values in the "Antenna" column of HDU 2 in the metafits file (e.g. 0 3
-    /// 127), or the "TileName" (e.g. Tile011).
-    #[structopt(long)]
-    pub tile_flags: Option<Vec<String>>,
-
-    /// If specified, pretend that all tiles are unflagged in the input data.
-    #[structopt(long)]
-    pub ignore_input_data_tile_flags: bool,
-
-    /// If specified, pretend all fine channels in the input data are unflagged.
-    #[structopt(long)]
-    pub ignore_input_data_fine_channel_flags: bool,
+    #[clap(short, long, help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
+    pub model_filename: Option<PathBuf>,
 
     /// When writing out calibrated visibilities, don't include
     /// auto-correlations.
-    #[structopt(long)]
+    #[clap(long, help_heading = "OUTPUT FILES")]
     pub ignore_autos: bool,
-
-    /// The fine channels to be flagged in each coarse channel. e.g. 0 1 16 30
-    /// 31 are typical for 40 kHz data. If this is not specified, it defaults to
-    /// flagging 80 kHz (or as close to this as possible) at the edges, as well
-    /// as the centre channel for non-MWAX data.
-    #[structopt(long)]
-    pub fine_chan_flags_per_coarse_chan: Option<Vec<usize>>,
-
-    /// The fine channels to be flagged across the whole observation band. e.g.
-    /// 0 767 are the first and last fine channels for 40 kHz data.
-    #[structopt(long)]
-    pub fine_chan_flags: Option<Vec<usize>>,
-
-    #[structopt(long, help = PFB_FLAVOUR_HELP.as_str())]
-    pub pfb_flavour: Option<String>,
-
-    /// When reading in raw MWA data, don't apply digital gains.
-    #[structopt(long)]
-    pub no_digital_gains: bool,
-
-    /// When reading in raw MWA data, don't apply cable length corrections. Note
-    /// that some data may have already had the correction applied before it was
-    /// written.
-    #[structopt(long)]
-    pub no_cable_length_correction: bool,
-
-    /// When reading in raw MWA data, don't apply geometric corrections. Note
-    /// that some data may have already had the correction applied before it was
-    /// written.
-    #[structopt(long)]
-    pub no_geometric_correction: bool,
 
     /// When writing out calibrated visibilities, average this many timesteps
     /// together. Also supports a target time resolution (e.g. 8s). The value
@@ -212,7 +114,7 @@ pub struct CalibrateUserArgs {
     /// calibrated data together before writing the data out. If the variable is
     /// instead 4s, then 8 calibrated timesteps are averaged together before
     /// writing the data out.
-    #[structopt(long)]
+    #[clap(long, help_heading = "OUTPUT FILES")]
     pub output_vis_time_average: Option<String>,
 
     /// When writing out calibrated visibilities, average this many fine freq.
@@ -223,29 +125,127 @@ pub struct CalibrateUserArgs {
     /// average 160kHz worth of calibrated data together before writing the data
     /// out. If the variable is instead 80kHz, then 2 calibrated fine freq.
     /// channels are averaged together before writing the data out.
-    #[structopt(long)]
+    #[clap(long, help_heading = "OUTPUT FILES")]
     pub output_vis_freq_average: Option<String>,
 
-    #[structopt(long, help = MAX_ITERATIONS_HELP.as_str())]
+    /// The number of sources to use in the source list. The default is to use
+    /// them all. Example: If 1000 sources are specified here, then the top 1000
+    /// sources are used (based on their flux densities after the beam
+    /// attenuation) within the specified source distance cutoff.
+    #[clap(short, long, help_heading = "SKY-MODEL SOURCES")]
+    pub num_sources: Option<usize>,
+
+    #[clap(long, help = SOURCE_DIST_CUTOFF_HELP.as_str(), help_heading = "SKY-MODEL SOURCES")]
+    pub source_dist_cutoff: Option<f64>,
+
+    #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY-MODEL SOURCES")]
+    pub veto_threshold: Option<f64>,
+
+    /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
+    /// provided by the MWA_BEAM_FILE environment variable.
+    #[clap(long, help_heading = "BEAM")]
+    pub beam_file: Option<PathBuf>,
+
+    /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
+    /// the metafits file.
+    #[clap(long, help_heading = "BEAM")]
+    pub unity_dipole_gains: bool,
+
+    /// If specified, use these dipole delays for the MWA pointing.
+    #[clap(long, multiple_values(true), help_heading = "BEAM")]
+    pub delays: Option<Vec<u32>>,
+
+    /// Don't apply a beam response when generating a sky model. The default is
+    /// to use the FEE beam.
+    #[clap(long, help_heading = "BEAM")]
+    pub no_beam: bool,
+
+    /// The number of time samples to average together before calibrating. If
+    /// this is 0, then all data are averaged together. Default: 0. e.g. If the
+    /// input data is in 0.5s resolution and this variable was 4, then we
+    /// produce calibration solutions for every 2s worth of data.
+    #[clap(short, long, help_heading = "CALIBRATION")]
+    pub time_average_factor: Option<usize>,
+
+    // /// The number of fine-frequency channels to average together before
+    // /// calibrating. If this is 0, then all data is averaged together. Default:
+    // /// 1
+    // ///
+    // /// e.g. If the input data is in 20kHz resolution and this variable was 2,
+    // /// then we average 40kHz worth of data together during calibration.
+    // #[clap(short, long, help_heading = "CALIBRATION")]
+    // pub freq_average_factor: Option<usize>,
+    /// The timesteps to use from the input data. The timesteps will be
+    /// ascendingly sorted for calibration. No duplicates are allowed. The
+    /// default is to use all unflagged timesteps.
+    #[clap(long, multiple_values(true), help_heading = "CALIBRATION")]
+    pub timesteps: Option<Vec<usize>>,
+
+    #[clap(long, help = MAX_ITERATIONS_HELP.as_str(), help_heading = "CALIBRATION")]
     pub max_iterations: Option<usize>,
 
-    #[structopt(long, help = STOP_THRESHOLD_HELP.as_str())]
+    #[clap(long, help = STOP_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     pub stop_thresh: Option<f64>,
 
-    #[structopt(long, help = MIN_THRESHOLD_HELP.as_str())]
+    #[clap(long, help = MIN_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     pub min_thresh: Option<f64>,
 
-    #[structopt(long = "array_longitude", help = ARRAY_LONGITUDE_HELP.as_str())]
+    #[clap(long = "array_longitude", help = ARRAY_LONGITUDE_HELP.as_str(), help_heading = "CALIBRATION")]
     pub array_longitude_deg: Option<f64>,
 
-    #[structopt(long = "array_latitude", help = ARRAY_LATITUDE_HELP.as_str())]
+    #[clap(long = "array_latitude", help = ARRAY_LATITUDE_HELP.as_str(), help_heading = "CALIBRATION")]
     pub array_latitude_deg: Option<f64>,
 
     #[cfg(feature = "cuda")]
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
-    #[structopt(long)]
+    #[clap(long, help_heading = "CALIBRATION")]
     pub cpu: bool,
+
+    /// Additional tiles to be flagged. These values correspond to either the
+    /// values in the "Antenna" column of HDU 2 in the metafits file (e.g. 0 3
+    /// 127), or the "TileName" (e.g. Tile011).
+    #[clap(long, multiple_values(true), help_heading = "FLAGGING")]
+    pub tile_flags: Option<Vec<String>>,
+
+    /// If specified, pretend that all tiles are unflagged in the input data.
+    #[clap(long, help_heading = "FLAGGING")]
+    pub ignore_input_data_tile_flags: bool,
+
+    /// If specified, pretend all fine channels in the input data are unflagged.
+    #[clap(long, help_heading = "FLAGGING")]
+    pub ignore_input_data_fine_channel_flags: bool,
+
+    /// The fine channels to be flagged in each coarse channel. e.g. 0 1 16 30
+    /// 31 are typical for 40 kHz data. If this is not specified, it defaults to
+    /// flagging 80 kHz (or as close to this as possible) at the edges, as well
+    /// as the centre channel for non-MWAX data.
+    #[clap(long, multiple_values(true), help_heading = "FLAGGING")]
+    pub fine_chan_flags_per_coarse_chan: Option<Vec<usize>>,
+
+    /// The fine channels to be flagged across the whole observation band. e.g.
+    /// 0 767 are the first and last fine channels for 40 kHz data.
+    #[clap(long, multiple_values(true), help_heading = "FLAGGING")]
+    pub fine_chan_flags: Option<Vec<usize>>,
+
+    #[clap(long, help = PFB_FLAVOUR_HELP.as_str(), help_heading = "RAW MWA DATA")]
+    pub pfb_flavour: Option<String>,
+
+    /// When reading in raw MWA data, don't apply digital gains.
+    #[clap(long, help_heading = "RAW MWA DATA")]
+    pub no_digital_gains: bool,
+
+    /// When reading in raw MWA data, don't apply cable length corrections. Note
+    /// that some data may have already had the correction applied before it was
+    /// written.
+    #[clap(long, help_heading = "RAW MWA DATA")]
+    pub no_cable_length_correction: bool,
+
+    /// When reading in raw MWA data, don't apply geometric corrections. Note
+    /// that some data may have already had the correction applied before it was
+    /// written.
+    #[clap(long, help_heading = "RAW MWA DATA")]
+    pub no_geometric_correction: bool,
 }
 
 impl CalibrateUserArgs {

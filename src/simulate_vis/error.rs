@@ -8,7 +8,7 @@ Error type for all simulate-vis-related errors.
 
 use thiserror::Error;
 
-use mwa_rust_core::mwalib;
+use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum SimulateVisError {
@@ -29,6 +29,11 @@ pub enum SimulateVisError {
 
     #[error("Number of timesteps cannot be 0!")]
     ZeroTimeSteps,
+
+    #[error(
+        "The specified MWA dipole delays aren't valid; there should be 16 values between 0 and 32"
+    )]
+    BadDelays,
 
     #[error("{0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),

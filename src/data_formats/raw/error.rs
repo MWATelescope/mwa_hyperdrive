@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::flagging::MwafMergeError;
-use mwa_rust_core::mwalib;
+use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum NewRawError {

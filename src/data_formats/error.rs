@@ -6,6 +6,8 @@
 
 use thiserror::Error;
 
+use mwa_hyperdrive_common::thiserror;
+
 #[derive(Error, Debug)]
 pub enum ReadInputDataError {
     #[error("The supplied mwaf files don't have flags for timestep {timestep} (GPS time {gps})")]

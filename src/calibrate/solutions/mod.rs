@@ -20,16 +20,19 @@ use std::str::FromStr;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use hifitime::Epoch;
+use marlu::{time::epoch_as_gps_seconds, Jones};
+use mwalib::{
+    fitsio::{
+        errors::check_status as fits_check_status,
+        images::{ImageDescription, ImageType},
+        FitsFile,
+    },
+    *,
+};
 use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
 
-use mwa_rust_core::{mwalib, time::epoch_as_gps_seconds, Complex, Jones};
-use mwalib::fitsio::{
-    errors::check_status as fits_check_status,
-    images::{ImageDescription, ImageType},
-    FitsFile,
-};
-use mwalib::*;
+use mwa_hyperdrive_common::{hifitime, marlu, mwalib, ndarray, Complex};
 
 #[derive(Debug, Display, EnumIter, EnumString)]
 pub(crate) enum CalSolutionType {

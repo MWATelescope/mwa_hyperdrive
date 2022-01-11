@@ -12,9 +12,14 @@
 // Link hyperdrive_cu produced from build.rs
 #![link(name = "hyperdrive_cu", kind = "static")]
 
+pub mod modeller;
+pub use modeller::SkyModellerCuda;
+
+pub use mwa_hyperdrive_beam::{CudaError, DevicePointer};
+
 // Import Rust bindings to the CUDA code specific to the precision we're using,
 // and set corresponding compile-time types.
-cfg_if::cfg_if! {
+mwa_hyperdrive_common::cfg_if::cfg_if! {
     if #[cfg(feature = "cuda-single")] {
         include!("model_single.rs");
         include!("memory_single.rs");
@@ -27,8 +32,3 @@ cfg_if::cfg_if! {
         pub(crate) type CudaJones = JonesF64;
     }
 }
-
-pub mod modeller;
-pub use modeller::SkyModellerCuda;
-
-pub use mwa_hyperdrive_beam::{CudaError, DevicePointer};

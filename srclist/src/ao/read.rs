@@ -7,8 +7,9 @@
 //! The code here is probably incomplete, but it should work for the majority of
 //! source lists.
 
+use marlu::{sexagesimal::*, RADec};
+
 use super::*;
-use mwa_rust_core::sexagesimal::*;
 
 /// Parse a buffer containing an AO-style source list into a [SourceList].
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -617,11 +618,9 @@ pub fn parse_source_list<T: std::io::BufRead>(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
-    use approx::*;
-
     use super::*;
+    use approx::*;
+    use std::io::Cursor;
 
     #[test]
     fn parse_source_1() {

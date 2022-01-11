@@ -4,18 +4,20 @@
 
 //! Code for FEE beam calculations.
 
+use std::collections::HashMap;
 use std::path::Path;
 
-use dashmap::DashMap;
 use log::trace;
-use mwa_rust_core::{AzEl, Jones};
+use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
+use parking_lot::RwLock;
 
 use super::{cache::JonesHash, Beam, BeamError, BeamType, Delays};
+use mwa_hyperdrive_common::{cfg_if, log, marlu, ndarray};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "cuda")] {
-        use mwa_hyperbeam::cuda::*;
+        use marlu::cuda::*;
         use super::{BeamCUDA, CudaFloat};
     }
 }
@@ -26,7 +28,7 @@ pub struct FEEBeam {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
     delays: Array2<u32>,
     gains: Array2<f64>,
-    cache: DashMap<JonesHash, Jones<f64>>,
+    cache: RwLock<HashMap<JonesHash, Jones<f64>>>,
 
     /// If all the tile delays are the same, then provide a single tile's delays
     /// here for convenience.
@@ -88,7 +90,7 @@ impl FEEBeam {
             hyperbeam_object,
             delays,
             gains,
-            cache: DashMap::new(),
+            cache: RwLock::new(HashMap::new()),
             delays_flattened,
         })
     }
@@ -121,6 +123,11 @@ impl FEEBeam {
     ) -> Result<Jones<f64>, mwa_hyperbeam::fee::FEEBeamError> {
         self.hyperbeam_object
             .calc_jones(azel.az, azel.za(), freq_hz as _, delays, amps, true)
+            // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
+            // but the Marlu used all over hyperdrive is imported differently
+            // from that of hyperbeam. Testing shows that this operation takes
+            // tens of nanoseconds.
+            .map(|j| unsafe { std::mem::transmute(j) })
     }
 
     /// Get the dipole delays that are used for this [FEEBeam].
@@ -164,9 +171,11 @@ impl Beam for FEEBeam {
 
         // If the cache for this hash exists, we can return a copy of the Jones
         // matrix.
-        if self.cache.contains_key(&hash) {
-            // TODO: Can we avoid clone here?
-            return Ok(*self.cache.get(&hash).unwrap());
+        {
+            let cache = self.cache.read();
+            if cache.contains_key(&hash) {
+                return Ok(cache[&hash]);
+            }
         }
 
         // If we hit this part of the code, the relevant Jones matrix was not in
@@ -177,8 +186,11 @@ impl Beam for FEEBeam {
             delays.as_slice().unwrap(),
             amps.as_slice().unwrap(),
         )?;
-        self.cache.insert(hash, jones);
-        Ok(*self.cache.get(&hash).unwrap())
+        {
+            let mut cache = self.cache.write();
+            cache.insert(hash, jones);
+        }
+        Ok(jones)
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
@@ -191,15 +203,15 @@ impl Beam for FEEBeam {
     }
 
     fn len(&self) -> usize {
-        self.cache.len()
+        self.cache.read().len()
     }
 
     fn is_empty(&self) -> bool {
-        self.cache.is_empty()
+        self.cache.read().is_empty()
     }
 
     fn empty_cache(&self) {
-        self.cache.clear();
+        self.cache.write().clear();
     }
 
     fn empty_coeff_cache(&self) {
@@ -237,6 +249,11 @@ impl BeamCUDA for FEEBeamCUDA {
             .unzip();
         self.hyperbeam_object
             .calc_jones_device(&azs, &zas, true)
+            // This hilariously unsafe map is to convert hyperbeam's `Jones` to
+            // our `Jones`. Both come from Marlu, but the Marlu used all over
+            // hyperdrive is imported differently from that of hyperbeam.
+            // Testing shows that this operation takes tens of nanoseconds.
+            .map(|ptr| unsafe { std::mem::transmute(ptr) })
             .map_err(BeamError::from)
     }
 
@@ -244,8 +261,12 @@ impl BeamCUDA for FEEBeamCUDA {
         BeamType::FEE
     }
 
-    fn get_beam_jones_map(&self) -> *const u64 {
-        self.hyperbeam_object.get_beam_jones_map()
+    fn get_tile_map(&self) -> *const i32 {
+        self.hyperbeam_object.get_tile_map()
+    }
+
+    fn get_freq_map(&self) -> *const i32 {
+        self.hyperbeam_object.get_freq_map()
     }
 
     fn get_num_unique_freqs(&self) -> i32 {
@@ -286,45 +307,4 @@ fn partial_to_full(delays: Vec<u32>, num_tiles: usize) -> Array2<u32> {
         tile_delays.assign(&d);
     });
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use approx::assert_abs_diff_eq;
-    use mwa_hyperbeam::fee::FEEBeam;
-    use serial_test::serial;
-
-    #[test]
-    #[serial]
-    fn fee_beam_values_are_sensible() {
-        let delays = vec![0; 16];
-        let amps = [1.0; 16];
-        let freq = 150e6;
-        let azels = [
-            AzEl { az: 0.0, el: 0.0 },
-            AzEl { az: 1.0, el: 0.1 },
-            AzEl { az: -1.0, el: 0.2 },
-        ];
-        let (azs, zas): (Vec<_>, Vec<_>) = azels.iter().map(|azel| (azel.az, azel.za())).unzip();
-
-        // Get the beam values right out of hyperbeam.
-        let hyperbeam = FEEBeam::new_from_env().unwrap();
-        let hyperbeam_values = hyperbeam
-            .calc_jones_array(&azs, &zas, freq as u32, &delays, &amps, true)
-            .unwrap();
-        // Put the hyperbeam results into hyperdrive `Jones` objects.
-        let hyperbeam_values = Array1::from(hyperbeam_values.to_vec());
-
-        // Compare these with the hyperdrive `Beam` trait.
-        let gains = array![amps];
-        let hyperdrive =
-            super::FEEBeam::new_from_env(1, Delays::Partial(delays), Some(gains)).unwrap();
-        let hyperdrive_values: Vec<Jones<f64>> = azels
-            .iter()
-            .map(|&azel| hyperdrive.calc_jones(azel, freq, 0).unwrap())
-            .collect();
-
-        assert_abs_diff_eq!(Array1::from(hyperdrive_values), hyperbeam_values);
-    }
 }

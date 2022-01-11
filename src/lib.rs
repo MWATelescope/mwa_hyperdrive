@@ -15,15 +15,16 @@ pub mod data_formats;
 pub(crate) mod error;
 pub(crate) mod flagging;
 pub(crate) mod glob;
-pub(crate) mod math;
+pub mod math;
 pub(crate) mod pfb_gains;
 pub(crate) mod shapelets;
 pub(crate) mod unit_parsing;
 
+#[cfg(test)]
+mod jones_test;
 #[cfg(test)]
 pub(crate) mod tests;
 
 // Re-exports.
 pub(crate) use constants::*;
 pub use error::HyperdriveError;
-pub(crate) use mwa_rust_core::*;

@@ -12,13 +12,14 @@ mod tests {
     use std::fs::File;
     use std::io::{BufReader, Read};
 
+    use marlu::RADec;
     use tempfile::NamedTempFile;
 
+    use mwa_hyperdrive_common::marlu;
     use mwa_hyperdrive_srclist::{
         hyperdrive, ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source,
         SourceComponent, SourceList,
     };
-    use mwa_rust_core::RADec;
 
     /// The return value of this function is the sourcelist that should match
     /// what is in the examples.

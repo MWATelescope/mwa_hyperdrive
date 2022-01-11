@@ -6,10 +6,10 @@
 
 use std::path::PathBuf;
 
+use mwalib::*;
 use thiserror::Error;
 
-use mwa_rust_core::mwalib;
-use mwalib::*;
+use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum FitsError {

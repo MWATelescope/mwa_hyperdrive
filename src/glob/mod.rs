@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use glob::glob;
 use thiserror::Error;
 
+use mwa_hyperdrive_common::thiserror;
+
 /// Given a glob pattern, get all of the matches from the filesystem.
 pub(crate) fn get_all_matches_from_glob(g: &str) -> Result<Vec<PathBuf>, GlobError> {
     let mut entries = vec![];
@@ -81,18 +83,18 @@ mod tests {
     fn test_single_glob() {
         let glob = "Cargo.t*l";
         assert_eq!(
-            get_single_match_from_glob(&glob).unwrap(),
+            get_single_match_from_glob(glob).unwrap(),
             PathBuf::from("Cargo.toml")
         );
 
         let glob = "Cargo.t??l";
         assert_eq!(
-            get_single_match_from_glob(&glob).unwrap(),
+            get_single_match_from_glob(glob).unwrap(),
             PathBuf::from("Cargo.toml")
         );
 
         let glob = "../Cargo*";
         // Matches "Cargo.lock" and "Cargo.toml".
-        assert!(get_single_match_from_glob(&glob).is_err());
+        assert!(get_single_match_from_glob(glob).is_err());
     }
 }

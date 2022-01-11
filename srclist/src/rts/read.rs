@@ -8,10 +8,10 @@
 //! <https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists>
 
 use log::warn;
+use marlu::{constants::DH2R, RADec};
 
 use super::*;
-use mwa_hyperdrive_common::log;
-use mwa_rust_core::constants::DH2R;
+use mwa_hyperdrive_common::{log, marlu};
 
 /// Parse a buffer containing an RTS-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -39,7 +39,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
     };
 
     let float_to_int = |float: f64, line_num: u32| -> Result<usize, ReadSourceListCommonError> {
-        if float < 0.0 || float > std::u8::MAX as _ {
+        if float < 0.0 || float > std::u8::MAX as f64 {
             Err(ReadSourceListCommonError::FloatToIntError { line_num, float })
         } else {
             Ok(float as _)
@@ -431,8 +431,17 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     );
                 }
 
+                // Validation and conversion.
+                if !(0.0..=24.0).contains(&hour_angle) {
+                    return Err(ReadSourceListError::InvalidHa(hour_angle));
+                }
+                if !(-90.0..=90.0).contains(&declination) {
+                    return Err(ReadSourceListError::InvalidDec(declination));
+                }
+                let radec = RADec::new(hour_angle * DH2R, declination.to_radians());
+
                 components.push(SourceComponent {
-                    radec: RADec::new(hour_angle * DH2R, declination.to_radians()),
+                    radec,
                     // Assume the base source is a point source. If we find
                     // component type information, we can overwrite this.
                     comp_type: ComponentType::Point,
@@ -1086,6 +1095,30 @@ mod tests {
         let sl = result.unwrap();
         assert_eq!(sl["VLA_ForA"].components.len(), 1);
         assert_eq!(sl["VLA_ForB"].components.len(), 2);
+    }
+
+    #[test]
+    fn invalid_ha() {
+        let mut sl = Cursor::new(indoc! {"
+        SOURCE J235959-180236 24.999841465546492 -18.047459423190038
+        FREQ 170e6 235.71 0 0 0
+        ENDSOURCE
+        "});
+        let result = parse_source_list(&mut sl);
+        assert!(&result.is_err(), "{:?}", &result);
+
+        let mut sl = Cursor::new(indoc! {"
+        SOURCE J235959-180236 23.999841465546492 -18.047459423190038
+        FREQ 170e6 235.71 0 0 0
+        COMPONENT 24.005069897856296291 -20.092982953337557
+        GAUSSIAN 90 1.0 0.5
+        FREQ 180e+6 0.5 0 0 0
+        FREQ 170e+6 1.0 0 0.2 0
+        ENDCOMPONENT
+        ENDSOURCE
+        "});
+        let result = parse_source_list(&mut sl);
+        assert!(&result.is_err(), "{:?}", &result);
     }
 
     #[test]

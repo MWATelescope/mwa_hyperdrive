@@ -11,7 +11,7 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::c64;
+use mwa_hyperdrive_common::c64;
 
 // Make traditional trigonometry possible.
 /// Sine.
@@ -88,13 +88,13 @@ pub(crate) fn is_prime(n: usize) -> bool {
     true
 }
 
-pub(crate) struct TileBaselineMaps {
-    pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
-    pub(crate) unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+pub struct TileBaselineMaps {
+    pub tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
+    pub unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 }
 
 impl TileBaselineMaps {
-    pub(crate) fn new(total_num_tiles: usize, tile_flags: &HashSet<usize>) -> TileBaselineMaps {
+    pub fn new(total_num_tiles: usize, tile_flags: &HashSet<usize>) -> TileBaselineMaps {
         let mut tile_to_unflagged_cross_baseline_map = HashMap::new();
         let mut unflagged_cross_baseline_to_tile_map = HashMap::new();
         let mut bl = 0;

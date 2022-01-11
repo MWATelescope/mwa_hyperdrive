@@ -8,6 +8,7 @@ use crate::{
     read::SourceListError, VetoError, HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED,
     SOURCE_LIST_TYPES_COMMA_SEPARATED,
 };
+use mwa_hyperdrive_common::{marlu, serde_json, thiserror};
 
 /// Errors associated with reading in any kind of source list.
 #[derive(Error, Debug)]
@@ -53,7 +54,7 @@ pub enum ReadSourceListError {
     Json(#[from] serde_json::Error),
 
     #[error("{0}")]
-    Sexagesimal(#[from] mwa_rust_core::sexagesimal::SexagesimalError),
+    Sexagesimal(#[from] marlu::sexagesimal::SexagesimalError),
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
@@ -273,7 +274,7 @@ pub enum WriteSourceListError {
     InvalidHyperdriveFormat(String),
 
     #[error("{0}")]
-    Sexagesimal(#[from] mwa_rust_core::sexagesimal::SexagesimalError),
+    Sexagesimal(#[from] marlu::sexagesimal::SexagesimalError),
 
     /// An IO error.
     #[error("{0}")]
@@ -307,7 +308,7 @@ pub enum SrclistError {
     Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
     #[error("{0}")]
-    Mwalib(#[from] mwa_rust_core::mwalib::MwalibError),
+    Mwalib(#[from] marlu::mwalib::MwalibError),
 
     #[error("{0}")]
     IO(#[from] std::io::Error),

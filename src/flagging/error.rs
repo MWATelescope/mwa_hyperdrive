@@ -4,9 +4,10 @@
 
 //! Errors associated with reading AOFlagger flag files.
 
+use mwalib::FitsError;
 use thiserror::Error;
 
-use crate::mwalib::FitsError;
+use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 /// Error type associated with mwaf files.

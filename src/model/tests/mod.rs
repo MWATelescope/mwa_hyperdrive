@@ -11,12 +11,13 @@ use std::collections::HashSet;
 use std::ops::Deref;
 
 use approx::assert_abs_diff_eq;
-use mwa_rust_core::{HADec, Jones, RADec, XyzGeodetic};
+use marlu::{pos::xyz::xyzs_to_cross_uvws_parallel, Jones, RADec, XyzGeodetic};
 use ndarray::prelude::*;
 
 use super::*;
-use crate::math::TileBaselineMaps;
+use crate::{jones_test::TestJones, math::TileBaselineMaps};
 use mwa_hyperdrive_beam::create_no_beam_object;
+use mwa_hyperdrive_common::{marlu, ndarray};
 use mwa_hyperdrive_srclist::{
     constants::DEFAULT_SPEC_INDEX, ComponentList, ComponentType, FluxDensity, FluxDensityType,
     Source, SourceComponent, SourceList,
@@ -220,18 +221,18 @@ fn assert_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
 
     // First column: flux density at first frequency (i.e. 1 Jy XX and YY).
     assert_abs_diff_eq!(
-        vis.slice(s![.., 0]),
-        Array1::from_elem(vis.dim().0, Jones::identity()),
+        vis.slice(s![.., 0]).mapv(TestJones::from),
+        Array1::from_elem(vis.dim().0, Jones::identity()).mapv(TestJones::from),
     );
     // 3 Jy XX and YY.
     assert_abs_diff_eq!(
-        vis.slice(s![.., 1]),
-        Array1::from_elem(vis.dim().0, Jones::identity() * 3.0),
+        vis.slice(s![.., 1]).mapv(TestJones::from),
+        Array1::from_elem(vis.dim().0, Jones::identity() * 3.0).mapv(TestJones::from),
     );
     // 2 Jy XX and YY.
     assert_abs_diff_eq!(
-        vis.slice(s![.., 2]),
-        Array1::from_elem(vis.dim().0, Jones::identity() * 2.0),
+        vis.slice(s![.., 2]).mapv(TestJones::from),
+        Array1::from_elem(vis.dim().0, Jones::identity() * 2.0).mapv(TestJones::from),
     );
 }
 
@@ -241,21 +242,21 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // input flux densities.
 
     assert_abs_diff_eq!(
-        vis.slice(s![.., 0]),
+        vis.slice(s![.., 0]).mapv(TestJones::from),
         array![
-            Jones::from([
+            TestJones::from([
                 Complex::new(0.99522406, 0.09761678),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.99522406, 0.09761678),
             ]),
-            Jones::from([
+            TestJones::from([
                 Complex::new(0.99878436, 0.049292877),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.99878436, 0.049292877),
             ]),
-            Jones::from([
+            TestJones::from([
                 Complex::new(0.9988261, -0.04844065),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
@@ -265,21 +266,21 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     );
 
     assert_abs_diff_eq!(
-        vis.slice(s![.., 1]),
+        vis.slice(s![.., 1]).mapv(TestJones::from),
         array![
-            Jones::from([
+            TestJones::from([
                 Complex::new(2.980504, 0.34146205),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
                 Complex::new(2.980504, 0.34146205),
             ]),
-            Jones::from([
+            TestJones::from([
                 Complex::new(2.9950366, 0.17249982),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
                 Complex::new(2.9950366, 0.17249982),
             ]),
-            Jones::from([
+            TestJones::from([
                 Complex::new(2.9952068, -0.1695183),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
@@ -289,21 +290,21 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     );
 
     assert_abs_diff_eq!(
-        vis.slice(s![.., 2]),
+        vis.slice(s![.., 2]).mapv(TestJones::from),
         array![
-            Jones::from([
+            TestJones::from([
                 Complex::new(1.9830295, 0.25998875),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
                 Complex::new(1.9830295, 0.25998875),
             ]),
-            Jones::from([
+            TestJones::from([
                 Complex::new(1.9956784, 0.13140623),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
                 Complex::new(1.9956784, 0.13140623),
             ]),
-            Jones::from([
+            TestJones::from([
                 Complex::new(1.9958266, -0.12913574),
                 Complex::new(0.0, 0.0),
                 Complex::new(0.0, 0.0),
@@ -503,28 +504,4 @@ fn shapelet_off_zenith_cpu() {
         &obs.unflagged_cross_baseline_to_tile_map,
     );
     assert_list_off_zenith_visibilities(visibilities.view());
-}
-
-// TODO: Have in mwa_rust_core
-/// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
-/// having to form [XyzGeodetic] baselines first. This function performs
-/// calculations in parallel. Cross-correlation baselines only.
-fn xyzs_to_cross_uvws_parallel(xyzs: &[XyzGeodetic], phase_centre: HADec) -> Vec<UVW> {
-    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-    // Get a UVW for each tile.
-    let tile_uvws: Vec<UVW> = xyzs
-        .par_iter()
-        .map(|&xyz| UVW::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec))
-        .collect();
-    // Take the difference of every pair of UVWs.
-    let num_tiles = xyzs.len();
-    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-    (0..num_baselines)
-        .into_par_iter()
-        .map(|i_bl| {
-            let (i, j) = mwa_rust_core::math::cross_correlation_baseline_to_tiles(num_tiles, i_bl);
-            tile_uvws[i] - tile_uvws[j]
-        })
-        .collect()
 }

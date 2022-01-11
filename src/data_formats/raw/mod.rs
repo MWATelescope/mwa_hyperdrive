@@ -15,9 +15,9 @@ use std::ops::Range;
 use std::path::Path;
 
 use log::{debug, info, trace, warn};
-use mwa_rust_core::{
+use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    math::{baseline_to_tiles, cross_correlation_baseline_to_tiles},
+    math::baseline_to_tiles,
     time::{epoch_as_gps_seconds, gps_to_epoch},
     Jones, RADec, XyzGeodetic,
 };
@@ -30,10 +30,10 @@ use crate::{
     context::{FreqContext, ObsContext},
     data_formats::metafits::get_dipole_gains,
     flagging::{AOFlags, MwafProducer},
-    mwalib,
     pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
 };
 use mwa_hyperdrive_beam::Delays;
+use mwa_hyperdrive_common::{hifitime::Epoch, log, marlu, mwalib, ndarray, rayon};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawData {
@@ -163,7 +163,7 @@ impl RawData {
 
         let time_res = Some(metafits_context.corr_int_time_ms as f64 / 1e3);
 
-        let timesteps: Vec<hifitime::Epoch> = mwalib_context
+        let timesteps: Vec<Epoch> = mwalib_context
             .timesteps
             .iter()
             .map(|t| gps_to_epoch(t.gps_time_ms as f64 / 1e3))
@@ -582,7 +582,8 @@ impl RawData {
             &coarse_chan_range,
             None,
         );
-        let weights = birli::flags::flag_to_weight_array(&self.mwalib_context, flags.view());
+        let weight_factor = birli::flags::get_weight_factor(&self.mwalib_context);
+        let weights = birli::flags::flag_to_weight_array(flags.view(), weight_factor);
 
         // Correct the raw data.
         if !self.mwalib_context.metafits_context.cable_delays_applied
@@ -626,7 +627,7 @@ impl RawData {
         // flagged.
         ndarray::Zip::from(&mut vis)
             .and(&mut weights)
-            .par_apply(|v, w| {
+            .par_for_each(|v, w| {
                 if *w < 0.0 {
                     *w = 0.0;
                 }

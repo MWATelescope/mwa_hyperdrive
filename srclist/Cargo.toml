@@ -15,33 +15,23 @@ exclude = [".github/*", "test_files/*"]
 default = []
 cuda = ["mwa_hyperdrive_beam/cuda"]
 cuda-single = ["mwa_hyperdrive_beam/cuda-single"]
-cfitsio-static = ["mwa_rust_core/cfitsio-static"]
-erfa-static = ["mwa_rust_core/erfa-static"]
+cfitsio-static = ["mwa_hyperdrive_common/cfitsio-static"]
+erfa-static = ["mwa_hyperdrive_common/erfa-static"]
 hdf5-static = ["mwa_hyperdrive_beam/hdf5-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 
 [dependencies]
-cfg-if = "1.0.*"
-itertools = "0.10.*"
-lazy_static = "1.4.*"
-mwa_rust_core = "0.2.*"
-ndarray = { version = "0.14.*", features = ["rayon"] }
-rayon = "~1"
 serde = { version = "1.0.*", features = ["derive"] }
-serde_json = "1.0.*"
 serde_yaml = "0.8.*"
-structopt = "0.3.*"
 strum = "0.21.*"
 strum_macros = "0.21.*"
-thiserror = "1.0.*"
 
 mwa_hyperdrive_common = { path = "../common" }
 mwa_hyperdrive_beam =   { path = "../beam" }
 
 [dev-dependencies]
+approx = "0.5.*"
 indoc = "1.0.*"
+ndarray = { version = ">=0.15.4,<0.16", features = ["approx-0_5"] }
 serial_test = "0.5.*"
-tempfile = "3.1.*"
-
-approx = "0.4.*"
-ndarray = { version = "0.14.*", features = ["approx"] }
+tempfile = "3.3.*"

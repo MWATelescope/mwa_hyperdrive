@@ -5,41 +5,16 @@
 use std::collections::HashSet;
 
 use approx::assert_abs_diff_eq;
-use mwa_rust_core::{
-    c32, math::cross_correlation_baseline_to_tiles, time::gps_to_epoch, HADec, Jones, RADec,
-    XyzGeodetic, UVW,
+use marlu::{
+    c32, pos::xyz::xyzs_to_cross_uvws_parallel, time::gps_to_epoch, Jones, RADec, XyzGeodetic, UVW,
 };
 use ndarray::prelude::*;
-use rayon::prelude::*;
 use tempfile::NamedTempFile;
 
 use super::*;
-use crate::math::TileBaselineMaps;
+use crate::{jones_test::TestJones, math::TileBaselineMaps};
 use mwa_hyperdrive_beam::Delays;
-
-// TODO: Have in mwa_rust_core
-/// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
-/// having to form [XyzGeodetic] baselines first. This function performs
-/// calculations in parallel. Cross-correlation baselines only.
-pub fn xyzs_to_cross_uvws_parallel(xyzs: &[XyzGeodetic], phase_centre: HADec) -> Vec<UVW> {
-    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-    // Get a UVW for each tile.
-    let tile_uvws: Vec<UVW> = xyzs
-        .par_iter()
-        .map(|&xyz| UVW::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec))
-        .collect();
-    // Take the difference of every pair of UVWs.
-    let num_tiles = xyzs.len();
-    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-    (0..num_baselines)
-        .into_par_iter()
-        .map(|i_bl| {
-            let (i, j) = cross_correlation_baseline_to_tiles(num_tiles, i_bl);
-            tile_uvws[i] - tile_uvws[j]
-        })
-        .collect()
-}
+use mwa_hyperdrive_common::{marlu, ndarray};
 
 #[test]
 fn test_get_truncated_date_str() {
@@ -281,6 +256,9 @@ fn write_then_read_uvfits(autos: bool) {
             result.unwrap_err()
         );
         result.unwrap();
+
+        let cross_vis = cross_vis.mapv(TestJones::from);
+        let cross_vis_read = cross_vis_read.mapv(TestJones::from);
         assert_abs_diff_eq!(cross_vis_read, cross_vis);
         assert_abs_diff_eq!(cross_weights_read, cross_weights);
 
@@ -299,6 +277,8 @@ fn write_then_read_uvfits(autos: bool) {
             );
             result.unwrap();
 
+            let auto_vis = auto_vis.mapv(TestJones::from);
+            let auto_vis_read = auto_vis_read.mapv(TestJones::from);
             assert_abs_diff_eq!(auto_vis_read, auto_vis);
             assert_abs_diff_eq!(auto_weights_read, auto_weights);
         }

@@ -6,6 +6,7 @@
 
 use thiserror::Error;
 
+use mwa_hyperdrive_common::thiserror;
 use mwa_hyperdrive_srclist::SrclistError;
 
 #[derive(Error, Debug)]

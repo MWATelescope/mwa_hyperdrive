@@ -11,11 +11,11 @@
 use log::{debug, trace, log_enabled, Level::Trace};
 use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
+use marlu::{RADec, Jones};
 
 use crate::{FluxDensity, SourceList, constants::*};
-use mwa_rust_core::{RADec, Jones};
 use mwa_hyperdrive_beam::{BeamError, Beam};
-use mwa_hyperdrive_common::log;
+use mwa_hyperdrive_common::{log, rayon, thiserror, marlu};
 
 #[derive(Debug)]
 struct RankedSource<'a> {
@@ -220,7 +220,7 @@ mod tests {
     use std::ops::Deref;
 
     use mwa_hyperdrive_beam::{Delays, create_fee_beam_object, create_no_beam_object};
-    use mwa_rust_core::{AzEl, constants::MWA_LAT_RAD};
+    use marlu::{AzEl, constants::MWA_LAT_RAD};
     use approx::assert_abs_diff_eq;
     use serial_test::*;
 

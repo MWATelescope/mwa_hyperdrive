@@ -6,6 +6,8 @@
 
 use thiserror::Error;
 
+use mwa_hyperdrive_common::{marlu, thiserror};
+
 #[derive(Error, Debug)]
 pub enum BeamError {
     #[error("Tried to create a beam object, but MWA dipole delay information isn't available!")]
@@ -22,5 +24,5 @@ pub enum BeamError {
 
     #[cfg(feature = "cuda")]
     #[error("CUDA error: {0}")]
-    Cuda(#[from] mwa_hyperbeam::cuda::CudaError),
+    Cuda(#[from] marlu::cuda::CudaError),
 }

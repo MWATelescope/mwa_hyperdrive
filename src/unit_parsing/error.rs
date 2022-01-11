@@ -6,18 +6,23 @@ use super::*;
 
 use thiserror::Error;
 
+use mwa_hyperdrive_common::thiserror;
+
 #[derive(Debug, Error)]
 pub enum UnitParseError {
     #[error(
-        "Successfully parsed a time unit, but could not parse the numerical component of '{0}'"
+        "Successfully parsed a time unit ('{unit}'), but could not parse the numerical component of '{0}'"
     )]
-    GotTimeUnitButCantParse(String),
+    GotTimeUnitButCantParse { input: String, unit: &'static str },
 
     #[error(
         "Successfully parsed a frequency unit, but could not parse the numerical component of '{0}'"
     )]
     GotFreqUnitButCantParse(String),
 
-    #[error("Could not parse '{0}' as a time")]
-    Unknown(String),
+    #[error("Could not parse '{input}' as a number or quantity of {unit_type}")]
+    Unknown {
+        input: String,
+        unit_type: &'static str,
+    },
 }

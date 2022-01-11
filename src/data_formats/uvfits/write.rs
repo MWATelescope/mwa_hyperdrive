@@ -11,14 +11,12 @@ use std::path::{Path, PathBuf};
 use erfa_sys::{ERFA_DJM0, ERFA_WGS84};
 use fitsio::{errors::check_status as fits_check_status, FitsFile};
 use hifitime::Epoch;
+use marlu::{erfa_sys, mwalib, Jones, RADec, XyzGeocentric, XyzGeodetic, UVW};
+use mwalib::{fitsio, fitsio_sys};
 use ndarray::prelude::*;
 
 use super::*;
-use mwa_rust_core::{
-    constants::{MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD, VEL_C},
-    erfa_sys, mwalib, Jones, RADec, XyzGeocentric, XyzGeodetic, UVW,
-};
-use mwalib::{fitsio, fitsio_sys};
+use crate::constants::*;
 
 /// A helper struct to write out a uvfits file.
 pub(crate) struct UvfitsWriter<'a> {

@@ -10,11 +10,10 @@
 //! errors) can be neatly split.
 
 pub(crate) mod error;
+mod filenames;
 pub(crate) mod freq;
 #[cfg(test)]
 mod tests;
-
-mod filenames;
 
 pub(crate) use error::*;
 use filenames::InputDataTypes;
@@ -28,12 +27,16 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
-use mwa_rust_core::{
+use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    pos::precession::{precess_time, PrecessionInfo},
+    pos::{
+        precession::{precess_time, PrecessionInfo},
+        xyz::xyzs_to_cross_uvws_parallel,
+    },
     time::epoch_as_gps_seconds,
-    XyzGeodetic,
+    Jones, XyzGeodetic,
 };
+use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
 
 use super::solutions::CalSolutionType;
@@ -46,6 +49,7 @@ use crate::{
     unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat},
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
+use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon};
 use mwa_hyperdrive_srclist::{
     constants::*, veto_sources, FluxDensityType, SourceList, SourceListType,
 };
@@ -766,19 +770,20 @@ impl CalibrateParams {
                         factor
                     }
                     Some(Ok((out_res, time_format))) => {
-                        // If the time resolution isn't determined, it's because
-                        // there's only one timestep. In this case, it doesn't
-                        // matter what the output time resolution is; only one
-                        // timestep goes into it.
-                        let ratio = out_res / obs_context.time_res.unwrap_or(1.0)
+                        let out_res_s = out_res
                             * match time_format {
                                 TimeFormat::S | TimeFormat::NoUnit => 1.0,
                                 TimeFormat::Ms => 1000.0,
                             };
+                        // If the time resolution isn't determined, it's because
+                        // there's only one timestep. In this case, it doesn't
+                        // matter what the output time resolution is; only one
+                        // timestep goes into it.
+                        let ratio = out_res_s / obs_context.time_res.unwrap_or(1.0);
                         // Reject non-integer floats.
                         if ratio.fract().abs() > 1e-6 {
                             return Err(InvalidArgsError::OutputVisTimeResNotMulitple {
-                                out: out_res,
+                                out: out_res_s,
                                 inp: obs_context.time_res.unwrap(),
                             });
                         }
@@ -808,18 +813,19 @@ impl CalibrateParams {
                         factor
                     }
                     Some(Ok((out_res, freq_format))) => {
-                        // If the frequency resolution isn't determined, it's
-                        // because there's only one fine channel. In this case,
-                        // it doesn't matter what the output freq. resolution
-                        // is; only one channel goes into it.
-                        let ratio = out_res / freq_context.native_fine_chan_width.unwrap_or(1.0)
+                        let out_res_hz = out_res
                             * match freq_format {
                                 FreqFormat::Hz | FreqFormat::NoUnit => 1.0,
                                 FreqFormat::kHz => 1000.0,
                             };
+                        // If the frequency resolution isn't determined, it's
+                        // because there's only one fine channel. In this case,
+                        // it doesn't matter what the output freq. resolution
+                        // is; only one channel goes into it.
+                        let ratio = out_res_hz / freq_context.native_fine_chan_width.unwrap_or(1.0);
                         if ratio.fract().abs() > 1e-6 {
                             return Err(InvalidArgsError::OutputVisFreqResNotMulitple {
-                                out: out_res,
+                                out: out_res_hz,
                                 inp: freq_context.native_fine_chan_width.unwrap(),
                             });
                         }
@@ -893,6 +899,21 @@ impl CalibrateParams {
         };
         params.log_param_info(&precession_info)?;
         Ok(params)
+    }
+
+    pub(crate) fn read_crosses(
+        &self,
+        vis: ArrayViewMut2<Jones<f32>>,
+        weights: ArrayViewMut2<f32>,
+        timestep: usize,
+    ) -> Result<(), ReadInputDataError> {
+        self.input_data.read_crosses(
+            vis,
+            weights,
+            timestep,
+            &self.tile_to_unflagged_cross_baseline_map,
+            &self.freq.fine_chan_flags,
+        )
     }
 
     fn log_param_info(&self, precession_info: &PrecessionInfo) -> Result<(), InvalidArgsError> {

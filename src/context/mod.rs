@@ -7,9 +7,10 @@
 use std::ops::Range;
 
 use hifitime::Epoch;
+use marlu::{RADec, XyzGeodetic};
 use ndarray::Array2;
 
-use mwa_rust_core::{RADec, XyzGeodetic};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
 /// Observation metadata.
 ///

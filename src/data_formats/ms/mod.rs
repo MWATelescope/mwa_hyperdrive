@@ -13,18 +13,9 @@ use helpers::*;
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
+use hifitime::Epoch;
 use log::{debug, trace, warn};
-use ndarray::prelude::*;
-use rayon::prelude::*;
-
-use super::*;
-use crate::{
-    context::{FreqContext, ObsContext},
-    data_formats::metafits,
-    glob::get_single_match_from_glob,
-};
-use mwa_hyperdrive_beam::Delays;
-use mwa_rust_core::{
+use marlu::{
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
@@ -33,6 +24,16 @@ use mwa_rust_core::{
     time::{casacore_utc_to_epoch, epoch_as_gps_seconds},
     Jones, RADec, XyzGeocentric,
 };
+use ndarray::prelude::*;
+
+use super::*;
+use crate::{
+    context::{FreqContext, ObsContext},
+    data_formats::metafits,
+    glob::get_single_match_from_glob,
+};
+use mwa_hyperdrive_beam::Delays;
+use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray};
 
 const COTTER_DEFAULT_EDGEWIDTH: f64 = 80e3;
 
@@ -256,7 +257,7 @@ impl MS {
             Some(utc_timesteps[1] - utc_timesteps[0])
         };
 
-        let (all_timestep_indices, timesteps): (Vec<usize>, Vec<hifitime::Epoch>) = utc_timesteps
+        let (all_timestep_indices, timesteps): (Vec<usize>, Vec<Epoch>) = utc_timesteps
             .into_iter()
             .enumerate()
             // casacore keeps the stores the times as centroids, so no

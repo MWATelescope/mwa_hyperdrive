@@ -6,8 +6,10 @@
 
 use std::path::PathBuf;
 
-use mwa_rust_core::mwalib::MwalibError;
+use marlu::mwalib::MwalibError;
 use thiserror::Error;
+
+use mwa_hyperdrive_common::{marlu, thiserror};
 
 #[derive(Error, Debug)]
 pub enum NewMSError {

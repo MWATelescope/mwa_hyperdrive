@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <stdlib.h>
-
 #include "memory.h"
 #include "types.h"
 
@@ -17,60 +15,37 @@ extern "C" {
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
- * sky-model point-source components. See the documentation of `model_timestep`
- * for more info.
+ * sky-model point-source components.
+ *
+ * `points` contains coordinates and flux densities for their respective
+ * component types. The components are further split into "power law" and "list"
+ * types; this is done for efficiency. For the list types, the flux densities
+ * ("fds") are two-dimensional arrays, of which the first axis corresponds to
+ * frequency and the second component.
+ *
+ * `a` is the populated `Addresses` struct needed to do any sky modelling.
+ *
+ * `d_uvws` has one element per baseline.
+ *
+ * `d_beam_jones` is the beam response used for each unique tile, unique
+ * frequency and direction. The metadata within `a` allows disambiguation of
+ * which tile and frequency should use which set of responses.
  */
 int model_points(const Points *points, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
- * sky-model Gaussian components. See the documentation of `model_timestep` for
+ * sky-model Gaussian components. See the documentation of `model_points` for
  * more info.
  */
 int model_gaussians(const Gaussians *gaussians, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
- * sky-model shapelet components. See the documentation of `model_timestep` for
+ * sky-model shapelet components. See the documentation of `model_points` for
  * more info.
  */
 int model_shapelets(const Shapelets *shapelets, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
-
-/**
- * Generate sky-model visibilities for a single timestep given multiple
- * sky-model sources.
- *
- * `uvws` has one element per baseline. `freqs` has one element per...
- * frequency.
- *
- * `points`, `gaussians` and `shapelets` contain coordinates and flux densities
- * for their respective component types. The components are further split into
- * "power law" and "list" types; this is done for efficiency. For the list
- * types, the flux densities ("fds") are two-dimensional arrays, of which the
- * first axis corresponds to frequency and the second component.
- *
- * `*_shapelet_uvs` are special UVWs (without the Ws) calculated just for the
- * shapelets. These are two-dimensional arrays; the first axis corresponds to
- * baselines and the second a shapelet component.
- *
- * `*_shapelet_coeffs` is a flattened array-of-arrays. The length of each
- * sub-array is indicated by `*_num_shapelet_coeffs` (which has a length equal
- * to `*_num_shapelets`).
- *
- * `vis` is a two-dimensional array, of which the first axis corresponds to
- * baselines and the second frequency. It is the only argument that should be
- * mutated and should be completely full of zeros before this function is
- * called.
- */
-int model_timestep_no_beam(int num_baselines, int num_freqs, UVW *uvws, FLOAT *freqs, Points *points,
-                           Gaussians *gaussians, Shapelets *shapelets, FLOAT *shapelet_basis_values, int sbf_l,
-                           int sbf_n, FLOAT sbf_c, FLOAT sbf_dx, JonesF32 *vis);
-
-int model_timestep_fee_beam(int num_baselines, int num_freqs, int num_tiles, UVW *uvws, FLOAT *freqs, Points *points,
-                            Gaussians *gaussians, Shapelets *shapelets, FLOAT *shapelet_basis_values, int sbf_l,
-                            int sbf_n, FLOAT sbf_c, FLOAT sbf_dx, void *d_beam_coeffs, int num_beam_coeffs,
-                            int num_unique_fee_tiles, int num_unique_fee_freqs, uint64_t *d_beam_jones_map,
-                            void *d_beam_norm_jones, JonesF32 *vis);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -19,8 +19,10 @@ use hifitime::{Duration, Epoch, TimeUnit};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Either;
 use log::{debug, info, trace};
-use mwa_hyperdrive_srclist::ComponentList;
-use mwa_rust_core::{math::cross_correlation_baseline_to_tiles, HADec, Jones, XyzGeodetic, UVW};
+use marlu::{
+    math::cross_correlation_baseline_to_tiles, pos::xyz::xyzs_to_cross_uvws_parallel,
+    precession::precess_time, Jones,
+};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
@@ -32,38 +34,15 @@ use super::{
 use crate::{
     data_formats::{uvfits::UvfitsWriter, VisOutputType},
     model,
-    precession::precess_time,
 };
+use mwa_hyperdrive_common::{cfg_if, hifitime, indicatif, itertools, log, marlu, ndarray, rayon};
+use mwa_hyperdrive_srclist::ComponentList;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "cuda")] {
         use mwa_hyperdrive_cuda as cuda;
         use cuda::modeller::SkyModellerCuda;
     }
-}
-
-// TODO: Have in mwa_rust_core
-/// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
-/// having to form [XyzGeodetic] baselines first. This function performs
-/// calculations in parallel. Cross-correlation baselines only.
-pub(crate) fn xyzs_to_cross_uvws_parallel(xyzs: &[XyzGeodetic], phase_centre: HADec) -> Vec<UVW> {
-    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-    // Get a UVW for each tile.
-    let tile_uvws: Vec<UVW> = xyzs
-        .par_iter()
-        .map(|&xyz| UVW::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec))
-        .collect();
-    // Take the difference of every pair of UVWs.
-    let num_tiles = xyzs.len();
-    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-    (0..num_baselines)
-        .into_par_iter()
-        .map(|i_bl| {
-            let (i, j) = cross_correlation_baseline_to_tiles(num_tiles, i_bl);
-            tile_uvws[i] - tile_uvws[j]
-        })
-        .collect()
 }
 
 /// Do all the steps required for direction-independent calibration; read the
@@ -97,18 +76,19 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         num_unflagged_cross_baselines,
         num_unflagged_fine_chans,
     );
+    let size = vis_shape.0 * vis_shape.1 * vis_shape.2 * std::mem::size_of::<Jones<f32>>();
+    let (size_unit, size) = if size < 1024_usize.pow(3) {
+        ("MiB", size as f64 / (1024.0_f64.powi(2)))
+    } else {
+        ("GiB", size as f64 / (1024.0_f64.powi(3)))
+    };
+    debug!(
+        "Shape of data and model arrays: ({} timesteps, {} baselines, {} channels; {:.2} {} each)",
+        vis_shape.0, vis_shape.1, vis_shape.2, size, size_unit
+    );
     let mut vis_data: Array3<Jones<f32>> = Array3::zeros(vis_shape);
     let mut vis_model: Array3<Jones<f32>> = Array3::zeros(vis_shape);
     let mut vis_weights: Array3<f32> = Array3::zeros(vis_shape);
-    debug!(
-        "Shape of data and model arrays: ({} timesteps, {} baselines, {} channels; {} MiB each)",
-        vis_shape.0,
-        vis_shape.1,
-        vis_shape.2,
-        vis_shape.0 * vis_shape.1 * vis_shape.2 * std::mem::size_of_val(&vis_data[[0, 0, 0]])
-        // 1024 * 1024 == 1 MiB.
-        / 1024 / 1024
-    );
 
     // Set up our producer (IO reading and sending) thread, worker (IO receiving
     // and predicting) thread and model (writes the sky model to a file) thread.
@@ -194,13 +174,8 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 .zip(vis_model_slices)
                 .zip(vis_weight_slices)
             {
-                let read_result = params.input_data.read_crosses(
-                    vis_data_slice,
-                    vis_weight_slice.view_mut(),
-                    timestep,
-                    &params.tile_to_unflagged_cross_baseline_map,
-                    &params.freq.fine_chan_flags,
-                );
+                let read_result =
+                    params.read_crosses(vis_data_slice, vis_weight_slice.view_mut(), timestep);
                 let read_failed = read_result.is_err();
                 // Send the result of the read to the worker thread.
                 let msg = read_result
@@ -785,15 +760,14 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 }
 
                 // Divide by `num_merged`.
-                vis_new_timestep
-                    .iter_mut()
-                    .zip(num_merged.into_iter())
-                    .for_each(|(vis, num_merged)| {
-                        if *num_merged > 0 {
-                            let v: Jones<f64> = Jones::from(*vis) / *num_merged as f64;
+                vis_new_timestep.iter_mut().zip(num_merged.iter()).for_each(
+                    |(vis, &num_merged)| {
+                        if num_merged > 0 {
+                            let v: Jones<f64> = Jones::from(*vis) / num_merged as f64;
                             *vis = Jones::from(v);
                         }
-                    });
+                    },
+                );
             }
             (out_vis_data, out_vis_weights)
         } else {
@@ -1267,7 +1241,7 @@ fn calibrate(
                             *failed = true;
                             *di_jones = Jones::default();
                             *new_jones = Jones::default();
-                        } else if !approx::abs_diff_eq!(div, Jones::identity(), epsilon = 1e-5) {
+                        } else {
                             *new_jones = div;
                         }
                     });
@@ -1306,8 +1280,13 @@ fn calibrate(
                             ]
                         },
                     );
+                    let len = di_jones.len() as f64;
                     antenna_precision
-                        .assign(&(Array1::from(jones_diff_sum.to_vec()) / di_jones.len() as f64));
+                        .iter_mut()
+                        .zip(jones_diff_sum.into_iter())
+                        .for_each(|(a, d)| {
+                            *a = d / len;
+                        });
 
                     // di_jones = 0.5 * (di_jones + new_jones)
                     di_jones += &new_jones;

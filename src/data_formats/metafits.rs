@@ -8,10 +8,10 @@
 
 use std::path::Path;
 
+use mwalib::{MetafitsContext, MwalibError, Pol};
 use ndarray::prelude::*;
 
-use mwa_rust_core::mwalib;
-use mwalib::{MetafitsContext, MwalibError, Pol};
+use mwa_hyperdrive_common::{mwalib, ndarray};
 
 /// Populate an `<Option<MetafitsContext>>` if it isn't already populated and
 /// return a reference to the context inside the `Option`.

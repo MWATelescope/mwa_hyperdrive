@@ -17,11 +17,12 @@ pub(crate) use uvfits::Uvfits;
 
 use std::collections::{HashMap, HashSet};
 
+use marlu::Jones;
 use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
 
 use crate::context::{FreqContext, ObsContext};
-use mwa_rust_core::Jones;
+use mwa_hyperdrive_common::{marlu, ndarray};
 
 #[derive(Debug)]
 pub(crate) enum VisInputType {

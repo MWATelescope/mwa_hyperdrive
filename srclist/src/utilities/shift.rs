@@ -8,58 +8,58 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use clap::Parser;
 use log::{debug, info, trace, warn};
-use mwa_rust_core::{constants::DH2R, mwalib};
+use marlu::{constants::DH2R, RADec};
 use rayon::prelude::*;
 use serde::Deserialize;
-use structopt::StructOpt;
 
 use crate::*;
-use mwa_hyperdrive_common::log;
+use mwa_hyperdrive_common::{clap, log, marlu, mwalib, rayon, serde_json};
 
 /// Shift the sources in a source list. Useful to correct for the ionosphere.
 /// The shifts must be detailed in a .json file, with source names as keys
 /// associated with an "ra" and "dec" in degrees. Only the sources specified in
 /// the .json are written to the output source list.
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 pub struct ShiftArgs {
     /// Path to the source list to be shifted.
-    #[structopt(name = "SOURCE_LIST", parse(from_os_str))]
+    #[clap(name = "SOURCE_LIST", parse(from_os_str))]
     pub source_list: PathBuf,
 
     /// Path to the .json shifts file.
-    #[structopt(name = "SOURCE_SHIFTS", parse(from_os_str))]
+    #[clap(name = "SOURCE_SHIFTS", parse(from_os_str))]
     pub source_shifts: PathBuf,
 
     /// Path to the output source list. If not specified, then then "_shifted"
     /// is appended to the filename.
-    #[structopt(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+    #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
     pub output_source_list: Option<PathBuf>,
 
     /// Attempt to convert flux density lists to power laws. See the online help
     /// for more information.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     pub convert_lists: bool,
 
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source. This is suitable
     /// for an "RTS patch source list".
-    #[structopt(long)]
+    #[clap(long)]
     pub collapse_into_single_source: bool,
 
     /// Path to the metafits file. Only needed if collapse-into-single-source is
     /// used.
-    #[structopt(short, long, parse(from_str))]
+    #[clap(short, long, parse(from_str))]
     pub metafits: Option<PathBuf>,
 
     /// Keep any SHAPELET components (SHAPELET2 components are never ignored).
     /// Applies only to rts-style source lists.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     pub keep_shapelets: bool,
 
     /// The verbosity of the program. The default is to print high-level
     /// information.
-    #[structopt(short, long, parse(from_occurrences))]
+    #[clap(short, long, parse(from_occurrences))]
     pub verbosity: u8,
 }
 

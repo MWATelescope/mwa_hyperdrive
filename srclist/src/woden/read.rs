@@ -26,12 +26,12 @@
 
 use std::convert::TryInto;
 
-use crate::constants::DEFAULT_SPEC_INDEX;
 use log::warn;
-use mwa_rust_core::constants::DH2R;
+use marlu::{constants::DH2R, RADec};
 
 use super::*;
-use mwa_hyperdrive_common::log;
+use crate::constants::DEFAULT_SPEC_INDEX;
+use mwa_hyperdrive_common::{log, marlu};
 
 /// Parse a buffer containing a WODEN-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -59,7 +59,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
     };
 
     let float_to_int = |float: f64, line_num: u32| -> Result<u32, ReadSourceListCommonError> {
-        if float < 0.0 || float > std::u32::MAX as _ {
+        if float < 0.0 || float > std::u32::MAX as f64 {
             Err(ReadSourceListCommonError::FloatToIntError { line_num, float })
         } else {
             Ok(float as u32)

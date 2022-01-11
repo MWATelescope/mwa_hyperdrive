@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use mwa_hyperdrive_common::thiserror;
+
 /// Errors associated with setting up a `CalibrateParams` struct.
 #[derive(Error, Debug)]
 pub enum InvalidArgsError {
@@ -90,10 +92,10 @@ pub enum InvalidArgsError {
     #[error("Output vis. freq. average factor cannot be 0")]
     OutputVisFreqAverageFactorZero,
 
-    #[error("Output vis. time resolution isn't a multiple of input data's: {out} vs {inp}")]
+    #[error("Output vis. time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
     OutputVisTimeResNotMulitple { out: f64, inp: f64 },
 
-    #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} vs {inp}")]
+    #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
     OutputVisFreqResNotMulitple { out: f64, inp: f64 },
 
     #[error("Output vis. time resolution cannot be 0")]

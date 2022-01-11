@@ -4,10 +4,11 @@
 
 //! Errors associated with reading or writing calibration solutions.
 
+use marlu::mwalib;
+use mwalib::{fitsio, FitsError};
 use thiserror::Error;
 
-use mwa_rust_core::mwalib;
-use mwalib::{fitsio, FitsError};
+use mwa_hyperdrive_common::{marlu, thiserror};
 
 #[derive(Error, Debug)]
 pub enum ReadSolutionsError {

@@ -10,10 +10,11 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use clap::Parser;
 use itertools::Itertools;
 use log::{debug, info, trace};
+use marlu::RADec;
 use ndarray::{Array1, Array2};
-use structopt::StructOpt;
 
 use crate::{
     ao, constants::*, hyperdrive, rts, veto_sources, woden, HyperdriveFileType, SourceList,
@@ -21,78 +22,77 @@ use crate::{
     CONVERT_OUTPUT_TYPE_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
-use mwa_hyperdrive_common::log;
-use mwa_rust_core::{mwalib, RADec};
+use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, ndarray};
 
 /// Reduce a sky-model source list to the top N brightest sources, given
 /// pointing information.
 ///
 /// See for more info:
 /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 pub struct ByBeamArgs {
     /// Path to the source list to be converted.
-    #[structopt(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
+    #[clap(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
     pub input_source_list: PathBuf,
 
     /// Path to the output source list. If not specified, then then "_N" is
     /// appended to the filename.
-    #[structopt(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+    #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
     pub output_source_list: Option<PathBuf>,
 
-    #[structopt(short = "i", long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'i', long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
     pub input_type: Option<String>,
 
-    #[structopt(short = "o", long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'o', long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
     pub output_type: Option<String>,
 
     /// Reduce the input source list to the brightest N sources and write them
     /// to the output source list. If the input source list has less than N
     /// sources, then all sources are used.
-    #[structopt(short = "n", long)]
+    #[clap(short = 'n', long)]
     pub number: usize,
 
     /// Path to the metafits file.
-    #[structopt(short = "m", long, parse(from_str))]
+    #[clap(short = 'm', long, parse(from_str))]
     pub metafits: PathBuf,
 
-    #[structopt(long, help = SOURCE_DIST_CUTOFF_HELP.as_str())]
+    #[clap(long, help = SOURCE_DIST_CUTOFF_HELP.as_str())]
     pub source_dist_cutoff: Option<f64>,
 
-    #[structopt(long, help = VETO_THRESHOLD_HELP.as_str())]
+    #[clap(long, help = VETO_THRESHOLD_HELP.as_str())]
     pub veto_threshold: Option<f64>,
 
     /// Path to the MWA FEE beam file. If this is not specified, then the
     /// MWA_BEAM_FILE environment variable should contain the path.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     pub beam_file: Option<PathBuf>,
 
     /// Attempt to convert flux density lists to power laws. See the online help
     /// for more information.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     pub convert_lists: bool,
 
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source. This is suitable
     /// for an "RTS patch source list".
-    #[structopt(long)]
+    #[clap(long)]
     pub collapse_into_single_source: bool,
 
     /// Don't include point components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_points: bool,
 
     /// Don't include Gaussian components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_gaussians: bool,
 
     /// Don't include shapelet components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_shapelets: bool,
 
     /// The verbosity of the program. The default is to print high-level
     /// information.
-    #[structopt(short, long, parse(from_occurrences))]
+    #[clap(short, long, parse(from_occurrences))]
     pub verbosity: u8,
 }
 
@@ -244,7 +244,7 @@ pub fn by_beam<T: AsRef<Path>, S: AsRef<str>>(
         &mut sl,
         phase_centre,
         lst,
-        mwa_rust_core::constants::MWA_LAT_RAD,
+        marlu::constants::MWA_LAT_RAD,
         &coarse_chan_freqs,
         beam.deref(),
         Some(num_sources),

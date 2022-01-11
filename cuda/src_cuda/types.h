@@ -8,9 +8,6 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <stdlib.h>
-
 // If SINGLE is enabled, use single-precision floats everywhere. Otherwise
 // default to double-precision.
 #ifdef SINGLE

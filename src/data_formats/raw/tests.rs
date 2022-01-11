@@ -4,15 +4,17 @@
 
 //! Tests for reading from raw MWA files.
 
-use approx::{abs_diff_eq, abs_diff_ne, assert_abs_diff_eq, assert_abs_diff_ne};
-use mwa_rust_core::c32;
+use approx::{abs_diff_eq, abs_diff_ne, assert_abs_diff_eq};
+use marlu::c32;
 use ndarray::prelude::*;
+use tempfile::TempDir;
 
 use super::*;
 use crate::{
     calibrate::args::CalibrateUserArgs,
+    jones_test::TestJones,
     pfb_gains::{EMPIRICAL_40KHZ, LEVINE_40KHZ},
-    tests::reduced_obsids::get_1090008640,
+    tests::{deflate_gz_into_file, reduced_obsids::get_1090008640},
 };
 
 struct CrossData {
@@ -137,8 +139,8 @@ fn read_1090008640_cross_vis() {
     } = get_cross_vis(args);
 
     assert_abs_diff_eq!(
-        vis[(0, 0)] / weights[(0, 0)],
-        Jones::from([
+        TestJones::from(vis[(0, 0)] / weights[(0, 0)]),
+        TestJones::from([
             c32::new(1.6775006e2, -8.475e1),
             c32::new(2.1249968e1, 2.5224997e2),
             c32::new(-1.03750015e2, -3.5224997e2),
@@ -146,8 +148,8 @@ fn read_1090008640_cross_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(10, 16)] / weights[(10, 16)],
-        Jones::from([
+        TestJones::from(vis[(10, 16)] / weights[(10, 16)]),
+        TestJones::from([
             c32::new(4.0899994e2, -1.2324997e2),
             c32::new(5.270001e2, 7.7025006e2),
             c32::new(4.1725012e2, 7.262501e2),
@@ -172,8 +174,8 @@ fn read_1090008640_auto_vis() {
     } = get_auto_vis(args);
 
     assert_abs_diff_eq!(
-        vis[(0, 0)] / weights[(0, 0)],
-        Jones::from([
+        TestJones::from(vis[(0, 0)] / weights[(0, 0)]),
+        TestJones::from([
             c32::new(7.955224e4, 6.400678e-7),
             c32::new(-1.10225e3, 1.9750005e2),
             c32::new(-1.10225e3, -1.9750005e2),
@@ -181,8 +183,8 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(0, 2)] / weights[(0, 2)],
-        Jones::from([
+        TestJones::from(vis[(0, 2)] / weights[(0, 2)]),
+        TestJones::from([
             c32::new(1.0605874e5, -2.0732023e-6),
             c32::new(-1.5845e3, 1.5025009e2),
             c32::new(-1.5845e3, -1.5025009e2),
@@ -190,8 +192,8 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(0, 16)] / weights[(0, 16)],
-        Jones::from([
+        TestJones::from(vis[(0, 16)] / weights[(0, 16)]),
+        TestJones::from([
             c32::new(1.593375e5, 2.8569048e-8),
             c32::new(-1.5977499e3, -6.5500046e1),
             c32::new(-1.5977499e3, 6.5500046e1),
@@ -199,8 +201,8 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(10, 16)] / weights[(10, 16)],
-        Jones::from([
+        TestJones::from(vis[(10, 16)] / weights[(10, 16)]),
+        TestJones::from([
             c32::new(1.5991898e5, 2.289782e-6),
             c32::new(-1.9817502e3, -2.81125e3),
             c32::new(-1.9817502e3, 2.81125e3),
@@ -223,8 +225,8 @@ fn read_1090008640_cross_and_auto_vis() {
 
     // Test values should match those used in "cross_vis" and "auto_vis" tests;
     assert_abs_diff_eq!(
-        cross_data.data_array[(0, 0)] / cross_data.weights_array[(10, 16)],
-        Jones::from([
+        TestJones::from(cross_data.data_array[(0, 0)] / cross_data.weights_array[(10, 16)]),
+        TestJones::from([
             c32::new(1.6775006e2, -8.475e1),
             c32::new(2.1249968e1, 2.5224997e2),
             c32::new(-1.03750015e2, -3.5224997e2),
@@ -232,8 +234,8 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        cross_data.data_array[(10, 16)] / cross_data.weights_array[(10, 16)],
-        Jones::from([
+        TestJones::from(cross_data.data_array[(10, 16)] / cross_data.weights_array[(10, 16)]),
+        TestJones::from([
             c32::new(4.0899994e2, -1.2324997e2),
             c32::new(5.270001e2, 7.7025006e2),
             c32::new(4.1725012e2, 7.262501e2),
@@ -242,8 +244,8 @@ fn read_1090008640_cross_and_auto_vis() {
     );
 
     assert_abs_diff_eq!(
-        auto_data.data_array[(0, 0)] / auto_data.weights_array[(0, 0)],
-        Jones::from([
+        TestJones::from(auto_data.data_array[(0, 0)] / auto_data.weights_array[(0, 0)]),
+        TestJones::from([
             c32::new(7.955224e4, 6.400678e-7),
             c32::new(-1.10225e3, 1.9750005e2),
             c32::new(-1.10225e3, -1.9750005e2),
@@ -251,8 +253,8 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        auto_data.data_array[(10, 16)] / auto_data.weights_array[(10, 16)],
-        Jones::from([
+        TestJones::from(auto_data.data_array[(10, 16)] / auto_data.weights_array[(10, 16)]),
+        TestJones::from([
             c32::new(1.5991898e5, 2.289782e-6),
             c32::new(-1.9817502e3, -2.81125e3),
             c32::new(-1.9817502e3, 2.81125e3),
@@ -296,8 +298,8 @@ fn pfb_empirical_gains() {
         .for_each(|((&vis_pfb, &vis_no_pfb), &gain)| {
             // Promote the Jones matrices for better accuracy.
             assert_abs_diff_eq!(
-                Jones::from(vis_pfb) / Jones::from(vis_no_pfb),
-                Jones::identity() / gain,
+                TestJones::from(Jones::from(vis_pfb) / Jones::from(vis_no_pfb)),
+                TestJones::from(Jones::identity() / gain),
                 epsilon = 1e-6
             );
         });
@@ -334,8 +336,8 @@ fn pfb_levine_gains() {
         .for_each(|((&vis_pfb, &vis_no_pfb), &gain)| {
             // Promote the Jones matrices for better accuracy.
             assert_abs_diff_eq!(
-                Jones::from(vis_pfb) / Jones::from(vis_no_pfb),
-                Jones::identity() / gain,
+                TestJones::from(Jones::from(vis_pfb) / Jones::from(vis_no_pfb)),
+                TestJones::from(Jones::identity() / gain),
                 epsilon = 1e-6
             );
         });
@@ -369,7 +371,11 @@ fn test_digital_gains() {
     // Baseline 1 is made from antennas 0 and 1. Both have a digital gain of 65.
     let dg: f64 = 65.0;
     let expected = Array1::from_elem(result.dim(), Jones::identity()) / dg / dg;
-    assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
+    assert_abs_diff_eq!(
+        result.mapv(TestJones::from),
+        expected.mapv(TestJones::from),
+        epsilon = 1e-10
+    );
 
     let i_bl = 103;
     let mut result: Array1<Jones<f64>> = vis_dg.slice(s![i_bl, ..]).mapv(Jones::from);
@@ -378,7 +384,11 @@ fn test_digital_gains() {
     let dg1: f64 = 65.0;
     let dg2: f64 = 67.0;
     let expected = Array1::from_elem(result.dim(), Jones::identity()) / dg1 / dg2;
-    assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
+    assert_abs_diff_eq!(
+        result.mapv(TestJones::from),
+        expected.mapv(TestJones::from),
+        epsilon = 1e-10
+    );
 
     // Weights are definitely the same.
     assert_abs_diff_eq!(weights_dg, weights_no_dg);
@@ -429,8 +439,12 @@ fn test_mwaf_flags() {
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = None;
     args.no_digital_gains = false;
+    let temp_dir = TempDir::new().unwrap();
+    let mwaf_pb = temp_dir.path().join("primes.mwaf");
+    let mut mwaf_file = std::fs::File::create(&mwaf_pb).unwrap();
+    deflate_gz_into_file("test_files/1090008640/primes_01.mwaf.gz", &mut mwaf_file);
     match &mut args.data {
-        Some(d) => d.push("test_files/1090008640/primes_01.mwaf".to_string()),
+        Some(d) => d.push(mwaf_pb.display().to_string()),
         None => unreachable!(),
     }
 
@@ -475,8 +489,7 @@ fn test_mwaf_flags() {
     for i in 0..num_bls * num_freqs {
         let prime = crate::math::is_prime(i);
         let i_bl = i / num_freqs;
-        let (tile1, tile2) =
-            mwa_rust_core::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
+        let (tile1, tile2) = marlu::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
 
         let (vis, weight) = if tile1 == tile2 {
             i_auto += 1;
@@ -493,7 +506,7 @@ fn test_mwaf_flags() {
         };
         if prime {
             assert!(
-                abs_diff_eq!(vis, Jones::default()),
+                abs_diff_eq!(TestJones::from(vis), TestJones::from(Jones::default())),
                 "i = {}, tile1 = {}, tile2 = {}",
                 i,
                 tile1,
@@ -508,7 +521,7 @@ fn test_mwaf_flags() {
             );
         } else {
             assert!(
-                abs_diff_ne!(vis, Jones::default()),
+                abs_diff_ne!(TestJones::from(vis), TestJones::from(Jones::default())),
                 "i = {}, tile1 = {}, tile2 = {}",
                 i,
                 tile1,

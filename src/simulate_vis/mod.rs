@@ -11,29 +11,32 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::path::PathBuf;
 
+use clap::Parser;
 use hifitime::Epoch;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Either;
 use log::{debug, info};
-use mwa_rust_core::{
+use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    mwalib,
+    pos::xyz::xyzs_to_cross_uvws_parallel,
+    precession::precess_time,
     time::epoch_as_gps_seconds,
+    time::mjd_to_epoch,
     Jones, RADec, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use serde::Deserialize;
-use structopt::StructOpt;
 
 use crate::{
     data_formats::{metafits, uvfits::UvfitsWriter},
     glob::get_single_match_from_glob,
     model,
-    precession::precess_time,
-    time::mjd_to_epoch,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
+use mwa_hyperdrive_common::{
+    cfg_if, clap, hifitime, indicatif, itertools, log, marlu, mwalib, ndarray,
+};
 use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList, SourceList};
 
 cfg_if::cfg_if! {
@@ -43,86 +46,86 @@ cfg_if::cfg_if! {
     }
 }
 
-#[derive(StructOpt, Debug, Default, Deserialize)]
+#[derive(Parser, Debug, Default, Deserialize)]
 pub struct SimulateVisArgs {
     /// Path to the sky-model source list used for simulation.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     source_list: String,
 
     /// Path to the metafits file.
-    #[structopt(short, long, parse(from_str))]
+    #[clap(short, long, parse(from_str))]
     metafits: PathBuf,
 
     /// Path to the output visibilities file.
-    #[structopt(short = "o", long, default_value = "model.uvfits")]
+    #[clap(short = 'o', long, default_value = "model.uvfits")]
     output_model_file: PathBuf,
 
     /// The phase centre right ascension [degrees]. If this is not specified,
     /// then the metafits phase/pointing centre is used.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     ra: Option<f64>,
 
     /// The phase centre declination [degrees]. If this is not specified, then
     /// the metafits phase/pointing centre is used.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     dec: Option<f64>,
 
     /// The total number of fine channels in the observation.
-    #[structopt(short = "c", long, default_value = "384")]
+    #[clap(short = 'c', long, default_value = "384")]
     num_fine_channels: usize,
 
     /// The fine-channel resolution [kHz].
-    #[structopt(short, long, default_value = "80")]
+    #[clap(short, long, default_value = "80")]
     freq_res: f64,
 
     /// The middle frequency of the simulation [MHz]. If this is not specified,
     /// then the middle frequency specified in the metafits is used.
-    #[structopt(long)]
+    #[clap(long)]
     middle_freq: Option<f64>,
 
     /// The number of time steps used from the metafits epoch.
-    #[structopt(short = "t", long, default_value = "14")]
+    #[clap(short = 't', long, default_value = "14")]
     num_timesteps: usize,
 
     /// The time resolution [seconds].
-    #[structopt(long, default_value = "8")]
+    #[clap(long, default_value = "8")]
     time_res: f64,
 
     /// Should we use a beam? Default is to use the FEE beam.
-    #[structopt(long)]
+    #[clap(long)]
     no_beam: bool,
 
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided by the MWA_BEAM_FILE environment variable.
-    #[structopt(long)]
+    #[clap(long)]
     beam_file: Option<PathBuf>,
 
     /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
     /// the metafits file.
-    #[structopt(long)]
+    #[clap(long)]
     unity_dipole_gains: bool,
 
     /// Specify the MWA dipoles delays, ignoring whatever is in the metafits
     /// file.
-    #[structopt(long)]
+    #[clap(long, multiple_values(true))]
     dipole_delays: Option<Vec<u32>>,
 
     /// Don't attempt to convert "list" flux densities to power law flux
     /// densities. See for more info:
     /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
-    #[structopt(long)]
+    #[clap(long)]
     dont_convert_lists: bool,
 
     /// Don't include point components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_points: bool,
 
     /// Don't include Gaussian components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_gaussians: bool,
 
     /// Don't include shapelet components from the input sky model.
-    #[structopt(long)]
+    #[clap(long)]
     filter_shapelets: bool,
 }
 
@@ -356,7 +359,12 @@ impl SimVisParams {
                 beam_file,
                 metafits.num_ants,
                 match dipole_delays {
-                    Some(d) => Delays::Partial(d),
+                    Some(d) => {
+                        if d.len() != 16 || d.iter().any(|&v| v > 32) {
+                            return Err(SimulateVisError::BadDelays);
+                        }
+                        Delays::Partial(d)
+                    }
                     None => Delays::Full(metafits::get_dipole_delays(&metafits)),
                 },
                 match unity_dipole_gains {
@@ -565,33 +573,4 @@ pub fn simulate_vis(
     );
 
     Ok(())
-}
-
-// TODO: Have in mwa_rust_core
-/// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
-/// having to form [XyzGeodetic] baselines first. This function performs
-/// calculations in parallel. Cross-correlation baselines only.
-fn xyzs_to_cross_uvws_parallel(
-    xyzs: &[mwa_rust_core::XyzGeodetic],
-    phase_centre: mwa_rust_core::HADec,
-) -> Vec<mwa_rust_core::UVW> {
-    use rayon::prelude::*;
-
-    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-    // Get a UVW for each tile.
-    let tile_uvws: Vec<mwa_rust_core::UVW> = xyzs
-        .par_iter()
-        .map(|&xyz| mwa_rust_core::UVW::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec))
-        .collect();
-    // Take the difference of every pair of UVWs.
-    let num_tiles = xyzs.len();
-    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-    (0..num_baselines)
-        .into_par_iter()
-        .map(|i_bl| {
-            let (i, j) = mwa_rust_core::math::cross_correlation_baseline_to_tiles(num_tiles, i_bl);
-            tile_uvws[i] - tile_uvws[j]
-        })
-        .collect()
 }

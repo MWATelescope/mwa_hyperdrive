@@ -16,6 +16,8 @@ use itertools::Itertools;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 
+use mwa_hyperdrive_common::{itertools, lazy_static};
+
 /// All available kinds of PFB gains.
 #[derive(Debug, Display, Clone, Copy, EnumIter, EnumString)]
 pub(crate) enum PfbFlavour {

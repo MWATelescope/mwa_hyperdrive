@@ -8,11 +8,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use log::trace;
-use mwa_rust_core::mwalib;
 use mwalib::*;
 use ndarray::prelude::*;
 
 use super::error::*;
+use mwa_hyperdrive_common::{log, mwalib, ndarray};
 
 /// This monstrosity exists to nicely handle converting any type that can be
 /// represented as a `Path` into a string slice. This is kind of a hack, but a
@@ -489,6 +489,8 @@ fn get_occupancy(flags: &[u8], num_channels: usize) -> Vec<f32> {
 mod tests {
     use super::*;
     use crate::tests::*;
+
+    use approx::assert_abs_diff_eq;
 
     #[test]
     fn test_1065880128_01_mwaf() {

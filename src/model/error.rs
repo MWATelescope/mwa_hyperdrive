@@ -7,6 +7,7 @@
 use thiserror::Error;
 
 use mwa_hyperdrive_beam::BeamError;
+use mwa_hyperdrive_common::thiserror;
 
 #[derive(Error, Debug)]
 pub enum ModelError {

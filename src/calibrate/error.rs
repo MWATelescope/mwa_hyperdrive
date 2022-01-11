@@ -4,18 +4,21 @@
 
 //! Error type for all calibration-related errors.
 
+use mwalib::fitsio;
 use thiserror::Error;
 
 use super::{
     params::InvalidArgsError,
     solutions::{ReadSolutionsError, WriteSolutionsError},
 };
-use crate::data_formats::{
-    uvfits::{UvfitsReadError, UvfitsWriteError},
-    ReadInputDataError,
+use crate::{
+    data_formats::{
+        uvfits::{UvfitsReadError, UvfitsWriteError},
+        ReadInputDataError,
+    },
+    model::ModelError,
 };
-use crate::model::ModelError;
-use mwa_rust_core::mwalib::fitsio;
+use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {

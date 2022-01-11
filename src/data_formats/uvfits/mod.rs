@@ -20,6 +20,7 @@ use std::ffi::CString;
 use hifitime::Epoch;
 
 use super::*;
+use mwa_hyperdrive_common::hifitime;
 
 /// From a `hifitime` [Epoch], get a formatted date string with the hours,
 /// minutes and seconds set to 0.

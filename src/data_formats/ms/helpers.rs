@@ -6,12 +6,13 @@
 
 use std::path::Path;
 
+use marlu::{rubbl_casatables, LatLngHeight, XyzGeocentric, XyzGeodetic};
 use rayon::prelude::*;
 use rubbl_casatables::{Table, TableOpenMode};
 
 use super::error::*;
 use crate::constants::*;
-use mwa_rust_core::{LatLngHeight, XyzGeocentric, XyzGeodetic};
+use mwa_hyperdrive_common::{marlu, rayon};
 
 /// Open a measurement set table read only. If `table` is `None`, then open the
 /// base table.

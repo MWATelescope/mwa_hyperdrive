@@ -6,99 +6,97 @@
 
 use std::path::PathBuf;
 
+use clap::{AppSettings, Parser};
 use log::{debug, info, trace};
-use structopt::{clap::AppSettings, StructOpt};
 
 use mwa_hyperdrive::{
     calibrate::{args::CalibrateUserArgs, di_calibrate},
     simulate_vis::{simulate_vis, SimulateVisArgs},
     HyperdriveError,
 };
-use mwa_hyperdrive_common::{display_build_info, setup_logging};
+use mwa_hyperdrive_common::{clap, display_build_info, log, mwalib, setup_logging};
 use mwa_hyperdrive_srclist::utilities::*;
 
-#[derive(StructOpt)]
-#[structopt(name = "hyperdrive", about,
-            author = env!("CARGO_PKG_HOMEPAGE"),
-            global_settings = &[AppSettings::ColoredHelp,
-                                AppSettings::ArgRequiredElseHelp,
-                                AppSettings::DeriveDisplayOrder,
-                                AppSettings::UnifiedHelpMessage,
-                                AppSettings::DisableHelpSubcommand,
-                                AppSettings::InferSubcommands,
-                                ])]
+#[derive(Parser)]
+#[clap(name = "hyperdrive", version, author = env!("CARGO_PKG_HOMEPAGE"), about)]
+#[clap(global_setting(AppSettings::ArgRequiredElseHelp))]
+#[clap(global_setting(AppSettings::DeriveDisplayOrder))]
+#[clap(global_setting(AppSettings::DisableHelpSubcommand))]
+#[clap(global_setting(AppSettings::InferLongArgs))]
+#[clap(global_setting(AppSettings::InferSubcommands))]
+#[clap(global_setting(AppSettings::PropagateVersion))]
 enum Args {
     /// Perform direction-independent calibration on the input MWA data.
     ///
     /// See for more info:
     /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-usage
-    #[structopt(alias = "calibrate")]
+    #[clap(alias = "calibrate")]
     DiCalibrate {
         // Share the arguments that could be passed in via a parameter file.
-        #[structopt(flatten)]
-        cli_args: CalibrateUserArgs,
+        #[clap(flatten)]
+        cli_args: Box<CalibrateUserArgs>,
 
-        /// All of the arguments to calibrate may be specified in a toml or json
-        /// file. Any CLI arguments override parameters set in the file.
-        #[structopt(name = "ARGUMENTS_FILE", parse(from_os_str))]
+        /// All of the arguments to di-calibrate may be specified in a toml or
+        /// json file. Any CLI arguments override parameters set in the file.
+        #[clap(name = "ARGUMENTS_FILE", parse(from_os_str))]
         args_file: Option<PathBuf>,
 
         /// The verbosity of the program. Increase by specifying multiple times
         /// (e.g. -vv). The default is to print only high-level information.
-        #[structopt(short, long, parse(from_occurrences))]
+        #[clap(short, long, parse(from_occurrences))]
         verbosity: u8,
 
         /// Don't actually do calibration; just verify that arguments were
         /// correctly ingested and print out high-level information.
-        #[structopt(long)]
+        #[clap(long)]
         dry_run: bool,
     },
 
     /// Simulate visibilities of a sky-model source list.
     SimulateVis {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: SimulateVisArgs,
 
         /// The verbosity of the program. The default is to print high-level
         /// information.
-        #[structopt(short, long, parse(from_occurrences))]
+        #[clap(short, long, parse(from_occurrences))]
         verbosity: u8,
 
         /// Don't actually do any work; just verify that the input arguments
         /// were correctly ingested and print out high-level information.
-        #[structopt(long)]
+        #[clap(long)]
         dry_run: bool,
 
         /// Use the CPU for visibility generation. This is deliberately made
         /// non-default because using a GPU is much faster.
         #[cfg(feature = "cuda")]
-        #[structopt(long)]
+        #[clap(long)]
         cpu: bool,
     },
 
     SrclistByBeam {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: ByBeamArgs,
     },
 
     SrclistConvert {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: ConvertArgs,
     },
 
     SrclistShift {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: ShiftArgs,
     },
 
     SrclistVerify {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: VerifyArgs,
     },
 
     /// Print information on the dipole gains listed by a metafits file.
     DipoleGains {
-        #[structopt(name = "METAFITS_FILE", parse(from_os_str))]
+        #[clap(name = "METAFITS_FILE", parse(from_os_str))]
         metafits: PathBuf,
     },
 }
@@ -115,7 +113,7 @@ fn main() {
 
 fn try_main() -> Result<(), HyperdriveError> {
     // Get the command-line arguments.
-    let args = Args::from_args();
+    let args = Args::parse();
 
     // Set up logging.
     let verbosity = match &args {
@@ -145,7 +143,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     );
     display_build_info();
 
-    match Args::from_args() {
+    match Args::parse() {
         Args::DiCalibrate {
             cli_args,
             args_file,
@@ -154,7 +152,7 @@ fn try_main() -> Result<(), HyperdriveError> {
         } => {
             let args = if let Some(f) = args_file {
                 trace!("Merging command-line arguments with the argument file");
-                cli_args.merge(&f)?
+                Box::new(cli_args.merge(&f)?)
             } else {
                 cli_args
             };
@@ -195,7 +193,7 @@ fn try_main() -> Result<(), HyperdriveError> {
         Args::SrclistVerify { args } => args.run()?,
 
         Args::DipoleGains { metafits } => {
-            let meta = mwa_rust_core::mwalib::MetafitsContext::new(&metafits, None).unwrap();
+            let meta = mwalib::MetafitsContext::new(&metafits, None).unwrap();
             let gains = mwa_hyperdrive::data_formats::metafits::get_dipole_gains(&meta);
             let mut all_unity = vec![];
             let mut non_unity = vec![];

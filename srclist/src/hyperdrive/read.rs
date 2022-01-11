@@ -8,7 +8,10 @@
 //! [SourceList] isn't directly serialisable or deserialisable. Use temporary
 //! types here to do the serde magic and give the caller a [SourceList].
 
+use marlu::RADec;
+
 use super::*;
+use mwa_hyperdrive_common::serde_json;
 
 fn source_list_from_tmp_sl(
     tmp_sl: BTreeMap<String, Vec<TmpComponent>>,

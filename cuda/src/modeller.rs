@@ -6,7 +6,10 @@
 
 use std::collections::HashSet;
 
-use mwa_rust_core::{AzEl, HADec, Jones, RADec, XyzGeodetic, LMN, UVW};
+use marlu::{
+    cuda_runtime_sys, pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, RADec, XyzGeodetic, LMN,
+    UVW,
+};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
@@ -16,9 +19,9 @@ use mwa_hyperdrive_beam::{
     cuda_status_to_error, Beam, BeamCUDA, BeamError, DevicePointer,
     ERROR_STR_LENGTH as CUDA_ERROR_STR_LENGTH,
 };
+use mwa_hyperdrive_common::{cfg_if, marlu, ndarray, rayon};
 use mwa_hyperdrive_srclist::{
-    get_instrumental_flux_densities, mwa_rust_core, ndarray, rayon, ComponentType, FluxDensityType,
-    ShapeletCoeff, SourceList,
+    get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
 };
 
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
@@ -27,6 +30,7 @@ use mwa_hyperdrive_srclist::{
 // TODO: Curved power laws.
 pub struct SkyModellerCuda<'a> {
     cuda_beam: Box<dyn BeamCUDA>,
+
     /// The latitude of the array we're using.
     array_latitude_rad: f64,
 
@@ -110,6 +114,7 @@ impl<'a> SkyModellerCuda<'a> {
     ///
     /// This function interfaces directly with the CUDA API. Rust errors attempt
     /// to catch problems but there are no guarantees.
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn new(
         beam: &dyn Beam,
         source_list: &SourceList,
@@ -611,7 +616,8 @@ impl<'a> SkyModellerCuda<'a> {
             d_freqs: self.d_freqs.get_mut(),
             d_shapelet_basis_values: self.d_shapelet_basis_values.get_mut(),
             num_unique_beam_freqs: self.cuda_beam.get_num_unique_freqs(),
-            d_beam_jones_map: self.cuda_beam.get_beam_jones_map(),
+            d_tile_map: self.cuda_beam.get_tile_map(),
+            d_freq_map: self.cuda_beam.get_freq_map(),
             d_tile_index_to_unflagged_tile_index_map: self
                 .tile_index_to_unflagged_tile_index_map
                 .get(),
@@ -708,28 +714,4 @@ fn get_flattened_coeffs(
 
     coeffs.shrink_to_fit();
     (coeffs, coeff_lengths)
-}
-
-// TODO: Have in mwa_rust_core
-/// Convert [XyzGeodetic] tile coordinates to [UVW] baseline coordinates without
-/// having to form [XyzGeodetic] baselines first. This function performs
-/// calculations in parallel. Cross-correlation baselines only.
-fn xyzs_to_cross_uvws_parallel(xyzs: &[XyzGeodetic], phase_centre: HADec) -> Vec<UVW> {
-    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-    // Get a UVW for each tile.
-    let tile_uvws: Vec<UVW> = xyzs
-        .par_iter()
-        .map(|&xyz| UVW::from_xyz_inner(xyz, s_ha, c_ha, s_dec, c_dec))
-        .collect();
-    // Take the difference of every pair of UVWs.
-    let num_tiles = xyzs.len();
-    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-    (0..num_baselines)
-        .into_par_iter()
-        .map(|i_bl| {
-            let (i, j) = mwa_rust_core::math::cross_correlation_baseline_to_tiles(num_tiles, i_bl);
-            tile_uvws[i] - tile_uvws[j]
-        })
-        .collect()
 }

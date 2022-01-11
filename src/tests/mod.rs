@@ -12,12 +12,12 @@ pub(crate) use std::fs::File;
 pub(crate) use std::io::Write;
 pub(crate) use std::path::{Path, PathBuf};
 
-pub(crate) use approx::assert_abs_diff_eq;
 pub(crate) use tempfile::{NamedTempFile, TempPath};
 // Need to use serial tests because HDF5 is not necessarily reentrant.
 pub(crate) use serial_test::serial;
 
 pub(crate) use crate::calibrate::args::CalibrateUserArgs;
+use mwa_hyperdrive_common::{serde_json, toml};
 
 pub(crate) fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(
     filename: T,

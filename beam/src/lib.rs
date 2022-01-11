@@ -15,20 +15,27 @@
 mod cache;
 mod error;
 mod fee;
+#[cfg(test)]
+mod jones_test;
+#[cfg(test)]
+mod tests;
+
 pub use error::*;
 pub use fee::*;
 
-use mwa_rust_core::{AzEl, Jones};
+use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
+
+use mwa_hyperdrive_common::{cfg_if, marlu, ndarray};
 
 // Set a compile-time variable type.
 cfg_if::cfg_if! {
     if #[cfg(feature = "cuda-single")] {
-        pub use mwa_hyperbeam::cuda::*;
+        pub use marlu::cuda::*;
         /// f32 (using the "cuda-single" feature)
         pub type CudaFloat = f32;
     } else if #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] {
-        pub use mwa_hyperbeam::cuda::*;
+        pub use marlu::cuda::*;
         /// f64 (using the "cuda" feature and not "cuda-single")
         pub type CudaFloat = f64;
     }
@@ -80,6 +87,11 @@ pub trait Beam: Sync + Send {
     /// Using the tile information from this [Beam] and frequencies to be used,
     /// return a [BeamCUDA]. This object only needs pointings to calculate beam
     /// response [Jones] matrices.
+    ///
+    /// # Safety
+    ///
+    /// This function interfaces directly with the CUDA API. Rust errors attempt
+    /// to catch problems but there are no guarantees.
     unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
 }
 
@@ -102,9 +114,13 @@ pub trait BeamCUDA {
     /// Get the type of beam.
     fn get_beam_type(&self) -> BeamType;
 
-    /// Get a pointer to the device beam Jones map. This is necessary to access
+    /// Get a pointer to the device tile map. This is necessary to access
     /// de-duplicated beam Jones matrices on the device.
-    fn get_beam_jones_map(&self) -> *const u64;
+    fn get_tile_map(&self) -> *const i32;
+
+    /// Get a pointer to the device freq map. This is necessary to access
+    /// de-duplicated beam Jones matrices on the device.
+    fn get_freq_map(&self) -> *const i32;
 
     /// Get the number of de-duplicated frequencies associated with this
     /// [BeamCUDA].
@@ -167,10 +183,8 @@ impl Beam for NoBeam {
     #[cfg(feature = "cuda")]
     unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
         let obj = NoBeamCUDA {
-            beam_jones_map: DevicePointer::copy_to_device(&vec![
-                0;
-                self.num_tiles * freqs_hz.len()
-            ])?,
+            tile_map: DevicePointer::copy_to_device(&vec![0; self.num_tiles])?,
+            freq_map: DevicePointer::copy_to_device(&vec![0; freqs_hz.len()])?,
         };
         Ok(Box::new(obj))
     }
@@ -180,7 +194,8 @@ impl Beam for NoBeam {
 /// calculations.
 #[cfg(feature = "cuda")]
 pub struct NoBeamCUDA {
-    beam_jones_map: DevicePointer<u64>,
+    tile_map: DevicePointer<i32>,
+    freq_map: DevicePointer<i32>,
 }
 
 #[cfg(feature = "cuda")]
@@ -189,17 +204,20 @@ impl BeamCUDA for NoBeamCUDA {
         &self,
         azels: &[AzEl],
     ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError> {
-        let identities: Array3<Jones<CudaFloat>> =
-            Array3::from_elem((1, 1, azels.len()), Jones::identity());
-        DevicePointer::copy_to_device(identities.as_slice().unwrap()).map_err(BeamError::from)
+        let identities: Vec<Jones<CudaFloat>> = vec![Jones::identity(); azels.len()];
+        DevicePointer::copy_to_device(&identities).map_err(BeamError::from)
     }
 
     fn get_beam_type(&self) -> BeamType {
         BeamType::None
     }
 
-    fn get_beam_jones_map(&self) -> *const u64 {
-        self.beam_jones_map.get()
+    fn get_tile_map(&self) -> *const i32 {
+        self.tile_map.get()
+    }
+
+    fn get_freq_map(&self) -> *const i32 {
+        self.freq_map.get()
     }
 
     fn get_num_unique_freqs(&self) -> i32 {
@@ -216,26 +234,6 @@ pub fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
             })
         } else {
             Box::new(NoBeam {})
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use approx::assert_abs_diff_eq;
-
-    #[test]
-    fn no_beam_means_no_beam() {
-        let azels = [
-            AzEl { az: 0.0, el: 0.0 },
-            AzEl { az: 1.0, el: 0.1 },
-            AzEl { az: -1.0, el: 0.2 },
-        ];
-        let beam = create_no_beam_object(1);
-        for azel in azels {
-            let j = beam.calc_jones(azel, 150e6, 0).unwrap();
-            assert_abs_diff_eq!(j, Jones::identity());
         }
     }
 }

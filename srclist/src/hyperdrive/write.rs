@@ -9,6 +9,7 @@
 //! types here to do the serde magic and write out a [SourceList].
 
 use super::*;
+use mwa_hyperdrive_common::serde_json;
 
 fn source_list_to_tmp_sl(sl: &SourceList) -> TmpSourceList {
     let mut tmp_sl: BTreeMap<String, Vec<TmpComponent>> = BTreeMap::new();

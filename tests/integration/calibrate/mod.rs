@@ -6,8 +6,9 @@
 
 mod cli_args;
 
-use crate::*;
 use approx::assert_abs_diff_eq;
+
+use crate::*;
 use mwa_hyperdrive::calibrate::solutions::CalibrationSolutions;
 
 #[test]
@@ -84,7 +85,7 @@ fn test_1090008640_woden() {
     assert!(!bin_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
     // Re-do calibration, but this time into the hyperdrive fits format.
-    let mut solutions_path = tmp_dir.clone();
+    let mut solutions_path = tmp_dir;
     solutions_path.push("sols.fits");
 
     let cmd = hyperdrive()
@@ -119,7 +120,9 @@ fn test_1090008640_woden() {
     );
     assert!(!hyp_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
+    let bin_sols_di_jones = bin_sols.di_jones.mapv(TestJones::from);
+    let hyp_sols_di_jones = hyp_sols.di_jones.mapv(TestJones::from);
     // This epsilon is surprisingly big! Most of the errors are pretty small,
     // though... Maybe it's because fits files store things as big endian?
-    assert_abs_diff_eq!(bin_sols.di_jones, hyp_sols.di_jones, epsilon = 1e-7);
+    assert_abs_diff_eq!(bin_sols_di_jones, hyp_sols_di_jones, epsilon = 1e-7);
 }

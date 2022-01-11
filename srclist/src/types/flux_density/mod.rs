@@ -4,11 +4,15 @@
 
 //! Flux density structures.
 
+#[cfg(test)]
+mod tests;
+
+use marlu::Jones;
 use ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
-use mwa_rust_core::{Complex, Jones};
+use mwa_hyperdrive_common::{marlu, ndarray, Complex};
 
 /// When converting a list to a power law, this is the maximum condition number
 /// allowed for the power law fit. This setting is somewhat subjective;
@@ -46,8 +50,9 @@ pub struct FluxDensity {
 
 impl FluxDensity {
     /// Given two flux densities, calculate the spectral index that fits them.
+    /// Uses only Stokes I.
     pub fn calc_spec_index(&self, fd2: &Self) -> f64 {
-        (fd2.i / self.i).ln() / (fd2.freq / self.freq).ln()
+        (fd2.i.abs() / self.i.abs()).ln() / (fd2.freq / self.freq).ln()
     }
 
     /// Convert a `FluxDensity` into a [Jones] matrix representing instrumental
@@ -391,198 +396,5 @@ impl approx::AbsDiffEq for FluxDensity {
             && f64::abs_diff_eq(&self.q, &other.q, epsilon)
             && f64::abs_diff_eq(&self.u, &other.u, epsilon)
             && f64::abs_diff_eq(&self.v, &other.v, epsilon)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use approx::assert_abs_diff_eq;
-    use mwa_rust_core::c64;
-
-    #[test]
-    fn calc_freq_ratio_1() {
-        let desired_freq = 160.0;
-        let cat_freq = 150.0;
-        let spec_index = -0.6;
-        let ratio = calc_flux_ratio(desired_freq, cat_freq, spec_index);
-        let expected = 0.9620170425907598;
-        assert_abs_diff_eq!(ratio, expected, epsilon = 1e-10);
-    }
-
-    #[test]
-    fn calc_freq_ratio_2() {
-        let desired_freq = 140.0;
-        let cat_freq = 150.0;
-        let spec_index = -0.6;
-        let ratio = calc_flux_ratio(desired_freq, cat_freq, spec_index);
-        let expected = 1.0422644718599143;
-        assert_abs_diff_eq!(ratio, expected, epsilon = 1e-10);
-    }
-
-    fn get_fdt() -> FluxDensityType {
-        // J034844-125505 from
-        // srclist_pumav3_EoR0aegean_fixedEoR1pietro+ForA_phase1+2.txt
-        FluxDensityType::List {
-            fds: vec![
-                FluxDensity {
-                    freq: 120e6,
-                    i: 8.00841,
-                    ..Default::default()
-                },
-                FluxDensity {
-                    freq: 140e6,
-                    i: 6.80909,
-                    ..Default::default()
-                },
-                FluxDensity {
-                    freq: 160e6,
-                    i: 5.91218,
-                    ..Default::default()
-                },
-                FluxDensity {
-                    freq: 180e6,
-                    i: 5.21677,
-                    ..Default::default()
-                },
-            ],
-        }
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_none_convert_list_to_power_law() {
-        let mut fdt = get_fdt();
-        // This is definitely a list.
-        assert!(matches!(fdt, FluxDensityType::List { .. }));
-        // Empty the flux densities. Our function will panic.
-        match &mut fdt {
-            FluxDensityType::List { fds } => *fds = vec![],
-            _ => unreachable!(),
-        }
-        fdt.convert_list_to_power_law();
-    }
-
-    #[test]
-    fn test_one_convert_list_to_power_law() {
-        let mut fdt = get_fdt();
-        // This is definitely a list.
-        assert!(matches!(fdt, FluxDensityType::List { .. }));
-        // Leave one flux density.
-        match &mut fdt {
-            FluxDensityType::List { fds } => *fds = vec![fds[0].clone()],
-            _ => unreachable!(),
-        }
-        fdt.convert_list_to_power_law();
-        // It's been converted to a power law.
-        assert!(matches!(fdt, FluxDensityType::PowerLaw { .. }));
-        // We're using the default SI.
-        match fdt {
-            FluxDensityType::PowerLaw { si, .. } => assert_abs_diff_eq!(si, DEFAULT_SPEC_INDEX),
-            _ => unreachable!(),
-        }
-    }
-
-    #[test]
-    fn test_two_convert_list_to_power_law() {
-        let mut fdt = get_fdt();
-        // This is definitely a list.
-        assert!(matches!(fdt, FluxDensityType::List { .. }));
-        // Leave two flux densities.
-        match &mut fdt {
-            FluxDensityType::List { fds } => *fds = vec![fds[0].clone(), fds[1].clone()],
-            _ => unreachable!(),
-        }
-        fdt.convert_list_to_power_law();
-        // It's been converted to a power law.
-        assert!(matches!(fdt, FluxDensityType::PowerLaw { .. }));
-        // We're using the SI between the only two FDs.
-        match fdt {
-            FluxDensityType::PowerLaw { si, .. } => assert_abs_diff_eq!(si, -1.0524361973093983),
-            _ => unreachable!(),
-        }
-    }
-
-    #[test]
-    fn test_many_convert_list_to_power_law() {
-        let mut fdt = get_fdt();
-        // This is definitely a list.
-        assert!(matches!(fdt, FluxDensityType::List { .. }));
-        fdt.convert_list_to_power_law();
-        // It's been converted to a power law.
-        assert!(matches!(fdt, FluxDensityType::PowerLaw { .. }));
-        // We're using the SI between the middle two FDs.
-        match fdt {
-            FluxDensityType::PowerLaw { si, fd } => {
-                let expected_fd = FluxDensity {
-                    freq: 160e6,
-                    i: 5.910484034862892,
-                    q: 0.0,
-                    u: 0.0,
-                    v: 0.0,
-                };
-                assert_abs_diff_eq!(si, -1.0570227720845136);
-                assert_abs_diff_eq!(fd, expected_fd);
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    #[test]
-    fn test_many_convert_bad_list_to_power_law() {
-        // This source is deliberately poorly conditioned; it should not be
-        // converted.
-        let mut fdt = FluxDensityType::List {
-            fds: vec![
-                FluxDensity {
-                    freq: 120e6,
-                    i: 1.0,
-                    ..Default::default()
-                },
-                FluxDensity {
-                    freq: 140e6,
-                    i: 2.0,
-                    ..Default::default()
-                },
-                FluxDensity {
-                    freq: 160e6,
-                    i: 0.5,
-                    ..Default::default()
-                },
-                FluxDensity {
-                    freq: 180e6,
-                    i: 3.0,
-                    ..Default::default()
-                },
-            ],
-        };
-
-        // This is definitely a list.
-        assert!(matches!(fdt, FluxDensityType::List { .. }));
-        fdt.convert_list_to_power_law();
-        // It's not been converted to a power law.
-        assert!(matches!(fdt, FluxDensityType::List { .. }));
-    }
-
-    #[test]
-    fn test_to_jones() {
-        let fd = FluxDensity {
-            freq: 170e6,
-            i: 0.058438801501144624,
-            q: -0.3929914018344019,
-            u: -0.3899498110659575,
-            v: -0.058562589895788,
-        };
-        let fd2 = fd.clone();
-        let result = fd.to_inst_stokes();
-        assert_abs_diff_eq!(
-            result,
-            Jones::from([
-                c64::new(fd2.i + fd2.q, 0.0),
-                c64::new(fd2.u, fd2.v),
-                c64::new(fd2.u, -fd2.v),
-                c64::new(fd2.i - fd2.q, 0.0),
-            ])
-        );
     }
 }
