@@ -299,18 +299,7 @@ mod tests {
 
         let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", tmp_dir.path());
         serialise_args_toml(&args, &mut toml);
-
-        // Because the mwaf files are optional, the mwalib error will occur as
-        // with all other tests. hyperdrive requires a mwalib context to analyse
-        // the cotter flags, so we can't test any further.
-        let cmd = hyperdrive()
-            .current_dir(tmp_dir.path())
-            .arg("calibrate")
-            .arg(&format!("{}", toml_pb.display()))
-            .ok();
-        assert!(cmd.is_err());
-        let (_, stderr) = get_cmd_output(cmd);
-        assert!(&stderr.contains("mwalib error:"));
-        assert!(&stderr.contains("tried to move past end of file"));
+        // Because the mwaf files are optional, the arguments will be ingested
+        // without an issue.
     }
 }

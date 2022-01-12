@@ -1,6 +1,6 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.2.0-alpha7"
+version = "0.2.0-alpha8"
 authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
 edition = "2021"
 rust-version = "1.56"
@@ -44,14 +44,14 @@ all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 # birli = { version = "0.2.1", default_features = false }
 birli = { path = "/home/chj/Software/other/Birli", default_features = false }
 byteorder = "1.4.3"
-crossbeam-channel = "0.5.1"
-crossbeam-utils = "0.8.5"
-flate2 = "1.0.21"
+crossbeam-channel = "0.5.2"
+crossbeam-utils = "0.8.6"
+flate2 = "1.0.22"
 glob = "0.3.0"
 regex = "1.5.4"
 serde = { version = "1.0.133", features = ["derive"] }
-strum = "0.21.0"
-strum_macros = "0.21.1"
+strum = "0.23.0"
+strum_macros = "0.23.1"
 
 plotters = { version = "0.3.1", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "point_series"], optional = true }
 
@@ -62,7 +62,7 @@ mwa_hyperdrive_srclist = { path = "srclist" }
 
 [dev-dependencies]
 approx = "0.5.*"
-assert_cmd = "1.0.*"
+assert_cmd = "2.0.*"
 criterion = "0.3.*"
 indoc = "1.0.*"
 ndarray = { version = ">=0.15.4,<0.16", features = ["approx-0_5"] }

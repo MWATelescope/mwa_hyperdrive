@@ -18,3 +18,4 @@ use crate::*;
 // Re-exports.
 pub use read::parse_source_list;
 pub use write::write_source_list;
+pub(crate) use write::write_source_list_with_order;

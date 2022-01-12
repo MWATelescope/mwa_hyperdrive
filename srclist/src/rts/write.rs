@@ -125,3 +125,52 @@ pub fn write_source_list<T: std::io::Write>(
 
     Ok(())
 }
+
+/// The same as above, but write the sources out in the order according to
+/// `source_name_order`.
+///
+/// This function is kept private because its usage is discouraged.
+pub(crate) fn write_source_list_with_order<T: std::io::Write>(
+    buf: &mut T,
+    sl: &SourceList,
+    source_name_order: Vec<String>,
+) -> Result<(), WriteSourceListError> {
+    for name in source_name_order {
+        let source = &sl[&name];
+        // Write out the first component as the RTS base source.
+        let first_comp = match source.components.first() {
+            Some(c) => c,
+            None => return Err(WriteSourceListError::NoComponents(name.clone())),
+        };
+        writeln!(
+            buf,
+            "SOURCE {} {} {}",
+            name.replace(' ', "_"),
+            first_comp.radec.ra.to_degrees() / 15.0,
+            first_comp.radec.dec.to_degrees()
+        )?;
+
+        write_comp_type(buf, &first_comp.comp_type)?;
+        write_flux_type(buf, &first_comp.flux_type)?;
+
+        // Write out any other components.
+        for comp in source.components.iter().skip(1) {
+            writeln!(
+                buf,
+                "COMPONENT {} {}",
+                comp.radec.ra.to_degrees() / 15.0,
+                comp.radec.dec.to_degrees()
+            )?;
+
+            write_comp_type(buf, &comp.comp_type)?;
+            write_flux_type(buf, &comp.flux_type)?;
+
+            writeln!(buf, "ENDCOMPONENT")?;
+        }
+
+        writeln!(buf, "ENDSOURCE")?;
+    }
+    buf.flush()?;
+
+    Ok(())
+}

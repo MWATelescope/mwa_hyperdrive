@@ -17,7 +17,7 @@ use rayon::prelude::*;
 
 use crate::{
     ao, hyperdrive, rts, woden, HyperdriveFileType, SourceList, SourceListType, SrclistError,
-    WriteSourceListError, CONVERT_INPUT_TYPE_HELP, CONVERT_OUTPUT_TYPE_HELP,
+    WriteSourceListError, SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP,
 };
 use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, rayon};
 
@@ -27,14 +27,14 @@ use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, rayon};
 /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
 #[derive(Parser, Debug)]
 pub struct ConvertArgs {
-    #[clap(short = 'i', long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
     pub input_type: Option<String>,
 
     /// Path to the source list to be converted.
     #[clap(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
     pub input_source_list: PathBuf,
 
-    #[clap(short = 'o', long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
     pub output_type: Option<String>,
 
     /// Path to the output source list. If the file extension is .json or .yaml,

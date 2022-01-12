@@ -75,11 +75,11 @@ lazy_static::lazy_static! {
     format!("Specifies the minimum Stokes XX+YY a source must have before it gets vetoed [Jy]. Default: {}",
             DEFAULT_VETO_THRESHOLD);
 
-    pub static ref CONVERT_INPUT_TYPE_HELP: String =
+    pub static ref SOURCE_LIST_INPUT_TYPE_HELP: String =
     format!("Specifies the type of the input source list. Currently supported types: {}",
                 *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 
-    pub static ref CONVERT_OUTPUT_TYPE_HELP: String =
+    pub static ref SOURCE_LIST_OUTPUT_TYPE_HELP: String =
     format!("Specifies the type of the output source list. May be required depending on the output filename. Currently supported types: {}",
             *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 }

@@ -4,13 +4,13 @@
 
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clap::Parser;
 use log::{debug, info, trace, warn};
-use marlu::{constants::DH2R, RADec};
+use marlu::RADec;
 use rayon::prelude::*;
 use serde::Deserialize;
 
@@ -36,6 +36,12 @@ pub struct ShiftArgs {
     #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
     pub output_source_list: Option<PathBuf>,
 
+    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
+    pub input_type: Option<String>,
+
+    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
+    pub output_type: Option<String>,
+
     /// Attempt to convert flux density lists to power laws. See the online help
     /// for more information.
     #[clap(short, long)]
@@ -47,15 +53,14 @@ pub struct ShiftArgs {
     #[clap(long)]
     pub collapse_into_single_source: bool,
 
+    /// Don't throw away sources that have no shifts specified in the JSON file.
+    #[clap(long)]
+    pub include_unshifted_sources: bool,
+
     /// Path to the metafits file. Only needed if collapse-into-single-source is
     /// used.
     #[clap(short, long, parse(from_str))]
     pub metafits: Option<PathBuf>,
-
-    /// Keep any SHAPELET components (SHAPELET2 components are never ignored).
-    /// Applies only to rts-style source lists.
-    #[clap(short, long)]
-    pub keep_shapelets: bool,
 
     /// The verbosity of the program. The default is to print high-level
     /// information.
@@ -70,183 +75,28 @@ impl ShiftArgs {
             &self.source_list,
             &self.source_shifts,
             self.output_source_list.as_ref(),
+            self.input_type.as_ref(),
+            self.output_type.as_ref(),
             self.convert_lists,
             self.collapse_into_single_source,
+            self.include_unshifted_sources,
             self.metafits.as_ref(),
-            self.keep_shapelets,
         )
     }
 }
 
-pub fn shift<T: AsRef<Path>>(
+#[allow(clippy::too_many_arguments)]
+pub fn shift<T: AsRef<Path>, S: AsRef<str>>(
     source_list_file: T,
     source_shifts_file: T,
     output_source_list_file: Option<T>,
+    source_list_input_type: Option<S>,
+    source_list_output_type: Option<S>,
     convert_lists: bool,
     collapse_into_single_source: bool,
+    include_unshifted_sources: bool,
     metafits_file: Option<T>,
-    keep_shapelets: bool,
 ) -> Result<(), SrclistError> {
-    let f = BufReader::new(File::open(source_shifts_file)?);
-    let source_shifts: BTreeMap<String, RaDec> =
-        serde_json::from_reader(f).map_err(WriteSourceListError::from)?;
-    let (mut sl, sl_type) = crate::read::read_source_list_file(&source_list_file, None)?;
-    info!(
-        "Successfully read {} as a {}-style source list",
-        source_list_file.as_ref().display(),
-        sl_type
-    );
-    let counts = sl.get_counts();
-    info!(
-        "Input has {} points, {} gaussians, {} shapelets",
-        counts.0, counts.1, counts.2
-    );
-
-    let mut shapelets = vec![];
-    if keep_shapelets {
-        match sl_type {
-            SourceListType::Rts => {
-                // Pull out the SHAPELET sources. We can make a lot of shortcuts
-                // here because the source list was successfully parsed above.
-                // We expect that any SHAPELET components are actually RTS base
-                // sources, not components.
-                let mut buf = BufReader::new(File::open(&source_list_file)?);
-                let mut line = String::new();
-                let mut src = TempSource {
-                    name: String::new(),
-                    ra: 0.0,
-                    dec: 0.0,
-                    fds: vec![],
-                    comp: ComponentType::Shapelet {
-                        maj: 0.0,
-                        min: 0.0,
-                        pa: 0.0,
-                        coeffs: vec![],
-                    },
-                    is_shapelet: false,
-                };
-                while buf.read_line(&mut line)? > 0 {
-                    let mut items = line.split_whitespace();
-                    match items.next() {
-                        Some("SOURCE") => {
-                            src.name = items.next().unwrap().to_string();
-                            src.ra = items.next().unwrap().parse::<f64>().unwrap() * DH2R;
-                            src.dec = items.next().unwrap().parse::<f64>().unwrap().to_radians();
-                        },
-                        Some("COMPONENT") => {
-                            src.clear();
-                        },
-                        Some("FREQ") => {
-                            let freq = items.next().unwrap().parse().unwrap();
-                            let stokes_i = items.next().unwrap().parse().unwrap();
-                            let stokes_q = items.next().unwrap().parse().unwrap();
-                            let stokes_u = items.next().unwrap().parse().unwrap();
-                            let stokes_v = items.next().unwrap().parse().unwrap();
-                            src.fds.push(FluxDensity {
-                                freq,
-                                i: stokes_i,
-                                q: stokes_q,
-                                u: stokes_u,
-                                v: stokes_v,
-                            });
-                        },
-                        Some("SHAPELET2") => (),
-                        Some("SHAPELET") => {
-                            let mut pa = items.next().unwrap().parse::<f64>().unwrap();
-                            let maj_arcmin = items.next().unwrap().parse::<f64>().unwrap();
-                            let min_arcmin = items.next().unwrap().parse::<f64>().unwrap();
-
-                            // Ensure the position angle is positive.
-                            if pa < 0.0 {
-                                pa += 360.0;
-                            }
-
-                            src.comp = ComponentType::Shapelet {
-                                maj: maj_arcmin.to_radians() / 60.0,
-                                min: min_arcmin.to_radians() / 60.0,
-                                pa: pa.to_radians(),
-                                coeffs: vec![],
-                            };
-                            src.is_shapelet = true;
-                        },
-                        Some("COEFF") => {
-                            let n1 = items.next().unwrap().parse::<f64>().unwrap();
-                            let n2 = items.next().unwrap().parse::<f64>().unwrap();
-                            let value = items.next().unwrap().parse().unwrap();
-                            match &mut src.comp {
-                                ComponentType::Shapelet { coeffs, .. } => coeffs.push(ShapeletCoeff {
-                                    n1: n1 as _, n2: n2 as _, value,
-                                }),
-                                _ => unreachable!(),
-                            }
-                        },
-                        Some("ENDSOURCE") => {
-                            if src.is_shapelet {
-                               shapelets.push(src.clone());
-                            }
-                            src.clear();
-                        }
-                        Some("ENDCOMPONENT") => src.clear(),
-                        _ => (),
-                    }
-
-                    line.clear(); // clear to reuse the buffer line.
-                }
-            },
-
-            _ => warn!("keep_shapelets was specified, but this is meaningless if the input source list is not rts-style"),
-        }
-    }
-    // If we found any SHAPELETs, add them in.
-    if !shapelets.is_empty() {
-        for shapelet in &shapelets {
-            let (maj, min, pa, coeffs) = match &shapelet.comp {
-                ComponentType::Shapelet {
-                    maj,
-                    min,
-                    pa,
-                    coeffs,
-                } => (maj, min, pa, coeffs),
-                _ => unreachable!(),
-            };
-            sl.insert(
-                shapelet.name.clone(),
-                Source {
-                    components: vec![SourceComponent {
-                        radec: RADec::new(shapelet.ra, shapelet.dec),
-                        comp_type: ComponentType::Shapelet {
-                            maj: *maj,
-                            min: *min,
-                            pa: *pa,
-                            coeffs: coeffs.clone(),
-                        },
-                        flux_type: FluxDensityType::List {
-                            fds: shapelet.fds.clone(),
-                        },
-                    }],
-                },
-            );
-        }
-    }
-
-    // Filter any sources that aren't in the shifts file, and shift the
-    // sources. All components of a source get shifted the same amount.
-    let mut sl = {
-        let tmp_sl: BTreeMap<String, Source> = sl
-            .into_iter()
-            .filter(|(name, _)| source_shifts.contains_key(name))
-            .map(|(name, mut src)| {
-                let shifts = &source_shifts[&name];
-                src.components.iter_mut().for_each(|comp| {
-                    comp.radec.ra += shifts.ra.to_radians();
-                    comp.radec.dec += shifts.dec.to_radians();
-                });
-                (name, src)
-            })
-            .collect();
-        SourceList::from(tmp_sl)
-    };
-
     let output_path: PathBuf = match output_source_list_file {
         Some(p) => p.as_ref().to_path_buf(),
         None => {
@@ -269,6 +119,83 @@ pub fn shift<T: AsRef<Path>>(
             output_pb
         }
     };
+    let input_type = source_list_input_type.and_then(|t| SourceListType::from_str(t.as_ref()).ok());
+
+    let f = BufReader::new(File::open(source_shifts_file)?);
+    let source_shifts: BTreeMap<String, RaDec> =
+        serde_json::from_reader(f).map_err(WriteSourceListError::from)?;
+    let (sl, sl_type) = crate::read::read_source_list_file(&source_list_file, input_type)?;
+    info!(
+        "Successfully read {} as a {}-style source list",
+        source_list_file.as_ref().display(),
+        sl_type
+    );
+    let counts = sl.get_counts();
+    info!(
+        "Input has {} points, {} gaussians, {} shapelets",
+        counts.0, counts.1, counts.2
+    );
+
+    let metafits: Option<mwalib::MetafitsContext> =
+        match (collapse_into_single_source, metafits_file) {
+            (false, _) => None,
+            (true, None) => return Err(SrclistError::MissingMetafits),
+            (true, Some(m)) => {
+                trace!("Attempting to open the metafits file");
+                let m = mwalib::MetafitsContext::new(&m, None)?;
+                Some(m)
+            }
+        };
+
+    // If this an RTS source list, then the order of the sources in the source
+    // list is important and must be preserved. When hyperdrive reads these
+    // source lists, the ordering is thrown away because it was not designed
+    // with this in mind (and, it should never consider it, as it's a detail
+    // that we never want to care about). Here, we know that we've read an RTS
+    // source list so we can (in a dirty fashion) get the order of the sources.
+    let source_name_order: Option<Vec<String>> = match sl_type {
+        SourceListType::Rts => {
+            warn!("Preserving the order of the RTS sources");
+            let mut names = vec![];
+            let f = BufReader::new(File::open(&source_list_file)?);
+            for line in f.lines() {
+                let line = line?;
+                if line.starts_with("SOURCE") {
+                    // unwrap is safe because we successfully read the RTS
+                    // source list earlier.
+                    let source_name = line.split_whitespace().nth(1).unwrap();
+                    if include_unshifted_sources || source_shifts.contains_key(source_name) {
+                        names.push(source_name.to_string());
+                    }
+                }
+            }
+            Some(names)
+        }
+        _ => None,
+    };
+
+    // Filter any sources that aren't in the shifts file, and shift the
+    // sources. All components of a source get shifted the same amount.
+    let mut sl = {
+        let no_shift = RaDec { ra: 0.0, dec: 0.0 };
+        let tmp_sl: BTreeMap<String, Source> = sl
+            .into_iter()
+            .filter(|(name, _)| include_unshifted_sources || source_shifts.contains_key(name))
+            .map(|(name, mut src)| {
+                let shift = if source_shifts.contains_key(&name) {
+                    &source_shifts[&name]
+                } else {
+                    &no_shift
+                };
+                src.components.iter_mut().for_each(|comp| {
+                    comp.radec.ra += shift.ra.to_radians();
+                    comp.radec.dec += shift.dec.to_radians();
+                });
+                (name, src)
+            })
+            .collect();
+        SourceList::from(tmp_sl)
+    };
 
     // If we were told to, attempt to convert lists of flux densities to power
     // laws.
@@ -279,14 +206,7 @@ pub fn shift<T: AsRef<Path>>(
     }
 
     // If requested, collapse the source list.
-    sl = if collapse_into_single_source {
-        // Open the metafits.
-        let metafits = match &metafits_file {
-            Some(m) => m,
-            None => return Err(SrclistError::MissingMetafits),
-        };
-        trace!("Attempting to open the metafits file");
-        let meta = mwalib::MetafitsContext::new(&metafits, None)?;
+    sl = if let Some(meta) = metafits {
         let ra_phase_centre = meta
             .ra_phase_center_degrees
             .unwrap_or(meta.ra_tile_pointing_degrees);
@@ -311,26 +231,42 @@ pub fn shift<T: AsRef<Path>>(
         );
 
         let mut collapsed = SourceList::new();
-        // Use the apparently brightest source as the base. Not sure this is
-        // necessary or important, but hey, it's the RTS we're talking about.
-        let brightest = sl
-            .par_iter()
-            .map(|(name, src)| {
-                let stokes_i = src
-                    .get_flux_estimates(150e6)
-                    .iter()
-                    .fold(0.0, |acc, fd| acc + fd.i);
-                (name, stokes_i)
-            })
-            .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
-            .unwrap();
-        let brightest_name = brightest.0.clone();
-        let brightest = sl.remove_entry(&brightest_name).unwrap();
-        collapsed.insert(brightest_name, brightest.1);
-        let base_src = collapsed.get_mut(&brightest.0).unwrap();
-        sl.into_iter()
-            .flat_map(|(_, src)| src.components)
-            .for_each(|comp| base_src.components.push(comp));
+        // If we're preserving the order of the RTS sources, then use the first
+        // source as the base.
+        if let Some(ordered) = &source_name_order {
+            let base_name = ordered.first().unwrap().clone();
+            let base = sl.remove_entry(&base_name).unwrap();
+            collapsed.insert(base_name, base.1);
+            let base_src = collapsed.get_mut(&base.0).unwrap();
+
+            for name in &ordered[1..] {
+                for comp in &sl[name].components {
+                    base_src.components.push(comp.clone());
+                }
+            }
+        } else {
+            // Use the apparently brightest source as the base.
+            let brightest = sl
+                .par_iter()
+                .map(|(name, src)| {
+                    let stokes_i = src
+                        .get_flux_estimates(150e6)
+                        .iter()
+                        .fold(0.0, |acc, fd| acc + fd.i);
+                    (name, stokes_i)
+                })
+                .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
+                .unwrap();
+            let base_name = brightest.0.clone();
+
+            let base = sl.remove_entry(&base_name).unwrap();
+            collapsed.insert(base_name, base.1);
+            let base_src = collapsed.get_mut(&base.0).unwrap();
+            sl.into_iter()
+                .flat_map(|(_, src)| src.components)
+                .for_each(|comp| base_src.components.push(comp));
+        }
+
         collapsed
     } else {
         sl
@@ -345,72 +281,56 @@ pub fn shift<T: AsRef<Path>>(
     trace!("Attempting to write output source list");
     let mut f = std::io::BufWriter::new(File::create(&output_path)?);
 
-    match sl_type {
-        SourceListType::Hyperdrive => {
-            let sl_file_ext = output_path.extension().and_then(|e| e.to_str());
-            match sl_file_ext.and_then(|e| HyperdriveFileType::from_str(e).ok()) {
-                Some(HyperdriveFileType::Yaml) => {
-                    hyperdrive::source_list_to_yaml(&mut f, &sl)?;
-                }
-                Some(HyperdriveFileType::Json) => {
-                    hyperdrive::source_list_to_json(&mut f, &sl)?;
-                }
-                None => {
-                    return Err(WriteSourceListError::InvalidHyperdriveFormat(
-                        sl_file_ext.unwrap_or("<no extension>").to_string(),
-                    )
-                    .into())
-                }
+    let output_ext = output_path.extension().and_then(|e| e.to_str());
+    let hyp_file_type = output_ext.and_then(|e| HyperdriveFileType::from_str(e).ok());
+    let output_type = match (source_list_output_type, &hyp_file_type) {
+        (Some(t), _) => {
+            // Try to parse the specified output type.
+            match SourceListType::from_str(t.as_ref()) {
+                Ok(t) => t,
+                Err(_) => return Err(WriteSourceListError::InvalidFormat.into()),
             }
+        }
 
+        (None, Some(_)) => SourceListType::Hyperdrive,
+
+        // Use the input source list type as the output type.
+        (None, None) => sl_type,
+    };
+
+    match (output_type, hyp_file_type) {
+        (SourceListType::Hyperdrive, None) => {
+            return Err(WriteSourceListError::InvalidHyperdriveFormat(
+                output_ext.unwrap_or("<no extension>").to_string(),
+            )
+            .into())
+        }
+        (SourceListType::Rts, _) => {
+            rts::write_source_list_with_order(&mut f, &sl, source_name_order.unwrap())?;
+            info!("Wrote rts-style source list to {}", output_path.display());
+        }
+        (SourceListType::AO, _) => {
+            ao::write_source_list(&mut f, &sl)?;
+            info!("Wrote ao-style source list to {}", output_path.display());
+        }
+        (SourceListType::Woden, _) => {
+            woden::write_source_list(&mut f, &sl)?;
+            info!("Wrote woden-style source list to {}", output_path.display());
+        }
+        (_, Some(HyperdriveFileType::Yaml)) => {
+            hyperdrive::source_list_to_yaml(&mut f, &sl)?;
             info!(
                 "Wrote hyperdrive-style source list to {}",
                 output_path.display()
             );
         }
-        SourceListType::Rts => {
-            rts::write_source_list(&mut f, &sl)?;
-            info!("Wrote rts-style source list to {}", output_path.display());
+        (_, Some(HyperdriveFileType::Json)) => {
+            hyperdrive::source_list_to_json(&mut f, &sl)?;
+            info!(
+                "Wrote hyperdrive-style source list to {}",
+                output_path.display()
+            );
         }
-        SourceListType::AO => {
-            ao::write_source_list(&mut f, &sl)?;
-            info!("Wrote ao-style source list to {}", output_path.display());
-        }
-        SourceListType::Woden => {
-            woden::write_source_list(&mut f, &sl)?;
-            info!("Wrote woden-style source list to {}", output_path.display());
-        }
-    }
-
-    // Doctor any SHAPELET sources. They will get written as SHAPELET2 but we
-    // want SHAPELET.
-    if !shapelets.is_empty() {
-        let mut buf = BufReader::new(File::open(&output_path)?);
-        let mut out = String::new();
-        let mut line = String::new();
-        while buf.read_line(&mut line)? > 0 {
-            let mut items = line.split_whitespace();
-            if let Some("SHAPELET2") = items.next() {
-                // Make sure this isn't actually a SHAPELET2 component.
-                let line_pa = items.next().unwrap().parse::<f64>().unwrap().to_radians();
-                let line_maj = items.next().unwrap().parse::<f64>().unwrap().to_radians() / 60.0;
-                let line_min = items.next().unwrap().parse::<f64>().unwrap().to_radians() / 60.0;
-                if shapelets.iter().any(|s| match s.comp {
-                    ComponentType::Shapelet { maj, min, pa, .. } => {
-                        (line_maj - maj).abs() < 1e-3
-                            && (line_min - min).abs() < 1e-3
-                            && (line_pa - pa).abs() < 1e-3
-                    }
-                    _ => unreachable!(),
-                }) {
-                    line.replace_range(0..9, "SHAPELET");
-                }
-            }
-            out.push_str(&line);
-
-            line.clear(); // clear to reuse the buffer line.
-        }
-        File::create(&output_path)?.write_all(out.as_bytes())?;
     }
 
     Ok(())
@@ -420,21 +340,4 @@ pub fn shift<T: AsRef<Path>>(
 struct RaDec {
     ra: f64,
     dec: f64,
-}
-
-#[derive(Debug, Clone)]
-struct TempSource {
-    name: String,
-    ra: f64,
-    dec: f64,
-    fds: Vec<FluxDensity>,
-    comp: ComponentType,
-    is_shapelet: bool,
-}
-
-impl TempSource {
-    fn clear(&mut self) {
-        self.fds.clear();
-        self.is_shapelet = false;
-    }
 }

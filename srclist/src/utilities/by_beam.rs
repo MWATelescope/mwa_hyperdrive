@@ -18,8 +18,8 @@ use ndarray::{Array1, Array2};
 
 use crate::{
     ao, constants::*, hyperdrive, rts, veto_sources, woden, HyperdriveFileType, SourceList,
-    SourceListType, SrclistError, WriteSourceListError, CONVERT_INPUT_TYPE_HELP,
-    CONVERT_OUTPUT_TYPE_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
+    SourceListType, SrclistError, WriteSourceListError, SOURCE_DIST_CUTOFF_HELP,
+    SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP, VETO_THRESHOLD_HELP,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
 use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, ndarray};
@@ -40,10 +40,10 @@ pub struct ByBeamArgs {
     #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
     pub output_source_list: Option<PathBuf>,
 
-    #[clap(short = 'i', long, parse(from_str), help = CONVERT_INPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
     pub input_type: Option<String>,
 
-    #[clap(short = 'o', long, parse(from_str), help = CONVERT_OUTPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
     pub output_type: Option<String>,
 
     /// Reduce the input source list to the brightest N sources and write them
