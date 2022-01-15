@@ -548,8 +548,10 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         .to_string(),
     );
     info!(
-        "All timesteps: {}/{} chanblocks converged",
-        total_converged_count, num_chanblocks
+        "All timesteps: {}/{} ({}%) chanblocks converged",
+        total_converged_count,
+        num_chanblocks,
+        (total_converged_count as f64 / num_chanblocks as f64 * 100.0).round()
     );
 
     if num_timeblocks > 1 {
@@ -572,10 +574,11 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 format!("Calibrating timeblock {}/{}", timeblock + 1, num_timeblocks),
             );
             info!(
-                "Timeblock {}: {}/{} chanblocks converged",
+                "Timeblock {}: {}/{} ({}%) chanblocks converged",
                 timeblock + 1,
                 total_converged_count,
-                num_chanblocks
+                num_chanblocks,
+                (total_converged_count as f64 / num_chanblocks as f64 * 100.0).round()
             );
         }
     }
@@ -1150,7 +1153,6 @@ fn calibrate_timeblock(
                                 new_cal_result.max_precision,
                                 stop_threshold
                             ));
-                            pb.inc(1);
                         } else {
                             status_str.push_str(&format!(
                                 ": converged ({:>2}): {:e} > {:.5e}",
@@ -1158,7 +1160,6 @@ fn calibrate_timeblock(
                                 stop_threshold,
                                 new_cal_result.max_precision
                             ));
-                            pb.inc(1);
                         }
                         pb.println(status_str);
                         *old_cal_result = new_cal_result;

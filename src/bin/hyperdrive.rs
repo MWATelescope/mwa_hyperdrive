@@ -26,9 +26,8 @@ use mwa_hyperdrive_srclist::utilities::*;
 #[clap(global_setting(AppSettings::InferSubcommands))]
 #[clap(global_setting(AppSettings::PropagateVersion))]
 enum Args {
-    /// Perform direction-independent calibration on the input MWA data.
-    ///
-    /// See for more info:
+    /// Perform direction-independent calibration on the input MWA data. See for
+    /// more info:
     /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-usage
     #[clap(alias = "calibrate")]
     DiCalibrate {
