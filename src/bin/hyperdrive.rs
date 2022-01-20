@@ -216,6 +216,11 @@ fn try_main() -> Result<(), HyperdriveError> {
             metafits,
             verbosity: _,
         } => {
+            if files.is_empty() {
+                eprintln!("Error: No solutions files supplied!");
+                std::process::exit(1);
+            }
+
             if metafits.is_none() {
                 warn!("No metafits supplied; the obsid and tile names won't be on the plots");
             }

@@ -4,6 +4,9 @@
 
 //! Useful constants.
 
+// The default minimum baseline cutoff.
+pub(crate) const DEFAULT_UVW_MIN: &str = "50λ";
+
 /// The maximum number of times to iterate when performing "MitchCal" in
 /// direction-independent calibration.
 pub(crate) const DEFAULT_MAX_ITERATIONS: usize = 50;

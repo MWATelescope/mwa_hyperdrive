@@ -50,6 +50,7 @@ fn test_calibrate_trivial() {
                 vis_data_slice,
                 vis_model_slice,
                 di_jones_slice.view_mut(),
+                &vec![1.0; vis_data.dim().1],
                 20,
                 1e-8,
                 1e-5,

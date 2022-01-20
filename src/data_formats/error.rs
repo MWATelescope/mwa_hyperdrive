@@ -4,6 +4,7 @@
 
 //! Errors from building a `InputData` trait instance.
 
+use birli::BirliError;
 use thiserror::Error;
 
 use mwa_hyperdrive_common::thiserror;
@@ -19,6 +20,9 @@ pub enum ReadInputDataError {
         expected_len: usize,
         axis_num: usize,
     },
+
+    #[error("{0}")]
+    Birli(#[from] BirliError),
 
     #[error("{0}")]
     MS(#[from] super::ms::MSError),

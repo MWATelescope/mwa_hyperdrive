@@ -12,8 +12,7 @@ cuda-single = ["cuda", "mwa_hyperbeam/cuda-single"]
 
 [dependencies]
 # mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "v0.4.0-WIP" }
-mwa_hyperbeam = { path = "/home/chj/Software/personal/mwa_hyperbeam" }
-# mwa_hyperbeam = "0.4.*"
+mwa_hyperbeam = "0.4.*"
 parking_lot = "0.11.*"
 
 mwa_hyperdrive_common =  { path = "../common" }

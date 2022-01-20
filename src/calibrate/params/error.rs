@@ -104,6 +104,12 @@ pub enum InvalidArgsError {
     #[error("Output vis. freq. resolution cannot be 0")]
     OutputVisFreqResZero,
 
+    #[error("Error when parsing minimum UVW cutoff: {0}")]
+    ParseUvwMin(crate::unit_parsing::UnitParseError),
+
+    #[error("Error when parsing maximum UVW cutoff: {0}")]
+    ParseUvwMax(crate::unit_parsing::UnitParseError),
+
     #[error("Cannot write to the specified file '{file}'. Do you have write permissions set?")]
     FileNotWritable { file: String },
 

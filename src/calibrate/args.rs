@@ -30,6 +30,7 @@ use crate::{
     constants::*,
     data_formats::VisOutputType,
     pfb_gains::{DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
+    unit_parsing::WAVELENGTH_FORMATS,
 };
 use mwa_hyperdrive_common::{clap, itertools, lazy_static, log, serde_json, thiserror, toml};
 use mwa_hyperdrive_srclist::{SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP};
@@ -59,6 +60,12 @@ lazy_static::lazy_static! {
 
     static ref PFB_FLAVOUR_HELP: String =
         format!("The 'flavour' of poly-phase filter bank corrections applied to raw MWA data. The default is '{}'. Valid flavours are: {}", DEFAULT_PFB_FLAVOUR, *PFB_FLAVOURS);
+
+    static ref UVW_MIN_HELP: String =
+        format!("The minimum UVW length to use. This value must have a unit annotated. Allowed units: {}. Default: {}", *WAVELENGTH_FORMATS, DEFAULT_UVW_MIN);
+
+    static ref UVW_MAX_HELP: String =
+        format!("The maximum UVW length to use. This value must have a unit annotated. Allowed units: {}. No default.", *WAVELENGTH_FORMATS);
 
     static ref MAX_ITERATIONS_HELP: String =
         format!("The maximum number of times to iterate when performing \"MitchCal\". Default: {}", DEFAULT_MAX_ITERATIONS);
@@ -180,6 +187,12 @@ pub struct CalibrateUserArgs {
     /// default is to use all unflagged timesteps.
     #[clap(long, multiple_values(true), help_heading = "CALIBRATION")]
     pub timesteps: Option<Vec<usize>>,
+
+    #[clap(long, help = UVW_MIN_HELP.as_str(), help_heading = "CALIBRATION")]
+    pub uvw_min: Option<String>,
+
+    #[clap(long, help = UVW_MAX_HELP.as_str(), help_heading = "CALIBRATION")]
+    pub uvw_max: Option<String>,
 
     #[clap(long, help = MAX_ITERATIONS_HELP.as_str(), help_heading = "CALIBRATION")]
     pub max_iterations: Option<usize>,
@@ -345,6 +358,8 @@ impl CalibrateUserArgs {
             no_geometric_correction,
             output_vis_time_average,
             output_vis_freq_average,
+            uvw_min,
+            uvw_max,
             max_iterations,
             stop_thresh,
             min_thresh,
@@ -387,6 +402,8 @@ impl CalibrateUserArgs {
             no_geometric_correction: cli_args.no_geometric_correction || no_geometric_correction,
             output_vis_time_average: cli_args.output_vis_time_average.or(output_vis_time_average),
             output_vis_freq_average: cli_args.output_vis_freq_average.or(output_vis_freq_average),
+            uvw_min: cli_args.uvw_min.or(uvw_min),
+            uvw_max: cli_args.uvw_max.or(uvw_max),
             max_iterations: cli_args.max_iterations.or(max_iterations),
             stop_thresh: cli_args.stop_thresh.or(stop_thresh),
             min_thresh: cli_args.min_thresh.or(min_thresh),

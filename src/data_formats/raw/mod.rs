@@ -581,7 +581,7 @@ impl RawData {
             &timestep_range,
             &coarse_chan_range,
             None,
-        );
+        )?;
         let weight_factor = birli::flags::get_weight_factor(&self.mwalib_context);
         let weights = birli::flags::flag_to_weight_array(flags.view(), weight_factor);
 
@@ -606,6 +606,7 @@ impl RawData {
                 &timestep_range,
                 &coarse_chan_range,
                 None,
+                Some(self.obs_context.phase_centre),
             ),
 
             // Nothing to do; metafits indicates delay corrections have been

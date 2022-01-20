@@ -46,7 +46,9 @@ use crate::{
     glob::*,
     math::TileBaselineMaps,
     pfb_gains::{PfbFlavour, DEFAULT_PFB_FLAVOUR},
-    unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat},
+    unit_parsing::{
+        parse_freq, parse_time, parse_wavelength, FreqFormat, TimeFormat, WavelengthUnit,
+    },
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon};
@@ -78,12 +80,10 @@ pub struct CalibrateParams {
     /// the metafits file. Zero indexed.
     pub(crate) tile_flags: HashSet<usize>,
 
-    /// Which baselines are flagged? These indices apply only to
-    /// cross-correlation baselines.
-    ///
-    /// These values correspond to tiles derived from the "Antenna" column in
-    /// HDU 2 of the metafits file. Zero indexed.
-    pub(crate) baseline_flags: HashSet<usize>,
+    /// Multiplicative factors to apply to unflagged baselines. These are mostly
+    /// all 1.0, but flagged baselines (perhaps due to a UVW cutoff) have values
+    /// of 0.0.
+    pub(crate) baseline_weights: Vec<f64>,
 
     /// Channel- and frequency-related parameters required for calibration.
     pub(crate) freq: FrequencyParams,
@@ -208,6 +208,8 @@ impl CalibrateParams {
             no_cable_length_correction,
             output_vis_time_average,
             output_vis_freq_average,
+            uvw_min,
+            uvw_max,
             max_iterations,
             stop_thresh,
             min_thresh,
@@ -521,7 +523,6 @@ impl CalibrateParams {
                 tile_flags.insert(obs_tile_flag);
             }
         }
-        let baseline_flags = get_flagged_baselines_set(total_num_tiles, &tile_flags);
 
         // Assign the per-coarse-channel fine-channel flags.
         // TODO: Rename "coarse band" to "coarse channel".
@@ -851,14 +852,95 @@ impl CalibrateParams {
         };
         let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
 
-        let (unflagged_tile_xyzs, unflagged_tile_names) = obs_context
-            .tile_xyzs
-            .par_iter()
-            .zip(obs_context.tile_names.par_iter())
-            .enumerate()
-            .filter(|(tile_index, _)| !tile_flags.contains(tile_index))
-            .map(|(_, (xyz, name))| (*xyz, name.clone()))
-            .unzip();
+        let (unflagged_tile_xyzs, unflagged_tile_names): (Vec<XyzGeodetic>, Vec<String>) =
+            obs_context
+                .tile_xyzs
+                .par_iter()
+                .zip(obs_context.tile_names.par_iter())
+                .enumerate()
+                .filter(|(tile_index, _)| !tile_flags.contains(tile_index))
+                .map(|(_, (xyz, name))| (*xyz, name.clone()))
+                .unzip();
+
+        // Set baseline weights from UVW cuts.
+        let uvw_min = uvw_min.or_else(|| Some(DEFAULT_UVW_MIN.to_string()));
+        let baseline_weights = {
+            let mut baseline_weights = vec![
+                1.0;
+                tile_baseline_maps
+                    .unflagged_cross_baseline_to_tile_map
+                    .len()
+            ];
+            if uvw_min.is_some() || uvw_max.is_some() {
+                // Parse the arguments. If a lambda was used, then we use the
+                // centroid frequency of the observation.
+                let freq_centroid = freq_context.fine_chan_freqs.iter().sum::<f64>()
+                    / freq_context.fine_chan_freqs.len() as f64;
+                let mut lambda_used = false;
+                // Let the new uvw_min and uvw_max values be in metres.
+                let uvw_min = match uvw_min {
+                    None => 0.0,
+                    Some(uvw_min) => {
+                        let (quantity, unit) =
+                            parse_wavelength(&uvw_min).map_err(InvalidArgsError::ParseUvwMin)?;
+                        match unit {
+                            WavelengthUnit::M => {
+                                info!("Minimum UVW cutoff: {}m", quantity);
+                                quantity
+                            }
+                            WavelengthUnit::L => {
+                                if !lambda_used {
+                                    info!("Using observation centroid frequency {} MHz to convert lambdas to metres", freq_centroid/1e6);
+                                    lambda_used = true;
+                                }
+                                let metres = marlu::constants::VEL_C / freq_centroid * quantity;
+                                info!("Minimum UVW cutoff: {}λ ({:.3}m)", quantity, metres);
+                                metres
+                            }
+                        }
+                    }
+                };
+                let uvw_max = match uvw_max {
+                    None => f64::INFINITY,
+                    Some(uvw_max) => {
+                        let (quantity, unit) =
+                            parse_wavelength(&uvw_max).map_err(InvalidArgsError::ParseUvwMax)?;
+                        match unit {
+                            WavelengthUnit::M => {
+                                info!("Maximum UVW cutoff: {}m", quantity);
+                                quantity
+                            }
+                            WavelengthUnit::L => {
+                                if !lambda_used {
+                                    info!("Using observation centroid frequency {} MHz to convert lambdas to metres", freq_centroid/1e6);
+                                    // lambda_used = true;
+                                }
+                                let metres = marlu::constants::VEL_C / freq_centroid * quantity;
+                                info!("Maximum UVW cutoff: {}λ ({:.3}m)", quantity, metres);
+                                metres
+                            }
+                        }
+                    }
+                };
+
+                let uvws = xyzs_to_cross_uvws_parallel(
+                    &unflagged_tile_xyzs,
+                    obs_context
+                        .phase_centre
+                        .to_hadec(precession_info.lmst_j2000),
+                );
+                debug_assert_eq!(baseline_weights.len(), uvws.len());
+                uvws.into_par_iter()
+                    .zip(baseline_weights.par_iter_mut())
+                    .for_each(|(uvw, baseline_weight)| {
+                        let uvw_length = uvw.u * uvw.u + uvw.v * uvw.v + uvw.w * uvw.w;
+                        if uvw_length < uvw_min * uvw_min || uvw_length > uvw_max * uvw_max {
+                            *baseline_weight = 0.0;
+                        }
+                    });
+            }
+            baseline_weights
+        };
 
         // Make sure the thresholds are sensible.
         let mut stop_threshold = stop_thresh.unwrap_or(DEFAULT_STOP_THRESHOLD);
@@ -874,7 +956,7 @@ impl CalibrateParams {
             source_list,
             model_file,
             tile_flags,
-            baseline_flags,
+            baseline_weights,
             freq: freq_struct,
             time_average_factor,
             timesteps: timesteps_to_use,
@@ -1178,26 +1260,6 @@ impl CalibrateParams {
             (n * (n - 1)) / 2
         }
     }
-}
-
-/// Get the flagged cross-correlation baseline indices from flagged tile
-/// indices. If all 128 tiles are flagged in a 128-element array, then this set
-/// will have 8128 flags.
-fn get_flagged_baselines_set(
-    total_num_tiles: usize,
-    tile_flags: &HashSet<usize>,
-) -> HashSet<usize> {
-    let mut flagged_baselines: HashSet<usize> = HashSet::new();
-    let mut bl = 0;
-    for tile1 in 0..total_num_tiles {
-        for tile2 in tile1 + 1..total_num_tiles {
-            if tile_flags.contains(&tile1) || tile_flags.contains(&tile2) {
-                flagged_baselines.insert(bl);
-            }
-            bl += 1;
-        }
-    }
-    flagged_baselines
 }
 
 // It looks a bit neater to print out a collection of numbers as a range rather

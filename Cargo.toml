@@ -41,8 +41,7 @@ cuda-static = ["mwa_hyperdrive_common/cuda-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-# birli = { version = "0.2.1", default_features = false }
-birli = { path = "/home/chj/Software/other/Birli", default_features = false }
+birli = { version = "0.3.1", default_features = false }
 byteorder = "1.4.3"
 crossbeam-channel = "0.5.2"
 crossbeam-utils = "0.8.6"

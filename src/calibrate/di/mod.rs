@@ -537,6 +537,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         &chanblocks,
         0,
         params.timesteps.len(),
+        &params.baseline_weights,
         params.max_iterations,
         params.stop_threshold,
         params.min_threshold,
@@ -568,6 +569,7 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
                 &chanblocks,
                 timeblock,
                 params.time_average_factor,
+                &params.baseline_weights,
                 params.max_iterations,
                 params.stop_threshold,
                 params.min_threshold,
@@ -960,11 +962,15 @@ fn calibrate_timeblock(
     chanblocks: &[usize],
     timeblock: usize,
     timeblock_length: usize,
+    baseline_weights: &[f64],
     max_iterations: usize,
     stop_threshold: f64,
     min_threshold: f64,
     progress_bar_msg: String,
 ) -> usize {
+    debug_assert_eq!(baseline_weights.len(), vis_data.dim().1);
+    debug_assert_eq!(baseline_weights.len(), vis_model.dim().1);
+
     let num_chanblocks = chanblocks.len();
     let num_tiles = solutions.di_jones.dim().1;
     let mut di_jones_rev = solutions
@@ -1001,6 +1007,7 @@ fn calibrate_timeblock(
                 vis_data.slice(range),
                 vis_model.slice(range),
                 di_jones,
+                baseline_weights,
                 max_iterations,
                 stop_threshold,
                 min_threshold,
@@ -1125,6 +1132,7 @@ fn calibrate_timeblock(
                             vis_data.slice(range),
                             vis_model.slice(range),
                             di_jones,
+                            &baseline_weights,
                             max_iterations,
                             stop_threshold,
                             min_threshold,
@@ -1197,6 +1205,7 @@ fn calibrate(
     data: ArrayView3<Jones<f32>>,
     model: ArrayView3<Jones<f32>>,
     mut di_jones: ArrayViewMut1<Jones<f64>>,
+    baseline_weights: &[f64],
     max_iterations: usize,
     stop_threshold: f64,
     min_threshold: f64,
@@ -1222,7 +1231,14 @@ fn calibrate(
         top.fill(Jones::default());
         bot.fill(Jones::default());
 
-        calibration_loop(data, model, di_jones.view(), top.view_mut(), bot.view_mut());
+        calibration_loop(
+            data,
+            model,
+            baseline_weights,
+            di_jones.view(),
+            top.view_mut(),
+            bot.view_mut(),
+        );
 
         // Obtain the new DI Jones matrices from "top" and "bot".
         // Tile/antenna axis.
@@ -1360,6 +1376,7 @@ fn calibrate(
 fn calibration_loop(
     data: ArrayView3<Jones<f32>>,
     model: ArrayView3<Jones<f32>>,
+    baseline_weights: &[f64],
     di_jones: ArrayView1<Jones<f64>>,
     mut top: ArrayViewMut1<Jones<f64>>,
     mut bot: ArrayViewMut1<Jones<f64>>,
@@ -1374,48 +1391,53 @@ fn calibration_loop(
             data_time
                 .outer_iter()
                 .zip(model_time.outer_iter())
+                .zip(baseline_weights.iter())
                 .enumerate()
-                .for_each(|(i_baseline, (data_bl, model_bl))| {
-                    let (tile1, tile2) = cross_correlation_baseline_to_tiles(num_tiles, i_baseline);
+                .for_each(|(i_baseline, ((data_bl, model_bl), &baseline_weight))| {
+                    // Don't do anything if the baseline weight is 0.
+                    if baseline_weight.abs() > f64::EPSILON {
+                        let (tile1, tile2) =
+                            cross_correlation_baseline_to_tiles(num_tiles, i_baseline);
 
-                    // Unflagged frequency chan axis.
-                    data_bl
-                        .iter()
-                        .zip(model_bl.iter())
-                        .for_each(|(j_data, j_model)| {
-                            // Copy and promote the data and model Jones
-                            // matrices.
-                            let j_data: Jones<f64> = j_data.into();
-                            let j_model: Jones<f64> = j_model.into();
+                        // Unflagged frequency chan axis.
+                        data_bl
+                            .iter()
+                            .zip(model_bl.iter())
+                            .for_each(|(j_data, j_model)| {
+                                // Copy and promote the data and model Jones
+                                // matrices.
+                                let j_data: Jones<f64> = Jones::from(j_data) * baseline_weight;
+                                let j_model: Jones<f64> = Jones::from(j_model) * baseline_weight;
 
-                            // Suppress boundary checks for maximum performance!
-                            unsafe {
-                                let j_t1 = di_jones.uget(tile1);
-                                let j_t2 = di_jones.uget(tile2);
+                                // Suppress boundary checks for maximum performance!
+                                unsafe {
+                                    let j_t1 = di_jones.uget(tile1);
+                                    let j_t2 = di_jones.uget(tile2);
 
-                                let top_t1 = top.uget_mut(tile1);
-                                let bot_t1 = bot.uget_mut(tile1);
+                                    let top_t1 = top.uget_mut(tile1);
+                                    let bot_t1 = bot.uget_mut(tile1);
 
-                                // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
-                                // J M^H
-                                let z = *j_t2 * j_model.h();
-                                // D (J M^H)
-                                *top_t1 += j_data * z;
-                                // (J M^H)^H (J M^H)
-                                *bot_t1 += z.h() * z;
+                                    // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
+                                    // J M^H
+                                    let z = *j_t2 * j_model.h();
+                                    // D (J M^H)
+                                    *top_t1 += j_data * z;
+                                    // (J M^H)^H (J M^H)
+                                    *bot_t1 += z.h() * z;
 
-                                let top_t2 = top.uget_mut(tile2);
-                                let bot_t2 = bot.uget_mut(tile2);
+                                    let top_t2 = top.uget_mut(tile2);
+                                    let bot_t2 = bot.uget_mut(tile2);
 
-                                // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
-                                // J (M^H)^H
-                                let z = *j_t1 * j_model;
-                                // D^H (J M^H)^H
-                                *top_t2 += j_data.h() * z;
-                                // (J M^H) (J M^H)
-                                *bot_t2 += z.h() * z;
-                            }
-                        });
+                                    // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
+                                    // J (M^H)^H
+                                    let z = *j_t1 * j_model;
+                                    // D^H (J M^H)^H
+                                    *top_t2 += j_data.h() * z;
+                                    // (J M^H) (J M^H)
+                                    *bot_t2 += z.h() * z;
+                                }
+                            });
+                    }
                 })
         });
 }

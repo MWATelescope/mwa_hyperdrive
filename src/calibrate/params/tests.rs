@@ -7,21 +7,6 @@
 use super::*;
 use crate::tests::{full_obsids::*, reduced_obsids::*, *};
 
-#[test]
-fn test_get_flagged_baselines_set() {
-    let total_num_tiles = 128;
-    let mut tile_flags = HashSet::new();
-    let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
-    assert!(flagged_baselines.is_empty());
-
-    tile_flags.insert(127);
-    let flagged_baselines = get_flagged_baselines_set(total_num_tiles, &tile_flags);
-    assert_eq!(flagged_baselines.len(), 127);
-    assert!(flagged_baselines.contains(&126));
-    assert!(flagged_baselines.contains(&252));
-    assert!(flagged_baselines.contains(&8127));
-}
-
 // #[test]
 // fn test_new_params() {
 //     let args = get_1090008640_smallest();
