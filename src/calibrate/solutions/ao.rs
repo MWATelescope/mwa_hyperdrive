@@ -7,7 +7,6 @@
 //! See for more info:
 //! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
 
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
@@ -103,10 +102,12 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         di_jones,
         num_timeblocks,
         total_num_tiles,
-        total_num_fine_freq_chans,
+        unflagged_tiles: todo!(),
         // We'd really like to have the *actual* start times of each
         // timeblock, but this isn't possible with this format. Here is the
         // best effort.
+        total_num_fine_freq_chans,
+        unflagged_fine_channels: todo!(),
         start_timestamps: match (start_time, end_time) {
             (None, None) => vec![],
             (Some(t), None) => vec![t],
@@ -135,8 +136,6 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
 pub(super) fn write<T: AsRef<Path>>(
     sols: &CalibrationSolutions,
     file: T,
-    tile_flags: &HashSet<usize>,
-    unflagged_fine_chans: &HashSet<usize>,
 ) -> Result<(), WriteSolutionsError> {
     let num_polarisations = 4;
 
@@ -172,14 +171,14 @@ pub(super) fn write<T: AsRef<Path>>(
         for tile_index in 0..sols.total_num_tiles {
             let mut unflagged_chan_index = 0;
             for chan in 0..sols.total_num_fine_freq_chans {
-                if unflagged_fine_chans.contains(&chan) {
+                if sols.unflagged_fine_channels.contains(&chan) {
                     // Invert the Jones matrices so that they can be applied as
                     // J D J^H
-                    let j = if tile_flags.contains(&tile_index) {
+                    let j = if sols.unflagged_tiles.contains(&tile_index) {
+                        di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)].inv()
+                    } else {
                         // This is a Jones matrix of all NaN.
                         Jones::default().inv()
-                    } else {
-                        di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)].inv()
                     };
 
                     LittleEndian::write_f64_into(
@@ -194,7 +193,7 @@ pub(super) fn write<T: AsRef<Path>>(
                 }
                 bin_file.write_all(&buf)?;
             }
-            if !tile_flags.contains(&tile_index) {
+            if sols.unflagged_tiles.contains(&tile_index) {
                 unflagged_tile_index += 1;
             };
         }

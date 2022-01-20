@@ -30,6 +30,9 @@ pub enum ReadSolutionsError {
         got: String,
     },
 
+    #[error("When interfacing with RTS calibration solutions, a metafits file is required")]
+    RtsMetafitsRequired,
+
     #[error("In file {file} key {key}, could not parse '{got}' as a number!")]
     Parse {
         file: String,

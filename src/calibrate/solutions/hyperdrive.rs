@@ -7,7 +7,6 @@
 //! See for more info:
 //! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
 
-use std::collections::HashSet;
 use std::ffi::CString;
 use std::path::Path;
 
@@ -37,15 +36,16 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
     let time_res = get_optional_fits_key!(&mut fptr, &hdu, "TIMERES")?;
     let start_timestamps: Vec<Epoch> = {
         let timestamps: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "TIMESTAMPS")?;
-        match timestamps {
-            None => vec![],
+        // The retrieved string might be empty (or just have spaces for values)
+        match timestamps.as_ref().map(|s| s.trim()) {
+            None | Some("") => vec![],
             Some(s) => s
                 .split(',')
-                .map(|ss| match ss.parse::<f64>() {
+                .map(|ss| match ss.trim().parse::<f64>() {
                     Ok(float) => Ok(gps_to_epoch(float)),
                     Err(_) => Err(ReadSolutionsError::Parse {
                         file: file.display().to_string(),
-                        key: "TMESTEPS",
+                        key: "TIMESTAMPS",
                         got: ss.to_string(),
                     }),
                 })
@@ -89,7 +89,9 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         di_jones,
         num_timeblocks,
         total_num_tiles,
+        unflagged_tiles: todo!(),
         total_num_fine_freq_chans,
+        unflagged_fine_channels: todo!(),
         start_timestamps,
         obsid,
         time_res,
@@ -99,8 +101,6 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
 pub(super) fn write<T: AsRef<Path>>(
     sols: &CalibrationSolutions,
     file: T,
-    tile_flags: &HashSet<usize>,
-    unflagged_fine_chans: &HashSet<usize>,
 ) -> Result<(), WriteSolutionsError> {
     if file.as_ref().exists() {
         std::fs::remove_file(&file)?;
@@ -202,16 +202,16 @@ pub(super) fn write<T: AsRef<Path>>(
         for tile in 0..sols.total_num_tiles {
             let mut unflagged_chan_index = 0;
             for chan in 0..sols.total_num_fine_freq_chans {
-                if unflagged_fine_chans.contains(&chan) {
+                if sols.unflagged_fine_channels.contains(&chan) {
                     let one_dim_index = timeblock * dim[1] * dim[2] * dim[3]
                         + tile * dim[2] * dim[3]
                         + chan * dim[3];
                     // Invert the Jones matrices so that they can be applied
                     // as J D J^H
-                    let j = if tile_flags.contains(&tile) {
-                        Jones::nan() // This is a Jones matrix of all NaN.
+                    let j = if sols.unflagged_tiles.contains(&tile) {
+                        di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)].inv()
                     } else {
-                        di_jones_per_time[[unflagged_tile_index, unflagged_chan_index]].inv()
+                        Jones::nan() // This is a Jones matrix of all NaN.
                     };
                     fits_image_data[one_dim_index] = j[0].re;
                     fits_image_data[one_dim_index + 1] = j[0].im;
@@ -224,7 +224,7 @@ pub(super) fn write<T: AsRef<Path>>(
                     unflagged_chan_index += 1;
                 }
             }
-            if !tile_flags.contains(&tile) {
+            if sols.unflagged_tiles.contains(&tile) {
                 unflagged_tile_index += 1;
             };
         }

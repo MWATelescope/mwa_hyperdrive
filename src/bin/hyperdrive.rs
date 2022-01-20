@@ -73,19 +73,47 @@ enum Args {
         cpu: bool,
     },
 
+    /// Convert between calibration solution file formats.
+    SolutionsConvert {
+        /// The path to the input file. If this is a directory instead, then we
+        /// attempt to read RTS calibration files in the directory.
+        #[clap(name = "INPUT_SOLUTIONS_FILE", parse(from_os_str))]
+        input: PathBuf,
+
+        /// The path to the output file. If this is a directory instead, then we
+        /// attempt to write RTS calibration files to the directory.
+        #[clap(name = "OUTPUT_SOLUTIONS_FILE", parse(from_os_str))]
+        output: PathBuf,
+
+        /// The metafits file associated with the solutions. This may be
+        /// required.
+        #[clap(short, long, parse(from_str))]
+        metafits: Option<PathBuf>,
+
+        /// The verbosity of the program. Increase by specifying multiple times
+        /// (e.g. -vv). The default is to print only high-level information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
+    },
+
     /// Plot calibration solutions.
     #[cfg(feature = "plotting")]
     SolutionsPlot {
         #[clap(name = "SOLUTIONS_FILES", parse(from_os_str))]
         files: Vec<PathBuf>,
 
+        /// The reference antenna to use. If this isn't specified, the best one
+        /// from the end is used.
+        #[clap(short, long)]
+        ref_ant: Option<usize>,
+
+        #[clap(long)]
+        ignore_cross_pols: bool,
+
         /// The metafits file associated with the solutions. This provides
         /// additional information on the plots, like the antenna names.
         #[clap(short, long, parse(from_str))]
         metafits: Option<PathBuf>,
-
-        #[clap(short, long)]
-        ref_ant: Option<usize>,
 
         /// The verbosity of the program. Increase by specifying multiple times
         /// (e.g. -vv). The default is to print only high-level information.
@@ -138,6 +166,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     let verbosity = match &args {
         Args::DiCalibrate { verbosity, .. } => verbosity,
         Args::SimulateVis { verbosity, .. } => verbosity,
+        Args::SolutionsConvert { verbosity, .. } => verbosity,
         #[cfg(feature = "plotting")]
         Args::SolutionsPlot { verbosity, .. } => verbosity,
         Args::SrclistByBeam { args, .. } => &args.verbosity,
@@ -154,6 +183,7 @@ fn try_main() -> Result<(), HyperdriveError> {
         match args {
             Args::DiCalibrate { .. } => "di-calibrate",
             Args::SimulateVis { .. } => "simulate-vis",
+            Args::SolutionsConvert { .. } => "solutions-convert",
             #[cfg(feature = "plotting")]
             Args::SolutionsPlot { .. } => "solutions-plot",
             Args::SrclistByBeam { .. } => "srclist-by-beam",
@@ -209,10 +239,21 @@ fn try_main() -> Result<(), HyperdriveError> {
             info!("hyperdrive simulate-vis complete.");
         }
 
+        Args::SolutionsConvert {
+            input,
+            output,
+            metafits,
+            verbosity: _,
+        } => {
+            let sols = CalibrationSolutions::read_solutions_from_ext(input, metafits).unwrap();
+            sols.write_solutions_from_ext(output).unwrap();
+        }
+
         #[cfg(feature = "plotting")]
         Args::SolutionsPlot {
             files,
             ref_ant,
+            ignore_cross_pols,
             metafits,
             verbosity: _,
         } => {
@@ -225,7 +266,9 @@ fn try_main() -> Result<(), HyperdriveError> {
                 warn!("No metafits supplied; the obsid and tile names won't be on the plots");
             }
 
-            let mwalib_context = metafits.map(|m| mwalib::MetafitsContext::new(&m, None).unwrap());
+            let mwalib_context = metafits
+                .as_ref()
+                .map(|m| mwalib::MetafitsContext::new(&m, None).unwrap());
             let tile_names: Option<Vec<&str>> = mwalib_context.as_ref().map(|m| {
                 m.rf_inputs
                     .iter()
@@ -235,7 +278,11 @@ fn try_main() -> Result<(), HyperdriveError> {
             });
 
             for solutions_file in files {
-                let sols = CalibrationSolutions::read_solutions_from_ext(&solutions_file).unwrap();
+                let sols = CalibrationSolutions::read_solutions_from_ext(
+                    &solutions_file,
+                    metafits.as_ref(),
+                )
+                .unwrap();
                 let base = solutions_file
                     .file_stem()
                     .and_then(|os_str| os_str.to_str())
@@ -250,17 +297,17 @@ fn try_main() -> Result<(), HyperdriveError> {
                         .unwrap_or_else(|| "<unknown>".to_string())
                 );
                 let plot_files = sols
-                    .plot(base, &plot_title, ref_ant, tile_names.as_deref())
+                    .plot(
+                        base,
+                        &plot_title,
+                        ref_ant,
+                        tile_names.as_deref(),
+                        ignore_cross_pols,
+                    )
                     .unwrap();
                 info!("Wrote {:?}", plot_files);
             }
         }
-
-        // Source list utilities.
-        Args::SrclistByBeam { args } => args.run()?,
-        Args::SrclistConvert { args } => args.run()?,
-        Args::SrclistShift { args } => args.run()?,
-        Args::SrclistVerify { args } => args.run()?,
 
         Args::DipoleGains { metafits } => {
             let meta = mwalib::MetafitsContext::new(&metafits, None).unwrap();
@@ -319,6 +366,12 @@ fn try_main() -> Result<(), HyperdriveError> {
                 }
             }
         }
+
+        // Source list utilities.
+        Args::SrclistByBeam { args } => args.run()?,
+        Args::SrclistConvert { args } => args.run()?,
+        Args::SrclistShift { args } => args.run()?,
+        Args::SrclistVerify { args } => args.run()?,
     }
 
     Ok(())

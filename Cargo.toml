@@ -51,6 +51,7 @@ regex = "1.5.4"
 serde = { version = "1.0.133", features = ["derive"] }
 strum = "0.23.0"
 strum_macros = "0.23.1"
+vec1 = "1.8.0"
 
 plotters = { version = "0.3.1", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "point_series"], optional = true }
 

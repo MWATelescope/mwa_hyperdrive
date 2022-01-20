@@ -19,6 +19,8 @@ const X_PIXELS: u32 = 3200;
 const Y_PIXELS: u32 = 1800;
 
 lazy_static::lazy_static! {
+    static ref CLEAR: RGBAColor = WHITE.mix(0.0);
+
     static ref POLS: [(&'static str, RGBAColor); 4] = [
         ("XX", BLUE.mix(1.0)),
         ("XY", BLUE.mix(0.2)),
@@ -33,6 +35,7 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
     obs_name: &str,
     ref_tile: Option<usize>,
     tile_names: Option<&[S]>,
+    ignore_cross_pols: bool,
 ) -> Result<Vec<String>, ()> {
     // How should the plot be split up to distribute the tiles?
     let split = match sols.total_num_tiles {
@@ -112,6 +115,9 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
         phases_root_area.fill(&WHITE).unwrap();
         // Draw the coloured text for each polarisation.
         for (i, (pol, colour)) in POLS.iter().enumerate() {
+            if ignore_cross_pols && [1, 2].contains(&i) {
+                continue;
+            }
             amps_root_area
                 .draw_text(
                     *pol,
@@ -207,6 +213,7 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
                     max_amp,
                     &tile_name,
                     (i_tile / split.0, i_tile % split.1),
+                    ignore_cross_pols,
                 );
             });
         phases
@@ -223,6 +230,7 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
                     phases.view(),
                     &tile_name,
                     (i_tile / split.0, i_tile % split.1),
+                    ignore_cross_pols,
                 );
             });
 
@@ -242,6 +250,7 @@ fn plot_amps<DB: DrawingBackend, S: AsRef<str>>(
     max_amp: f64,
     tile_name: S,
     tile_plot_indices: (usize, usize),
+    ignore_cross_pols: bool,
 ) {
     let x_axis = (0..amps.len()).step(1);
     let y_label_area_size = if tile_plot_indices.1 == 0 { 20 } else { 0 };
@@ -272,6 +281,8 @@ fn plot_amps<DB: DrawingBackend, S: AsRef<str>>(
             1,
             if [0, 3].contains(&pol_index) {
                 ShapeStyle::from(&colour).filled()
+            } else if ignore_cross_pols {
+                ShapeStyle::from(*CLEAR)
             } else {
                 ShapeStyle::from(&colour)
             },
@@ -287,6 +298,7 @@ fn plot_phases<DB: DrawingBackend, S: AsRef<str>>(
     phases: ArrayView1<[f64; 4]>,
     tile_name: S,
     tile_plot_indices: (usize, usize),
+    ignore_cross_pols: bool,
 ) {
     let x_axis = (0..phases.len()).step(1);
     let y_label_area_size = if tile_plot_indices.1 == 0 { 45 } else { 0 };
@@ -325,6 +337,8 @@ fn plot_phases<DB: DrawingBackend, S: AsRef<str>>(
             1,
             if [0, 3].contains(&pol_index) {
                 ShapeStyle::from(&colour).filled()
+            } else if ignore_cross_pols {
+                ShapeStyle::from(*CLEAR)
             } else {
                 ShapeStyle::from(&colour)
             },

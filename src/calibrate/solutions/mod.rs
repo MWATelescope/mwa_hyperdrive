@@ -15,9 +15,7 @@ mod plotting;
 mod rts;
 
 pub(crate) use error::*;
-pub(crate) use rts::RtsReadSolsError;
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -25,6 +23,7 @@ use hifitime::Epoch;
 use marlu::{time::epoch_as_gps_seconds, Jones};
 use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
+use vec1::Vec1;
 
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
@@ -42,12 +41,27 @@ pub(crate) enum CalSolutionType {
 pub struct CalibrationSolutions {
     pub di_jones: Array3<Jones<f64>>,
     pub num_timeblocks: usize,
+
+    /// The number of flagged and unflagged tiles in the observation.
     pub total_num_tiles: usize,
+
+    /// Which tiles are unflagged?
+    pub unflagged_tiles: Vec1<usize>,
+
+    /// The number of flagged and unflagged fine frequency channels in the
+    /// observation.
     pub total_num_fine_freq_chans: usize,
 
+    /// Which channels are unflagged?
+    pub unflagged_fine_channels: Vec1<usize>,
+
     /// The start timestamps of each timeblock used to produce these calibration
-    /// solutions.
+    /// solutions. This is allowed to be empty; in this case, no timestamp
+    /// information is provided.
     pub start_timestamps: Vec<Epoch>,
+
+    /// The MWA observation ID. Allowed to be optional as not all formats
+    /// provide it.
     pub obsid: Option<u32>,
 
     /// The number of seconds per timeblock, or, the time resolution of the
@@ -58,55 +72,47 @@ pub struct CalibrationSolutions {
 
 impl CalibrationSolutions {
     /// Read in calibration solutions from a file. The format of the file is
-    /// determined by the file's extension (e.g. ".fits"). Mostly useful for
-    /// testing.
-    pub fn read_solutions_from_ext<T: AsRef<Path>>(file: T) -> Result<Self, ReadSolutionsError> {
-        match file.as_ref().extension().and_then(|s| s.to_str()) {
-            Some("fits") => hyperdrive::read(file),
-            Some("bin") => ao::read(file),
-            s => {
-                let ext = s.unwrap_or("<no extension>").to_string();
-                Err(ReadSolutionsError::UnsupportedExt { ext })
+    /// determined by the file's extension (e.g. ".fits"). If the file is
+    /// actually a directory, we attempt to read RTS DI calibration solution
+    /// files from the directory.
+    pub fn read_solutions_from_ext<T: AsRef<Path>, T2: AsRef<Path>>(
+        file: T,
+        metafits: Option<T2>,
+    ) -> Result<Self, ReadSolutionsError> {
+        let f = file.as_ref();
+        if f.is_dir() {
+            let metafits = metafits.ok_or(ReadSolutionsError::RtsMetafitsRequired)?;
+            rts::read(f, metafits).map_err(ReadSolutionsError::from)
+        } else {
+            match f.extension().and_then(|s| s.to_str()) {
+                Some("fits") => hyperdrive::read(file),
+                Some("bin") => ao::read(file),
+                s => {
+                    let ext = s.unwrap_or("<no extension>").to_string();
+                    Err(ReadSolutionsError::UnsupportedExt { ext })
+                }
             }
         }
     }
 
-    pub(super) fn write_solutions_from_ext<T: AsRef<Path>>(
+    pub fn write_solutions_from_ext<T: AsRef<Path>>(
         &self,
         file: T,
-        tile_flags: &HashSet<usize>,
-        unflagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), WriteSolutionsError> {
-        let ext = file.as_ref().extension().and_then(|e| e.to_str());
-        match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
-            Some(CalSolutionType::Fits) => {
-                self.write_hyperdrive_fits(file, tile_flags, unflagged_fine_chans)
+        let f = file.as_ref();
+        if f.is_dir() {
+            //rts::write
+            todo!()
+        } else {
+            let ext = file.as_ref().extension().and_then(|e| e.to_str());
+            match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
+                Some(CalSolutionType::Fits) => hyperdrive::write(self, file),
+                Some(CalSolutionType::Bin) => ao::write(self, file),
+                None => Err(WriteSolutionsError::UnsupportedExt {
+                    ext: ext.unwrap_or("<no extension>").to_string(),
+                }),
             }
-            Some(CalSolutionType::Bin) => {
-                self.write_andre_binary(file, tile_flags, unflagged_fine_chans)
-            }
-            None => Err(WriteSolutionsError::UnsupportedExt {
-                ext: ext.unwrap_or("<no extension>").to_string(),
-            }),
         }
-    }
-
-    pub(super) fn write_hyperdrive_fits<T: AsRef<Path>>(
-        &self,
-        file: T,
-        tile_flags: &HashSet<usize>,
-        unflagged_fine_chans: &HashSet<usize>,
-    ) -> Result<(), WriteSolutionsError> {
-        hyperdrive::write(self, file, tile_flags, unflagged_fine_chans)
-    }
-
-    pub(super) fn write_andre_binary<T: AsRef<Path>>(
-        &self,
-        file: T,
-        tile_flags: &HashSet<usize>,
-        unflagged_fine_chans: &HashSet<usize>,
-    ) -> Result<(), WriteSolutionsError> {
-        ao::write(self, file, tile_flags, unflagged_fine_chans)
     }
 
     #[cfg(feature = "plotting")]
@@ -116,7 +122,15 @@ impl CalibrationSolutions {
         plot_title: &str,
         ref_tile: Option<usize>,
         tile_names: Option<&[S]>,
+        ignore_cross_pols: bool,
     ) -> Result<Vec<String>, ()> {
-        plotting::plot_sols(self, filename_base, plot_title, ref_tile, tile_names)
+        plotting::plot_sols(
+            self,
+            filename_base,
+            plot_title,
+            ref_tile,
+            tile_names,
+            ignore_cross_pols,
+        )
     }
 }

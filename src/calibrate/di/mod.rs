@@ -503,7 +503,9 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         di_jones: Array3::from_elem(shape, Jones::identity()),
         num_timeblocks,
         total_num_tiles,
+        unflagged_tiles: todo!(),
         total_num_fine_freq_chans,
+        unflagged_fine_channels: todo!(),
         start_timestamps: (0..num_timeblocks)
             .into_iter()
             .map(|i_timeblock| {
@@ -593,18 +595,19 @@ pub fn di_calibrate(params: &CalibrateParams) -> Result<(), CalibrateError> {
         info!("Writing solutions...");
     }
     for (sol_type, file) in &params.output_solutions_filenames {
-        match sol_type {
-            CalSolutionType::Fits => sols.write_hyperdrive_fits(
-                &file,
-                &params.tile_flags,
-                &params.freq.unflagged_fine_chans,
-            ),
-            CalSolutionType::Bin => sols.write_andre_binary(
-                &file,
-                &params.tile_flags,
-                &params.freq.unflagged_fine_chans,
-            ),
-        }?;
+        sols.write_solutions_from_ext(file)?;
+        // match sol_type {
+        //     CalSolutionType::Fits => sols.write_hyperdrive_fits(
+        //         &file,
+        //         &params.tile_flags,
+        //         &params.freq.unflagged_fine_chans,
+        //     ),
+        //     CalSolutionType::Bin => sols.write_andre_binary(
+        //         &file,
+        //         &params.tile_flags,
+        //         &params.freq.unflagged_fine_chans,
+        //     ),
+        // }?;
         info!("Calibration solutions written to {}", file.display());
     }
 
