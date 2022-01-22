@@ -125,7 +125,7 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
 
     // Check that the number of tiles is the same everywhere.
     let total_num_tiles = all_di_jm[0].pre_alignment_matrices.len();
-    let num_unflagged_tiles = all_bp_cal[0].unflagged_tile_indices.len();
+    let num_unflagged_tiles = all_bp_cal[0].unflagged_rf_input_indices.len();
     for (node_index, di_jm) in all_di_jm.iter().enumerate() {
         if di_jm.pre_alignment_matrices.len() < num_unflagged_tiles {
             return Err(RtsReadSolsError::UnequalTileCountDiJm {
@@ -145,48 +145,75 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
         }
     }
 
-    let num_unflagged_fine_chans = all_bp_cal
-        .iter()
-        .fold(0, |acc, bp_cal| acc + bp_cal.data.dim().2);
+    // Get the flagged tile indices from the flagged RF inputs.
+    let flagged_tiles = (0..total_num_tiles)
+        .into_iter()
+        .filter(|i_tile| {
+            let i_input = context
+                .rf_inputs
+                .iter()
+                .find(|rf| rf.ant == *i_tile as u32)
+                .unwrap()
+                .input as usize
+                / 2;
+            !all_bp_cal[0].unflagged_rf_input_indices.contains(&i_input)
+        })
+        .collect();
+
     // Try to work out the total number of fine frequency channels.
-    let total_num_fine_freq_chans = {
+    let (total_num_fine_freq_chans, num_fine_chans_per_coarse_chan) = {
         let smallest_fine_chan_res = all_bp_cal.iter().fold(f64::INFINITY, |acc, bp| {
             acc.min(bp.fine_channel_resolution.unwrap_or(f64::INFINITY))
         });
 
         // Only handling legacy correlator settings for now.
         if (smallest_fine_chan_res - 40e3).abs() < f64::EPSILON {
-            768
+            (768, 32)
         } else if (smallest_fine_chan_res - 20e3).abs() < f64::EPSILON {
-            1536
+            (1536, 64)
         } else if (smallest_fine_chan_res - 10e3).abs() < f64::EPSILON {
-            3072
+            (3072, 128)
         } else {
             panic!("Unhandled RTS frequency resolution")
         }
     };
 
-    let mut di_jones = Array3::zeros((1, total_num_tiles, total_num_fine_freq_chans));
-    let mut i_chan: usize = 0;
+    // Get the flagged tile indices from the flagged RF inputs.
+    let flagged_fine_channels: Vec<usize> = (0..total_num_fine_freq_chans)
+        .into_iter()
+        .filter(|&i_chan| {
+            let i_coarse_chan = i_chan / num_fine_chans_per_coarse_chan;
+            let i_fine_chan_in_coarse_chan = i_chan % num_fine_chans_per_coarse_chan;
+            let bp_cal = &all_bp_cal[i_coarse_chan];
+            !bp_cal
+                .unflagged_fine_channel_indices
+                .contains(&i_fine_chan_in_coarse_chan)
+        })
+        .collect();
+
+    let mut di_jones = Array3::zeros((
+        1,
+        num_unflagged_tiles,
+        total_num_fine_freq_chans - flagged_fine_channels.len(),
+    ));
     for (mut bp_cal, di_jm) in all_bp_cal.into_iter().zip(all_di_jm.into_iter()) {
-        let unflagged_tile_indices = bp_cal.unflagged_tile_indices;
+        let unflagged_rf_input_indices = bp_cal.unflagged_rf_input_indices;
 
         // Apply di_jm to the bp_cal data. Use the modified bp_cal data to
         // populate the outgoing di_jones.
-        let num_chans = bp_cal.data.dim().2;
-        let mut bp_cal = bp_cal.data.slice_mut(s![
+        let mut bp_cal_data = bp_cal.data.slice_mut(s![
             ..,
-            0, // Throw away the "fit" data; only use "lsq".
+            0_usize, // Throw away the "fit" data; only use "lsq".
             ..
         ]);
-        bp_cal
+        bp_cal_data
             .outer_iter_mut()
             .zip(
                 di_jm
                     .pre_alignment_matrices
                     .iter()
                     .enumerate()
-                    .filter(|(i_tile, _)| unflagged_tile_indices.contains(i_tile))
+                    .filter(|(i_input, _)| unflagged_rf_input_indices.contains(i_input))
                     .map(|pair| pair.1),
             )
             .for_each(|(mut bp_cal, &di_jm_pre)| {
@@ -203,25 +230,32 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
         // ordered by metafits antenna number, whereas RTS data is ordered by
         // metafits input number. Flagged tiles have NaN written.
         let mut i_unflagged_tile: usize = 0;
-        di_jones
-            .slice_mut(s![0, .., i_chan..i_chan + num_chans])
-            .outer_iter_mut()
-            .enumerate()
-            .for_each(|(i_ant, mut di_jones)| {
-                let i_input = context
-                    .rf_inputs
-                    .iter()
-                    .find(|rf| rf.ant as usize == i_ant)
-                    .map(|rf| rf.input / 2)
-                    .unwrap() as usize;
-                if unflagged_tile_indices.contains(&i_input) {
-                    di_jones.assign(&bp_cal.slice(s![i_unflagged_tile, ..]));
-                    i_unflagged_tile += 1;
-                } else {
-                    di_jones.fill(Jones::nan());
+        for i_tile in 0..total_num_tiles {
+            let i_input = context
+                .rf_inputs
+                .iter()
+                .find(|rf| rf.ant == i_tile as u32)
+                .map(|rf| rf.input / 2)
+                .unwrap() as usize;
+
+            if unflagged_rf_input_indices.contains(&i_input) {
+                let bp_cal_data = bp_cal_data.slice(s![i_unflagged_tile, ..]);
+
+                // Unpack the unflagged channels.
+                let mut i_unflagged_chan = 0;
+                for i_chan in 0..total_num_fine_freq_chans {
+                    if bp_cal.unflagged_fine_channel_indices.contains(&i_chan) {
+                        let di_jones = di_jones
+                            .get_mut((0, i_unflagged_tile, i_unflagged_chan))
+                            .unwrap();
+                        *di_jones = bp_cal_data[i_unflagged_chan];
+                        i_unflagged_chan += 1;
+                    }
                 }
-            });
-        i_chan += num_chans
+
+                i_unflagged_tile += 1;
+            }
+        }
     }
 
     Ok(CalibrationSolutions {
@@ -229,9 +263,9 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
         // RTS solutions don't change over time.
         num_timeblocks: 1,
         total_num_tiles,
-        unflagged_tiles: todo!(),
+        flagged_tiles,
         total_num_fine_freq_chans,
-        unflagged_fine_channels: todo!(),
+        flagged_fine_channels,
         start_timestamps: vec![],
         obsid: Some(context.obs_id),
         time_res: None,

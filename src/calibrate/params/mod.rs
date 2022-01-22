@@ -42,6 +42,7 @@ use rayon::prelude::*;
 use super::solutions::CalSolutionType;
 use crate::{
     constants::*,
+    context::{FreqContext, ObsContext},
     data_formats::*,
     glob::*,
     math::TileBaselineMaps,
@@ -59,7 +60,6 @@ use mwa_hyperdrive_srclist::{
 /// Parameters needed to perform calibration.
 pub struct CalibrateParams {
     /// Interface to the MWA data, and metadata on the input data.
-    // pub(crate) input_data: Box<dyn InputData>,
     pub(crate) input_data: Box<dyn InputData>,
 
     /// Beam object.
@@ -981,6 +981,14 @@ impl CalibrateParams {
         };
         params.log_param_info(&precession_info)?;
         Ok(params)
+    }
+
+    pub(crate) fn get_obs_context(&self) -> &ObsContext {
+        self.input_data.get_obs_context()
+    }
+
+    pub(crate) fn get_freq_context(&self) -> &FreqContext {
+        self.input_data.get_freq_context()
     }
 
     pub(crate) fn read_crosses(

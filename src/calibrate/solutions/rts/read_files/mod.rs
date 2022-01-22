@@ -239,9 +239,11 @@ pub(super) struct BpCal {
     /// corresponds to. Zero indexed.
     pub(super) unflagged_fine_channel_indices: Vec1<usize>,
 
-    /// The unflagged tiles indices for the coarse channel that this file
-    /// corresponds to. Zero indexed.
-    pub(super) unflagged_tile_indices: Vec1<usize>,
+    /// The unflagged RF input indices (divided by 2) for the coarse channel
+    /// that this file corresponds to. Only one RF input is included per tile,
+    /// so when there are 0 flagged tiles in a 128-tile observation, this vector
+    /// has 128 elements. Zero indexed.
+    pub(super) unflagged_rf_input_indices: Vec1<usize>,
 
     /// All of the Jones matrices in the file. The 1st dimension is per tile,
     /// the 2nd dimension is for lsq and fit (in that order) and always has a
@@ -306,29 +308,29 @@ impl BpCal {
             return Err(ReadBpCalFileError::NoUnflaggedChans);
         }
 
-        let mut unflagged_tile_indices = Vec::with_capacity(128);
+        let mut unflagged_rf_input_indices = Vec::with_capacity(128);
         let mut data: Array3<Jones<f64>> =
             Array3::zeros((num_tiles, 2, unflagged_fine_chan_freqs.len()));
         let mut i_tile = 0;
         for (i_line, line) in file.lines().skip(1).enumerate() {
             let mut elems = line.split(',').flat_map(|s| s.split_whitespace());
-            let tile_num_str = elems.next().ok_or(ReadBpCalFileError::NoTileNum {
+            let input_num_str = elems.next().ok_or(ReadBpCalFileError::NoTileNum {
                 line_num: i_line + 2,
             })?;
             if i_line > 0 && i_line % 8 == 0 {
                 i_tile += 1;
             }
 
-            let tile_num =
-                tile_num_str
+            let input_num =
+                input_num_str
                     .parse::<usize>()
                     .map_err(|_| ReadBpCalFileError::ParseInt {
-                        text: tile_num_str.to_string(),
+                        text: input_num_str.to_string(),
                         line_num: i_line + 2,
                     })?
                     - 1; // convert to zero indexed
-            if !unflagged_tile_indices.contains(&tile_num) {
-                unflagged_tile_indices.push(tile_num);
+            if !unflagged_rf_input_indices.contains(&input_num) {
+                unflagged_rf_input_indices.push(input_num);
             }
 
             let lsq_or_fit = i_line % 2;
@@ -355,6 +357,8 @@ impl BpCal {
                 }
             }
         }
+        let unflagged_rf_input_indices = Vec1::try_from_vec(unflagged_rf_input_indices)
+            .map_err(|_| ReadBpCalFileError::NoTiles)?;
 
         let fine_channel_resolution = if unflagged_fine_chan_freqs.len() == 1 {
             None
@@ -381,13 +385,13 @@ impl BpCal {
 
             None => vec![0],
         };
+        let unflagged_fine_channel_indices = Vec1::try_from_vec(unflagged_fine_channel_indices)
+            .map_err(|_| ReadBpCalFileError::NoUnflaggedChans)?;
 
         Ok(BpCal {
             fine_channel_resolution,
-            unflagged_fine_channel_indices: Vec1::try_from_vec(unflagged_fine_channel_indices)
-                .map_err(|_| ReadBpCalFileError::NoUnflaggedChans)?,
-            unflagged_tile_indices: Vec1::try_from_vec(unflagged_tile_indices)
-                .map_err(|_| ReadBpCalFileError::NoTiles)?,
+            unflagged_fine_channel_indices,
+            unflagged_rf_input_indices,
             data,
         })
     }

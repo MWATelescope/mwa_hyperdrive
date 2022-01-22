@@ -23,7 +23,6 @@ use hifitime::Epoch;
 use marlu::{time::epoch_as_gps_seconds, Jones};
 use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
-use vec1::Vec1;
 
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
@@ -45,15 +44,15 @@ pub struct CalibrationSolutions {
     /// The number of flagged and unflagged tiles in the observation.
     pub total_num_tiles: usize,
 
-    /// Which tiles are unflagged?
-    pub unflagged_tiles: Vec1<usize>,
+    /// Which tiles are flagged?
+    pub flagged_tiles: Vec<usize>,
 
     /// The number of flagged and unflagged fine frequency channels in the
     /// observation.
     pub total_num_fine_freq_chans: usize,
 
-    /// Which channels are unflagged?
-    pub unflagged_fine_channels: Vec1<usize>,
+    /// Which channels are flagged?
+    pub flagged_fine_channels: Vec<usize>,
 
     /// The start timestamps of each timeblock used to produce these calibration
     /// solutions. This is allowed to be empty; in this case, no timestamp

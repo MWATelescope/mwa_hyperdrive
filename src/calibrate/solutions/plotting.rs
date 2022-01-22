@@ -196,19 +196,19 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
             .iter()
             .flatten()
             .filter(|a| !a.is_nan())
-            .fold(0.0, |acc, &p| if p > acc { p } else { acc });
+            .fold(0.0, |acc, &a| if a > acc { a } else { acc });
 
         amps.outer_iter()
             .zip(amps_tile_plots.into_iter())
             .enumerate()
-            .for_each(|(i_tile, (phases, phase_tile_plot))| {
+            .for_each(|(i_tile, (amps, amp_tile_plot))| {
                 let tile_name = match tile_names {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile].as_ref()),
                     None => format!("{}", i_tile),
                 };
                 plot_amps(
-                    &phase_tile_plot,
-                    phases.view(),
+                    &amp_tile_plot,
+                    amps.view(),
                     min_amp,
                     max_amp,
                     &tile_name,

@@ -18,9 +18,10 @@ use marlu::{
     Jones,
 };
 use ndarray::prelude::*;
+use rayon::prelude::*;
 
 use super::{error::*, CalibrationSolutions};
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray, Complex};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray, rayon, Complex};
 
 pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, ReadSolutionsError> {
     let file_str = file.as_ref().display().to_string();
@@ -98,16 +99,35 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         ])
     });
 
+    // Find any tiles containing only NaNs; these are flagged.
+    let flagged_tiles = di_jones
+        .axis_iter(Axis(1))
+        .into_par_iter()
+        .enumerate()
+        .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
+        .map(|pair| pair.0)
+        .collect();
+    eprintln!("{:?}", &flagged_tiles);
+
+    // Also find any flagged channels.
+    let flagged_fine_channels = di_jones
+        .axis_iter(Axis(2))
+        .into_par_iter()
+        .enumerate()
+        .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
+        .map(|pair| pair.0)
+        .collect();
+    eprintln!("{:?}", &flagged_fine_channels);
+
     Ok(CalibrationSolutions {
         di_jones,
         num_timeblocks,
         total_num_tiles,
-        unflagged_tiles: todo!(),
-        // We'd really like to have the *actual* start times of each
-        // timeblock, but this isn't possible with this format. Here is the
-        // best effort.
+        flagged_tiles,
         total_num_fine_freq_chans,
-        unflagged_fine_channels: todo!(),
+        flagged_fine_channels,
+        // We'd really like to have the *actual* start times of each timeblock,
+        // but this isn't possible with this format. Here is the best effort.
         start_timestamps: match (start_time, end_time) {
             (None, None) => vec![],
             (Some(t), None) => vec![t],
@@ -171,14 +191,14 @@ pub(super) fn write<T: AsRef<Path>>(
         for tile_index in 0..sols.total_num_tiles {
             let mut unflagged_chan_index = 0;
             for chan in 0..sols.total_num_fine_freq_chans {
-                if sols.unflagged_fine_channels.contains(&chan) {
+                if !sols.flagged_fine_channels.contains(&chan) {
                     // Invert the Jones matrices so that they can be applied as
                     // J D J^H
-                    let j = if sols.unflagged_tiles.contains(&tile_index) {
+                    let j = if !sols.flagged_tiles.contains(&tile_index) {
                         di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)].inv()
                     } else {
                         // This is a Jones matrix of all NaN.
-                        Jones::default().inv()
+                        Jones::nan()
                     };
 
                     LittleEndian::write_f64_into(
@@ -193,7 +213,7 @@ pub(super) fn write<T: AsRef<Path>>(
                 }
                 bin_file.write_all(&buf)?;
             }
-            if sols.unflagged_tiles.contains(&tile_index) {
+            if !sols.flagged_tiles.contains(&tile_index) {
                 unflagged_tile_index += 1;
             };
         }

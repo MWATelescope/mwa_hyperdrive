@@ -24,9 +24,10 @@ use mwalib::{
     *,
 };
 use ndarray::prelude::*;
+use rayon::prelude::*;
 
 use super::{error::*, CalibrationSolutions};
-use mwa_hyperdrive_common::{hifitime, marlu, mwalib, ndarray, Complex};
+use mwa_hyperdrive_common::{hifitime, marlu, mwalib, ndarray, rayon, Complex};
 
 pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, ReadSolutionsError> {
     let file = file.as_ref().to_path_buf();
@@ -85,13 +86,33 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         ])
     });
 
+    // Find any tiles containing only NaNs; these are flagged.
+    let flagged_tiles = di_jones
+        .axis_iter(Axis(1))
+        .into_par_iter()
+        .enumerate()
+        .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
+        .map(|pair| pair.0)
+        .collect();
+    eprintln!("flagged_tiles: {:?}", flagged_tiles);
+
+    // Also find any flagged channels.
+    let flagged_fine_channels = di_jones
+        .axis_iter(Axis(2))
+        .into_par_iter()
+        .enumerate()
+        .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
+        .map(|pair| pair.0)
+        .collect();
+    eprintln!("flagged_fine_channels: {:?}", flagged_fine_channels);
+
     Ok(CalibrationSolutions {
         di_jones,
         num_timeblocks,
         total_num_tiles,
-        unflagged_tiles: todo!(),
+        flagged_tiles,
         total_num_fine_freq_chans,
-        unflagged_fine_channels: todo!(),
+        flagged_fine_channels,
         start_timestamps,
         obsid,
         time_res,
@@ -196,23 +217,30 @@ pub(super) fn write<T: AsRef<Path>>(
     // Fill the fits file with NaN before overwriting with our solved
     // solutions. We have to be tricky with what gets written out, because
     // `di_jones` doesn't necessarily have the same shape as the output.
+    dbg!(sols.di_jones.dim());
+    eprintln!("{:?}", &sols.flagged_tiles);
+    eprintln!("{:?}", &sols.flagged_fine_channels);
     let mut fits_image_data = vec![f64::NAN; dim.iter().product()];
-    for (timeblock, di_jones_per_time) in sols.di_jones.outer_iter().enumerate() {
+    for (timeblock, di_jones) in sols.di_jones.outer_iter().enumerate() {
         let mut unflagged_tile_index = 0;
-        for tile in 0..sols.total_num_tiles {
+
+        for i_tile in 0..sols.total_num_tiles {
             let mut unflagged_chan_index = 0;
-            for chan in 0..sols.total_num_fine_freq_chans {
-                if sols.unflagged_fine_channels.contains(&chan) {
-                    let one_dim_index = timeblock * dim[1] * dim[2] * dim[3]
-                        + tile * dim[2] * dim[3]
-                        + chan * dim[3];
-                    // Invert the Jones matrices so that they can be applied
-                    // as J D J^H
-                    let j = if sols.unflagged_tiles.contains(&tile) {
-                        di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)].inv()
+
+            for i_chan in 0..sols.total_num_fine_freq_chans {
+                if !sols.flagged_fine_channels.contains(&i_chan) {
+                    let j = if !sols.flagged_tiles.contains(&i_tile) {
+                        // Invert the Jones matrices so that they can be applied
+                        // as J D J^H
+                        di_jones[(unflagged_tile_index, unflagged_chan_index)].inv()
                     } else {
-                        Jones::nan() // This is a Jones matrix of all NaN.
+                        continue;
                     };
+
+                    let one_dim_index = timeblock * dim[1] * dim[2] * dim[3]
+                        + i_tile * dim[2] * dim[3]
+                        + i_chan * dim[3];
+
                     fits_image_data[one_dim_index] = j[0].re;
                     fits_image_data[one_dim_index + 1] = j[0].im;
                     fits_image_data[one_dim_index + 2] = j[1].re;
@@ -224,7 +252,7 @@ pub(super) fn write<T: AsRef<Path>>(
                     unflagged_chan_index += 1;
                 }
             }
-            if sols.unflagged_tiles.contains(&tile) {
+            if !sols.flagged_tiles.contains(&i_tile) {
                 unflagged_tile_index += 1;
             };
         }
