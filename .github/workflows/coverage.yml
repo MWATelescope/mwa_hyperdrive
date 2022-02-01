@@ -1,0 +1,71 @@
+# Based on https://github.com/actions-rs/meta/blob/master/recipes/quickstart.md
+
+# Do this on every push, but don't double up on tags
+on:
+  push:
+    tags-ignore:
+      - '**'
+    pull_request:
+    branches:
+    - '**'
+
+name: Generate Coverage report
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:11.1-base
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          apt update -y
+          apt-get -y install tzdata
+          apt install -y \
+            build-essential \
+            cmake \
+            cuda-nvcc-11-1 \
+            curl \
+            gcc \
+            git \
+            lcov \
+            libcfitsio-dev \
+            libclang-dev \
+            liberfa-dev \
+            libhdf5-dev \
+            llvm \
+            pkg-config \
+            ;
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Install nightly-2022-01-14 toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly-2022-01-14
+          override: true
+          components: llvm-tools-preview
+
+      - name: install cargo-llvm-cov
+        run: cargo +nightly-2022-01-14 install cargo-llvm-cov
+
+      - name: Generate test lcov coverage into coverage/ dir
+        run: |
+          export PATH="${HOME}/.cargo/bin:${PATH}"
+          mkdir -p coverage
+          cargo +nightly-2022-01-14 llvm-cov --lib --no-default-features --lcov --output-path coverage/coverage.lcov
+          # this uses the result of the previous run to generate a text summary
+          cargo +nightly-2022-01-14 llvm-cov --no-run
+        env:
+          MWA_BEAM_FILE: mwa_full_embedded_element_pattern.h5
+          HYPERDRIVE_CUDA_COMPUTE: 75
+
+      - name: Upload reports to codecov.io
+        uses: codecov/codecov-action@v2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
