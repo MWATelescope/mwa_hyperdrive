@@ -167,21 +167,24 @@ pub struct CalibrateUserArgs {
     #[clap(long, help_heading = "BEAM")]
     pub no_beam: bool,
 
-    /// The number of time samples to average together before calibrating. If
-    /// this is 0, then all data are averaged together. Default: 0. e.g. If the
-    /// input data is in 0.5s resolution and this variable was 4, then we
-    /// produce calibration solutions for every 2s worth of data.
+    /// The number of time samples to average together during calibration. Also
+    /// supports a target time resolution (e.g. 8s). If this is 0, then all data
+    /// are averaged together. Default: 0. e.g. If this variable is 4, then we
+    /// produce calibration solutions in timeblocks with up to 4 timesteps each.
+    /// If the variable is instead 4s, then each timeblock contains up to 4s
+    /// worth of data.
     #[clap(short, long, help_heading = "CALIBRATION")]
-    pub time_average_factor: Option<usize>,
+    pub time_average_factor: Option<String>,
 
-    // /// The number of fine-frequency channels to average together before
-    // /// calibrating. If this is 0, then all data is averaged together. Default:
-    // /// 1
-    // ///
-    // /// e.g. If the input data is in 20kHz resolution and this variable was 2,
-    // /// then we average 40kHz worth of data together during calibration.
-    // #[clap(short, long, help_heading = "CALIBRATION")]
-    // pub freq_average_factor: Option<usize>,
+    /// The number of fine-frequency channels to average together before
+    /// calibration. If this is 0, then all data is averaged together. Default:
+    /// 1. e.g. If the input data is in 20kHz resolution and this variable was
+    /// 2, then we average 40kHz worth of data into a chanblock before
+    /// calibration. If the variable is instead 40kHz, then each chanblock
+    /// contains upto 40kHz worth of data.
+    #[clap(short, long, help_heading = "CALIBRATION")]
+    pub freq_average_factor: Option<String>,
+
     /// The timesteps to use from the input data. The timesteps will be
     /// ascendingly sorted for calibration. No duplicates are allowed. The
     /// default is to use all unflagged timesteps.
@@ -271,7 +274,10 @@ impl CalibrateUserArgs {
     ///
     /// This function should only ever merge arguments, and not try to make
     /// sense of them.
-    pub fn merge<T: AsRef<Path>>(self, arg_file: &T) -> Result<Self, CalibrateArgsError> {
+    pub fn merge<T: AsRef<Path>>(
+        self,
+        arg_file: &T,
+    ) -> Result<CalibrateUserArgs, CalibrateArgsFileError> {
         // Make it abundantly clear that "self" should be considered the
         // command-line arguments.
         let cli_args = self;
@@ -298,7 +304,7 @@ impl CalibrateUserArgs {
                     match toml::from_str(&contents) {
                         Ok(p) => p,
                         Err(e) => {
-                            return Err(CalibrateArgsError::TomlDecode {
+                            return Err(CalibrateArgsFileError::TomlDecode {
                                 file: file_args_path.display().to_string(),
                                 err: e.to_string(),
                             })
@@ -313,7 +319,7 @@ impl CalibrateUserArgs {
                     match serde_json::from_str(&contents) {
                         Ok(p) => p,
                         Err(e) => {
-                            return Err(CalibrateArgsError::JsonDecode {
+                            return Err(CalibrateArgsFileError::JsonDecode {
                                 file: file_args_path.display().to_string(),
                                 err: e.to_string(),
                             })
@@ -322,7 +328,7 @@ impl CalibrateUserArgs {
                 }
 
                 _ => {
-                    return Err(CalibrateArgsError::UnrecognisedArgFileExt(
+                    return Err(CalibrateArgsFileError::UnrecognisedArgFileExt(
                         file_args_path.display().to_string(),
                     ))
                 }
@@ -344,7 +350,7 @@ impl CalibrateUserArgs {
             source_dist_cutoff,
             veto_threshold,
             time_average_factor,
-            // freq_average_factor,
+            freq_average_factor,
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
@@ -369,39 +375,25 @@ impl CalibrateUserArgs {
             cpu,
         } = file_args;
         // Merge all the arguments, preferring the CLI args when available.
-        Ok(Self {
+        Ok(CalibrateUserArgs {
             data: cli_args.data.or(data),
-            outputs: cli_args.outputs.or(outputs),
-            model_filename: cli_args.model_filename.or(model_filename),
-            beam_file: cli_args.beam_file.or(beam_file),
-            unity_dipole_gains: cli_args.unity_dipole_gains || unity_dipole_gains,
-            no_beam: cli_args.no_beam || no_beam,
             source_list: cli_args.source_list.or(source_list),
             source_list_type: cli_args.source_list_type.or(source_list_type),
+            outputs: cli_args.outputs.or(outputs),
+            model_filename: cli_args.model_filename.or(model_filename),
+            ignore_autos: cli_args.ignore_autos || ignore_autos,
+            output_vis_time_average: cli_args.output_vis_time_average.or(output_vis_time_average),
+            output_vis_freq_average: cli_args.output_vis_freq_average.or(output_vis_freq_average),
             num_sources: cli_args.num_sources.or(num_sources),
             source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
             veto_threshold: cli_args.veto_threshold.or(veto_threshold),
-            time_average_factor: cli_args.time_average_factor.or(time_average_factor),
-            // freq_average_factor: cli_args.freq_average_factor.or(freq_average_factor),
-            timesteps: cli_args.timesteps.or(timesteps),
-            tile_flags: cli_args.tile_flags.or(tile_flags),
-            ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
-                || ignore_input_data_tile_flags,
+            beam_file: cli_args.beam_file.or(beam_file),
+            unity_dipole_gains: cli_args.unity_dipole_gains || unity_dipole_gains,
             delays: cli_args.delays.or(delays),
-            ignore_input_data_fine_channel_flags: cli_args.ignore_input_data_fine_channel_flags
-                || ignore_input_data_fine_channel_flags,
-            ignore_autos: cli_args.ignore_autos || ignore_autos,
-            fine_chan_flags_per_coarse_chan: cli_args
-                .fine_chan_flags_per_coarse_chan
-                .or(fine_chan_flags_per_coarse_chan),
-            fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
-            pfb_flavour: cli_args.pfb_flavour.or(pfb_flavour),
-            no_digital_gains: cli_args.no_digital_gains || no_digital_gains,
-            no_cable_length_correction: cli_args.no_cable_length_correction
-                || no_cable_length_correction,
-            no_geometric_correction: cli_args.no_geometric_correction || no_geometric_correction,
-            output_vis_time_average: cli_args.output_vis_time_average.or(output_vis_time_average),
-            output_vis_freq_average: cli_args.output_vis_freq_average.or(output_vis_freq_average),
+            no_beam: cli_args.no_beam || no_beam,
+            time_average_factor: cli_args.time_average_factor.or(time_average_factor),
+            freq_average_factor: cli_args.freq_average_factor.or(freq_average_factor),
+            timesteps: cli_args.timesteps.or(timesteps),
             uvw_min: cli_args.uvw_min.or(uvw_min),
             uvw_max: cli_args.uvw_max.or(uvw_max),
             max_iterations: cli_args.max_iterations.or(max_iterations),
@@ -411,17 +403,31 @@ impl CalibrateUserArgs {
             array_latitude_deg: cli_args.array_latitude_deg.or(array_latitude_deg),
             #[cfg(feature = "cuda")]
             cpu: cli_args.cpu || cpu,
+            tile_flags: cli_args.tile_flags.or(tile_flags),
+            ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
+                || ignore_input_data_tile_flags,
+            ignore_input_data_fine_channel_flags: cli_args.ignore_input_data_fine_channel_flags
+                || ignore_input_data_fine_channel_flags,
+            fine_chan_flags_per_coarse_chan: cli_args
+                .fine_chan_flags_per_coarse_chan
+                .or(fine_chan_flags_per_coarse_chan),
+            fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
+            pfb_flavour: cli_args.pfb_flavour.or(pfb_flavour),
+            no_digital_gains: cli_args.no_digital_gains || no_digital_gains,
+            no_cable_length_correction: cli_args.no_cable_length_correction
+                || no_cable_length_correction,
+            no_geometric_correction: cli_args.no_geometric_correction || no_geometric_correction,
         })
     }
 
-    pub fn into_params(self) -> Result<CalibrateParams, InvalidArgsError> {
+    pub(crate) fn into_params(self) -> Result<CalibrateParams, InvalidArgsError> {
         CalibrateParams::new(self)
     }
 }
 
 /// Errors associated with merging `CalibrateUserArgs` structs.
 #[derive(Error, Debug)]
-pub enum CalibrateArgsError {
+pub enum CalibrateArgsFileError {
     #[error("Argument file '{0}' doesn't have a recognised file extension! Valid extensions are: {}", *ARG_FILE_TYPES_COMMA_SEPARATED)]
     UnrecognisedArgFileExt(String),
 

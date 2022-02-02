@@ -48,6 +48,9 @@ pub enum UvfitsReadError {
         function: &'static str,
     },
 
+    #[error("No timesteps were in file {file}")]
+    NoTimesteps { file: String },
+
     /// An error associated with fitsio.
     #[error("{0}")]
     Fitsio(#[from] fitsio::errors::Error),

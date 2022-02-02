@@ -35,7 +35,7 @@ pub enum SimulateVisError {
     )]
     BadDelays,
 
-    #[error("{0}")]
+    #[error("Error when trying to read source list: {0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
     #[error("{0}")]
@@ -45,7 +45,7 @@ pub enum SimulateVisError {
     Model(#[from] crate::model::ModelError),
 
     #[error("{0}")]
-    Uvfits(#[from] crate::data_formats::uvfits::UvfitsWriteError),
+    Uvfits(#[from] crate::data_formats::UvfitsWriteError),
 
     #[error("{0}")]
     Glob(#[from] crate::glob::GlobError),

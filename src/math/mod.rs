@@ -9,9 +9,10 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, HashSet};
+use hifitime::{Duration, Epoch, TimeUnit};
+use std::collections::HashMap;
 
-use mwa_hyperdrive_common::c64;
+use mwa_hyperdrive_common::{c64, hifitime};
 
 // Make traditional trigonometry possible.
 /// Sine.
@@ -88,22 +89,33 @@ pub(crate) fn is_prime(n: usize) -> bool {
     true
 }
 
+/// Given a collection of [Epoch]s, return one that is the average of their
+/// times.
+pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
+    let duration_sum = es
+        .iter()
+        .fold(Duration::from_f64(0.0, TimeUnit::Second), |acc, t| {
+            acc + t.as_et_duration()
+        });
+    Epoch::from_et_seconds(duration_sum.in_seconds() / es.len() as f64)
+}
+
 pub struct TileBaselineMaps {
     pub tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
     pub unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 }
 
 impl TileBaselineMaps {
-    pub fn new(total_num_tiles: usize, tile_flags: &HashSet<usize>) -> TileBaselineMaps {
+    pub fn new(total_num_tiles: usize, flagged_tiles: &[usize]) -> TileBaselineMaps {
         let mut tile_to_unflagged_cross_baseline_map = HashMap::new();
         let mut unflagged_cross_baseline_to_tile_map = HashMap::new();
         let mut bl = 0;
         for tile1 in 0..total_num_tiles {
-            if tile_flags.contains(&tile1) {
+            if flagged_tiles.contains(&tile1) {
                 continue;
             }
             for tile2 in tile1 + 1..total_num_tiles {
-                if tile_flags.contains(&tile2) {
+                if flagged_tiles.contains(&tile2) {
                     continue;
                 }
                 tile_to_unflagged_cross_baseline_map.insert((tile1, tile2), bl);
@@ -112,7 +124,7 @@ impl TileBaselineMaps {
             }
         }
 
-        Self {
+        TileBaselineMaps {
             tile_to_unflagged_cross_baseline_map,
             unflagged_cross_baseline_to_tile_map,
         }

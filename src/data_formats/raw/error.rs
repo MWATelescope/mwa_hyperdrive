@@ -12,7 +12,7 @@ use crate::flagging::MwafMergeError;
 use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
-pub enum NewRawError {
+pub enum RawReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
     BadFile(PathBuf),
 
@@ -39,6 +39,9 @@ pub enum NewRawError {
 
     #[error("No fine-channel flags were specified, and no rule is in place for automatically flagging observations with a fine-channel resolution of {0} Hz")]
     UnhandledFreqResolutionForFlags(u32),
+
+    #[error("The raw MWA data contains no timesteps")]
+    NoTimesteps,
 
     #[error("{0}")]
     MwafMerge(#[from] MwafMergeError),

@@ -192,7 +192,7 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
         .collect();
 
     let mut di_jones = Array3::zeros((
-        1,
+        1, // RTS solutions don't change over time.
         num_unflagged_tiles,
         total_num_fine_freq_chans - flagged_fine_channels.len(),
     ));
@@ -260,15 +260,13 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
 
     Ok(CalibrationSolutions {
         di_jones,
-        // RTS solutions don't change over time.
-        num_timeblocks: 1,
-        total_num_tiles,
         flagged_tiles,
-        total_num_fine_freq_chans,
-        flagged_fine_channels,
+        flagged_chanblocks: flagged_fine_channels,
+        // lmao
+        average_timestamps: vec![],
         start_timestamps: vec![],
+        end_timestamps: vec![],
         obsid: Some(context.obs_id),
-        time_res: None,
     })
 }
 

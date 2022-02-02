@@ -19,7 +19,6 @@ use marlu::{
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
-        MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD,
     },
     time::{casacore_utc_to_epoch, epoch_as_gps_seconds},
     Jones, RADec, XyzGeocentric,
@@ -33,7 +32,7 @@ use crate::{
     glob::get_single_match_from_glob,
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray};
 
 const COTTER_DEFAULT_EDGEWIDTH: f64 = 80e3;
 
@@ -58,7 +57,7 @@ pub(crate) enum MsFlavour {
     Cotter,
 
     /// Generic?
-    CASA,
+    Casa,
 }
 
 impl MS {
@@ -68,10 +67,10 @@ impl MS {
     /// cotter/Birli write measurement sets.
     // TODO: Handle multiple measurement sets.
     pub(crate) fn new<T: AsRef<Path>>(
-        ms: &T,
-        metafits: Option<&T>,
+        ms: T,
+        metafits: Option<T>,
         dipole_delays: &mut Delays,
-    ) -> Result<Self, NewMSError> {
+    ) -> Result<MS, MsReadError> {
         // The ms argument could be a glob. If the specified argument can't be
         // found as a file, treat it as a glob and expand it to find a match.
         let ms = {
@@ -84,12 +83,12 @@ impl MS {
         };
         debug!("Using measurement set: {}", ms.display());
         if !ms.exists() {
-            return Err(NewMSError::BadFile(ms));
+            return Err(MsReadError::BadFile(ms));
         }
 
         let mut main_table = read_table(&ms, None)?;
         if main_table.n_rows() == 0 {
-            return Err(NewMSError::Empty);
+            return Err(MsReadError::Empty);
         }
 
         // This currently only returns table names. Maybe that's this function's
@@ -106,7 +105,7 @@ impl MS {
                 // stuff.
                 MsFlavour::Cotter
             } else {
-                MsFlavour::CASA
+                MsFlavour::Casa
             }
         };
 
@@ -135,7 +134,7 @@ impl MS {
                 COTTER_MWA_LATITUDE_RADIANS,
                 COTTER_MWA_HEIGHT_METRES,
             )?,
-            MsFlavour::CASA => todo!(),
+            MsFlavour::Casa => todo!(),
         };
         let total_num_tiles = tile_xyzs.len();
         trace!("There are {} total tiles", total_num_tiles);
@@ -147,7 +146,7 @@ impl MS {
         // of `xyz` above, which is the number of tiles) from the main table,
         // and find any missing antennas; these are the flagged tiles.
         let mut autocorrelations_present = false;
-        let tile_flags: Vec<usize> = {
+        let flagged_tiles: Vec<usize> = {
             let mut present_tiles = HashSet::new();
             // N.B. The following method doesn't work if the antenna1 number
             // increases faster than antenna2.
@@ -176,8 +175,8 @@ impl MS {
                 .filter(|ant| !present_tiles.contains(ant))
                 .collect()
         };
-        let num_unflagged_tiles = total_num_tiles - tile_flags.len();
-        debug!("Flagged tiles in the MS: {:?}", tile_flags);
+        let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
+        debug!("Flagged tiles in the MS: {:?}", flagged_tiles);
         debug!("Autocorrelations present: {}", autocorrelations_present);
 
         // Get the observation phase centre.
@@ -200,7 +199,7 @@ impl MS {
                 0
             };
         trace!("MS step: {}", step);
-        let unflagged_timestep_indices: Vec<usize> = {
+        let unflagged_timesteps: Vec<usize> = {
             // The first and last good timestep indicies.
             let mut first: Option<usize> = None;
             let mut last: Option<usize> = None;
@@ -227,7 +226,7 @@ impl MS {
                 // If there weren't any flags at the end of the MS, then the
                 // last timestep is fine.
                 (Some(f), None) => f..main_table.n_rows() as usize / step,
-                _ => return Err(NewMSError::AllFlagged),
+                _ => return Err(MsReadError::AllFlagged),
             }
         }
         .into_iter()
@@ -245,10 +244,10 @@ impl MS {
             }
         }
 
-        // Get the observation's native time resolution. There is a possibility
-        // that the MS contains only one timestep.
+        // Get the data's time resolution. There is a possibility that the MS
+        // contains only one timestep.
         let time_res = if utc_timesteps.len() == 1 {
-            warn!("Only one timestep is present in the data; can't determine the observation's native time resolution.");
+            warn!("Only one timestep is present in the data; can't determine the data's time resolution.");
             None
         } else {
             // Assume the timesteps are contiguous, i.e. the span of time
@@ -257,7 +256,7 @@ impl MS {
             Some(utc_timesteps[1] - utc_timesteps[0])
         };
 
-        let (all_timestep_indices, timesteps): (Vec<usize>, Vec<Epoch>) = utc_timesteps
+        let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = utc_timesteps
             .into_iter()
             .enumerate()
             // casacore keeps the stores the times as centroids, so no
@@ -265,7 +264,12 @@ impl MS {
             // above.
             .map(|(i, utc)| (i, casacore_utc_to_epoch(utc)))
             .unzip();
-        match timesteps.as_slice() {
+        let all_timesteps =
+            Vec1::try_from_vec(all_timesteps).map_err(|_| MsReadError::NoTimesteps {
+                file: ms.display().to_string(),
+            })?;
+
+        match timestamps.as_slice() {
             // Handled above; measurement sets aren't allowed to be empty.
             [] => unreachable!(),
             [t] => debug!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
@@ -277,14 +281,11 @@ impl MS {
                     "First good timestep (GPS): {:.2}",
                     // We expect GPS timestamps to be "leading edge", not
                     // centroids.
-                    epoch_as_gps_seconds(timesteps[*unflagged_timestep_indices.first().unwrap()])
-                        - time_res / 2.0
+                    epoch_as_gps_seconds(*t0) - time_res / 2.0
                 );
                 debug!(
                     "Last good timestep  (GPS): {:.2}",
-                    epoch_as_gps_seconds(
-                        timesteps[*unflagged_timestep_indices.last().unwrap() - 1]
-                    ) - time_res / 2.0
+                    epoch_as_gps_seconds(*tn) - time_res / 2.0
                 );
             }
         }
@@ -343,14 +344,17 @@ impl MS {
             }
         };
 
-        // If a metafits file was provided, we _may_ use it. Get a _potential_
-        // mwalib object ready.
-        let mut mwalib = None;
+        // If a metafits file was provided, get an mwalib object ready.
+        let mwalib_context = match metafits {
+            None => None,
+            // TODO: Let the user supply the MWA version
+            Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
+        };
 
         // Populate the dipole delays if we need to, and get the pointing centre
         // if we can.
         let pointing_centre: Option<RADec> =
-            match (read_table(&ms, Some("MWA_TILE_POINTING")), metafits) {
+            match (read_table(&ms, Some("MWA_TILE_POINTING")), &mwalib_context) {
                 (Err(_), None) => {
                     // MWA_TILE_POINTING doesn't exist and no metafits file was
                     // provided; no changes to the delays can be made here. We also
@@ -392,9 +396,7 @@ impl MS {
                 }
 
                 // Use the metafits file.
-                (Err(_), Some(meta)) => {
-                    // TODO: Let the user supply the MWA version
-                    let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
+                (Err(_), Some(context)) => {
                     // Only use the metafits delays if none were provided to
                     // this function.
                     match dipole_delays {
@@ -423,7 +425,7 @@ impl MS {
         // of 0 for dead dipoles, and 1 for all others. cotter doesn't supply
         // this information; if the user provided a metafits file, we can use
         // that, otherwise we must assume all dipoles are alive.
-        let dipole_gains: Option<Array2<f64>> = match metafits {
+        let dipole_gains: Option<Array2<f64>> = match &mwalib_context {
             None => {
                 warn!("Measurement sets do not supply dead dipole information.");
                 warn!("Without a metafits file, we must assume all dipoles are alive.");
@@ -431,10 +433,7 @@ impl MS {
                 None
             }
 
-            Some(meta) => {
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
-                Some(metafits::get_dipole_gains(context))
-            }
+            Some(context) => Some(metafits::get_dipole_gains(context)),
         };
 
         let coarse_chan_width = total_bandwidth_hz / coarse_chan_nums.len() as f64;
@@ -465,7 +464,7 @@ impl MS {
             fine_chan_range,
             fine_chan_freqs: fine_chan_freqs_hz,
             num_fine_chans_per_coarse_chan,
-            native_fine_chan_width: Some(native_fine_chan_width),
+            freq_res: Some(native_fine_chan_width),
         };
 
         // Get the observation's flagged channels per coarse band.
@@ -540,19 +539,19 @@ impl MS {
                 fine_chan_flags
             }
 
-            MsFlavour::CASA => todo!(),
+            MsFlavour::Casa => todo!(),
         };
 
         let obs_context = ObsContext {
             obsid,
-            timesteps,
-            all_timestep_indices,
-            unflagged_timestep_indices,
+            timestamps,
+            all_timesteps,
+            unflagged_timesteps,
             phase_centre,
             pointing_centre,
             tile_names,
             tile_xyzs,
-            tile_flags,
+            flagged_tiles,
             autocorrelations_present,
             fine_chan_flags_per_coarse_chan,
             dipole_gains,
@@ -562,7 +561,7 @@ impl MS {
             array_latitude_rad: None,
         };
 
-        let ms = Self {
+        let ms = MS {
             obs_context,
             freq_context,
             ms,
@@ -587,14 +586,14 @@ impl InputData for MS {
 
     fn read_crosses_and_autos(
         &self,
-        cross_data_array: ArrayViewMut2<Jones<f32>>,
-        cross_weights_array: ArrayViewMut2<f32>,
-        auto_data_array: ArrayViewMut2<Jones<f32>>,
-        auto_weights_array: ArrayViewMut2<f32>,
-        timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_tiles: &HashSet<usize>,
-        flagged_fine_chans: &HashSet<usize>,
+        _cross_data_array: ArrayViewMut2<Jones<f32>>,
+        _cross_weights_array: ArrayViewMut2<f32>,
+        _auto_data_array: ArrayViewMut2<Jones<f32>>,
+        _auto_weights_array: ArrayViewMut2<f32>,
+        _timestep: usize,
+        _tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        _flagged_tiles: &[usize],
+        _flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         todo!()
     }
@@ -645,15 +644,13 @@ impl InputData for MS {
 
                     // Put the data and weights into the shared arrays outside
                     // this scope. Before we can do this, we need to remove any
-                    // globally-flagged fine channels. Use an int to index
-                    // unflagged fine channel (outer_freq_chan_index).
-                    let mut outer_freq_chan_index: usize = 0;
-                    for (_, ((data_freq_axis, weights_freq_axis), flags_freq_axis)) in data
+                    // globally-flagged fine channels.
+                    for (i_chan, ((data_freq_axis, weights_freq_axis), flags_freq_axis)) in data
                         .outer_iter()
                         .zip(data_weights.outer_iter())
                         .zip(flags.outer_iter())
                         .enumerate()
-                        .filter(|(freq_chan, _)| !flagged_fine_chans.contains(freq_chan))
+                        .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                     {
                         // Ensure that all arrays have appropriate
                         // sizes.
@@ -702,12 +699,12 @@ impl InputData for MS {
                                 }
                             );
                         }
-                        if data_array.len_of(Axis(1)) < outer_freq_chan_index {
+                        if data_array.len_of(Axis(1)) < i_chan {
                             panic!(
                                 "{}",
                                 ReadInputDataError::BadArraySize {
                                     array_type: "data",
-                                    expected_len: outer_freq_chan_index,
+                                    expected_len: i_chan,
                                     axis_num: 1,
                                 }
                             );
@@ -715,10 +712,8 @@ impl InputData for MS {
 
                         // These are references to the visibilities and weights
                         // in the output arrays.
-                        let data_array_elem =
-                            data_array.get_mut((bl, outer_freq_chan_index)).unwrap();
-                        let weight_elem =
-                            weights_array.get_mut((bl, outer_freq_chan_index)).unwrap();
+                        let data_array_elem = data_array.get_mut((bl, i_chan)).unwrap();
+                        let weight_elem = weights_array.get_mut((bl, i_chan)).unwrap();
                         // These are the components of the input
                         // data's visibility.
                         let data_xx_elem = data_freq_axis.get(0).unwrap();
@@ -743,8 +738,6 @@ impl InputData for MS {
                         data_array_elem[1] = *data_xy_elem * *weight_elem;
                         data_array_elem[2] = *data_yx_elem * *weight_elem;
                         data_array_elem[3] = *data_yy_elem * *weight_elem;
-
-                        outer_freq_chan_index += 1;
                     }
                 }
                 row_index += 1;
@@ -757,11 +750,11 @@ impl InputData for MS {
 
     fn read_autos(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
-        timestep: usize,
-        flagged_tiles: &HashSet<usize>,
-        flagged_fine_chans: &HashSet<usize>,
+        _data_array: ArrayViewMut2<Jones<f32>>,
+        _weights_array: ArrayViewMut2<f32>,
+        _timestep: usize,
+        _flagged_tiles: &[usize],
+        _flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         todo!()
     }

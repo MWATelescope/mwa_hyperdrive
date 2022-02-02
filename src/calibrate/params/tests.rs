@@ -4,125 +4,175 @@
 
 //! Tests against calibration parameters and converting arguments to parameters.
 
-use super::*;
-use crate::tests::{full_obsids::*, reduced_obsids::*, *};
+use approx::assert_abs_diff_eq;
+use serial_test::serial;
 
-// #[test]
-// fn test_new_params() {
-//     let args = get_1090008640_smallest();
-//     let params = match args.into_params() {
-//         Ok(p) => p,
-//         Err(e) => panic!("{}", e),
-//     };
-//     // The default time resolution should be 2.0s, as per the metafits.
-//     assert_abs_diff_eq!(params.time_res.unwrap(), 2.0);
-//     // The default freq resolution should be 40kHz, as per the metafits.
-//     assert_abs_diff_eq!(params.freq.res.unwrap(), 40e3, epsilon = 1e-10);
-// }
+use super::InvalidArgsError;
+use crate::tests::{full_obsids::*, reduced_obsids::*};
 
-// #[test]
-// fn test_new_params_time_averaging() {
-//     // The native time resolution is 2.0s.
-//     let mut args = get_1090008640_smallest();
-//     // 4.0 should be a multiple of 2.0s
-//     args.time_res = Some(4.0);
-//     let params = match args.into_params() {
-//         Ok(p) => p,
-//         Err(e) => panic!("{}", e),
-//     };
-//     assert_abs_diff_eq!(params.time_res.unwrap(), 4.0);
+#[test]
+fn test_new_params() {
+    let args = get_reduced_1090008640(true);
+    let params = match args.into_params() {
+        Ok(p) => p,
+        Err(e) => panic!("{}", e),
+    };
+    // The default time resolution should be 2.0s, as per the metafits.
+    assert_abs_diff_eq!(params.get_obs_context().time_res.unwrap(), 2.0);
+    // The default freq resolution should be 40kHz, as per the metafits.
+    assert_abs_diff_eq!(params.get_freq_context().freq_res.unwrap(), 40e3);
+}
 
-//     let mut args = get_1090008640();
-//     // 8.0 should be a multiple of 2.0s
-//     args.time_res = Some(8.0);
-//     let params = match args.into_params() {
-//         Ok(p) => p,
-//         Err(e) => panic!("{}", e),
-//     };
-//     assert_abs_diff_eq!(params.time_res.unwrap(), 8.0);
-// }
+#[test]
+fn test_new_params_time_averaging() {
+    // The native time resolution is 2.0s.
+    let mut args = get_reduced_1090008640(true);
+    // 1 is a valid time average factor.
+    args.time_average_factor = Some("1".to_string());
+    let result = args.into_params();
+    assert!(result.is_ok());
 
-// #[test]
-// fn test_new_params_time_averaging_fail() {
-//     // The native time resolution is 2.0s.
-//     let mut args = get_1090008640_smallest();
-//     // 2.01 is not a multiple of 2.0s
-//     args.time_res = Some(2.01);
-//     let result = args.into_params();
-//     assert!(
-//         result.is_err(),
-//         "Expected CalibrateParams to have not been successfully created"
-//     );
+    let mut args = get_reduced_1090008640(true);
+    // 2 is a valid time average factor.
+    args.time_average_factor = Some("2".to_string());
+    let result = args.into_params();
+    assert!(result.is_ok());
 
-//     let mut args = get_1090008640_smallest();
-//     // 3.0 is not a multiple of 2.0s
-//     args.time_res = Some(3.0);
-//     let result = args.into_params();
-//     assert!(
-//         result.is_err(),
-//         "Expected CalibrateParams to have not been successfully created"
-//     );
-// }
+    let mut args = get_reduced_1090008640(true);
+    // 4.0s should be a multiple of 2.0s
+    args.time_average_factor = Some("4.0s".to_string());
+    let result = args.into_params();
+    assert!(result.is_ok());
 
-// #[test]
-// fn test_new_params_freq_averaging() {
-//     // The native freq. resolution is 40kHz.
-//     let mut args = get_1090008640_smallest();
-//     // 80e3 should be a multiple of 40kHz
-//     args.freq_res = Some(80e3);
-//     let params = match args.into_params() {
-//         Ok(p) => p,
-//         Err(e) => panic!("{}", e),
-//     };
-//     assert_abs_diff_eq!(params.freq.res, 80e3, epsilon = 1e-10);
+    let mut args = get_reduced_1090008640(true);
+    // 8.0s should be a multiple of 2.0s
+    args.time_average_factor = Some("8.0s".to_string());
+    let result = args.into_params();
+    assert!(result.is_ok());
+}
 
-//     let mut args = get_1090008640_smallest();
-//     // 200e3 should be a multiple of 40kHz
-//     args.freq_res = Some(200e3);
-//     let params = match args.into_params() {
-//         Ok(p) => p,
-//         Err(e) => panic!("{}", e),
-//     };
-//     assert_abs_diff_eq!(params.freq.res, 200e3, epsilon = 1e-10);
-// }
+#[test]
+fn test_new_params_time_averaging_fail() {
+    // The native time resolution is 2.0s.
+    let mut args = get_reduced_1090008640(true);
+    // 1.5 is an invalid time average factor.
+    args.time_average_factor = Some("1.5".to_string());
+    let result = args.into_params();
+    assert!(result.is_err());
+    let err = match result {
+        Ok(_) => unreachable!(),
+        Err(err) => err,
+    };
+    assert!(matches!(err, InvalidArgsError::CalTimeFactorNotInteger));
 
-// #[test]
-// fn test_new_params_freq_averaging_fail() {
-//     // The native freq. resolution is 40kHz.
-//     let mut args = get_1090008640_smallest();
-//     // 10e3 is not a multiple of 40kHz
-//     args.freq_res = Some(10e3);
-//     let result = args.into_params();
-//     assert!(
-//         result.is_err(),
-//         "Expected CalibrateParams to have not been successfully created"
-//     );
+    let mut args = get_reduced_1090008640(true);
+    // 2.01s is not a multiple of 2.0s
+    args.time_average_factor = Some("2.01s".to_string());
+    let result = args.into_params();
+    assert!(result.is_err());
+    let err = match result {
+        Ok(_) => unreachable!(),
+        Err(err) => err,
+    };
+    assert!(matches!(
+        err,
+        InvalidArgsError::CalTimeResNotMulitple { .. }
+    ));
 
-//     let mut args = get_1090008640_smallest();
+    let mut args = get_reduced_1090008640(true);
+    // 3.0s is not a multiple of 2.0s
+    args.time_average_factor = Some("3.0s".to_string());
+    let result = args.into_params();
+    assert!(result.is_err());
+    let err = match result {
+        Ok(_) => unreachable!(),
+        Err(err) => err,
+    };
+    assert!(matches!(
+        err,
+        InvalidArgsError::CalTimeResNotMulitple { .. }
+    ));
+}
 
-//     // 79e3 is not a multiple of 40kHz
-//     args.freq_res = Some(79e3);
-//     let result = args.into_params();
-//     assert!(
-//         result.is_err(),
-//         "Expected CalibrateParams to have not been successfully created"
-//     );
-// }
+#[test]
+fn test_new_params_freq_averaging() {
+    // The native freq. resolution is 40kHz.
+    let mut args = get_reduced_1090008640(true);
+    // 3 is a valid freq average factor.
+    args.freq_average_factor = Some("3".to_string());
+    let result = args.into_params();
+    assert!(result.is_ok());
+
+    let mut args = get_reduced_1090008640(true);
+    // 80kHz should be a multiple of 40kHz
+    args.freq_average_factor = Some("80kHz".to_string());
+    let result = args.into_params();
+    assert!(result.is_ok());
+
+    let mut args = get_reduced_1090008640(true);
+    // 200kHz should be a multiple of 40kHz
+    args.freq_average_factor = Some("200kHz".to_string());
+    let result = args.into_params();
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_new_params_freq_averaging_fail() {
+    // The native freq. resolution is 40kHz.
+    let mut args = get_reduced_1090008640(true);
+    // 1.5 is an invalid freq average factor.
+    args.freq_average_factor = Some("1.5".to_string());
+    let result = args.into_params();
+    assert!(result.is_err());
+    let err = match result {
+        Ok(_) => unreachable!(),
+        Err(err) => err,
+    };
+    assert!(matches!(err, InvalidArgsError::CalFreqFactorNotInteger));
+
+    let mut args = get_reduced_1090008640(true);
+    // 10kHz is not a multiple of 40kHz
+    args.freq_average_factor = Some("10kHz".to_string());
+    let result = args.into_params();
+    assert!(result.is_err());
+    let err = match result {
+        Ok(_) => unreachable!(),
+        Err(err) => err,
+    };
+    assert!(matches!(
+        err,
+        InvalidArgsError::CalFreqResNotMulitple { .. }
+    ));
+
+    let mut args = get_reduced_1090008640(true);
+    // 79kHz is not a multiple of 40kHz
+    args.freq_average_factor = Some("79kHz".to_string());
+    let result = args.into_params();
+    assert!(result.is_err());
+    let err = match result {
+        Ok(_) => unreachable!(),
+        Err(err) => err,
+    };
+    assert!(matches!(
+        err,
+        InvalidArgsError::CalFreqResNotMulitple { .. }
+    ));
+}
 
 #[test]
 fn test_new_params_tile_flags() {
     // 1090008640 has no flagged tiles in its metafits.
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(true);
     // Manually flag antennas 1, 2 and 3.
     args.tile_flags = Some(vec!["1".to_string(), "2".to_string(), "3".to_string()]);
     let params = match args.into_params() {
         Ok(p) => p,
         Err(e) => panic!("{}", e),
     };
-    assert_eq!(params.tile_flags.len(), 3);
-    assert!(params.tile_flags.contains(&1));
-    assert!(params.tile_flags.contains(&2));
-    assert!(params.tile_flags.contains(&3));
+    assert_eq!(params.flagged_tiles.len(), 3);
+    assert!(params.flagged_tiles.contains(&1));
+    assert!(params.flagged_tiles.contains(&2));
+    assert!(params.flagged_tiles.contains(&3));
     assert_eq!(params.unflagged_cross_baseline_to_tile_map.len(), 7750);
     assert_eq!(params.tile_to_unflagged_cross_baseline_map.len(), 7750);
 
@@ -145,49 +195,5 @@ fn test_new_params_tile_flags() {
 fn test_new_params_real_data() {
     let args = get_1065880128();
     let result = args.into_params();
-    assert!(
-        result.is_ok(),
-        "Expected CalibrateParams to have been successfully created"
-    );
+    assert!(result.is_ok());
 }
-
-// #[test]
-// #[serial]
-// #[ignore]
-// fn test_lst_from_timestep_native_real() {
-//     let args = get_1065880128();
-//     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-//     {
-//         Ok(c) => c,
-//         Err(e) => panic!("{}", e),
-//     };
-//     let time_res = context.metafits_context.corr_int_time_ms as f64 / 1e3;
-//     let new_lst = lst_from_timestep(0, &context, time_res);
-//     // gpstime 1065880126.25
-//     assert_abs_diff_eq!(new_lst, 6.074695614533638, epsilon = 1e-10);
-
-//     let new_lst = lst_from_timestep(1, &context, time_res);
-//     // gpstime 1065880126.75
-//     assert_abs_diff_eq!(new_lst, 6.074732075112903, epsilon = 1e-10);
-// }
-
-// #[test]
-// #[serial]
-// #[ignore]
-// fn test_lst_from_timestep_averaged_real() {
-//     let args = get_1065880128();
-//     let context = match CorrelatorContext::new(&args.metafits.unwrap(), &args.gpuboxes.unwrap())
-//     {
-//         Ok(c) => c,
-//         Err(e) => panic!("{}", e),
-//     };
-//     // The native time res. is 0.5s, let's make our target 2s here.
-//     let time_res = 2.0;
-//     let new_lst = lst_from_timestep(0, &context, time_res);
-//     // gpstime 1065880127
-//     assert_abs_diff_eq!(new_lst, 6.074750305402534, epsilon = 1e-10);
-
-//     let new_lst = lst_from_timestep(1, &context, time_res);
-//     // gpstime 1065880129
-//     assert_abs_diff_eq!(new_lst, 6.074896147719591, epsilon = 1e-10);
-// }

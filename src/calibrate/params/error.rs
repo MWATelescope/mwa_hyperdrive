@@ -7,18 +7,31 @@
 use std::path::PathBuf;
 
 use thiserror::Error;
+use vec1::Vec1;
 
+use super::filenames::SUPPORTED_INPUT_FILE_COMBINATIONS;
 use mwa_hyperdrive_common::thiserror;
 
-/// Errors associated with setting up a `CalibrateParams` struct.
+/// Errors associated with setting up [super::CalibrateParams].
 #[derive(Error, Debug)]
 pub enum InvalidArgsError {
-    // TODO: List supported combinations.
     #[error("No input data was given!")]
     NoInputData,
 
-    #[error("Either no input data was given, or an invalid combination of formats was given.")]
+    #[error(
+        "An invalid combination of formats was given. Supported:\n{}",
+        SUPPORTED_INPUT_FILE_COMBINATIONS
+    )]
     InvalidDataInput,
+
+    #[error("Multiple metafits files were specified: {0:?}\nThis is unsupported.")]
+    MultipleMetafits(Vec1<PathBuf>),
+
+    #[error("Multiple measurement sets were specified: {0:?}\nThis is currently unsupported.")]
+    MultipleMeasurementSets(Vec1<PathBuf>),
+
+    #[error("Multiple uvfits files were specified: {0:?}\nThis is currently unsupported.")]
+    MultipleUvfits(Vec1<PathBuf>),
 
     #[error("No calibration output was specified. There must be at least one calibration solution file or calibrated visibility file.")]
     NoOutput,
@@ -75,9 +88,33 @@ pub enum InvalidArgsError {
     ParsePfbFlavour(String),
 
     #[error("Error when parsing time average factor: {0}")]
-    ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),
+    ParseCalTimeAverageFactor(crate::unit_parsing::UnitParseError),
 
     #[error("Error when parsing freq. average factor: {0}")]
+    ParseCalFreqAverageFactor(crate::unit_parsing::UnitParseError),
+
+    #[error("Calibration time average factor isn't an integer")]
+    CalTimeFactorNotInteger,
+
+    #[error("Calibration freq. average factor isn't an integer")]
+    CalFreqFactorNotInteger,
+
+    #[error("Calibration time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
+    CalTimeResNotMulitple { out: f64, inp: f64 },
+
+    #[error("Calibration freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
+    CalFreqResNotMulitple { out: f64, inp: f64 },
+
+    #[error("Calibration time average factor cannot be 0")]
+    CalTimeFactorZero,
+
+    #[error("Calibration freq. average factor cannot be 0")]
+    CalFreqFactorZero,
+
+    #[error("Error when parsing output vis. time average factor: {0}")]
+    ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),
+
+    #[error("Error when parsing output vis. freq. average factor: {0}")]
     ParseOutputVisFreqAverageFactor(crate::unit_parsing::UnitParseError),
 
     #[error("Output vis. time average factor isn't an integer")]
@@ -114,24 +151,24 @@ pub enum InvalidArgsError {
     FileNotWritable { file: String },
 
     #[error("{0}")]
-    InputFile(#[from] super::filenames::InputFileError),
+    InputFile(String),
 
     #[error("{0}")]
     Glob(#[from] crate::glob::GlobError),
 
     #[error("{0}")]
-    RawData(#[from] crate::data_formats::raw::NewRawError),
+    RawData(#[from] crate::data_formats::RawReadError),
 
     #[error("{0}")]
-    MS(#[from] crate::data_formats::ms::NewMSError),
+    MS(#[from] crate::data_formats::MsReadError),
 
     #[error("{0}")]
-    Uvfits(#[from] crate::data_formats::uvfits::UvfitsReadError),
+    Uvfits(#[from] crate::data_formats::UvfitsReadError),
 
     #[error("{0}")]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 
-    #[error("{0}")]
+    #[error("Error when trying to read source list: {0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
     #[error("{0}")]

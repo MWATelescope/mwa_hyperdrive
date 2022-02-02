@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
+use vec1::Vec1;
 
 use crate::glob::{get_all_matches_from_glob, GlobError};
 use mwa_hyperdrive_common::{lazy_static, thiserror};
@@ -30,13 +31,17 @@ lazy_static::lazy_static! {
             .case_insensitive(false).build().unwrap();
 }
 
+pub(super) const SUPPORTED_INPUT_FILE_COMBINATIONS: &str =
+    "gpubox + metafits (+ mwaf)\nms (+ metafits)\nuvfits (+ metafits)";
+
 #[derive(Debug)]
+/// Supported input data types for calibration.
 pub struct InputDataTypes {
-    pub metafits: Option<PathBuf>,
-    pub gpuboxes: Option<Vec<PathBuf>>,
-    pub mwafs: Option<Vec<PathBuf>>,
-    pub ms: Option<PathBuf>,
-    pub uvfits: Option<Vec<PathBuf>>,
+    pub metafits: Option<Vec1<PathBuf>>,
+    pub gpuboxes: Option<Vec1<PathBuf>>,
+    pub mwafs: Option<Vec1<PathBuf>>,
+    pub ms: Option<Vec1<PathBuf>>,
+    pub uvfits: Option<Vec1<PathBuf>>,
 }
 
 // The same as `InputDataTypes`, but all types are allowed to be multiples. This
@@ -53,47 +58,38 @@ struct InputDataTypesTemp {
 impl InputDataTypes {
     /// From an input collection of filename or glob strings, disentangle the
     /// file types and populate [InputDataTypes].
-    pub fn new(files: &[String]) -> Result<Self, InputFileError> {
+    pub(super) fn new(files: &[String]) -> Result<InputDataTypes, InputFileError> {
         let mut temp = InputDataTypesTemp::default();
 
         for file in files.iter().map(|f| f.as_str()) {
             file_checker(&mut temp, file)?;
         }
 
-        if temp.metafits.len() > 1 {
-            return Err(InputFileError::MultipleMetafits(
-                temp.metafits
-                    .into_iter()
-                    .map(|pb| pb.display().to_string())
-                    .collect(),
-            ));
-        }
-        if temp.ms.len() > 1 {
-            return Err(InputFileError::MultipleMeasurementSets(
-                temp.ms
-                    .into_iter()
-                    .map(|pb| pb.display().to_string())
-                    .collect(),
-            ));
-        }
-
         Ok(Self {
-            metafits: temp.metafits.first().cloned(),
+            metafits: if temp.metafits.is_empty() {
+                None
+            } else {
+                Some(Vec1::try_from_vec(temp.metafits).unwrap())
+            },
             gpuboxes: if temp.gpuboxes.is_empty() {
                 None
             } else {
-                Some(temp.gpuboxes)
+                Some(Vec1::try_from_vec(temp.gpuboxes).unwrap())
             },
             mwafs: if temp.mwafs.is_empty() {
                 None
             } else {
-                Some(temp.mwafs)
+                Some(Vec1::try_from_vec(temp.mwafs).unwrap())
             },
-            ms: temp.ms.first().cloned(),
+            ms: if temp.ms.is_empty() {
+                None
+            } else {
+                Some(Vec1::try_from_vec(temp.ms).unwrap())
+            },
             uvfits: if temp.uvfits.is_empty() {
                 None
             } else {
-                Some(temp.uvfits)
+                Some(Vec1::try_from_vec(temp.uvfits).unwrap())
             },
         })
     }
@@ -143,6 +139,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
                     for pb in glob_results {
                         file_checker(file_types, pb.display().to_string().as_str())?;
                     }
+                    return Ok(());
                 }
 
                 // Propagate all other errors.
@@ -174,7 +171,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
 }
 
 #[derive(Debug, Error)]
-pub enum InputFileError {
+pub(super) enum InputFileError {
     #[error("Specified file does not exist: {0}")]
     DoesNotExist(String),
 
@@ -183,12 +180,6 @@ pub enum InputFileError {
 
     #[error("The specified file '{0}' was not a recognised file type.")]
     NotRecognised(String),
-
-    #[error("Multiple metafits files were specified: {0:?}")]
-    MultipleMetafits(Vec<String>),
-
-    #[error("Multiple measurement sets were specified: {0:?}")]
-    MultipleMeasurementSets(Vec<String>),
 
     #[error("{0}")]
     Glob(#[from] GlobError),

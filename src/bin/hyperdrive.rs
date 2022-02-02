@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use clap::{AppSettings, Parser};
-use log::{debug, info, trace, warn};
+use log::{info, warn};
 
 use mwa_hyperdrive::{
     calibrate::{args::CalibrateUserArgs, di_calibrate, solutions::CalibrationSolutions},
@@ -102,16 +102,22 @@ enum Args {
         #[clap(name = "SOLUTIONS_FILES", parse(from_os_str))]
         files: Vec<PathBuf>,
 
-        /// The reference antenna to use. If this isn't specified, the best one
+        /// The reference tile to use. If this isn't specified, the best one
         /// from the end is used.
         #[clap(short, long)]
-        ref_ant: Option<usize>,
+        ref_tile: Option<usize>,
 
+        /// Don't use a reference tile. Using this will ignore any input for
+        /// `ref_tile`.
+        #[clap(short, long)]
+        no_ref_tile: bool,
+
+        /// Don't plot XY and YX polarisations.
         #[clap(long)]
         ignore_cross_pols: bool,
 
         /// The metafits file associated with the solutions. This provides
-        /// additional information on the plots, like the antenna names.
+        /// additional information on the plots, like the tile names.
         #[clap(short, long, parse(from_str))]
         metafits: Option<PathBuf>,
 
@@ -203,22 +209,7 @@ fn try_main() -> Result<(), HyperdriveError> {
             verbosity: _,
             dry_run,
         } => {
-            let args = if let Some(f) = args_file {
-                trace!("Merging command-line arguments with the argument file");
-                Box::new(cli_args.merge(&f)?)
-            } else {
-                cli_args
-            };
-            debug!("{:#?}", &args);
-            trace!("Converting arguments into calibration parameters");
-            let parameters = args.into_params()?;
-
-            if dry_run {
-                info!("Dry run -- exiting now.");
-                return Ok(());
-            }
-
-            di_calibrate(&parameters)?;
+            di_calibrate(cli_args, args_file, dry_run)?;
 
             info!("hyperdrive di-calibrate complete.");
         }
@@ -252,7 +243,8 @@ fn try_main() -> Result<(), HyperdriveError> {
         #[cfg(feature = "plotting")]
         Args::SolutionsPlot {
             files,
-            ref_ant,
+            ref_tile,
+            no_ref_tile,
             ignore_cross_pols,
             metafits,
             verbosity: _,
@@ -300,7 +292,8 @@ fn try_main() -> Result<(), HyperdriveError> {
                     .plot(
                         base,
                         &plot_title,
-                        ref_ant,
+                        ref_tile,
+                        no_ref_tile,
                         tile_names.as_deref(),
                         ignore_cross_pols,
                     )
@@ -311,7 +304,7 @@ fn try_main() -> Result<(), HyperdriveError> {
 
         Args::DipoleGains { metafits } => {
             let meta = mwalib::MetafitsContext::new(&metafits, None).unwrap();
-            let gains = mwa_hyperdrive::data_formats::metafits::get_dipole_gains(&meta);
+            let gains = mwa_hyperdrive::data_formats::get_dipole_gains(&meta);
             let mut all_unity = vec![];
             let mut non_unity = vec![];
             for (i, tile_gains) in gains.outer_iter().enumerate() {

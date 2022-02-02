@@ -34,8 +34,7 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
     let mut fptr = fits_open!(&file)?;
     let hdu = fits_open_hdu!(&mut fptr, 0)?;
     let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
-    let time_res = get_optional_fits_key!(&mut fptr, &hdu, "TIMERES")?;
-    let start_timestamps: Vec<Epoch> = {
+    let timestamps: Vec<Epoch> = {
         let timestamps: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "TIMESTAMPS")?;
         // The retrieved string might be empty (or just have spaces for values)
         match timestamps.as_ref().map(|s| s.trim()) {
@@ -94,28 +93,24 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
         .map(|pair| pair.0)
         .collect();
-    eprintln!("flagged_tiles: {:?}", flagged_tiles);
 
     // Also find any flagged channels.
-    let flagged_fine_channels = di_jones
+    let flagged_chanblocks = di_jones
         .axis_iter(Axis(2))
         .into_par_iter()
         .enumerate()
         .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
         .map(|pair| pair.0)
         .collect();
-    eprintln!("flagged_fine_channels: {:?}", flagged_fine_channels);
 
     Ok(CalibrationSolutions {
         di_jones,
-        num_timeblocks,
-        total_num_tiles,
         flagged_tiles,
-        total_num_fine_freq_chans,
-        flagged_fine_channels,
-        start_timestamps,
+        flagged_chanblocks,
+        average_timestamps: timestamps,
+        start_timestamps: vec![],
+        end_timestamps: vec![],
         obsid,
-        time_res,
     })
 }
 
@@ -148,34 +143,16 @@ pub(super) fn write<T: AsRef<Path>>(
         }
     }
 
-    // Write the time resolution if we can.
-    if let Some(time_res) = sols.time_res {
-        unsafe {
-            let keyname = CString::new("TIMERES").unwrap();
-            let value = CString::new(format!("{:.2}", time_res)).unwrap();
-            let comment = CString::new("The number of seconds per timeblock").unwrap();
-            let mut status = 0;
-            fitsio_sys::ffpkys(
-                fptr.as_raw(),    /* I - FITS file pointer        */
-                keyname.as_ptr(), /* I - name of keyword to write */
-                value.as_ptr(),   /* I - keyword value            */
-                comment.as_ptr(), /* I - keyword comment          */
-                &mut status,      /* IO - error status            */
-            );
-            fits_check_status(status)?;
-        }
-    }
-
     // Write the start timestamps as a comma separated list in a string.
-    let start_timestamps = sols
-        .start_timestamps
+    let timestamps = sols
+        .average_timestamps
         .iter()
         .map(|&t| format!("{:.2}", epoch_as_gps_seconds(t)))
         .collect::<Vec<_>>()
         .join(",");
     unsafe {
         let keyname = CString::new("TIMESTAMPS").unwrap();
-        let value = CString::new(start_timestamps).unwrap();
+        let value = CString::new(timestamps).unwrap();
         let comment =
             CString::new("Start GPS timesteps used for these solution timeblocks").unwrap();
         let mut status = 0;
@@ -202,12 +179,8 @@ pub(super) fn write<T: AsRef<Path>>(
     // Four elements for each Jones matrix, and we need to double the last
     // axis, because we can't write complex numbers directly to FITS files;
     // instead, we write each real and imag float as individual floats.
-    let dim = [
-        sols.num_timeblocks,
-        sols.total_num_tiles,
-        sols.total_num_fine_freq_chans,
-        4 * 2,
-    ];
+    let (num_timeblocks, total_num_tiles, total_num_chanblocks) = sols.di_jones.dim();
+    let dim = [num_timeblocks, total_num_tiles, total_num_chanblocks, 4 * 2];
     let image_description = ImageDescription {
         data_type: ImageType::Float,
         dimensions: &dim,
@@ -217,22 +190,17 @@ pub(super) fn write<T: AsRef<Path>>(
     // Fill the fits file with NaN before overwriting with our solved
     // solutions. We have to be tricky with what gets written out, because
     // `di_jones` doesn't necessarily have the same shape as the output.
-    dbg!(sols.di_jones.dim());
-    eprintln!("{:?}", &sols.flagged_tiles);
-    eprintln!("{:?}", &sols.flagged_fine_channels);
     let mut fits_image_data = vec![f64::NAN; dim.iter().product()];
     for (timeblock, di_jones) in sols.di_jones.outer_iter().enumerate() {
         let mut unflagged_tile_index = 0;
 
-        for i_tile in 0..sols.total_num_tiles {
+        for i_tile in 0..total_num_tiles {
             let mut unflagged_chan_index = 0;
 
-            for i_chan in 0..sols.total_num_fine_freq_chans {
-                if !sols.flagged_fine_channels.contains(&i_chan) {
+            for i_chan in 0..total_num_chanblocks {
+                if !sols.flagged_chanblocks.contains(&i_chan) {
                     let j = if !sols.flagged_tiles.contains(&i_tile) {
-                        // Invert the Jones matrices so that they can be applied
-                        // as J D J^H
-                        di_jones[(unflagged_tile_index, unflagged_chan_index)].inv()
+                        di_jones[(unflagged_tile_index, unflagged_chan_index)]
                     } else {
                         continue;
                     };

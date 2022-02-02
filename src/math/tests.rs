@@ -5,8 +5,10 @@
 use std::f64::consts::*;
 
 use approx::assert_abs_diff_eq;
+use marlu::time::{epoch_as_gps_seconds, gps_to_epoch};
 
 use super::*;
+use mwa_hyperdrive_common::marlu;
 
 #[test]
 fn test_sin() {
@@ -30,14 +32,40 @@ fn test_cexp() {
 }
 
 #[test]
+fn test_average_epoch() {
+    let epochs = [
+        gps_to_epoch(1065880128.0),
+        gps_to_epoch(1065880130.0),
+        gps_to_epoch(1065880132.0),
+    ];
+
+    let average = average_epoch(&epochs);
+    assert_abs_diff_eq!(epoch_as_gps_seconds(average), 1065880130.0);
+}
+
+#[test]
+fn test_average_epoch2() {
+    let epochs = [
+        gps_to_epoch(1065880128.0),
+        gps_to_epoch(1090008640.0),
+        gps_to_epoch(1118529192.0),
+    ];
+
+    let average = average_epoch(&epochs);
+    // This epsilon is huge, but the epochs span years. At least the first test
+    // is accurate to precision.
+    assert_abs_diff_eq!(epoch_as_gps_seconds(average), 1091472653.0, epsilon = 0.4);
+}
+
+#[test]
 fn test_generate_tile_baseline_maps() {
     let total_num_tiles = 128;
-    let mut tile_flags = HashSet::new();
+    let mut tile_flags = vec![];
     let maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 1)], 0);
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&0], (0, 1));
 
-    tile_flags.insert(1);
+    tile_flags.push(1);
     let maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 2)], 0);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(2, 3)], 126);

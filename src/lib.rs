@@ -7,24 +7,24 @@
 
 pub mod calibrate;
 pub mod constants;
-pub mod model;
-pub mod simulate_vis;
-
 pub(crate) mod context;
 pub mod data_formats;
 pub(crate) mod error;
 pub(crate) mod flagging;
 pub(crate) mod glob;
 pub mod math;
+pub mod model;
 pub(crate) mod pfb_gains;
 pub(crate) mod shapelets;
+pub mod simulate_vis;
 pub(crate) mod unit_parsing;
 
-#[cfg(test)]
-mod jones_test;
-#[cfg(test)]
-pub(crate) mod tests;
+mwa_hyperdrive_common::cfg_if::cfg_if! {
+    if #[cfg(test)] {
+        mod jones_test;
+        mod tests;
+    }
+}
 
 // Re-exports.
-pub(crate) use constants::*;
 pub use error::HyperdriveError;

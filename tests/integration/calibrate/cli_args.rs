@@ -13,7 +13,7 @@ fn test_calibrate_help_is_correct() {
     assert!(cmd.is_ok());
     let (stdout, stderr) = get_cmd_output(cmd);
     assert!(stderr.is_empty());
-    assert!(stdout.contains("calibrate"));
+    assert!(stdout.contains("di-calibrate"));
     assert!(stdout.contains("Perform direction-independent calibration on the input MWA data"));
 
     // Second with -h
@@ -21,6 +21,6 @@ fn test_calibrate_help_is_correct() {
     assert!(cmd.is_ok());
     let (stdout, stderr) = get_cmd_output(cmd);
     assert!(stderr.is_empty());
-    assert!(stdout.contains("calibrate"));
+    assert!(stdout.contains("di-calibrate"));
     assert!(stdout.contains("Perform direction-independent calibration on the input MWA data"));
 }

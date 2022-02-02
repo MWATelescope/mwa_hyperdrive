@@ -9,10 +9,11 @@ use std::ops::Range;
 use hifitime::Epoch;
 use marlu::{RADec, XyzGeodetic};
 use ndarray::Array2;
+use vec1::Vec1;
 
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
-/// Observation metadata.
+/// MWA observation metadata.
 ///
 /// This can be thought of as a substitute of mwalib context structs; mwalib
 /// can't be used all the time (e.g. doesn't interface with measurement sets),
@@ -22,20 +23,26 @@ use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 /// complexity down; use [FreqContext] for that.
 pub(crate) struct ObsContext {
     /// The observation ID, which is also the observation's scheduled start GPS
-    /// time.
+    /// time (but shouldn't be used for this purpose).
     pub(crate) obsid: Option<u32>,
 
-    /// The unique timesteps in the observation. These are stored as `hifitime`
-    /// [Epoch] structs to help keep the code flexible. These include flagged
-    /// timesteps.
-    pub(crate) timesteps: Vec<Epoch>,
+    /// The unique timestamps in the observation. These are stored as `hifitime`
+    /// [Epoch] structs to help keep the code flexible. These include timestamps
+    /// that are deemed "flagged" by the observation.
+    pub(crate) timestamps: Vec<Epoch>,
 
     /// The *available* timestep indices of the input data. This does not
-    /// necessarily start at 0.
-    pub(crate) all_timestep_indices: Vec<usize>,
+    /// necessarily start at 0, and is not necessarily regular (e.g. a valid
+    /// vector could be [1, 2, 4]).
+    ///
+    /// Allowing the indices to non-regular means that we can represent input
+    /// data that also isn't regular; naively reading in a dataset with 2
+    /// timesteps that are separated by more than the time resolution of the
+    /// data would give misleading results.
+    pub(crate) all_timesteps: Vec1<usize>,
 
     /// The timestep indices of the input data that aren't totally flagged.
-    pub(crate) unflagged_timestep_indices: Vec<usize>,
+    pub(crate) unflagged_timesteps: Vec<usize>,
 
     /// The observation phase centre.
     pub(super) phase_centre: RADec,
@@ -55,7 +62,7 @@ pub(crate) struct ObsContext {
     /// The tiles already flagged in the supplied data. These values correspond
     /// to those from the "Antenna" column in HDU 1 of the metafits file. Zero
     /// indexed.
-    pub(crate) tile_flags: Vec<usize>,
+    pub(crate) flagged_tiles: Vec<usize>,
 
     /// Are auto-correlations present in the visibility data?
     pub(crate) autocorrelations_present: bool,
@@ -73,8 +80,8 @@ pub(crate) struct ObsContext {
     /// The time resolution of the supplied data \[seconds\]. This is not
     /// necessarily the native time resolution of the original observation's
     /// data, as it may have already been averaged. This is kept optional in
-    /// case in the input data has only one time step, and therefore no
-    /// resolution.
+    /// case in the input data doesn't report the resolution and has only one
+    /// time step, and therefore no resolution.
     pub(crate) time_res: Option<f64>,
 
     /// The Earth longitude of the instrumental array \[radians\].
@@ -119,6 +126,6 @@ pub(crate) struct FreqContext {
 
     /// The fine-channel resolution of the supplied data \[Hz\]. This is not
     /// necessarily the fine-channel resolution of the original observation's
-    /// data.
-    pub(crate) native_fine_chan_width: Option<f64>,
+    /// data; this data may have applied averaging to the original observation.
+    pub(crate) freq_res: Option<f64>,
 }

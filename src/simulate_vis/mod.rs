@@ -29,7 +29,7 @@ use ndarray::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    data_formats::{metafits, uvfits::UvfitsWriter},
+    data_formats::{get_dipole_delays, get_dipole_gains, UvfitsWriter},
     glob::get_single_match_from_glob,
     model,
 };
@@ -153,7 +153,7 @@ struct SimVisParams {
     baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
     /// Flagged tiles.
-    tile_flags: HashSet<usize>,
+    flagged_tiles: Vec<usize>,
 
     /// Timesteps to be simulated.
     timesteps: Vec<Epoch>,
@@ -170,7 +170,7 @@ struct SimVisParams {
 
 impl SimVisParams {
     /// Convert arguments into parameters.
-    fn new(args: SimulateVisArgs) -> Result<Self, SimulateVisError> {
+    fn new(args: SimulateVisArgs) -> Result<SimVisParams, SimulateVisError> {
         debug!("{:#?}", &args);
 
         // Expose all the struct fields to ensure they're all used.
@@ -196,7 +196,7 @@ impl SimVisParams {
         } = args;
 
         // Read the metafits file with mwalib.
-        // TODO: Allow the user to specify the MWAVersion.
+        // TODO: Allow the user to specify the mwa_version.
         let metafits = mwalib::MetafitsContext::new(&metafits, None)?;
 
         // Get the phase centre.
@@ -285,16 +285,16 @@ impl SimVisParams {
 
         // Prepare a map between baselines and their constituent tiles.
         // TODO: Utilise tile flags.
-        let tile_flags: HashSet<usize> = HashSet::new();
+        let flagged_tiles: Vec<usize> = vec![];
         let baseline_to_tile_map = {
             let mut baseline_to_tile_map = HashMap::new();
             let mut bl = 0;
             for tile1 in 0..metafits.num_ants {
-                if tile_flags.contains(&tile1) {
+                if flagged_tiles.contains(&tile1) {
                     continue;
                 }
                 for tile2 in tile1 + 1..metafits.num_ants {
-                    if tile_flags.contains(&tile2) {
+                    if flagged_tiles.contains(&tile2) {
                         continue;
                     }
                     baseline_to_tile_map.insert(bl, (tile1, tile2));
@@ -320,10 +320,7 @@ impl SimVisParams {
                 debug!("Successfully parsed {}-style source list", sl_type);
                 sl
             }
-            Err(e) => {
-                eprintln!("Error when trying to read source list:");
-                return Err(SimulateVisError::from(e));
-            }
+            Err(e) => return Err(SimulateVisError::from(e)),
         };
         let counts = source_list.get_counts();
         debug!(
@@ -365,18 +362,18 @@ impl SimVisParams {
                         }
                         Delays::Partial(d)
                     }
-                    None => Delays::Full(metafits::get_dipole_delays(&metafits)),
+                    None => Delays::Full(get_dipole_delays(&metafits)),
                 },
                 match unity_dipole_gains {
                     true => None,
-                    false => Some(metafits::get_dipole_gains(&metafits)),
+                    false => Some(get_dipole_gains(&metafits)),
                 },
             )?
         };
 
         info!("Writing the sky model to {}", output_model_file.display());
 
-        Ok(Self {
+        Ok(SimVisParams {
             source_list,
             metafits,
             output_model_file,
@@ -384,7 +381,7 @@ impl SimVisParams {
             fine_chan_freqs,
             xyzs,
             baseline_to_tile_map,
-            tile_flags,
+            flagged_tiles,
             timesteps,
             beam,
             array_latitude_rad: MWA_LAT_RAD,
@@ -478,7 +475,7 @@ pub fn simulate_vis(
                 &params.source_list,
                 &params.fine_chan_freqs,
                 &params.xyzs,
-                &params.tile_flags,
+                &params.flagged_tiles,
                 params.phase_centre,
                 params.array_latitude_rad,
                 &crate::shapelets::SHAPELET_BASIS_VALUES,

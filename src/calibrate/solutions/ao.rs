@@ -12,7 +12,6 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-use hifitime::{Duration, Epoch};
 use marlu::{
     time::{epoch_as_gps_seconds, gps_to_epoch},
     Jones,
@@ -21,6 +20,7 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::{error::*, CalibrationSolutions};
+use crate::math::average_epoch;
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray, rayon, Complex};
 
 pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, ReadSolutionsError> {
@@ -57,39 +57,32 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
     }
     let num_timeblocks = bin_file.read_u32::<LittleEndian>()? as usize;
     let total_num_tiles = bin_file.read_u32::<LittleEndian>()? as usize;
-    let total_num_fine_freq_chans = bin_file.read_u32::<LittleEndian>()? as usize;
+    let total_num_chanblocks = bin_file.read_u32::<LittleEndian>()? as usize;
     let num_polarisations = bin_file.read_u32::<LittleEndian>()? as usize;
+    // If the start time (read in here as `t`) is 0, then we don't really have a
+    // start time!
     let t = bin_file.read_f64::<LittleEndian>()?;
     let start_time = if t.abs() < f64::EPSILON {
         None
     } else {
         Some(gps_to_epoch(t))
     };
+    // And similarly for the end time.
     let t = bin_file.read_f64::<LittleEndian>()?;
     let end_time = if t.abs() < f64::EPSILON {
         None
     } else {
         Some(gps_to_epoch(t))
     };
-    let mut di_jones_vec = vec![
-        0.0;
-        num_timeblocks
-            * total_num_tiles
-            * total_num_fine_freq_chans
-            // Real and imag for each polarisation.
-            * 2 * num_polarisations
-    ];
-    bin_file.read_f64_into::<LittleEndian>(&mut di_jones_vec)?;
-    let di_jones_a4 = Array4::from_shape_vec(
-        (
-            num_timeblocks,
-            total_num_tiles,
-            total_num_fine_freq_chans,
-            2 * num_polarisations,
-        ),
-        di_jones_vec,
-    )
-    .unwrap();
+
+    // The rest of the binary is only Jones matrices.
+    let mut di_jones_a4 = Array4::zeros((
+        num_timeblocks,
+        total_num_tiles,
+        total_num_chanblocks,
+        2 * num_polarisations,
+    ));
+    bin_file.read_f64_into::<LittleEndian>(di_jones_a4.as_slice_mut().unwrap())?;
     let di_jones = di_jones_a4.map_axis(Axis(3), |view| {
         Jones::from([
             Complex::new(view[0], view[1]),
@@ -107,48 +100,33 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
         .map(|pair| pair.0)
         .collect();
-    eprintln!("{:?}", &flagged_tiles);
 
     // Also find any flagged channels.
-    let flagged_fine_channels = di_jones
+    let flagged_chanblocks = di_jones
         .axis_iter(Axis(2))
         .into_par_iter()
         .enumerate()
         .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
         .map(|pair| pair.0)
         .collect();
-    eprintln!("{:?}", &flagged_fine_channels);
+
+    // We'd really like to have the *actual* timestamps of each timeblock,
+    // but this isn't possible with this format. Here is the best effort.
+    let (start_timestamps, end_timestamps, average_timestamps) = match (start_time, end_time) {
+        (Some(s), Some(e)) => (vec![s], vec![e], vec![average_epoch(&[s, e])]),
+        (Some(s), None) => (vec![s], vec![], vec![]),
+        (None, Some(e)) => (vec![], vec![e], vec![]),
+        (None, None) => (vec![], vec![], vec![]),
+    };
 
     Ok(CalibrationSolutions {
         di_jones,
-        num_timeblocks,
-        total_num_tiles,
         flagged_tiles,
-        total_num_fine_freq_chans,
-        flagged_fine_channels,
-        // We'd really like to have the *actual* start times of each timeblock,
-        // but this isn't possible with this format. Here is the best effort.
-        start_timestamps: match (start_time, end_time) {
-            (None, None) => vec![],
-            (Some(t), None) => vec![t],
-            (None, Some(t)) => vec![t],
-            (Some(s), Some(e)) => {
-                let duration = e - s;
-                let average_duration_per_timeblock = duration.in_seconds() / num_timeblocks as f64;
-                let mut start_timestamps = vec![];
-                for i_timeblock in 0..num_timeblocks {
-                    let start: Epoch = s + i_timeblock as f64
-                        * Duration::from_f64(
-                            average_duration_per_timeblock,
-                            hifitime::TimeUnit::Second,
-                        );
-                    start_timestamps.push(start);
-                }
-                start_timestamps
-            }
-        },
+        flagged_chanblocks,
+        average_timestamps,
+        start_timestamps,
+        end_timestamps,
         obsid: None,
-        time_res: None,
     })
 }
 
@@ -158,6 +136,7 @@ pub(super) fn write<T: AsRef<Path>>(
     file: T,
 ) -> Result<(), WriteSolutionsError> {
     let num_polarisations = 4;
+    let (num_timeblocks, total_num_tiles, total_num_chanblocks) = sols.di_jones.dim();
 
     let mut bin_file = BufWriter::new(File::create(file)?);
     // 8 floats, 8 bytes per float.
@@ -166,38 +145,42 @@ pub(super) fn write<T: AsRef<Path>>(
     bin_file.write_u8(0)?;
     bin_file.write_u32::<LittleEndian>(0)?;
     bin_file.write_u32::<LittleEndian>(0)?;
-    bin_file.write_u32::<LittleEndian>(sols.num_timeblocks as _)?;
-    bin_file.write_u32::<LittleEndian>(sols.total_num_tiles as _)?;
-    bin_file.write_u32::<LittleEndian>(sols.total_num_fine_freq_chans as _)?;
+    bin_file.write_u32::<LittleEndian>(num_timeblocks as _)?;
+    bin_file.write_u32::<LittleEndian>(total_num_tiles as _)?;
+    bin_file.write_u32::<LittleEndian>(total_num_chanblocks as _)?;
     bin_file.write_u32::<LittleEndian>(num_polarisations)?;
-    // André indicates that "AIPS time" should be used here. However, it
-    // looks like only 0.0 is ever written. I don't know what AIPS time is,
-    // and I hate leap seconds, so GPS it is.
-    bin_file.write_f64::<LittleEndian>(
-        sols.start_timestamps
-            .first()
-            .map(|&t| epoch_as_gps_seconds(t))
-            .unwrap_or(0.0),
-    )?;
-    bin_file.write_f64::<LittleEndian>(
-        sols.start_timestamps
-            .last()
-            .map(|&t| epoch_as_gps_seconds(t))
-            .unwrap_or(0.0),
-    )?;
+    // André indicates that "AIPS time" should be used for the "start" and "end"
+    // times here. However, it looks like only 0.0 is ever written by
+    // mwa-reduce's calibrate. I don't know what AIPS time is, and I hate leap
+    // seconds, so GPS it is.
+    let (start, end) = match (
+        sols.start_timestamps.as_slice(),
+        sols.end_timestamps.as_slice(),
+        sols.average_timestamps.as_slice(),
+    ) {
+        // One start and end time.
+        ([s, ..], [.., e], _) => (epoch_as_gps_seconds(*s), epoch_as_gps_seconds(*e)),
+        // No start and end times, but averages. Sure, why not.
+        ([], [], [a0, .., an]) => (epoch_as_gps_seconds(*a0), epoch_as_gps_seconds(*an)),
+        ([], [], [a0]) => (epoch_as_gps_seconds(*a0), epoch_as_gps_seconds(*a0)),
+        // Less-than-ideal amount of info.
+        ([s, ..], [], _) => (epoch_as_gps_seconds(*s), 0.0),
+        ([], [.., e], _) => (0.0, epoch_as_gps_seconds(*e)),
+        // Nothing, nothing.
+        ([], [], []) => (0.0, 0.0),
+    };
+    bin_file.write_f64::<LittleEndian>(start)?;
+    bin_file.write_f64::<LittleEndian>(end)?;
 
     for di_jones_per_time in sols.di_jones.outer_iter() {
         let mut unflagged_tile_index = 0;
-        for tile_index in 0..sols.total_num_tiles {
+        for tile_index in 0..total_num_tiles {
             let mut unflagged_chan_index = 0;
-            for chan in 0..sols.total_num_fine_freq_chans {
-                if !sols.flagged_fine_channels.contains(&chan) {
-                    // Invert the Jones matrices so that they can be applied as
-                    // J D J^H
+            for chan in 0..total_num_chanblocks {
+                if !sols.flagged_chanblocks.contains(&chan) {
                     let j = if !sols.flagged_tiles.contains(&tile_index) {
-                        di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)].inv()
+                        di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)]
                     } else {
-                        // This is a Jones matrix of all NaN.
                         Jones::nan()
                     };
 

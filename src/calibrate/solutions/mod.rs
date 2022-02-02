@@ -13,6 +13,8 @@ mod hyperdrive;
 #[cfg(feature = "plotting")]
 mod plotting;
 mod rts;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use error::*;
 
@@ -38,35 +40,41 @@ pub(crate) enum CalSolutionType {
 }
 
 pub struct CalibrationSolutions {
+    /// The direction-independent calibration solutions. This has dimensions of
+    /// (num_timeblocks, total_num_tiles, total_num_chanblocks). Note that this
+    /// potentially includes flagged data; other struct members help to
+    /// determine what is flagged. These Jones matrices, when applied to data
+    /// Jones matrices, should approximate the model Jones matrices used in
+    /// calibration.
     pub di_jones: Array3<Jones<f64>>,
-    pub num_timeblocks: usize,
 
-    /// The number of flagged and unflagged tiles in the observation.
-    pub total_num_tiles: usize,
-
-    /// Which tiles are flagged?
+    /// Which tiles are flagged? Zero indexed.
     pub flagged_tiles: Vec<usize>,
 
-    /// The number of flagged and unflagged fine frequency channels in the
-    /// observation.
-    pub total_num_fine_freq_chans: usize,
+    /// Which chanblocks are flagged? Zero indexed.
+    pub flagged_chanblocks: Vec<usize>,
 
-    /// Which channels are flagged?
-    pub flagged_fine_channels: Vec<usize>,
+    /// The average timestamps of each timeblock used to produce these
+    /// calibration solutions. This is allowed to be empty; in this case, no
+    /// timestamp information is provided. It may also have a different length
+    /// to the first dimension of `di_jones` due to inadequate information.
+    pub average_timestamps: Vec<Epoch>,
 
     /// The start timestamps of each timeblock used to produce these calibration
     /// solutions. This is allowed to be empty; in this case, no timestamp
-    /// information is provided.
+    /// information is provided. It may also have a different length to the
+    /// first dimension of `di_jones` due to inadequate information.
     pub start_timestamps: Vec<Epoch>,
+
+    /// The end timestamps of each timeblock used to produce these calibration
+    /// solutions. This is allowed to be empty; in this case, no timestamp
+    /// information is provided. It may also have a different length to the
+    /// first dimension of `di_jones` due to inadequate information.
+    pub end_timestamps: Vec<Epoch>,
 
     /// The MWA observation ID. Allowed to be optional as not all formats
     /// provide it.
     pub obsid: Option<u32>,
-
-    /// The number of seconds per timeblock, or, the time resolution of the
-    /// calibration solutions. Only really useful if there are multiple
-    /// timeblocks.
-    pub time_res: Option<f64>,
 }
 
 impl CalibrationSolutions {
@@ -120,6 +128,7 @@ impl CalibrationSolutions {
         filename_base: T,
         plot_title: &str,
         ref_tile: Option<usize>,
+        no_ref_tile: bool,
         tile_names: Option<&[S]>,
         ignore_cross_pols: bool,
     ) -> Result<Vec<String>, ()> {
@@ -128,6 +137,7 @@ impl CalibrationSolutions {
             filename_base,
             plot_title,
             ref_tile,
+            no_ref_tile,
             tile_names,
             ignore_cross_pols,
         )

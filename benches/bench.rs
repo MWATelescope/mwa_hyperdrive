@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::collections::HashSet;
 use std::ops::Deref;
 
 use criterion::*;
@@ -24,7 +23,7 @@ fn model(c: &mut Criterion) {
     let uvws = vec![UVW::default(); num_bls];
     let lmns = vec![LMN::default(); num_points];
     let freqs = vec![0.0; num_freqs];
-    let maps = TileBaselineMaps::new(num_tiles, &HashSet::new());
+    let maps = TileBaselineMaps::new(num_tiles, &[]);
     let beam_file: Option<&str> = None; // Assume the env. variable is set.
     let beam =
         create_fee_beam_object(beam_file, num_tiles, Delays::Partial(vec![0; 16]), None).unwrap();

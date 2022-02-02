@@ -8,6 +8,10 @@ mod logging;
 
 pub use logging::*;
 
+pub fn is_a_tty() -> bool {
+    atty::is(atty::Stream::Stdout) || atty::is(atty::Stream::Stderr)
+}
+
 // Re-exports.
 pub use {
     cfg_if, chrono, clap, fern, indicatif, itertools, lazy_static, log, marlu,

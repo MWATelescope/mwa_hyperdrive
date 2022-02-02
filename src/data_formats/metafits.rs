@@ -6,37 +6,10 @@
 //!
 //! Anything here is to supplement mwalib.
 
-use std::path::Path;
-
-use mwalib::{MetafitsContext, MwalibError, Pol};
+use mwalib::{MetafitsContext, Pol};
 use ndarray::prelude::*;
 
 use mwa_hyperdrive_common::{mwalib, ndarray};
-
-/// Populate an `<Option<MetafitsContext>>` if it isn't already populated and
-/// return a reference to the context inside the `Option`.
-///
-/// Why is this useful? Some functions _may_ need information from a metafits
-/// file. Rather than unconditionally creating an mwalib context if a metafits
-/// file is provided, this function allows the caller to only call mwalib if it
-/// is necessary.
-pub(crate) fn populate_metafits_context<T: AsRef<Path>>(
-    mwalib: &mut Option<MetafitsContext>,
-    metafits: T,
-    mwa_version: Option<mwalib::MWAVersion>,
-) -> Result<&MetafitsContext, MwalibError> {
-    match mwalib.as_mut() {
-        None => {
-            let c = MetafitsContext::new(&metafits, mwa_version)?;
-            *mwalib = Some(c);
-        }
-        Some(_) => (),
-    };
-    // The mwalib context is always populated at this point; get the reference
-    // from inside the Option.
-    let context = mwalib.as_ref().unwrap();
-    Ok(context)
-}
 
 /// Get the delays for each tile's dipoles.
 pub(crate) fn get_dipole_delays(context: &mwalib::MetafitsContext) -> Array2<u32> {

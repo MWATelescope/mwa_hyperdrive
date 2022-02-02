@@ -11,13 +11,13 @@
 
 pub(crate) mod error;
 mod filenames;
-pub(crate) mod freq;
+mod helpers;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use error::*;
 use filenames::InputDataTypes;
-pub(crate) use freq::*;
+use helpers::*;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
@@ -38,8 +38,9 @@ use marlu::{
 };
 use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
+use vec1::Vec1;
 
-use super::solutions::CalSolutionType;
+use super::{solutions::CalSolutionType, Chanblock, Timeblock};
 use crate::{
     constants::*,
     context::{FreqContext, ObsContext},
@@ -58,7 +59,7 @@ use mwa_hyperdrive_srclist::{
 };
 
 /// Parameters needed to perform calibration.
-pub struct CalibrateParams {
+pub(crate) struct CalibrateParams {
     /// Interface to the MWA data, and metadata on the input data.
     pub(crate) input_data: Box<dyn InputData>,
 
@@ -78,25 +79,72 @@ pub struct CalibrateParams {
     ///
     /// These values correspond to those from the "Antenna" column in HDU 2 of
     /// the metafits file. Zero indexed.
-    pub(crate) tile_flags: HashSet<usize>,
+    pub(crate) flagged_tiles: Vec<usize>,
 
     /// Multiplicative factors to apply to unflagged baselines. These are mostly
     /// all 1.0, but flagged baselines (perhaps due to a UVW cutoff) have values
     /// of 0.0.
     pub(crate) baseline_weights: Vec<f64>,
 
-    /// Channel- and frequency-related parameters required for calibration.
-    pub(crate) freq: FrequencyParams,
-
-    /// The number of time samples to average together before calibrating.
+    /// The number of time samples to average together during calibration.
     ///
     /// e.g. If the input data is in 0.5s resolution and this variable was 4,
     /// then we average 2s worth of data together during calibration.
     pub(crate) time_average_factor: usize,
 
-    /// The timestep indices to use in calibration. These are sorted
-    /// ascendingly.
-    pub(crate) timesteps: Vec<usize>,
+    /// Blocks of timesteps used for calibration. Each timeblock contains
+    /// indices of the input data to average together during calibration. Each
+    /// timeblock may have a different number of timesteps; the number of blocks
+    /// and their lengths depends on which input data timesteps are being used
+    /// as well as the `time_average_factor` (i.e. the number of timesteps to
+    /// average during calibration; by default we average all timesteps).
+    ///
+    /// Simple examples: If we are averaging all data over time to form
+    /// calibration solutions, there will only be one timeblock, and that block
+    /// will contain all input data timestep indices. On the other hand, if
+    /// `time_average_factor` is 1, then there are as many timeblocks as there
+    /// are timesteps, and each block contains 1 timestep index.
+    ///
+    /// A more complicated example: If we are using input data timesteps 10, 11,
+    /// 12 and 15 with a `time_average_factor` of 4, then there will be 2
+    /// timeblocks, even though there are only 4 timesteps. This is because
+    /// timestep 10 and 15 can't occupy the same timeblock with the "length" is
+    /// 4. So the first timeblock contains 10, 11 and 12, whereas the second
+    /// contains only 15.
+    pub(super) timeblocks: Vec1<Timeblock>,
+
+    /// The timestep indicies into the input data to be used for calibration.
+    pub(crate) timesteps: Vec1<usize>,
+
+    /// The number of frequency samples to average together during calibration.
+    ///
+    /// e.g. If the input data is in 40kHz resolution and this variable was 2,
+    /// then we average 80kHz worth of data together during calibration.
+    pub(crate) freq_average_factor: usize,
+
+    /// Blocks of frequency channels that will be calibrated. Each chanblock may
+    /// represent of multiple channels, depending on `freq_average_factor`; when
+    /// visibilities are read from `input_data`, the channels are averaged
+    /// according to `freq_average_factor`. If no frequency channels are
+    /// flagged, then these chanblocks will represent all frequency channels.
+    /// However, it's likely at least some channels are flagged, so
+    /// `flagged_chanblocks` may be needed.
+    // TODO: If "picket fence" observations are ever supported, then this will
+    // need to correctly map to fine-frequency channels in each contiguous band
+    // of coarse channels.
+    pub(super) chanblocks: Vec1<Chanblock>,
+
+    /// Indices for chanblocks that were flagged.
+    pub(crate) flagged_chanblocks: Vec<usize>,
+
+    /// The frequencies of each of the observation's unflagged fine channels
+    /// \[Hz\].
+    pub(crate) unflagged_fine_chan_freqs: Vec<f64>,
+
+    /// The fine channels to be flagged across the entire observation. e.g. For
+    /// a 40 kHz observation, there are 768 fine channels, and this could
+    /// contain 0 and 767.
+    pub(crate) flagged_fine_chans: HashSet<usize>,
 
     /// Given two antenna indices, get the unflagged cross-correlation baseline
     /// index. e.g. If antenna 1 (i.e. the second antenna) is flagged, then the
@@ -166,9 +214,9 @@ pub struct CalibrateParams {
     pub(crate) output_vis_freq_average_factor: usize,
 
     #[cfg(feature = "cuda")]
-    /// If enabled, use the CPU to generate sky-model visibilites. Otherwise,
-    /// use the GPU.
-    pub(crate) cpu_vis_gen: bool,
+    /// If true, use the CPU to generate sky-model visibilites. Otherwise, use
+    /// the GPU.
+    pub(crate) use_cpu_for_modelling: bool,
 }
 
 impl CalibrateParams {
@@ -194,7 +242,7 @@ impl CalibrateParams {
             delays,
             no_beam,
             time_average_factor,
-            // freq_average_factor,
+            freq_average_factor,
             timesteps,
             tile_flags,
             ignore_input_data_tile_flags,
@@ -218,7 +266,7 @@ impl CalibrateParams {
             #[cfg(feature = "cuda")]
             cpu,
         }: super::args::CalibrateUserArgs,
-    ) -> Result<Self, InvalidArgsError> {
+    ) -> Result<CalibrateParams, InvalidArgsError> {
         let mut dipole_delays = match (delays, no_beam) {
             // Check that delays are sensible, regardless if we actually need
             // them.
@@ -244,7 +292,8 @@ impl CalibrateParams {
         // - uvfits files.
         // If none or multiple of these possibilities are met, then we must fail.
         let input_data_types = match data {
-            Some(strings) => InputDataTypes::new(&strings)?,
+            Some(strings) => InputDataTypes::new(&strings)
+                .map_err(|e| InvalidArgsError::InputFile(e.to_string()))?,
             None => return Err(InvalidArgsError::NoInputData),
         };
         let input_data: Box<dyn InputData> = match (
@@ -256,6 +305,13 @@ impl CalibrateParams {
         ) {
             // Valid input for reading raw data.
             (Some(meta), Some(gpuboxes), mwafs, None, None) => {
+                // Ensure that there's only one metafits.
+                let meta = if meta.len() > 1 {
+                    return Err(InvalidArgsError::MultipleMetafits(meta));
+                } else {
+                    meta.first()
+                };
+
                 let pfb_flavour = match pfb_flavour {
                     None => DEFAULT_PFB_FLAVOUR,
                     Some(s) => match PfbFlavour::from_str(&s.to_lowercase()) {
@@ -264,8 +320,8 @@ impl CalibrateParams {
                     },
                 };
 
-                let input_data = RawData::new(
-                    &meta,
+                let input_data = RawDataReader::new(
+                    meta,
                     &gpuboxes,
                     mwafs.as_deref(),
                     &mut dipole_delays,
@@ -290,14 +346,33 @@ impl CalibrateParams {
                 debug!("gpubox files: {:?}", &gpuboxes);
                 match mwafs {
                     Some(_) => info!("Using supplied mwaf flags"),
-                    None => warn!("No mwaf flags files supplied"),
+                    None => warn!("No mwaf flag files supplied"),
                 }
                 Box::new(input_data)
             }
 
             // Valid input for reading a measurement set.
             (meta, None, None, Some(ms), None) => {
-                let input_data = MS::new(&ms, meta.as_ref(), &mut dipole_delays)?;
+                // Only one MS is supported at the moment.
+                let ms: PathBuf = if ms.len() > 1 {
+                    return Err(InvalidArgsError::MultipleMeasurementSets(ms));
+                } else {
+                    ms.first().clone()
+                };
+
+                // Ensure that there's only one metafits.
+                let meta: Option<&PathBuf> = match meta.as_ref() {
+                    None => None,
+                    Some(m) => {
+                        if m.len() > 1 {
+                            return Err(InvalidArgsError::MultipleMetafits(m.clone()));
+                        } else {
+                            Some(m.first())
+                        }
+                    }
+                };
+
+                let input_data = MS::new(&ms, meta, &mut dipole_delays)?;
                 match input_data.get_obs_context().obsid {
                     Some(o) => info!(
                         "Calibrating obsid {} from measurement set {}",
@@ -313,12 +388,27 @@ impl CalibrateParams {
             }
 
             // Valid input for reading uvfits files.
-            (meta, None, None, None, Some(uvfits_strs)) => {
-                let input_data = match uvfits_strs.len() {
-                    0 => panic!("whatcha doin?"),
-                    1 => Uvfits::new(&uvfits_strs[0], meta.as_ref(), &mut dipole_delays)?,
-                    _ => todo!(),
+            (meta, None, None, None, Some(uvfits)) => {
+                // Only one uvfits is supported at the moment.
+                let uvfits: PathBuf = if uvfits.len() > 1 {
+                    return Err(InvalidArgsError::MultipleUvfits(uvfits));
+                } else {
+                    uvfits.first().clone()
                 };
+
+                // Ensure that there's only one metafits.
+                let meta: Option<&PathBuf> = match meta.as_ref() {
+                    None => None,
+                    Some(m) => {
+                        if m.len() > 1 {
+                            return Err(InvalidArgsError::MultipleMetafits(m.clone()));
+                        } else {
+                            Some(m.first())
+                        }
+                    }
+                };
+
+                let input_data = UvfitsReader::new(&uvfits, meta, &mut dipole_delays)?;
                 match input_data.get_obs_context().obsid {
                     Some(o) => info!(
                         "Calibrating obsid {} from uvfits {}",
@@ -419,13 +509,9 @@ impl CalibrateParams {
         };
 
         let timesteps_to_use = {
-            let input_data_unflagged_timesteps: Vec<usize> = obs_context
-                .unflagged_timestep_indices
-                .clone()
-                .into_iter()
-                .collect();
             match timesteps {
-                None => input_data_unflagged_timesteps,
+                None => Vec1::try_from_vec(obs_context.unflagged_timesteps.clone())
+                    .map_err(|_| InvalidArgsError::NoTimesteps)?,
                 Some(mut ts) => {
                     // Make sure there are no duplicates.
                     let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
@@ -435,16 +521,16 @@ impl CalibrateParams {
 
                     // Ensure that all specified timesteps are actually available.
                     for t in &ts {
-                        if !(0..obs_context.timesteps.len()).contains(t) {
+                        if !(0..obs_context.timestamps.len()).contains(t) {
                             return Err(InvalidArgsError::UnavailableTimestep {
                                 got: *t,
-                                last: obs_context.timesteps.len() - 1,
+                                last: obs_context.timestamps.len() - 1,
                             });
                         }
                     }
 
                     ts.sort_unstable();
-                    ts
+                    Vec1::try_from_vec(ts).map_err(|_| InvalidArgsError::NoTimesteps)?
                 }
             }
         };
@@ -478,11 +564,11 @@ impl CalibrateParams {
                     .collect::<Vec<_>>()
             );
         }
-        let mut tile_flags: HashSet<usize> = match tile_flags {
+        let mut flagged_tiles: Vec<usize> = match tile_flags {
             Some(flags) => {
                 // We need to convert the strings into antenna indices. The
                 // strings are either indicies themselves or antenna names.
-                let mut tile_flags = HashSet::new();
+                let mut flagged_tiles = HashSet::new();
 
                 for flag in flags {
                     // Try to parse a naked number.
@@ -494,7 +580,7 @@ impl CalibrateParams {
                                     max: total_num_tiles - 1,
                                 });
                             }
-                            tile_flags.insert(n);
+                            flagged_tiles.insert(n);
                         }
                         None => {
                             // Check if this is an antenna name.
@@ -507,20 +593,22 @@ impl CalibrateParams {
                                 // If there are no matches, complain that
                                 // the user input is no good.
                                 None => return Err(InvalidArgsError::BadTileFlag(flag)),
-                                Some((i, _)) => tile_flags.insert(i),
+                                Some((i, _)) => flagged_tiles.insert(i),
                             };
                         }
                     }
                 }
 
-                tile_flags
+                let mut flagged_tiles: Vec<_> = flagged_tiles.into_iter().collect();
+                flagged_tiles.sort_unstable();
+                flagged_tiles
             }
-            None => HashSet::new(),
+            None => vec![],
         };
         if !ignore_input_data_tile_flags {
             // Add tiles that have already been flagged by the input data.
-            for &obs_tile_flag in &obs_context.tile_flags {
-                tile_flags.insert(obs_tile_flag);
+            for &obs_tile_flag in &obs_context.flagged_tiles {
+                flagged_tiles.push(obs_tile_flag);
             }
         }
 
@@ -537,74 +625,99 @@ impl CalibrateParams {
             }
         }
 
+        // Set up the timeblocks.
+        let time_average_factor = parse_time_average_factor(
+            obs_context.time_res,
+            time_average_factor,
+            *timesteps_to_use.last() - *timesteps_to_use.first() + 1,
+        )
+        .map_err(|e| match e {
+            AverageFactorError::Zero => InvalidArgsError::CalTimeFactorZero,
+            AverageFactorError::NotInteger => InvalidArgsError::CalTimeFactorNotInteger,
+            AverageFactorError::NotIntegerMultiple { out, inp } => {
+                InvalidArgsError::CalTimeResNotMulitple { out, inp }
+            }
+            AverageFactorError::Parse(e) => InvalidArgsError::ParseCalTimeAverageFactor(e),
+        })?;
+        // Check that the factor is not too big.
+        let time_average_factor = if time_average_factor > timesteps_to_use.len() {
+            warn!(
+                "Cannot average {} timesteps during calibration; only {} are being used. Capping.",
+                time_average_factor,
+                timesteps_to_use.len()
+            );
+            timesteps_to_use.len()
+        } else {
+            time_average_factor
+        };
+
+        let timeblocks = timesteps_to_timeblocks(
+            &obs_context.timestamps,
+            time_average_factor,
+            &timesteps_to_use,
+        );
+        // There must be at least one timeblock for calibration.
+        let timeblocks =
+            Vec1::try_from_vec(timeblocks).map_err(|_| InvalidArgsError::NoTimesteps)?;
+
+        // Set up frequency information.
         // Determine all of the fine-channel flags.
-        let mut fine_chan_flags: HashSet<usize> = match fine_chan_flags {
+        let mut flagged_fine_chans: HashSet<usize> = match fine_chan_flags {
             Some(flags) => flags.into_iter().collect(),
             None => HashSet::new(),
         };
         for (i, _) in freq_context.coarse_chan_nums.iter().enumerate() {
             // Add the per-coarse-channel flags to the observation-wide flags.
             for f in &fine_chan_flags_per_coarse_chan {
-                fine_chan_flags.insert(f + freq_context.num_fine_chans_per_coarse_chan * i);
+                flagged_fine_chans.insert(f + freq_context.num_fine_chans_per_coarse_chan * i);
             }
         }
 
-        // Set up frequency information.
-        let total_num_fine_channels = freq_context.fine_chan_freqs.len();
-        let num_fine_chans_per_coarse_band =
-            total_num_fine_channels / freq_context.coarse_chan_freqs.len();
-        let num_unflagged_fine_chans_per_coarse_band =
-            num_fine_chans_per_coarse_band - fine_chan_flags_per_coarse_chan.len();
-        let mut unflagged_fine_chans = HashSet::new();
         let mut unflagged_fine_chan_freqs = vec![];
         for (&freq, chan_num) in freq_context
             .fine_chan_freqs
             .iter()
             .zip((0..freq_context.fine_chan_freqs.len()).into_iter())
         {
-            if !fine_chan_flags.contains(&chan_num) {
-                unflagged_fine_chans.insert(chan_num);
+            if !flagged_fine_chans.contains(&chan_num) {
                 unflagged_fine_chan_freqs.push(freq.round());
             }
         }
 
-        // let freq_average_factor = match (freq_context.native_fine_chan_width, freq_average_factor) {
-        //     (None, _) => {
-        //         // If the input data has unknown frequency resolution, it's
-        //         // because there's only one frequency.
-        //         1
-        //     }
-        //     (Some(_), None) => {
-        //         // "None" indicates we should follow default behaviour: Each
-        //         // fine-frequency channel is calibrated independently.
-        //         1
-        //     }
-        //     (_, Some(f)) => {
-        //         // In all other cases, just use the input as is, but check that
-        //         // it's not too big.
-        //         if f > unflagged_fine_chans.len() {
-        //             warn!(
-        //                 "Cannot average {} channels; only {} are being used. Capping.",
-        //                 f,
-        //                 unflagged_fine_chans.len()
-        //             );
-        //             unflagged_fine_chans.len()
-        //         } else {
-        //             f
-        //         }
-        //     }
-        // };
-
-        let freq_struct = FrequencyParams {
-            freq_average_factor: 1,
-            num_fine_chans: total_num_fine_channels,
-            num_unflagged_fine_chans_per_coarse_band,
-            num_unflagged_fine_chans: num_unflagged_fine_chans_per_coarse_band
-                * freq_context.coarse_chan_freqs.len(),
-            unflagged_fine_chans,
-            unflagged_fine_chan_freqs,
-            fine_chan_flags,
+        // Set up the chanblocks.
+        let freq_average_factor =
+            parse_freq_average_factor(freq_context.freq_res, freq_average_factor, 1).map_err(
+                |e| match e {
+                    AverageFactorError::Zero => InvalidArgsError::CalFreqFactorZero,
+                    AverageFactorError::NotInteger => InvalidArgsError::CalFreqFactorNotInteger,
+                    AverageFactorError::NotIntegerMultiple { out, inp } => {
+                        InvalidArgsError::CalFreqResNotMulitple { out, inp }
+                    }
+                    AverageFactorError::Parse(e) => InvalidArgsError::ParseCalFreqAverageFactor(e),
+                },
+            )?;
+        // Check that the factor is not too big.
+        let freq_average_factor = if freq_average_factor > unflagged_fine_chan_freqs.len() {
+            warn!(
+                "Cannot average {} channels; only {} are being used. Capping.",
+                freq_average_factor,
+                unflagged_fine_chan_freqs.len()
+            );
+            unflagged_fine_chan_freqs.len()
+        } else {
+            freq_average_factor
         };
+
+        // dbg!(&flagged_fine_chans);
+        let (chanblocks, flagged_chanblocks) = channels_to_chanblocks(
+            &freq_context.fine_chan_freqs,
+            freq_context.freq_res,
+            freq_average_factor,
+            &flagged_fine_chans,
+        );
+        // There must be at least one chanblock for calibration.
+        let chanblocks =
+            Vec1::try_from_vec(chanblocks).map_err(|_| InvalidArgsError::NoChannels)?;
 
         let mut source_list: SourceList = {
             // Handle the source list argument.
@@ -630,10 +743,7 @@ impl CalibrateParams {
             let (sl, sl_type) =
                 match mwa_hyperdrive_srclist::read::read_source_list_file(&sl_pb, sl_type) {
                     Ok((sl, sl_type)) => (sl, sl_type),
-                    Err(e) => {
-                        eprintln!("Error when trying to read source list:");
-                        return Err(InvalidArgsError::from(e));
-                    }
+                    Err(e) => return Err(InvalidArgsError::from(e)),
                 };
 
             // If the user didn't specify the source list type, then print out
@@ -655,7 +765,7 @@ impl CalibrateParams {
         // (if applicable).
         let precession_info = precess_time(
             obs_context.phase_centre,
-            obs_context.timesteps[0],
+            obs_context.timestamps[0],
             array_longitude,
             array_latitude,
         );
@@ -701,33 +811,6 @@ impl CalibrateParams {
             num_list_types - new_num_list_types
         );
 
-        let time_average_factor = match (obs_context.time_res, time_average_factor) {
-            (None, _) => {
-                // If the input data has unknown time resolution, it's because
-                // there's only one timestep.
-                1
-            }
-            (Some(_), None) => {
-                // "None" indicates we should follow default behaviour: All data
-                // should be averaged in time.
-                timesteps_to_use.len()
-            }
-            (_, Some(f)) => {
-                // In all other cases, just use the input as is, but check that
-                // it's not too big.
-                if f > timesteps_to_use.len() {
-                    warn!(
-                        "Cannot average {} timesteps; only {} are being used. Capping.",
-                        f,
-                        timesteps_to_use.len()
-                    );
-                    timesteps_to_use.len()
-                } else {
-                    f
-                }
-            }
-        };
-
         // Handle output visibility arguments.
         let (output_vis_time_average_factor, output_vis_freq_average_factor) =
             if output_vis_filenames.is_empty() {
@@ -736,18 +819,18 @@ impl CalibrateParams {
                 match (output_vis_time_average, output_vis_freq_average) {
                     (Some(_), Some(_)) => {
                         warn!("Not writing out calibrated visibilities, but");
-                        warn!("    \"output_vis_time_average_factor\" and");
-                        warn!("    \"output_vis_freq_average_factor\" are set.");
+                        warn!("    \"output_vis_time_average\" and");
+                        warn!("    \"output_vis_freq_average\" are set.");
                     }
 
                     (Some(_), None) => {
                         warn!("Not writing out calibrated visibilities, but");
-                        warn!("    \"output_vis_time_average_factor\" is set.");
+                        warn!("    \"output_vis_time_average\" is set.");
                     }
 
                     (None, Some(_)) => {
                         warn!("Not writing out calibrated visibilities, but");
-                        warn!("    \"output_vis_freq_average_factor\" is set.");
+                        warn!("    \"output_vis_freq_average\" is set.");
                     }
 
                     (None, None) => (),
@@ -756,93 +839,42 @@ impl CalibrateParams {
             } else {
                 // Parse and verify user input (specified resolutions must
                 // evenly divide the input data's resolutions).
-                let time_factor = match output_vis_time_average.map(|f| parse_time(&f)) {
-                    None => 1.0,
-                    Some(Ok((factor, TimeFormat::NoUnit))) => {
-                        // Reject non-integer floats.
-                        if factor.fract().abs() > 1e-6 {
-                            return Err(InvalidArgsError::OutputVisTimeFactorNotInteger);
-                        }
-                        // Zero is not allowed.
-                        if factor < f64::EPSILON {
-                            return Err(InvalidArgsError::OutputVisTimeAverageFactorZero);
-                        }
+                let time_factor = parse_time_average_factor(
+                    Some(time_average_factor as f64),
+                    output_vis_time_average,
+                    1,
+                )
+                .map_err(|e| match e {
+                    AverageFactorError::Zero => InvalidArgsError::OutputVisTimeAverageFactorZero,
+                    AverageFactorError::NotInteger => {
+                        InvalidArgsError::OutputVisTimeFactorNotInteger
+                    }
+                    AverageFactorError::NotIntegerMultiple { out, inp } => {
+                        InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
+                    }
+                    AverageFactorError::Parse(e) => {
+                        InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
+                    }
+                })?;
+                let freq_factor = parse_freq_average_factor(
+                    Some(freq_average_factor as f64),
+                    output_vis_freq_average,
+                    1,
+                )
+                .map_err(|e| match e {
+                    AverageFactorError::Zero => InvalidArgsError::OutputVisFreqAverageFactorZero,
+                    AverageFactorError::NotInteger => {
+                        InvalidArgsError::OutputVisFreqFactorNotInteger
+                    }
+                    AverageFactorError::NotIntegerMultiple { out, inp } => {
+                        InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
+                    }
+                    AverageFactorError::Parse(e) => {
+                        InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
+                    }
+                })?;
 
-                        factor
-                    }
-                    Some(Ok((out_res, time_format))) => {
-                        let out_res_s = out_res
-                            * match time_format {
-                                TimeFormat::S | TimeFormat::NoUnit => 1.0,
-                                TimeFormat::Ms => 1000.0,
-                            };
-                        // If the time resolution isn't determined, it's because
-                        // there's only one timestep. In this case, it doesn't
-                        // matter what the output time resolution is; only one
-                        // timestep goes into it.
-                        let ratio = out_res_s / obs_context.time_res.unwrap_or(1.0);
-                        // Reject non-integer floats.
-                        if ratio.fract().abs() > 1e-6 {
-                            return Err(InvalidArgsError::OutputVisTimeResNotMulitple {
-                                out: out_res_s,
-                                inp: obs_context.time_res.unwrap(),
-                            });
-                        }
-                        // Zero is not allowed.
-                        if ratio < f64::EPSILON {
-                            return Err(InvalidArgsError::OutputVisTimeResZero);
-                        }
-
-                        ratio
-                    }
-                    Some(Err(e)) => {
-                        return Err(InvalidArgsError::ParseOutputVisTimeAverageFactor(e))
-                    }
-                };
-                let freq_factor = match output_vis_freq_average.map(|f| parse_freq(&f)) {
-                    None => 1.0,
-                    Some(Ok((factor, FreqFormat::NoUnit))) => {
-                        // Reject non-integer floats.
-                        if factor.fract().abs() > 1e-6 {
-                            return Err(InvalidArgsError::OutputVisFreqFactorNotInteger);
-                        }
-                        // Zero is not allowed.
-                        if factor < f64::EPSILON {
-                            return Err(InvalidArgsError::OutputVisFreqAverageFactorZero);
-                        }
-
-                        factor
-                    }
-                    Some(Ok((out_res, freq_format))) => {
-                        let out_res_hz = out_res
-                            * match freq_format {
-                                FreqFormat::Hz | FreqFormat::NoUnit => 1.0,
-                                FreqFormat::kHz => 1000.0,
-                            };
-                        // If the frequency resolution isn't determined, it's
-                        // because there's only one fine channel. In this case,
-                        // it doesn't matter what the output freq. resolution
-                        // is; only one channel goes into it.
-                        let ratio = out_res_hz / freq_context.native_fine_chan_width.unwrap_or(1.0);
-                        if ratio.fract().abs() > 1e-6 {
-                            return Err(InvalidArgsError::OutputVisFreqResNotMulitple {
-                                out: out_res_hz,
-                                inp: freq_context.native_fine_chan_width.unwrap(),
-                            });
-                        }
-                        // Zero is not allowed.
-                        if ratio < f64::EPSILON {
-                            return Err(InvalidArgsError::OutputVisFreqResZero);
-                        }
-
-                        ratio
-                    }
-                    Some(Err(e)) => {
-                        return Err(InvalidArgsError::ParseOutputVisFreqAverageFactor(e))
-                    }
-                };
-
-                (time_factor as usize, freq_factor as usize)
+                (time_factor, freq_factor)
             };
 
         let using_autos = if ignore_autos {
@@ -850,7 +882,7 @@ impl CalibrateParams {
         } else {
             obs_context.autocorrelations_present
         };
-        let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
+        let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
 
         let (unflagged_tile_xyzs, unflagged_tile_names): (Vec<XyzGeodetic>, Vec<String>) =
             obs_context
@@ -858,7 +890,7 @@ impl CalibrateParams {
                 .par_iter()
                 .zip(obs_context.tile_names.par_iter())
                 .enumerate()
-                .filter(|(tile_index, _)| !tile_flags.contains(tile_index))
+                .filter(|(tile_index, _)| !flagged_tiles.contains(tile_index))
                 .map(|(_, (xyz, name))| (*xyz, name.clone()))
                 .unzip();
 
@@ -950,16 +982,21 @@ impl CalibrateParams {
             stop_threshold = min_threshold;
         }
 
-        let params = Self {
+        let params = CalibrateParams {
             input_data,
             beam,
             source_list,
             model_file,
-            tile_flags,
+            flagged_tiles,
             baseline_weights,
-            freq: freq_struct,
             time_average_factor,
+            timeblocks,
             timesteps: timesteps_to_use,
+            freq_average_factor,
+            chanblocks,
+            flagged_chanblocks,
+            unflagged_fine_chan_freqs,
+            flagged_fine_chans,
             tile_to_unflagged_cross_baseline_map: tile_baseline_maps
                 .tile_to_unflagged_cross_baseline_map,
             unflagged_cross_baseline_to_tile_map: tile_baseline_maps
@@ -977,9 +1014,13 @@ impl CalibrateParams {
             output_vis_time_average_factor,
             output_vis_freq_average_factor,
             #[cfg(feature = "cuda")]
-            cpu_vis_gen: cpu,
+            use_cpu_for_modelling: cpu,
         };
-        params.log_param_info(&precession_info)?;
+        let extra_info = ExtraInfo {
+            precession_info,
+            params: &params,
+        };
+        extra_info.log_info()?;
         Ok(params)
     }
 
@@ -989,6 +1030,38 @@ impl CalibrateParams {
 
     pub(crate) fn get_freq_context(&self) -> &FreqContext {
         self.input_data.get_freq_context()
+    }
+
+    pub(crate) fn get_total_num_tiles(&self) -> usize {
+        self.get_obs_context().tile_xyzs.len()
+    }
+
+    pub(crate) fn get_num_unflagged_tiles(&self) -> usize {
+        self.get_obs_context().tile_xyzs.len() - self.flagged_tiles.len()
+    }
+
+    /// The number of calibration timesteps.
+    pub(crate) fn get_num_timesteps(&self) -> usize {
+        self.timeblocks
+            .iter()
+            .fold(0, |acc, tb| acc + tb.range.len())
+    }
+
+    /// The number of unflagged baselines, including auto-correlation
+    /// "baselines" if these are included.
+    pub(crate) fn get_num_unflagged_baselines(&self) -> usize {
+        let n = self.unflagged_tile_xyzs.len();
+        if self.using_autos {
+            (n * (n + 1)) / 2
+        } else {
+            (n * (n - 1)) / 2
+        }
+    }
+
+    /// The number of unflagged cross-correlation baselines.
+    pub(crate) fn get_num_unflagged_cross_baselines(&self) -> usize {
+        let n = self.unflagged_tile_xyzs.len();
+        (n * (n - 1)) / 2
     }
 
     pub(crate) fn read_crosses(
@@ -1002,22 +1075,33 @@ impl CalibrateParams {
             weights,
             timestep,
             &self.tile_to_unflagged_cross_baseline_map,
-            &self.freq.fine_chan_flags,
+            &self.flagged_fine_chans,
         )
     }
+}
 
-    fn log_param_info(&self, precession_info: &PrecessionInfo) -> Result<(), InvalidArgsError> {
-        let obs_context = self.input_data.get_obs_context();
-        let freq_context = self.input_data.get_freq_context();
+/// Extra metadata that is useful to report.
+struct ExtraInfo<'a> {
+    precession_info: PrecessionInfo,
+
+    /// The rest of the parameters.
+    params: &'a CalibrateParams,
+}
+
+impl<'a> ExtraInfo<'a> {
+    fn log_info(self) -> Result<(), InvalidArgsError> {
+        let params = self.params;
+        let obs_context = params.input_data.get_obs_context();
+        let freq_context = params.input_data.get_freq_context();
 
         info!(
             "Array longitude, latitude:     ({:.4}°, {:.4}°)",
-            self.array_longitude.to_degrees(),
-            self.array_latitude.to_degrees()
+            params.array_longitude.to_degrees(),
+            params.array_latitude.to_degrees()
         );
         info!(
             "Array latitude (J2000):                    {:.4}°",
-            precession_info.array_latitude_j2000.to_degrees()
+            self.precession_info.array_latitude_j2000.to_degrees()
         );
         info!(
             "Phase centre (J2000):          ({:.4}°, {:.4}°)",
@@ -1033,20 +1117,20 @@ impl CalibrateParams {
         }
         info!(
             "LMST of first timestep:         {:.4}°",
-            precession_info.lmst.to_degrees()
+            self.precession_info.lmst.to_degrees()
         );
         info!(
             "LMST of first timestep (J2000): {:.4}°",
-            precession_info.lmst_j2000.to_degrees()
+            self.precession_info.lmst_j2000.to_degrees()
         );
 
-        let total_num_tiles = obs_context.tile_xyzs.len();
+        let total_num_tiles = params.get_total_num_tiles();
+        let num_unflagged_tiles = params.get_num_unflagged_tiles();
         info!("Total number of tiles:           {}", total_num_tiles);
-        let num_unflagged_tiles = total_num_tiles - self.tile_flags.len();
         info!("Number of unflagged tiles:       {}", num_unflagged_tiles);
         {
             // Print out the tile flags. Use a vector to sort ascendingly.
-            let mut tile_flags = self.tile_flags.iter().collect::<Vec<_>>();
+            let mut tile_flags = params.flagged_tiles.iter().collect::<Vec<_>>();
             tile_flags.sort_unstable();
             info!("Tile flags: {:?}", tile_flags);
         }
@@ -1060,7 +1144,7 @@ impl CalibrateParams {
                 .iter()
                 .enumerate()
                 .map(|(i, name)| {
-                    let flagged = self.tile_flags.contains(&i);
+                    let flagged = params.flagged_tiles.contains(&i);
                     (i, name, if flagged { "  flagged" } else { "unflagged" })
                 })
                 .for_each(|(i, name, status)| {
@@ -1070,15 +1154,12 @@ impl CalibrateParams {
 
         info!(
             "{}",
-            range_or_comma_separated(
-                &obs_context.all_timestep_indices,
-                Some("Available timesteps:")
-            )
+            range_or_comma_separated(&obs_context.all_timesteps, Some("Available timesteps:"))
         );
         info!(
             "{}",
             range_or_comma_separated(
-                &obs_context.unflagged_timestep_indices,
+                &obs_context.unflagged_timesteps,
                 Some("Unflagged timesteps:")
             )
         );
@@ -1087,26 +1168,23 @@ impl CalibrateParams {
         // as a range rather than individual indicies.
         info!(
             "{}",
-            range_or_comma_separated(&self.timesteps, Some("Using timesteps:    "))
+            range_or_comma_separated(&self.params.timesteps, Some("Using timesteps:    "))
         );
 
-        match self.timesteps.as_slice() {
-            [] => {
-                info!("No timesteps being used!");
-                return Err(InvalidArgsError::NoTimesteps);
-            }
+        match self.params.timesteps.as_slice() {
+            [] => unreachable!(),
             [t] => info!(
                 "Only timestep (GPS): {:.2}",
-                epoch_as_gps_seconds(obs_context.timesteps[*t])
+                epoch_as_gps_seconds(obs_context.timestamps[*t])
             ),
             [t0, .., tn] => {
                 info!(
                     "First timestep (GPS): {:.2}",
-                    epoch_as_gps_seconds(obs_context.timesteps[*t0])
+                    epoch_as_gps_seconds(obs_context.timestamps[*t0])
                 );
                 info!(
                     "Last timestep  (GPS): {:.2}",
-                    epoch_as_gps_seconds(obs_context.timesteps[*tn])
+                    epoch_as_gps_seconds(obs_context.timestamps[*tn])
                 );
             }
         }
@@ -1117,7 +1195,7 @@ impl CalibrateParams {
             }
             None => info!("Input data time resolution unknown"),
         }
-        match freq_context.native_fine_chan_width {
+        match freq_context.freq_res {
             Some(freq_res) => {
                 info!("Input data freq. resolution: {:.2} kHz", freq_res / 1e3);
             }
@@ -1126,15 +1204,19 @@ impl CalibrateParams {
 
         info!(
             "Total number of fine channels:     {}",
-            self.freq.num_fine_chans
+            freq_context.fine_chan_freqs.len()
         );
         info!(
             "Number of unflagged fine channels: {}",
-            self.freq.unflagged_fine_chans.len()
+            params.unflagged_fine_chan_freqs.len()
         );
         if log_enabled!(Debug) {
-            let mut unflagged_fine_chans: Vec<_> = self.freq.unflagged_fine_chans.iter().collect();
-            unflagged_fine_chans.sort_unstable();
+            let unflagged_fine_chans: Vec<_> = freq_context
+                .fine_chan_range
+                .clone()
+                .into_iter()
+                .filter(|i_chan| !params.flagged_fine_chans.contains(i_chan))
+                .collect();
             match unflagged_fine_chans.as_slice() {
                 [] => unreachable!(), // Handled by data-reading code.
                 [f] => debug!("Only unflagged fine-channel: {}", f),
@@ -1149,11 +1231,11 @@ impl CalibrateParams {
             obs_context.fine_chan_flags_per_coarse_chan
         );
         {
-            let mut fine_chan_flags_vec = self.freq.fine_chan_flags.iter().collect::<Vec<_>>();
+            let mut fine_chan_flags_vec = params.flagged_fine_chans.iter().collect::<Vec<_>>();
             fine_chan_flags_vec.sort_unstable();
             debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
         }
-        match self.freq.unflagged_fine_chan_freqs.as_slice() {
+        match params.unflagged_fine_chan_freqs.as_slice() {
             [] => return Err(InvalidArgsError::NoChannels),
             [f] => info!("Only unflagged fine-channel frequency: {:.2} MHz", f / 1e6),
             [f_0, .., f_n] => {
@@ -1170,26 +1252,26 @@ impl CalibrateParams {
 
         info!(
             "Averaging {} timesteps into each timeblock",
-            self.time_average_factor,
+            params.time_average_factor,
         );
         info!(
             "Averaging {} fine-freq. channels into each chanblock",
-            self.freq.freq_average_factor,
+            params.freq_average_factor,
         );
         info!(
             "Number of calibration timeblocks: {}",
-            self.get_num_timeblocks()
+            params.timeblocks.len()
         );
         info!(
             "Number of calibration chanblocks: {}",
-            self.get_num_chanblocks()
+            params.chanblocks.len()
         );
 
-        let (num_points, num_gaussians, num_shapelets) = self.source_list.get_counts();
+        let (num_points, num_gaussians, num_shapelets) = params.source_list.get_counts();
         let num_components = num_points + num_gaussians + num_shapelets;
         info!(
             "Using {} sources with a total of {} components",
-            self.source_list.len(),
+            params.source_list.len(),
             num_components
         );
         info!("{} point components", num_points);
@@ -1198,21 +1280,23 @@ impl CalibrateParams {
         if num_components > 10000 {
             warn!("Using more than 10,000 components!");
         }
-        trace!("Using sources: {:?}", self.source_list.keys());
+        trace!("Using sources: {:?}", params.source_list.keys());
 
-        if !self.output_solutions_filenames.is_empty() {
+        if !params.output_solutions_filenames.is_empty() {
             info!(
                 "Writing calibration solutions to: {}",
-                self.output_solutions_filenames
+                params
+                    .output_solutions_filenames
                     .iter()
                     .map(|(_, pb)| pb.display())
                     .join(", ")
             );
         }
-        if !self.output_vis_filenames.is_empty() {
+        if !params.output_vis_filenames.is_empty() {
             info!(
                 "Writing calibrated visibilities to: {}",
-                self.output_vis_filenames
+                params
+                    .output_vis_filenames
                     .iter()
                     .map(|(_, pb)| pb.display())
                     .join(", ")
@@ -1222,51 +1306,31 @@ impl CalibrateParams {
             if let Some(tr) = obs_context.time_res {
                 info!(
                     "    {}x in time  ({}s)",
-                    self.output_vis_time_average_factor,
-                    tr * self.output_vis_time_average_factor as f64
+                    params.output_vis_time_average_factor,
+                    tr * params.output_vis_time_average_factor as f64
                 );
             } else {
                 info!(
                     "    {}x (only one timestep)",
-                    self.output_vis_time_average_factor
+                    params.output_vis_time_average_factor
                 );
             }
 
-            if let Some(fr) = freq_context.native_fine_chan_width {
+            if let Some(fr) = freq_context.freq_res {
                 info!(
                     "    {}x in freq. ({}kHz)",
-                    self.output_vis_freq_average_factor,
-                    fr * self.output_vis_freq_average_factor as f64 / 1000.0
+                    params.output_vis_freq_average_factor,
+                    fr * params.output_vis_freq_average_factor as f64 / 1000.0
                 );
             } else {
                 info!(
                     "    {}x (only one fine channel)",
-                    self.output_vis_freq_average_factor
+                    params.output_vis_freq_average_factor
                 );
             }
         }
 
         Ok(())
-    }
-
-    pub(crate) fn get_num_timeblocks(&self) -> usize {
-        (self.timesteps.len() as f64 / self.time_average_factor as f64).ceil() as _
-    }
-
-    pub(crate) fn get_num_chanblocks(&self) -> usize {
-        (self.freq.unflagged_fine_chans.len() as f64 / self.freq.freq_average_factor as f64).ceil()
-            as _
-    }
-
-    /// The number of unflagged baselines, including auto-correlation
-    /// "baselines" if these are included.
-    pub(crate) fn get_num_unflagged_baselines(&self) -> usize {
-        let n = self.unflagged_tile_xyzs.len();
-        if self.using_autos {
-            (n * (n + 1)) / 2
-        } else {
-            (n * (n - 1)) / 2
-        }
     }
 }
 

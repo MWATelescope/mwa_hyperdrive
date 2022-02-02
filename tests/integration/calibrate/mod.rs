@@ -75,14 +75,14 @@ fn test_1090008640_woden() {
         CalibrationSolutions::read_solutions_from_ext(&solutions_path, metafits.as_ref()).unwrap();
     assert_eq!(bin_sols.di_jones.dim(), (1, 128, 32));
     assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*bin_sols.start_timestamps.first().unwrap()),
+        epoch_as_gps_seconds(*bin_sols.average_timestamps.first().unwrap()),
         // 1090008642 is the obsid + 2s, which is the centroid of the first and
         // only timestep.
         1090008642.0,
         epsilon = 1e-3
     );
     assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*bin_sols.start_timestamps.last().unwrap()),
+        epoch_as_gps_seconds(*bin_sols.average_timestamps.last().unwrap()),
         1090008642.0,
         epsilon = 1e-3
     );
@@ -108,18 +108,18 @@ fn test_1090008640_woden() {
         .ok();
     assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
     let (_, stderr) = get_cmd_output(cmd);
-    assert!(stderr.is_empty());
+    assert!(stderr.is_empty(), "{}", stderr);
 
     let hyp_sols =
         CalibrationSolutions::read_solutions_from_ext(&solutions_path, metafits).unwrap();
     assert_eq!(hyp_sols.di_jones.dim(), bin_sols.di_jones.dim());
     assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*hyp_sols.start_timestamps.first().unwrap()),
+        epoch_as_gps_seconds(*hyp_sols.average_timestamps.first().unwrap()),
         1090008642.0,
         epsilon = 1e-3
     );
     assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*hyp_sols.start_timestamps.last().unwrap()),
+        epoch_as_gps_seconds(*hyp_sols.average_timestamps.last().unwrap()),
         1090008642.0,
         epsilon = 1e-3
     );

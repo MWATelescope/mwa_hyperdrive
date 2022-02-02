@@ -5,15 +5,18 @@
 //! Code to handle reading from raw MWA files.
 
 mod error;
+mod helpers;
 #[cfg(test)]
 mod tests;
 
 pub use error::*;
+use helpers::*;
 
 use std::collections::HashSet;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use hifitime::Epoch;
 use log::{debug, info, trace, warn};
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
@@ -33,10 +36,10 @@ use crate::{
     pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime::Epoch, log, marlu, mwalib, ndarray, rayon};
+use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray, rayon};
 
 /// Raw MWA data, i.e. gpubox files.
-pub(crate) struct RawData {
+pub(crate) struct RawDataReader {
     /// Observation metadata.
     obs_context: ObsContext,
 
@@ -64,8 +67,9 @@ pub(crate) struct RawData {
     aoflags: Option<AOFlags>,
 }
 
-impl RawData {
+impl RawDataReader {
     /// Create a new instance of the `InputData` trait with raw MWA data.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<T: AsRef<Path>>(
         metadata: &T,
         gpuboxes: &[T],
@@ -75,15 +79,19 @@ impl RawData {
         digital_gains: bool,
         cable_length_correction: bool,
         geometric_correction: bool,
-    ) -> Result<Self, NewRawError> {
-        let meta_pb = metadata.as_ref();
-        let gpubox_pbs: Vec<&Path> = gpuboxes.iter().map(|p| p.as_ref()).collect();
+    ) -> Result<RawDataReader, RawReadError> {
+        let meta_pb = metadata.as_ref().to_path_buf();
+        let gpubox_pbs: Vec<PathBuf> = gpuboxes.iter().map(|p| p.as_ref().to_path_buf()).collect();
         trace!("Using metafits: {}", meta_pb.display());
         trace!("Using gpubox files: {:#?}", gpubox_pbs);
 
         trace!("Creating mwalib context");
-        let mwalib_context = CorrelatorContext::new(&meta_pb, &gpubox_pbs)?;
+        let mwalib_context = get_mwalib_correlator_context(meta_pb, gpubox_pbs)?;
         let metafits_context = &mwalib_context.metafits_context;
+
+        let all_timesteps = Vec1::try_from_vec(mwalib_context.provided_timestep_indices.clone())
+            .map_err(|_| RawReadError::NoTimesteps)?;
+
         let total_num_tiles = metafits_context.num_ants;
         trace!("There are {} total tiles", total_num_tiles);
 
@@ -99,13 +107,13 @@ impl RawData {
         let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
         debug!("There are {} unflagged tiles", num_unflagged_tiles);
         if num_unflagged_tiles == 0 {
-            return Err(NewRawError::AllTilesFlagged);
+            return Err(RawReadError::AllTilesFlagged);
         }
 
         // Check that the tile flags are sensible.
         for &f in &tile_flags_set {
             if f > total_num_tiles - 1 {
-                return Err(NewRawError::InvalidTileFlag {
+                return Err(RawReadError::InvalidTileFlag {
                     got: f,
                     max: total_num_tiles - 1,
                 });
@@ -125,11 +133,11 @@ impl RawData {
             *dipole_delays = Delays::Full(metafits::get_dipole_delays(metafits_context));
         }
 
-        let mut tile_flags: Vec<usize> = tile_flags_set.into_iter().collect();
-        tile_flags.sort_unstable();
-        for &f in &tile_flags {
+        let mut flagged_tiles: Vec<usize> = tile_flags_set.into_iter().collect();
+        flagged_tiles.sort_unstable();
+        for &f in &flagged_tiles {
             if f > total_num_tiles - 1 {
-                return Err(NewRawError::InvalidTileFlag {
+                return Err(RawReadError::InvalidTileFlag {
                     got: f,
                     max: total_num_tiles - 1,
                 });
@@ -158,12 +166,12 @@ impl RawData {
                 (40000, true) => vec![0, 1, 30, 31],
                 (40000, false) => vec![0, 1, 16, 30, 31],
 
-                (f, _) => return Err(NewRawError::UnhandledFreqResolutionForFlags(f)),
+                (f, _) => return Err(RawReadError::UnhandledFreqResolutionForFlags(f)),
         };
 
         let time_res = Some(metafits_context.corr_int_time_ms as f64 / 1e3);
 
-        let timesteps: Vec<Epoch> = mwalib_context
+        let timestamps: Vec<Epoch> = mwalib_context
             .timesteps
             .iter()
             .map(|t| gps_to_epoch(t.gps_time_ms as f64 / 1e3))
@@ -211,7 +219,7 @@ impl RawData {
                     * metafits_context.num_corr_fine_chans_per_coarse,
             fine_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
-            native_fine_chan_width: Some(metafits_context.corr_fine_chan_width_hz as f64),
+            freq_res: Some(metafits_context.corr_fine_chan_width_hz as f64),
         };
 
         let phase_centre = RADec::new(
@@ -263,7 +271,7 @@ impl RawData {
         // frequency check when that's done.
         let pfb_gains = match (
             pfb_flavour,
-            (freq_context.native_fine_chan_width.unwrap() - 40000.0).abs() < f64::EPSILON,
+            (freq_context.freq_res.unwrap() - 40000.0).abs() < f64::EPSILON,
         ) {
             // Not using any gains.
             (PfbFlavour::None, _) => None,
@@ -292,7 +300,7 @@ impl RawData {
                     .gpubox_nums
                     .contains(&(gpubox_file.channel_identifier as u8))
                 {
-                    return Err(NewRawError::GpuboxFileMissingMwafFile(
+                    return Err(RawReadError::GpuboxFileMissingMwafFile(
                         gpubox_file.channel_identifier,
                     ));
                 }
@@ -352,14 +360,14 @@ impl RawData {
 
         let obs_context = ObsContext {
             obsid: Some(metafits_context.obs_id),
-            timesteps,
-            all_timestep_indices: mwalib_context.provided_timestep_indices.clone(),
-            unflagged_timestep_indices: mwalib_context.common_good_timestep_indices.clone(),
+            timestamps,
+            all_timesteps,
+            unflagged_timesteps: mwalib_context.common_good_timestep_indices.clone(),
             phase_centre,
             pointing_centre,
             tile_names,
             tile_xyzs,
-            tile_flags,
+            flagged_tiles,
             autocorrelations_present: true,
             fine_chan_flags_per_coarse_chan,
             dipole_gains: Some(dipole_gains),
@@ -368,7 +376,7 @@ impl RawData {
             array_latitude_rad: Some(MWA_LAT_RAD),
         };
 
-        Ok(Self {
+        Ok(RawDataReader {
             obs_context,
             freq_context,
             mwalib_context,
@@ -404,7 +412,7 @@ impl RawData {
             vis.axis_iter_mut(Axis(1))
                 .into_par_iter()
                 .enumerate()
-                .for_each(|(i_bl, mut vis_chan)| {
+                .for_each(|(i_bl, mut vis)| {
                     let (tile1, tile2) =
                         baseline_to_tiles(self.mwalib_context.metafits_context.num_ants, i_bl);
                     // The digital gains in a metafits file are listed in
@@ -432,28 +440,26 @@ impl RawData {
                         // Discard every second RF input; the digital gains are
                         // the same for both.
                         .filter(|rf| rf.pol == Pol::X)
-                        .enumerate()
-                        .filter(|(i, _)| *i == tile1 || *i == tile2)
-                        .map(|(_, rf)| &rf.digital_gains)
+                        // RFs are ordered by increasing antenna number. So
+                        // tile1 always comes before tile2.
+                        .filter(|rf| rf.ant == tile1 as u32 || rf.ant == tile2 as u32)
+                        .map(|rf| &rf.digital_gains)
                         .enumerate()
                         .for_each(|(i, rf)| tile_gains[i] = rf);
 
-                    vis_chan.iter_mut().enumerate().for_each(|(i_chan, v)| {
-                        let mut gain = tile_gains[0][i_chan
+                    vis.iter_mut().enumerate().for_each(|(i_chan, vis)| {
+                        let i_cc = i_chan
                             / self
                                 .mwalib_context
                                 .metafits_context
-                                .num_corr_fine_chans_per_coarse];
+                                .num_corr_fine_chans_per_coarse;
+                        let mut gain = tile_gains[0][i_cc];
                         let i = if tile1 != tile2 { 1 } else { 0 };
-                        gain *= tile_gains[i][i_chan
-                            / self
-                                .mwalib_context
-                                .metafits_context
-                                .num_corr_fine_chans_per_coarse];
+                        gain *= tile_gains[i][i_cc];
 
                         // Do the multiplication at double precision.
-                        let vd: Jones<f64> = Jones::from(*v) / gain as f64;
-                        *v = Jones::from(vd);
+                        let vd: Jones<f64> = Jones::from(*vis) / gain as f64;
+                        *vis = Jones::from(vd);
                     });
                 });
         }
@@ -531,7 +537,7 @@ impl RawData {
                 let time_res = self.obs_context.time_res.unwrap();
                 let flags_start = aoflags.start_time_milli as f64 / 1e3;
                 let flags_end = flags_start + aoflags.num_time_steps as f64 * time_res;
-                let gps = epoch_as_gps_seconds(self.obs_context.timesteps[timestep]);
+                let gps = epoch_as_gps_seconds(self.obs_context.timestamps[timestep]);
                 if !(flags_start..flags_end).contains(&gps) {
                     return Err(ReadInputDataError::MwafFlagsMissingForTimestep { timestep, gps });
                 }
@@ -581,6 +587,7 @@ impl RawData {
             &timestep_range,
             &coarse_chan_range,
             None,
+            false,
         )?;
         let weight_factor = birli::flags::get_weight_factor(&self.mwalib_context);
         let weights = birli::flags::flag_to_weight_array(flags.view(), weight_factor);
@@ -589,7 +596,7 @@ impl RawData {
         if !self.mwalib_context.metafits_context.cable_delays_applied
             && self.cable_length_correction
         {
-            birli::correct_cable_lengths(&self.mwalib_context, &mut vis, &coarse_chan_range);
+            birli::correct_cable_lengths(&self.mwalib_context, &mut vis, &coarse_chan_range, false);
         }
         match (
             self.mwalib_context
@@ -607,6 +614,7 @@ impl RawData {
                 &coarse_chan_range,
                 None,
                 Some(self.obs_context.phase_centre),
+                false,
             ),
 
             // Nothing to do; metafits indicates delay corrections have been
@@ -623,21 +631,8 @@ impl RawData {
         let mut vis = vis.remove_axis(Axis(0));
         let mut weights = weights.remove_axis(Axis(0));
 
-        // Apply the weights to the just-read-in visibilities. We don't care for
-        // negative weights; they just signal that the visibilities should be
-        // flagged.
-        ndarray::Zip::from(&mut vis)
-            .and(&mut weights)
-            .par_for_each(|v, w| {
-                if *w < 0.0 {
-                    *w = 0.0;
-                }
-                // Do the multiplication at double precision.
-                let vd: Jones<f64> = Jones::from(*v) * *w as f64;
-                *v = Jones::from(vd);
-            });
         // TODO: It's (probably) a lot more efficient to traverse the
-        // visibilities once, applying weights, PFB gains and digital gains all
+        // visibilities once, applying PFB gains, digital gains and weights all
         // at the same time.
         self.apply_pfb_gains(vis.view_mut());
         self.apply_digital_gains(vis.view_mut());
@@ -741,10 +736,10 @@ struct CrossData<'a, 'b, 'c> {
 struct AutoData<'a, 'b, 'c> {
     data_array: ArrayViewMut2<'a, Jones<f32>>,
     weights_array: ArrayViewMut2<'b, f32>,
-    flagged_tiles: &'c HashSet<usize>,
+    flagged_tiles: &'c [usize],
 }
 
-impl InputData for RawData {
+impl InputData for RawDataReader {
     fn get_obs_context(&self) -> &ObsContext {
         &self.obs_context
     }
@@ -765,7 +760,7 @@ impl InputData for RawData {
         auto_weights_array: ArrayViewMut2<f32>,
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_tiles: &HashSet<usize>,
+        flagged_tiles: &[usize],
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         self.read_inner(
@@ -809,7 +804,7 @@ impl InputData for RawData {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        flagged_tiles: &HashSet<usize>,
+        flagged_tiles: &[usize],
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         self.read_inner(

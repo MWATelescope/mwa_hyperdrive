@@ -29,7 +29,7 @@ use crate::{
 use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
 
-pub(crate) struct Uvfits {
+pub(crate) struct UvfitsReader {
     /// Observation metadata.
     obs_context: ObsContext,
 
@@ -49,20 +49,23 @@ pub(crate) struct Uvfits {
     step: usize,
 }
 
-impl Uvfits {
+impl UvfitsReader {
     /// Verify and populate metadata associated with this measurement set. TODO:
     /// Use the metafits to get dead dipole info.
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
     pub(crate) fn new<T: AsRef<Path>>(
-        uvfits: &T,
-        metafits: Option<&T>,
+        uvfits: T,
+        metafits: Option<T>,
         dipole_delays: &mut Delays,
-    ) -> Result<Self, UvfitsReadError> {
-        // If a metafits file was provided, we _may_ use it. Get a _potential_
-        // mwalib object ready.
-        let mut mwalib = None;
+    ) -> Result<UvfitsReader, UvfitsReadError> {
+        // If a metafits file was provided, get an mwalib object ready.
+        // TODO: Let the user supply the MWA version.
+        let mwalib_context = match metafits {
+            None => None,
+            Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
+        };
 
         // The uvfits argument could be a glob. If the specified argument can't
         // be found as a file, treat it as a glob and expand it to find a match.
@@ -141,11 +144,8 @@ impl Uvfits {
         };
 
         // Get the dipole delays and the pointing centre (if possible).
-        let pointing_centre: Option<RADec> = match metafits {
-            Some(meta) => {
-                // Populate `mwalib` if it isn't already populated.
-                // TODO: Let the user supply the MWA version.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
+        let pointing_centre: Option<RADec> = match &mwalib_context {
+            Some(context) => {
                 // Only use the metafits delays if none were provided to
                 // this function.
                 match dipole_delays {
@@ -180,67 +180,73 @@ impl Uvfits {
             present_tiles_set.insert(ant1 - 1);
             present_tiles_set.insert(ant2 - 1);
         });
-        let tile_flags = (0..total_num_tiles)
+        let flagged_tiles = (0..total_num_tiles)
             .into_iter()
             .filter(|i| !present_tiles_set.contains(i))
             .collect();
 
-        // Work out the timestep epochs. uvfits timesteps are in the middle of
+        // Work out the timestamp epochs. uvfits timestamps are in the middle of
         // their respective integration periods, so no adjustment is needed
         // here.
-        let timesteps: Vec<Epoch> = metadata
-            .jd_frac_timesteps
+        let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
+            .jd_frac_timestamps
             .iter()
-            .map(|&frac| {
+            .enumerate()
+            .map(|(i, &frac)| {
                 let jd = metadata.jd_zero + (frac as f64);
-                jd_to_epoch(jd)
+                (i, jd_to_epoch(jd))
             })
-            .collect();
-        let all_timestep_indices = (0..timesteps.len()).into_iter().collect();
+            .unzip();
         // TODO: Determine flagging!
-        let unflagged_timestep_indices: Vec<usize> = (0..timesteps.len()).into_iter().collect();
-        let time_res: Option<f64> = match (timesteps.first(), timesteps.get(1)) {
-            (Some(&first), Some(&second)) => {
-                let time_res = (second - first).in_unit_f64(hifitime::TimeUnit::Second);
-                trace!("Time resolution: {}s", time_res);
-                debug!(
-                    "First good GPS timestep: {:.2}",
-                    // Need to remove a number from the result of .as_gpst_seconds(), as
-                    // it goes from the 1900 epoch, not the expected 1980 epoch. Also we
-                    // expect GPS timestamps to be "leading edge", not centroids.
-                    epoch_as_gps_seconds(timesteps[*unflagged_timestep_indices.first().unwrap()])
-                        - time_res / 2.0
-                );
-                debug!(
-                    "Last good GPS timestep:  {:.2}",
-                    epoch_as_gps_seconds(
-                        timesteps[*unflagged_timestep_indices.last().unwrap() - 1]
-                    ) - time_res / 2.0
-                );
-                Some(time_res)
-            }
-            _ => {
-                warn!("Only one timestep is present in the data; can't determine the observation's native time resolution.");
-                debug!(
-                    "Only GPS timestep: {:.2}",
-                    epoch_as_gps_seconds(timesteps[0])
-                );
-                None
-            }
+        let unflagged_timesteps = all_timesteps.clone();
+        let all_timesteps =
+            Vec1::try_from_vec(all_timesteps).map_err(|_| UvfitsReadError::NoTimesteps {
+                file: uvfits.filename.clone(),
+            })?;
+
+        // Get the data's time resolution. There is a possibility that the file
+        // contains only one timestep.
+        let time_res = if timestamps.len() == 1 {
+            warn!("Only one timestep is present in the data; can't determine the data's time resolution.");
+            None
+        } else {
+            // Assume the timestamps are contiguous, i.e. the span of time
+            // between two consecutive timestamps is the same between all
+            // consecutive timestamps.
+            let time_res = (timestamps[1] - timestamps[0]).in_seconds();
+            trace!("Time resolution: {}s", time_res);
+            Some(time_res)
         };
-        debug!("Flagged tiles in the uvfits: {:?}", tile_flags);
+        match timestamps.as_slice() {
+            // Handled above; uvfits files aren't allowed to be empty.
+            [] => unreachable!(),
+            [t] => debug!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
+            [t0, .., tn] => {
+                // The time resolution is specified if there's more than one
+                // timestep.
+                let time_res = time_res.unwrap();
+                debug!(
+                    "First good timestep (GPS): {:.2}",
+                    // We expect GPS timestamps to be "leading edge", not
+                    // centroids.
+                    epoch_as_gps_seconds(*t0) - time_res / 2.0
+                );
+                debug!(
+                    "Last good timestep  (GPS): {:.2}",
+                    epoch_as_gps_seconds(*tn) - time_res / 2.0
+                );
+            }
+        }
+
+        debug!("Flagged tiles in the uvfits: {:?}", flagged_tiles);
         debug!(
             "Autocorrelations present: {}",
             metadata.autocorrelations_present
         );
 
         // Get the dipole gains. Only available with a metafits.
-        let dipole_gains: Option<Array2<f64>> = match metafits {
-            Some(meta) => {
-                // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
-                Some(metafits::get_dipole_gains(context))
-            }
+        let dipole_gains: Option<Array2<f64>> = match &mwalib_context {
+            Some(context) => Some(metafits::get_dipole_gains(context)),
             None => {
                 warn!("Without a metafits file, we must assume all dipoles are alive.");
                 warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
@@ -248,32 +254,24 @@ impl Uvfits {
             }
         };
 
-        // Get the obsid.
-        let obsid = match metafits {
-            Some(meta) => {
-                // Populate `mwalib` if it isn't already populated.
-                let context = metafits::populate_metafits_context(&mut mwalib, meta, None)?;
-                Some(context.obs_id)
-            }
-            // How does a uvfits file advertise the obsid? There is an "obs.
-            // name" in the "object" filed, but that's not the same thing.
-            None => None,
-        };
+        // Get the obsid. There is an "obs. name" in the "object" filed, but
+        // that's not the same thing.
+        let obsid = mwalib_context.map(|context| context.obs_id);
 
         // TODO: Get flagging right. I think that info is in an optional table.
         let fine_chan_flags_per_coarse_chan = vec![];
-        let step = metadata.num_rows / timesteps.len();
+        let step = metadata.num_rows / timestamps.len();
 
         let obs_context = ObsContext {
             obsid,
-            timesteps,
-            all_timestep_indices,
-            unflagged_timestep_indices,
+            timestamps,
+            all_timesteps,
+            unflagged_timesteps,
             phase_centre,
             pointing_centre,
             tile_names,
             tile_xyzs,
-            tile_flags,
+            flagged_tiles,
             autocorrelations_present: metadata.autocorrelations_present,
             fine_chan_flags_per_coarse_chan,
             dipole_gains,
@@ -283,7 +281,7 @@ impl Uvfits {
             array_latitude_rad: None,
         };
 
-        Ok(Self {
+        Ok(UvfitsReader {
             obs_context,
             freq_context,
             uvfits: uvfits_pb,
@@ -293,7 +291,7 @@ impl Uvfits {
     }
 }
 
-impl InputData for Uvfits {
+impl InputData for UvfitsReader {
     fn get_obs_context(&self) -> &ObsContext {
         &self.obs_context
     }
@@ -308,14 +306,14 @@ impl InputData for Uvfits {
 
     fn read_crosses_and_autos(
         &self,
-        cross_data_array: ArrayViewMut2<Jones<f32>>,
-        cross_weights_array: ArrayViewMut2<f32>,
-        auto_data_array: ArrayViewMut2<Jones<f32>>,
-        auto_weights_array: ArrayViewMut2<f32>,
-        timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_tiles: &HashSet<usize>,
-        flagged_fine_chans: &HashSet<usize>,
+        _cross_data_array: ArrayViewMut2<Jones<f32>>,
+        _cross_weights_array: ArrayViewMut2<f32>,
+        _auto_data_array: ArrayViewMut2<Jones<f32>>,
+        _auto_weights_array: ArrayViewMut2<f32>,
+        _timestep: usize,
+        _tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        _flagged_tiles: &[usize],
+        _flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         todo!()
     }
@@ -361,7 +359,7 @@ impl InputData for Uvfits {
             };
 
             let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl.round() as usize);
-            if let Some(bl) = tile_to_unflagged_baseline_map
+            if let Some(i_baseline) = tile_to_unflagged_baseline_map
                 .get(&(ant1 - 1, ant2 - 1))
                 .cloned()
             {
@@ -391,21 +389,19 @@ impl InputData for Uvfits {
                 .unwrap();
                 // Put the data and weights into the shared arrays outside this
                 // scope. Before we can do this, we need to remove any
-                // globally-flagged fine channels. Use an int to index unflagged
-                // fine channel (outer_freq_chan_index).
-                let mut outer_freq_chan_index: usize = 0;
-                for (_, data_pol_axis) in vis_array
+                // globally-flagged fine channels.
+                for (i_chan, data_pol_axis) in vis_array
                     .outer_iter()
                     .enumerate()
-                    .filter(|(freq_chan, _)| !flagged_fine_chans.contains(freq_chan))
+                    .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                 {
                     // Skip boundary checks to improve performance.
                     // TODO: How much does this actually help?
                     unsafe {
                         // These are references to the visibilities and weights
                         // in the output arrays.
-                        let data_array_elem = data_array.uget_mut((bl, outer_freq_chan_index));
-                        let weight_elem = weights_array.uget_mut((bl, outer_freq_chan_index));
+                        let data_array_elem = data_array.uget_mut((i_baseline, i_chan));
+                        let weight_elem = weights_array.uget_mut((i_baseline, i_chan));
 
                         // These are the components of the input data's
                         // visibilities.
@@ -426,7 +422,6 @@ impl InputData for Uvfits {
                         data_array_elem[2] = c32::new(data_yx[0], data_yx[1]) * *weight_elem;
                         data_array_elem[3] = c32::new(data_yy[0], data_yy[1]) * *weight_elem;
                     }
-                    outer_freq_chan_index += 1;
                 }
             }
         }
@@ -439,7 +434,7 @@ impl InputData for Uvfits {
         mut data_array: ArrayViewMut2<Jones<f32>>,
         mut weights_array: ArrayViewMut2<f32>,
         timestep_index: usize,
-        flagged_tiles: &HashSet<usize>,
+        flagged_tiles: &[usize],
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError> {
         let row_range_start = timestep_index * self.step;
@@ -503,23 +498,19 @@ impl InputData for Uvfits {
                 .unwrap();
                 // Put the data and weights into the shared arrays outside this
                 // scope. Before we can do this, we need to remove any
-                // globally-flagged fine channels. Use an int to index unflagged
-                // fine channel (outer_freq_chan_index).
-                let mut outer_freq_chan_index = 0;
-                for (_, data_pol_axis) in vis_array
+                // globally-flagged fine channels.
+                for (i_chan, data_pol_axis) in vis_array
                     .outer_iter()
                     .enumerate()
-                    .filter(|(freq_chan, _)| !flagged_fine_chans.contains(freq_chan))
+                    .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                 {
                     // Skip boundary checks to improve performance.
                     // TODO: How much does this actually help?
                     unsafe {
                         // These are references to the visibilities and weights
                         // in the output arrays.
-                        let data_array_elem =
-                            data_array.uget_mut((auto_array_index, outer_freq_chan_index));
-                        let weight_elem =
-                            weights_array.uget_mut((auto_array_index, outer_freq_chan_index));
+                        let data_array_elem = data_array.uget_mut((auto_array_index, i_chan));
+                        let weight_elem = weights_array.uget_mut((auto_array_index, i_chan));
 
                         // These are the components of the input data's
                         // visibilities.
@@ -540,7 +531,6 @@ impl InputData for Uvfits {
                         data_array_elem[2] = c32::new(data_yx[0], data_yx[1]) * *weight_elem;
                         data_array_elem[3] = c32::new(data_yy[0], data_yy[1]) * *weight_elem;
                     }
-                    outer_freq_chan_index += 1;
                 }
                 auto_array_index += 1;
             }
@@ -571,8 +561,8 @@ struct UvfitsMetadata {
     /// decoded).
     uvfits_baselines: Vec<usize>,
 
-    /// Unique collection of JD fractions for timesteps.
-    jd_frac_timesteps: Vec<f32>,
+    /// Unique collection of JD fractions for timestamps.
+    jd_frac_timestamps: Vec<f32>,
 
     /// Are auto-correlations present?
     autocorrelations_present: bool,
@@ -658,12 +648,12 @@ impl UvfitsMetadata {
             }
         };
 
-        // Read unique group parameters (timesteps and baselines).
+        // Read unique group parameters (timestamps and baselines).
         let mut uvfits_baselines_set = HashSet::new();
         let mut uvfits_baselines = vec![];
         let mut autocorrelations_present = false;
-        let mut jd_frac_timestep_set = HashSet::new();
-        let mut jd_frac_timesteps = vec![];
+        let mut jd_frac_timestamp_set = HashSet::new();
+        let mut jd_frac_timestamps = vec![];
 
         let mut status = 0;
         unsafe {
@@ -694,11 +684,11 @@ impl UvfitsMetadata {
                     uvfits_baselines.push(uvfits_bl);
                 }
 
-                let timestep = group_params[indices.date as usize - 1];
-                let timestep_bits = timestep.to_bits();
-                if !jd_frac_timestep_set.contains(&timestep_bits) {
-                    jd_frac_timestep_set.insert(timestep_bits);
-                    jd_frac_timesteps.push(timestep);
+                let timestamp = group_params[indices.date as usize - 1];
+                let timestamp_bits = timestamp.to_bits();
+                if !jd_frac_timestamp_set.contains(&timestamp_bits) {
+                    jd_frac_timestamp_set.insert(timestamp_bits);
+                    jd_frac_timestamps.push(timestamp);
                 }
             }
         }
@@ -712,7 +702,7 @@ impl UvfitsMetadata {
             jd_zero,
             indices,
             uvfits_baselines,
-            jd_frac_timesteps,
+            jd_frac_timestamps,
             autocorrelations_present,
         })
     }
@@ -927,7 +917,7 @@ fn get_freq_context(
         fine_chan_range: 0..metadata.num_fine_freq_chans,
         fine_chan_freqs,
         num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
-        native_fine_chan_width: Some(fine_chan_width),
+        freq_res: Some(fine_chan_width),
     })
 }
 

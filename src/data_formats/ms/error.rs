@@ -12,7 +12,7 @@ use thiserror::Error;
 use mwa_hyperdrive_common::{marlu, thiserror};
 
 #[derive(Error, Debug)]
-pub enum NewMSError {
+pub enum MsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
     BadFile(PathBuf),
 
@@ -21,6 +21,9 @@ pub enum NewMSError {
 
     #[error("Couldn't work out the good start and end times of the measurement set; are all visibilities flagged?")]
     AllFlagged,
+
+    #[error("No timesteps were in file {file}")]
+    NoTimesteps { file: String },
 
     #[error("{0}")]
     GeneralMS(#[from] MSError),

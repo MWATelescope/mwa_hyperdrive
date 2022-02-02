@@ -14,7 +14,7 @@ use crate::{
     calibrate::args::CalibrateUserArgs,
     jones_test::TestJones,
     pfb_gains::{EMPIRICAL_40KHZ, LEVINE_40KHZ},
-    tests::{deflate_gz_into_file, reduced_obsids::get_1090008640},
+    tests::{deflate_gz_into_file, reduced_obsids::get_reduced_1090008640},
 };
 
 struct CrossData {
@@ -35,7 +35,7 @@ fn get_cross_vis(args: CalibrateUserArgs) -> CrossData {
     };
 
     let num_unflagged_cross_baselines = params.unflagged_cross_baseline_to_tile_map.len();
-    let num_unflagged_fine_chans = params.freq.unflagged_fine_chans.len();
+    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut data_array = Array2::zeros(vis_shape);
     let mut weights_array = Array2::zeros(vis_shape);
@@ -43,9 +43,9 @@ fn get_cross_vis(args: CalibrateUserArgs) -> CrossData {
     let result = params.input_data.read_crosses(
         data_array.view_mut(),
         weights_array.view_mut(),
-        params.timesteps[0],
+        *params.timesteps.first(),
         &params.tile_to_unflagged_cross_baseline_map,
-        &params.freq.fine_chan_flags,
+        &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -64,7 +64,7 @@ fn get_auto_vis(args: CalibrateUserArgs) -> AutoData {
     };
 
     let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
-    let num_unflagged_fine_chans = params.freq.unflagged_fine_chans.len();
+    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let vis_shape = (num_unflagged_tiles, num_unflagged_fine_chans);
     let mut data_array = Array2::zeros(vis_shape);
     let mut weights_array = Array2::zeros(vis_shape);
@@ -72,9 +72,9 @@ fn get_auto_vis(args: CalibrateUserArgs) -> AutoData {
     let result = params.input_data.read_autos(
         data_array.view_mut(),
         weights_array.view_mut(),
-        params.timesteps[0],
-        &params.tile_flags,
-        &params.freq.fine_chan_flags,
+        *params.timesteps.first(),
+        &params.flagged_tiles,
+        &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -93,7 +93,7 @@ fn get_cross_and_auto_vis(args: CalibrateUserArgs) -> (CrossData, AutoData) {
     };
 
     let num_unflagged_cross_baselines = params.unflagged_cross_baseline_to_tile_map.len();
-    let num_unflagged_fine_chans = params.freq.unflagged_fine_chans.len();
+    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut cross_data = CrossData {
         data_array: Array2::zeros(vis_shape),
@@ -112,10 +112,10 @@ fn get_cross_and_auto_vis(args: CalibrateUserArgs) -> (CrossData, AutoData) {
         cross_data.weights_array.view_mut(),
         auto_data.data_array.view_mut(),
         auto_data.weights_array.view_mut(),
-        params.timesteps[0],
+        *params.timesteps.first(),
         &params.tile_to_unflagged_cross_baseline_map,
-        &params.tile_flags,
-        &params.freq.fine_chan_flags,
+        &params.flagged_tiles,
+        &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -127,7 +127,7 @@ fn get_cross_and_auto_vis(args: CalibrateUserArgs) -> (CrossData, AutoData) {
 fn read_1090008640_cross_vis() {
     // Other tests check that PFB gains and digital gains are correctly applied.
     // These simple _vis tests just check that the values are right.
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("none".to_string());
     args.no_cable_length_correction = true;
     args.no_geometric_correction = true;
@@ -139,7 +139,7 @@ fn read_1090008640_cross_vis() {
     } = get_cross_vis(args);
 
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 0)] / weights[(0, 0)]),
+        TestJones::from(vis[(0, 0)]),
         TestJones::from([
             c32::new(1.6775006e2, -8.475e1),
             c32::new(2.1249968e1, 2.5224997e2),
@@ -148,7 +148,7 @@ fn read_1090008640_cross_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(10, 16)] / weights[(10, 16)]),
+        TestJones::from(vis[(10, 16)]),
         TestJones::from([
             c32::new(4.0899994e2, -1.2324997e2),
             c32::new(5.270001e2, 7.7025006e2),
@@ -162,7 +162,7 @@ fn read_1090008640_cross_vis() {
 
 #[test]
 fn read_1090008640_auto_vis() {
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("none".to_string());
     args.no_cable_length_correction = true;
     args.no_geometric_correction = true;
@@ -174,7 +174,7 @@ fn read_1090008640_auto_vis() {
     } = get_auto_vis(args);
 
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 0)] / weights[(0, 0)]),
+        TestJones::from(vis[(0, 0)]),
         TestJones::from([
             c32::new(7.955224e4, 6.400678e-7),
             c32::new(-1.10225e3, 1.9750005e2),
@@ -183,7 +183,7 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 2)] / weights[(0, 2)]),
+        TestJones::from(vis[(0, 2)]),
         TestJones::from([
             c32::new(1.0605874e5, -2.0732023e-6),
             c32::new(-1.5845e3, 1.5025009e2),
@@ -192,7 +192,7 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 16)] / weights[(0, 16)]),
+        TestJones::from(vis[(0, 16)]),
         TestJones::from([
             c32::new(1.593375e5, 2.8569048e-8),
             c32::new(-1.5977499e3, -6.5500046e1),
@@ -201,7 +201,7 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(10, 16)] / weights[(10, 16)]),
+        TestJones::from(vis[(10, 16)]),
         TestJones::from([
             c32::new(1.5991898e5, 2.289782e-6),
             c32::new(-1.9817502e3, -2.81125e3),
@@ -215,7 +215,7 @@ fn read_1090008640_auto_vis() {
 
 #[test]
 fn read_1090008640_cross_and_auto_vis() {
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("none".to_string());
     args.no_cable_length_correction = true;
     args.no_geometric_correction = true;
@@ -225,7 +225,7 @@ fn read_1090008640_cross_and_auto_vis() {
 
     // Test values should match those used in "cross_vis" and "auto_vis" tests;
     assert_abs_diff_eq!(
-        TestJones::from(cross_data.data_array[(0, 0)] / cross_data.weights_array[(10, 16)]),
+        TestJones::from(cross_data.data_array[(0, 0)]),
         TestJones::from([
             c32::new(1.6775006e2, -8.475e1),
             c32::new(2.1249968e1, 2.5224997e2),
@@ -234,7 +234,7 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(cross_data.data_array[(10, 16)] / cross_data.weights_array[(10, 16)]),
+        TestJones::from(cross_data.data_array[(10, 16)]),
         TestJones::from([
             c32::new(4.0899994e2, -1.2324997e2),
             c32::new(5.270001e2, 7.7025006e2),
@@ -244,7 +244,7 @@ fn read_1090008640_cross_and_auto_vis() {
     );
 
     assert_abs_diff_eq!(
-        TestJones::from(auto_data.data_array[(0, 0)] / auto_data.weights_array[(0, 0)]),
+        TestJones::from(auto_data.data_array[(0, 0)]),
         TestJones::from([
             c32::new(7.955224e4, 6.400678e-7),
             c32::new(-1.10225e3, 1.9750005e2),
@@ -253,7 +253,7 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(auto_data.data_array[(10, 16)] / auto_data.weights_array[(10, 16)]),
+        TestJones::from(auto_data.data_array[(10, 16)]),
         TestJones::from([
             c32::new(1.5991898e5, 2.289782e-6),
             c32::new(-1.9817502e3, -2.81125e3),
@@ -274,7 +274,7 @@ fn read_1090008640_cross_and_auto_vis() {
 
 #[test]
 fn pfb_empirical_gains() {
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("empirical".to_string());
     args.ignore_input_data_fine_channel_flags = true;
     let CrossData {
@@ -282,7 +282,7 @@ fn pfb_empirical_gains() {
         weights_array: weights_pfb,
     } = get_cross_vis(args);
 
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("none".to_string());
     args.ignore_input_data_fine_channel_flags = true;
     let CrossData {
@@ -310,7 +310,7 @@ fn pfb_empirical_gains() {
 
 #[test]
 fn pfb_levine_gains() {
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("levine".to_string());
     args.no_digital_gains = true;
     args.ignore_input_data_fine_channel_flags = true;
@@ -319,7 +319,7 @@ fn pfb_levine_gains() {
         weights_array: weights_pfb,
     } = get_cross_vis(args);
 
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = true;
     args.ignore_input_data_fine_channel_flags = true;
@@ -348,7 +348,7 @@ fn pfb_levine_gains() {
 
 #[test]
 fn test_digital_gains() {
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = false;
     let CrossData {
@@ -356,7 +356,7 @@ fn test_digital_gains() {
         weights_array: weights_dg,
     } = get_cross_vis(args);
 
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = true;
     let CrossData {
@@ -397,7 +397,7 @@ fn test_digital_gains() {
 #[test]
 fn test_mwaf_flags() {
     // First test without any mwaf flags.
-    let mut args = get_1090008640();
+    let mut args = get_reduced_1090008640(false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = None;
@@ -408,11 +408,12 @@ fn test_mwaf_flags() {
         Ok(p) => p,
         Err(e) => panic!("{}", e),
     };
+    let timesteps = params.timesteps;
 
     // Set up our arrays for reading.
     let num_unflagged_cross_baselines = params.unflagged_cross_baseline_to_tile_map.len();
     let num_unflagged_tiles = params.unflagged_cross_baseline_to_tile_map.len();
-    let num_unflagged_fine_chans = params.freq.unflagged_fine_chans.len();
+    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let cross_vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut cross_data_array = Array2::from_elem(cross_vis_shape, Jones::identity());
     let mut cross_weights_array = Array2::ones(cross_vis_shape);
@@ -425,16 +426,16 @@ fn test_mwaf_flags() {
         cross_weights_array.view_mut(),
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
-        params.timesteps[0],
+        *timesteps.first(),
         &params.tile_to_unflagged_cross_baseline_map,
-        &params.tile_flags,
-        &params.freq.fine_chan_flags,
+        &params.flagged_tiles,
+        &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
 
-    // Now use the mwaf flags.
-    let mut args = get_1090008640();
+    // Now use the flags from our "primes" mwaf file.
+    let mut args = get_reduced_1090008640(false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = None;
@@ -464,10 +465,10 @@ fn test_mwaf_flags() {
         flagged_cross_weights_array.view_mut(),
         flagged_auto_data_array.view_mut(),
         flagged_auto_weights_array.view_mut(),
-        params.timesteps[0],
+        *timesteps.first(),
         &params.tile_to_unflagged_cross_baseline_map,
-        &params.tile_flags,
-        &params.freq.fine_chan_flags,
+        &params.flagged_tiles,
+        &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -481,7 +482,7 @@ fn test_mwaf_flags() {
     // Iterate over the arrays, where are the differences? They should be
     // primes.
     let num_bls = params.get_num_unflagged_baselines();
-    let num_freqs = params.freq.num_fine_chans;
+    let num_freqs = params.get_freq_context().fine_chan_freqs.len();
     // Unfortunately we have to conditionally select either the auto or cross
     // visibilities.
     let mut i_auto = 0;

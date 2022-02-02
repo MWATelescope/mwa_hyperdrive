@@ -59,7 +59,7 @@ fn test_new_uvfits_is_sensible() {
     let num_chans = 2;
     let obsid = 1065880128.0;
     let start_epoch = gps_to_epoch(obsid);
-    let maps = TileBaselineMaps::new(num_tiles, &HashSet::new());
+    let maps = TileBaselineMaps::new(num_tiles, &[]);
     let chan_flags = HashSet::new();
 
     let mut u = UvfitsWriter::new(
@@ -138,7 +138,7 @@ fn write_then_read_uvfits(autos: bool) {
         num_cross_baselines
     };
 
-    let flagged_tiles = HashSet::new();
+    let flagged_tiles = vec![];
     let flagged_fine_chans = HashSet::new();
     let maps = TileBaselineMaps::new(num_tiles, &flagged_tiles);
 
@@ -231,7 +231,7 @@ fn write_then_read_uvfits(autos: bool) {
     result.unwrap();
 
     // Inspect the file for sanity's sake!
-    let result = uvfits::read::Uvfits::new(&output.path(), None, &mut Delays::NotNecessary);
+    let result = UvfitsReader::new(&output.path(), None, &mut Delays::NotNecessary);
     assert!(
         result.is_ok(),
         "Failed to read the just-created uvfits file"

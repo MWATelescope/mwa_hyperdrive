@@ -4,20 +4,37 @@
 
 //! Code for easing testing.
 
-pub(crate) mod calibrate;
+mod calibrate;
 pub(crate) mod full_obsids;
 pub(crate) mod reduced_obsids;
 
-pub(crate) use std::fs::File;
-pub(crate) use std::io::Write;
-pub(crate) use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::Output;
+use std::str::from_utf8;
 
-pub(crate) use tempfile::{NamedTempFile, TempPath};
-// Need to use serial tests because HDF5 is not necessarily reentrant.
-pub(crate) use serial_test::serial;
+use assert_cmd::{output::OutputError, Command};
+use tempfile::{NamedTempFile, TempPath};
 
 pub(crate) use crate::calibrate::args::CalibrateUserArgs;
 use mwa_hyperdrive_common::{serde_json, toml};
+
+/// Run the hyperdrive binary with `assert_cmd`.
+pub(crate) fn hyperdrive() -> Command {
+    Command::cargo_bin("hyperdrive").unwrap()
+}
+
+pub(crate) fn get_cmd_output(result: Result<Output, OutputError>) -> (String, String) {
+    let output = match result {
+        Ok(o) => o,
+        Err(o) => o.as_output().unwrap().clone(),
+    };
+    (
+        from_utf8(&output.stdout).unwrap().to_string(),
+        from_utf8(&output.stderr).unwrap().to_string(),
+    )
+}
 
 pub(crate) fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(
     filename: T,
@@ -28,8 +45,8 @@ pub(crate) fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(
     (path, f)
 }
 
-pub(crate) fn path_to_string(p: &Path) -> String {
-    p.to_str().map(|s| s.to_string()).unwrap()
+pub(crate) fn path_to_string<P: AsRef<Path>>(path: P) -> String {
+    path.as_ref().to_str().map(|s| s.to_string()).unwrap()
 }
 
 pub(crate) fn deflate_gz_into_file<T: AsRef<Path>>(gz_file: T, out_file: &mut File) {

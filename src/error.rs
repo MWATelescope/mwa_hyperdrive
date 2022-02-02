@@ -18,7 +18,7 @@ pub enum HyperdriveError {
     InvalidArgs(#[from] crate::calibrate::params::InvalidArgsError),
 
     #[error("{0}")]
-    CalibrateArgs(#[from] crate::calibrate::args::CalibrateArgsError),
+    ArgsFile(#[from] crate::calibrate::args::CalibrateArgsFileError),
 
     #[error("{0}")]
     Calibrate(#[from] crate::calibrate::CalibrateError),

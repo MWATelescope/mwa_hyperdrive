@@ -7,7 +7,6 @@
 #[cfg(feature = "cuda")]
 mod cuda;
 
-use std::collections::HashSet;
 use std::ops::Deref;
 
 use approx::assert_abs_diff_eq;
@@ -70,12 +69,12 @@ struct ObsParams {
     beam: Box<dyn Beam>,
     num_unflagged_cross_baselines: usize,
     unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
-    tile_flags: HashSet<usize>,
+    flagged_tiles: Vec<usize>,
     array_latitude_rad: f64,
 }
 
 impl ObsParams {
-    fn list() -> Self {
+    fn list() -> ObsParams {
         let phase_centre = RADec::new_degrees(0.0, -27.0);
         let freqs = vec![150e6, 175e6, 200e6];
 
@@ -120,11 +119,11 @@ impl ObsParams {
         let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyzs_to_cross_uvws_parallel(&xyzs, phase_centre.to_hadec(lst));
         let beam = create_no_beam_object(xyzs.len());
-        let tile_flags = HashSet::new();
-        let maps = TileBaselineMaps::new(xyzs.len(), &tile_flags);
+        let flagged_tiles = vec![];
+        let maps = TileBaselineMaps::new(xyzs.len(), &flagged_tiles);
         let array_latitude_rad = MWA_LAT_RAD;
 
-        Self {
+        ObsParams {
             phase_centre,
             freqs,
             flux_density_scale,
@@ -134,12 +133,12 @@ impl ObsParams {
             beam,
             num_unflagged_cross_baselines,
             unflagged_cross_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
-            tile_flags,
+            flagged_tiles,
             array_latitude_rad,
         }
     }
 
-    fn power_law() -> Self {
+    fn power_law() -> ObsParams {
         let phase_centre = RADec::new_degrees(0.0, -27.0);
         let freqs = vec![150e6, 175e6, 200e6];
 
@@ -173,11 +172,11 @@ impl ObsParams {
         let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyzs_to_cross_uvws_parallel(&xyzs, phase_centre.to_hadec(lst));
         let beam = create_no_beam_object(xyzs.len());
-        let tile_flags = HashSet::new();
-        let maps = TileBaselineMaps::new(xyzs.len(), &tile_flags);
+        let flagged_tiles = vec![];
+        let maps = TileBaselineMaps::new(xyzs.len(), &flagged_tiles);
         let array_latitude_rad = MWA_LAT_RAD;
 
-        Self {
+        ObsParams {
             phase_centre,
             freqs,
             flux_density_scale,
@@ -187,7 +186,7 @@ impl ObsParams {
             beam,
             num_unflagged_cross_baselines,
             unflagged_cross_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
-            tile_flags,
+            flagged_tiles,
             array_latitude_rad,
         }
     }
@@ -200,7 +199,7 @@ impl ObsParams {
                 &srclist,
                 &self.freqs,
                 &self.xyzs,
-                &self.tile_flags,
+                &self.flagged_tiles,
                 self.phase_centre,
                 self.array_latitude_rad,
                 &crate::shapelets::SHAPELET_BASIS_VALUES,

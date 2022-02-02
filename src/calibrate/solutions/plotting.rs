@@ -34,13 +34,16 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
     filename_base: T,
     obs_name: &str,
     ref_tile: Option<usize>,
+    no_ref_tile: bool,
     tile_names: Option<&[S]>,
     ignore_cross_pols: bool,
 ) -> Result<Vec<String>, ()> {
+    let (num_timeblocks, total_num_tiles, _) = sols.di_jones.dim();
+
     // How should the plot be split up to distribute the tiles?
-    let split = match sols.total_num_tiles {
-        0..=128 => (8, sols.total_num_tiles / 8),
-        _ => (16, sols.total_num_tiles / 16),
+    let split = match total_num_tiles {
+        0..=128 => (8, total_num_tiles / 8),
+        _ => (16, total_num_tiles / 16),
     };
     let title_style = ("sans-serif", 60).into_font();
 
@@ -53,14 +56,15 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
         [0.0, 0.0, 0.0, 0.0],
     );
 
-    let ref_tile = match ref_tile {
-        Some(r) => r,
+    let ref_tile = match (no_ref_tile, ref_tile) {
+        (true, _) => None,
+        (_, Some(r)) => Some(r),
         // If the reference tile wasn't defined, use the first valid one from
         // the end.
-        None => {
+        (_, None) => {
             let possibly_good = sols
                 .di_jones
-                .slice(s![0, .., ..])
+                .slice(s![0_usize, .., ..])
                 .outer_iter()
                 .enumerate()
                 .filter(|(_, j)| {
@@ -72,16 +76,16 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
             // If the search for a valid tile didn't find anything, all
             // solutions must be NaN. In this case, it doesn't matter what the
             // reference is.
-            sols.total_num_tiles - 1 - possibly_good.unwrap_or(0)
+            possibly_good.map(|g| total_num_tiles - 1 - g)
         }
     };
 
     let mut output_filenames = vec![];
-    for timeblock in 0..sols.num_timeblocks {
+    for timeblock in 0..num_timeblocks {
         let mut output_amps = PathBuf::new();
         let mut output_phases = PathBuf::new();
 
-        if sols.num_timeblocks > 1 {
+        if num_timeblocks > 1 {
             let filename = format!(
                 "{}_amps_{:03}.png",
                 filename_base.as_ref().display(),
@@ -134,14 +138,15 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
                 .unwrap();
         }
         // Also draw the GPS start time and which tile is the reference tile.
-        let meta_str = if let Some(timestamp) = sols.start_timestamps.get(timeblock) {
-            format!(
+        let meta_str = match (sols.average_timestamps.get(timeblock), ref_tile) {
+            (Some(timestamp), Some(ref_tile)) => format!(
                 "Ref. tile {}, GPS start {}",
                 ref_tile,
                 epoch_as_gps_seconds(*timestamp)
-            )
-        } else {
-            format!("Ref. tile {}", ref_tile)
+            ),
+            (Some(timestamp), None) => format!("GPS start {}", epoch_as_gps_seconds(*timestamp)),
+            (None, Some(ref_tile)) => format!("Ref. tile {}", ref_tile),
+            (None, None) => String::new(),
         };
         amps_root_area
             .draw_text(
@@ -169,7 +174,12 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
             .unwrap();
         let phase_tile_plots = phases_root_area.split_evenly(split);
 
-        let ref_jones = sols.di_jones.slice(s![timeblock, ref_tile, ..]);
+        let ones = vec![Jones::identity(); sols.di_jones.dim().2];
+        let ref_jones = if let Some(ref_tile) = ref_tile {
+            sols.di_jones.slice(s![timeblock, ref_tile, ..])
+        } else {
+            ArrayView1::from_shape(sols.di_jones.dim().2, &ones).unwrap()
+        };
         amps.outer_iter_mut()
             .zip(phases.outer_iter_mut())
             .zip(sols.di_jones.slice(s![timeblock, .., ..]).outer_iter())

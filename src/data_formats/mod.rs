@@ -5,21 +5,23 @@
 //! Code to handle reading from and writing to various data container formats.
 
 mod error;
-pub mod metafits;
-pub(crate) mod ms;
-pub(crate) mod raw;
-pub(crate) mod uvfits;
+mod metafits;
+mod ms;
+mod raw;
+mod uvfits;
 
 pub(crate) use error::ReadInputDataError;
-pub(crate) use ms::MS;
-pub(crate) use raw::RawData;
-pub(crate) use uvfits::Uvfits;
+pub use metafits::*;
+pub(crate) use ms::{MsReadError, MS};
+pub(crate) use raw::{RawDataReader, RawReadError};
+pub(crate) use uvfits::{UvfitsReadError, UvfitsReader, UvfitsWriteError, UvfitsWriter};
 
 use std::collections::{HashMap, HashSet};
 
 use marlu::Jones;
 use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
+use vec1::Vec1;
 
 use crate::context::{FreqContext, ObsContext};
 use mwa_hyperdrive_common::{marlu, ndarray};
@@ -46,6 +48,7 @@ pub(crate) trait InputData: Sync + Send {
 
     /// Read cross- and auto-correlation visibilities for all frequencies and
     /// baselines in a single timestep into corresponding arrays.
+    #[allow(clippy::too_many_arguments)]
     fn read_crosses_and_autos(
         &self,
         cross_data_array: ArrayViewMut2<Jones<f32>>,
@@ -54,7 +57,7 @@ pub(crate) trait InputData: Sync + Send {
         auto_weights_array: ArrayViewMut2<f32>,
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_tiles: &HashSet<usize>,
+        flagged_tiles: &[usize],
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError>;
 
@@ -76,7 +79,7 @@ pub(crate) trait InputData: Sync + Send {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        flagged_tiles: &HashSet<usize>,
+        flagged_tiles: &[usize],
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), ReadInputDataError>;
 }

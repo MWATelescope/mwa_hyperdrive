@@ -4,8 +4,6 @@
 
 //! Types to generate sky-models with CUDA.
 
-use std::collections::HashSet;
-
 use marlu::{
     cuda_runtime_sys, pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, RADec, XyzGeodetic, LMN,
     UVW,
@@ -120,7 +118,7 @@ impl<'a> SkyModellerCuda<'a> {
         source_list: &SourceList,
         unflagged_fine_chan_freqs: &[f64],
         unflagged_tile_xyzs: &'a [XyzGeodetic],
-        tile_flags: &HashSet<usize>,
+        flagged_tiles: &[usize],
         phase_centre: RADec,
         array_latitude_rad: f64,
         shapelet_basis_values: &[f64],
@@ -338,8 +336,8 @@ impl<'a> SkyModellerCuda<'a> {
         let mut tile_index_to_unflagged_tile_index_map: Vec<i32> =
             Vec::with_capacity(unflagged_tile_xyzs.len());
         let mut i_unflagged_tile = 0;
-        for i_tile in 0..unflagged_tile_xyzs.len() + tile_flags.len() {
-            if tile_flags.contains(&i_tile) {
+        for i_tile in 0..unflagged_tile_xyzs.len() + flagged_tiles.len() {
+            if flagged_tiles.contains(&i_tile) {
                 i_unflagged_tile += 1;
                 continue;
             }

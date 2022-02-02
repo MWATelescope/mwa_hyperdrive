@@ -8,20 +8,24 @@ use mwalib::fitsio;
 use thiserror::Error;
 
 use super::{
+    args::CalibrateArgsFileError,
     params::InvalidArgsError,
     solutions::{ReadSolutionsError, WriteSolutionsError},
 };
 use crate::{
-    data_formats::{
-        uvfits::{UvfitsReadError, UvfitsWriteError},
-        ReadInputDataError,
-    },
+    data_formats::{ReadInputDataError, UvfitsReadError, UvfitsWriteError},
     model::ModelError,
 };
 use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {
+    #[error("Insufficient memory available to perform calibration; need {need_gib} GiB of memory.\nYou could try using fewer timesteps and channels.")]
+    InsufficientMemory { need_gib: usize },
+
+    #[error("{0}")]
+    ArgFile(#[from] CalibrateArgsFileError),
+
     #[error("{0}")]
     InvalidArgs(#[from] InvalidArgsError),
 

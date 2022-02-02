@@ -127,7 +127,7 @@ also available):
   [list](https://developer.nvidia.com/cuda-gpus) to determine what compute
   capability a GPU has.
 
-- A Rust compiler with a version >= 1.56.0
+- A Rust compiler with a version >= 1.58.0
 
   `https://www.rust-lang.org/tools/install`
 

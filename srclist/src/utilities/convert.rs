@@ -96,6 +96,7 @@ impl ConvertArgs {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn convert<T: AsRef<Path>, S: AsRef<str>>(
     input_path: T,
     output_path: T,

@@ -7,6 +7,8 @@
 use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 
+use super::is_a_tty;
+
 // Add build-time information from the "built" crate.
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
 
@@ -14,7 +16,7 @@ include!(concat!(env!("OUT_DIR"), "/built.rs"));
 /// display source lines in log messages with verbosity >= 3.
 // This is pretty dirty code. Can it be cleaned up?
 pub fn setup_logging(verbosity: u8) -> Result<(), log::SetLoggerError> {
-    let is_a_tty = atty::is(atty::Stream::Stdout) || atty::is(atty::Stream::Stderr);
+    let is_a_tty = is_a_tty();
 
     let (high_level_messages, low_level_messages) = if is_a_tty {
         let colours = ColoredLevelConfig::new()

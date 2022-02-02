@@ -21,7 +21,7 @@ itertools = "0.10.*"
 indicatif = { version = "0.16.*", features = ["rayon"] }
 lazy_static = "1.4.*"
 log = "0.4.*"
-marlu = "0.3.*"
+marlu = "0.4.*"
 serde_json = "1.0.*"
 thiserror = "1.0.*"
 toml = "0.5.*"

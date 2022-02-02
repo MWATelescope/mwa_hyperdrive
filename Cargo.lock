@@ -43,9 +43,9 @@ dependencies = [
 
 [[package]]
 name = "approx"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "072df7202e63b127ab55acfe16ce97013d5b97bf160489336d3f1840fd78e99e"
+checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
 dependencies = [
  "num-complex",
  "num-traits",
@@ -132,12 +132,13 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "birli"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b019c43e265170431651cc931444bfd659d6372fe4e2a0aec511cba5bdb3c500"
+checksum = "e54501b989bff1ee6fa3060d01edbad340ae381755d1d1b9c2807d2153310cc6"
 dependencies = [
+ "built",
  "cfg-if",
- "clap 3.0.10",
+ "clap 3.0.13",
  "crossbeam-channel",
  "crossbeam-utils",
  "env_logger",
@@ -145,7 +146,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu",
+ "marlu 0.4.0",
  "prettytable-rs",
  "regex",
  "thiserror",
@@ -294,9 +295,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.0.10"
+version = "3.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a30c3bf9ff12dfe5dae53f0a96e0febcd18420d1c0e7fad77796d9d5c4b5375"
+checksum = "08799f92c961c7a1cf0cc398a9073da99e21ce388b46372c37f3191f2f3eed3e"
 dependencies = [
  "atty",
  "bitflags",
@@ -312,9 +313,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.0.6"
+version = "3.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "517358c28fcef6607bf6f76108e02afad7e82297d132a6b846dcc1fc3efcd153"
+checksum = "0fd2078197a22f338bd4fbf7d6387eb6f0d6a3c69e6cbc09f5c93e97321fd92a"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -358,7 +359,9 @@ dependencies = [
  "encode_unicode",
  "libc",
  "once_cell",
+ "regex",
  "terminal_size",
+ "unicode-width",
  "winapi",
 ]
 
@@ -685,9 +688,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "1.6.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "779d043b6a0b90cc4c0ed7ee380a6504394cee7efd7db050e3774eee387324b2"
+checksum = "c3fcf0cee53519c866c09b5de1f6c56ff9d647101f81c1964fa632e148896cdf"
 dependencies = [
  "instant",
 ]
@@ -1114,9 +1117,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.113"
+version = "0.2.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eef78b64d87775463c549fbd80e19249ef436ea3bf1de2a1eb7e717ec7fab1e9"
+checksum = "0a8d982fa7a96a000f6ec4cfe966de9703eccde29750df2bb8949da91b0e818d"
 
 [[package]]
 name = "libgit2-sys"
@@ -1184,15 +1187,39 @@ dependencies = [
 
 [[package]]
 name = "marlu"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3c77013700391e4429f8350a3c934565d4894c5197838d516a21aa47f94e2f2"
+checksum = "a8ca44f4b14a452a995d2248cd8af2c41763b52f19e469290c94893fe1ecab81"
 dependencies = [
  "cfg-if",
  "cuda-runtime-sys",
  "erfa-sys",
  "flate2",
  "hifitime",
+ "indicatif",
+ "itertools",
+ "lazy_static",
+ "log",
+ "ndarray",
+ "num-complex",
+ "num-traits",
+ "rayon",
+ "tar",
+ "thiserror",
+]
+
+[[package]]
+name = "marlu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d6d8d39e6833c665fd3acde10d0ec47e3af268b5e20bdca37af56c4595016b9"
+dependencies = [
+ "cfg-if",
+ "cuda-runtime-sys",
+ "erfa-sys",
+ "flate2",
+ "hifitime",
+ "indicatif",
  "itertools",
  "lazy_static",
  "log",
@@ -1267,7 +1294,7 @@ dependencies = [
  "cfg-if",
  "hdf5",
  "hdf5-sys",
- "marlu",
+ "marlu 0.3.4",
  "parking_lot",
  "thiserror",
 ]
@@ -1280,6 +1307,7 @@ dependencies = [
  "assert_cmd",
  "birli",
  "byteorder",
+ "console",
  "criterion",
  "crossbeam-channel",
  "crossbeam-utils",
@@ -1321,13 +1349,13 @@ dependencies = [
  "built",
  "cfg-if",
  "chrono",
- "clap 3.0.10",
+ "clap 3.0.13",
  "fern",
  "indicatif",
  "itertools",
  "lazy_static",
  "log",
- "marlu",
+ "marlu 0.4.0",
  "serde_json",
  "thiserror",
  "toml",
@@ -2000,9 +2028,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.134"
+version = "1.0.136"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96b3c34c1690edf8174f5b289a336ab03f568a4460d8c6df75f2f3a692b3bc6a"
+checksum = "ce31e24b01e1e524df96f1c2fdd054405f8d7376249a5110886fb4b658484789"
 dependencies = [
  "serde_derive",
 ]
@@ -2019,9 +2047,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.134"
+version = "1.0.136"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "784ed1fbfa13fe191077537b0d70ec8ad1e903cfe04831da608aa36457cb653d"
+checksum = "08597e7152fcd306f41838ed3e37be9eaeed2b61c42e2117266a554fab4662f9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2030,9 +2058,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.75"
+version = "1.0.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c059c05b48c5c0067d4b4b2b4f0732dd65feb52daf7e0ea09cd87e7dadc1af79"
+checksum = "d23c1ba4cf0efd44be32017709280b32d1cea5c3f1275c3b6d9e8bc54f758085"
 dependencies = [
  "itoa 1.0.1",
  "ryu",
