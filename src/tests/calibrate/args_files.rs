@@ -15,6 +15,7 @@ use crate::tests::{
 };
 
 #[test]
+#[ignore = "assert_cmd_not_working_in_coverage"]
 fn arg_file_absolute_paths() {
     let args = get_reduced_1090008640(true);
     let temp_dir = tempdir().expect("Couldn't make tempdir");
@@ -39,6 +40,7 @@ fn arg_file_absolute_paths() {
 }
 
 #[test]
+#[ignore = "assert_cmd_not_working_in_coverage"]
 fn arg_file_absolute_globs() {
     let mut args = get_reduced_1090008640(true);
     let abs_path = PathBuf::from(&args.data.unwrap()[0])
@@ -77,6 +79,7 @@ fn arg_file_absolute_globs() {
 }
 
 #[test]
+#[ignore = "assert_cmd_not_working_in_coverage"]
 fn arg_file_relative_globs() {
     let mut args = get_reduced_1090008640(true);
     let rel_path = PathBuf::from(&args.data.unwrap()[0])

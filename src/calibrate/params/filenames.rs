@@ -254,14 +254,44 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_unreadable_file() {
-        let result = exists_and_is_readable(&PathBuf::from("/etc/shadow"));
+        // This test only works on "unix" because windows can't reliably alter
+        // write permissions.
+        use std::os::unix::fs::PermissionsExt;
+
+        // Make a temporary file and remove write permissions from it.
+        let tmp_file = tempfile::NamedTempFile::new().expect("Couldn't make a temp file");
+        let mut perms = tmp_file
+            .as_file()
+            .metadata()
+            .expect("Couldn't get file metadata")
+            .permissions();
+        perms.set_mode(0o000); // No read/write for anyone.
+        tmp_file
+            .as_file()
+            .set_permissions(perms)
+            .expect("Couldn't set permissions");
+
+        let result = exists_and_is_readable(tmp_file.path());
         assert!(result.is_err());
         match result {
             Err(InputFileError::CouldNotRead(_)) => (),
             Err(e) => panic!("Unexpected error kind! {:?}", e),
             Ok(_) => unreachable!(),
         }
+
+        // Set read/write for the owner so the file can be deleted.
+        let mut perms = tmp_file
+            .as_file()
+            .metadata()
+            .expect("Couldn't get file metadata")
+            .permissions();
+        perms.set_mode(0o600);
+        tmp_file
+            .as_file()
+            .set_permissions(perms)
+            .expect("Couldn't set permissions");
     }
 
     #[test]

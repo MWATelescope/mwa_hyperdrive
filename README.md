@@ -4,7 +4,9 @@
 <img src="doc/hyperdrive.png" height="200px" alt="hyperdrive logo">
 <br/>
 <a href="https://docs.rs/crate/mwa_hyperdrive"><img src="https://docs.rs/mwa_hyperdrive/badge.svg" alt="docs"></a>
-<img src="https://github.com/MWATelescope/mwa_hyperdrive/workflows/Tests/badge.svg" alt="Cross-platform%20tests">
+<img src="https://github.com/MWATelescope/mwa_hyperdrive/workflows/Tests/badge.svg" alt="Linux%20tests">
+<a href="https://codecov.io/gh/MWATelescope/mwa_hyperdrive">
+  <img src="https://codecov.io/gh/MWATelescope/mwa_hyperdrive/branch/main/graph/badge.svg?token=FSRY8T0G0R"/>
 </div>
 
 Calibration software for the Murchison Widefield Array (MWA) radio telescope.

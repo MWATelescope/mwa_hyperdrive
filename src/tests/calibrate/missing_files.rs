@@ -12,6 +12,7 @@ use crate::{
 
 /// Try to calibrate raw MWA data without a metafits file.
 #[test]
+#[ignore = "assert_cmd_not_working_in_coverage"]
 fn param_file_missing_metafits() {
     let args = get_reduced_1090008640(true);
     let source_list = args.source_list.unwrap();
@@ -55,6 +56,7 @@ fn param_file_missing_metafits() {
 
 /// Try to calibrate raw MWA data without gpubox files.
 #[test]
+#[ignore = "assert_cmd_not_working_in_coverage"]
 fn param_file_missing_gpuboxes() {
     let args = get_reduced_1090008640(true);
     let source_list = args.source_list.unwrap();
@@ -95,6 +97,7 @@ fn param_file_missing_gpuboxes() {
 
 /// Make a toml argument file without mwaf files.
 #[test]
+#[ignore = "assert_cmd_not_working_in_coverage"]
 fn param_file_missing_mwafs() {
     let args = get_reduced_1090008640(true);
     let source_list = args.source_list.unwrap();
