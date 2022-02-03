@@ -456,9 +456,10 @@ impl RawDataReader {
                         let mut gain = tile_gains[0][i_cc];
                         let i = if tile1 != tile2 { 1 } else { 0 };
                         gain *= tile_gains[i][i_cc];
+                        let gain = gain as f64 / 64.0_f64.powi(2);
 
-                        // Do the multiplication at double precision.
-                        let vd: Jones<f64> = Jones::from(*vis) / gain as f64;
+                        // Do the division at double precision.
+                        let vd: Jones<f64> = Jones::from(*vis) / gain;
                         *vis = Jones::from(vd);
                     });
                 });

@@ -310,35 +310,34 @@ fn test_1090008640_quality() {
         &params.timeblocks,
         &params.chanblocks,
         &params.baseline_weights,
-        params.max_iterations,
-        params.stop_threshold,
-        params.min_threshold,
+        50,
+        1e-8,
+        1e-4,
         false,
     );
 
     // Only one timeblock.
     assert_eq!(cal_results.dim().0, 1);
 
-    // One chanblock needs 28 iterations and 2 need 24 iterations. The rest need
-    // at most 22.
-    let mut count_28 = 1;
-    let mut count_24 = 3;
+    // 15 chanblocks need 50 iterations and 3 need 42 iterations. The rest are
+    // somewhere inbetween.
+    let mut count_50 = 15;
+    let mut count_42 = 3;
     for cal_result in cal_results {
         match cal_result.num_iterations {
-            28 => {
-                count_28 -= 1;
-                assert_eq!(cal_result.chanblock, Some(2));
+            50 => {
+                count_50 -= 1;
             }
-            24 => {
-                count_24 -= 1;
-                assert!([7, 21, 28].contains(&cal_result.chanblock.unwrap()));
+            42 => {
+                count_42 -= 1;
+                assert!([12, 13, 23].contains(&cal_result.chanblock.unwrap()));
             }
             0 => panic!("0 iterations? Something is wrong."),
             _ => {
                 if cal_result.num_iterations % 2 == 1 {
                     panic!("An odd number of iterations shouldn't be possible; at the time of writing, only even numbers are allowed.");
-                } else if cal_result.num_iterations > 22 {
-                    panic!("Too many iterations required: {:?}", cal_result)
+                } else if cal_result.num_iterations < 42 {
+                    panic!("Unexpected fewer iterations: {:?}", cal_result)
                 }
             }
         }
@@ -347,6 +346,6 @@ fn test_1090008640_quality() {
         assert_eq!(cal_result.num_failed, 0);
         assert!(cal_result.max_precision < 1e8);
     }
-    assert_eq!(count_28, 0);
-    assert_eq!(count_24, 0);
+    assert_eq!(count_50, 0);
+    assert_eq!(count_42, 0);
 }

@@ -349,6 +349,8 @@ fn pfb_levine_gains() {
 #[test]
 fn test_digital_gains() {
     let mut args = get_reduced_1090008640(false);
+    // Some("none") turns off the PFB correction, whereas None would be the
+    // default behaviour (apply PFB correction).
     args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = false;
     let CrossData {
@@ -369,25 +371,25 @@ fn test_digital_gains() {
     let mut result: Array1<Jones<f64>> = vis_dg.slice(s![i_bl, ..]).mapv(Jones::from);
     result /= &vis_no_dg.slice(s![i_bl, ..]).mapv(Jones::from);
     // Baseline 1 is made from antennas 0 and 1. Both have a digital gain of 65.
-    let dg: f64 = 65.0;
+    let dg: f64 = 65.0 / 64.0;
     let expected = Array1::from_elem(result.dim(), Jones::identity()) / dg / dg;
     assert_abs_diff_eq!(
         result.mapv(TestJones::from),
         expected.mapv(TestJones::from),
-        epsilon = 1e-10
+        epsilon = 1e-6
     );
 
     let i_bl = 103;
     let mut result: Array1<Jones<f64>> = vis_dg.slice(s![i_bl, ..]).mapv(Jones::from);
     result /= &vis_no_dg.slice(s![i_bl, ..]).mapv(Jones::from);
     // Baseline 103 is made from antennas 0 and 103.
-    let dg1: f64 = 65.0;
-    let dg2: f64 = 67.0;
+    let dg1: f64 = 65.0 / 64.0;
+    let dg2: f64 = 67.0 / 64.0;
     let expected = Array1::from_elem(result.dim(), Jones::identity()) / dg1 / dg2;
     assert_abs_diff_eq!(
         result.mapv(TestJones::from),
         expected.mapv(TestJones::from),
-        epsilon = 1e-10
+        epsilon = 1e-6
     );
 
     // Weights are definitely the same.
