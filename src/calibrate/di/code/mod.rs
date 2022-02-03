@@ -604,7 +604,7 @@ impl<'a> IncompleteSolutions<'a> {
         out_di_jones
             .outer_iter_mut()
             .into_par_iter()
-            .zip(self.di_jones.outer_iter().into_par_iter())
+            .zip(self.di_jones.outer_iter())
             .for_each(|(mut out_di_jones, di_jones)| {
                 // Iterate over the tiles.
                 let mut i_unflagged_tile = 0;

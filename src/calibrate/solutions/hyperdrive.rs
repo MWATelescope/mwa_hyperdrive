@@ -182,7 +182,7 @@ pub(super) fn write<T: AsRef<Path>>(
     let (num_timeblocks, total_num_tiles, total_num_chanblocks) = sols.di_jones.dim();
     let dim = [num_timeblocks, total_num_tiles, total_num_chanblocks, 4 * 2];
     let image_description = ImageDescription {
-        data_type: ImageType::Float,
+        data_type: ImageType::Double,
         dimensions: &dim,
     };
     let hdu = fptr.create_image("SOLUTIONS".to_string(), &image_description)?;
@@ -191,39 +191,18 @@ pub(super) fn write<T: AsRef<Path>>(
     // solutions. We have to be tricky with what gets written out, because
     // `di_jones` doesn't necessarily have the same shape as the output.
     let mut fits_image_data = vec![f64::NAN; dim.iter().product()];
-    for (timeblock, di_jones) in sols.di_jones.outer_iter().enumerate() {
-        let mut unflagged_tile_index = 0;
+    let mut one_dim_index = 0;
+    for j in sols.di_jones.iter() {
+        fits_image_data[one_dim_index] = j[0].re;
+        fits_image_data[one_dim_index + 1] = j[0].im;
+        fits_image_data[one_dim_index + 2] = j[1].re;
+        fits_image_data[one_dim_index + 3] = j[1].im;
+        fits_image_data[one_dim_index + 4] = j[2].re;
+        fits_image_data[one_dim_index + 5] = j[2].im;
+        fits_image_data[one_dim_index + 6] = j[3].re;
+        fits_image_data[one_dim_index + 7] = j[3].im;
 
-        for i_tile in 0..total_num_tiles {
-            let mut unflagged_chan_index = 0;
-
-            for i_chan in 0..total_num_chanblocks {
-                if !sols.flagged_chanblocks.contains(&i_chan) {
-                    let j = if !sols.flagged_tiles.contains(&i_tile) {
-                        di_jones[(unflagged_tile_index, unflagged_chan_index)]
-                    } else {
-                        continue;
-                    };
-
-                    let one_dim_index = timeblock * dim[1] * dim[2] * dim[3]
-                        + i_tile * dim[2] * dim[3]
-                        + i_chan * dim[3];
-
-                    fits_image_data[one_dim_index] = j[0].re;
-                    fits_image_data[one_dim_index + 1] = j[0].im;
-                    fits_image_data[one_dim_index + 2] = j[1].re;
-                    fits_image_data[one_dim_index + 3] = j[1].im;
-                    fits_image_data[one_dim_index + 4] = j[2].re;
-                    fits_image_data[one_dim_index + 5] = j[2].im;
-                    fits_image_data[one_dim_index + 6] = j[3].re;
-                    fits_image_data[one_dim_index + 7] = j[3].im;
-                    unflagged_chan_index += 1;
-                }
-            }
-            if !sols.flagged_tiles.contains(&i_tile) {
-                unflagged_tile_index += 1;
-            };
-        }
+        one_dim_index += 8;
     }
     hdu.write_image(&mut fptr, &fits_image_data)?;
 

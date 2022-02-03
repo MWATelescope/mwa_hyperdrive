@@ -21,7 +21,7 @@ use rayon::prelude::*;
 
 use super::{error::*, CalibrationSolutions};
 use crate::math::average_epoch;
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray, rayon, Complex};
+use mwa_hyperdrive_common::{marlu, ndarray, rayon, Complex};
 
 pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, ReadSolutionsError> {
     let file_str = file.as_ref().display().to_string();
@@ -172,34 +172,14 @@ pub(super) fn write<T: AsRef<Path>>(
     bin_file.write_f64::<LittleEndian>(start)?;
     bin_file.write_f64::<LittleEndian>(end)?;
 
-    for di_jones_per_time in sols.di_jones.outer_iter() {
-        let mut unflagged_tile_index = 0;
-        for tile_index in 0..total_num_tiles {
-            let mut unflagged_chan_index = 0;
-            for chan in 0..total_num_chanblocks {
-                if !sols.flagged_chanblocks.contains(&chan) {
-                    let j = if !sols.flagged_tiles.contains(&tile_index) {
-                        di_jones_per_time[(unflagged_tile_index, unflagged_chan_index)]
-                    } else {
-                        Jones::nan()
-                    };
-
-                    LittleEndian::write_f64_into(
-                        &[
-                            j[0].re, j[0].im, j[1].re, j[1].im, j[2].re, j[2].im, j[3].re, j[3].im,
-                        ],
-                        &mut buf,
-                    );
-                    unflagged_chan_index += 1;
-                } else {
-                    LittleEndian::write_f64_into(&[f64::NAN; 8], &mut buf);
-                }
-                bin_file.write_all(&buf)?;
-            }
-            if !sols.flagged_tiles.contains(&tile_index) {
-                unflagged_tile_index += 1;
-            };
-        }
+    for j in sols.di_jones.iter() {
+        LittleEndian::write_f64_into(
+            &[
+                j[0].re, j[0].im, j[1].re, j[1].im, j[2].re, j[2].im, j[3].re, j[3].im,
+            ],
+            &mut buf,
+        );
+        bin_file.write_all(&buf)?;
     }
     bin_file.flush()?;
     Ok(())

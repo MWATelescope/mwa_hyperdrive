@@ -9,11 +9,13 @@ use marlu::{c64, time::gps_to_epoch, Jones, XyzGeodetic};
 use ndarray::prelude::*;
 
 use tempfile::tempdir;
+use vec1::vec1;
 
 use super::{calibrate, calibrate_timeblocks, get_cal_vis, CalVis, IncompleteSolutions};
 use crate::{
     calibrate::{Chanblock, Timeblock},
     jones_test::TestJones,
+    math::is_prime,
     tests::reduced_obsids::get_reduced_1090008640,
 };
 use mwa_hyperdrive_common::{marlu, ndarray};
@@ -87,7 +89,7 @@ fn test_calibrate_trivial() {
 /// Test that converting [IncompleteSolutions] to [CalibrationSolutions] does
 /// what's expected.
 #[test]
-fn incomplete_to_complete() {
+fn incomplete_to_complete_trivial() {
     let timeblocks = [Timeblock {
         index: 0,
         range: 0..1,
@@ -119,11 +121,18 @@ fn incomplete_to_complete() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = chanblocks.len();
     let baseline_weights = vec![1.0; num_baselines];
+
+    let incomplete_di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
+        .into_iter()
+        .map(|i| Jones::identity() * (i + 1) as f64 * if is_prime(i) { 1.0 } else { 0.5 })
+        .collect();
+    let incomplete_di_jones = Array3::from_shape_vec(
+        (num_timeblocks, num_tiles, num_chanblocks),
+        incomplete_di_jones,
+    )
+    .unwrap();
     let incomplete = IncompleteSolutions {
-        di_jones: Array3::from_elem(
-            (num_timeblocks, num_tiles, num_chanblocks),
-            Jones::identity() * 2.0,
-        ),
+        di_jones: incomplete_di_jones.clone(),
         timeblocks: &timeblocks,
         chanblocks: &chanblocks,
         baseline_weights: &baseline_weights,
@@ -148,17 +157,207 @@ fn incomplete_to_complete() {
     );
 
     // The "complete" solutions should have inverted Jones matrices.
-    let expected = Array3::from_elem(
-        (num_timeblocks, num_tiles, num_chanblocks),
-        (Jones::identity() * 2.0).inv(),
-    )
-    .mapv(TestJones::from);
-    assert_abs_diff_eq!(complete.di_jones.mapv(TestJones::from), expected);
+    let expected = incomplete_di_jones.mapv(|v| v.inv());
+
+    assert_abs_diff_eq!(
+        complete.di_jones.mapv(TestJones::from),
+        expected.mapv(TestJones::from)
+    );
 
     assert!(complete.flagged_tiles.is_empty());
     assert!(complete.flagged_chanblocks.is_empty());
+}
 
-    // Let's now add some flags.
+// Make the first chanblock flagged. Everything should then just be "shifted one
+// over".
+#[test]
+fn incomplete_to_complete_flags_simple() {
+    let timeblocks = [Timeblock {
+        index: 0,
+        range: 0..1,
+        start: gps_to_epoch(1065880128.0),
+        end: gps_to_epoch(1065880130.0),
+        average: gps_to_epoch(1065880129.0),
+    }];
+    let chanblocks = [
+        Chanblock {
+            chanblock_index: 1,
+            unflagged_index: 0,
+            freq: 151e6,
+        },
+        Chanblock {
+            chanblock_index: 2,
+            unflagged_index: 1,
+            freq: 152e6,
+        },
+        Chanblock {
+            chanblock_index: 3,
+            unflagged_index: 2,
+            freq: 153e6,
+        },
+    ];
+    let flagged_tiles = [];
+    let flagged_chanblock_indices = [0];
+    let num_timeblocks = timeblocks.len();
+    let num_tiles = 5;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let num_chanblocks = chanblocks.len();
+    let baseline_weights = vec![1.0; num_baselines];
+    let total_num_tiles = num_tiles + flagged_tiles.len();
+
+    let di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
+        .into_iter()
+        .map(|i| Jones::identity() * (i + 1) as f64 * if is_prime(i) { 1.0 } else { 0.5 })
+        .collect();
+    let incomplete_di_jones =
+        Array3::from_shape_vec((num_timeblocks, num_tiles, num_chanblocks), di_jones).unwrap();
+    let incomplete = IncompleteSolutions {
+        di_jones: incomplete_di_jones.clone(),
+        timeblocks: &timeblocks,
+        chanblocks: &chanblocks,
+        baseline_weights: &baseline_weights,
+        max_iterations: 50,
+        stop_threshold: 1e-8,
+        min_threshold: 1e-4,
+    };
+
+    let all_tile_positions = vec![
+        XyzGeodetic {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        total_num_tiles
+    ];
+    let complete = incomplete.into_cal_sols(
+        &all_tile_positions,
+        &flagged_tiles,
+        &flagged_chanblock_indices,
+        Some(1065880128),
+    );
+
+    // The first chanblock is all flagged.
+    for j in complete.di_jones.slice(s![.., .., 0]).iter() {
+        assert!(j.any_nan());
+    }
+    // All others are not.
+    for j in complete.di_jones.slice(s![.., .., 1..]).iter() {
+        assert!(!j.any_nan());
+    }
+    assert_eq!(
+        complete.di_jones.slice(s![.., .., 1..]).dim(),
+        incomplete_di_jones.dim()
+    );
+    assert_abs_diff_eq!(
+        complete
+            .di_jones
+            .slice(s![.., .., 1..])
+            .mapv(TestJones::from),
+        incomplete_di_jones.mapv(|v| TestJones::from(v.inv()))
+    );
+
+    assert!(complete.flagged_tiles.is_empty());
+    assert_eq!(complete.flagged_chanblocks.len(), 1);
+    assert!(complete.flagged_chanblocks.contains(&0));
+}
+
+// Same as above, but make the last chanblock flagged.
+#[test]
+fn incomplete_to_complete_flags_simple2() {
+    let timeblocks = [Timeblock {
+        index: 0,
+        range: 0..1,
+        start: gps_to_epoch(1065880128.0),
+        end: gps_to_epoch(1065880130.0),
+        average: gps_to_epoch(1065880129.0),
+    }];
+    let chanblocks = [
+        Chanblock {
+            chanblock_index: 0,
+            unflagged_index: 0,
+            freq: 151e6,
+        },
+        Chanblock {
+            chanblock_index: 1,
+            unflagged_index: 1,
+            freq: 152e6,
+        },
+        Chanblock {
+            chanblock_index: 2,
+            unflagged_index: 2,
+            freq: 153e6,
+        },
+    ];
+    let flagged_tiles = [];
+    let flagged_chanblock_indices = [3];
+    let num_timeblocks = timeblocks.len();
+    let num_tiles = 5;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let num_chanblocks = chanblocks.len();
+    let baseline_weights = vec![1.0; num_baselines];
+    let total_num_tiles = num_tiles + flagged_tiles.len();
+
+    let incomplete_di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
+        .into_iter()
+        .map(|i| Jones::identity() * (i + 1) as f64 * if is_prime(i) { 1.0 } else { 0.5 })
+        .collect();
+    let incomplete_di_jones = Array3::from_shape_vec(
+        (num_timeblocks, num_tiles, num_chanblocks),
+        incomplete_di_jones,
+    )
+    .unwrap();
+    let incomplete = IncompleteSolutions {
+        di_jones: incomplete_di_jones.clone(),
+        timeblocks: &timeblocks,
+        chanblocks: &chanblocks,
+        baseline_weights: &baseline_weights,
+        max_iterations: 50,
+        stop_threshold: 1e-8,
+        min_threshold: 1e-4,
+    };
+
+    let all_tile_positions = vec![
+        XyzGeodetic {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        total_num_tiles
+    ];
+    let complete = incomplete.into_cal_sols(
+        &all_tile_positions,
+        &flagged_tiles,
+        &flagged_chanblock_indices,
+        Some(1065880128),
+    );
+
+    // The last chanblock is all flagged.
+    for j in complete.di_jones.slice(s![.., .., -1]).iter() {
+        assert!(j.any_nan());
+    }
+    // All others are not.
+    for j in complete.di_jones.slice(s![.., .., ..-1]).iter() {
+        assert!(!j.any_nan());
+    }
+    assert_eq!(
+        complete.di_jones.slice(s![.., .., ..-1]).dim(),
+        incomplete_di_jones.dim()
+    );
+    assert_abs_diff_eq!(
+        complete
+            .di_jones
+            .slice(s![.., .., ..-1])
+            .mapv(TestJones::from),
+        incomplete_di_jones.mapv(|v| TestJones::from(v.inv()))
+    );
+
+    assert!(complete.flagged_tiles.is_empty());
+    assert_eq!(complete.flagged_chanblocks.len(), 1);
+    assert!(complete.flagged_chanblocks.contains(&3));
+}
+
+#[test]
+fn incomplete_to_complete_flags_complex() {
     let timeblocks = [Timeblock {
         index: 0,
         range: 0..1,
@@ -190,22 +389,28 @@ fn incomplete_to_complete() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = chanblocks.len();
     let baseline_weights = vec![1.0; num_baselines];
-    // The solutions are now dependent on unflagged tile index.
-    let mut di_jones = Array3::from_elem(
-        (num_timeblocks, num_tiles, num_chanblocks),
-        Jones::identity(),
-    );
-    let mut i_unflagged_tile: usize = 0;
-    for i_tile in 0..num_tiles + flagged_tiles.len() {
-        if !flagged_tiles.contains(&i_tile) {
-            di_jones
-                .slice_mut(s![.., i_unflagged_tile, ..])
-                .map_inplace(|v| *v *= (i_unflagged_tile + 1) as f64);
-            i_unflagged_tile += 1;
-        }
+    let total_num_tiles = num_tiles + flagged_tiles.len();
+    let total_num_chanblocks = num_chanblocks + flagged_chanblock_indices.len();
+
+    // Cower at my evil, awful code.
+    let mut primes = vec1![2];
+    while primes.len() < num_tiles * num_chanblocks {
+        let next = (*primes.last() + 1..)
+            .into_iter()
+            .find(|&i| is_prime(i))
+            .unwrap();
+        primes.push(next);
     }
+    let incomplete_di_jones = Array3::from_shape_vec(
+        (num_timeblocks, num_tiles, num_chanblocks),
+        primes
+            .iter()
+            .map(|&i| Jones::identity() * i as f64)
+            .collect(),
+    )
+    .unwrap();
     let incomplete = IncompleteSolutions {
-        di_jones,
+        di_jones: incomplete_di_jones,
         timeblocks: &timeblocks,
         chanblocks: &chanblocks,
         baseline_weights: &baseline_weights,
@@ -220,7 +425,7 @@ fn incomplete_to_complete() {
             y: 2.0,
             z: 3.0,
         };
-        num_tiles + flagged_tiles.len()
+        total_num_tiles
     ];
     let complete = incomplete.into_cal_sols(
         &all_tile_positions,
@@ -229,52 +434,35 @@ fn incomplete_to_complete() {
         Some(1065880128),
     );
 
+    // For programmer sanity, enforce here that this test only ever has one
+    // timeblock.
+    assert_eq!(complete.di_jones.dim().0, 1);
+
     let mut i_unflagged_tile = 0;
-    for i_tile in 0..num_tiles + flagged_tiles.len() {
-        let slice = complete.di_jones.slice(s![.., i_tile, ..]);
+    for i_tile in 0..total_num_tiles {
+        let sub_array = complete.di_jones.slice(s![0, i_tile, ..]);
+        let mut i_unflagged_chanblock = 0;
+
         if flagged_tiles.contains(&i_tile) {
-            // Jones matrices filled with NaN cannot be compared against each
-            // other. Convert these to matrices with "random" numbers.
-            assert_abs_diff_eq!(
-                slice
-                    .mapv(|_| Jones::identity() * 543.0)
-                    .mapv(TestJones::from),
-                Array2::from_elem(slice.dim(), Jones::identity() * 543.0).mapv(TestJones::from)
-            );
+            assert!(sub_array.iter().all(|j| j.any_nan()));
         } else {
-            // Generate the expected results based on the unflagged tile index.
-            let mut expected = Array2::from_elem(
-                slice.dim(),
-                (Jones::identity() * (i_unflagged_tile + 1) as f64).inv(),
-            );
-            for i_chan in 0..num_chanblocks + flagged_chanblock_indices.len() {
+            for i_chan in 0..total_num_chanblocks {
                 if flagged_chanblock_indices.contains(&i_chan) {
-                    expected
-                        .slice_mut(s![.., i_chan])
-                        .map_inplace(|v| *v = Jones::from([c64::new(f64::NAN, f64::NAN); 4]));
+                    assert!(sub_array[i_chan].any_nan());
+                } else {
+                    assert_abs_diff_eq!(
+                        TestJones::from(sub_array[i_chan]),
+                        TestJones::from(
+                            Jones::identity()
+                                / primes[i_unflagged_tile * num_chanblocks + i_unflagged_chanblock]
+                                    as f64
+                        )
+                    );
+
+                    i_unflagged_chanblock += 1;
                 }
             }
 
-            // Remove NaNs and compare.
-            let result = slice
-                .mapv(|v| {
-                    if v.any_nan() {
-                        Jones::identity() * 456.0
-                    } else {
-                        v
-                    }
-                })
-                .mapv(TestJones::from);
-            let expected = expected
-                .mapv(|v| {
-                    if v.any_nan() {
-                        Jones::identity() * 456.0
-                    } else {
-                        v
-                    }
-                })
-                .mapv(TestJones::from);
-            assert_abs_diff_eq!(result, expected);
             i_unflagged_tile += 1;
         }
     }

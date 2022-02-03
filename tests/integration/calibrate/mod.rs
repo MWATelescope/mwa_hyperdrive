@@ -127,5 +127,5 @@ fn test_1090008640_woden() {
 
     let bin_sols_di_jones = bin_sols.di_jones.mapv(TestJones::from);
     let hyp_sols_di_jones = hyp_sols.di_jones.mapv(TestJones::from);
-    assert_abs_diff_eq!(bin_sols_di_jones, hyp_sols_di_jones, epsilon = 1e-7);
+    assert_abs_diff_eq!(bin_sols_di_jones, hyp_sols_di_jones);
 }

@@ -708,7 +708,6 @@ impl CalibrateParams {
             freq_average_factor
         };
 
-        // dbg!(&flagged_fine_chans);
         let (chanblocks, flagged_chanblocks) = channels_to_chanblocks(
             &freq_context.fine_chan_freqs,
             freq_context.freq_res,
