@@ -123,6 +123,7 @@ impl CalibrationSolutions {
     }
 
     #[cfg(feature = "plotting")]
+    #[allow(clippy::too_many_arguments)]
     pub fn plot<T: AsRef<Path>, S: AsRef<str>>(
         &self,
         filename_base: T,
@@ -131,6 +132,8 @@ impl CalibrationSolutions {
         no_ref_tile: bool,
         tile_names: Option<&[S]>,
         ignore_cross_pols: bool,
+        min_amp: Option<f64>,
+        max_amp: Option<f64>,
     ) -> Result<Vec<String>, ()> {
         plotting::plot_sols(
             self,
@@ -140,6 +143,8 @@ impl CalibrationSolutions {
             no_ref_tile,
             tile_names,
             ignore_cross_pols,
+            min_amp,
+            max_amp,
         )
     }
 }

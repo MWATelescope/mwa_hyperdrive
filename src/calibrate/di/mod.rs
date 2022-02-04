@@ -33,7 +33,7 @@ pub(crate) fn di_calibrate(
         mut vis_data,
         vis_weights,
         vis_model,
-    } = get_cal_vis(params, true)?;
+    } = get_cal_vis(params, !params.no_progress_bars)?;
 
     let obs_context = params.input_data.get_obs_context();
     let freq_context = params.input_data.get_freq_context();

@@ -116,6 +116,14 @@ enum Args {
         #[clap(long)]
         ignore_cross_pols: bool,
 
+        /// The minimum y-range value on the amplitude gain plots.
+        #[clap(long)]
+        min_amp: Option<f64>,
+
+        /// The maximum y-range value on the amplitude gain plots.
+        #[clap(long)]
+        max_amp: Option<f64>,
+
         /// The metafits file associated with the solutions. This provides
         /// additional information on the plots, like the tile names.
         #[clap(short, long, parse(from_str))]
@@ -246,6 +254,8 @@ fn try_main() -> Result<(), HyperdriveError> {
             ref_tile,
             no_ref_tile,
             ignore_cross_pols,
+            min_amp,
+            max_amp,
             metafits,
             verbosity: _,
         } => {
@@ -296,6 +306,8 @@ fn try_main() -> Result<(), HyperdriveError> {
                         no_ref_tile,
                         tile_names.as_deref(),
                         ignore_cross_pols,
+                        min_amp,
+                        max_amp,
                     )
                     .unwrap();
                 info!("Wrote {:?}", plot_files);

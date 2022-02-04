@@ -29,6 +29,7 @@ lazy_static::lazy_static! {
     ];
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
     sols: &CalibrationSolutions,
     filename_base: T,
@@ -37,6 +38,8 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
     no_ref_tile: bool,
     tile_names: Option<&[S]>,
     ignore_cross_pols: bool,
+    min_amp: Option<f64>,
+    max_amp: Option<f64>,
 ) -> Result<Vec<String>, ()> {
     let (num_timeblocks, total_num_tiles, _) = sols.di_jones.dim();
 
@@ -201,12 +204,21 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
                     });
             });
 
-        let min_amp = 0.0;
-        let max_amp = amps
-            .iter()
-            .flatten()
-            .filter(|a| !a.is_nan())
-            .fold(0.0, |acc, &a| if a > acc { a } else { acc });
+        let (min_amp, max_amp) = match (min_amp, max_amp) {
+            (Some(min), Some(max)) => (min, max),
+            _ => {
+                // We need to work out the min and max ourselves.
+                let (data_min, data_max) = amps.iter().flatten().filter(|a| !a.is_nan()).fold(
+                    (f64::INFINITY, 0.0),
+                    |(acc_min, acc_max), &a| {
+                        let acc_min = if a < acc_min { a } else { acc_min };
+                        let acc_max = if a > acc_max { a } else { acc_max };
+                        (acc_min, acc_max)
+                    },
+                );
+                (min_amp.unwrap_or(data_min), max_amp.unwrap_or(data_max))
+            }
+        };
 
         amps.outer_iter()
             .zip(amps_tile_plots.into_iter())

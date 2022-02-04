@@ -40,7 +40,7 @@ use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
 use vec1::Vec1;
 
-use super::{solutions::CalSolutionType, Chanblock, Timeblock};
+use super::{solutions::CalSolutionType, CalibrateUserArgs, Chanblock, Timeblock};
 use crate::{
     constants::*,
     context::{FreqContext, ObsContext},
@@ -213,6 +213,10 @@ pub(crate) struct CalibrateParams {
     /// writing out calibrated visibilities.
     pub(crate) output_vis_freq_average_factor: usize,
 
+    /// When reading in visibilities and generating sky-model visibilities,
+    /// don't draw progress bars.
+    pub(crate) no_progress_bars: bool,
+
     #[cfg(feature = "cuda")]
     /// If true, use the CPU to generate sky-model visibilites. Otherwise, use
     /// the GPU.
@@ -228,12 +232,15 @@ impl CalibrateParams {
     /// Source list vetoing is performed in this function, using the specified
     /// number of sources and/or the veto threshold.
     pub(crate) fn new(
-        super::args::CalibrateUserArgs {
+        CalibrateUserArgs {
             data,
-            outputs,
-            model_filename,
             source_list,
             source_list_type,
+            outputs,
+            model_filename,
+            ignore_autos,
+            output_vis_time_average,
+            output_vis_freq_average,
             num_sources,
             source_dist_cutoff,
             veto_threshold,
@@ -244,18 +251,6 @@ impl CalibrateParams {
             time_average_factor,
             freq_average_factor,
             timesteps,
-            tile_flags,
-            ignore_input_data_tile_flags,
-            ignore_input_data_fine_channel_flags,
-            ignore_autos,
-            fine_chan_flags_per_coarse_chan,
-            fine_chan_flags,
-            pfb_flavour,
-            no_digital_gains,
-            no_geometric_correction,
-            no_cable_length_correction,
-            output_vis_time_average,
-            output_vis_freq_average,
             uvw_min,
             uvw_max,
             max_iterations,
@@ -265,7 +260,17 @@ impl CalibrateParams {
             array_latitude_deg,
             #[cfg(feature = "cuda")]
             cpu,
-        }: super::args::CalibrateUserArgs,
+            tile_flags,
+            ignore_input_data_tile_flags,
+            ignore_input_data_fine_channel_flags,
+            fine_chan_flags_per_coarse_chan,
+            fine_chan_flags,
+            pfb_flavour,
+            no_digital_gains,
+            no_cable_length_correction,
+            no_geometric_correction,
+            no_progress_bars,
+        }: CalibrateUserArgs,
     ) -> Result<CalibrateParams, InvalidArgsError> {
         let mut dipole_delays = match (delays, no_beam) {
             // Check that delays are sensible, regardless if we actually need
@@ -1012,6 +1017,7 @@ impl CalibrateParams {
             output_vis_filenames,
             output_vis_time_average_factor,
             output_vis_freq_average_factor,
+            no_progress_bars,
             #[cfg(feature = "cuda")]
             use_cpu_for_modelling: cpu,
         };

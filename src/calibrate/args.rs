@@ -262,6 +262,11 @@ pub struct CalibrateUserArgs {
     /// written.
     #[clap(long, help_heading = "RAW MWA DATA")]
     pub no_geometric_correction: bool,
+
+    /// When reading in visibilities and generating sky-model visibilities,
+    /// don't draw progress bars.
+    #[clap(long, help_heading = "USER INTERFACE")]
+    pub no_progress_bars: bool,
 }
 
 impl CalibrateUserArgs {
@@ -336,34 +341,25 @@ impl CalibrateUserArgs {
         };
 
         // Ensure all of the file args are accounted for by pattern matching.
-        let Self {
+        let CalibrateUserArgs {
             data,
+            source_list,
+            source_list_type,
             outputs,
             model_filename,
+            ignore_autos,
+            output_vis_time_average,
+            output_vis_freq_average,
+            num_sources,
+            source_dist_cutoff,
+            veto_threshold,
             beam_file,
             unity_dipole_gains,
             delays,
             no_beam,
-            source_list,
-            source_list_type,
-            num_sources,
-            source_dist_cutoff,
-            veto_threshold,
             time_average_factor,
             freq_average_factor,
             timesteps,
-            tile_flags,
-            ignore_input_data_tile_flags,
-            ignore_input_data_fine_channel_flags,
-            ignore_autos,
-            fine_chan_flags_per_coarse_chan,
-            fine_chan_flags,
-            pfb_flavour,
-            no_digital_gains,
-            no_cable_length_correction,
-            no_geometric_correction,
-            output_vis_time_average,
-            output_vis_freq_average,
             uvw_min,
             uvw_max,
             max_iterations,
@@ -373,6 +369,16 @@ impl CalibrateUserArgs {
             array_latitude_deg,
             #[cfg(feature = "cuda")]
             cpu,
+            tile_flags,
+            ignore_input_data_tile_flags,
+            ignore_input_data_fine_channel_flags,
+            fine_chan_flags_per_coarse_chan,
+            fine_chan_flags,
+            pfb_flavour,
+            no_digital_gains,
+            no_cable_length_correction,
+            no_geometric_correction,
+            no_progress_bars,
         } = file_args;
         // Merge all the arguments, preferring the CLI args when available.
         Ok(CalibrateUserArgs {
@@ -417,6 +423,7 @@ impl CalibrateUserArgs {
             no_cable_length_correction: cli_args.no_cable_length_correction
                 || no_cable_length_correction,
             no_geometric_correction: cli_args.no_geometric_correction || no_geometric_correction,
+            no_progress_bars: cli_args.no_progress_bars || no_progress_bars,
         })
     }
 
