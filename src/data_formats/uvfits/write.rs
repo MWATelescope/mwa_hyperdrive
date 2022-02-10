@@ -70,8 +70,9 @@ pub(crate) struct UvfitsWriter<'a> {
 impl<'a> UvfitsWriter<'a> {
     /// Create a new uvfits file at the specified filename.
     ///
-    /// If `fine_chan_width_hz` is unknown, then zero is written at the FREQ
+    /// If `fine_chan_width_hz` is unknown, then zero is written as the FREQ
     /// CDELT.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<T: AsRef<Path>>(
         filename: T,
         num_timesteps: usize,
@@ -81,7 +82,6 @@ impl<'a> UvfitsWriter<'a> {
         start_epoch: Epoch,
         fine_chan_width_hz: Option<f64>,
         centre_freq_hz: f64,
-        centre_freq_chan: usize,
         phase_centre: RADec,
         obs_name: Option<&str>,
         unflagged_cross_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
@@ -168,7 +168,7 @@ impl<'a> UvfitsWriter<'a> {
         hdu.write_key(&mut u, "CTYPE4", "FREQ")?;
         hdu.write_key(&mut u, "CRVAL4", centre_freq_hz)?;
         hdu.write_key(&mut u, "CDELT4", fine_chan_width_hz.unwrap_or(0.0))?;
-        hdu.write_key(&mut u, "CRPIX4", centre_freq_chan as u64 + 1)?;
+        hdu.write_key(&mut u, "CRPIX4", (num_chans / 2) as u64 + 1)?;
 
         hdu.write_key(&mut u, "CTYPE5", "RA")?;
         hdu.write_key(&mut u, "CRVAL5", phase_centre.ra.to_degrees())?;
@@ -239,7 +239,7 @@ impl<'a> UvfitsWriter<'a> {
             .map(|(uvfits_ant, &ant)| (ant, uvfits_ant))
             .collect();
 
-        Ok(Self {
+        Ok(UvfitsWriter {
             path: filename.as_ref().to_path_buf(),
             num_timesteps,
             num_baselines,
@@ -268,7 +268,7 @@ impl<'a> UvfitsWriter<'a> {
     /// Write the antenna table to a uvfits file. Assumes that the array
     /// location is MWA.
     ///
-    /// `centre_freq` is the centre frequency of the coarse band that this
+    /// `centre_freq` is the centre frequency of the coarse channel that this
     /// uvfits file pertains to. `positions` are the [XyzGeodetic] coordinates
     /// of the MWA tiles.
     ///
@@ -574,8 +574,7 @@ impl<'a> UvfitsWriter<'a> {
 
     /// Write cross-correlation visibilities contained in `cross_vis` to the
     /// uvfits file. The first axis of `cross_vis` corresponds to baselines, the
-    /// second frequencies. This function assumes that visibilities do not
-    /// already have weights applied to them.
+    /// second frequencies.
     // TODO: Assumes that all baselines and fine channels are written for a
     // single timestep.
     pub(crate) fn write_cross_timestep_vis(
@@ -623,8 +622,7 @@ impl<'a> UvfitsWriter<'a> {
     /// Write cross- and auto-correlation visibilities (contained in
     /// `cross_vis` and `auto_vis`, respectively) to the uvfits file. The
     /// first axis of `cross_vis` corresponds to baselines, the second
-    /// frequencies. This function assumes that visibilities do not already have
-    /// weights applied to them.
+    /// frequencies.
     // TODO: Assumes that all baselines and fine channels are written for a
     // single timestep.
     pub(crate) fn write_cross_and_auto_timestep_vis(
@@ -734,23 +732,29 @@ impl<'a> UvfitsWriter<'a> {
             } else {
                 let jones = unsafe { jones.uget(unflagged_chan_index) };
                 let weight = unsafe { weights.uget(unflagged_chan_index) };
+                // If this vis is flagged, make the weight negative.
+                let weight = if jones.any_nan() || *weight <= 0.0 {
+                    -(weight.abs())
+                } else {
+                    *weight
+                };
                 vis.extend_from_slice(&[
                     // XX
                     jones[0].re,
                     jones[0].im,
-                    if jones[0].re.is_nan() { 0.0 } else { *weight },
+                    weight,
                     // YY
                     jones[3].re,
                     jones[3].im,
-                    if jones[3].re.is_nan() { 0.0 } else { *weight },
+                    weight,
                     // XY
                     jones[1].re,
                     jones[1].im,
-                    if jones[1].re.is_nan() { 0.0 } else { *weight },
+                    weight,
                     // YX
                     jones[2].re,
                     jones[2].im,
-                    if jones[2].re.is_nan() { 0.0 } else { *weight },
+                    weight,
                 ]);
                 unflagged_chan_index += 1;
             };

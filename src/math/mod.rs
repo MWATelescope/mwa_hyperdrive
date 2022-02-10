@@ -9,7 +9,7 @@
 #[cfg(test)]
 mod tests;
 
-use hifitime::{Duration, Epoch, TimeUnit};
+use hifitime::Epoch;
 use std::collections::HashMap;
 
 use mwa_hyperdrive_common::{c64, hifitime};
@@ -92,12 +92,10 @@ pub(crate) fn is_prime(n: usize) -> bool {
 /// Given a collection of [Epoch]s, return one that is the average of their
 /// times.
 pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
-    let duration_sum = es
-        .iter()
-        .fold(Duration::from_f64(0.0, TimeUnit::Second), |acc, t| {
-            acc + t.as_et_duration()
-        });
-    Epoch::from_et_seconds(duration_sum.in_seconds() / es.len() as f64)
+    let duration_sum = es.iter().fold(Epoch::from_gpst_seconds(0.0), |acc, t| {
+        acc + t.as_gpst_seconds()
+    });
+    Epoch::from_gpst_seconds(duration_sum.as_gpst_seconds() / es.len() as f64)
 }
 
 pub struct TileBaselineMaps {

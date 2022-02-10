@@ -9,11 +9,7 @@ use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
-use marlu::{
-    c32,
-    time::{epoch_as_gps_seconds, jd_to_epoch},
-    Jones, RADec, XyzGeodetic,
-};
+use marlu::{c32, Jones, RADec, XyzGeodetic};
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -22,9 +18,10 @@ use ndarray::prelude::*;
 
 use super::*;
 use crate::{
-    context::{FreqContext, ObsContext},
+    context::ObsContext,
     data_formats::{metafits, InputData, ReadInputDataError},
     glob::get_single_match_from_glob,
+    time::round_hundredths_of_a_second,
 };
 use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
@@ -32,9 +29,6 @@ use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
 pub(crate) struct UvfitsReader {
     /// Observation metadata.
     obs_context: ObsContext,
-
-    /// Frequency metadata.
-    freq_context: FreqContext,
 
     // uvfits-specific things follow.
     /// The path to the uvfits on disk.
@@ -87,7 +81,10 @@ impl UvfitsReader {
         let hdu = fits_open_hdu!(&mut uvfits, 1)?;
 
         let tile_names: Vec<String> = get_fits_col!(&mut uvfits, &hdu, "ANNAME")?;
+        let tile_names =
+            Vec1::try_from_vec(tile_names).map_err(|_| UvfitsReadError::AnnameEmpty)?;
         let total_num_tiles = tile_names.len();
+
         let tile_xyzs = {
             let mut tile_xyzs: Vec<XyzGeodetic> = Vec::with_capacity(total_num_tiles);
             for i in 0..total_num_tiles {
@@ -100,6 +97,7 @@ impl UvfitsReader {
             }
             tile_xyzs
         };
+        let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
 
         let hdu = fits_open_hdu!(&mut uvfits, 0)?;
         let metadata = UvfitsMetadata::new(&mut uvfits, &hdu)?;
@@ -123,8 +121,6 @@ impl UvfitsReader {
         if metadata.num_rows == 0 {
             return Err(UvfitsReadError::Empty(uvfits_pb));
         }
-
-        let freq_context = get_freq_context(&mut uvfits, &hdu, &metadata)?;
 
         // The phase centre is described by RA and DEC if there is no SOURCE
         // table (as per the standard).
@@ -185,16 +181,45 @@ impl UvfitsReader {
             .filter(|i| !present_tiles_set.contains(i))
             .collect();
 
-        // Work out the timestamp epochs. uvfits timestamps are in the middle of
-        // their respective integration periods, so no adjustment is needed
-        // here.
+        // Work out the timestamp epochs. The file tells us what time standard
+        // is being used (probably UTC). If this is false, then we assume TAI.
+        let uses_utc_time = {
+            let timsys: Option<String> = get_optional_fits_key!(&mut uvfits, &hdu, "TIMSYS")?;
+            match timsys {
+                None => {
+                    warn!("No TIMSYS present; assuming UTC");
+                    true
+                }
+                Some(timsys) => {
+                    if timsys.starts_with("UTC") {
+                        true
+                    } else if timsys.starts_with("IAT") || timsys.starts_with("TAI") {
+                        false
+                    } else {
+                        return Err(UvfitsReadError::UnknownTimsys(timsys));
+                    }
+                }
+            }
+        };
+
+        // uvfits timestamps are in the middle of their respective integration
+        // periods, so no adjustment is needed here.
         let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
             .jd_frac_timestamps
             .iter()
             .enumerate()
             .map(|(i, &frac)| {
-                let jd = metadata.jd_zero + (frac as f64);
-                (i, jd_to_epoch(jd))
+                let jd_days = metadata.jd_zero + (frac as f64);
+                let e = if uses_utc_time {
+                    Epoch::from_jde_utc(jd_days)
+                } else {
+                    Epoch::from_jde_tai(jd_days)
+                };
+                // Here's why you don't store your times in a stupid format (JD)
+                // in a single-precision float -- they come out wrong. Check how
+                // this epoch is represented in GPS; if it's close to an int,
+                // round to an int.
+                (i, round_hundredths_of_a_second(e))
             })
             .unzip();
         // TODO: Determine flagging!
@@ -220,21 +245,10 @@ impl UvfitsReader {
         match timestamps.as_slice() {
             // Handled above; uvfits files aren't allowed to be empty.
             [] => unreachable!(),
-            [t] => debug!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
+            [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
             [t0, .., tn] => {
-                // The time resolution is specified if there's more than one
-                // timestep.
-                let time_res = time_res.unwrap();
-                debug!(
-                    "First good timestep (GPS): {:.2}",
-                    // We expect GPS timestamps to be "leading edge", not
-                    // centroids.
-                    epoch_as_gps_seconds(*t0) - time_res / 2.0
-                );
-                debug!(
-                    "Last good timestep  (GPS): {:.2}",
-                    epoch_as_gps_seconds(*tn) - time_res / 2.0
-                );
+                debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
+                debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
             }
         }
 
@@ -258,9 +272,55 @@ impl UvfitsReader {
         // that's not the same thing.
         let obsid = mwalib_context.map(|context| context.obs_id);
 
-        // TODO: Get flagging right. I think that info is in an optional table.
-        let fine_chan_flags_per_coarse_chan = vec![];
         let step = metadata.num_rows / timestamps.len();
+
+        let freq_val_str = format!("CRVAL{}", metadata.indices.freq);
+        let base_freq_str: String = get_required_fits_key!(&mut uvfits, &hdu, &freq_val_str)?;
+        let base_freq: f64 = match base_freq_str.parse() {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(UvfitsReadError::Parse {
+                    key: freq_val_str,
+                    value: base_freq_str,
+                })
+            }
+        };
+        let base_index: isize = {
+            // CRPIX might be a float. Parse it as one, then make it an int.
+            let freq_val_str = format!("CRPIX{}", metadata.indices.freq);
+            let f_str: String = get_required_fits_key!(&mut uvfits, &hdu, &freq_val_str)?;
+            let f: f64 = match f_str.parse() {
+                Ok(p) => p,
+                Err(_) => {
+                    return Err(UvfitsReadError::Parse {
+                        key: freq_val_str,
+                        value: f_str,
+                    })
+                }
+            };
+            f.round() as _
+        };
+        let freq_val_str = format!("CDELT{}", metadata.indices.freq);
+        let fine_chan_width_str: String = get_required_fits_key!(&mut uvfits, &hdu, &freq_val_str)?;
+        let freq_res: f64 = match fine_chan_width_str.parse() {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(UvfitsReadError::Parse {
+                    key: freq_val_str,
+                    value: fine_chan_width_str,
+                })
+            }
+        };
+
+        let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
+        for i in 0..metadata.num_fine_freq_chans {
+            fine_chan_freqs
+                .push((base_freq + (i as isize - base_index + 1) as f64 * freq_res).round() as _);
+        }
+        let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
+
+        let total_bandwidth =
+            (*fine_chan_freqs.last() - *fine_chan_freqs.first()) as f64 + freq_res;
 
         let obs_context = ObsContext {
             obsid,
@@ -273,17 +333,28 @@ impl UvfitsReader {
             tile_xyzs,
             flagged_tiles,
             autocorrelations_present: metadata.autocorrelations_present,
-            fine_chan_flags_per_coarse_chan,
             dipole_gains,
             time_res,
-            // TODO: Where does this live?
+            // TODO: Where does this live in a uvfits?
             array_longitude_rad: None,
             array_latitude_rad: None,
+            // TODO - populate properly. The values don't matter until we want to
+            // use coarse channel information.
+            coarse_chan_nums: vec![1],
+            coarse_chan_freqs: vec![150e6],
+            coarse_chan_width: 40e3 * 32.0,
+            num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
+            total_bandwidth,
+            freq_res: Some(freq_res),
+            fine_chan_range: 0..metadata.num_fine_freq_chans,
+            fine_chan_freqs,
+            // TODO: Get flagging right. I think that info is in an optional table.
+            flagged_fine_chans: vec![],
+            flagged_fine_chans_per_coarse_chan: vec![],
         };
 
         Ok(UvfitsReader {
             obs_context,
-            freq_context,
             uvfits: uvfits_pb,
             metadata,
             step,
@@ -294,10 +365,6 @@ impl UvfitsReader {
 impl InputData for UvfitsReader {
     fn get_obs_context(&self) -> &ObsContext {
         &self.obs_context
-    }
-
-    fn get_freq_context(&self) -> &FreqContext {
-        &self.freq_context
     }
 
     fn get_input_data_type(&self) -> VisInputType {
@@ -410,17 +477,16 @@ impl InputData for UvfitsReader {
                         let data_xy = data_pol_axis.index_axis(Axis(0), 2);
                         let data_yx = data_pol_axis.index_axis(Axis(0), 3);
 
-                        // Get the element of the output weights array, and
-                        // write to it. We assume that weights are all equal for
-                        // these visibilities.
+                        // Write to the output weights array. We assume that
+                        // each polarisation weight is equal.
                         *weight_elem = data_xx[2];
 
                         // Write the input data visibility components to the
-                        // output data array, also multiplying by the weight.
-                        data_array_elem[0] = c32::new(data_xx[0], data_xx[1]) * *weight_elem;
-                        data_array_elem[1] = c32::new(data_xy[0], data_xy[1]) * *weight_elem;
-                        data_array_elem[2] = c32::new(data_yx[0], data_yx[1]) * *weight_elem;
-                        data_array_elem[3] = c32::new(data_yy[0], data_yy[1]) * *weight_elem;
+                        // output data array.
+                        data_array_elem[0] = c32::new(data_xx[0], data_xx[1]);
+                        data_array_elem[1] = c32::new(data_xy[0], data_xy[1]);
+                        data_array_elem[2] = c32::new(data_yx[0], data_yx[1]);
+                        data_array_elem[3] = c32::new(data_yy[0], data_yy[1]);
                     }
                 }
             }
@@ -693,7 +759,7 @@ impl UvfitsMetadata {
             }
         }
 
-        Ok(Self {
+        Ok(UvfitsMetadata {
             num_rows,
             pcount,
             num_pols,
@@ -843,7 +909,7 @@ impl Indices {
             }
         };
 
-        Ok(Self {
+        Ok(Indices {
             u,
             v,
             w,
@@ -854,71 +920,6 @@ impl Indices {
             freq,
         })
     }
-}
-
-fn get_freq_context(
-    uvfits: &mut FitsFile,
-    hdu: &FitsHdu,
-    metadata: &UvfitsMetadata,
-) -> Result<FreqContext, UvfitsReadError> {
-    let freq_val_str = format!("CRVAL{}", metadata.indices.freq);
-    let base_freq_str: String = get_required_fits_key!(uvfits, hdu, &freq_val_str)?;
-    let base_freq: f64 = match base_freq_str.parse() {
-        Ok(p) => p,
-        Err(_) => {
-            return Err(UvfitsReadError::Parse {
-                key: freq_val_str,
-                value: base_freq_str,
-            })
-        }
-    };
-    let base_index: isize = {
-        // CRPIX might be a float. Parse it as one, then make it an int.
-        let freq_val_str = format!("CRPIX{}", metadata.indices.freq);
-        let f_str: String = get_required_fits_key!(uvfits, hdu, &freq_val_str)?;
-        let f: f64 = match f_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(UvfitsReadError::Parse {
-                    key: freq_val_str,
-                    value: f_str,
-                })
-            }
-        };
-        f.round() as _
-    };
-    let freq_val_str = format!("CDELT{}", metadata.indices.freq);
-    let fine_chan_width_str: String = get_required_fits_key!(uvfits, hdu, &freq_val_str)?;
-    let fine_chan_width: f64 = match fine_chan_width_str.parse() {
-        Ok(p) => p,
-        Err(_) => {
-            return Err(UvfitsReadError::Parse {
-                key: freq_val_str,
-                value: fine_chan_width_str,
-            })
-        }
-    };
-
-    let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
-    for i in 0..metadata.num_fine_freq_chans {
-        fine_chan_freqs
-            .push((base_freq + (i as isize - base_index + 1) as f64 * fine_chan_width) as _);
-    }
-
-    Ok(FreqContext {
-        // TODO - populate properly. The values don't matter until we want to
-        // use coarse channel information.
-        coarse_chan_nums: vec![1],
-        coarse_chan_freqs: vec![150e6],
-        coarse_chan_width: 40e3 * 32.0,
-
-        total_bandwidth: fine_chan_freqs[metadata.num_fine_freq_chans - 1] - fine_chan_freqs[0]
-            + fine_chan_width,
-        fine_chan_range: 0..metadata.num_fine_freq_chans,
-        fine_chan_freqs,
-        num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
-        freq_res: Some(fine_chan_width),
-    })
 }
 
 /// Pull out fits array-in-a-cell values; useful for e.g. STABXYZ. This function

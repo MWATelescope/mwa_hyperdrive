@@ -17,6 +17,7 @@ pub mod model;
 pub(crate) mod pfb_gains;
 pub(crate) mod shapelets;
 pub mod simulate_vis;
+pub(crate) mod time;
 pub(crate) mod unit_parsing;
 
 mwa_hyperdrive_common::cfg_if::cfg_if! {

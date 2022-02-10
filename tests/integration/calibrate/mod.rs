@@ -7,11 +7,35 @@
 mod cli_args;
 
 use approx::assert_abs_diff_eq;
-use marlu::time::epoch_as_gps_seconds;
 
 use crate::*;
 use mwa_hyperdrive::calibrate::solutions::CalibrationSolutions;
-use mwa_hyperdrive_common::marlu;
+
+/// If di-calibrate is working, it should not write anything to stderr.
+#[test]
+fn test_no_stderr() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let mut sols = tmp_dir;
+    sols.push("sols.fits");
+    let args = get_reduced_1090008640(true, false);
+    let data = args.data.unwrap();
+
+    let cmd = hyperdrive()
+        .args(&[
+            "di-calibrate",
+            "--data",
+            &data[0],
+            &data[1],
+            "--source-list",
+            &args.source_list.unwrap(),
+            "--outputs",
+            &format!("{}", sols.display()),
+        ])
+        .ok();
+    assert!(cmd.is_ok(), "di-calibrate failed on simple test data!");
+    let (_, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
+}
 
 #[test]
 fn test_1090008640_woden() {
@@ -19,7 +43,8 @@ fn test_1090008640_woden() {
     let mut solutions_path = tmp_dir.clone();
     solutions_path.push("sols.bin");
 
-    // Reading from a uvfits file without a metafits file should fail.
+    // Reading from a uvfits file without a metafits file should fail because
+    // there's no beam information.
     let cmd = hyperdrive()
         .args(&[
             "di-calibrate",
@@ -49,8 +74,7 @@ fn test_1090008640_woden() {
         ])
         .ok();
     assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
-    let (stdout, stderr) = get_cmd_output(cmd);
-    assert!(stderr.is_empty(), "{}", stderr);
+    let (stdout, _) = get_cmd_output(cmd);
 
     // Verify that none of the calibration solutions are failures (i.e. not set
     // to NaN).
@@ -74,17 +98,19 @@ fn test_1090008640_woden() {
     let bin_sols =
         CalibrationSolutions::read_solutions_from_ext(&solutions_path, metafits.as_ref()).unwrap();
     assert_eq!(bin_sols.di_jones.dim(), (1, 128, 32));
+    assert_eq!(bin_sols.start_timestamps.len(), 1);
+    assert_eq!(bin_sols.end_timestamps.len(), 1);
+    assert_eq!(bin_sols.average_timestamps.len(), 1);
     assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*bin_sols.average_timestamps.first().unwrap()),
-        // 1090008642 is the obsid + 2s, which is the centroid of the first and
-        // only timestep.
-        1090008642.0,
-        epsilon = 1e-3
+        bin_sols.start_timestamps[0].as_gpst_seconds(),
+        // output_band01 lists the start time as 1090008640, but it should
+        // probably be 1090008642.
+        1090008640.0
     );
+    assert_abs_diff_eq!(bin_sols.end_timestamps[0].as_gpst_seconds(), 1090008640.0);
     assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*bin_sols.average_timestamps.last().unwrap()),
-        1090008642.0,
-        epsilon = 1e-3
+        bin_sols.average_timestamps[0].as_gpst_seconds(),
+        1090008640.0,
     );
     assert!(!bin_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
@@ -107,21 +133,18 @@ fn test_1090008640_woden() {
         ])
         .ok();
     assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
-    let (_, stderr) = get_cmd_output(cmd);
-    assert!(stderr.is_empty(), "{}", stderr);
 
     let hyp_sols =
         CalibrationSolutions::read_solutions_from_ext(&solutions_path, metafits).unwrap();
     assert_eq!(hyp_sols.di_jones.dim(), bin_sols.di_jones.dim());
+    assert_eq!(hyp_sols.start_timestamps.len(), 1);
+    assert_eq!(hyp_sols.end_timestamps.len(), 1);
+    assert_eq!(hyp_sols.average_timestamps.len(), 1);
+    assert_abs_diff_eq!(hyp_sols.start_timestamps[0].as_gpst_seconds(), 1090008640.0);
+    assert_abs_diff_eq!(hyp_sols.end_timestamps[0].as_gpst_seconds(), 1090008640.0);
     assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*hyp_sols.average_timestamps.first().unwrap()),
-        1090008642.0,
-        epsilon = 1e-3
-    );
-    assert_abs_diff_eq!(
-        epoch_as_gps_seconds(*hyp_sols.average_timestamps.last().unwrap()),
-        1090008642.0,
-        epsilon = 1e-3
+        hyp_sols.average_timestamps[0].as_gpst_seconds(),
+        1090008640.0
     );
     assert!(!hyp_sols.di_jones.iter().any(|jones| jones.any_nan()));
 

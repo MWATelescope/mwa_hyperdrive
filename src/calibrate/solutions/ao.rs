@@ -12,16 +12,14 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-use marlu::{
-    time::{epoch_as_gps_seconds, gps_to_epoch},
-    Jones,
-};
+use hifitime::Epoch;
+use marlu::Jones;
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::{error::*, CalibrationSolutions};
 use crate::math::average_epoch;
-use mwa_hyperdrive_common::{marlu, ndarray, rayon, Complex};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray, rayon, Complex};
 
 pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, ReadSolutionsError> {
     let file_str = file.as_ref().display().to_string();
@@ -65,14 +63,14 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
     let start_time = if t.abs() < f64::EPSILON {
         None
     } else {
-        Some(gps_to_epoch(t))
+        Some(Epoch::from_gpst_seconds(t))
     };
     // And similarly for the end time.
     let t = bin_file.read_f64::<LittleEndian>()?;
     let end_time = if t.abs() < f64::EPSILON {
         None
     } else {
-        Some(gps_to_epoch(t))
+        Some(Epoch::from_gpst_seconds(t))
     };
 
     // The rest of the binary is only Jones matrices.
@@ -107,7 +105,7 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         .into_par_iter()
         .enumerate()
         .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
-        .map(|pair| pair.0)
+        .map(|pair| pair.0.try_into().unwrap())
         .collect();
 
     // We'd really like to have the *actual* timestamps of each timeblock,
@@ -159,13 +157,13 @@ pub(super) fn write<T: AsRef<Path>>(
         sols.average_timestamps.as_slice(),
     ) {
         // One start and end time.
-        ([s, ..], [.., e], _) => (epoch_as_gps_seconds(*s), epoch_as_gps_seconds(*e)),
+        ([s, ..], [.., e], _) => (s.as_gpst_seconds(), e.as_gpst_seconds()),
         // No start and end times, but averages. Sure, why not.
-        ([], [], [a0, .., an]) => (epoch_as_gps_seconds(*a0), epoch_as_gps_seconds(*an)),
-        ([], [], [a0]) => (epoch_as_gps_seconds(*a0), epoch_as_gps_seconds(*a0)),
+        ([], [], [a0, .., an]) => (a0.as_gpst_seconds(), an.as_gpst_seconds()),
+        ([], [], [a0]) => (a0.as_gpst_seconds(), a0.as_gpst_seconds()),
         // Less-than-ideal amount of info.
-        ([s, ..], [], _) => (epoch_as_gps_seconds(*s), 0.0),
-        ([], [.., e], _) => (0.0, epoch_as_gps_seconds(*e)),
+        ([s, ..], [], _) => (s.as_gpst_seconds(), 0.0),
+        ([], [.., e], _) => (0.0, e.as_gpst_seconds()),
         // Nothing, nothing.
         ([], [], []) => (0.0, 0.0),
     };

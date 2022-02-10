@@ -12,19 +12,19 @@ cfitsio-static = ["marlu/cfitsio-static"]
 cuda-static = ["marlu/cuda-static"]
 
 [dependencies]
-atty = "0.2.*"
-cfg-if = "1.0.*"
-chrono = "0.4.*"
-clap = { version = "3.0.*", features = ["derive", "wrap_help"] }
-fern = { version = "0.6.*", features = ["chrono", "colored"] }
-itertools = "0.10.*"
-indicatif = { version = "0.16.*", features = ["rayon"] }
-lazy_static = "1.4.*"
-log = "0.4.*"
-marlu = "0.4.*"
-serde_json = "1.0.*"
-thiserror = "1.0.*"
-toml = "0.5.*"
+atty = "0.2.11"
+cfg-if = "1.0.0"
+chrono = "0.4.0"
+clap = { version = "3.0.14", features = ["derive", "wrap_help"] }
+fern = { version = "0.6.0", features = ["chrono", "colored"] }
+itertools = "0.10.0"
+indicatif = { version = "0.16.0", features = ["rayon"] }
+lazy_static = "1.4.0"
+log = "0.4.0"
+marlu = { git = "https://github.com/MWATelescope/Marlu.git", branch = "v0.5.0" }
+serde_json = "1.0.0"
+thiserror = "1.0.7"
+toml = "0.5.2"
 
 [build-dependencies]
-built = { version = "0.5.*", features = ["chrono", "git2"] }
+built = { version = "0.5.0", features = ["chrono", "git2"] }

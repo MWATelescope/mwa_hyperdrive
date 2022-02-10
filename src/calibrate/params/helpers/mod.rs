@@ -15,7 +15,7 @@ use hifitime::Epoch;
 use thiserror::Error;
 
 use crate::{
-    calibrate::{Chanblock, Timeblock},
+    calibrate::{Chanblock, Fence, Timeblock},
     math::average_epoch,
     unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat},
 };
@@ -80,43 +80,81 @@ pub(super) fn timesteps_to_timeblocks(
     timeblocks
 }
 
-/// Returns a vector of unflagged chanblocks to use in calibration, as well as a
-/// vector of flagged chanblock indices.
-///
-/// If the frequency resolution isn't given, then we guess based off of the
-/// channel frequencies.
+/// Returns a vector of [Fence]s (potentially multiple contiguous-bands of fine
+/// channels) to use in calibration. If there's more than one [Fence], then this
+/// is a "picket fence" observation.
 pub(super) fn channels_to_chanblocks(
-    all_channel_freqs: &[f64],
+    all_channel_freqs: &[u64],
     frequency_resolution: Option<f64>,
     freq_average_factor: usize,
     flagged_channels: &HashSet<usize>,
-) -> (Vec<Chanblock>, Vec<usize>) {
-    let freq_res = match frequency_resolution {
-        Some(f) => f,
-        None => {
-            // Iterate over all the frequencies and find the smallest gap
-            // between any pair.
-            all_channel_freqs
-                .iter()
-                .skip(1)
-                .zip(all_channel_freqs.iter())
-                .fold(f64::INFINITY, |acc, (&f2, &f1)| {
-                    let diff = f2 - f1;
-                    acc.min(diff)
-                })
+) -> Vec<Fence> {
+    // Handle 0 or 1 provided frequencies here.
+    match all_channel_freqs {
+        [] => return vec![],
+        [f] => {
+            let (chanblocks, flagged_chanblock_indices) = if flagged_channels.contains(&0) {
+                (vec![], vec![0])
+            } else {
+                (
+                    vec![Chanblock {
+                        chanblock_index: 0,
+                        unflagged_index: 0,
+                        freq: *f as f64,
+                    }],
+                    vec![],
+                )
+            };
+            return vec![Fence {
+                chanblocks,
+                flagged_chanblock_indices,
+                first_freq: *f as f64,
+                freq_res: None,
+            }];
         }
-    };
+        _ => (), // More complicated logic needed.
+    }
 
-    let biggest_freq_diff = freq_res * freq_average_factor as f64;
+    // If the frequency resolution wasn't provided, we find the minimum gap
+    // between consecutive frequencies and use this instead.
+    let freq_res = frequency_resolution
+        .map(|f| f.round() as u64)
+        .unwrap_or_else(|| {
+            // Iterate over all the frequencies and find the smallest gap between
+            // any pair.
+            all_channel_freqs.windows(2).fold(u64::MAX, |acc, window| {
+                let diff = window[1] - window[0];
+                acc.min(diff)
+            })
+        });
+
+    // Find any picket fences here.
+    let mut fence_index_ends = vec![];
+    all_channel_freqs
+        .windows(2)
+        .enumerate()
+        .for_each(|(i, window)| {
+            if window[1] - window[0] > freq_res {
+                fence_index_ends.push(i + 1);
+            }
+        });
+
+    let mut fences = Vec::with_capacity(fence_index_ends.len() + 1);
+    let biggest_freq_diff = freq_res * freq_average_factor as u64;
     let mut chanblocks = vec![];
     let mut flagged_chanblock_indices = vec![];
     let mut i_chanblock = 0;
     let mut i_unflagged_chanblock = 0;
     let mut current_freqs = vec![];
+    let mut first_fence_freq = None;
     let mut first_freq = None;
     let mut all_flagged = true;
 
     for (i_chan, &freq) in all_channel_freqs.iter().enumerate() {
+        match first_fence_freq {
+            Some(_) => (),
+            None => first_fence_freq = Some(freq),
+        }
         match first_freq {
             Some(_) => (),
             None => first_freq = Some(freq),
@@ -126,10 +164,12 @@ pub(super) fn channels_to_chanblocks(
             if all_flagged {
                 flagged_chanblock_indices.push(i_chanblock);
             } else {
+                let centroid_freq =
+                    first_freq.unwrap() + freq_res / 2 * (freq_average_factor - 1) as u64;
                 chanblocks.push(Chanblock {
                     chanblock_index: i_chanblock,
                     unflagged_index: i_unflagged_chanblock,
-                    freq: current_freqs.iter().sum::<f64>() / current_freqs.len() as f64,
+                    freq: centroid_freq as f64,
                 });
                 i_unflagged_chanblock += 1;
             }
@@ -139,25 +179,44 @@ pub(super) fn channels_to_chanblocks(
             i_chanblock += 1;
         }
 
+        current_freqs.push(freq as f64);
         if !flagged_channels.contains(&i_chan) {
             all_flagged = false;
-            current_freqs.push(freq);
+        }
+
+        if fence_index_ends.contains(&i_chan) {
+            fences.push(Fence {
+                chanblocks: chanblocks.clone(),
+                flagged_chanblock_indices: flagged_chanblock_indices.clone(),
+                first_freq: first_fence_freq.unwrap() as f64,
+                freq_res: Some(biggest_freq_diff as f64),
+            });
+            first_fence_freq = Some(freq);
+            chanblocks.clear();
+            flagged_chanblock_indices.clear();
         }
     }
     // Deal with any leftover data.
-    if first_freq.is_some() {
+    if let Some(first_freq) = first_freq {
         if all_flagged {
             flagged_chanblock_indices.push(i_chanblock);
         } else {
+            let centroid_freq = first_freq + freq_res / 2 * (freq_average_factor - 1) as u64;
             chanblocks.push(Chanblock {
                 chanblock_index: i_chanblock,
                 unflagged_index: i_unflagged_chanblock,
-                freq: current_freqs.iter().sum::<f64>() / current_freqs.len() as f64,
-            })
+                freq: centroid_freq as f64,
+            });
         }
+        fences.push(Fence {
+            chanblocks,
+            flagged_chanblock_indices,
+            first_freq: first_fence_freq.unwrap() as f64,
+            freq_res: Some(biggest_freq_diff as f64),
+        });
     }
 
-    (chanblocks, flagged_chanblock_indices)
+    fences
 }
 
 #[derive(Error, Debug)]

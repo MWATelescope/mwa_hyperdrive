@@ -33,6 +33,15 @@ pub enum UvfitsReadError {
     #[error("Supplied file path {0} does not contain any data")]
     Empty(PathBuf),
 
+    #[error("No timesteps were in file {file}")]
+    NoTimesteps { file: String },
+
+    #[error("No antenna names were in the ANNAME column")]
+    AnnameEmpty,
+
+    #[error("The TIMSYS ({0}) wasn't UTC, IAT or TAI; this is unsupported")]
+    UnknownTimsys(String),
+
     #[error("Expected to find key {key} in header of HDU {hdu}")]
     MissingKey { key: &'static str, hdu: usize },
 
@@ -47,9 +56,6 @@ pub enum UvfitsReadError {
         status: i32,
         function: &'static str,
     },
-
-    #[error("No timesteps were in file {file}")]
-    NoTimesteps { file: String },
 
     /// An error associated with fitsio.
     #[error("{0}")]

@@ -33,24 +33,21 @@ use marlu::{
         precession::{precess_time, PrecessionInfo},
         xyz::xyzs_to_cross_uvws_parallel,
     },
-    time::epoch_as_gps_seconds,
     Jones, XyzGeodetic,
 };
 use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
 use vec1::Vec1;
 
-use super::{solutions::CalSolutionType, CalibrateUserArgs, Chanblock, Timeblock};
+use super::{solutions::CalSolutionType, CalibrateUserArgs, Fence, Timeblock};
 use crate::{
     constants::*,
-    context::{FreqContext, ObsContext},
+    context::ObsContext,
     data_formats::*,
     glob::*,
     math::TileBaselineMaps,
     pfb_gains::{PfbFlavour, DEFAULT_PFB_FLAVOUR},
-    unit_parsing::{
-        parse_freq, parse_time, parse_wavelength, FreqFormat, TimeFormat, WavelengthUnit,
-    },
+    unit_parsing::{parse_wavelength, WavelengthUnit},
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon};
@@ -122,20 +119,17 @@ pub(crate) struct CalibrateParams {
     /// then we average 80kHz worth of data together during calibration.
     pub(crate) freq_average_factor: usize,
 
-    /// Blocks of frequency channels that will be calibrated. Each chanblock may
-    /// represent of multiple channels, depending on `freq_average_factor`; when
-    /// visibilities are read from `input_data`, the channels are averaged
-    /// according to `freq_average_factor`. If no frequency channels are
-    /// flagged, then these chanblocks will represent all frequency channels.
-    /// However, it's likely at least some channels are flagged, so
-    /// `flagged_chanblocks` may be needed.
-    // TODO: If "picket fence" observations are ever supported, then this will
-    // need to correctly map to fine-frequency channels in each contiguous band
-    // of coarse channels.
-    pub(super) chanblocks: Vec1<Chanblock>,
-
-    /// Indices for chanblocks that were flagged.
-    pub(crate) flagged_chanblocks: Vec<usize>,
+    /// Spectral windows, or, groups of contiguous-bands of channels to be
+    /// calibrated. Multiple [Fence]s can represent a "picket fence"
+    /// observation. Each [Fence] is composed of chanblocks, and the unflagged
+    /// chanblocks are calibrated. Each chanblock may represent of multiple
+    /// channels, depending on `freq_average_factor`; when visibilities are read
+    /// from `input_data`, the channels are averaged according to
+    /// `freq_average_factor`. If no frequency channels are flagged, then these
+    /// chanblocks will represent all frequency channels. However, it's likely
+    /// at least some channels are flagged, so the `flagged_chanblock_indices`
+    /// in every [Fence] may be needed.
+    pub(crate) fences: Vec1<Fence>,
 
     /// The frequencies of each of the observation's unflagged fine channels
     /// \[Hz\].
@@ -432,7 +426,6 @@ impl CalibrateParams {
         };
 
         let obs_context = input_data.get_obs_context();
-        let freq_context = input_data.get_freq_context();
 
         let beam: Box<dyn Beam> = if no_beam {
             create_no_beam_object(obs_context.tile_xyzs.len())
@@ -617,19 +610,6 @@ impl CalibrateParams {
             }
         }
 
-        // Assign the per-coarse-channel fine-channel flags.
-        // TODO: Rename "coarse band" to "coarse channel".
-        let mut fine_chan_flags_per_coarse_chan: HashSet<usize> =
-            match fine_chan_flags_per_coarse_chan {
-                Some(flags) => flags.into_iter().collect(),
-                None => HashSet::new(),
-            };
-        if !ignore_input_data_fine_channel_flags {
-            for &obs_fine_chan_flag in &obs_context.fine_chan_flags_per_coarse_chan {
-                fine_chan_flags_per_coarse_chan.insert(obs_fine_chan_flag);
-            }
-        }
-
         // Set up the timeblocks.
         let time_average_factor = parse_time_average_factor(
             obs_context.time_res,
@@ -665,33 +645,47 @@ impl CalibrateParams {
         let timeblocks =
             Vec1::try_from_vec(timeblocks).map_err(|_| InvalidArgsError::NoTimesteps)?;
 
-        // Set up frequency information.
-        // Determine all of the fine-channel flags.
+        // Set up frequency information. Determine all of the fine-channel flags.
         let mut flagged_fine_chans: HashSet<usize> = match fine_chan_flags {
             Some(flags) => flags.into_iter().collect(),
             None => HashSet::new(),
         };
-        for (i, _) in freq_context.coarse_chan_nums.iter().enumerate() {
-            // Add the per-coarse-channel flags to the observation-wide flags.
-            for f in &fine_chan_flags_per_coarse_chan {
-                flagged_fine_chans.insert(f + freq_context.num_fine_chans_per_coarse_chan * i);
+        if !ignore_input_data_fine_channel_flags {
+            for &f in &obs_context.flagged_fine_chans {
+                flagged_fine_chans.insert(f);
+            }
+        }
+        // Assign the per-coarse-channel fine-channel flags.
+        let fine_chan_flags_per_coarse_chan: HashSet<usize> = {
+            let mut out_flags = match fine_chan_flags_per_coarse_chan {
+                Some(flags) => flags.into_iter().collect(),
+                None => HashSet::new(),
+            };
+            if !ignore_input_data_fine_channel_flags {
+                for &obs_fine_chan_flag in &obs_context.flagged_fine_chans_per_coarse_chan {
+                    out_flags.insert(obs_fine_chan_flag);
+                }
+            }
+            out_flags
+        };
+        if !ignore_input_data_fine_channel_flags {
+            for (i, _) in obs_context.coarse_chan_nums.iter().enumerate() {
+                for f in &fine_chan_flags_per_coarse_chan {
+                    flagged_fine_chans.insert(f + obs_context.num_fine_chans_per_coarse_chan * i);
+                }
             }
         }
 
         let mut unflagged_fine_chan_freqs = vec![];
-        for (&freq, chan_num) in freq_context
-            .fine_chan_freqs
-            .iter()
-            .zip((0..freq_context.fine_chan_freqs.len()).into_iter())
-        {
-            if !flagged_fine_chans.contains(&chan_num) {
-                unflagged_fine_chan_freqs.push(freq.round());
+        for (i_chan, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
+            if !flagged_fine_chans.contains(&i_chan) {
+                unflagged_fine_chan_freqs.push(freq as f64);
             }
         }
 
         // Set up the chanblocks.
         let freq_average_factor =
-            parse_freq_average_factor(freq_context.freq_res, freq_average_factor, 1).map_err(
+            parse_freq_average_factor(obs_context.freq_res, freq_average_factor, 1).map_err(
                 |e| match e {
                     AverageFactorError::Zero => InvalidArgsError::CalFreqFactorZero,
                     AverageFactorError::NotInteger => InvalidArgsError::CalFreqFactorNotInteger,
@@ -713,15 +707,31 @@ impl CalibrateParams {
             freq_average_factor
         };
 
-        let (chanblocks, flagged_chanblocks) = channels_to_chanblocks(
-            &freq_context.fine_chan_freqs,
-            freq_context.freq_res,
+        let fences = channels_to_chanblocks(
+            &obs_context.fine_chan_freqs,
+            obs_context.freq_res,
             freq_average_factor,
             &flagged_fine_chans,
         );
         // There must be at least one chanblock for calibration.
-        let chanblocks =
-            Vec1::try_from_vec(chanblocks).map_err(|_| InvalidArgsError::NoChannels)?;
+        match fences.as_slice() {
+            // No fences is the same as no chanblocks.
+            [] => return Err(InvalidArgsError::NoChannels),
+            [f] => {
+                // Check that the chanblocks aren't all flagged.
+                if f.chanblocks.is_empty() {
+                    return Err(InvalidArgsError::NoChannels);
+                }
+            }
+            [f, ..] => {
+                // Check that the chanblocks aren't all flagged.
+                if f.chanblocks.is_empty() {
+                    return Err(InvalidArgsError::NoChannels);
+                }
+                warn!("\"Picket fence\" data detected. Only the first contiguous band will be used as this is not well supported right now.");
+            }
+        }
+        let fences = Vec1::try_from_vec(fences).unwrap();
 
         let mut source_list: SourceList = {
             // Handle the source list argument.
@@ -780,7 +790,7 @@ impl CalibrateParams {
                 .to_radec(precession_info.lmst_j2000),
             precession_info.lmst_j2000,
             precession_info.array_latitude_j2000,
-            &freq_context.coarse_chan_freqs,
+            &obs_context.coarse_chan_freqs,
             beam.deref(),
             num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
@@ -843,40 +853,38 @@ impl CalibrateParams {
             } else {
                 // Parse and verify user input (specified resolutions must
                 // evenly divide the input data's resolutions).
-                let time_factor = parse_time_average_factor(
-                    Some(time_average_factor as f64),
-                    output_vis_time_average,
-                    1,
-                )
-                .map_err(|e| match e {
-                    AverageFactorError::Zero => InvalidArgsError::OutputVisTimeAverageFactorZero,
-                    AverageFactorError::NotInteger => {
-                        InvalidArgsError::OutputVisTimeFactorNotInteger
-                    }
-                    AverageFactorError::NotIntegerMultiple { out, inp } => {
-                        InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
-                    }
-                    AverageFactorError::Parse(e) => {
-                        InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
-                    }
-                })?;
-                let freq_factor = parse_freq_average_factor(
-                    Some(freq_average_factor as f64),
-                    output_vis_freq_average,
-                    1,
-                )
-                .map_err(|e| match e {
-                    AverageFactorError::Zero => InvalidArgsError::OutputVisFreqAverageFactorZero,
-                    AverageFactorError::NotInteger => {
-                        InvalidArgsError::OutputVisFreqFactorNotInteger
-                    }
-                    AverageFactorError::NotIntegerMultiple { out, inp } => {
-                        InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
-                    }
-                    AverageFactorError::Parse(e) => {
-                        InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
-                    }
-                })?;
+                let time_factor =
+                    parse_time_average_factor(obs_context.time_res, output_vis_time_average, 1)
+                        .map_err(|e| match e {
+                            AverageFactorError::Zero => {
+                                InvalidArgsError::OutputVisTimeAverageFactorZero
+                            }
+                            AverageFactorError::NotInteger => {
+                                InvalidArgsError::OutputVisTimeFactorNotInteger
+                            }
+                            AverageFactorError::NotIntegerMultiple { out, inp } => {
+                                InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
+                            }
+                            AverageFactorError::Parse(e) => {
+                                InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
+                            }
+                        })?;
+                let freq_factor =
+                    parse_freq_average_factor(obs_context.freq_res, output_vis_freq_average, 1)
+                        .map_err(|e| match e {
+                            AverageFactorError::Zero => {
+                                InvalidArgsError::OutputVisFreqAverageFactorZero
+                            }
+                            AverageFactorError::NotInteger => {
+                                InvalidArgsError::OutputVisFreqFactorNotInteger
+                            }
+                            AverageFactorError::NotIntegerMultiple { out, inp } => {
+                                InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
+                            }
+                            AverageFactorError::Parse(e) => {
+                                InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
+                            }
+                        })?;
 
                 (time_factor, freq_factor)
             };
@@ -910,8 +918,12 @@ impl CalibrateParams {
             if uvw_min.is_some() || uvw_max.is_some() {
                 // Parse the arguments. If a lambda was used, then we use the
                 // centroid frequency of the observation.
-                let freq_centroid = freq_context.fine_chan_freqs.iter().sum::<f64>()
-                    / freq_context.fine_chan_freqs.len() as f64;
+                let freq_centroid = obs_context
+                    .fine_chan_freqs
+                    .iter()
+                    .map(|&u| u as f64)
+                    .sum::<f64>()
+                    / obs_context.fine_chan_freqs.len() as f64;
                 let mut lambda_used = false;
                 // Let the new uvw_min and uvw_max values be in metres.
                 let uvw_min = match uvw_min {
@@ -997,8 +1009,7 @@ impl CalibrateParams {
             timeblocks,
             timesteps: timesteps_to_use,
             freq_average_factor,
-            chanblocks,
-            flagged_chanblocks,
+            fences,
             unflagged_fine_chan_freqs,
             flagged_fine_chans,
             tile_to_unflagged_cross_baseline_map: tile_baseline_maps
@@ -1031,10 +1042,6 @@ impl CalibrateParams {
 
     pub(crate) fn get_obs_context(&self) -> &ObsContext {
         self.input_data.get_obs_context()
-    }
-
-    pub(crate) fn get_freq_context(&self) -> &FreqContext {
-        self.input_data.get_freq_context()
     }
 
     pub(crate) fn get_total_num_tiles(&self) -> usize {
@@ -1097,7 +1104,6 @@ impl<'a> ExtraInfo<'a> {
     fn log_info(self) -> Result<(), InvalidArgsError> {
         let params = self.params;
         let obs_context = params.input_data.get_obs_context();
-        let freq_context = params.input_data.get_freq_context();
 
         info!(
             "Array longitude, latitude:     ({:.4}°, {:.4}°)",
@@ -1180,16 +1186,16 @@ impl<'a> ExtraInfo<'a> {
             [] => unreachable!(),
             [t] => info!(
                 "Only timestep (GPS): {:.2}",
-                epoch_as_gps_seconds(obs_context.timestamps[*t])
+                obs_context.timestamps[*t].as_gpst_seconds()
             ),
             [t0, .., tn] => {
                 info!(
                     "First timestep (GPS): {:.2}",
-                    epoch_as_gps_seconds(obs_context.timestamps[*t0])
+                    obs_context.timestamps[*t0].as_gpst_seconds()
                 );
                 info!(
                     "Last timestep  (GPS): {:.2}",
-                    epoch_as_gps_seconds(obs_context.timestamps[*tn])
+                    obs_context.timestamps[*tn].as_gpst_seconds()
                 );
             }
         }
@@ -1200,7 +1206,7 @@ impl<'a> ExtraInfo<'a> {
             }
             None => info!("Input data time resolution unknown"),
         }
-        match freq_context.freq_res {
+        match obs_context.freq_res {
             Some(freq_res) => {
                 info!("Input data freq. resolution: {:.2} kHz", freq_res / 1e3);
             }
@@ -1209,16 +1215,14 @@ impl<'a> ExtraInfo<'a> {
 
         info!(
             "Total number of fine channels:     {}",
-            freq_context.fine_chan_freqs.len()
+            obs_context.fine_chan_freqs.len()
         );
         info!(
             "Number of unflagged fine channels: {}",
             params.unflagged_fine_chan_freqs.len()
         );
         if log_enabled!(Debug) {
-            let unflagged_fine_chans: Vec<_> = freq_context
-                .fine_chan_range
-                .clone()
+            let unflagged_fine_chans: Vec<_> = (0..obs_context.fine_chan_freqs.len())
                 .into_iter()
                 .filter(|i_chan| !params.flagged_fine_chans.contains(i_chan))
                 .collect();
@@ -1233,9 +1237,9 @@ impl<'a> ExtraInfo<'a> {
         }
         info!(
             "Input data's fine-channel flags per coarse channel: {:?}",
-            obs_context.fine_chan_flags_per_coarse_chan
+            obs_context.flagged_fine_chans_per_coarse_chan
         );
-        {
+        if log_enabled!(Debug) {
             let mut fine_chan_flags_vec = params.flagged_fine_chans.iter().collect::<Vec<_>>();
             fine_chan_flags_vec.sort_unstable();
             debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
@@ -1269,7 +1273,7 @@ impl<'a> ExtraInfo<'a> {
         );
         info!(
             "Number of calibration chanblocks: {}",
-            params.chanblocks.len()
+            params.fences.first().chanblocks.len()
         );
 
         let (num_points, num_gaussians, num_shapelets) = params.source_list.get_counts();
@@ -1321,7 +1325,7 @@ impl<'a> ExtraInfo<'a> {
                 );
             }
 
-            if let Some(fr) = freq_context.freq_res {
+            if let Some(fr) = obs_context.freq_res {
                 info!(
                     "    {}x in freq. ({}kHz)",
                     params.output_vis_freq_average_factor,

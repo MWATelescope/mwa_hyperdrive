@@ -6,16 +6,15 @@ use std::collections::HashSet;
 
 use approx::assert_abs_diff_eq;
 use hifitime::Epoch;
-use marlu::time::{epoch_as_gps_seconds, gps_to_epoch};
 
 use super::*;
-use mwa_hyperdrive_common::{hifitime, marlu};
+use mwa_hyperdrive_common::hifitime;
 
 #[test]
 fn test_timesteps_to_timeblocks() {
     let all_timestamps: Vec<Epoch> = (0..20)
         .into_iter()
-        .map(|i| gps_to_epoch(1065880128.0 + (2 * i) as f64))
+        .map(|i| Epoch::from_gpst_seconds(1065880128.0 + (2 * i) as f64))
         .collect();
 
     let time_average_factor = 1;
@@ -34,7 +33,7 @@ fn test_timesteps_to_timeblocks() {
             assert_eq!(timestep, expected_index);
         }
 
-        assert_eq!(epoch_as_gps_seconds(timeblock.average), expected_timestamp);
+        assert_eq!(timeblock.average.as_gpst_seconds(), expected_timestamp);
     }
 
     let time_average_factor = 2;
@@ -53,7 +52,7 @@ fn test_timesteps_to_timeblocks() {
             assert_eq!(timestep, expected_index);
         }
 
-        assert_eq!(epoch_as_gps_seconds(timeblock.average), expected_timestamp);
+        assert_eq!(timeblock.average.as_gpst_seconds(), expected_timestamp);
     }
 
     let time_average_factor = 3;
@@ -72,7 +71,7 @@ fn test_timesteps_to_timeblocks() {
             assert_eq!(timestep, expected_index);
         }
 
-        assert_eq!(epoch_as_gps_seconds(timeblock.average), expected_timestamp);
+        assert_eq!(timeblock.average.as_gpst_seconds(), expected_timestamp);
     }
 
     let timesteps_to_use = [2, 15, 16];
@@ -92,7 +91,7 @@ fn test_timesteps_to_timeblocks() {
             assert_eq!(timestep, expected_index);
         }
 
-        assert_eq!(epoch_as_gps_seconds(timeblock.average), expected_timestamp);
+        assert_eq!(timeblock.average.as_gpst_seconds(), expected_timestamp);
     }
 
     // No timesteps, no timeblocks.
@@ -105,77 +104,139 @@ fn test_timesteps_to_timeblocks() {
 
 #[test]
 fn test_channels_to_chanblocks() {
-    let all_channel_freqs = [10.0, 11.0, 12.0, 13.0, 14.0];
+    let all_channel_freqs = [12000];
     let freq_average_factor = 1;
-
     let mut flagged_channels = HashSet::new();
-    let (chanblocks, flagged_chanblock_indices) = channels_to_chanblocks(
+    let fences = channels_to_chanblocks(
         &all_channel_freqs,
         None,
         freq_average_factor,
         &flagged_channels,
     );
-    assert_eq!(chanblocks.len(), 5);
-    assert!(flagged_chanblock_indices.is_empty());
-    assert_abs_diff_eq!(chanblocks[0].freq, 10.0);
-    assert_abs_diff_eq!(chanblocks[1].freq, 11.0);
-    assert_abs_diff_eq!(chanblocks[2].freq, 12.0);
-    assert_abs_diff_eq!(chanblocks[3].freq, 13.0);
-    assert_abs_diff_eq!(chanblocks[4].freq, 14.0);
+    assert_eq!(fences.len(), 1);
+    assert_eq!(fences[0].chanblocks.len(), 1);
+    assert!(fences[0].flagged_chanblock_indices.is_empty());
+    assert_abs_diff_eq!(fences[0].chanblocks[0].freq, 12000.0);
+    assert_abs_diff_eq!(fences[0].first_freq, 12000.0);
+    assert!(fences[0].freq_res.is_none());
+
+    let all_channel_freqs = [10000, 11000, 12000, 13000, 14000];
+    let fences = channels_to_chanblocks(
+        &all_channel_freqs,
+        None,
+        freq_average_factor,
+        &flagged_channels,
+    );
+    assert_eq!(fences.len(), 1);
+    assert_eq!(fences[0].chanblocks.len(), 5);
+    assert!(fences[0].flagged_chanblock_indices.is_empty());
+    assert_abs_diff_eq!(fences[0].chanblocks[0].freq, 10000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[1].freq, 11000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[2].freq, 12000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[3].freq, 13000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[4].freq, 14000.0);
+    assert_abs_diff_eq!(fences[0].first_freq, 10000.0);
+    assert_abs_diff_eq!(fences[0].freq_res.unwrap(), 1000.0);
+
+    let all_channel_freqs = [10000, 11000, 12000, 13000, 14000, 20000];
+    let fences = channels_to_chanblocks(
+        &all_channel_freqs,
+        None,
+        freq_average_factor,
+        &flagged_channels,
+    );
+    assert_eq!(fences.len(), 2);
+    assert_eq!(fences[0].chanblocks.len(), 5);
+    assert_eq!(fences[1].chanblocks.len(), 1);
+    assert!(fences[0].flagged_chanblock_indices.is_empty());
+    assert!(fences[1].flagged_chanblock_indices.is_empty());
+    assert_abs_diff_eq!(fences[0].chanblocks[0].freq, 10000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[1].freq, 11000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[2].freq, 12000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[3].freq, 13000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[4].freq, 14000.0);
+    assert_abs_diff_eq!(fences[1].chanblocks[0].freq, 20000.0);
+    assert_abs_diff_eq!(fences[0].first_freq, 10000.0);
+    assert_abs_diff_eq!(fences[1].first_freq, 20000.0);
+    assert_abs_diff_eq!(fences[0].freq_res.unwrap(), 1000.0);
+    assert_abs_diff_eq!(fences[1].freq_res.unwrap(), 1000.0);
 
     flagged_channels.insert(3);
-    let (chanblocks, flagged_chanblock_indices) = channels_to_chanblocks(
+    let fences = channels_to_chanblocks(
         &all_channel_freqs,
         None,
         freq_average_factor,
         &flagged_channels,
     );
-    assert_eq!(chanblocks.len(), 4);
-    assert_eq!(flagged_chanblock_indices.len(), 1);
-    assert_eq!(flagged_chanblock_indices[0], 3);
-    assert_abs_diff_eq!(chanblocks[0].freq, 10.0);
-    assert_abs_diff_eq!(chanblocks[1].freq, 11.0);
-    assert_abs_diff_eq!(chanblocks[2].freq, 12.0);
-    assert_abs_diff_eq!(chanblocks[3].freq, 14.0);
+    assert_eq!(fences.len(), 2);
+    assert_eq!(fences[0].chanblocks.len(), 4);
+    assert_eq!(fences[1].chanblocks.len(), 1);
+    assert_eq!(fences[0].flagged_chanblock_indices.len(), 1);
+    assert_eq!(fences[0].flagged_chanblock_indices[0], 3);
+    assert!(fences[1].flagged_chanblock_indices.is_empty());
+    assert_abs_diff_eq!(fences[0].chanblocks[0].freq, 10000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[1].freq, 11000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[2].freq, 12000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[3].freq, 14000.0);
+    assert_abs_diff_eq!(fences[1].chanblocks[0].freq, 20000.0);
+    assert_abs_diff_eq!(fences[0].first_freq, 10000.0);
+    assert_abs_diff_eq!(fences[1].first_freq, 20000.0);
+    assert_abs_diff_eq!(fences[0].freq_res.unwrap(), 1000.0);
+    assert_abs_diff_eq!(fences[1].freq_res.unwrap(), 1000.0);
 
     let freq_average_factor = 2;
-    let (chanblocks, flagged_chanblock_indices) = channels_to_chanblocks(
+    let fences = channels_to_chanblocks(
         &all_channel_freqs,
         None,
         freq_average_factor,
         &flagged_channels,
     );
-    assert_eq!(chanblocks.len(), 3);
-    assert!(flagged_chanblock_indices.is_empty());
-    assert_abs_diff_eq!(chanblocks[0].freq, 10.5);
-    assert_abs_diff_eq!(chanblocks[1].freq, 12.0);
-    assert_abs_diff_eq!(chanblocks[2].freq, 14.0);
+    assert_eq!(fences.len(), 2);
+    assert_eq!(fences[0].chanblocks.len(), 3);
+    assert_eq!(fences[1].chanblocks.len(), 1);
+    assert!(fences[0].flagged_chanblock_indices.is_empty());
+    assert!(fences[1].flagged_chanblock_indices.is_empty());
+    assert_abs_diff_eq!(fences[0].chanblocks[0].freq, 10500.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[1].freq, 12500.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[2].freq, 14500.0);
+    assert_abs_diff_eq!(fences[1].chanblocks[0].freq, 20500.0);
+    assert_abs_diff_eq!(fences[0].first_freq, 10000.0);
+    assert_abs_diff_eq!(fences[1].first_freq, 20000.0);
+    assert_abs_diff_eq!(fences[0].freq_res.unwrap(), 2000.0);
+    assert_abs_diff_eq!(fences[1].freq_res.unwrap(), 2000.0);
 
-    // Put a gap in the frequencies.
-    let all_channel_freqs = [10.0, 11.0, 12.0, 13.0, 14.0, 20.0, 21.0];
-    let freq_average_factor = 2;
-    let (chanblocks, flagged_chanblock_indices) = channels_to_chanblocks(
+    let freq_average_factor = 3;
+    let fences = channels_to_chanblocks(
         &all_channel_freqs,
         None,
         freq_average_factor,
         &flagged_channels,
     );
-    assert_eq!(chanblocks.len(), 4);
-    assert!(flagged_chanblock_indices.is_empty());
-    assert_abs_diff_eq!(chanblocks[0].freq, 10.5);
-    assert_abs_diff_eq!(chanblocks[1].freq, 12.0);
-    assert_abs_diff_eq!(chanblocks[2].freq, 14.0);
-    assert_abs_diff_eq!(chanblocks[3].freq, 20.5);
+    assert_eq!(fences.len(), 2);
+    assert_eq!(fences[0].chanblocks.len(), 2);
+    assert_eq!(fences[1].chanblocks.len(), 1);
+    assert!(fences[0].flagged_chanblock_indices.is_empty());
+    assert!(fences[1].flagged_chanblock_indices.is_empty());
+    assert_abs_diff_eq!(fences[0].chanblocks[0].freq, 11000.0);
+    assert_abs_diff_eq!(fences[0].chanblocks[1].freq, 14000.0);
+    assert_abs_diff_eq!(fences[1].chanblocks[0].freq, 21000.0);
+    assert_abs_diff_eq!(fences[0].first_freq, 10000.0);
+    assert_abs_diff_eq!(fences[1].first_freq, 20000.0);
+    assert_abs_diff_eq!(fences[0].freq_res.unwrap(), 3000.0);
+    assert_abs_diff_eq!(fences[1].freq_res.unwrap(), 3000.0);
+}
 
-    // No frequencies, no chanblocks.
+// No frequencies, no fences.
+#[test]
+fn test_no_channels_to_chanblocks() {
     let all_channel_freqs = [];
     let freq_average_factor = 2;
-    let (chanblocks, flagged_chanblock_indices) = channels_to_chanblocks(
+    let flagged_channels = HashSet::new();
+    let fences = channels_to_chanblocks(
         &all_channel_freqs,
         None,
         freq_average_factor,
         &flagged_channels,
     );
-    assert!(chanblocks.is_empty());
-    assert!(flagged_chanblock_indices.is_empty());
+    assert!(fences.is_empty());
 }

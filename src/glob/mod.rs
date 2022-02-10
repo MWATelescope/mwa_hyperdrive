@@ -17,7 +17,7 @@ pub(crate) fn get_all_matches_from_glob(g: &str) -> Result<Vec<PathBuf>, GlobErr
     for entry in glob(g)? {
         match entry {
             Ok(e) => entries.push(e),
-            Err(e) => return Err(GlobError::GlobError(e)),
+            Err(e) => return Err(GlobError::GlobCrate(e)),
         }
     }
     Ok(entries)
@@ -49,7 +49,7 @@ pub enum GlobError {
     MoreThanOneMatch { glob: String },
 
     #[error("{0}")]
-    GlobError(#[from] glob::GlobError),
+    GlobCrate(#[from] glob::GlobError),
 
     #[error("{0}")]
     PatternError(#[from] glob::PatternError),

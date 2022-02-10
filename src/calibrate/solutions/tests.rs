@@ -3,12 +3,13 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use approx::assert_abs_diff_eq;
-use marlu::{c64, time::gps_to_epoch, Jones};
+use hifitime::Epoch;
+use marlu::{c64, Jones};
 use ndarray::prelude::*;
 
 use super::*;
 use crate::jones_test::TestJones;
-use mwa_hyperdrive_common::{marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
 fn make_solutions() -> CalibrationSolutions {
     let num_timeblocks = 2;
@@ -43,10 +44,22 @@ fn make_solutions() -> CalibrationSolutions {
     CalibrationSolutions {
         di_jones,
         flagged_tiles: flagged_tiles.into_iter().collect(),
-        flagged_chanblocks: flagged_chanblocks.into_iter().collect(),
-        average_timestamps: vec![gps_to_epoch(1065880134.0), gps_to_epoch(1065880146.0)],
-        start_timestamps: vec![gps_to_epoch(1065880128.0), gps_to_epoch(1065880140.0)],
-        end_timestamps: vec![gps_to_epoch(1065880140.0), gps_to_epoch(1065880152.0)],
+        flagged_chanblocks: flagged_chanblocks
+            .into_iter()
+            .map(|i| i.try_into().unwrap())
+            .collect(),
+        start_timestamps: vec![
+            Epoch::from_gpst_seconds(1065880128.0),
+            Epoch::from_gpst_seconds(1065880140.0),
+        ],
+        end_timestamps: vec![
+            Epoch::from_gpst_seconds(1065880140.0),
+            Epoch::from_gpst_seconds(1065880152.0),
+        ],
+        average_timestamps: vec![
+            Epoch::from_gpst_seconds(1065880134.0),
+            Epoch::from_gpst_seconds(1065880146.0),
+        ],
         obsid: Some(1065880128),
     }
 }

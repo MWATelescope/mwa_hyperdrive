@@ -29,6 +29,18 @@ impl<F: Float> From<[Complex<F>; 4]> for TestJones<F> {
     }
 }
 
+impl<F: Float> From<[F; 8]> for TestJones<F> {
+    #[inline]
+    fn from(j: [F; 8]) -> Self {
+        Self(Jones::from([
+            Complex::new(j[0], j[1]),
+            Complex::new(j[2], j[3]),
+            Complex::new(j[4], j[5]),
+            Complex::new(j[6], j[7]),
+        ]))
+    }
+}
+
 impl<F: Float> std::ops::Deref for TestJones<F> {
     type Target = Jones<F>;
 

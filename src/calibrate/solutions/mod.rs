@@ -22,7 +22,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use hifitime::Epoch;
-use marlu::{time::epoch_as_gps_seconds, Jones};
+use marlu::Jones;
 use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
 
@@ -52,25 +52,25 @@ pub struct CalibrationSolutions {
     pub flagged_tiles: Vec<usize>,
 
     /// Which chanblocks are flagged? Zero indexed.
-    pub flagged_chanblocks: Vec<usize>,
+    pub flagged_chanblocks: Vec<u16>,
+
+    /// The start timestamps (centroids) of each timeblock used to produce these
+    /// calibration solutions. This is allowed to be empty; in this case, no
+    /// timestamp information is provided. It may also have a different length
+    /// to the first dimension of `di_jones` due to inadequate information.
+    pub start_timestamps: Vec<Epoch>,
+
+    /// The end timestamps (centroids) of each timeblock used to produce these
+    /// calibration solutions. This is allowed to be empty; in this case, no
+    /// timestamp information is provided. It may also have a different length
+    /// to the first dimension of `di_jones` due to inadequate information.
+    pub end_timestamps: Vec<Epoch>,
 
     /// The average timestamps of each timeblock used to produce these
     /// calibration solutions. This is allowed to be empty; in this case, no
     /// timestamp information is provided. It may also have a different length
     /// to the first dimension of `di_jones` due to inadequate information.
     pub average_timestamps: Vec<Epoch>,
-
-    /// The start timestamps of each timeblock used to produce these calibration
-    /// solutions. This is allowed to be empty; in this case, no timestamp
-    /// information is provided. It may also have a different length to the
-    /// first dimension of `di_jones` due to inadequate information.
-    pub start_timestamps: Vec<Epoch>,
-
-    /// The end timestamps of each timeblock used to produce these calibration
-    /// solutions. This is allowed to be empty; in this case, no timestamp
-    /// information is provided. It may also have a different length to the
-    /// first dimension of `di_jones` due to inadequate information.
-    pub end_timestamps: Vec<Epoch>,
 
     /// The MWA observation ID. Allowed to be optional as not all formats
     /// provide it.

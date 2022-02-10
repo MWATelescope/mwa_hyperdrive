@@ -145,9 +145,9 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
             (Some(timestamp), Some(ref_tile)) => format!(
                 "Ref. tile {}, GPS start {}",
                 ref_tile,
-                epoch_as_gps_seconds(*timestamp)
+                timestamp.as_gpst_seconds()
             ),
-            (Some(timestamp), None) => format!("GPS start {}", epoch_as_gps_seconds(*timestamp)),
+            (Some(timestamp), None) => format!("GPS start {}", timestamp.as_gpst_seconds()),
             (None, Some(ref_tile)) => format!("Ref. tile {}", ref_tile),
             (None, None) => String::new(),
         };

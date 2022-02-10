@@ -179,7 +179,7 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
     };
 
     // Get the flagged tile indices from the flagged RF inputs.
-    let flagged_fine_channels: Vec<usize> = (0..total_num_fine_freq_chans)
+    let flagged_fine_channels: Vec<u16> = (0..total_num_fine_freq_chans)
         .into_iter()
         .filter(|&i_chan| {
             let i_coarse_chan = i_chan / num_fine_chans_per_coarse_chan;
@@ -189,6 +189,7 @@ pub(super) fn read<T: AsRef<Path>, T2: AsRef<Path>>(
                 .unflagged_fine_channel_indices
                 .contains(&i_fine_chan_in_coarse_chan)
         })
+        .map(|i_chan| i_chan.try_into().unwrap())
         .collect();
 
     let mut di_jones = Array3::zeros((

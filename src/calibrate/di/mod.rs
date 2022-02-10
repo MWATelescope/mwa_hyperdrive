@@ -21,7 +21,10 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
-use crate::data_formats::{UvfitsWriter, VisOutputType};
+use crate::{
+    data_formats::{UvfitsWriter, VisOutputType},
+    math::average_epoch,
+};
 use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray, rayon};
 
 /// Do all the steps required for direction-independent calibration; read the
@@ -29,6 +32,11 @@ use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray, rayon};
 pub(crate) fn di_calibrate(
     params: &CalibrateParams,
 ) -> Result<CalibrationSolutions, CalibrateError> {
+    // TODO: Fix.
+    if params.freq_average_factor > 1 {
+        panic!("Frequency averaging isn't working right now. Sorry!");
+    }
+
     let CalVis {
         mut vis_data,
         vis_weights,
@@ -36,11 +44,10 @@ pub(crate) fn di_calibrate(
     } = get_cal_vis(params, !params.no_progress_bars)?;
 
     let obs_context = params.input_data.get_obs_context();
-    let freq_context = params.input_data.get_freq_context();
 
     // The shape of the array containing output Jones matrices.
     let num_timeblocks = params.timeblocks.len();
-    let num_chanblocks = params.chanblocks.len();
+    let num_chanblocks = params.fences.first().chanblocks.len();
     let total_num_tiles = obs_context.tile_xyzs.len();
     let num_unflagged_tiles = total_num_tiles - params.flagged_tiles.len();
 
@@ -61,12 +68,12 @@ pub(crate) fn di_calibrate(
         vis_data.view(),
         vis_model.view(),
         &params.timeblocks,
-        &params.chanblocks,
+        &params.fences.first().chanblocks,
         &params.baseline_weights,
         params.max_iterations,
         params.stop_threshold,
         params.min_threshold,
-        true,
+        !params.no_progress_bars,
     );
 
     // The model visibilities are no longer needed.
@@ -77,13 +84,11 @@ pub(crate) fn di_calibrate(
     vis_data
         .outer_iter_mut()
         .into_par_iter()
-        .zip(vis_weights.outer_iter())
-        .for_each(|(mut vis_data, vis_weights)| {
+        .for_each(|mut vis_data| {
             vis_data
                 .outer_iter_mut()
-                .zip(vis_weights.outer_iter())
                 .enumerate()
-                .for_each(|(i_baseline, (mut vis_data, vis_weights))| {
+                .for_each(|(i_baseline, mut vis_data)| {
                     let (tile1, tile2) = cross_correlation_baseline_to_tiles(
                         params.get_num_unflagged_tiles(),
                         i_baseline,
@@ -95,14 +100,11 @@ pub(crate) fn di_calibrate(
 
                     vis_data
                         .iter_mut()
-                        .zip(vis_weights.iter())
                         .zip(sols_tile1.iter())
                         .zip(sols_tile2.iter())
-                        .for_each(|(((vis_data, vis_weight), sol1), sol2)| {
+                        .for_each(|((vis_data, sol1), sol2)| {
                             // Promote the data before demoting it again.
                             let mut d: Jones<f64> = Jones::from(*vis_data);
-                            // Divide by the weight.
-                            d /= *vis_weight as f64;
                             // Solutions need to be inverted, because they're
                             // currently stored as something that goes from
                             // model to data, not data to model.
@@ -118,7 +120,7 @@ pub(crate) fn di_calibrate(
     let sols = sols.into_cal_sols(
         &obs_context.tile_xyzs,
         &params.flagged_tiles,
-        &params.flagged_chanblocks,
+        &params.fences.first().flagged_chanblock_indices,
         obs_context.obsid,
     );
 
@@ -156,12 +158,11 @@ pub(crate) fn di_calibrate(
         let out_timestamps: Vec<Epoch> = out_timesteps
             .iter()
             .map(|timesteps| {
-                let average_duration = timesteps
+                let timestamps = timesteps
                     .iter()
-                    .fold(Duration::from_f64(0.0, TimeUnit::Second), |acc, t| {
-                        acc + obs_context.timestamps[t.0].as_et_duration()
-                    });
-                Epoch::from_et_seconds(average_duration.in_seconds() / timesteps.len() as f64)
+                    .map(|i| obs_context.timestamps[i.0])
+                    .collect::<Vec<_>>();
+                average_epoch(&timestamps)
             })
             .collect();
 
@@ -255,7 +256,7 @@ pub(crate) fn di_calibrate(
             let mut out_chans = vec![];
             let mut first = 0;
             let mut current_chans = vec![0];
-            for i in 1..freq_context.fine_chan_freqs.len() {
+            for i in 1..obs_context.fine_chan_freqs.len() {
                 if i - first > params.output_vis_freq_average_factor - 1 {
                     out_chans.push(current_chans.clone());
                     current_chans.clear();
@@ -349,7 +350,7 @@ pub(crate) fn di_calibrate(
                     let num_fine_chans = out_chans.len();
                     let centre_freq_hz = out_chans[num_fine_chans / 2]
                         .iter()
-                        .map(|&i| freq_context.fine_chan_freqs[i])
+                        .map(|&i| obs_context.fine_chan_freqs[i] as f64)
                         .sum::<f64>()
                         / params.output_vis_freq_average_factor as f64;
                     let mut writer = UvfitsWriter::new(
@@ -359,11 +360,10 @@ pub(crate) fn di_calibrate(
                         num_fine_chans,
                         params.using_autos,
                         out_timestamps[0],
-                        freq_context
+                        obs_context
                             .freq_res
                             .map(|w| w * params.output_vis_freq_average_factor as f64),
                         centre_freq_hz,
-                        num_fine_chans / 2,
                         obs_context.phase_centre,
                         obs_name.as_deref(),
                         &params.unflagged_cross_baseline_to_tile_map,

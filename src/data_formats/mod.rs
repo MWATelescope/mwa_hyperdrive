@@ -23,7 +23,7 @@ use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
 use vec1::Vec1;
 
-use crate::context::{FreqContext, ObsContext};
+use crate::context::ObsContext;
 use mwa_hyperdrive_common::{marlu, ndarray};
 
 #[derive(Debug)]
@@ -41,8 +41,6 @@ pub(crate) enum VisOutputType {
 
 pub(crate) trait InputData: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
-
-    fn get_freq_context(&self) -> &FreqContext;
 
     fn get_input_data_type(&self) -> VisInputType;
 

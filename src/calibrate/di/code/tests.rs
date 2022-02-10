@@ -5,7 +5,8 @@
 //! Direction-independent calibration tests.
 
 use approx::assert_abs_diff_eq;
-use marlu::{c64, time::gps_to_epoch, Jones, XyzGeodetic};
+use hifitime::Epoch;
+use marlu::{Jones, XyzGeodetic};
 use ndarray::prelude::*;
 
 use tempfile::tempdir;
@@ -18,7 +19,7 @@ use crate::{
     math::is_prime,
     tests::reduced_obsids::get_reduced_1090008640,
 };
-use mwa_hyperdrive_common::{marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
 /// Make some data "four times as bright as the model". The solutions should
 /// then be all "twos". As data and model visibilities are given per baseline
@@ -93,9 +94,9 @@ fn incomplete_to_complete_trivial() {
     let timeblocks = [Timeblock {
         index: 0,
         range: 0..1,
-        start: gps_to_epoch(1065880128.0),
-        end: gps_to_epoch(1065880130.0),
-        average: gps_to_epoch(1065880129.0),
+        start: Epoch::from_gpst_seconds(1065880128.0),
+        end: Epoch::from_gpst_seconds(1065880130.0),
+        average: Epoch::from_gpst_seconds(1065880129.0),
     }];
     let chanblocks = [
         Chanblock {
@@ -175,9 +176,9 @@ fn incomplete_to_complete_flags_simple() {
     let timeblocks = [Timeblock {
         index: 0,
         range: 0..1,
-        start: gps_to_epoch(1065880128.0),
-        end: gps_to_epoch(1065880130.0),
-        average: gps_to_epoch(1065880129.0),
+        start: Epoch::from_gpst_seconds(1065880128.0),
+        end: Epoch::from_gpst_seconds(1065880130.0),
+        average: Epoch::from_gpst_seconds(1065880129.0),
     }];
     let chanblocks = [
         Chanblock {
@@ -267,9 +268,9 @@ fn incomplete_to_complete_flags_simple2() {
     let timeblocks = [Timeblock {
         index: 0,
         range: 0..1,
-        start: gps_to_epoch(1065880128.0),
-        end: gps_to_epoch(1065880130.0),
-        average: gps_to_epoch(1065880129.0),
+        start: Epoch::from_gpst_seconds(1065880128.0),
+        end: Epoch::from_gpst_seconds(1065880130.0),
+        average: Epoch::from_gpst_seconds(1065880129.0),
     }];
     let chanblocks = [
         Chanblock {
@@ -361,9 +362,9 @@ fn incomplete_to_complete_flags_complex() {
     let timeblocks = [Timeblock {
         index: 0,
         range: 0..1,
-        start: gps_to_epoch(1065880128.0),
-        end: gps_to_epoch(1065880130.0),
-        average: gps_to_epoch(1065880129.0),
+        start: Epoch::from_gpst_seconds(1065880128.0),
+        end: Epoch::from_gpst_seconds(1065880130.0),
+        average: Epoch::from_gpst_seconds(1065880129.0),
     }];
     let chanblocks = [
         Chanblock {
@@ -447,7 +448,7 @@ fn incomplete_to_complete_flags_complex() {
             assert!(sub_array.iter().all(|j| j.any_nan()));
         } else {
             for i_chan in 0..total_num_chanblocks {
-                if flagged_chanblock_indices.contains(&i_chan) {
+                if flagged_chanblock_indices.contains(&(i_chan as u16)) {
                     assert!(sub_array[i_chan].any_nan());
                 } else {
                     assert_abs_diff_eq!(
@@ -496,7 +497,7 @@ fn test_1090008640_quality() {
         vis_data.view(),
         vis_model.view(),
         &params.timeblocks,
-        &params.chanblocks,
+        &params.fences.first().chanblocks,
         &params.baseline_weights,
         50,
         1e-8,

@@ -11,10 +11,7 @@ use std::ffi::CString;
 use std::path::Path;
 
 use hifitime::Epoch;
-use marlu::{
-    time::{epoch_as_gps_seconds, gps_to_epoch},
-    Jones,
-};
+use marlu::Jones;
 use mwalib::{
     fitsio::{
         errors::check_status as fits_check_status,
@@ -34,18 +31,19 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
     let mut fptr = fits_open!(&file)?;
     let hdu = fits_open_hdu!(&mut fptr, 0)?;
     let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
-    let timestamps: Vec<Epoch> = {
-        let timestamps: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "TIMESTAMPS")?;
+    let start_timestamps = {
+        let timestamps: Option<String> =
+            get_optional_fits_key!(&mut fptr, &hdu, "START_TIMESTAMPS")?;
         // The retrieved string might be empty (or just have spaces for values)
         match timestamps.as_ref().map(|s| s.trim()) {
             None | Some("") => vec![],
             Some(s) => s
                 .split(',')
                 .map(|ss| match ss.trim().parse::<f64>() {
-                    Ok(float) => Ok(gps_to_epoch(float)),
+                    Ok(float) => Ok(Epoch::from_gpst_seconds(float)),
                     Err(_) => Err(ReadSolutionsError::Parse {
                         file: file.display().to_string(),
-                        key: "TIMESTAMPS",
+                        key: "START_TIMESTAMPS",
                         got: ss.to_string(),
                     }),
                 })
@@ -54,6 +52,48 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
                 .collect::<Result<Vec<Epoch>, ReadSolutionsError>>()?,
         }
     };
+    let end_timestamps = {
+        let timestamps: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "END_TIMESTAMPS")?;
+        // The retrieved string might be empty (or just have spaces for values)
+        match timestamps.as_ref().map(|s| s.trim()) {
+            None | Some("") => vec![],
+            Some(s) => s
+                .split(',')
+                .map(|ss| match ss.trim().parse::<f64>() {
+                    Ok(float) => Ok(Epoch::from_gpst_seconds(float)),
+                    Err(_) => Err(ReadSolutionsError::Parse {
+                        file: file.display().to_string(),
+                        key: "END_TIMESTAMPS",
+                        got: ss.to_string(),
+                    }),
+                })
+                .collect::<Vec<Result<Epoch, ReadSolutionsError>>>()
+                .into_iter()
+                .collect::<Result<Vec<Epoch>, ReadSolutionsError>>()?,
+        }
+    };
+    let average_timestamps = {
+        let timestamps: Option<String> =
+            get_optional_fits_key!(&mut fptr, &hdu, "AVERAGE_TIMESTAMPS")?;
+        // The retrieved string might be empty (or just have spaces for values)
+        match timestamps.as_ref().map(|s| s.trim()) {
+            None | Some("") => vec![],
+            Some(s) => s
+                .split(',')
+                .map(|ss| match ss.trim().parse::<f64>() {
+                    Ok(float) => Ok(Epoch::from_gpst_seconds(float)),
+                    Err(_) => Err(ReadSolutionsError::Parse {
+                        file: file.display().to_string(),
+                        key: "AVERAGE_TIMESTAMPS",
+                        got: ss.to_string(),
+                    }),
+                })
+                .collect::<Vec<Result<Epoch, ReadSolutionsError>>>()
+                .into_iter()
+                .collect::<Result<Vec<Epoch>, ReadSolutionsError>>()?,
+        }
+    };
+
     let hdu = fits_open_hdu!(&mut fptr, 1)?;
     let num_timeblocks: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS4")?;
     let total_num_tiles: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS3")?;
@@ -100,16 +140,16 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         .into_par_iter()
         .enumerate()
         .filter(|(_, di_jones)| di_jones.iter().all(|j| j.any_nan()))
-        .map(|pair| pair.0)
+        .map(|pair| pair.0.try_into().unwrap())
         .collect();
 
     Ok(CalibrationSolutions {
         di_jones,
         flagged_tiles,
         flagged_chanblocks,
-        average_timestamps: timestamps,
-        start_timestamps: vec![],
-        end_timestamps: vec![],
+        start_timestamps,
+        end_timestamps,
+        average_timestamps,
         obsid,
     })
 }
@@ -127,44 +167,51 @@ pub(super) fn write<T: AsRef<Path>>(
     // Write the obsid if we can.
     if let Some(obsid) = sols.obsid {
         unsafe {
-            let keyname = CString::new("OBSID").unwrap();
+            let key_name = CString::new("OBSID").unwrap();
             let value = CString::new(obsid.to_string()).unwrap();
             let comment = CString::new("The MWA observation ID").unwrap();
             let mut status = 0;
             // ffpkys = fits_write_key_str
             fitsio_sys::ffpkys(
-                fptr.as_raw(),    /* I - FITS file pointer        */
-                keyname.as_ptr(), /* I - name of keyword to write */
-                value.as_ptr(),   /* I - keyword value            */
-                comment.as_ptr(), /* I - keyword comment          */
-                &mut status,      /* IO - error status            */
+                fptr.as_raw(),     /* I - FITS file pointer        */
+                key_name.as_ptr(), /* I - name of keyword to write */
+                value.as_ptr(),    /* I - keyword value            */
+                comment.as_ptr(),  /* I - keyword comment          */
+                &mut status,       /* IO - error status            */
             );
             fits_check_status(status)?;
         }
     }
 
-    // Write the start timestamps as a comma separated list in a string.
-    let timestamps = sols
-        .average_timestamps
-        .iter()
-        .map(|&t| format!("{:.2}", epoch_as_gps_seconds(t)))
-        .collect::<Vec<_>>()
-        .join(",");
-    unsafe {
-        let keyname = CString::new("TIMESTAMPS").unwrap();
-        let value = CString::new(timestamps).unwrap();
-        let comment =
-            CString::new("Start GPS timesteps used for these solution timeblocks").unwrap();
-        let mut status = 0;
-        // ffpkls = fits_write_key_longstr
-        fitsio_sys::ffpkls(
-            fptr.as_raw(),    /* I - FITS file pointer        */
-            keyname.as_ptr(), /* I - name of keyword to write */
-            value.as_ptr(),   /* I - keyword value            */
-            comment.as_ptr(), /* I - keyword comment          */
-            &mut status,      /* IO - error status            */
-        );
-        fits_check_status(status)?;
+    // Write the timestamps as a comma separated list in a string.
+    for (key_name, key_type, timestamps) in [
+        ("START_TIMESTAMPS", "Start", &sols.start_timestamps),
+        ("END_TIMESTAMPS", "End", &sols.end_timestamps),
+        ("AVERAGE_TIMESTAMPS", "Average", &sols.average_timestamps),
+    ] {
+        let timestamps_str = timestamps
+            .iter()
+            .map(|&t| format!("{:.3}", t.as_gpst_seconds()))
+            .collect::<Vec<_>>()
+            .join(",");
+        unsafe {
+            let key_name = CString::new(key_name).unwrap();
+            let value = CString::new(timestamps_str).unwrap();
+            let comment = CString::new(format!(
+                "{key_type} GPS timesteps used for these solution timeblocks"
+            ))
+            .unwrap();
+            let mut status = 0;
+            // ffpkls = fits_write_key_longstr
+            fitsio_sys::ffpkls(
+                fptr.as_raw(),     /* I - FITS file pointer        */
+                key_name.as_ptr(), /* I - name of keyword to write */
+                value.as_ptr(),    /* I - keyword value            */
+                comment.as_ptr(),  /* I - keyword comment          */
+                &mut status,       /* IO - error status            */
+            );
+            fits_check_status(status)?;
+        }
     }
     hdu.write_key(
         &mut fptr,

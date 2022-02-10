@@ -62,8 +62,8 @@ pub(crate) struct AOFlags {
     ///
     /// Each key is a gpubox number. Each value (which is a vector) has
     /// `num_channels / flags.len()` elements (i.e. the number of fine channels
-    /// per coarse band), and each of those elements is between 0 (0% flagged)
-    /// and 1 (100% flagged).
+    /// per coarse channel), and each of those elements is between 0 (0%
+    /// flagged) and 1 (100% flagged).
     pub(crate) occupancy: BTreeMap<u8, Vec<f32>>,
 
     /// The gpubox numbers that these flags apply to (usually between 1 and 24).
@@ -438,8 +438,8 @@ struct AOFlagsTemp {
     ///
     /// Each key is a gpubox number. Each value (which is a vector) has
     /// `num_channels / flags.len()` elements (i.e. the number of fine channels
-    /// per coarse band), and each of those elements is between 0 (0% flagged)
-    /// and 1 (100% flagged).
+    /// per coarse channel), and each of those elements is between 0 (0%
+    /// flagged) and 1 (100% flagged).
     occupancy: BTreeMap<u8, Vec<f32>>,
     /// The gpubox number that these flags apply to (usually between 1 and 24).
     gpubox_num: u8,
@@ -451,7 +451,7 @@ struct AOFlagsTemp {
 }
 
 /// Calculate the fraction that each channel is flagged. `num_channels` is the
-/// number of fine channels per coarse band.
+/// number of fine channels per coarse channel.
 fn get_occupancy(flags: &[u8], num_channels: usize) -> Vec<f32> {
     // Collapse the flags into a total number of flags per channel.
     let mut total: Vec<u32> = vec![0; num_channels];

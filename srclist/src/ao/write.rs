@@ -4,14 +4,19 @@
 
 //! Writing "André Offringa"-style text source lists.
 
+use log::warn;
 use marlu::sexagesimal::*;
 
 use super::*;
+use mwa_hyperdrive_common::log;
 
 pub fn write_source_list<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
 ) -> Result<(), WriteSourceListError> {
+    // If we find any shapelets, warn the user, but only do it once.
+    let mut found_shapelets = false;
+
     writeln!(buf, "skymodel fileformat 1.1")?;
 
     for (name, source) in sl.iter() {
@@ -24,10 +29,11 @@ pub fn write_source_list<T: std::io::Write>(
                 ComponentType::Point => ("point", None),
                 ComponentType::Gaussian { maj, min, pa } => ("gaussian", Some((maj, min, pa))),
                 ComponentType::Shapelet { .. } => {
-                    return Err(WriteSourceListError::UnsupportedComponentType {
-                        source_list_type: "AO",
-                        comp_type: "shapelet",
-                    })
+                    if !found_shapelets {
+                        warn!("AO-style source lists don't support shapelets; ignoring them");
+                    }
+                    found_shapelets = true;
+                    continue;
                 }
             };
             writeln!(buf, "    type {}", comp_type)?;

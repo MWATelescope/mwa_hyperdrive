@@ -1,7 +1,10 @@
 [package]
 name = "mwa_hyperdrive"
 version = "0.2.0-alpha9"
-authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
+authors = [
+    "Christopher H. Jordan <christopherjordan87@gmail.com>",
+    "Derwent McElhinney <derwent.mcelhinney@curtin.edu.au>"
+]
 edition = "2021"
 rust-version = "1.58"
 license = "MPL-2.0"
@@ -41,18 +44,18 @@ cuda-static = ["mwa_hyperdrive_common/cuda-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.4.0", default_features = false }
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "v0.5.0", default_features = false }
 byteorder = "1.4.3"
-console = "0.15.*"
-crossbeam-channel = "0.5.2"
-crossbeam-utils = "0.8.6"
-flate2 = "1.0.22"
+console = "0.15.0"
+crossbeam-channel = "0.5.0"
+crossbeam-utils = "0.8.7"
+flate2 = "1.0.13"
 glob = "0.3.0"
-regex = "1.5.4"
-serde = { version = "1.0.135", features = ["derive"] }
+regex = "1.4.6"
+serde = { version = "1.0.103", features = ["derive"] }
 strum = "0.23.0"
-strum_macros = "0.23.1"
-vec1 = "1.8.0"
+strum_macros = "0.23.0"
+vec1 = "1.5.0"
 
 plotters = { version = "0.3.1", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "point_series"], optional = true }
 
@@ -62,13 +65,13 @@ mwa_hyperdrive_cuda =    { path = "cuda", optional = true }
 mwa_hyperdrive_srclist = { path = "srclist" }
 
 [dev-dependencies]
-approx = "0.5.*"
-assert_cmd = "2.0.*"
-criterion = "0.3.*"
-indoc = "1.0.*"
+approx = "0.5.0"
+assert_cmd = "2.0.0"
+criterion = "0.3.5"
+indoc = "1.0.0"
 ndarray = { version = ">=0.15.4,<0.16", features = ["approx-0_5"] }
-serial_test = "0.5.*"
-tempfile = "3.3.*"
+serial_test = "0.5.0"
+tempfile = "3.3.0"
 
 [[bench]]
 name = "bench"

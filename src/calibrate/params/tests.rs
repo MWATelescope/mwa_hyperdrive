@@ -11,16 +11,46 @@ use super::InvalidArgsError;
 use crate::tests::{full_obsids::*, reduced_obsids::*};
 
 #[test]
-fn test_new_params() {
+fn test_new_params_defaults() {
     let args = get_reduced_1090008640(true);
     let params = match args.into_params() {
         Ok(p) => p,
         Err(e) => panic!("{}", e),
     };
+    let obs_context = params.get_obs_context();
     // The default time resolution should be 2.0s, as per the metafits.
-    assert_abs_diff_eq!(params.get_obs_context().time_res.unwrap(), 2.0);
+    assert_abs_diff_eq!(obs_context.time_res.unwrap(), 2.0);
     // The default freq resolution should be 40kHz, as per the metafits.
-    assert_abs_diff_eq!(params.get_freq_context().freq_res.unwrap(), 40e3);
+    assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
+    // No tiles are flagged in the input data, and no additional flags were
+    // supplied.
+    assert_eq!(obs_context.flagged_tiles.len(), 0);
+    assert_eq!(params.flagged_tiles.len(), 0);
+
+    // By default there are 5 flagged channels per coarse channel. We only have
+    // one coarse channel here so we expect 27/32 channels. Also no picket fence
+    // shenanigans.
+    assert_eq!(params.fences.len(), 1);
+    assert_eq!(params.fences[0].chanblocks.len(), 27);
+}
+
+#[test]
+fn test_new_params_no_input_flags() {
+    let mut args = get_reduced_1090008640(true);
+    args.ignore_input_data_tile_flags = true;
+    args.ignore_input_data_fine_channel_flags = true;
+    let params = match args.into_params() {
+        Ok(p) => p,
+        Err(e) => panic!("{}", e),
+    };
+    let obs_context = params.get_obs_context();
+    assert_abs_diff_eq!(obs_context.time_res.unwrap(), 2.0);
+    assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
+    assert_eq!(obs_context.flagged_tiles.len(), 0);
+    assert_eq!(params.flagged_tiles.len(), 0);
+
+    assert_eq!(params.fences.len(), 1);
+    assert_eq!(params.fences[0].chanblocks.len(), 32);
 }
 
 #[test]

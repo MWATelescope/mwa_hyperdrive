@@ -6,7 +6,7 @@
 
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{marlu, thiserror};
+use mwa_hyperdrive_common::thiserror;
 
 #[derive(Error, Debug)]
 pub enum BeamError {
@@ -24,5 +24,5 @@ pub enum BeamError {
 
     #[cfg(feature = "cuda")]
     #[error("CUDA error: {0}")]
-    Cuda(#[from] marlu::cuda::CudaError),
+    Cuda(#[from] mwa_hyperdrive_common::marlu::cuda::CudaError),
 }

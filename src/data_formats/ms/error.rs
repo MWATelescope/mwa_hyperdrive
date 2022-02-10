@@ -19,6 +19,15 @@ pub enum MsReadError {
     #[error("The main table of the measurement set contains no rows!")]
     Empty,
 
+    #[error("The SPECTRAL_WINDOW table contained no channel frequencies")]
+    NoChannelFreqs,
+
+    #[error("The SPECTRAL_WINDOW table contained no channel widths")]
+    NoChanWidths,
+
+    #[error("The SPECTRAL_WINDOW table contains unequal channel widths")]
+    ChanWidthsUnequal,
+
     #[error("Couldn't work out the good start and end times of the measurement set; are all visibilities flagged?")]
     AllFlagged,
 

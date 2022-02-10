@@ -12,6 +12,7 @@ use std::ops::Deref;
 
 use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::thread::scope;
+use hifitime::Epoch;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Either;
 use log::{debug, info, trace};
@@ -20,7 +21,6 @@ use marlu::{
     math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_cross_correlation_baselines},
     pos::xyz::{xyzs_to_cross_uvws_parallel, XyzGeodetic},
     precession::precess_time,
-    time::gps_to_epoch,
     Jones,
 };
 use ndarray::prelude::*;
@@ -34,7 +34,7 @@ use crate::{
     data_formats::UvfitsWriter,
     model,
 };
-use mwa_hyperdrive_common::{cfg_if, indicatif, itertools, log, marlu, ndarray, rayon};
+use mwa_hyperdrive_common::{cfg_if, hifitime, indicatif, itertools, log, marlu, ndarray, rayon};
 use mwa_hyperdrive_srclist::ComponentList;
 
 cfg_if::cfg_if! {
@@ -79,12 +79,13 @@ pub(super) fn get_cal_vis(
     }
 
     let obs_context = params.input_data.get_obs_context();
-    let freq_context = params.input_data.get_freq_context();
+    // TODO: Use all fences, not just the first.
+    let fence = params.fences.first();
 
     let vis_shape = (
         params.get_num_timesteps(),
         params.get_num_unflagged_cross_baselines(),
-        params.chanblocks.len(),
+        fence.chanblocks.len(),
     );
     let num_elems = vis_shape.0 * vis_shape.1 * vis_shape.2;
     let size = num_elems * std::mem::size_of::<Jones<f32>>();
@@ -377,18 +378,14 @@ pub(super) fn get_cal_vis(
             drop(tx_model);
         });
 
-        // Model writing thread. It also multiplies model visibilities by
-        // weights *after* the visibilities have been written, such that they're
-        // ready for calibration. If the user hasn't specified to write the
-        // model to a file, then this thread just propagates errors.
+        // Model writing thread. If the user hasn't specified to write the model
+        // to a file, then this thread just propagates errors.
         scope.spawn(move |_| {
             // If the user wants the sky model written out, create the file
             // here. This can take a good deal of time; by creating the file in
             // a thread, the other threads can do useful work in parallel.
             let model_writer_result = if let Some(model_pb) = &params.model_file {
                 let start_epoch = params.timeblocks.first().start;
-                let centre_freq =
-                    freq_context.fine_chan_freqs[0] + freq_context.total_bandwidth / 2.0;
                 let obs_name = obs_context.obsid.map(|o| format!("{}", o));
 
                 let create_result = UvfitsWriter::new(
@@ -398,12 +395,11 @@ pub(super) fn get_cal_vis(
                     vis_shape.1,
                     // ... but use all channels (including flagged channels).
                     // fits files expect a neat layout.
-                    freq_context.fine_chan_freqs.len(),
+                    fence.get_total_num_chanblocks(),
                     false,
                     start_epoch,
-                    freq_context.freq_res,
-                    centre_freq,
-                    freq_context.fine_chan_freqs.len() / 2,
+                    fence.freq_res,
+                    fence.get_centre_freq(),
                     obs_context.phase_centre,
                     obs_name.as_deref(),
                     &params.unflagged_cross_baseline_to_tile_map,
@@ -572,7 +568,7 @@ impl<'a> IncompleteSolutions<'a> {
         self,
         all_tile_positions: &[XyzGeodetic],
         flagged_tiles: &[usize],
-        flagged_chanblock_indices: &[usize],
+        flagged_chanblock_indices: &[u16],
         obsid: Option<u32>,
     ) -> CalibrationSolutions {
         let (num_timeblocks, num_unflagged_tiles, num_unflagged_chanblocks) = self.di_jones.dim();
@@ -620,7 +616,7 @@ impl<'a> IncompleteSolutions<'a> {
                                 |(i_chanblock, out_di_jones)| {
                                     // Nothing needs to be done if this
                                     // chanblock is flagged.
-                                    if !flagged_chanblock_indices.contains(&i_chanblock) {
+                                    if !flagged_chanblock_indices.contains(&(i_chanblock as u16)) {
                                         // The incomplete solutions aren't
                                         // inverted (i.e. they go from model to
                                         // data, but we want to store data to
@@ -720,9 +716,9 @@ pub(super) fn calibrate_timeblocks<'a>(
                 range: 0..0,
                 // The timestamps don't matter for calibration, but attempt to set
                 // them correctly just in case.
-                start: gps_to_epoch(2e10),
-                end: gps_to_epoch(0.0),
-                average: gps_to_epoch(0.0),
+                start: Epoch::from_gpst_seconds(2e10),
+                end: Epoch::from_gpst_seconds(0.0),
+                average: Epoch::from_gpst_seconds(0.0),
             },
             |acc, tb| Timeblock {
                 index: 0,
@@ -860,13 +856,14 @@ fn calibrate_timeblock(
         .par_iter()
         .zip(di_jones_rev.outer_iter_mut())
         .map(|(chanblock, di_jones)| {
+            let i_chanblock = chanblock.unflagged_index as usize;
             let range = s![
                 timeblock.range.clone(),
                 ..,
                 // We use a range because `calibrate` and `calibration_loop`
                 // expect visibility arrays with potentially multiple
                 // chanblocks. It may be worth enforcing only single chanblocks.
-                chanblock.unflagged_index..chanblock.unflagged_index + 1
+                i_chanblock..i_chanblock + 1
             ];
             let mut cal_result = calibrate(
                 vis_data.slice(range),
@@ -877,8 +874,8 @@ fn calibrate_timeblock(
                 stop_threshold,
                 min_threshold,
             );
-            cal_result.chanblock = Some(chanblock.chanblock_index);
-            cal_result.i_chanblock = Some(chanblock.unflagged_index);
+            cal_result.chanblock = Some(chanblock.chanblock_index as usize);
+            cal_result.i_chanblock = Some(chanblock.unflagged_index as usize);
 
             let mut status_str = format!("Chanblock {:>3}", chanblock.chanblock_index);
             if num_unflagged_tiles - cal_result.num_failed <= 4 {
@@ -906,7 +903,11 @@ fn calibrate_timeblock(
                 ));
             }
             progress_bar.inc(1);
-            progress_bar.println(status_str);
+            if progress_bar.is_hidden() {
+                println!("{status_str}");
+            } else {
+                progress_bar.println(status_str);
+            }
             cal_result
         })
         .collect();

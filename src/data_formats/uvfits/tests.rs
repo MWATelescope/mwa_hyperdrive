@@ -5,16 +5,15 @@
 use std::collections::HashSet;
 
 use approx::assert_abs_diff_eq;
-use marlu::{
-    c32, pos::xyz::xyzs_to_cross_uvws_parallel, time::gps_to_epoch, Jones, RADec, XyzGeodetic, UVW,
-};
+use hifitime::Epoch;
+use marlu::{c32, pos::xyz::xyzs_to_cross_uvws_parallel, Jones, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use tempfile::NamedTempFile;
 
 use super::*;
 use crate::{jones_test::TestJones, math::TileBaselineMaps};
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
 #[test]
 fn test_get_truncated_date_str() {
@@ -58,7 +57,7 @@ fn test_new_uvfits_is_sensible() {
     let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
     let num_chans = 2;
     let obsid = 1065880128.0;
-    let start_epoch = gps_to_epoch(obsid);
+    let start_epoch = Epoch::from_gpst_seconds(obsid);
     let maps = TileBaselineMaps::new(num_tiles, &[]);
     let chan_flags = HashSet::new();
 
@@ -71,7 +70,6 @@ fn test_new_uvfits_is_sensible() {
         start_epoch,
         Some(40e3),
         170e6,
-        3,
         RADec::new_degrees(0.0, 60.0),
         Some("test"),
         &maps.unflagged_cross_baseline_to_tile_map,
@@ -106,7 +104,7 @@ fn write_then_read_uvfits(autos: bool) {
     let output = NamedTempFile::new().expect("Couldn't create temporary file");
     let phase_centre = RADec::new_degrees(0.0, -27.0);
     let lst_rad = 0.0;
-    let timesteps = [gps_to_epoch(1065880128.0)];
+    let timesteps = [Epoch::from_gpst_seconds(1065880128.0)];
     let num_timesteps = timesteps.len();
     let num_tiles = 128;
     let autocorrelations_present = autos;
@@ -157,7 +155,6 @@ fn write_then_read_uvfits(autos: bool) {
         *timesteps.first().unwrap(),
         Some(fine_chan_width_hz),
         fine_chan_freqs_hz[num_chans / 2],
-        num_chans / 2,
         phase_centre,
         None,
         &maps.unflagged_cross_baseline_to_tile_map,

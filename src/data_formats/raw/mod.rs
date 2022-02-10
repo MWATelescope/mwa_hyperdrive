@@ -21,16 +21,16 @@ use log::{debug, info, trace, warn};
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     math::baseline_to_tiles,
-    time::{epoch_as_gps_seconds, gps_to_epoch},
     Jones, RADec, XyzGeodetic,
 };
 use mwalib::{CorrelatorContext, Pol};
 use ndarray::prelude::*;
 use rayon::prelude::*;
+use vec1::Vec1;
 
 use super::*;
 use crate::{
-    context::{FreqContext, ObsContext},
+    context::ObsContext,
     data_formats::metafits::get_dipole_gains,
     flagging::{AOFlags, MwafProducer},
     pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
@@ -42,9 +42,6 @@ use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray, rayon};
 pub(crate) struct RawDataReader {
     /// Observation metadata.
     obs_context: ObsContext,
-
-    /// Frequency metadata.
-    freq_context: FreqContext,
 
     // Raw-data-specific things follow.
     /// The interface to the raw data via mwalib.
@@ -80,6 +77,10 @@ impl RawDataReader {
         cable_length_correction: bool,
         geometric_correction: bool,
     ) -> Result<RawDataReader, RawReadError> {
+        // There are a lot of unwraps in this function. These are fine because
+        // mwalib ensures that vectors aren't empty so when we convert a Vec to
+        // Vec1, for example, we don't need to propogate a new error.
+
         let meta_pb = metadata.as_ref().to_path_buf();
         let gpubox_pbs: Vec<PathBuf> = gpuboxes.iter().map(|p| p.as_ref().to_path_buf()).collect();
         trace!("Using metafits: {}", meta_pb.display());
@@ -145,7 +146,8 @@ impl RawDataReader {
         }
 
         let mwax = matches!(mwalib_context.mwa_version, mwalib::MWAVersion::CorrMWAXv2);
-        let fine_chan_flags_per_coarse_chan: Vec<usize> =
+
+        let flagged_fine_chans_per_coarse_chan: Vec<usize> =
             // If the flags aren't specified, use the observation's fine-channel
             // frequency resolution to set them.
             match (metafits_context.corr_fine_chan_width_hz, mwax) {
@@ -168,20 +170,27 @@ impl RawDataReader {
 
                 (f, _) => return Err(RawReadError::UnhandledFreqResolutionForFlags(f)),
         };
+        let flagged_fine_chans = {
+            let mut flagged_fine_chans = Vec::with_capacity(
+                flagged_fine_chans_per_coarse_chan.len() * mwalib_context.num_coarse_chans,
+            );
+            for i_cc in 0..mwalib_context.num_provided_coarse_chans {
+                for &f in &flagged_fine_chans_per_coarse_chan {
+                    flagged_fine_chans
+                        .push(i_cc * metafits_context.num_corr_fine_chans_per_coarse + f);
+                }
+            }
+            flagged_fine_chans
+        };
 
         let time_res = Some(metafits_context.corr_int_time_ms as f64 / 1e3);
 
         let timestamps: Vec<Epoch> = mwalib_context
             .timesteps
             .iter()
-            .map(|t| gps_to_epoch(t.gps_time_ms as f64 / 1e3))
+            .map(|t| Epoch::from_gpst_seconds(t.gps_time_ms as f64 / 1e3))
             .collect();
 
-        // Populate a frequency context struct.
-        let mut fine_chan_freqs = Vec::with_capacity(
-            metafits_context.num_corr_fine_chans_per_coarse
-                * metafits_context.metafits_coarse_chans.len(),
-        );
         let common_good_coarse_chans: Vec<&mwalib::CoarseChannel> = mwalib_context
             .coarse_chans
             .iter()
@@ -189,38 +198,22 @@ impl RawDataReader {
             .filter(|(i, _)| mwalib_context.common_good_coarse_chan_indices.contains(i))
             .map(|(_, cc)| cc)
             .collect();
-        for cc in &common_good_coarse_chans {
-            let mut cc_freqs = Array1::range(
-                cc.chan_start_hz as f64,
-                cc.chan_end_hz as f64,
-                metafits_context.corr_fine_chan_width_hz as f64,
-            )
-            .to_vec();
-            fine_chan_freqs.append(&mut cc_freqs);
-        }
+        let common_good_coarse_chans = Vec1::try_from_vec(common_good_coarse_chans).unwrap();
 
-        let freq_context = FreqContext {
-            coarse_chan_nums: common_good_coarse_chans
-                .iter()
-                .map(|cc| cc.corr_chan_number as u32)
-                .collect(),
-            coarse_chan_freqs: common_good_coarse_chans
-                .iter()
-                .map(|cc| cc.chan_centre_hz as f64)
-                .collect(),
-            coarse_chan_width: metafits_context.corr_fine_chan_width_hz as f64,
-            total_bandwidth: common_good_coarse_chans
-                .iter()
-                .map(|cc| cc.chan_width_hz as f64)
-                .sum(),
-            fine_chan_range: common_good_coarse_chans.first().unwrap().corr_chan_number
-                * metafits_context.num_corr_fine_chans_per_coarse
-                ..common_good_coarse_chans.last().unwrap().corr_chan_number
-                    * metafits_context.num_corr_fine_chans_per_coarse,
-            fine_chan_freqs,
-            num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
-            freq_res: Some(metafits_context.corr_fine_chan_width_hz as f64),
-        };
+        let mut fine_chan_freqs = Vec::with_capacity(
+            metafits_context.num_corr_fine_chans_per_coarse
+                * mwalib_context.num_provided_coarse_chans,
+        );
+        for cc in &common_good_coarse_chans {
+            for i_chan in 0..metafits_context.num_corr_fine_chans_per_coarse as u64 {
+                fine_chan_freqs.push(
+                    (cc.chan_start_hz as u64
+                        + i_chan * metafits_context.corr_fine_chan_width_hz as u64)
+                        as u64,
+                )
+            }
+        }
+        let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
         let phase_centre = RADec::new(
             metafits_context
@@ -242,12 +235,14 @@ impl RawDataReader {
             metafits_context.dec_tile_pointing_degrees.to_radians(),
         ));
         let tile_xyzs = XyzGeodetic::get_tiles_mwa(metafits_context);
+        let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
         let tile_names: Vec<String> = metafits_context
             .rf_inputs
             .iter()
             .filter(|rf| rf.pol == Pol::X)
             .map(|rf_input| rf_input.tile_name.clone())
             .collect();
+        let tile_names = Vec1::try_from_vec(tile_names).unwrap();
 
         let dipole_gains = get_dipole_gains(metafits_context);
 
@@ -271,7 +266,7 @@ impl RawDataReader {
         // frequency check when that's done.
         let pfb_gains = match (
             pfb_flavour,
-            (freq_context.freq_res.unwrap() - 40000.0).abs() < f64::EPSILON,
+            metafits_context.corr_fine_chan_width_hz == 40000,
         ) {
             // Not using any gains.
             (PfbFlavour::None, _) => None,
@@ -369,16 +364,36 @@ impl RawDataReader {
             tile_xyzs,
             flagged_tiles,
             autocorrelations_present: true,
-            fine_chan_flags_per_coarse_chan,
             dipole_gains: Some(dipole_gains),
             time_res,
             array_longitude_rad: Some(MWA_LONG_RAD),
             array_latitude_rad: Some(MWA_LAT_RAD),
+            coarse_chan_nums: common_good_coarse_chans
+                .iter()
+                .map(|cc| cc.corr_chan_number as u32)
+                .collect(),
+            coarse_chan_freqs: common_good_coarse_chans
+                .iter()
+                .map(|cc| cc.chan_centre_hz as f64)
+                .collect(),
+            coarse_chan_width: metafits_context.coarse_chan_width_hz as f64,
+            total_bandwidth: common_good_coarse_chans
+                .iter()
+                .map(|cc| cc.chan_width_hz as f64)
+                .sum(),
+            fine_chan_range: common_good_coarse_chans.first().corr_chan_number
+                * metafits_context.num_corr_fine_chans_per_coarse
+                ..common_good_coarse_chans.last().corr_chan_number
+                    * metafits_context.num_corr_fine_chans_per_coarse,
+            fine_chan_freqs,
+            num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
+            freq_res: Some(metafits_context.corr_fine_chan_width_hz as f64),
+            flagged_fine_chans,
+            flagged_fine_chans_per_coarse_chan,
         };
 
         Ok(RawDataReader {
             obs_context,
-            freq_context,
             mwalib_context,
             pfb_gains,
             digital_gains,
@@ -429,7 +444,7 @@ impl RawDataReader {
                     // Set tile_gains to anything to make Rust happy. I don't
                     // want to allocate a new vector even though it's probably
                     // not significantly affecting performance.
-                    let mut tile_gains: [&Vec<u32>; 2] = [
+                    let mut tile_gains: [&Vec<f64>; 2] = [
                         &self.mwalib_context.metafits_context.rf_inputs[0].digital_gains,
                         &self.mwalib_context.metafits_context.rf_inputs[0].digital_gains,
                     ];
@@ -456,7 +471,6 @@ impl RawDataReader {
                         let mut gain = tile_gains[0][i_cc];
                         let i = if tile1 != tile2 { 1 } else { 0 };
                         gain *= tile_gains[i][i_cc];
-                        let gain = gain as f64 / 64.0_f64.powi(2);
 
                         // Do the division at double precision.
                         let vd: Jones<f64> = Jones::from(*vis) / gain;
@@ -478,7 +492,7 @@ impl RawDataReader {
                 let flags = self.aoflags.as_ref().unwrap().flags[&(gpubox_channel as u8)]
                     .slice(s![timestep, .., ..,]);
                 // Select only the applicable frequencies.
-                let n = self.freq_context.num_fine_chans_per_coarse_chan;
+                let n = self.obs_context.num_fine_chans_per_coarse_chan;
                 let selection = s![
                     (i_gpubox_chan * n)..((i_gpubox_chan + 1) * n),
                     .. // All baselines
@@ -507,8 +521,8 @@ impl RawDataReader {
 
                         vis.iter_mut()
                             .zip(weights.iter_mut())
-                            .zip(flags_for_bls.iter())
-                            .for_each(|((vis, weight), &flag)| {
+                            .zip(flags_for_bls)
+                            .for_each(|((vis, weight), flag)| {
                                 let f = flag as f32;
                                 *vis *= f;
                                 *weight *= f;
@@ -538,7 +552,7 @@ impl RawDataReader {
                 let time_res = self.obs_context.time_res.unwrap();
                 let flags_start = aoflags.start_time_milli as f64 / 1e3;
                 let flags_end = flags_start + aoflags.num_time_steps as f64 * time_res;
-                let gps = epoch_as_gps_seconds(self.obs_context.timestamps[timestep]);
+                let gps = self.obs_context.timestamps[timestep].as_gpst_seconds();
                 if !(flags_start..flags_end).contains(&gps) {
                     return Err(ReadInputDataError::MwafFlagsMissingForTimestep { timestep, gps });
                 }
@@ -627,7 +641,6 @@ impl RawDataReader {
                 _,
             ) => (),
         }
-
         // Remove the extraneous time dimension; there's only ever one timestep.
         let mut vis = vis.remove_axis(Axis(0));
         let mut weights = weights.remove_axis(Axis(0));
@@ -652,36 +665,38 @@ impl RawDataReader {
             tile_to_unflagged_baseline_map,
         }) = crosses
         {
-            let mut data_array_bl_index = 0;
-            for (i_bl, (vis_bl, weights_bl)) in vis
-                .view()
-                .reversed_axes()
-                .outer_iter()
-                .zip(weights.view().reversed_axes().outer_iter())
+            vis.outer_iter()
+                .zip(weights.outer_iter())
                 .enumerate()
-            {
-                let (tile1, tile2) =
-                    baseline_to_tiles(self.mwalib_context.metafits_context.num_ants, i_bl);
-
-                if tile_to_unflagged_baseline_map
-                    .get(&(tile1, tile2))
-                    .is_some()
-                {
-                    let mut data_array_freq_index = 0;
-                    for (i_freq, (&vis, &weight)) in
-                        vis_bl.iter().zip(weights_bl.iter()).enumerate()
-                    {
-                        if !flagged_fine_chans.contains(&i_freq) {
-                            data_array[(data_array_bl_index, data_array_freq_index)] = vis;
-                            weights_array[(data_array_bl_index, data_array_freq_index)] = weight;
-
-                            data_array_freq_index += 1;
-                        }
-                    }
-
-                    data_array_bl_index += 1;
-                }
-            }
+                // Let only unflagged channels proceed.
+                .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
+                // Discard the channel index and get the unflagged
+                // channel index.
+                .map(|(_, data)| data)
+                .enumerate()
+                .for_each(|(i_unflagged_chan, (vis, weights))| {
+                    vis.iter()
+                        .zip(weights)
+                        .enumerate()
+                        // Let only unflagged baselines proceed.
+                        .filter(|(i_baseline, _)| {
+                            let (tile1, tile2) = baseline_to_tiles(
+                                self.mwalib_context.metafits_context.num_ants,
+                                *i_baseline,
+                            );
+                            tile_to_unflagged_baseline_map
+                                .get(&(tile1, tile2))
+                                .is_some()
+                        })
+                        // Discard the baseline index and get the unflagged baseline
+                        // index.
+                        .map(|(_, data)| data)
+                        .enumerate()
+                        .for_each(|(i_unflagged_baseline, (vis, weight))| {
+                            data_array[(i_unflagged_baseline, i_unflagged_chan)] = *vis;
+                            weights_array[(i_unflagged_baseline, i_unflagged_chan)] = *weight;
+                        });
+                });
         }
 
         // If applicable, write the auto-correlation visibilities to our
@@ -692,32 +707,36 @@ impl RawDataReader {
             flagged_tiles,
         }) = autos
         {
-            let mut data_array_tile_index = 0;
-            for (i_bl, (vis_bl, weights_bl)) in vis
-                .reversed_axes()
-                .outer_iter()
-                .zip(weights.reversed_axes().outer_iter())
+            vis.outer_iter()
+                .zip(weights.outer_iter())
                 .enumerate()
-            {
-                let (tile1, tile2) =
-                    baseline_to_tiles(self.mwalib_context.metafits_context.num_ants, i_bl);
-
-                if tile1 == tile2 && !flagged_tiles.contains(&tile1) {
-                    let mut data_array_freq_index = 0;
-                    for (i_freq, (&vis, &weight)) in
-                        vis_bl.iter().zip(weights_bl.iter()).enumerate()
-                    {
-                        if !flagged_fine_chans.contains(&i_freq) {
-                            data_array[(data_array_tile_index, data_array_freq_index)] = vis;
-                            weights_array[(data_array_tile_index, data_array_freq_index)] = weight;
-
-                            data_array_freq_index += 1;
-                        }
-                    }
-
-                    data_array_tile_index += 1;
-                }
-            }
+                // Let only unflagged channels proceed.
+                .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
+                // Discard the channel index and get the unflagged channel
+                // index.
+                .map(|(_, data)| data)
+                .enumerate()
+                .for_each(|(i_unflagged_chan, (vis, weights))| {
+                    vis.iter()
+                        .zip(weights)
+                        .enumerate()
+                        // Let only unflagged autos proceed.
+                        .filter(|(i_baseline, _)| {
+                            let (tile1, tile2) = baseline_to_tiles(
+                                self.mwalib_context.metafits_context.num_ants,
+                                *i_baseline,
+                            );
+                            tile1 == tile2 && !flagged_tiles.contains(&tile1)
+                        })
+                        // Discard the baseline index and get the unflagged tile
+                        // index.
+                        .map(|(_, data)| data)
+                        .enumerate()
+                        .for_each(|(i_unflagged_tile, (vis, weight))| {
+                            data_array[(i_unflagged_tile, i_unflagged_chan)] = *vis;
+                            weights_array[(i_unflagged_tile, i_unflagged_chan)] = *weight;
+                        });
+                });
         }
 
         Ok(())
@@ -743,10 +762,6 @@ struct AutoData<'a, 'b, 'c> {
 impl InputData for RawDataReader {
     fn get_obs_context(&self) -> &ObsContext {
         &self.obs_context
-    }
-
-    fn get_freq_context(&self) -> &FreqContext {
-        &self.freq_context
     }
 
     fn get_input_data_type(&self) -> VisInputType {

@@ -19,29 +19,23 @@ use marlu::{
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
+        MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD,
     },
-    time::{casacore_utc_to_epoch, epoch_as_gps_seconds},
     Jones, RADec, XyzGeocentric,
 };
 use ndarray::prelude::*;
 
 use super::*;
 use crate::{
-    context::{FreqContext, ObsContext},
-    data_formats::metafits,
-    glob::get_single_match_from_glob,
+    context::ObsContext, data_formats::metafits, glob::get_single_match_from_glob,
+    time::round_hundredths_of_a_second,
 };
 use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray};
 
-const COTTER_DEFAULT_EDGEWIDTH: f64 = 80e3;
-
 pub(crate) struct MS {
-    /// Observation metadata.
+    /// Input data metadata.
     obs_context: ObsContext,
-
-    /// Frequency metadata.
-    freq_context: FreqContext,
 
     /// The path to the measurement set on disk.
     pub(crate) ms: PathBuf,
@@ -100,9 +94,7 @@ impl MS {
             let app: String = history_table.get_cell("APPLICATION", 0).unwrap();
             if app.starts_with("Birli") {
                 MsFlavour::Birli
-            } else if read_table(&ms, Some("MWA_TILE_POINTING")).is_ok() {
-                // We're assuming that only Cotter is left as it knows about MWA
-                // stuff.
+            } else if app.starts_with("Cotter") {
                 MsFlavour::Cotter
             } else {
                 MsFlavour::Casa
@@ -112,6 +104,7 @@ impl MS {
         // Get the tile names and XYZ positions.
         let mut antenna_table = read_table(&ms, Some("ANTENNA"))?;
         let tile_names: Vec<String> = antenna_table.get_col_as_vec("NAME").unwrap();
+        let tile_names = Vec1::try_from_vec(tile_names).map_err(|_| MsReadError::Empty)?;
         let mut casacore_positions = Vec::with_capacity(antenna_table.n_rows() as usize);
         antenna_table
             .for_each_row(|row| {
@@ -126,16 +119,22 @@ impl MS {
                 Ok(())
             })
             .unwrap();
-        let tile_xyzs = match flavour {
-            MsFlavour::Birli => casacore_positions_to_local_xyz_mwa(&casacore_positions)?,
-            MsFlavour::Cotter => casacore_positions_to_local_xyz(
-                &casacore_positions,
+        let (array_longitude_rad, array_latitude_rad, array_height_m) = match flavour {
+            MsFlavour::Birli => (MWA_LONG_RAD, MWA_LAT_RAD, MWA_HEIGHT_M),
+            MsFlavour::Cotter => (
                 COTTER_MWA_LONGITUDE_RADIANS,
                 COTTER_MWA_LATITUDE_RADIANS,
                 COTTER_MWA_HEIGHT_METRES,
-            )?,
+            ),
             MsFlavour::Casa => todo!(),
         };
+        let tile_xyzs = casacore_positions_to_local_xyz(
+            &casacore_positions,
+            array_longitude_rad,
+            array_latitude_rad,
+            array_height_m,
+        )?;
+        let tile_xyzs = Vec1::try_from_vec(tile_xyzs).map_err(|_| MsReadError::Empty)?;
         let total_num_tiles = tile_xyzs.len();
         trace!("There are {} total tiles", total_num_tiles);
 
@@ -262,7 +261,16 @@ impl MS {
             // casacore keeps the stores the times as centroids, so no
             // correction is needed. Undo the multiply by a big number from
             // above.
-            .map(|(i, utc)| (i, casacore_utc_to_epoch(utc)))
+            .map(|(i, utc)| {
+                let e = Epoch::from_utc_seconds(
+                    // casacore stores the times as UTC seconds... but with an
+                    // offset.
+                    utc - hifitime::J1900_OFFSET * hifitime::SECONDS_PER_DAY,
+                );
+                // The values can be slightly off of their intended values;
+                // round them to the nearest hundredth.
+                (i, round_hundredths_of_a_second(e))
+            })
             .unzip();
         let all_timesteps =
             Vec1::try_from_vec(all_timesteps).map_err(|_| MsReadError::NoTimesteps {
@@ -272,29 +280,25 @@ impl MS {
         match timestamps.as_slice() {
             // Handled above; measurement sets aren't allowed to be empty.
             [] => unreachable!(),
-            [t] => debug!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
+            [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
             [t0, .., tn] => {
-                // The time resolution is specified if there's more than one
-                // timestep.
-                let time_res = time_res.unwrap();
-                debug!(
-                    "First good timestep (GPS): {:.2}",
-                    // We expect GPS timestamps to be "leading edge", not
-                    // centroids.
-                    epoch_as_gps_seconds(*t0) - time_res / 2.0
-                );
-                debug!(
-                    "Last good timestep  (GPS): {:.2}",
-                    epoch_as_gps_seconds(*tn) - time_res / 2.0
-                );
+                debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
+                debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
             }
         }
 
         // Get the frequency information.
         let mut spectral_window_table = read_table(&ms, Some("SPECTRAL_WINDOW"))?;
-        let fine_chan_freqs_hz: Vec<f64> = spectral_window_table
-            .get_cell_as_vec("CHAN_FREQ", 0)
-            .unwrap();
+        let fine_chan_freqs = {
+            let fine_chan_freqs_hz: Vec<f64> = spectral_window_table
+                .get_cell_as_vec("CHAN_FREQ", 0)
+                .unwrap();
+            let fine_chan_freqs = fine_chan_freqs_hz
+                .into_iter()
+                .map(|f| f.round() as u64)
+                .collect();
+            Vec1::try_from_vec(fine_chan_freqs).map_err(|_| MsReadError::NoChannelFreqs)?
+        };
         // Assume that `total_bandwidth_hz` is the total bandwidth inside the
         // measurement set, which is not necessarily the whole observation.
         let total_bandwidth_hz: f64 = spectral_window_table
@@ -327,6 +331,7 @@ impl MS {
             }
         };
         debug!("MS coarse channels: {:?}", &coarse_chan_nums);
+        let num_coarse_chans = coarse_chan_nums.len();
 
         // Get other metadata.
         let obsid: Option<u32> = {
@@ -437,110 +442,103 @@ impl MS {
         };
 
         let coarse_chan_width = total_bandwidth_hz / coarse_chan_nums.len() as f64;
-        let native_fine_chan_width = if fine_chan_freqs_hz.len() == 1 {
-            coarse_chan_width
-        } else {
-            fine_chan_freqs_hz[1] - fine_chan_freqs_hz[0]
-        }
-        // We're unlikely to ever have a fraction of a Hz as the channel
-        // resolution. Sometimes this number has a fractional component, for
-        // some reason.
-        .round();
-        let num_fine_chans_per_coarse_chan =
-            (total_bandwidth_hz / coarse_chan_nums.len() as f64 / native_fine_chan_width).round()
-                as _;
-        let coarse_chan_freqs: Vec<f64> = fine_chan_freqs_hz
-            .chunks_exact(num_fine_chans_per_coarse_chan)
-            // round is OK because these values are Hz, and we're not ever
-            // looking at sub-Hz resolution.
-            .map(|chunk| chunk[chunk.len() / 2].round())
-            .collect();
-        let fine_chan_range = 0..fine_chan_freqs_hz.len();
-        let freq_context = FreqContext {
-            coarse_chan_nums,
-            coarse_chan_freqs,
-            coarse_chan_width,
-            total_bandwidth: total_bandwidth_hz,
-            fine_chan_range,
-            fine_chan_freqs: fine_chan_freqs_hz,
-            num_fine_chans_per_coarse_chan,
-            freq_res: Some(native_fine_chan_width),
+        // Round the values in here because sometimes they have a fractional
+        // component, for some reason. We're unlikely to ever have a fraction of
+        // a Hz as the channel resolution.
+        let freq_res = {
+            let all_widths: Vec<f64> = spectral_window_table
+                .get_cell_as_vec("CHAN_WIDTH", 0)
+                .unwrap();
+            let width = *all_widths.get(0).ok_or(MsReadError::NoChanWidths)?;
+            // Make sure all the widths all the same.
+            for w in all_widths.iter().skip(1) {
+                if (w - width).abs() > f64::EPSILON {
+                    return Err(MsReadError::ChanWidthsUnequal);
+                }
+            }
+            width
         };
+
+        let num_fine_chans_per_coarse_chan =
+            (total_bandwidth_hz / coarse_chan_nums.len() as f64 / freq_res).round() as _;
+        let coarse_chan_freqs: Vec<f64> = fine_chan_freqs
+            .chunks_exact(num_fine_chans_per_coarse_chan)
+            .map(|chunk| {
+                if chunk.len() % 2 == 0 {
+                    // We round the coarse channel freqs hoping there isn't any
+                    // sub-Hz structure.
+                    ((chunk[chunk.len() / 2 - 1] + chunk[chunk.len() / 2]) / 2) as f64
+                } else {
+                    chunk[chunk.len() / 2] as f64
+                }
+            })
+            .collect();
+        let fine_chan_range = 0..fine_chan_freqs.len();
 
         // Get the observation's flagged channels per coarse band.
-        // TODO: Detect Birli.
-        let fine_chan_flags_per_coarse_chan = match flavour {
-            MsFlavour::Birli => {
-                warn!("Assuming no fine channel flags - TODO on Chris!");
-                vec![]
-            }
+        let flagged_fine_chans: Vec<bool> = {
+            // We assume here that the main_table contains a FLAG table.
 
-            MsFlavour::Cotter => {
-                // cotter doesn't list this conveniently. It's possible to inspect
-                // the FLAG column in the main ms table, but, that would use huge
-                // amount of IO, and there's no guarantee that any cell of that
-                // column contains only default fine-channel flags; there may also
-                // be RFI flags. So, we inspect the command-line options! (Sorry. At
-                // least I wrote this comment.) cotter flags 80 kHz at the edges by
-                // default, as well as the centre channel.
-                let mut history_table = read_table(&ms, Some("HISTORY"))?;
-                // For whatever reason, the CLI_COMMAND column needs to be accessed as a
-                // vector, even though it only has one element.
-                let cli_command: Vec<String> =
-                    history_table.get_cell_as_vec("CLI_COMMAND", 0).unwrap();
-                debug!("cotter CLI command: {:?}", cli_command);
+            // Get the first unflagged timestep. If there aren't any, get
+            // the middle one.
+            let timestep = *unflagged_timesteps
+                .first()
+                .unwrap_or(&all_timesteps[all_timesteps.len() / 2]);
 
-                // cotter CLI args are *always* split by whitespace; no equals
-                // symbol allowed.
-                let mut str_iter = cli_command[0].split_whitespace();
-                match str_iter.next() {
-                    Some(exe) => exe.contains("cotter"),
-                    // TODO
-                    None => panic!("measurement set not from cotter!"),
-                };
-
-                // If -edgewidth is specified, then a custom amount of channels is
-                // flagged at the coarse channel edges. The default is 80 kHz.
-                let mut ew_iter = str_iter.clone();
-                let edgewidth = match ew_iter.find(|&s| s.contains("-edgewidth")) {
-                    Some(_) => {
-                        let ew_str = ew_iter.next().unwrap();
-                        // The string may be quoted; remove those so it can be
-                        // parsed as a float.
-                        let ew_str = ew_str.trim_matches('\"');
-                        let ew = ew_str.parse::<f64>().unwrap() * 1e3;
-                        debug!("cotter -edgewidth: {} kHz", ew);
-                        ew
-                    }
-                    None => {
-                        debug!(
-                            "Assuming cotter is using default edgewidth of {} kHz",
-                            COTTER_DEFAULT_EDGEWIDTH / 1e3
-                        );
-                        COTTER_DEFAULT_EDGEWIDTH
-                    }
-                };
-                // If -noflagdcchannels is specified, then the centre channel of
-                // each coarse channel is not flagged. Without this flag, the centre
-                // channels are flagged.
-                let noflagdcchannels = str_iter.any(|s| s.contains("-noflagdcchannels"));
-                debug!("cotter -noflagdcchannels: {}", noflagdcchannels);
-
-                let num_edge_channels = (edgewidth / native_fine_chan_width).round() as _;
-                let mut fine_chan_flags = vec![];
-                for ec in 0..num_edge_channels {
-                    fine_chan_flags.push(ec);
-                    fine_chan_flags.push(freq_context.num_fine_chans_per_coarse_chan - ec - 1);
-                }
-                if !noflagdcchannels {
-                    fine_chan_flags.push(freq_context.num_fine_chans_per_coarse_chan / 2);
-                }
-                fine_chan_flags.sort_unstable();
-                fine_chan_flags
-            }
-
-            MsFlavour::Casa => todo!(),
+            // In this first unflagged timestep, get all the channel flags and
+            // logically AND them together. If an entire channel is flagged due
+            // to RFI, then we unfortunately will flag it for all timesteps.
+            let row_range = (timestep * step) as u64..((timestep + 1) * step) as u64;
+            let mut flagged_fine_chans: Vec<bool> = {
+                // The flags need to be read in as a 1D array, but there's
+                // actually 4 values per channel, because there's a flag for
+                // each pol. We don't care about individual pol flags; if any
+                // are flagged, flag the whole channel.
+                let flagged_fine_chans: Vec<bool> =
+                    main_table.get_cell_as_vec("FLAG", row_range.start).unwrap();
+                flagged_fine_chans
+                    .chunks_exact(4)
+                    .map(|pol_flags| pol_flags.iter().any(|f| *f))
+                    .collect()
+            };
+            main_table
+                .for_each_row_in_range(row_range, |row| {
+                    let row_flagged_fine_chans: Array2<bool> = row.get_cell("FLAG").unwrap();
+                    flagged_fine_chans
+                        .iter_mut()
+                        .zip(row_flagged_fine_chans.outer_iter())
+                        .for_each(|(f1, f2)| {
+                            let any_flagged = f2.iter().any(|f| *f);
+                            *f1 &= any_flagged;
+                        });
+                    Ok(())
+                })
+                .unwrap();
+            flagged_fine_chans
         };
+
+        let flagged_fine_chans_per_coarse_chan = {
+            let mut flagged_fine_chans_per_coarse_chan = vec![];
+            for i_chan in 0..num_fine_chans_per_coarse_chan {
+                let mut chan_is_flagged = true;
+                for i_cc in 0..num_coarse_chans {
+                    if !flagged_fine_chans[i_cc * num_fine_chans_per_coarse_chan + i_chan] {
+                        chan_is_flagged = false;
+                        break;
+                    }
+                }
+                if chan_is_flagged {
+                    flagged_fine_chans_per_coarse_chan.push(i_chan);
+                }
+            }
+            flagged_fine_chans_per_coarse_chan
+        };
+        let flagged_fine_chans = flagged_fine_chans
+            .into_iter()
+            .enumerate()
+            .filter(|(_, f)| *f)
+            .map(|(i, _)| i)
+            .collect();
 
         let obs_context = ObsContext {
             obsid,
@@ -553,17 +551,25 @@ impl MS {
             tile_xyzs,
             flagged_tiles,
             autocorrelations_present,
-            fine_chan_flags_per_coarse_chan,
             dipole_gains,
             time_res,
             // TODO
             array_longitude_rad: None,
             array_latitude_rad: None,
+            coarse_chan_nums,
+            coarse_chan_freqs,
+            coarse_chan_width,
+            total_bandwidth: total_bandwidth_hz,
+            fine_chan_range,
+            fine_chan_freqs,
+            num_fine_chans_per_coarse_chan,
+            freq_res: Some(freq_res),
+            flagged_fine_chans,
+            flagged_fine_chans_per_coarse_chan,
         };
 
         let ms = MS {
             obs_context,
-            freq_context,
             ms,
             step,
         };
@@ -574,10 +580,6 @@ impl MS {
 impl InputData for MS {
     fn get_obs_context(&self) -> &ObsContext {
         &self.obs_context
-    }
-
-    fn get_freq_context(&self) -> &FreqContext {
-        &self.freq_context
     }
 
     fn get_input_data_type(&self) -> VisInputType {
@@ -600,8 +602,8 @@ impl InputData for MS {
 
     fn read_crosses(
         &self,
-        mut data_array: ArrayViewMut2<Jones<f32>>,
-        mut weights_array: ArrayViewMut2<f32>,
+        mut vis_data: ArrayViewMut2<Jones<f32>>,
+        mut vis_weights: ArrayViewMut2<f32>,
         timestep: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
         flagged_fine_chans: &HashSet<usize>,
@@ -633,111 +635,113 @@ impl InputData for MS {
                     // The data array is arranged [frequency][instrumental_pol].
                     let data: Array2<c32> = row.get_cell("DATA").unwrap();
                     // The weight array is arranged
-                    // [frequency][instrumental_pol], however, the weights for
-                    // all instrumental polarisations of a visibility are all
-                    // the same. There isn't a way to just read one axis of the
-                    // data, though.
+                    // [frequency][instrumental_pol], however, we assume the
+                    // weights for all instrumental visibility polarisations are
+                    // all the same. There isn't a way to just read one axis of
+                    // the data.
                     let data_weights: Array2<f32> = row.get_cell("WEIGHT_SPECTRUM").unwrap();
                     // The flag array is arranged [frequency][instrumental_pol].
                     // As with the weights, the polarisation doesn't matter.
                     let flags: Array2<bool> = row.get_cell("FLAG").unwrap();
 
+                    // Ensure that all arrays have appropriate sizes. We have to
+                    // panic here because of the way Rubbl does error handling.
+                    if data.len_of(Axis(1)) != 4 {
+                        panic!(
+                            "{}",
+                            MSError::BadArraySize {
+                                array_type: "data",
+                                row_index,
+                                expected_len: 4,
+                                axis_num: 1,
+                            }
+                        );
+                    }
+                    if data_weights.len_of(Axis(1)) != 4 {
+                        panic!(
+                            "{}",
+                            MSError::BadArraySize {
+                                array_type: "weights",
+                                row_index,
+                                expected_len: 4,
+                                axis_num: 1,
+                            }
+                        );
+                    }
+                    if flags.len_of(Axis(1)) != 4 {
+                        panic!(
+                            "{}",
+                            MSError::BadArraySize {
+                                array_type: "flags",
+                                row_index,
+                                expected_len: 4,
+                                axis_num: 1,
+                            }
+                        );
+                    }
+                    if vis_data.len_of(Axis(0)) < bl {
+                        panic!(
+                            "{}",
+                            ReadInputDataError::BadArraySize {
+                                array_type: "data",
+                                expected_len: bl,
+                                axis_num: 0,
+                            }
+                        );
+                    }
+                    if vis_data.len_of(Axis(1)) > data.len_of(Axis(0)) {
+                        panic!(
+                            "{}",
+                            ReadInputDataError::BadArraySize {
+                                array_type: "data",
+                                expected_len: vis_data.len_of(Axis(0)),
+                                axis_num: 1,
+                            }
+                        );
+                    }
+
                     // Put the data and weights into the shared arrays outside
                     // this scope. Before we can do this, we need to remove any
                     // globally-flagged fine channels.
-                    for (i_chan, ((data_freq_axis, weights_freq_axis), flags_freq_axis)) in data
+                    for (i_unflagged_chan, ((data, data_weights), flags)) in data
                         .outer_iter()
                         .zip(data_weights.outer_iter())
                         .zip(flags.outer_iter())
                         .enumerate()
                         .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
+                        // Discard the channel index, we want the unflagged
+                        // channel index.
+                        .map(|(_, data)| data)
+                        .enumerate()
                     {
-                        // Ensure that all arrays have appropriate
-                        // sizes.
-                        // We have to panic here because of the way Rubbl
-                        // does error handling.
-                        if data_freq_axis.len() != 4 {
-                            panic!(
-                                "{}",
-                                MSError::BadArraySize {
-                                    array_type: "data",
-                                    row_index,
-                                    expected_len: 4,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
-                        if weights_freq_axis.len() != 4 {
-                            panic!(
-                                "{}",
-                                MSError::BadArraySize {
-                                    array_type: "weights",
-                                    row_index,
-                                    expected_len: 4,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
-                        if flags_freq_axis.len() != 4 {
-                            panic!(
-                                "{}",
-                                MSError::BadArraySize {
-                                    array_type: "flags",
-                                    row_index,
-                                    expected_len: 4,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
-                        if data_array.len_of(Axis(0)) < bl {
-                            panic!(
-                                "{}",
-                                ReadInputDataError::BadArraySize {
-                                    array_type: "data",
-                                    expected_len: bl,
-                                    axis_num: 0,
-                                }
-                            );
-                        }
-                        if data_array.len_of(Axis(1)) < i_chan {
-                            panic!(
-                                "{}",
-                                ReadInputDataError::BadArraySize {
-                                    array_type: "data",
-                                    expected_len: i_chan,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
+                        // TODO: This block of code could be better.
 
                         // These are references to the visibilities and weights
                         // in the output arrays.
-                        let data_array_elem = data_array.get_mut((bl, i_chan)).unwrap();
-                        let weight_elem = weights_array.get_mut((bl, i_chan)).unwrap();
+                        let data_array_elem = vis_data.get_mut((bl, i_unflagged_chan)).unwrap();
+                        let weight_elem = vis_weights.get_mut((bl, i_unflagged_chan)).unwrap();
                         // These are the components of the input
                         // data's visibility.
-                        let data_xx_elem = data_freq_axis.get(0).unwrap();
-                        let data_xy_elem = data_freq_axis.get(1).unwrap();
-                        let data_yx_elem = data_freq_axis.get(2).unwrap();
-                        let data_yy_elem = data_freq_axis.get(3).unwrap();
+                        let data_xx_elem = data.get(0).unwrap();
+                        let data_xy_elem = data.get(1).unwrap();
+                        let data_yx_elem = data.get(2).unwrap();
+                        let data_yy_elem = data.get(3).unwrap();
                         // The corresponding flag.
-                        let flag = flags_freq_axis.get(0).unwrap();
+                        let flag = flags.get(0).unwrap();
                         // If necessary, adjust the weight by the flag.
                         if *flag {
                             *weight_elem = 0.0
                         } else {
                             // This is the corresponding weight of the
                             // visibility. It is the same for all polarisations.
-                            let weight = weights_freq_axis.get(0).unwrap();
+                            let weight = data_weights.get(0).unwrap();
                             // Write to the output weights array.
                             *weight_elem = *weight;
                         };
-                        // Multiply the input data visibility by the weight
-                        // and mutate the output data array.
-                        data_array_elem[0] = *data_xx_elem * *weight_elem;
-                        data_array_elem[1] = *data_xy_elem * *weight_elem;
-                        data_array_elem[2] = *data_yx_elem * *weight_elem;
-                        data_array_elem[3] = *data_yy_elem * *weight_elem;
+                        data_array_elem[0] = *data_xx_elem;
+                        data_array_elem[1] = *data_xy_elem;
+                        data_array_elem[2] = *data_yx_elem;
+                        data_array_elem[3] = *data_yy_elem;
                     }
                 }
                 row_index += 1;

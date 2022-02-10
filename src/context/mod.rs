@@ -15,12 +15,12 @@ use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
 /// MWA observation metadata.
 ///
-/// This can be thought of as a substitute of mwalib context structs; mwalib
-/// can't be used all the time (e.g. doesn't interface with measurement sets),
-/// so this struct can be used as a common interface to some radio data.
+/// This can be thought of the state and contents of the input data. It may not
+/// reflect its raw, non-preprocessed state, but this is all we can say about
+/// it.
 ///
-/// Frequency information is deliberately kept aside in an effort to keep
-/// complexity down; use [FreqContext] for that.
+/// Tile information is ordered according to the "Antenna" column in HDU 1 of
+/// the observation's metafits file.
 pub(crate) struct ObsContext {
     /// The observation ID, which is also the observation's scheduled start GPS
     /// time (but shouldn't be used for this purpose).
@@ -42,6 +42,8 @@ pub(crate) struct ObsContext {
     pub(crate) all_timesteps: Vec1<usize>,
 
     /// The timestep indices of the input data that aren't totally flagged.
+    ///
+    /// This is allowed to be empty.
     pub(crate) unflagged_timesteps: Vec<usize>,
 
     /// The observation phase centre.
@@ -53,23 +55,19 @@ pub(crate) struct ObsContext {
     pub(super) pointing_centre: Option<RADec>,
 
     /// The names of each of the tiles used in the array.
-    pub(crate) tile_names: Vec<String>,
+    pub(crate) tile_names: Vec1<String>,
 
-    /// The [XyzGeodetic] coordinates of all tiles in the array \[metres\]. This
-    /// includes tiles that have been flagged in the input data.
-    pub(crate) tile_xyzs: Vec<XyzGeodetic>,
+    /// The [XyzGeodetic] coordinates of all tiles in the array (all coordinates
+    /// are specified in \[metres\]). This includes tiles that have been flagged
+    /// in the input data.
+    pub(crate) tile_xyzs: Vec1<XyzGeodetic>,
 
-    /// The tiles already flagged in the supplied data. These values correspond
-    /// to those from the "Antenna" column in HDU 1 of the metafits file. Zero
-    /// indexed.
+    /// The flagged tiles, either already missing data or suggested to be
+    /// flagged. Zero indexed.
     pub(crate) flagged_tiles: Vec<usize>,
 
     /// Are auto-correlations present in the visibility data?
     pub(crate) autocorrelations_present: bool,
-
-    /// The fine channels per coarse channel already flagged in the supplied
-    /// data. Zero indexed.
-    pub(crate) fine_chan_flags_per_coarse_chan: Vec<usize>,
 
     /// The dipole gains for each tile in the array. The first axis is unflagged
     /// antenna, the second dipole index. These will typically all be of value
@@ -81,7 +79,7 @@ pub(crate) struct ObsContext {
     /// necessarily the native time resolution of the original observation's
     /// data, as it may have already been averaged. This is kept optional in
     /// case in the input data doesn't report the resolution and has only one
-    /// time step, and therefore no resolution.
+    /// timestep, and therefore no resolution.
     pub(crate) time_res: Option<f64>,
 
     /// The Earth longitude of the instrumental array \[radians\].
@@ -89,14 +87,11 @@ pub(crate) struct ObsContext {
 
     /// The Earth latitude of the instrumental array \[radians\].
     pub(crate) array_latitude_rad: Option<f64>,
-}
 
-/// Metadata on an observation's frequency setup.
-pub(crate) struct FreqContext {
-    /// The coarse band numbers (typically 1 to 24) that are present in the
-    /// supplied data. This does not necessarily match the coarse band numbers
-    /// present in the full observation, as the input data may only reflect a
-    /// fraction of it.
+    /// The coarse channel numbers (typically 1 to 24) that are present in the
+    /// supplied data. This does not necessarily match the coarse channel
+    /// numbers present in the full observation, as the input data may only
+    /// reflect a fraction of it.
     pub(crate) coarse_chan_nums: Vec<u32>,
 
     /// The centre frequencies of each of the coarse channels in this
@@ -106,26 +101,37 @@ pub(crate) struct FreqContext {
     /// a.k.a coarse channel bandwidth \[Hz\].
     pub(crate) coarse_chan_width: f64,
 
+    /// The number of fine-frequency channels per coarse channel. For 40 kHz
+    /// legacy MWA data, this is 32.
+    pub(crate) num_fine_chans_per_coarse_chan: usize,
+
     /// The bandwidth of the supplied data \[Hz\]. This is not necessarily the
-    /// bandwidth of the full observation, as the input data may only reflect a
+    /// bandwidth of the full observation, as the data here may only reflect a
     /// fraction of it.
     pub(crate) total_bandwidth: f64,
+
+    /// The fine-channel resolution of the supplied data \[Hz\]. This is not
+    /// necessarily the fine-channel resolution of the original observation's
+    /// data; this data may have applied averaging to the original observation.
+    pub(crate) freq_res: Option<f64>,
 
     /// The fine-channel number range (exclusive). e.g. if a legacy MWA
     /// observation has 40 kHz fine-channel resolution, then this should be
     /// 0..768.
     pub(crate) fine_chan_range: Range<usize>,
 
-    /// All of the fine-channel frequencies within the data \[Hz\].
-    // TODO: Do the frequencies list the start edge or middle frequencies of these channels?
-    pub(crate) fine_chan_freqs: Vec<f64>,
+    /// All of the fine-channel frequencies within the data \[Hz\]. The values
+    /// reflect the frequencies at the *centre* of each channel.
+    ///
+    /// These are kept as ints to help some otherwise error-prone calculations
+    /// using floats. By using ints, we assume there is no sub-Hz structure.
+    pub(crate) fine_chan_freqs: Vec1<u64>,
 
-    /// The number of fine-frequency channels per coarse band. For 40 kHz legacy
-    /// MWA data, this is 32.
-    pub(crate) num_fine_chans_per_coarse_chan: usize,
+    /// The flagged fine channels for each baseline in the supplied data. Zero
+    /// indexed.
+    pub(crate) flagged_fine_chans: Vec<usize>,
 
-    /// The fine-channel resolution of the supplied data \[Hz\]. This is not
-    /// necessarily the fine-channel resolution of the original observation's
-    /// data; this data may have applied averaging to the original observation.
-    pub(crate) freq_res: Option<f64>,
+    /// The fine channels per coarse channel already flagged in the supplied
+    /// data. Zero indexed.
+    pub(crate) flagged_fine_chans_per_coarse_chan: Vec<usize>,
 }

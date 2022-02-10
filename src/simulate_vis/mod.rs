@@ -20,8 +20,6 @@ use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::xyz::xyzs_to_cross_uvws_parallel,
     precession::precess_time,
-    time::epoch_as_gps_seconds,
-    time::mjd_to_epoch,
     Jones, RADec, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
@@ -155,8 +153,8 @@ struct SimVisParams {
     /// Flagged tiles.
     flagged_tiles: Vec<usize>,
 
-    /// Timesteps to be simulated.
-    timesteps: Vec<Epoch>,
+    /// Timestamps to be simulated.
+    timestamps: Vec<Epoch>,
 
     /// Interface to beam code.    
     beam: Box<dyn Beam>,
@@ -256,12 +254,12 @@ impl SimVisParams {
             }
         }
 
-        // Populate the timesteps.
-        let timesteps = {
-            let mut timesteps = Vec::with_capacity(num_timesteps);
-            let start = mjd_to_epoch(metafits.sched_start_mjd);
+        // Populate the timestamps.
+        let timestamps = {
+            let mut timestamps = Vec::with_capacity(num_timesteps);
+            let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3);
             for i in 0..num_timesteps {
-                timesteps.push(
+                timestamps.push(
                     start
                         + hifitime::Duration::from_f64(
                             time_res * i as f64,
@@ -269,14 +267,14 @@ impl SimVisParams {
                         ),
                 );
             }
-            timesteps
+            timestamps
         };
-        match timesteps.as_slice() {
+        match timestamps.as_slice() {
             [] => return Err(SimulateVisError::ZeroTimeSteps),
-            [t] => info!("Only timestep (GPS): {:.2}", epoch_as_gps_seconds(*t)),
+            [t] => info!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
             [t0, .., tn] => {
-                info!("First timestep (GPS): {:.2}", epoch_as_gps_seconds(*t0));
-                info!("Last timestep  (GPS): {:.2}", epoch_as_gps_seconds(*tn));
+                info!("First timestep (GPS): {:.2}", t0.as_gpst_seconds());
+                info!("Last timestep  (GPS): {:.2}", tn.as_gpst_seconds());
             }
         }
 
@@ -382,7 +380,7 @@ impl SimVisParams {
             xyzs,
             baseline_to_tile_map,
             flagged_tiles,
-            timesteps,
+            timestamps,
             beam,
             array_latitude_rad: MWA_LAT_RAD,
             array_longitude_rad: MWA_LONG_RAD,
@@ -438,18 +436,17 @@ pub fn simulate_vis(
     let fine_chan_flags = HashSet::new();
     let mut output_writer = UvfitsWriter::new(
         &params.output_model_file,
-        params.timesteps.len(),
+        params.timestamps.len(),
         params.baseline_to_tile_map.len(),
         params.fine_chan_freqs.len(),
         false,
-        *params.timesteps.first().unwrap(),
+        *params.timestamps.first().unwrap(),
         if params.fine_chan_freqs.len() == 1 {
             None
         } else {
             Some(params.fine_chan_freqs[1] - params.fine_chan_freqs[0])
         },
         params.fine_chan_freqs[params.fine_chan_freqs.len() / 2],
-        params.fine_chan_freqs.len() / 2,
         params.phase_centre,
         Some(&format!(
             "Simulated visibilities for obsid {}",
@@ -492,7 +489,7 @@ pub fn simulate_vis(
     };
 
     // Progress bar.
-    let model_progress = ProgressBar::new(params.timesteps.len() as _)
+    let model_progress = ProgressBar::new(params.timestamps.len() as _)
         .with_style(
             ProgressStyle::default_bar()
                 .template(
@@ -506,7 +503,7 @@ pub fn simulate_vis(
     model_progress.tick();
 
     // Generate the visibilities.
-    for &timestep in params.timesteps.iter() {
+    for &timestep in params.timestamps.iter() {
         let precession_info = precess_time(
             params.phase_centre,
             timestep,
