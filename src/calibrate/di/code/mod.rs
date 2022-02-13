@@ -638,10 +638,10 @@ impl<'a> IncompleteSolutions<'a> {
             di_jones: out_di_jones,
             flagged_tiles: flagged_tiles.to_vec(),
             flagged_chanblocks: flagged_chanblock_indices.to_vec(),
-            average_timestamps: self.timeblocks.iter().map(|tb| tb.average).collect(),
+            obsid,
             start_timestamps: self.timeblocks.iter().map(|tb| tb.start).collect(),
             end_timestamps: self.timeblocks.iter().map(|tb| tb.end).collect(),
-            obsid,
+            average_timestamps: self.timeblocks.iter().map(|tb| tb.average).collect(),
         }
     }
 }

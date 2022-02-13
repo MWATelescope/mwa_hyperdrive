@@ -11,7 +11,7 @@ mod code;
 
 use code::*;
 
-use hifitime::{Duration, Epoch, TimeUnit};
+use hifitime::Epoch;
 use log::{debug, info, log_enabled, trace, Level::Debug};
 use marlu::{
     math::cross_correlation_baseline_to_tiles, pos::xyz::xyzs_to_cross_uvws_parallel,
@@ -129,7 +129,12 @@ pub(crate) fn di_calibrate(
         info!("Writing solutions...");
     }
     for (sol_type, file) in &params.output_solutions_filenames {
-        sols.write_solutions_from_ext(file)?;
+        // TODO: Provide a path to the metafits file. This is kinda redundant
+        // because only RTS solutions need metafits, and hyperdrive *will not*
+        // write RTS solutions out directly from calibration; they're only
+        // written out when converting from another format.
+        let metafits: Option<&str> = None;
+        sols.write_solutions_from_ext(file, metafits)?;
         info!("Calibration solutions written to {}", file.display());
     }
 

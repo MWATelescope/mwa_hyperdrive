@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use clap::{AppSettings, Parser};
-use log::{info, warn};
+use log::{debug, info, warn};
 
 use mwa_hyperdrive::{
     calibrate::{args::CalibrateUserArgs, di_calibrate, solutions::CalibrationSolutions},
@@ -244,8 +244,9 @@ fn try_main() -> Result<(), HyperdriveError> {
             metafits,
             verbosity: _,
         } => {
-            let sols = CalibrationSolutions::read_solutions_from_ext(input, metafits).unwrap();
-            sols.write_solutions_from_ext(output).unwrap();
+            let sols =
+                CalibrationSolutions::read_solutions_from_ext(input, metafits.as_ref()).unwrap();
+            sols.write_solutions_from_ext(output, metafits).unwrap();
         }
 
         #[cfg(feature = "plotting")]
@@ -280,6 +281,29 @@ fn try_main() -> Result<(), HyperdriveError> {
             });
 
             for solutions_file in files {
+                debug!("Plotting solutions for '{}'", solutions_file.display());
+                let solutions_file = match solutions_file.canonicalize() {
+                    Ok(f) => f,
+                    Err(e) => {
+                        match e.kind() {
+                            std::io::ErrorKind::NotFound => {
+                                eprintln!(
+                                    "Error: File/directory '{}' doesn't exist",
+                                    solutions_file.display()
+                                );
+                            }
+                            _ => {
+                                eprintln!(
+                                    "Error when trying to make '{}' into an absolute path: {:?}",
+                                    solutions_file.display(),
+                                    e
+                                );
+                            }
+                        }
+                        std::process::exit(1)
+                    }
+                };
+
                 let sols = CalibrationSolutions::read_solutions_from_ext(
                     &solutions_file,
                     metafits.as_ref(),
@@ -288,7 +312,12 @@ fn try_main() -> Result<(), HyperdriveError> {
                 let base = solutions_file
                     .file_stem()
                     .and_then(|os_str| os_str.to_str())
-                    .expect("Calibration solutions filename contains invalid UTF-8");
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Calibration solutions filename '{}' contains invalid UTF-8",
+                            solutions_file.display()
+                        )
+                    });
                 let plot_title = format!(
                     "obsid {}",
                     mwalib_context

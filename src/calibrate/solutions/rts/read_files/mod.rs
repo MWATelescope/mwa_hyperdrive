@@ -22,7 +22,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use marlu::{c64, Jones};
+use marlu::Jones;
 use ndarray::prelude::*;
 use thiserror::Error;
 use vec1::Vec1;
@@ -50,9 +50,9 @@ pub(super) struct DiJm {
     pub(super) _alignment_flux_density: f64,
 
     /// The beam response toward the calibrator source ("base source") used by
-    /// the RTS. Not needed unless applying these solutions to another
-    /// observation.
-    pub(super) _post_alignment_matrix: Jones<f64>,
+    /// the RTS. When reading in these, it is inverted and applied to the
+    /// pre-alignment matrices.
+    pub(super) post_alignment_matrix: Jones<f64>,
 
     /// The length of this vector is the total number of tiles in the
     /// observation (flagged and unflagged).
@@ -106,22 +106,14 @@ impl DiJm {
                         });
                     }
                     post_alignment_matrix = Jones::from([
-                        c64::new(
-                            post_alignment_matrix_floats[0],
-                            post_alignment_matrix_floats[1],
-                        ),
-                        c64::new(
-                            post_alignment_matrix_floats[2],
-                            post_alignment_matrix_floats[3],
-                        ),
-                        c64::new(
-                            post_alignment_matrix_floats[4],
-                            post_alignment_matrix_floats[5],
-                        ),
-                        c64::new(
-                            post_alignment_matrix_floats[6],
-                            post_alignment_matrix_floats[7],
-                        ),
+                        post_alignment_matrix_floats[0],
+                        post_alignment_matrix_floats[1],
+                        post_alignment_matrix_floats[2],
+                        post_alignment_matrix_floats[3],
+                        post_alignment_matrix_floats[4],
+                        post_alignment_matrix_floats[5],
+                        post_alignment_matrix_floats[6],
+                        post_alignment_matrix_floats[7],
                     ]);
                 }
 
@@ -148,22 +140,14 @@ impl DiJm {
                         });
                     }
                     let pre_alignment_matrix = Jones::from([
-                        c64::new(
-                            pre_alignment_matrix_floats[0],
-                            pre_alignment_matrix_floats[1],
-                        ),
-                        c64::new(
-                            pre_alignment_matrix_floats[2],
-                            pre_alignment_matrix_floats[3],
-                        ),
-                        c64::new(
-                            pre_alignment_matrix_floats[4],
-                            pre_alignment_matrix_floats[5],
-                        ),
-                        c64::new(
-                            pre_alignment_matrix_floats[6],
-                            pre_alignment_matrix_floats[7],
-                        ),
+                        pre_alignment_matrix_floats[0],
+                        pre_alignment_matrix_floats[1],
+                        pre_alignment_matrix_floats[2],
+                        pre_alignment_matrix_floats[3],
+                        pre_alignment_matrix_floats[4],
+                        pre_alignment_matrix_floats[5],
+                        pre_alignment_matrix_floats[6],
+                        pre_alignment_matrix_floats[7],
                     ]);
 
                     pre_alignment_matrices.push(pre_alignment_matrix);
@@ -173,7 +157,7 @@ impl DiJm {
 
         Ok(DiJm {
             _alignment_flux_density: alignment_flux_density,
-            _post_alignment_matrix: post_alignment_matrix,
+            post_alignment_matrix,
             pre_alignment_matrices: Vec1::try_from_vec(pre_alignment_matrices)
                 .map_err(|_| ReadDiJmFileError::NoPreAlignmentMatrices)?,
         })
@@ -212,7 +196,7 @@ pub enum ReadDiJmFileError {
 //
 // 1, +1.015465,+0.047708, +1.006940,+0.005763, +1.024352,+0.015657, ...
 //
-// (but on one line). Each pair corresponds to (amp, pahse). There will be 8
+// (but on one line). Each pair corresponds to (amp, phase). There will be 8
 // lines per tile; they represent:
 // 1) PX_lsq
 // 2) PX_fit
@@ -224,7 +208,7 @@ pub enum ReadDiJmFileError {
 // 8) QY_fit
 //
 // "lsq" lines are "measured values", whereas "fit" lines are "fitted values".
-// Apparently only the fitted data is interesting.
+// Apparently only the measured data is interesting.
 
 /// RTS "Bandpass calibration" Jones matrices.
 ///
@@ -239,11 +223,11 @@ pub(super) struct BpCal {
     /// corresponds to. Zero indexed.
     pub(super) unflagged_fine_channel_indices: Vec1<usize>,
 
-    /// The unflagged RF input indices (divided by 2) for the coarse channel
+    /// The unflagged RF input indices (*divided by 2*) for the coarse channel
     /// that this file corresponds to. Only one RF input is included per tile,
     /// so when there are 0 flagged tiles in a 128-tile observation, this vector
     /// has 128 elements. Zero indexed.
-    pub(super) unflagged_rf_input_indices: Vec1<usize>,
+    pub(super) unflagged_rf_input_indices: Vec1<u8>,
 
     /// All of the Jones matrices in the file. The 1st dimension is per tile,
     /// the 2nd dimension is for lsq and fit (in that order) and always has a
@@ -323,7 +307,7 @@ impl BpCal {
 
             let input_num =
                 input_num_str
-                    .parse::<usize>()
+                    .parse::<u8>()
                     .map_err(|_| ReadBpCalFileError::ParseInt {
                         text: input_num_str.to_string(),
                         line_num: i_line + 2,
@@ -380,7 +364,10 @@ impl BpCal {
         let unflagged_fine_channel_indices = match fine_channel_resolution {
             Some(res) => unflagged_fine_chan_freqs
                 .iter()
-                .map(|&f| (f / res) as usize)
+                .map(|&f| {
+                    let big_int = (f / res).round() as u32;
+                    big_int.try_into().unwrap()
+                })
                 .collect(),
 
             None => vec![0],

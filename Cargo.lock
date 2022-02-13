@@ -133,7 +133,7 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 [[package]]
 name = "birli"
 version = "0.4.1"
-source = "git+https://github.com/MWATelescope/Birli?branch=v0.5.0#6a36277d4f58d4ea879c19cd1e34c61540f48ad5"
+source = "git+https://github.com/MWATelescope/Birli?branch=main#2a27efbe8e9ad596e13cb5934f5cdb07a73de1db"
 dependencies = [
  "built",
  "byteorder",
@@ -1225,7 +1225,8 @@ dependencies = [
 [[package]]
 name = "marlu"
 version = "0.5.0"
-source = "git+https://github.com/MWATelescope/Marlu.git?branch=v0.5.0#9e7a0d392e5878132c0c10a7707d210e8a9715ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec71c7aed97e4be79d0e06c6fa7b1d9ed2cee17f579cad9d4f030d721c9989a2"
 dependencies = [
  "cfg-if",
  "cuda-runtime-sys",

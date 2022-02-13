@@ -44,7 +44,7 @@ cuda-static = ["mwa_hyperdrive_common/cuda-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { git = "https://github.com/MWATelescope/Birli", branch = "v0.5.0", default_features = false }
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "main", default_features = false }
 byteorder = "1.4.3"
 console = "0.15.0"
 crossbeam-channel = "0.5.0"

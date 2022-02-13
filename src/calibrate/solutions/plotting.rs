@@ -6,14 +6,16 @@
 
 use std::path::{Path, PathBuf};
 
+use log::warn;
 use plotters::{
     coord::Shift,
     prelude::*,
     style::{Color, RGBAColor},
 };
+use thiserror::Error;
 
 use super::*;
-use mwa_hyperdrive_common::lazy_static;
+use mwa_hyperdrive_common::{lazy_static, log, thiserror};
 
 const X_PIXELS: u32 = 3200;
 const Y_PIXELS: u32 = 1800;
@@ -40,7 +42,7 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
     ignore_cross_pols: bool,
     min_amp: Option<f64>,
     max_amp: Option<f64>,
-) -> Result<Vec<String>, ()> {
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let (num_timeblocks, total_num_tiles, _) = sols.di_jones.dim();
 
     // How should the plot be split up to distribute the tiles?
@@ -118,70 +120,95 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
             BitMapBackend::new(&output_amps, (X_PIXELS, Y_PIXELS)).into_drawing_area();
         let phases_root_area =
             BitMapBackend::new(&output_phases, (X_PIXELS, Y_PIXELS)).into_drawing_area();
-        amps_root_area.fill(&WHITE).unwrap();
-        phases_root_area.fill(&WHITE).unwrap();
+        amps_root_area.fill(&WHITE)?;
+        phases_root_area.fill(&WHITE)?;
         // Draw the coloured text for each polarisation.
         for (i, (pol, colour)) in POLS.iter().enumerate() {
             if ignore_cross_pols && [1, 2].contains(&i) {
                 continue;
             }
-            amps_root_area
-                .draw_text(
-                    *pol,
-                    &("sans-serif", 55).into_font().color(&colour),
-                    (X_PIXELS as i32 - 500 + 80 * i as i32, 10),
-                )
-                .unwrap();
-            phases_root_area
-                .draw_text(
-                    *pol,
-                    &("sans-serif", 55).into_font().color(&colour),
-                    (X_PIXELS as i32 - 500 + 80 * i as i32, 10),
-                )
-                .unwrap();
+            amps_root_area.draw_text(
+                *pol,
+                &("sans-serif", 55).into_font().color(&colour),
+                (X_PIXELS as i32 - 500 + 80 * i as i32, 10),
+            )?;
+            phases_root_area.draw_text(
+                *pol,
+                &("sans-serif", 55).into_font().color(&colour),
+                (X_PIXELS as i32 - 500 + 80 * i as i32, 10),
+            )?;
         }
-        // Also draw the GPS start time and which tile is the reference tile.
-        let meta_str = match (sols.average_timestamps.get(timeblock), ref_tile) {
-            (Some(timestamp), Some(ref_tile)) => format!(
-                "Ref. tile {}, GPS start {}",
-                ref_tile,
-                timestamp.as_gpst_seconds()
-            ),
-            (Some(timestamp), None) => format!("GPS start {}", timestamp.as_gpst_seconds()),
-            (None, Some(ref_tile)) => format!("Ref. tile {}", ref_tile),
-            (None, None) => String::new(),
+        // Also draw the reference tile number and the GPS times for this
+        // timeblock.
+        let mut meta_str = match ref_tile {
+            Some(ref_tile) => format!("Ref. tile {ref_tile}"),
+            None => String::new(),
         };
-        amps_root_area
-            .draw_text(
-                &meta_str,
-                &("sans-serif", 55).into_font().color(&BLACK),
-                (80, 10),
-            )
-            .unwrap();
-        phases_root_area
-            .draw_text(
-                &meta_str,
-                &("sans-serif", 55).into_font().color(&BLACK),
-                (80, 10),
-            )
-            .unwrap();
+        let time_str = match (
+            sols.start_timestamps.get(timeblock),
+            sols.end_timestamps.get(timeblock),
+            sols.average_timestamps.get(timeblock),
+        ) {
+            (Some(s), Some(e), Some(a)) => {
+                format!(
+                    "GPS start {}, end {}, average {}",
+                    s.as_gpst_seconds(),
+                    e.as_gpst_seconds(),
+                    a.as_gpst_seconds()
+                )
+            }
+            (Some(s), Some(e), None) => format!(
+                "GPS start {}, end {}",
+                s.as_gpst_seconds(),
+                e.as_gpst_seconds()
+            ),
+            (Some(s), None, None) => format!("GPS start {}, end unknown", s.as_gpst_seconds()),
+            (None, Some(e), None) => format!("GPS start unknown, end {}", e.as_gpst_seconds()),
+            (Some(s), None, Some(a)) => format!(
+                "GPS start {}, end unknown, average {}",
+                s.as_gpst_seconds(),
+                a.as_gpst_seconds()
+            ),
+            (None, Some(e), Some(a)) => format!(
+                "GPS start unknown, end {}, average {}",
+                e.as_gpst_seconds(),
+                a.as_gpst_seconds()
+            ),
+            (None, None, Some(a)) => format!(
+                "GPS start unknown, end unknown, average {}",
+                a.as_gpst_seconds()
+            ),
+            (None, None, None) => String::new(),
+        };
+        if !meta_str.is_empty() && !time_str.is_empty() {
+            meta_str.push_str(", ");
+        }
+        meta_str.push_str(&time_str);
+        amps_root_area.draw_text(
+            &meta_str,
+            &("sans-serif", 38).into_font().color(&BLACK),
+            (10, 10),
+        )?;
+        phases_root_area.draw_text(
+            &meta_str,
+            &("sans-serif", 38).into_font().color(&BLACK),
+            (10, 10),
+        )?;
 
         let amps_root_area = amps_root_area
             .shrink((15, 0), (X_PIXELS - 15, Y_PIXELS))
-            .titled(&format!("Amps for {}", obs_name), title_style.clone())
-            .unwrap();
+            .titled(&format!("Amps for {}", obs_name), title_style.clone())?;
         let amps_tile_plots = amps_root_area.split_evenly(split);
 
-        let phases_root_area = phases_root_area
-            .titled(&format!("Phases for {}", obs_name), title_style.clone())
-            .unwrap();
+        let phases_root_area =
+            phases_root_area.titled(&format!("Phases for {}", obs_name), title_style.clone())?;
         let phase_tile_plots = phases_root_area.split_evenly(split);
 
         let ones = vec![Jones::identity(); sols.di_jones.dim().2];
         let ref_jones = if let Some(ref_tile) = ref_tile {
             sols.di_jones.slice(s![timeblock, ref_tile, ..])
         } else {
-            ArrayView1::from_shape(sols.di_jones.dim().2, &ones).unwrap()
+            ArrayView1::from_shape(sols.di_jones.dim().2, &ones)?
         };
         amps.outer_iter_mut()
             .zip(phases.outer_iter_mut())
@@ -205,7 +232,7 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
             });
 
         let (min_amp, max_amp) = match (min_amp, max_amp) {
-            (Some(min), Some(max)) => (min, max),
+            (Some(user_min), Some(user_max)) => (user_min, user_max),
             _ => {
                 // We need to work out the min and max ourselves.
                 let (data_min, data_max) = amps.iter().flatten().filter(|a| !a.is_nan()).fold(
@@ -216,49 +243,75 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
                         (acc_min, acc_max)
                     },
                 );
-                (min_amp.unwrap_or(data_min), max_amp.unwrap_or(data_max))
+
+                // Check any user-specified limits. Are they sensible relative
+                // to the data?
+                let min_amp = match min_amp {
+                    Some(user_min_amp) => {
+                        if user_min_amp > data_max {
+                            warn!("User-specified plot minimum {user_min_amp} is larger than all data; ignoring");
+                            data_min
+                        } else {
+                            user_min_amp
+                        }
+                    }
+                    None => data_min,
+                };
+                let max_amp = match max_amp {
+                    Some(user_max_amp) => {
+                        if user_max_amp < data_min {
+                            warn!("User-specified plot maximum {user_max_amp} is smaller than all data; ignoring");
+                            data_max
+                        } else {
+                            user_max_amp
+                        }
+                    }
+                    None => data_max,
+                };
+                (min_amp, max_amp)
             }
         };
 
-        amps.outer_iter()
+        for (i_tile, (amps, amp_tile_plot)) in amps
+            .outer_iter()
             .zip(amps_tile_plots.into_iter())
             .enumerate()
-            .for_each(|(i_tile, (amps, amp_tile_plot))| {
-                let tile_name = match tile_names {
-                    Some(names) => format!("{}: {}", i_tile, names[i_tile].as_ref()),
-                    None => format!("{}", i_tile),
-                };
-                plot_amps(
-                    &amp_tile_plot,
-                    amps.view(),
-                    min_amp,
-                    max_amp,
-                    &tile_name,
-                    (i_tile / split.0, i_tile % split.1),
-                    ignore_cross_pols,
-                );
-            });
-        phases
+        {
+            let tile_name = match tile_names {
+                Some(names) => format!("{}: {}", i_tile, names[i_tile].as_ref()),
+                None => format!("{}", i_tile),
+            };
+            plot_amps(
+                &amp_tile_plot,
+                amps.view(),
+                min_amp,
+                max_amp,
+                &tile_name,
+                (i_tile / split.0, i_tile % split.1),
+                ignore_cross_pols,
+            )?;
+        }
+        for (i_tile, (phases, phase_tile_plot)) in phases
             .outer_iter()
             .zip(phase_tile_plots.into_iter())
             .enumerate()
-            .for_each(|(i_tile, (phases, phase_tile_plot))| {
-                let tile_name = match tile_names {
-                    Some(names) => format!("{}: {}", i_tile, names[i_tile].as_ref()),
-                    None => format!("{}", i_tile),
-                };
-                plot_phases(
-                    &phase_tile_plot,
-                    phases.view(),
-                    &tile_name,
-                    (i_tile / split.0, i_tile % split.1),
-                    ignore_cross_pols,
-                );
-            });
+        {
+            let tile_name = match tile_names {
+                Some(names) => format!("{}: {}", i_tile, names[i_tile].as_ref()),
+                None => format!("{}", i_tile),
+            };
+            plot_phases(
+                &phase_tile_plot,
+                phases.view(),
+                &tile_name,
+                (i_tile / split.0, i_tile % split.1),
+                ignore_cross_pols,
+            )?;
+        }
 
         // Finalise the plots.
-        amps_root_area.present().unwrap();
-        phases_root_area.present().unwrap();
+        amps_root_area.present()?;
+        phases_root_area.present()?;
     }
 
     Ok(output_filenames)
@@ -273,24 +326,29 @@ fn plot_amps<DB: DrawingBackend, S: AsRef<str>>(
     tile_name: S,
     tile_plot_indices: (usize, usize),
     ignore_cross_pols: bool,
-) {
+) -> Result<(), DrawError> {
     let x_axis = (0..amps.len()).step(1);
     let y_label_area_size = if tile_plot_indices.1 == 0 { 20 } else { 0 };
     let mut cc = ChartBuilder::on(drawing_area)
         .caption(&tile_name, ("sans-serif", 30))
         .top_x_label_area_size(15)
         .y_label_area_size(y_label_area_size)
-        .build_cartesian_2d(0..amps.len(), min_amp..max_amp * 1.1)
-        .unwrap();
+        .build_cartesian_2d(0..amps.len(), min_amp..max_amp)
+        .map_err(|e| DrawError::Amps(e.to_string()))?;
 
-    cc.configure_mesh().light_line_style(&WHITE).draw().unwrap();
+    cc.configure_mesh()
+        .light_line_style(&WHITE)
+        .draw()
+        .map_err(|e| DrawError::Amps(e.to_string()))?;
 
     if amps
         .iter()
         .all(|f| f[0].is_nan() || f[1].is_nan() || f[2].is_nan() || f[3].is_nan())
     {
-        cc.plotting_area().fill(&RGBColor(220, 220, 220)).unwrap();
-        return;
+        cc.plotting_area()
+            .fill(&RGBColor(220, 220, 220))
+            .map_err(|e| DrawError::Amps(e.to_string()))?;
+        return Ok(());
     }
 
     for (pol_index, (_, colour)) in POLS.iter().enumerate() {
@@ -310,8 +368,10 @@ fn plot_amps<DB: DrawingBackend, S: AsRef<str>>(
             },
             &|coord, size, style| EmptyElement::at(coord) + Circle::new((0, 0), size, style),
         ))
-        .unwrap();
+        .map_err(|e| DrawError::Amps(e.to_string()))?;
     }
+
+    Ok(())
 }
 
 /// For a single drawing area, plot phases.
@@ -321,7 +381,7 @@ fn plot_phases<DB: DrawingBackend, S: AsRef<str>>(
     tile_name: S,
     tile_plot_indices: (usize, usize),
     ignore_cross_pols: bool,
-) {
+) -> Result<(), DrawError> {
     let x_axis = (0..phases.len()).step(1);
     let y_label_area_size = if tile_plot_indices.1 == 0 { 45 } else { 0 };
     let mut cc = ChartBuilder::on(drawing_area)
@@ -329,16 +389,21 @@ fn plot_phases<DB: DrawingBackend, S: AsRef<str>>(
         .top_x_label_area_size(15)
         .y_label_area_size(y_label_area_size)
         .build_cartesian_2d(0..phases.len(), -180.0..180.0)
-        .unwrap();
+        .map_err(|e| DrawError::Phases(e.to_string()))?;
 
-    cc.configure_mesh().light_line_style(&WHITE).draw().unwrap();
+    cc.configure_mesh()
+        .light_line_style(&WHITE)
+        .draw()
+        .map_err(|e| DrawError::Phases(e.to_string()))?;
 
     if phases
         .iter()
         .all(|f| f[0].is_nan() || f[1].is_nan() || f[2].is_nan() || f[3].is_nan())
     {
-        cc.plotting_area().fill(&RGBColor(220, 220, 220)).unwrap();
-        return;
+        cc.plotting_area()
+            .fill(&RGBColor(220, 220, 220))
+            .map_err(|e| DrawError::Phases(e.to_string()))?;
+        return Ok(());
     }
 
     for (pol_index, (_, colour)) in POLS.iter().enumerate() {
@@ -366,6 +431,17 @@ fn plot_phases<DB: DrawingBackend, S: AsRef<str>>(
             },
             &|coord, size, style| EmptyElement::at(coord) + Circle::new((0, 0), size, style),
         ))
-        .unwrap();
+        .map_err(|e| DrawError::Phases(e.to_string()))?;
     }
+
+    Ok(())
+}
+
+#[derive(Error, Debug)]
+pub enum DrawError {
+    #[error("While plotting amps: {0}")]
+    Amps(String),
+
+    #[error("While plotting phases: {0}")]
+    Phases(String),
 }

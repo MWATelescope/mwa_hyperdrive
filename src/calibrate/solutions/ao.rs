@@ -121,10 +121,10 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
         di_jones,
         flagged_tiles,
         flagged_chanblocks,
-        average_timestamps,
+        obsid: None,
         start_timestamps,
         end_timestamps,
-        obsid: None,
+        average_timestamps,
     })
 }
 

@@ -22,11 +22,12 @@ use std::path::Path;
 use std::str::FromStr;
 
 use hifitime::Epoch;
+use log::debug;
 use marlu::Jones;
 use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
 
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray};
 
 #[derive(Debug, Display, EnumIter, EnumString)]
 pub(crate) enum CalSolutionType {
@@ -54,6 +55,10 @@ pub struct CalibrationSolutions {
     /// Which chanblocks are flagged? Zero indexed.
     pub flagged_chanblocks: Vec<u16>,
 
+    /// The MWA observation ID. Allowed to be optional as not all formats
+    /// provide it.
+    pub obsid: Option<u32>,
+
     /// The start timestamps (centroids) of each timeblock used to produce these
     /// calibration solutions. This is allowed to be empty; in this case, no
     /// timestamp information is provided. It may also have a different length
@@ -71,10 +76,6 @@ pub struct CalibrationSolutions {
     /// timestamp information is provided. It may also have a different length
     /// to the first dimension of `di_jones` due to inadequate information.
     pub average_timestamps: Vec<Epoch>,
-
-    /// The MWA observation ID. Allowed to be optional as not all formats
-    /// provide it.
-    pub obsid: Option<u32>,
 }
 
 impl CalibrationSolutions {
@@ -85,9 +86,13 @@ impl CalibrationSolutions {
     pub fn read_solutions_from_ext<T: AsRef<Path>, T2: AsRef<Path>>(
         file: T,
         metafits: Option<T2>,
-    ) -> Result<Self, ReadSolutionsError> {
+    ) -> Result<CalibrationSolutions, ReadSolutionsError> {
         let f = file.as_ref();
         if f.is_dir() {
+            debug!(
+                "Got a directory '{}', looking for RTS solutions...",
+                f.display()
+            );
             let metafits = metafits.ok_or(ReadSolutionsError::RtsMetafitsRequired)?;
             rts::read(f, metafits).map_err(ReadSolutionsError::from)
         } else {
@@ -102,24 +107,27 @@ impl CalibrationSolutions {
         }
     }
 
-    pub fn write_solutions_from_ext<T: AsRef<Path>>(
+    pub fn write_solutions_from_ext<P: AsRef<Path>, P2: AsRef<Path>>(
         &self,
-        file: T,
+        file: P,
+        metafits: Option<P2>,
     ) -> Result<(), WriteSolutionsError> {
-        let f = file.as_ref();
-        if f.is_dir() {
-            //rts::write
-            todo!()
+        let file = file.as_ref();
+        if file.is_dir() {
+            let metafits = metafits.ok_or(WriteSolutionsError::RtsMetafitsRequired)?;
+            rts::write(self, file, metafits)?;
         } else {
-            let ext = file.as_ref().extension().and_then(|e| e.to_str());
+            let ext = file.extension().and_then(|e| e.to_str());
             match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
                 Some(CalSolutionType::Fits) => hyperdrive::write(self, file),
                 Some(CalSolutionType::Bin) => ao::write(self, file),
                 None => Err(WriteSolutionsError::UnsupportedExt {
                     ext: ext.unwrap_or("<no extension>").to_string(),
                 }),
-            }
+            }?;
         }
+
+        Ok(())
     }
 
     #[cfg(feature = "plotting")]
@@ -134,7 +142,7 @@ impl CalibrationSolutions {
         ignore_cross_pols: bool,
         min_amp: Option<f64>,
         max_amp: Option<f64>,
-    ) -> Result<Vec<String>, ()> {
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         plotting::plot_sols(
             self,
             filename_base,

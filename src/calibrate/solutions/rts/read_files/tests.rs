@@ -8,9 +8,11 @@ use std::io::Cursor;
 
 use approx::assert_abs_diff_eq;
 use indoc::indoc;
+use marlu::c64;
 
 use super::*;
 use crate::jones_test::TestJones;
+use mwa_hyperdrive_common::marlu;
 
 #[test]
 fn test_read_di_jm() {
@@ -27,7 +29,7 @@ fn test_read_di_jm() {
 
     assert_abs_diff_eq!(di_jm._alignment_flux_density, 16.990089);
     assert_abs_diff_eq!(
-        TestJones::from(di_jm._post_alignment_matrix),
+        TestJones::from(di_jm.post_alignment_matrix),
         TestJones::from([
             c64::new(-0.131782, -0.933494),
             c64::new(0.019562, 0.135049),
