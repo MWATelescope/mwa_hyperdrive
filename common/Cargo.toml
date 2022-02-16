@@ -13,10 +13,12 @@ cuda-static = ["marlu/cuda-static"]
 
 [dependencies]
 atty = "0.2.11"
+byteorder = "1.4.3"
 cfg-if = "1.0.0"
 chrono = "0.4.0"
 clap = { version = "3.0.14", features = ["derive", "wrap_help"] }
 fern = { version = "0.6.0", features = ["chrono", "colored"] }
+flate2 = "1.0.13"
 itertools = "0.10.0"
 indicatif = { version = "0.16.0", features = ["rayon"] }
 lazy_static = "1.4.0"
@@ -25,6 +27,9 @@ marlu = "0.5.0"
 serde_json = "1.0.0"
 thiserror = "1.0.7"
 toml = "0.5.2"
+
+[dev-dependencies]
+approx = "0.5.0"
 
 [build-dependencies]
 built = { version = "0.5.0", features = ["chrono", "git2"] }

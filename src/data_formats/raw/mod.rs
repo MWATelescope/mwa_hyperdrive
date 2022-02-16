@@ -79,7 +79,7 @@ impl RawDataReader {
     ) -> Result<RawDataReader, RawReadError> {
         // There are a lot of unwraps in this function. These are fine because
         // mwalib ensures that vectors aren't empty so when we convert a Vec to
-        // Vec1, for example, we don't need to propogate a new error.
+        // Vec1, for example, we don't need to propagate a new error.
 
         let meta_pb = metadata.as_ref().to_path_buf();
         let gpubox_pbs: Vec<PathBuf> = gpuboxes.iter().map(|p| p.as_ref().to_path_buf()).collect();

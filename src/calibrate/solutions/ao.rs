@@ -19,7 +19,7 @@ use rayon::prelude::*;
 
 use super::{error::*, CalibrationSolutions};
 use crate::math::average_epoch;
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray, rayon, Complex};
+use mwa_hyperdrive_common::{byteorder, hifitime, marlu, ndarray, rayon, Complex};
 
 pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, ReadSolutionsError> {
     let file_str = file.as_ref().display().to_string();

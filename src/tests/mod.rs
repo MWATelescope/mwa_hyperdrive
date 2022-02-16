@@ -18,7 +18,7 @@ use assert_cmd::{output::OutputError, Command};
 use tempfile::{NamedTempFile, TempPath};
 
 pub(crate) use crate::calibrate::args::CalibrateUserArgs;
-use mwa_hyperdrive_common::{serde_json, toml};
+use mwa_hyperdrive_common::{flate2, serde_json, toml};
 
 /// Run the hyperdrive binary with `assert_cmd`.
 pub(crate) fn hyperdrive() -> Command {

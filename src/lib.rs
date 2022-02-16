@@ -15,7 +15,6 @@ pub(crate) mod glob;
 pub mod math;
 pub mod model;
 pub(crate) mod pfb_gains;
-pub(crate) mod shapelets;
 pub mod simulate_vis;
 pub(crate) mod time;
 pub(crate) mod unit_parsing;

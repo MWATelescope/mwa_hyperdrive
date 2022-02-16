@@ -257,7 +257,7 @@ pub(super) fn parse_time_average_factor(
             // "None" indicates we should follow default behaviour.
             Ok(default)
         }
-        // Propogate any errors encountered during parsing.
+        // propagate any errors encountered during parsing.
         (_, Some(Err(e))) => Err(AverageFactorError::Parse(e)),
 
         // User input is OK but has no unit.
@@ -324,7 +324,7 @@ pub(super) fn parse_freq_average_factor(
             // "None" indicates we should follow default behaviour.
             Ok(default)
         }
-        // Propogate any errors encountered during parsing.
+        // propagate any errors encountered during parsing.
         (_, Some(Err(e))) => Err(AverageFactorError::Parse(e)),
 
         // User input is OK but has no unit.

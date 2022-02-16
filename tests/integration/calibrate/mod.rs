@@ -7,6 +7,7 @@
 mod cli_args;
 
 use approx::assert_abs_diff_eq;
+use serial_test::serial;
 
 use crate::*;
 use mwa_hyperdrive::calibrate::solutions::CalibrationSolutions;
@@ -35,6 +36,37 @@ fn test_no_stderr() {
     assert!(cmd.is_ok(), "di-calibrate failed on simple test data!");
     let (_, stderr) = get_cmd_output(cmd);
     assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
+}
+
+#[test]
+#[serial]
+fn test_1090008640_di_calibrate_works() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let args = get_reduced_1090008640(true, false);
+    let data = args.data.unwrap();
+    let mut sols = tmp_dir.clone();
+    sols.push("sols.fits");
+    let mut cal_model = tmp_dir;
+    cal_model.push("hyp_model.uvfits");
+
+    let cmd = hyperdrive()
+        .args(&[
+            "di-calibrate",
+            "--data",
+            &data[0],
+            &data[1],
+            "--source-list",
+            &args.source_list.unwrap(),
+            "--outputs",
+            &format!("{}", sols.display()),
+            "--model-filename",
+            &format!("{}", cal_model.display()),
+        ])
+        .ok();
+    let cmd_error = cmd.is_err();
+    let (stdout, stderr) = get_cmd_output(cmd);
+    assert!(!cmd_error, "stdout: {}\nstderr: {}", stdout, stderr);
+    assert!(stderr.is_empty(), "{}", stderr);
 }
 
 #[test]

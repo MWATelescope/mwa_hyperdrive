@@ -977,7 +977,7 @@ impl CalibrateParams {
                         .phase_centre
                         .to_hadec(precession_info.lmst_j2000),
                 );
-                debug_assert_eq!(baseline_weights.len(), uvws.len());
+                assert_eq!(baseline_weights.len(), uvws.len());
                 uvws.into_par_iter()
                     .zip(baseline_weights.par_iter_mut())
                     .for_each(|(uvw, baseline_weight)| {

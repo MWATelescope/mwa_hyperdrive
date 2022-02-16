@@ -4,15 +4,13 @@
 
 //! Code for FEE beam calculations.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use log::trace;
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
-use parking_lot::RwLock;
 
-use super::{cache::JonesHash, Beam, BeamError, BeamType, Delays};
+use super::{Beam, BeamError, BeamType, Delays};
 use mwa_hyperdrive_common::{cfg_if, log, marlu, ndarray};
 
 cfg_if::cfg_if! {
@@ -24,15 +22,10 @@ cfg_if::cfg_if! {
 
 /// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [Beam]
 /// trait.
-pub struct FEEBeam {
+pub(super) struct FEEBeam {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
     delays: Array2<u32>,
     gains: Array2<f64>,
-    cache: RwLock<HashMap<JonesHash, Jones<f64>>>,
-
-    /// If all the tile delays are the same, then provide a single tile's delays
-    /// here for convenience.
-    delays_flattened: Option<Array2<u32>>,
 }
 
 impl FEEBeam {
@@ -41,7 +34,7 @@ impl FEEBeam {
         num_tiles: usize,
         delays: Delays,
         gains: Option<Array2<f64>>,
-    ) -> Result<Self, BeamError> {
+    ) -> Result<FEEBeam, BeamError> {
         let delays = match delays {
             Delays::Full(d) => d,
             Delays::Partial(d) => partial_to_full(d, num_tiles),
@@ -63,39 +56,15 @@ impl FEEBeam {
             });
         }
 
-        // Are all the delays the same? If so, keep a record of that for
-        // convenience.
-        let delays_flattened = {
-            // Innocent until proven guilty.
-            let mut all_equal = true;
-            for delay_row in delays.outer_iter() {
-                if delay_row != delays.slice(s![0, ..]) {
-                    all_equal = false;
-                    break;
-                }
-            }
-            if all_equal {
-                let slice = delays.slice(s![0, ..]);
-                let mut new = Array2::zeros((1, slice.dim()));
-                new.slice_mut(s![0, ..]).assign(&slice);
-                log::debug!("Using delays: {:?}", slice.as_slice().unwrap());
-                Some(new)
-            } else {
-                None
-            }
-        };
-
         // Wrap the `FEEBeam` out of hyperbeam with our own `FEEBeam`.
         Ok(FEEBeam {
             hyperbeam_object,
             delays,
             gains,
-            cache: RwLock::new(HashMap::new()),
-            delays_flattened,
         })
     }
 
-    pub fn new<T: AsRef<std::path::Path>>(
+    fn new<T: AsRef<std::path::Path>>(
         file: T,
         num_tiles: usize,
         delays: Delays,
@@ -105,7 +74,7 @@ impl FEEBeam {
         Self::new_inner(hyperbeam_object, num_tiles, delays, gains)
     }
 
-    pub fn new_from_env(
+    pub(super) fn new_from_env(
         num_tiles: usize,
         delays: Delays,
         gains: Option<Array2<f64>>,
@@ -130,88 +99,84 @@ impl FEEBeam {
             .map(|j| unsafe { std::mem::transmute(j) })
     }
 
-    /// Get the dipole delays that are used for this [FEEBeam].
-    pub fn get_delays(&self) -> ArrayView2<u32> {
-        if let Some(d) = &self.delays_flattened {
-            d.view()
-        } else {
-            self.delays.view()
-        }
+    fn calc_jones_array_inner(
+        &self,
+        azels: &[AzEl],
+        freq_hz: f64,
+        delays: &[u32],
+        amps: &[f64],
+    ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::fee::FEEBeamError> {
+        let (azs, zas): (Vec<f64>, Vec<f64>) =
+            azels.iter().map(|azel| (azel.az, azel.za())).unzip();
+        self.hyperbeam_object
+            .calc_jones_array(&azs, &zas, freq_hz as _, delays, amps, true)
+            // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
+            // but the Marlu used all over hyperdrive is imported differently
+            // from that of hyperbeam. Testing shows that this operation takes
+            // tens of nanoseconds.
+            .map(|v| unsafe { std::mem::transmute(v) })
     }
 }
 
 impl Beam for FEEBeam {
+    fn get_beam_type(&self) -> BeamType {
+        BeamType::FEE
+    }
+
+    fn get_num_tiles(&self) -> usize {
+        self.delays.len_of(Axis(0))
+    }
+
     fn calc_jones(
         &self,
         azel: AzEl,
         freq_hz: f64,
         tile_index: usize,
     ) -> Result<Jones<f64>, BeamError> {
-        // Determine whether the input settings correspond to a Jones matrix in
-        // the cache. If so, use the cache. Otherwise, calculate the Jones
-        // matrix and populate the cache.
-
         // The FEE beam is defined only at specific frequencies. For this
         // reason, rather than making a unique hash for every single different
         // frequency, round specified frequency (`freq_hz`) to the nearest beam
         // frequency and use that for the hash.
         let beam_freq = self.find_closest_freq(freq_hz);
 
-        // Are the input settings already cached? Hash them to check.
         // TODO: Check tile_index isn't too big.
         let delays = self.delays.slice(s![tile_index, ..]);
         let amps = self.gains.slice(s![tile_index, ..]);
-        let hash = JonesHash::new(
-            azel,
-            beam_freq,
-            // unwrap is safe because these array slices are contiguous.
-            delays.as_slice().unwrap(),
-            amps.as_slice().unwrap(),
-        );
-
-        // If the cache for this hash exists, we can return a copy of the Jones
-        // matrix.
-        {
-            let cache = self.cache.read();
-            if cache.contains_key(&hash) {
-                return Ok(cache[&hash]);
-            }
-        }
-
-        // If we hit this part of the code, the relevant Jones matrix was not in
-        // the cache.
         let jones = self.calc_jones_inner(
             azel,
             beam_freq,
             delays.as_slice().unwrap(),
             amps.as_slice().unwrap(),
         )?;
-        {
-            let mut cache = self.cache.write();
-            cache.insert(hash, jones);
-        }
         Ok(jones)
+    }
+
+    fn calc_jones_array(
+        &self,
+        azels: &[AzEl],
+        freq_hz: f64,
+        tile_index: usize,
+    ) -> Result<Vec<Jones<f64>>, BeamError> {
+        // The FEE beam is defined only at specific frequencies. For this
+        // reason, rather than making a unique hash for every single different
+        // frequency, round specified frequency (`freq_hz`) to the nearest beam
+        // frequency and use that for the hash.
+        let beam_freq = self.find_closest_freq(freq_hz);
+
+        let delays = self.delays.slice(s![tile_index, ..]);
+        let amps = self.gains.slice(s![tile_index, ..]);
+        self.calc_jones_array_inner(
+            azels,
+            beam_freq,
+            delays.as_slice().unwrap(),
+            amps.as_slice().unwrap(),
+        )
+        .map_err(BeamError::from)
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
         self.hyperbeam_object
             .find_closest_freq(desired_freq_hz as _) as _
-    }
-
-    fn get_beam_type(&self) -> BeamType {
-        BeamType::FEE
-    }
-
-    fn len(&self) -> usize {
-        self.cache.read().len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.cache.read().is_empty()
-    }
-
-    fn empty_cache(&self) {
-        self.cache.write().clear();
     }
 
     fn empty_coeff_cache(&self) {

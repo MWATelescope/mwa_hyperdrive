@@ -114,10 +114,10 @@ inline __device__ void operator+=(JonesF32 &a, JonesF64 &b) {
 
 inline __device__ FLOAT4 operator+(FLOAT4 a, FLOAT4 b) {
     FLOAT4 t;
-    t.x = a.x - b.x;
-    t.y = a.y - b.y;
-    t.z = a.z - b.z;
-    t.w = a.w - b.w;
+    t.x = a.x + b.x;
+    t.y = a.y + b.y;
+    t.z = a.z + b.z;
+    t.w = a.w + b.w;
     return t;
 }
 

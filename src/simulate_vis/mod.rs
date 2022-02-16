@@ -14,12 +14,9 @@ use std::path::PathBuf;
 use clap::Parser;
 use hifitime::Epoch;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Either;
 use log::{debug, info};
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    pos::xyz::xyzs_to_cross_uvws_parallel,
-    precession::precess_time,
     Jones, RADec, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
@@ -32,17 +29,8 @@ use crate::{
     model,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{
-    cfg_if, clap, hifitime, indicatif, itertools, log, marlu, mwalib, ndarray,
-};
-use mwa_hyperdrive_srclist::{read::read_source_list_file, ComponentList, SourceList};
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "cuda")] {
-        use mwa_hyperdrive_cuda as cuda;
-        use cuda::modeller::SkyModellerCuda;
-    }
-}
+use mwa_hyperdrive_common::{clap, hifitime, indicatif, log, marlu, mwalib, ndarray};
+use mwa_hyperdrive_srclist::{read::read_source_list_file, SourceList};
 
 #[derive(Parser, Debug, Default, Deserialize)]
 pub struct SimulateVisArgs {
@@ -160,10 +148,10 @@ struct SimVisParams {
     beam: Box<dyn Beam>,
 
     /// The Earth latitude location of the interferometer \[radians\].
-    array_latitude_rad: f64,
+    array_latitude: f64,
 
     /// The Earth longitude location of the interferometer \[radians\].
-    array_longitude_rad: f64,
+    array_longitude: f64,
 }
 
 impl SimVisParams {
@@ -382,8 +370,8 @@ impl SimVisParams {
             flagged_tiles,
             timestamps,
             beam,
-            array_latitude_rad: MWA_LAT_RAD,
-            array_longitude_rad: MWA_LONG_RAD,
+            array_latitude: MWA_LAT_RAD,
+            array_longitude: MWA_LONG_RAD,
         })
     }
 }
@@ -391,15 +379,15 @@ impl SimVisParams {
 /// Simulate sky-model visibilities from a sky-model source list.
 pub fn simulate_vis(
     args: SimulateVisArgs,
-    #[cfg(feature = "cuda")] cpu: bool,
+    #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
     dry_run: bool,
 ) -> Result<(), SimulateVisError> {
     // Witchcraft to allow this code to be used with or without CUDA support
     // compiled.
     #[cfg(not(feature = "cuda"))]
-    let cpu = true;
+    let use_cpu_for_modelling = true;
 
-    if cpu {
+    if use_cpu_for_modelling {
         info!("Generating sky model visibilities on the CPU");
     } else {
         // TODO: Display GPU info.
@@ -456,37 +444,22 @@ pub fn simulate_vis(
         &fine_chan_flags,
     )?;
 
-    // Create a "modeller" object. Use an Either to hold one type or the other
-    // (the types differ between CPU and GPU code).
-    let modeller = if cpu {
-        Either::Left(ComponentList::new(
+    // Create a "modeller" object.
+    let modeller = unsafe {
+        model::new_sky_modeller(
+            use_cpu_for_modelling,
+            params.beam.deref(),
             &params.source_list,
+            &params.xyzs,
             &params.fine_chan_freqs,
+            &params.flagged_tiles,
             params.phase_centre,
-        ))
-    } else {
-        #[cfg(feature = "cuda")]
-        unsafe {
-            Either::Right(SkyModellerCuda::new(
-                params.beam.deref(),
-                &params.source_list,
-                &params.fine_chan_freqs,
-                &params.xyzs,
-                &params.flagged_tiles,
-                params.phase_centre,
-                params.array_latitude_rad,
-                &crate::shapelets::SHAPELET_BASIS_VALUES,
-                crate::shapelets::SBF_L,
-                crate::shapelets::SBF_N,
-                crate::shapelets::SBF_C,
-                crate::shapelets::SBF_DX,
-            )?)
-        }
-
-        // It doesn't matter what goes in Right when we're not using CUDA.
-        #[cfg(not(feature = "cuda"))]
-        Either::Right(0)
-    };
+            params.array_longitude,
+            params.array_latitude,
+            // TODO: Allow the user to turn off precession.
+            true,
+        )
+    }?;
 
     // Progress bar.
     let model_progress = ProgressBar::new(params.timestamps.len() as _)
@@ -504,40 +477,7 @@ pub fn simulate_vis(
 
     // Generate the visibilities.
     for &timestep in params.timestamps.iter() {
-        let precession_info = precess_time(
-            params.phase_centre,
-            timestep,
-            params.array_longitude_rad,
-            params.array_latitude_rad,
-        );
-        // Apply precession to the tile XYZ positions.
-        let precessed_tile_xyzs = precession_info.precess_xyz_parallel(&params.xyzs);
-        let uvws = xyzs_to_cross_uvws_parallel(
-            &precessed_tile_xyzs,
-            params.phase_centre.to_hadec(precession_info.lmst_j2000),
-        );
-
-        if cpu {
-            model::model_timestep(
-                vis_model.view_mut(),
-                modeller.as_ref().unwrap_left(),
-                params.beam.deref(),
-                precession_info.lmst_j2000,
-                &params.xyzs,
-                &uvws,
-                &params.fine_chan_freqs,
-                &params.baseline_to_tile_map,
-            )?;
-        } else {
-            #[cfg(feature = "cuda")]
-            unsafe {
-                modeller.as_ref().unwrap_right().model_timestep(
-                    vis_model.view_mut(),
-                    precession_info.lmst_j2000,
-                    &uvws,
-                )?;
-            }
-        }
+        let uvws = modeller.model_timestep(vis_model.view_mut(), timestep)?;
         // Write the visibilities out.
         output_writer.write_cross_timestep_vis(
             vis_model.view(),
@@ -558,6 +498,7 @@ pub fn simulate_vis(
         .metafits
         .rf_inputs
         .iter()
+        .filter(|rf| rf.pol == mwalib::Pol::X)
         .map(|rf| rf.tile_name.as_str())
         .collect();
     output_writer.write_uvfits_antenna_table(&names, &params.xyzs)?;

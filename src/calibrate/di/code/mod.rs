@@ -10,39 +10,29 @@ mod tests;
 
 use std::ops::Deref;
 
-use crossbeam_channel::{bounded, unbounded};
-use crossbeam_utils::thread::scope;
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_utils::{atomic::AtomicCell, thread};
 use hifitime::Epoch;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Either;
 use log::{debug, info, trace};
 use marlu::{
     c64,
     math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_cross_correlation_baselines},
-    pos::xyz::{xyzs_to_cross_uvws_parallel, XyzGeodetic},
-    precession::precess_time,
-    Jones,
+    Jones, XyzGeodetic, UVW,
 };
-use ndarray::prelude::*;
+use ndarray::{iter::AxisIterMut, prelude::*};
 use rayon::prelude::*;
+use scopeguard::defer_on_unwind;
 
 use crate::{
     calibrate::{
-        params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError, Chanblock,
+        params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError, Chanblock, Fence,
         Timeblock,
     },
     data_formats::UvfitsWriter,
     model,
 };
-use mwa_hyperdrive_common::{cfg_if, hifitime, indicatif, itertools, log, marlu, ndarray, rayon};
-use mwa_hyperdrive_srclist::ComponentList;
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "cuda")] {
-        use mwa_hyperdrive_cuda as cuda;
-        use cuda::modeller::SkyModellerCuda;
-    }
-}
+use mwa_hyperdrive_common::{hifitime, indicatif, log, marlu, ndarray, rayon};
 
 pub(super) struct CalVis {
     /// Visibilites read from input data.
@@ -78,7 +68,6 @@ pub(super) fn get_cal_vis(
         info!("Generating sky model visibilities on the GPU (single precision)");
     }
 
-    let obs_context = params.input_data.get_obs_context();
     // TODO: Use all fences, not just the first.
     let fence = params.fences.first();
 
@@ -138,20 +127,9 @@ pub(super) fn get_cal_vis(
     let mut vis_model: Array3<Jones<f32>> = fallible_jones_allocator(vis_shape)?;
     let mut vis_weights: Array3<f32> = fallible_f32_allocator(vis_shape)?;
 
-    // Set up our producer (IO reading and sending) thread, sky-modelling
-    // thread and model-writer (writes the sky model to a file) thread. By doing
-    // things this way, the disk and CPU/GPU is fully utilised; the input data
-    // and our sky model is assembled as efficiently as possible.
-    info!("Reading input data and sky modelling");
-    // Data communication channel. The producer might send an error on this
-    // channel; it's up to the worker to propagate it.
-    let (tx_data, rx_data) = unbounded();
-    // Model communication channel. The worker might send an error on this
-    // channel.
+    // Sky-modelling communicate channel. Used to tell the model writer when
+    // visibilities have been generated and they're ready to be written.
     let (tx_model, rx_model) = unbounded();
-    // Final channel. Used to communicate with the main thread outside the
-    // thread scope.
-    let (tx_final, rx_final) = bounded(1);
 
     // Progress bars. Courtesy Dev.
     let multi_progress = MultiProgress::with_draw_target(if draw_progress_bar {
@@ -194,16 +172,20 @@ pub(super) fn get_cal_vis(
         )
     });
 
-    // Draw the progress bars.
+    // Draw the progress bars. Not doing this means that the bars aren't
+    // rendered until they've progressed.
     read_progress.tick();
     model_progress.tick();
     if let Some(pb) = &model_write_progress {
         pb.tick();
     }
 
-    scope(|scope| {
+    // Use a variable to track whether any threads have an issue.
+    let error = AtomicCell::new(false);
+    info!("Reading input data and sky modelling");
+    let scoped_threads_result = thread::scope(|scope| {
         // Spawn a thread to draw the progress bars.
-        scope.spawn(|_| {
+        scope.spawn(move |_| {
             multi_progress.join().unwrap();
         });
 
@@ -215,310 +197,245 @@ pub(super) fn get_cal_vis(
         let vis_weight_slices = vis_weights.outer_iter_mut();
 
         // Input visibility-data reading thread.
-        scope.spawn(move |_| {
-            for (((&timestep, vis_data_slice), vis_model_slice), mut vis_weight_slice) in params
-                .timesteps
-                .iter()
-                .zip(vis_data_slices)
-                .zip(vis_model_slices)
-                .zip(vis_weight_slices)
-            {
-                let read_result =
-                    params.read_crosses(vis_data_slice, vis_weight_slice.view_mut(), timestep);
-                let read_failed = read_result.is_err();
-                // Send the result of the read to the worker thread.
-                let msg = read_result
-                    .map(|()| (timestep, vis_model_slice, vis_weight_slice))
-                    .map_err(CalibrateError::from);
-                // If we can't send the message, it's because the channel has
-                // been closed on the other side. That should only happen
-                // because the worker has exited due to error; in that case,
-                // just exit this thread.
-                match tx_data.send(msg) {
-                    Ok(()) => (),
-                    Err(_) => break,
-                }
-                // If the result of the read was erroneous, then exit now.
-                if read_failed {
-                    break;
-                }
+        let data_handle = scope.spawn(|_| {
+            // If a panic happens, update our atomic error.
+            defer_on_unwind! { error.store(true); }
 
-                read_progress.inc(1);
+            let result = read_vis_data(
+                params,
+                vis_data_slices,
+                vis_weight_slices,
+                &error,
+                read_progress,
+            );
+            // If the result of reading data was an error, allow the other
+            // threads to see this so they can abandon their work early.
+            if result.is_err() {
+                error.store(true);
             }
-
-            // By dropping the send channel, we signal to the worker thread that
-            // there is no more incoming data, and it can stop waiting.
-            drop(tx_data);
-            read_progress.abandon_with_message("Finished reading input data");
+            result
         });
 
-        // Sky-model generation thread. Only one thread receives the input data,
-        // but it is processed in parallel. This is much more efficient than
-        // having slices of the input data being processed serially by
-        // individual threads.
-        scope.spawn(move |_| {
-            // Split the sky-model components (for efficiency). Use an Either to hold
-            // one type or the other (the types differ between CPU and GPU code).
-            let modeller = if use_cpu_for_modelling {
-                Either::Left(ComponentList::new(
-                    &params.source_list,
-                    &params.unflagged_fine_chan_freqs,
-                    obs_context.phase_centre,
-                ))
-            } else {
-                #[cfg(feature = "cuda")]
-                unsafe {
-                    Either::Right(
-                        SkyModellerCuda::new(
-                            params.beam.deref(),
-                            &params.source_list,
-                            &params.unflagged_fine_chan_freqs,
-                            &params.unflagged_tile_xyzs,
-                            &params.flagged_tiles,
-                            obs_context.phase_centre,
-                            params.array_latitude,
-                            &crate::shapelets::SHAPELET_BASIS_VALUES,
-                            crate::shapelets::SBF_L,
-                            crate::shapelets::SBF_N,
-                            crate::shapelets::SBF_C,
-                            crate::shapelets::SBF_DX,
-                        )
-                        .unwrap(),
-                    )
-                }
+        // Sky-model generation thread.
+        let model_handle = scope.spawn(|_| {
+            defer_on_unwind! { error.store(true); }
 
-                // It doesn't matter what goes in Right when we're not using CUDA.
-                #[cfg(not(feature = "cuda"))]
-                Either::Right(0)
-            };
-
-            // Iterate on the receive channel forever. This terminates when
-            // there is no data in the channel _and_ the sender has been
-            // dropped.
-            for msg in rx_data.iter() {
-                let (timestep, mut vis_model_slice, weights) = match msg {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        // Propagate the error.
-                        tx_model.send(Err(e)).unwrap();
-                        break;
-                    }
-                };
-                debug_assert_eq!(
-                    vis_model_slice.dim(),
-                    weights.dim(),
-                    "vis_model_slice.dim() != weights.dim()"
-                );
-
-                let timestamp = obs_context.timestamps[timestep];
-
-                // TODO: Allow the user to turn off precession.
-                let precession_info = precess_time(
-                    obs_context.phase_centre,
-                    timestamp,
-                    params.array_longitude,
-                    params.array_latitude,
-                );
-                // Apply precession to the tile XYZ positions.
-                let precessed_tile_xyzs =
-                    precession_info.precess_xyz_parallel(&params.unflagged_tile_xyzs);
-                let uvws = xyzs_to_cross_uvws_parallel(
-                    &precessed_tile_xyzs,
-                    obs_context
-                        .phase_centre
-                        .to_hadec(precession_info.lmst_j2000),
-                );
-
-                let model_result = if use_cpu_for_modelling {
-                    model::model_timestep(
-                        vis_model_slice.view_mut(),
-                        modeller.as_ref().unwrap_left(),
-                        params.beam.deref(),
-                        precession_info.lmst_j2000,
-                        &precessed_tile_xyzs,
-                        &uvws,
-                        &params.unflagged_fine_chan_freqs,
-                        &params.unflagged_cross_baseline_to_tile_map,
-                    )
-                    .map_err(CalibrateError::from)
-                } else {
-                    #[cfg(feature = "cuda")]
-                    unsafe {
-                        modeller
-                            .as_ref()
-                            .unwrap_right()
-                            .model_timestep(
-                                vis_model_slice.view_mut(),
-                                precession_info.lmst_j2000,
-                                &uvws,
-                            )
-                            .unwrap();
-                    }
-                    Ok(())
-                };
-                let model_failed = model_result.is_err();
-
-                let msg = model_result.map(|()| (vis_model_slice, weights, uvws, timestamp));
-                // If we can't send the message, it's because the
-                // channel has been closed on the other side. That
-                // should only happen because the thread has exited due
-                // to error; in that case, just exit this thread.
-                match tx_model.send(msg) {
-                    Ok(_) => (),
-                    Err(_) => break,
-                }
-                if model_failed {
-                    break;
-                }
-
-                model_progress.inc(1);
+            let result = model_vis(
+                params,
+                vis_model_slices,
+                tx_model,
+                &error,
+                model_progress,
+                use_cpu_for_modelling,
+            );
+            if result.is_err() {
+                error.store(true);
             }
-            model_progress.abandon_with_message("Finished generating sky model");
-
-            drop(tx_model);
+            result
         });
 
         // Model writing thread. If the user hasn't specified to write the model
-        // to a file, then this thread just propagates errors.
-        scope.spawn(move |_| {
-            // If the user wants the sky model written out, create the file
-            // here. This can take a good deal of time; by creating the file in
-            // a thread, the other threads can do useful work in parallel.
-            let model_writer_result = if let Some(model_pb) = &params.model_file {
-                let start_epoch = params.timeblocks.first().start;
-                let obs_name = obs_context.obsid.map(|o| format!("{}", o));
+        // to a file, then this thread just consumes messages from the modeller.
+        let writer_handle = scope.spawn(|_| {
+            defer_on_unwind! { error.store(true); }
 
-                let create_result = UvfitsWriter::new(
-                    model_pb,
-                    // Don't include flagged timesteps or flagged baselines.
-                    vis_shape.0,
-                    vis_shape.1,
-                    // ... but use all channels (including flagged channels).
-                    // fits files expect a neat layout.
-                    fence.get_total_num_chanblocks(),
-                    false,
-                    start_epoch,
-                    fence.freq_res,
-                    fence.get_centre_freq(),
-                    obs_context.phase_centre,
-                    obs_name.as_deref(),
-                    &params.unflagged_cross_baseline_to_tile_map,
-                    &params.flagged_fine_chans,
-                );
-                // Handle any errors during output model file creation.
-                match create_result {
-                    Err(e) => {
-                        tx_final.send(Err(CalibrateError::from(e))).unwrap();
-                        // If there was an error, make the code below exit early
-                        // so that this thread does no more work. The error has
-                        // already been propagated to the main thread.
-                        Err(0)
-                    }
-                    Ok(v) => Ok(Some(v)),
-                }
-            } else {
-                Ok(None)
-            };
-
-            match model_writer_result {
-                Ok(Some(mut model_writer)) => {
-                    for msg in rx_model.iter() {
-                        // Handle any errors from the worker thread.
-                        let (vis_model_timestep, weights, uvws, epoch) = match msg {
-                            Err(e) => {
-                                tx_final.send(Err(e)).unwrap();
-                                drop(rx_model);
-                                break;
-                            }
-                            Ok(v) => v,
-                        };
-
-                        let write_result: Result<(), CalibrateError> = {
-                            model_writer
-                                .write_cross_timestep_vis(
-                                    vis_model_timestep.view(),
-                                    weights.view(),
-                                    &uvws,
-                                    epoch,
-                                )
-                                .map_err(CalibrateError::from)
-                        };
-                        match write_result {
-                            Err(e) => {
-                                tx_final.send(Err(e)).unwrap();
-                                break;
-                            }
-                            Ok(()) => (),
-                        };
-
-                        if let Some(pb) = &model_write_progress {
-                            pb.inc(1)
-                        }
-                    }
-
-                    // Send the model writer object out to the main thread.
-                    tx_final.send(Ok(Some(model_writer))).unwrap();
-                }
-
-                // There's no model to write out, but we still need to handle
-                // all of the incoming messages.
-                Ok(None) => {
-                    for msg in rx_model.iter() {
-                        match msg {
-                            // Handle any errors from the worker thread.
-                            Err(e) => {
-                                tx_final.send(Err(e)).unwrap();
-                                break;
-                            }
-                            Ok(v) => v,
-                        };
-                    }
-
-                    // Send the model writer object out to the main thread.
-                    tx_final.send(Ok(None)).unwrap();
-                }
-
-                // There was an error when creating the model file. Exit now.
-                Err(_) => (),
+            let result = model_write(params, fence, rx_model, &error, model_write_progress);
+            if result.is_err() {
+                error.store(true);
             }
-
-            drop(tx_final);
-            if let Some(pb) = model_write_progress {
-                pb.abandon_with_message("Finished writing sky model");
-            }
+            result
         });
-    })
-    .unwrap();
-    info!("Finished reading input data and sky modelling");
 
-    // Handle messages from the scoped threads.
-    for msg in rx_final.iter() {
-        match msg {
-            // Finalise writing the model file.
-            Ok(Some(model_writer)) => {
-                trace!("Finalising writing of model uvfits file");
-                model_writer.write_uvfits_antenna_table(
-                    &params.unflagged_tile_names,
-                    &params.unflagged_tile_xyzs,
-                )?;
-                if let Some(model_pb) = &params.model_file {
-                    info!("Finished writing sky model to {}", model_pb.display());
-                }
-            }
+        // Join all thread handles. This propagates any errors and lets us know
+        // if any threads panicked, if panics aren't aborting as per the
+        // Cargo.toml. (It would be nice to capture the panic information, if
+        // it's possible, but I don't know how, so panics are currently
+        // aborting.)
+        let result = data_handle.join();
+        let result = match result {
+            Err(_) | Ok(Err(_)) => result,     // Propagate the previous result
+            Ok(Ok(())) => model_handle.join(), // Propagate the model result
+        };
+        let result = match result {
+            Err(_) | Ok(Err(_)) => result,
+            Ok(Ok(())) => writer_handle.join(),
+        };
+        result
+    });
 
-            // We're not writing a model; nothing to do.
-            Ok(None) => (),
-
-            // If an error message comes in on this channel, propagate it.
-            Err(e) => return Err(e),
-        }
+    match scoped_threads_result {
+        // Propagate anything that didn't panic.
+        Ok(Ok(r)) => r?,
+        // A panic. This ideally only happens because a programmer made a
+        // mistake, but it could happen in drastic situations (e.g. hardware
+        // failure).
+        Err(_) | Ok(Err(_)) => panic!(
+            "A panic occurred; the message should be above. You may need to disable progress bars."
+        ),
     }
+
+    info!("Finished reading input data and sky modelling");
 
     Ok(CalVis {
         vis_data,
         vis_weights,
         vis_model,
     })
+}
+
+fn read_vis_data(
+    params: &CalibrateParams,
+    vis_data_slices: AxisIterMut<Jones<f32>, Dim<[usize; 2]>>,
+    vis_weight_slices: AxisIterMut<f32, Dim<[usize; 2]>>,
+    error: &AtomicCell<bool>,
+    progress_bar: ProgressBar,
+) -> Result<(), CalibrateError> {
+    for ((&timestep, vis_data_slice), vis_weight_slice) in params
+        .timesteps
+        .iter()
+        .zip(vis_data_slices)
+        .zip(vis_weight_slices)
+    {
+        params.read_crosses(vis_data_slice, vis_weight_slice, timestep)?;
+
+        // Should we continue?
+        if error.load() {
+            return Ok(());
+        }
+
+        progress_bar.inc(1);
+    }
+
+    progress_bar.abandon_with_message("Finished reading input data");
+    Ok(())
+}
+
+fn model_vis<'a>(
+    params: &CalibrateParams,
+    vis_model_slices: AxisIterMut<'a, Jones<f32>, Dim<[usize; 2]>>,
+    tx_model: Sender<(ArrayViewMut2<'a, Jones<f32>>, Vec<UVW>, Epoch)>,
+    error: &AtomicCell<bool>,
+    progress_bar: ProgressBar,
+    use_cpu_for_modelling: bool,
+) -> Result<(), CalibrateError> {
+    let obs_context = params.get_obs_context();
+    let modeller = unsafe {
+        model::new_sky_modeller(
+            use_cpu_for_modelling,
+            params.beam.deref(),
+            &params.source_list,
+            &params.unflagged_tile_xyzs,
+            &params.unflagged_fine_chan_freqs,
+            &params.flagged_tiles,
+            obs_context.phase_centre,
+            params.array_longitude,
+            params.array_latitude,
+            // TODO: Allow the user to turn off precession.
+            true,
+        )
+    }?;
+
+    // Iterate over all calibration timesteps and write to the model slices.
+    for (&timestep, mut vis_model_slice) in params.timesteps.iter().zip(vis_model_slices) {
+        // If for some reason the timestamp isn't there for this timestep, a
+        // programmer stuffed up, but emit a decent error message.
+        let timestamp = obs_context
+            .timestamps
+            .get(timestep)
+            .ok_or(CalibrateError::TimestepUnavailable { timestep })?;
+        match modeller.model_timestep(vis_model_slice.view_mut(), *timestamp) {
+            // Send the model information to the writer.
+            Ok(uvws) => match tx_model.send((vis_model_slice, uvws, *timestamp)) {
+                Ok(()) => (),
+                // If we can't send the message, it's because the channel has
+                // been closed on the other side. That should only happen
+                // because the writer has exited due to error; in that case,
+                // just exit this thread.
+                Err(_) => return Ok(()),
+            },
+            Err(e) => return Err(CalibrateError::from(e)),
+        }
+
+        // Should we continue?
+        if error.load() {
+            return Ok(());
+        }
+
+        progress_bar.inc(1);
+    }
+
+    progress_bar.abandon_with_message("Finished generating sky model");
+    Ok(())
+}
+
+fn model_write(
+    params: &CalibrateParams,
+    fence: &Fence,
+    rx_model: Receiver<(ArrayViewMut2<Jones<f32>>, Vec<UVW>, Epoch)>,
+    error: &AtomicCell<bool>,
+    progress_bar: Option<ProgressBar>,
+) -> Result<(), CalibrateError> {
+    // If the user wants the sky model written out, create the file here. This
+    // can take a good deal of time; by creating the file in a thread, the other
+    // threads can do useful work in parallel.
+    if let Some(model_pb) = &params.model_file {
+        let start_epoch = params.timeblocks.first().start;
+        let obs_context = params.get_obs_context();
+        let obs_name = obs_context.obsid.map(|o| format!("{}", o));
+
+        let mut model_writer = UvfitsWriter::new(
+            model_pb,
+            // Don't include flagged timesteps or flagged baselines.
+            params.get_num_timesteps(),
+            params.get_num_unflagged_cross_baselines(),
+            // ... but use all channels (including flagged channels).
+            // fits files expect a neat layout.
+            fence.get_total_num_chanblocks(),
+            false,
+            start_epoch,
+            fence.freq_res,
+            fence.get_centre_freq(),
+            obs_context.phase_centre,
+            obs_name.as_deref(),
+            &params.unflagged_cross_baseline_to_tile_map,
+            &params.flagged_fine_chans,
+        )?;
+
+        // Receiver model information from the modelling thread.
+        for (vis_model_timestep, uvws, timestamp) in rx_model.iter() {
+            model_writer.write_cross_timestep_vis(
+                vis_model_timestep.view(),
+                Array2::ones(vis_model_timestep.dim()).view(),
+                &uvws,
+                timestamp,
+            )?;
+
+            // Should we continue?
+            if error.load() {
+                return Ok(());
+            }
+
+            if let Some(pb) = &progress_bar {
+                pb.inc(1)
+            }
+        }
+
+        // If we have to, finish the writer.
+        trace!("Finalising writing of model uvfits file");
+        model_writer.write_uvfits_antenna_table(
+            &params.unflagged_tile_names,
+            &params.unflagged_tile_xyzs,
+        )?;
+        if let Some(pb) = progress_bar {
+            pb.abandon_with_message("Finished writing sky model");
+        }
+    } else {
+        // There's no model to write out, but we still need to handle all of the
+        // incoming messages.
+        for _ in rx_model.iter() {}
+    };
+
+    Ok(())
 }
 
 /// (Possibly) incomplete calibration solutions.
@@ -911,7 +828,7 @@ fn calibrate_timeblock(
             cal_result
         })
         .collect();
-    debug_assert_eq!(timeblock_cal_results.len(), num_chanblocks);
+    assert_eq!(timeblock_cal_results.len(), num_chanblocks);
     let mut total_converged_count = timeblock_cal_results
         .iter()
         .filter(|result| result.converged)
@@ -1077,7 +994,7 @@ pub(super) fn calibrate(
     stop_threshold: f64,
     min_threshold: f64,
 ) -> CalibrationResult {
-    debug_assert_eq!(data.dim(), model.dim());
+    assert_eq!(data.dim(), model.dim());
 
     let mut new_jones: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
     let mut top: Array1<Jones<f64>> = Array::zeros(di_jones.dim());

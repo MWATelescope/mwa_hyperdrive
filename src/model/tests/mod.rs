@@ -9,17 +9,24 @@ mod cuda;
 
 use std::ops::Deref;
 
-use approx::assert_abs_diff_eq;
-use marlu::{pos::xyz::xyzs_to_cross_uvws_parallel, Jones, RADec, XyzGeodetic};
+use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
+use itertools::Itertools;
+use marlu::{
+    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    pos::xyz::xyzs_to_cross_uvws_parallel,
+    AzEl, Complex, Jones, RADec, XyzGeodetic,
+};
 use ndarray::prelude::*;
+use serial_test::serial;
 
 use super::*;
-use crate::{jones_test::TestJones, math::TileBaselineMaps};
-use mwa_hyperdrive_beam::create_no_beam_object;
-use mwa_hyperdrive_common::{marlu, ndarray};
+use crate::jones_test::TestJones;
+#[cfg(feature = "cuda")]
+use crate::model::cuda::SkyModellerCuda;
+use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Delays};
+use mwa_hyperdrive_common::{itertools, marlu, ndarray};
 use mwa_hyperdrive_srclist::{
-    constants::DEFAULT_SPEC_INDEX, ComponentList, ComponentType, FluxDensity, FluxDensityType,
-    Source, SourceComponent, SourceList,
+    ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList,
 };
 
 fn get_simple_point(pos: RADec, flux_density_scale: FluxDensityType) -> SourceComponent {
@@ -67,9 +74,8 @@ struct ObsParams {
     xyzs: Vec<XyzGeodetic>,
     uvws: Vec<UVW>,
     beam: Box<dyn Beam>,
-    num_unflagged_cross_baselines: usize,
-    unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
     flagged_tiles: Vec<usize>,
+    array_longitude_rad: f64,
     array_latitude_rad: f64,
 }
 
@@ -116,11 +122,10 @@ impl ObsParams {
                 z: 0.0,
             },
         ];
-        let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyzs_to_cross_uvws_parallel(&xyzs, phase_centre.to_hadec(lst));
         let beam = create_no_beam_object(xyzs.len());
         let flagged_tiles = vec![];
-        let maps = TileBaselineMaps::new(xyzs.len(), &flagged_tiles);
+        let array_longitude_rad = MWA_LONG_RAD;
         let array_latitude_rad = MWA_LAT_RAD;
 
         ObsParams {
@@ -131,9 +136,8 @@ impl ObsParams {
             xyzs,
             uvws,
             beam,
-            num_unflagged_cross_baselines,
-            unflagged_cross_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
             flagged_tiles,
+            array_longitude_rad,
             array_latitude_rad,
         }
     }
@@ -143,7 +147,7 @@ impl ObsParams {
         let freqs = vec![150e6, 175e6, 200e6];
 
         let flux_density_scale = FluxDensityType::PowerLaw {
-            si: DEFAULT_SPEC_INDEX,
+            si: -0.8,
             fd: FluxDensity {
                 freq: 150e6,
                 i: 1.0,
@@ -169,11 +173,10 @@ impl ObsParams {
                 z: 0.0,
             },
         ];
-        let num_unflagged_cross_baselines = (xyzs.len() * (xyzs.len() - 1)) / 2;
         let uvws = xyzs_to_cross_uvws_parallel(&xyzs, phase_centre.to_hadec(lst));
         let beam = create_no_beam_object(xyzs.len());
         let flagged_tiles = vec![];
-        let maps = TileBaselineMaps::new(xyzs.len(), &flagged_tiles);
+        let array_longitude_rad = MWA_LONG_RAD;
         let array_latitude_rad = MWA_LAT_RAD;
 
         ObsParams {
@@ -184,29 +187,39 @@ impl ObsParams {
             xyzs,
             uvws,
             beam,
-            num_unflagged_cross_baselines,
-            unflagged_cross_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
             flagged_tiles,
+            array_longitude_rad,
             array_latitude_rad,
         }
     }
 
+    fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu {
+        new_cpu_sky_modeller_inner(
+            self.beam.deref(),
+            srclist,
+            &self.xyzs,
+            &self.freqs,
+            &self.flagged_tiles,
+            self.phase_centre,
+            self.array_longitude_rad,
+            self.array_latitude_rad,
+            true,
+        )
+    }
+
     #[cfg(feature = "cuda")]
-    fn get_gpu_modeller(&self, srclist: SourceList) -> mwa_hyperdrive_cuda::SkyModellerCuda {
+    fn get_gpu_modeller(&self, srclist: &SourceList) -> SkyModellerCuda {
         unsafe {
-            mwa_hyperdrive_cuda::SkyModellerCuda::new(
+            super::new_cuda_sky_modeller_inner(
                 self.beam.deref(),
-                &srclist,
-                &self.freqs,
+                srclist,
                 &self.xyzs,
+                &self.freqs,
                 &self.flagged_tiles,
                 self.phase_centre,
+                self.array_longitude_rad,
                 self.array_latitude_rad,
-                &crate::shapelets::SHAPELET_BASIS_VALUES,
-                crate::shapelets::SBF_L,
-                crate::shapelets::SBF_N,
-                crate::shapelets::SBF_C,
-                crate::shapelets::SBF_DX,
+                true,
             )
             .unwrap()
         }
@@ -317,7 +330,6 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
 #[test]
 fn point_zenith_cpu() {
     let obs = ObsParams::list();
-
     let mut srclist = SourceList::new();
     srclist.insert(
         "zenith".to_string(),
@@ -328,21 +340,10 @@ fn point_zenith_cpu() {
             )],
         },
     );
-    // Get the component parameters via `ComponentList`.
-    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
-
-    // Ignore applying the beam.
-    let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    model_points(
-        visibilities.view_mut(),
-        obs.beam.deref(),
-        &comps.points.get_azels_mwa_parallel(obs.lst),
-        &comps.points.lmns,
-        comps.points.flux_densities.view(),
-        &obs.uvws,
-        &obs.freqs,
-        &obs.unflagged_cross_baseline_to_tile_map,
-    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view());
 }
 
@@ -350,28 +351,20 @@ fn point_zenith_cpu() {
 #[test]
 fn point_off_zenith_cpu() {
     let obs = ObsParams::list();
-    let pos = RADec::new_degrees(1.0, -27.0);
-
     let mut srclist = SourceList::new();
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_point(pos, obs.flux_density_scale.clone())],
+            components: vec![get_simple_point(
+                RADec::new_degrees(1.0, -27.0),
+                obs.flux_density_scale.clone(),
+            )],
         },
     );
-    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
-
-    let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    model_points(
-        visibilities.view_mut(),
-        obs.beam.deref(),
-        &comps.points.get_azels_mwa_parallel(obs.lst),
-        &comps.points.lmns,
-        comps.points.flux_densities.view(),
-        &obs.uvws,
-        &obs.freqs,
-        &obs.unflagged_cross_baseline_to_tile_map,
-    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
 }
 
@@ -379,7 +372,6 @@ fn point_off_zenith_cpu() {
 #[test]
 fn gaussian_zenith_cpu() {
     let obs = ObsParams::list();
-
     let mut srclist = SourceList::new();
     srclist.insert(
         "zenith".to_string(),
@@ -390,20 +382,10 @@ fn gaussian_zenith_cpu() {
             )],
         },
     );
-    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
-
-    let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    model_gaussians(
-        visibilities.view_mut(),
-        obs.beam.deref(),
-        &comps.gaussians.get_azels_mwa_parallel(obs.lst),
-        &comps.gaussians.lmns,
-        &comps.gaussians.gaussian_params,
-        comps.gaussians.flux_densities.view(),
-        &obs.uvws,
-        &obs.freqs,
-        &obs.unflagged_cross_baseline_to_tile_map,
-    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view());
 }
 
@@ -411,29 +393,20 @@ fn gaussian_zenith_cpu() {
 #[test]
 fn gaussian_off_zenith_cpu() {
     let obs = ObsParams::list();
-    let pos = RADec::new_degrees(1.0, -27.0);
-
     let mut srclist = SourceList::new();
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_gaussian(pos, obs.flux_density_scale.clone())],
+            components: vec![get_simple_gaussian(
+                RADec::new_degrees(1.0, -27.0),
+                obs.flux_density_scale.clone(),
+            )],
         },
     );
-    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
-
-    let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    model_gaussians(
-        visibilities.view_mut(),
-        obs.beam.deref(),
-        &comps.gaussians.get_azels_mwa_parallel(obs.lst),
-        &comps.gaussians.lmns,
-        &comps.gaussians.gaussian_params,
-        comps.gaussians.flux_densities.view(),
-        &obs.uvws,
-        &obs.freqs,
-        &obs.unflagged_cross_baseline_to_tile_map,
-    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
 }
 
@@ -441,7 +414,6 @@ fn gaussian_off_zenith_cpu() {
 #[test]
 fn shapelet_zenith_cpu() {
     let obs = ObsParams::list();
-
     let mut srclist = SourceList::new();
     srclist.insert(
         "zenith".to_string(),
@@ -452,23 +424,19 @@ fn shapelet_zenith_cpu() {
             )],
         },
     );
-    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
-
-    let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
-    model_shapelets(
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let shapelet_uvws = modeller
+        .components
+        .shapelets
+        .get_shapelet_uvws(obs.lst, &obs.xyzs);
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    let result = modeller.model_shapelets_inner(
         visibilities.view_mut(),
-        obs.beam.deref(),
-        &comps.shapelets.get_azels_mwa_parallel(obs.lst),
-        &comps.shapelets.lmns,
-        &comps.shapelets.gaussian_params,
-        &comps.shapelets.shapelet_coeffs,
-        shapelet_uvws.view(),
-        comps.shapelets.flux_densities.view(),
         &obs.uvws,
-        &obs.freqs,
-        &obs.unflagged_cross_baseline_to_tile_map,
+        shapelet_uvws.view(),
+        obs.lst,
     );
+    assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view());
 }
 
@@ -476,31 +444,54 @@ fn shapelet_zenith_cpu() {
 #[test]
 fn shapelet_off_zenith_cpu() {
     let obs = ObsParams::list();
-    let pos = RADec::new_degrees(1.0, -27.0);
-
     let mut srclist = SourceList::new();
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_shapelet(pos, obs.flux_density_scale.clone())],
+            components: vec![get_simple_shapelet(
+                RADec::new_degrees(1.0, -27.0),
+                obs.flux_density_scale.clone(),
+            )],
         },
     );
-    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
-
-    let mut visibilities = Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default());
-    let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
-    model_shapelets(
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let shapelet_uvws = modeller
+        .components
+        .shapelets
+        .get_shapelet_uvws(obs.lst, &obs.xyzs);
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    let result = modeller.model_shapelets_inner(
         visibilities.view_mut(),
-        obs.beam.deref(),
-        &comps.shapelets.get_azels_mwa_parallel(obs.lst),
-        &comps.shapelets.lmns,
-        &comps.shapelets.gaussian_params,
-        &comps.shapelets.shapelet_coeffs,
-        shapelet_uvws.view(),
-        comps.shapelets.flux_densities.view(),
         &obs.uvws,
+        shapelet_uvws.view(),
+        obs.lst,
+    );
+    assert!(result.is_ok());
+    assert_list_off_zenith_visibilities(visibilities.view());
+}
+        },
+    );
+
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    let modeller = SkyModeller::new(
+        obs.beam.deref(),
+        &srclist,
+        &obs.xyzs,
         &obs.freqs,
         &obs.unflagged_cross_baseline_to_tile_map,
+        obs.phase_centre,
+        obs.array_longitude_rad,
+        obs.array_latitude_rad,
+        true,
     );
+    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
+    let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
+    let result = modeller.model_shapelets_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        shapelet_uvws.view(),
+        obs.lst,
+    );
+    assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
 }

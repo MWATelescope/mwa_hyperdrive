@@ -6,11 +6,14 @@
 
 use thiserror::Error;
 
-use mwa_hyperdrive_beam::BeamError;
 use mwa_hyperdrive_common::thiserror;
 
 #[derive(Error, Debug)]
 pub enum ModelError {
     #[error("{0}")]
-    Beam(#[from] BeamError),
+    Beam(#[from] mwa_hyperdrive_beam::BeamError),
+
+    #[cfg(feature = "cuda")]
+    #[error("{0}")]
+    Cuda(#[from] mwa_hyperdrive_beam::CudaError),
 }

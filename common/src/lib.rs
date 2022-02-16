@@ -5,6 +5,7 @@
 //! Code to be shared between hyperdrive-related binaries.
 
 mod logging;
+pub mod shapelets;
 
 pub use logging::*;
 
@@ -14,7 +15,7 @@ pub fn is_a_tty() -> bool {
 
 // Re-exports.
 pub use {
-    cfg_if, chrono, clap, fern, indicatif, itertools, lazy_static, log, marlu,
+    byteorder, cfg_if, chrono, clap, fern, flate2, indicatif, itertools, lazy_static, log, marlu,
     marlu::{c32, c64, erfa_sys, hifitime, mwalib, ndarray, num_traits, rayon, Complex},
     serde_json, thiserror, toml,
 };

@@ -12,7 +12,6 @@
 //! implication being that a sky-model source's brightness is always assumed to
 //! be correct when at zenith.
 
-mod cache;
 mod error;
 mod fee;
 #[cfg(test)]
@@ -52,9 +51,16 @@ pub enum BeamType {
 
 /// A trait abstracting beam code functions.
 pub trait Beam: Sync + Send {
-    /// Calculate the Jones matrices for an [AzEl] direction. The pointing
-    /// information is not needed because it was provided when `self` was
-    /// created.
+    /// Get the type of beam.
+    fn get_beam_type(&self) -> BeamType;
+
+    /// Get the number of tiles associated with this beam. This is determined by
+    /// how many delays have been provided.
+    fn get_num_tiles(&self) -> usize;
+
+    /// Calculate the beam-response Jones matrix for an [AzEl] direction. The
+    /// pointing information is not needed because it was provided when `self`
+    /// was created.
     fn calc_jones(
         &self,
         azel: AzEl,
@@ -62,23 +68,21 @@ pub trait Beam: Sync + Send {
         tile_index: usize,
     ) -> Result<Jones<f64>, BeamError>;
 
-    /// Get the type of beam.
-    fn get_beam_type(&self) -> BeamType;
+    /// Calculate the beam-response Jones matrices for multiple [AzEl]
+    /// directions. The pointing information is not needed because it was
+    /// provided when `self` was created.
+    fn calc_jones_array(
+        &self,
+        azels: &[AzEl],
+        freq_hz: f64,
+        tile_index: usize,
+    ) -> Result<Vec<Jones<f64>>, BeamError>;
 
     /// Given a frequency in Hz, find the closest frequency that the beam code
     /// is defined for. An example of when this is important is with the FEE
     /// beam code, which can only give beam responses at specific frequencies.
     /// On the other hand, the analytic beam can be used at any frequency.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
-
-    /// Get the size of the [Jones] cache associated with this [Beam].
-    fn len(&self) -> usize;
-
-    /// Is the [Jones] cache empty?
-    fn is_empty(&self) -> bool;
-
-    /// Empty the [Jones] cache.
-    fn empty_cache(&self);
 
     /// If this [Beam] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self);
@@ -147,12 +151,18 @@ pub enum Delays {
 /// A beam implementation that returns only identity Jones matrices for all beam
 /// calculations.
 pub struct NoBeam {
-    /// This is needed for the CUDA "beam jones map".
-    #[cfg(feature = "cuda")]
     num_tiles: usize,
 }
 
 impl Beam for NoBeam {
+    fn get_beam_type(&self) -> BeamType {
+        BeamType::None
+    }
+
+    fn get_num_tiles(&self) -> usize {
+        self.num_tiles
+    }
+
     fn calc_jones(
         &self,
         _azel: AzEl,
@@ -162,22 +172,19 @@ impl Beam for NoBeam {
         Ok(Jones::identity())
     }
 
+    fn calc_jones_array(
+        &self,
+        azels: &[AzEl],
+        _freq_hz: f64,
+        _tile_index: usize,
+    ) -> Result<Vec<Jones<f64>>, BeamError> {
+        Ok(vec![Jones::identity(); azels.len()])
+    }
+
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
         desired_freq_hz
     }
 
-    fn get_beam_type(&self) -> BeamType {
-        BeamType::None
-    }
-
-    // No caches associated with `NoBeam`.
-    fn len(&self) -> usize {
-        0
-    }
-    fn is_empty(&self) -> bool {
-        true
-    }
-    fn empty_cache(&self) {}
     fn empty_coeff_cache(&self) {}
 
     #[cfg(feature = "cuda")]
@@ -227,13 +234,5 @@ impl BeamCUDA for NoBeamCUDA {
 
 /// Create a "no beam" object.
 pub fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "cuda")] {
-            Box::new(NoBeam {
-                num_tiles
-            })
-        } else {
-            Box::new(NoBeam {})
-        }
-    }
+    Box::new(NoBeam { num_tiles })
 }

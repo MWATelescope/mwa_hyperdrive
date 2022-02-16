@@ -23,6 +23,11 @@ pub enum CalibrateError {
     #[error("Insufficient memory available to perform calibration; need {need_gib} GiB of memory.\nYou could try using fewer timesteps and channels.")]
     InsufficientMemory { need_gib: usize },
 
+    #[error(
+        "Timestep {timestep} wasn't available in the timestamps list; this is a programmer error"
+    )]
+    TimestepUnavailable { timestep: usize },
+
     #[error("{0}")]
     ArgFile(#[from] CalibrateArgsFileError),
 

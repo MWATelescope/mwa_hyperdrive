@@ -584,15 +584,14 @@ impl<'a> UvfitsWriter<'a> {
         uvws: &[UVW],
         epoch: Epoch,
     ) -> Result<(), UvfitsWriteError> {
-        let mut uvfits = self.open()?;
+        // Sanity checks.
+        let num_unflagged_cross_baselines = cross_vis.len_of(Axis(0));
+        let num_unflagged_chans = cross_vis.len_of(Axis(1));
+        assert_eq!(num_unflagged_cross_baselines, uvws.len());
+        assert!(num_unflagged_cross_baselines <= self.num_baselines);
+        assert!(num_unflagged_chans <= self.num_chans);
 
-        {
-            let num_cross_baselines = cross_vis.len_of(Axis(0));
-            let num_chans = cross_vis.len_of(Axis(1));
-            debug_assert_eq!(num_cross_baselines, uvws.len());
-            debug_assert_eq!(num_cross_baselines, self.num_baselines);
-            debug_assert_eq!(num_chans, self.num_chans);
-        }
+        let mut uvfits = self.open()?;
 
         // Write out all the baselines of the timestep we received.
         let mut vis: Vec<f32> = Vec::with_capacity(5 + 12 * self.num_chans);
@@ -639,11 +638,11 @@ impl<'a> UvfitsWriter<'a> {
         let num_cross_baselines = cross_vis.len_of(Axis(0));
         let num_chans = cross_vis.len_of(Axis(1));
         let num_antennas = auto_vis.len_of(Axis(0));
-        debug_assert_eq!(self.unflagged_ants.len(), num_antennas);
-        debug_assert_eq!((num_antennas * (num_antennas - 1)) / 2, num_cross_baselines);
-        debug_assert_eq!(num_cross_baselines, uvws.len());
-        debug_assert_eq!(num_cross_baselines, self.num_baselines - num_antennas);
-        debug_assert_eq!(num_chans, self.num_chans);
+        assert_eq!(self.unflagged_ants.len(), num_antennas);
+        assert_eq!((num_antennas * (num_antennas - 1)) / 2, num_cross_baselines);
+        assert_eq!(num_cross_baselines, uvws.len());
+        assert_eq!(num_cross_baselines, self.num_baselines - num_antennas);
+        assert_eq!(num_chans, self.num_chans);
 
         // Write out all the baselines of the timestep we received.
         let mut vis: Vec<f32> = Vec::with_capacity(5 + 12 * self.num_chans);

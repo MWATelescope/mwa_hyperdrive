@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 
 use super::SourceList;
 use crate::{FluxDensity, FluxDensityType};
-use mwa_hyperdrive_beam::{Beam, BeamError};
 use mwa_hyperdrive_common::{marlu, ndarray, rayon};
 
 /// Information on a source's component.
@@ -337,15 +336,6 @@ pub struct ShapeletComponentParams {
 /// A trait to abstract common behaviour on the per-component parameters.
 pub trait PerComponentParams {
     fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl>;
-
-    /// Beam-correct the expected flux densities of the sky-model source components.
-    fn beam_correct_flux_densities(
-        &self,
-        lst_rad: f64,
-        beam: &dyn Beam,
-        dipole_gains: &[f64],
-        freqs: &[f64],
-    ) -> Result<Array2<Jones<f64>>, BeamError>;
 }
 
 fn get_azels_mwa_parallel(radecs: &[RADec], lst_rad: f64) -> Vec<AzEl> {
@@ -355,52 +345,11 @@ fn get_azels_mwa_parallel(radecs: &[RADec], lst_rad: f64) -> Vec<AzEl> {
         .collect()
 }
 
-fn beam_correct_flux_densities(
-    radecs: &[RADec],
-    instrumental_flux_densities: ArrayView2<Jones<f64>>,
-    lst_rad: f64,
-    beam: &dyn Beam,
-    dipole_gains: &[f64],
-    freqs: &[f64],
-) -> Result<Array2<Jones<f64>>, BeamError> {
-    let azels = get_azels_mwa_parallel(radecs, lst_rad);
-
-    debug_assert_eq!(instrumental_flux_densities.len_of(Axis(0)), freqs.len());
-    debug_assert_eq!(instrumental_flux_densities.len_of(Axis(1)), radecs.len());
-    debug_assert_eq!(instrumental_flux_densities.len_of(Axis(1)), azels.len());
-    debug_assert!(dipole_gains.len() == 16 || dipole_gains.len() == 32);
-
-    beam_correct_flux_densities_inner(
-        instrumental_flux_densities.view(),
-        beam,
-        &azels,
-        dipole_gains,
-        freqs,
-    )
-}
-
 // Make each of the component types derive the trait.
 
 impl PerComponentParams for PointComponentParams {
     fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
         get_azels_mwa_parallel(&self.radecs, lst_rad)
-    }
-
-    fn beam_correct_flux_densities(
-        &self,
-        lst_rad: f64,
-        beam: &dyn Beam,
-        dipole_gains: &[f64],
-        freqs: &[f64],
-    ) -> Result<Array2<Jones<f64>>, BeamError> {
-        beam_correct_flux_densities(
-            &self.radecs,
-            self.flux_densities.view(),
-            lst_rad,
-            beam,
-            dipole_gains,
-            freqs,
-        )
     }
 }
 
@@ -408,107 +357,10 @@ impl PerComponentParams for GaussianComponentParams {
     fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
         get_azels_mwa_parallel(&self.radecs, lst_rad)
     }
-
-    fn beam_correct_flux_densities(
-        &self,
-        lst_rad: f64,
-        beam: &dyn Beam,
-        dipole_gains: &[f64],
-        freqs: &[f64],
-    ) -> Result<Array2<Jones<f64>>, BeamError> {
-        beam_correct_flux_densities(
-            &self.radecs,
-            self.flux_densities.view(),
-            lst_rad,
-            beam,
-            dipole_gains,
-            freqs,
-        )
-    }
 }
 
 impl PerComponentParams for ShapeletComponentParams {
     fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
         get_azels_mwa_parallel(&self.radecs, lst_rad)
-    }
-
-    fn beam_correct_flux_densities(
-        &self,
-        lst_rad: f64,
-        beam: &dyn Beam,
-        dipole_gains: &[f64],
-        freqs: &[f64],
-    ) -> Result<Array2<Jones<f64>>, BeamError> {
-        beam_correct_flux_densities(
-            &self.radecs,
-            self.flux_densities.view(),
-            lst_rad,
-            beam,
-            dipole_gains,
-            freqs,
-        )
-    }
-}
-
-/// Beam-correct the expected flux densities of the sky-model source components.
-/// This function should only be called by `beam_correct_flux_densities`, but is
-/// isolated for testing.
-///
-/// `instrumental_flux_densities`: An ndarray view of the instrumental Stokes
-/// flux densities of all sky-model source components (as Jones matrices). The
-/// first axis is unflagged fine channel, the second is sky-model component.
-///
-/// `beam`: A `hyperdrive` [Beam] object.
-///
-/// `azels`: A collection of [AzEl] structs for each source component. The
-/// length and order of this collection should match that of the second axis of
-/// `instrumental_flux_densities`.
-///
-/// `dipole_gains`: The dipole gains to use when calculating beam responses.
-/// TODO: Make this different for each tile in a baseline.
-///
-/// `freqs`: The frequencies to use when calculating the beam responses. The
-/// length and order of this collection should match that of the first axis of
-/// `instrumental_flux_densities`.
-fn beam_correct_flux_densities_inner(
-    instrumental_flux_densities: ArrayView2<Jones<f64>>,
-    beam: &dyn Beam,
-    azels: &[AzEl],
-    dipole_gains: &[f64],
-    freqs: &[f64],
-) -> Result<Array2<Jones<f64>>, BeamError> {
-    let mut beam_corrected_fds =
-        Array2::from_elem(instrumental_flux_densities.dim(), Jones::default());
-
-    let results = beam_corrected_fds
-        .outer_iter_mut()
-        .into_par_iter()
-        .zip(instrumental_flux_densities.outer_iter())
-        .zip(freqs.par_iter())
-        .try_for_each(|((mut inst_fds_for_freq, inst_fds), freq)| {
-            inst_fds_for_freq
-                .iter_mut()
-                .zip(inst_fds.iter())
-                .zip(azels.iter())
-                .try_for_each(|((comp_fd, inst_fd), azel)| {
-                    // `jones_1` is the beam response from the first tile in
-                    // this baseline.
-                    // let jones_1 = beam.calc_jones(*azel, *freq, dipole_gains)?;
-
-                    // `jones_2` is the beam response from the second tile in
-                    // this baseline.
-                    // TODO: Use a Jones matrix from another tile!
-                    // let jones_2 = jones_1;
-
-                    // J . I . J^H
-                    // *comp_fd = jones_1 * *inst_fd * jones_2.h();
-                    Ok(())
-                })
-        });
-
-    // Handle any errors that happened in the closure.
-    match results {
-        Ok(()) => Ok(beam_corrected_fds),
-        Err(e) => Err(e),
     }
 }

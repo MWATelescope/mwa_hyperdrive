@@ -9,9 +9,7 @@ use std::io::Read;
 use byteorder::{ByteOrder, LittleEndian};
 use marlu::c64;
 
-use mwa_hyperdrive_common::{lazy_static, marlu};
-
-pub(crate) const I_POWER_TABLE: [c64; 4] = [
+pub const I_POWER_TABLE: [c64; 4] = [
     c64::new(1.0, 0.0),
     c64::new(0.0, 1.0),
     c64::new(-1.0, 0.0),
@@ -20,15 +18,15 @@ pub(crate) const I_POWER_TABLE: [c64; 4] = [
 
 // These values correspond to what were used when
 // "shapelet_basis_functions.bin.gz" was generated.
-pub(crate) const SBF_C: f64 = 5000.0;
-pub(crate) const SBF_L: usize = 10001;
-pub(crate) const SBF_N: usize = 101;
-pub(crate) const SBF_DX: f64 = 0.01;
+pub const SBF_C: f64 = 5000.0;
+pub const SBF_L: usize = 10001;
+pub const SBF_N: usize = 101;
+pub const SBF_DX: f64 = 0.01;
 
 // Read from "shapelet_basis_functions.bin.gz" in hyperdrive's project src
 // directory. Courtesy Jack Line.
 lazy_static::lazy_static! {
-    pub(crate) static ref SHAPELET_BASIS_VALUES: Vec<f64> = {
+    pub static ref SHAPELET_BASIS_VALUES: Vec<f64> = {
         // Read the compressed binary file from inside the hyperdrive binary.
         // This is loaded into the hyperdrive binary at compile time.
         let bytes = include_bytes!("shapelet_basis_values.bin.gz");

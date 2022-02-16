@@ -23,11 +23,11 @@ members = [
     "srclist",
 ]
 
-[profile.dev]
-opt-level = 2
-
 [profile.release]
 panic = "abort"
+
+[profile.dev]
+opt-level = 2
 
 [features]
 default = ["plotting"]
@@ -39,19 +39,18 @@ cuda-single = ["cuda", "mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_beam/c
 plotting = ["plotters"]
 cfitsio-static = ["mwa_hyperdrive_common/cfitsio-static", "birli/cfitsio-static"]
 erfa-static = ["mwa_hyperdrive_common/erfa-static", "birli/erfa-static"]
-hdf5-static = ["mwa_hyperdrive_srclist/hdf5-static"]
+hdf5-static = ["mwa_hyperdrive_beam/hdf5-static", "mwa_hyperdrive_srclist/hdf5-static"]
 cuda-static = ["mwa_hyperdrive_common/cuda-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
 birli = { git = "https://github.com/MWATelescope/Birli", branch = "main", default_features = false }
-byteorder = "1.4.3"
 console = "0.15.0"
 crossbeam-channel = "0.5.0"
 crossbeam-utils = "0.8.7"
-flate2 = "1.0.13"
 glob = "0.3.0"
 regex = "1.4.6"
+scopeguard = "1.1.0"
 serde = { version = "1.0.103", features = ["derive"] }
 strum = "0.23.0"
 strum_macros = "0.23.0"
