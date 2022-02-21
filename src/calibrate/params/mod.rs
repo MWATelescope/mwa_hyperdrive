@@ -779,7 +779,7 @@ impl CalibrateParams {
         // (if applicable).
         let precession_info = precess_time(
             obs_context.phase_centre,
-            obs_context.timestamps[0],
+            *obs_context.timestamps.first(),
             array_longitude,
             array_latitude,
         );

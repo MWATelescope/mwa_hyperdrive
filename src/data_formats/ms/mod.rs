@@ -276,6 +276,9 @@ impl MS {
             Vec1::try_from_vec(all_timesteps).map_err(|_| MsReadError::NoTimesteps {
                 file: ms.display().to_string(),
             })?;
+        let timestamps = Vec1::try_from_vec(timestamps).map_err(|_| MsReadError::NoTimesteps {
+            file: ms.display().to_string(),
+        })?;
 
         match timestamps.as_slice() {
             // Handled above; measurement sets aren't allowed to be empty.
@@ -473,7 +476,6 @@ impl MS {
                 }
             })
             .collect();
-        let fine_chan_range = 0..fine_chan_freqs.len();
 
         // Get the observation's flagged channels per coarse band.
         let flagged_fine_chans: Vec<bool> = {
@@ -559,11 +561,10 @@ impl MS {
             coarse_chan_nums,
             coarse_chan_freqs,
             coarse_chan_width,
-            total_bandwidth: total_bandwidth_hz,
-            fine_chan_range,
-            fine_chan_freqs,
             num_fine_chans_per_coarse_chan,
+            total_bandwidth: total_bandwidth_hz,
             freq_res: Some(freq_res),
+            fine_chan_freqs,
             flagged_fine_chans,
             flagged_fine_chans_per_coarse_chan,
         };

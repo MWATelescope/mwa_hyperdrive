@@ -228,6 +228,10 @@ impl UvfitsReader {
             Vec1::try_from_vec(all_timesteps).map_err(|_| UvfitsReadError::NoTimesteps {
                 file: uvfits.filename.clone(),
             })?;
+        let timestamps =
+            Vec1::try_from_vec(timestamps).map_err(|_| UvfitsReadError::NoTimesteps {
+                file: uvfits.filename.clone(),
+            })?;
 
         // Get the data's time resolution. There is a possibility that the file
         // contains only one timestep.
@@ -346,7 +350,6 @@ impl UvfitsReader {
             num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
             total_bandwidth,
             freq_res: Some(freq_res),
-            fine_chan_range: 0..metadata.num_fine_freq_chans,
             fine_chan_freqs,
             // TODO: Get flagging right. I think that info is in an optional table.
             flagged_fine_chans: vec![],

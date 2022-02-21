@@ -4,8 +4,6 @@
 
 //! Metadata on an observation.
 
-use std::ops::Range;
-
 use hifitime::Epoch;
 use marlu::{RADec, XyzGeodetic};
 use ndarray::Array2;
@@ -29,7 +27,7 @@ pub(crate) struct ObsContext {
     /// The unique timestamps in the observation. These are stored as `hifitime`
     /// [Epoch] structs to help keep the code flexible. These include timestamps
     /// that are deemed "flagged" by the observation.
-    pub(crate) timestamps: Vec<Epoch>,
+    pub(crate) timestamps: Vec1<Epoch>,
 
     /// The *available* timestep indices of the input data. This does not
     /// necessarily start at 0, and is not necessarily regular (e.g. a valid
@@ -106,7 +104,7 @@ pub(crate) struct ObsContext {
     pub(crate) num_fine_chans_per_coarse_chan: usize,
 
     /// The bandwidth of the supplied data \[Hz\]. This is not necessarily the
-    /// bandwidth of the full observation, as the data here may only reflect a
+    /// bandwidth of the actual observation, as the data here may only reflect a
     /// fraction of it.
     pub(crate) total_bandwidth: f64,
 
@@ -114,11 +112,6 @@ pub(crate) struct ObsContext {
     /// necessarily the fine-channel resolution of the original observation's
     /// data; this data may have applied averaging to the original observation.
     pub(crate) freq_res: Option<f64>,
-
-    /// The fine-channel number range (exclusive). e.g. if a legacy MWA
-    /// observation has 40 kHz fine-channel resolution, then this should be
-    /// 0..768.
-    pub(crate) fine_chan_range: Range<usize>,
 
     /// All of the fine-channel frequencies within the data \[Hz\]. The values
     /// reflect the frequencies at the *centre* of each channel.

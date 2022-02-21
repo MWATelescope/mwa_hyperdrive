@@ -90,9 +90,6 @@ impl RawDataReader {
         let mwalib_context = get_mwalib_correlator_context(meta_pb, gpubox_pbs)?;
         let metafits_context = &mwalib_context.metafits_context;
 
-        let all_timesteps = Vec1::try_from_vec(mwalib_context.provided_timestep_indices.clone())
-            .map_err(|_| RawReadError::NoTimesteps)?;
-
         let total_num_tiles = metafits_context.num_ants;
         trace!("There are {} total tiles", total_num_tiles);
 
@@ -185,11 +182,14 @@ impl RawDataReader {
 
         let time_res = Some(metafits_context.corr_int_time_ms as f64 / 1e3);
 
+        let all_timesteps = Vec1::try_from_vec(mwalib_context.provided_timestep_indices.clone())
+            .map_err(|_| RawReadError::NoTimesteps)?;
         let timestamps: Vec<Epoch> = mwalib_context
             .timesteps
             .iter()
             .map(|t| Epoch::from_gpst_seconds(t.gps_time_ms as f64 / 1e3))
             .collect();
+        let timestamps = Vec1::try_from_vec(timestamps).map_err(|_| RawReadError::NoTimesteps)?;
 
         let common_good_coarse_chans: Vec<&mwalib::CoarseChannel> = mwalib_context
             .coarse_chans
@@ -377,17 +377,13 @@ impl RawDataReader {
                 .map(|cc| cc.chan_centre_hz as f64)
                 .collect(),
             coarse_chan_width: metafits_context.coarse_chan_width_hz as f64,
+            num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
             total_bandwidth: common_good_coarse_chans
                 .iter()
                 .map(|cc| cc.chan_width_hz as f64)
                 .sum(),
-            fine_chan_range: common_good_coarse_chans.first().corr_chan_number
-                * metafits_context.num_corr_fine_chans_per_coarse
-                ..common_good_coarse_chans.last().corr_chan_number
-                    * metafits_context.num_corr_fine_chans_per_coarse,
-            fine_chan_freqs,
-            num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
             freq_res: Some(metafits_context.corr_fine_chan_width_hz as f64),
+            fine_chan_freqs,
             flagged_fine_chans,
             flagged_fine_chans_per_coarse_chan,
         };
