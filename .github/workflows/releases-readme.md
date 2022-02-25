@@ -24,3 +24,20 @@ different classes of CPUs so users can get something that works best for them.
 
 If your CPU does not support x86-64-v3, you will need to compile `hyperdrive`
 from source.
+
+# CUDA?
+
+The releases with "CUDA" in the name are CUDA enabled. The `hyperdrive` binaries
+have been dynamically linked against CUDA 11.2.0; to run them, a CUDA
+installation on version 11 is required.
+
+There is also a double- or single-precision version of `hyperdrive` provided. If
+you're running a desktop NVIDIA GPU (e.g. RTX 2070), then you probably want the
+single-precision version. This is because desktop GPUs have a lot less
+double-precision computation capability. It is still possible to use the
+double-precision version, but the extra precision comes at the expensive of
+speed.
+
+Other GPUs, like the V100s hosted by the Pawsey Supercomputing Centre, are
+capable of running the double-precision code much faster, so there is little
+incentive for running single-precision code on these GPUs.

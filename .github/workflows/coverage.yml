@@ -62,7 +62,7 @@ jobs:
         run: |
           export PATH="${HOME}/.cargo/bin:${PATH}"
           mkdir -p coverage
-          cargo +nightly-2022-01-14 llvm-cov --lib --no-default-features --lcov --output-path coverage/coverage.lcov
+          cargo +nightly-2022-01-14 llvm-cov --all-targets --workspace --no-default-features --lcov --output-path coverage/coverage.lcov
           # this uses the result of the previous run to generate a text summary
           cargo +nightly-2022-01-14 llvm-cov --no-run
         env:

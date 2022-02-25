@@ -7,12 +7,24 @@
 <img src="https://github.com/MWATelescope/mwa_hyperdrive/workflows/Tests/badge.svg" alt="Linux%20tests">
 <a href="https://codecov.io/gh/MWATelescope/mwa_hyperdrive">
   <img src="https://codecov.io/gh/MWATelescope/mwa_hyperdrive/branch/main/graph/badge.svg?token=FSRY8T0G0R"/>
+</a>
 </div>
 
 Calibration software for the Murchison Widefield Array (MWA) radio telescope.
 Aims to provide feature parity with and exceed the MWA Real-Time System (RTS).
 
-Currently in heavy development.
+Currently in heavy development. Major milestones are listed below:
+
+  - [x] Direction-independent calibration (on both CPUs and GPUs)
+  - [x] Reading visibilities from raw MWA data (legacy and MWAX), uvfits and
+    measurement sets
+  - [x] Reading and writing RTS, AOcal and WODEN style sky-model source lists
+  - [x] Reading and writing RTS, AOcal and hyperdrive style calibration
+    solutions
+  - [x] Writing visibilities to uvfits
+  - [ ] Writing visibilities to measurement sets
+  - [ ] Writing to multiple uvfits or measurement sets for each MWA coarse channel
+  - [ ] Direction-dependent calibration
 
 ## Usage
 A comprehensive use guide can be found on the [wiki](https://github.com/MWATelescope/mwa_hyperdrive/wiki), but below are some TL;DR examples.
@@ -22,11 +34,8 @@ Many `hyperdrive` functions require the beam code to function. The
 FEE beam HDF5 file. See the README for
 [`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam) for more info.
 
-### Calibration
+### DI Calibration
 <details>
-At present, only direction-independent calibration is supported, but
-direction-dependent calibration is planned.
-
 By default, only calibration solutions are written out (to a default filename):
 
     # -d is short for --data
@@ -73,14 +82,18 @@ A number of sky-model source list utilities are available. At the time of
 writing, the following subcommands are available (output edited for clarity):
 
     $ hyperdrive
-    hyperdrive 0.2.0-alpha6
+    hyperdrive 0.2.0-alpha9
     ...
 
     SUBCOMMANDS:
-        srclist-by-beam
-        srclist-convert
-        srclist-shift
-        srclist-verify
+        ...
+        srclist-by-beam      Reduce a sky-model source list to the top N brightest sources, given pointing information
+        srclist-convert      Convert a sky-model source list from one format to another
+        srclist-shift        Shift the sources in a source list. Useful to correct for the ionosphere. The shifts must
+                             be detailed in a .json file, with source names as keys associated with an "ra" and "dec"
+                             in degrees. Only the sources specified in the .json are written to the output source list
+        srclist-verify       Verify that sky-model source lists can be read by hyperdrive
+        ...
 
 Each of these subcommands have their own associated help, e.g.
 
@@ -134,33 +147,49 @@ also available):
   `https://www.rust-lang.org/tools/install`
 
 - [cfitsio](https://heasarc.gsfc.nasa.gov/docs/software/fitsio/)
+  - Can compile statically; use the `cfitsio-static` or `all-static` features.
   - Ubuntu: `libcfitsio-dev`
   - Arch: `cfitsio`
-  - Library and include dirs can be specified manually with CFITSIO_LIB and
-    CFITSIO_INC
-  - If not specified, `pkg-config` is used to find the library.
+  - Library and include dirs can be specified manually with `CFITSIO_LIB` and
+    `CFITSIO_INC`
+    - If not specified, `pkg-config` is used to find the library.
 
 - [ERFA](https://github.com/liberfa/erfa)
+  - Can compile statically; use the `erfa-static` or `all-static` features.
+    - Requires a C compiler and `autoconf`.
   - Ubuntu: `liberfa-dev`
   - Arch: AUR package `erfa`
-  - The library dir can be specified manually with ERFA_LIB
-  - If not specified, `pkg-config` is used to find the library.
-  - Use `--features=erfa-static` to build the library automatically. Requires a
-    C compiler and `autoconf`.
+  - The library dir can be specified manually with `ERFA_LIB`
+    - If not specified, `pkg-config` is used to find the library.
+
+- [hdf5](https://www.hdfgroup.org/hdf5)
+  - Can compile statically; use the `hdf5-static` or `all-static` features.
+    - Requires `CMake` version 3.10 or higher.
+  - Ubuntu: `libhdf5-dev`
+  - Arch: `hdf5`
+  - The library dir can be specified manually with `HDF5_DIR`
+    - If not specified, `pkg-config` is used to find the library.
+
+#### Optional dependencies
 
 - [CUDA](https://developer.nvidia.com/cuda-zone)
+  - Only needed if either the `cuda` or `cuda-single` feature is enabled
+  - Can link statically; use the `cuda-static` or `all-static` features.
   - Arch: `cuda`
-  - The library dir can be specified manually with CUDA_LIB
-  - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
+  - The library dir can be specified manually with `CUDA_LIB`
+    - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
 
-To link a library statically, use e.g. `ERFA_STATIC=1`. To link all libraries
-statically, use `PKG_CONFIG_ALL_STATIC=1`.
+- Calibration solutions plotting 
+  - Only needed if the `plotting` feature is enabled (which it is by default)
+  - Arch: `pkg-config` `make` `cmake` `freetype2`
+  - Ubuntu: `libfreetype-dev` `libexpat1-dev`
 
-Memory requirements can't be specified yet, as the code is still in development.
+System libraries can also be linked statically. Use e.g. `ERFA_STATIC=1`. To
+link all libraries statically, use `PKG_CONFIG_ALL_STATIC=1`.
+
 </details>
 
 ### Hyperdrive-specific instructions
-<details>
 
 - Specify your GPU's compute capability
 
@@ -171,34 +200,38 @@ Memory requirements can't be specified yet, as the code is still in development.
 
 - Compile the source
 
-    `cargo build --release`
+    `cargo install --path . --locked`
+
+    To enable CUDA functionality, add `--features=cuda` or
+    `--features=cuda-single` to the above command. If you're using a desktop
+    NVIDIA GPU, you probably want the `cuda-single` feature.
 
     You may need to specify additional compiler options, depending on your
     setup. For example, CUDA can only use certain versions of GCC, so the
-    following might be needed before running `cargo build`:
+    following might be needed before running `cargo install`:
 
     `export CXX=/usr/bin/g++-5`
 
     It's also possible to specify environment variables temporarily:
 
-    `CXX=/usr/bin/g++-5 HYPERDRIVE_CUDA_COMPUTE=75 cargo build --release`
+    `CXX=/usr/bin/g++-5 HYPERDRIVE_CUDA_COMPUTE=75 cargo install --path . --locked`
 
-- Run the compiled binary
+- Run the compiled binary (you may need to include it in your `PATH`; see the
+  output of `cargo install`)
 
-    `./target/release/hyperdrive -h`
+    `hyperdrive -h`
 
     A number of subcommands should present themselves, and the help text for
-    each command should clarify usage.
+    each subcommand should clarify usage.
 
     On the same system, the `hyperdrive` binary can be copied and used
     anywhere you like!
-</details>
+
 </details>
 
 ## Troubleshooting
 
-Run `hyperdrive` again, but this time with the debug build (i.e. no `--release`
-flag):
+Run `hyperdrive` again, but this time with the debug build (i.e. `cargo build`):
 
     cargo build
     ./target/debug/hyperdrive <your settings here>

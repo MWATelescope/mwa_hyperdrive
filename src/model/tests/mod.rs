@@ -469,29 +469,3 @@ fn shapelet_off_zenith_cpu() {
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
 }
-        },
-    );
-
-    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let modeller = SkyModeller::new(
-        obs.beam.deref(),
-        &srclist,
-        &obs.xyzs,
-        &obs.freqs,
-        &obs.unflagged_cross_baseline_to_tile_map,
-        obs.phase_centre,
-        obs.array_longitude_rad,
-        obs.array_latitude_rad,
-        true,
-    );
-    let comps = ComponentList::new(&srclist, &obs.freqs, obs.phase_centre);
-    let shapelet_uvws = comps.shapelets.get_shapelet_uvws(obs.lst, &obs.xyzs);
-    let result = modeller.model_shapelets_inner(
-        visibilities.view_mut(),
-        &obs.uvws,
-        shapelet_uvws.view(),
-        obs.lst,
-    );
-    assert!(result.is_ok());
-    assert_list_off_zenith_visibilities(visibilities.view());
-}
