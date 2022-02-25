@@ -20,7 +20,6 @@ use super::*;
 use crate::{
     context::ObsContext,
     data_formats::{metafits, InputData, ReadInputDataError},
-    glob::get_single_match_from_glob,
     time::round_hundredths_of_a_second,
 };
 use mwa_hyperdrive_beam::Delays;
@@ -49,319 +48,326 @@ impl UvfitsReader {
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
-    pub(crate) fn new<T: AsRef<Path>>(
-        uvfits: T,
-        metafits: Option<T>,
+    pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
+        uvfits: P,
+        metafits: Option<P2>,
         dipole_delays: &mut Delays,
     ) -> Result<UvfitsReader, UvfitsReadError> {
-        // If a metafits file was provided, get an mwalib object ready.
-        // TODO: Let the user supply the MWA version.
-        let mwalib_context = match metafits {
-            None => None,
-            Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
-        };
+        fn inner(
+            uvfits: &Path,
+            metafits: Option<&Path>,
+            dipole_delays: &mut Delays,
+        ) -> Result<UvfitsReader, UvfitsReadError> {
+            // If a metafits file was provided, get an mwalib object ready.
+            // TODO: Let the user supply the MWA version.
+            let mwalib_context = match metafits {
+                None => None,
+                Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
+            };
 
-        // The uvfits argument could be a glob. If the specified argument can't
-        // be found as a file, treat it as a glob and expand it to find a match.
-        let uvfits_pb = {
-            let pb = PathBuf::from(uvfits.as_ref());
-            if pb.exists() {
-                pb
-            } else {
-                get_single_match_from_glob(uvfits.as_ref().to_str().unwrap())?
+            debug!("Using uvfits file: {}", uvfits.display());
+            if !uvfits.exists() {
+                return Err(UvfitsReadError::BadFile(uvfits.to_path_buf()));
             }
-        };
-        debug!("Using uvfits file: {}", uvfits_pb.display());
-        if !uvfits_pb.exists() {
-            return Err(UvfitsReadError::BadFile(uvfits_pb));
-        }
 
-        // Get the tile names and XYZ positions.
-        let mut uvfits = fits_open!(&uvfits_pb)?;
-        let hdu = fits_open_hdu!(&mut uvfits, 1)?;
+            // Get the tile names and XYZ positions.
+            let mut uvfits_fptr = fits_open!(&uvfits)?;
+            let hdu = fits_open_hdu!(&mut uvfits_fptr, 1)?;
 
-        let tile_names: Vec<String> = get_fits_col!(&mut uvfits, &hdu, "ANNAME")?;
-        let tile_names =
-            Vec1::try_from_vec(tile_names).map_err(|_| UvfitsReadError::AnnameEmpty)?;
-        let total_num_tiles = tile_names.len();
+            let tile_names: Vec<String> = get_fits_col!(&mut uvfits_fptr, &hdu, "ANNAME")?;
+            let tile_names =
+                Vec1::try_from_vec(tile_names).map_err(|_| UvfitsReadError::AnnameEmpty)?;
+            let total_num_tiles = tile_names.len();
 
-        let tile_xyzs = {
-            let mut tile_xyzs: Vec<XyzGeodetic> = Vec::with_capacity(total_num_tiles);
-            for i in 0..total_num_tiles {
-                let fits_xyz = read_cell_array(&mut uvfits, &hdu, "STABXYZ", i as _, 3)?;
-                tile_xyzs.push(XyzGeodetic {
-                    x: fits_xyz[0],
-                    y: fits_xyz[1],
-                    z: fits_xyz[2],
-                });
+            let tile_xyzs = {
+                let mut tile_xyzs: Vec<XyzGeodetic> = Vec::with_capacity(total_num_tiles);
+                for i in 0..total_num_tiles {
+                    let fits_xyz = read_cell_array(&mut uvfits_fptr, &hdu, "STABXYZ", i as _, 3)?;
+                    tile_xyzs.push(XyzGeodetic {
+                        x: fits_xyz[0],
+                        y: fits_xyz[1],
+                        z: fits_xyz[2],
+                    });
+                }
+                tile_xyzs
+            };
+            let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
+
+            let hdu = fits_open_hdu!(&mut uvfits_fptr, 0)?;
+            let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &hdu)?;
+            debug!("Number of rows in the uvfits: {}", metadata.num_rows);
+            debug!("PCOUNT: {}", metadata.pcount);
+            debug!("Number of cross polarisations: {}", metadata.num_pols);
+            debug!("Floats per polarisation: {}", metadata.floats_per_pol);
+            debug!(
+                "Number of fine frequency chans: {}",
+                metadata.num_fine_freq_chans
+            );
+            debug!("UU index:       {}", metadata.indices.u);
+            debug!("VV index:       {}", metadata.indices.v);
+            debug!("WW index:       {}", metadata.indices.w);
+            debug!("BASELINE index: {}", metadata.indices.baseline);
+            debug!("DATE index:     {}", metadata.indices.date);
+            debug!("RA index:       {}", metadata.indices.ra);
+            debug!("DEC index:      {}", metadata.indices.dec);
+            debug!("FREQ index:     {}", metadata.indices.freq);
+
+            if metadata.num_rows == 0 {
+                return Err(UvfitsReadError::Empty(uvfits.to_path_buf()));
             }
-            tile_xyzs
-        };
-        let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
 
-        let hdu = fits_open_hdu!(&mut uvfits, 0)?;
-        let metadata = UvfitsMetadata::new(&mut uvfits, &hdu)?;
-        debug!("Number of rows in the uvfits: {}", metadata.num_rows);
-        debug!("PCOUNT: {}", metadata.pcount);
-        debug!("Number of cross polarisations: {}", metadata.num_pols);
-        debug!("Floats per polarisation: {}", metadata.floats_per_pol);
-        debug!(
-            "Number of fine frequency chans: {}",
-            metadata.num_fine_freq_chans
-        );
-        debug!("UU index:       {}", metadata.indices.u);
-        debug!("VV index:       {}", metadata.indices.v);
-        debug!("WW index:       {}", metadata.indices.w);
-        debug!("BASELINE index: {}", metadata.indices.baseline);
-        debug!("DATE index:     {}", metadata.indices.date);
-        debug!("RA index:       {}", metadata.indices.ra);
-        debug!("DEC index:      {}", metadata.indices.dec);
-        debug!("FREQ index:     {}", metadata.indices.freq);
+            // The phase centre is described by RA and DEC if there is no SOURCE
+            // table (as per the standard).
+            // TODO: Check that there is no SOURCE table!
+            let phase_centre = {
+                let ra = get_required_fits_key!(
+                    &mut uvfits_fptr,
+                    &hdu,
+                    &format!("CRVAL{}", metadata.indices.ra)
+                )?;
+                let dec = get_required_fits_key!(
+                    &mut uvfits_fptr,
+                    &hdu,
+                    &format!("CRVAL{}", metadata.indices.dec)
+                )?;
+                RADec::new_degrees(ra, dec)
+            };
 
-        if metadata.num_rows == 0 {
-            return Err(UvfitsReadError::Empty(uvfits_pb));
-        }
-
-        // The phase centre is described by RA and DEC if there is no SOURCE
-        // table (as per the standard).
-        // TODO: Check that there is no SOURCE table!
-        let phase_centre = {
-            let ra = get_required_fits_key!(
-                &mut uvfits,
-                &hdu,
-                &format!("CRVAL{}", metadata.indices.ra)
-            )?;
-            let dec = get_required_fits_key!(
-                &mut uvfits,
-                &hdu,
-                &format!("CRVAL{}", metadata.indices.dec)
-            )?;
-            RADec::new_degrees(ra, dec)
-        };
-
-        // Get the dipole delays and the pointing centre (if possible).
-        let pointing_centre: Option<RADec> = match &mwalib_context {
-            Some(context) => {
-                // Only use the metafits delays if none were provided to
-                // this function.
-                match dipole_delays {
-                    Delays::Full(_) | Delays::Partial(_) | Delays::NotNecessary => (),
-                    Delays::None => {
-                        debug!("Using metafits for dipole delays");
-                        *dipole_delays = Delays::Full(metafits::get_dipole_delays(context));
+            // Get the dipole delays and the pointing centre (if possible).
+            let pointing_centre: Option<RADec> = match &mwalib_context {
+                Some(context) => {
+                    // Only use the metafits delays if none were provided to
+                    // this function.
+                    match dipole_delays {
+                        Delays::Full(_) | Delays::Partial(_) | Delays::NotNecessary => (),
+                        Delays::None => {
+                            debug!("Using metafits for dipole delays");
+                            *dipole_delays = Delays::Full(metafits::get_dipole_delays(context));
+                        }
                     }
+                    Some(RADec::new_degrees(
+                        context.ra_tile_pointing_degrees,
+                        context.dec_tile_pointing_degrees,
+                    ))
                 }
-                Some(RADec::new_degrees(
-                    context.ra_tile_pointing_degrees,
-                    context.dec_tile_pointing_degrees,
-                ))
+
+                None => None,
+            };
+            match &dipole_delays {
+                Delays::Full(d) => debug!("Dipole delays: {:?}", d),
+                Delays::Partial(d) => debug!("Dipole delays: {:?}", d),
+                Delays::NotNecessary => {
+                    debug!("Dipole delays weren't searched for in input data; not necessary")
+                }
+                Delays::None => {
+                    warn!("Dipole delays not provided and not available in input data!")
+                }
             }
 
-            None => None,
-        };
-        match &dipole_delays {
-            Delays::Full(d) => debug!("Dipole delays: {:?}", d),
-            Delays::Partial(d) => debug!("Dipole delays: {:?}", d),
-            Delays::NotNecessary => {
-                debug!("Dipole delays weren't searched for in input data; not necessary")
-            }
-            Delays::None => warn!("Dipole delays not provided and not available in input data!"),
-        }
+            // Work out the tile flags.
+            let mut present_tiles_set: HashSet<usize> = HashSet::new();
+            metadata.uvfits_baselines.iter().for_each(|&uvfits_bl| {
+                let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
+                // Don't forget to subtract one from the uvfits-formatted baselines.
+                present_tiles_set.insert(ant1 - 1);
+                present_tiles_set.insert(ant2 - 1);
+            });
+            let flagged_tiles = (0..total_num_tiles)
+                .into_iter()
+                .filter(|i| !present_tiles_set.contains(i))
+                .collect();
 
-        // Work out the tile flags.
-        let mut present_tiles_set: HashSet<usize> = HashSet::new();
-        metadata.uvfits_baselines.iter().for_each(|&uvfits_bl| {
-            let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
-            // Don't forget to subtract one from the uvfits-formatted baselines.
-            present_tiles_set.insert(ant1 - 1);
-            present_tiles_set.insert(ant2 - 1);
-        });
-        let flagged_tiles = (0..total_num_tiles)
-            .into_iter()
-            .filter(|i| !present_tiles_set.contains(i))
-            .collect();
-
-        // Work out the timestamp epochs. The file tells us what time standard
-        // is being used (probably UTC). If this is false, then we assume TAI.
-        let uses_utc_time = {
-            let timsys: Option<String> = get_optional_fits_key!(&mut uvfits, &hdu, "TIMSYS")?;
-            match timsys {
-                None => {
-                    warn!("No TIMSYS present; assuming UTC");
-                    true
-                }
-                Some(timsys) => {
-                    if timsys.starts_with("UTC") {
+            // Work out the timestamp epochs. The file tells us what time standard
+            // is being used (probably UTC). If this is false, then we assume TAI.
+            let uses_utc_time = {
+                let timsys: Option<String> =
+                    get_optional_fits_key!(&mut uvfits_fptr, &hdu, "TIMSYS")?;
+                match timsys {
+                    None => {
+                        warn!("No TIMSYS present; assuming UTC");
                         true
-                    } else if timsys.starts_with("IAT") || timsys.starts_with("TAI") {
-                        false
-                    } else {
-                        return Err(UvfitsReadError::UnknownTimsys(timsys));
+                    }
+                    Some(timsys) => {
+                        if timsys.starts_with("UTC") {
+                            true
+                        } else if timsys.starts_with("IAT") || timsys.starts_with("TAI") {
+                            false
+                        } else {
+                            return Err(UvfitsReadError::UnknownTimsys(timsys));
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        // uvfits timestamps are in the middle of their respective integration
-        // periods, so no adjustment is needed here.
-        let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
-            .jd_frac_timestamps
-            .iter()
-            .enumerate()
-            .map(|(i, &frac)| {
-                let jd_days = metadata.jd_zero + (frac as f64);
-                let e = if uses_utc_time {
-                    Epoch::from_jde_utc(jd_days)
-                } else {
-                    Epoch::from_jde_tai(jd_days)
-                };
-                // Here's why you don't store your times in a stupid format (JD)
-                // in a single-precision float -- they come out wrong. Check how
-                // this epoch is represented in GPS; if it's close to an int,
-                // round to an int.
-                (i, round_hundredths_of_a_second(e))
-            })
-            .unzip();
-        // TODO: Determine flagging!
-        let unflagged_timesteps = all_timesteps.clone();
-        let all_timesteps =
-            Vec1::try_from_vec(all_timesteps).map_err(|_| UvfitsReadError::NoTimesteps {
-                file: uvfits.filename.clone(),
-            })?;
-        let timestamps =
-            Vec1::try_from_vec(timestamps).map_err(|_| UvfitsReadError::NoTimesteps {
-                file: uvfits.filename.clone(),
-            })?;
-
-        // Get the data's time resolution. There is a possibility that the file
-        // contains only one timestep.
-        let time_res = if timestamps.len() == 1 {
-            warn!("Only one timestep is present in the data; can't determine the data's time resolution.");
-            None
-        } else {
-            // Assume the timestamps are contiguous, i.e. the span of time
-            // between two consecutive timestamps is the same between all
-            // consecutive timestamps.
-            let time_res = (timestamps[1] - timestamps[0]).in_seconds();
-            trace!("Time resolution: {}s", time_res);
-            Some(time_res)
-        };
-        match timestamps.as_slice() {
-            // Handled above; uvfits files aren't allowed to be empty.
-            [] => unreachable!(),
-            [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
-            [t0, .., tn] => {
-                debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
-                debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
-            }
-        }
-
-        debug!("Flagged tiles in the uvfits: {:?}", flagged_tiles);
-        debug!(
-            "Autocorrelations present: {}",
-            metadata.autocorrelations_present
-        );
-
-        // Get the dipole gains. Only available with a metafits.
-        let dipole_gains: Option<Array2<f64>> = match &mwalib_context {
-            Some(context) => Some(metafits::get_dipole_gains(context)),
-            None => {
-                warn!("Without a metafits file, we must assume all dipoles are alive.");
-                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                None
-            }
-        };
-
-        // Get the obsid. There is an "obs. name" in the "object" filed, but
-        // that's not the same thing.
-        let obsid = mwalib_context.map(|context| context.obs_id);
-
-        let step = metadata.num_rows / timestamps.len();
-
-        let freq_val_str = format!("CRVAL{}", metadata.indices.freq);
-        let base_freq_str: String = get_required_fits_key!(&mut uvfits, &hdu, &freq_val_str)?;
-        let base_freq: f64 = match base_freq_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(UvfitsReadError::Parse {
-                    key: freq_val_str,
-                    value: base_freq_str,
+            // uvfits timestamps are in the middle of their respective integration
+            // periods, so no adjustment is needed here.
+            let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
+                .jd_frac_timestamps
+                .iter()
+                .enumerate()
+                .map(|(i, &frac)| {
+                    let jd_days = metadata.jd_zero + (frac as f64);
+                    let e = if uses_utc_time {
+                        Epoch::from_jde_utc(jd_days)
+                    } else {
+                        Epoch::from_jde_tai(jd_days)
+                    };
+                    // Here's why you don't store your times in a stupid format (JD)
+                    // in a single-precision float -- they come out wrong. Check how
+                    // this epoch is represented in GPS; if it's close to an int,
+                    // round to an int.
+                    (i, round_hundredths_of_a_second(e))
                 })
+                .unzip();
+            // TODO: Determine flagging!
+            let unflagged_timesteps = all_timesteps.clone();
+            let all_timesteps =
+                Vec1::try_from_vec(all_timesteps).map_err(|_| UvfitsReadError::NoTimesteps {
+                    file: uvfits_fptr.filename.clone(),
+                })?;
+            let timestamps =
+                Vec1::try_from_vec(timestamps).map_err(|_| UvfitsReadError::NoTimesteps {
+                    file: uvfits_fptr.filename.clone(),
+                })?;
+
+            // Get the data's time resolution. There is a possibility that the file
+            // contains only one timestep.
+            let time_res = if timestamps.len() == 1 {
+                warn!("Only one timestep is present in the data; can't determine the data's time resolution.");
+                None
+            } else {
+                // Assume the timestamps are contiguous, i.e. the span of time
+                // between two consecutive timestamps is the same between all
+                // consecutive timestamps.
+                let time_res = (timestamps[1] - timestamps[0]).in_seconds();
+                trace!("Time resolution: {}s", time_res);
+                Some(time_res)
+            };
+            match timestamps.as_slice() {
+                // Handled above; uvfits files aren't allowed to be empty.
+                [] => unreachable!(),
+                [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
+                [t0, .., tn] => {
+                    debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
+                    debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
+                }
             }
-        };
-        let base_index: isize = {
-            // CRPIX might be a float. Parse it as one, then make it an int.
-            let freq_val_str = format!("CRPIX{}", metadata.indices.freq);
-            let f_str: String = get_required_fits_key!(&mut uvfits, &hdu, &freq_val_str)?;
-            let f: f64 = match f_str.parse() {
+
+            debug!("Flagged tiles in the uvfits: {:?}", flagged_tiles);
+            debug!(
+                "Autocorrelations present: {}",
+                metadata.autocorrelations_present
+            );
+
+            // Get the dipole gains. Only available with a metafits.
+            let dipole_gains: Option<Array2<f64>> = match &mwalib_context {
+                Some(context) => Some(metafits::get_dipole_gains(context)),
+                None => {
+                    warn!("Without a metafits file, we must assume all dipoles are alive.");
+                    warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                    None
+                }
+            };
+
+            // Get the obsid. There is an "obs. name" in the "object" filed, but
+            // that's not the same thing.
+            let obsid = mwalib_context.map(|context| context.obs_id);
+
+            let step = metadata.num_rows / timestamps.len();
+
+            let freq_val_str = format!("CRVAL{}", metadata.indices.freq);
+            let base_freq_str: String =
+                get_required_fits_key!(&mut uvfits_fptr, &hdu, &freq_val_str)?;
+            let base_freq: f64 = match base_freq_str.parse() {
                 Ok(p) => p,
                 Err(_) => {
                     return Err(UvfitsReadError::Parse {
                         key: freq_val_str,
-                        value: f_str,
+                        value: base_freq_str,
                     })
                 }
             };
-            f.round() as _
-        };
-        let freq_val_str = format!("CDELT{}", metadata.indices.freq);
-        let fine_chan_width_str: String = get_required_fits_key!(&mut uvfits, &hdu, &freq_val_str)?;
-        let freq_res: f64 = match fine_chan_width_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(UvfitsReadError::Parse {
-                    key: freq_val_str,
-                    value: fine_chan_width_str,
-                })
+            let base_index: isize = {
+                // CRPIX might be a float. Parse it as one, then make it an int.
+                let freq_val_str = format!("CRPIX{}", metadata.indices.freq);
+                let f_str: String = get_required_fits_key!(&mut uvfits_fptr, &hdu, &freq_val_str)?;
+                let f: f64 = match f_str.parse() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return Err(UvfitsReadError::Parse {
+                            key: freq_val_str,
+                            value: f_str,
+                        })
+                    }
+                };
+                f.round() as _
+            };
+            let freq_val_str = format!("CDELT{}", metadata.indices.freq);
+            let fine_chan_width_str: String =
+                get_required_fits_key!(&mut uvfits_fptr, &hdu, &freq_val_str)?;
+            let freq_res: f64 = match fine_chan_width_str.parse() {
+                Ok(p) => p,
+                Err(_) => {
+                    return Err(UvfitsReadError::Parse {
+                        key: freq_val_str,
+                        value: fine_chan_width_str,
+                    })
+                }
+            };
+
+            let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
+            for i in 0..metadata.num_fine_freq_chans {
+                fine_chan_freqs.push(
+                    (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round() as _,
+                );
             }
-        };
+            let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
-        let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
-        for i in 0..metadata.num_fine_freq_chans {
-            fine_chan_freqs
-                .push((base_freq + (i as isize - base_index + 1) as f64 * freq_res).round() as _);
+            let total_bandwidth =
+                (*fine_chan_freqs.last() - *fine_chan_freqs.first()) as f64 + freq_res;
+
+            let obs_context = ObsContext {
+                obsid,
+                timestamps,
+                all_timesteps,
+                unflagged_timesteps,
+                phase_centre,
+                pointing_centre,
+                tile_names,
+                tile_xyzs,
+                flagged_tiles,
+                autocorrelations_present: metadata.autocorrelations_present,
+                dipole_gains,
+                time_res,
+                // TODO: Where does this live in a uvfits?
+                array_longitude_rad: None,
+                array_latitude_rad: None,
+                // TODO - populate properly. The values don't matter until we want to
+                // use coarse channel information.
+                coarse_chan_nums: vec![1],
+                coarse_chan_freqs: vec![150e6],
+                coarse_chan_width: 40e3 * 32.0,
+                num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
+                total_bandwidth,
+                freq_res: Some(freq_res),
+                fine_chan_freqs,
+                // TODO: Get flagging right. I think that info is in an optional table.
+                flagged_fine_chans: vec![],
+                flagged_fine_chans_per_coarse_chan: vec![],
+            };
+
+            Ok(UvfitsReader {
+                obs_context,
+                uvfits: uvfits.to_path_buf(),
+                metadata,
+                step,
+            })
         }
-        let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
-
-        let total_bandwidth =
-            (*fine_chan_freqs.last() - *fine_chan_freqs.first()) as f64 + freq_res;
-
-        let obs_context = ObsContext {
-            obsid,
-            timestamps,
-            all_timesteps,
-            unflagged_timesteps,
-            phase_centre,
-            pointing_centre,
-            tile_names,
-            tile_xyzs,
-            flagged_tiles,
-            autocorrelations_present: metadata.autocorrelations_present,
-            dipole_gains,
-            time_res,
-            // TODO: Where does this live in a uvfits?
-            array_longitude_rad: None,
-            array_latitude_rad: None,
-            // TODO - populate properly. The values don't matter until we want to
-            // use coarse channel information.
-            coarse_chan_nums: vec![1],
-            coarse_chan_freqs: vec![150e6],
-            coarse_chan_width: 40e3 * 32.0,
-            num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
-            total_bandwidth,
-            freq_res: Some(freq_res),
-            fine_chan_freqs,
-            // TODO: Get flagging right. I think that info is in an optional table.
-            flagged_fine_chans: vec![],
-            flagged_fine_chans_per_coarse_chan: vec![],
-        };
-
-        Ok(UvfitsReader {
-            obs_context,
-            uvfits: uvfits_pb,
-            metadata,
-            step,
-        })
+        inner(
+            uvfits.as_ref(),
+            metafits.as_ref().map(|f| f.as_ref()),
+            dipole_delays,
+        )
     }
 }
 

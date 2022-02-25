@@ -64,8 +64,8 @@ impl FEEBeam {
         })
     }
 
-    fn new<T: AsRef<std::path::Path>>(
-        file: T,
+    fn new(
+        file: &Path,
         num_tiles: usize,
         delays: Delays,
         gains: Option<Array2<f64>>,
@@ -245,8 +245,8 @@ impl BeamCUDA for FEEBeamCUDA {
 /// `amps` *must* have 16 or 32 elements per row (each corresponds to an MWA
 /// dipole in a tile, in the M&C order; see
 /// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>).
-pub fn create_fee_beam_object<T: AsRef<Path>>(
-    beam_file: Option<T>,
+pub fn create_fee_beam_object<P: AsRef<Path>>(
+    beam_file: Option<P>,
     num_tiles: usize,
     delays: Delays,
     gains: Option<Array2<f64>>,
@@ -254,7 +254,7 @@ pub fn create_fee_beam_object<T: AsRef<Path>>(
     trace!("Setting up FEE beam");
     let beam = if let Some(bf) = beam_file {
         // Set up the FEE beam struct from the specified beam file.
-        Box::new(FEEBeam::new(&bf, num_tiles, delays, gains)?)
+        Box::new(FEEBeam::new(bf.as_ref(), num_tiles, delays, gains)?)
     } else {
         // Set up the FEE beam struct from the MWA_BEAM_FILE environment
         // variable.

@@ -27,23 +27,30 @@ pub fn di_calibrate<P: AsRef<Path>>(
     args_file: Option<P>,
     dry_run: bool,
 ) -> Result<Option<CalibrationSolutions>, CalibrateError> {
-    let args = if let Some(f) = args_file {
-        trace!("Merging command-line arguments with the argument file");
-        Box::new(cli_args.merge(&f)?)
-    } else {
-        cli_args
-    };
-    debug!("{:#?}", &args);
-    trace!("Converting arguments into calibration parameters");
-    let parameters = args.into_params()?;
+    fn inner(
+        cli_args: Box<CalibrateUserArgs>,
+        args_file: Option<&Path>,
+        dry_run: bool,
+    ) -> Result<Option<CalibrationSolutions>, CalibrateError> {
+        let args = if let Some(f) = args_file {
+            trace!("Merging command-line arguments with the argument file");
+            Box::new(cli_args.merge(&f)?)
+        } else {
+            cli_args
+        };
+        debug!("{:#?}", &args);
+        trace!("Converting arguments into calibration parameters");
+        let parameters = args.into_params()?;
 
-    if dry_run {
-        info!("Dry run -- exiting now.");
-        return Ok(None);
+        if dry_run {
+            info!("Dry run -- exiting now.");
+            return Ok(None);
+        }
+
+        let sols = di::di_calibrate(&parameters)?;
+        Ok(Some(sols))
     }
-
-    let sols = di::di_calibrate(&parameters)?;
-    Ok(Some(sols))
+    inner(cli_args, args_file.as_ref().map(|f| f.as_ref()), dry_run)
 }
 
 /// A collection of timesteps to average together *during* calibration.

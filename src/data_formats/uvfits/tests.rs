@@ -228,7 +228,8 @@ fn write_then_read_uvfits(autos: bool) {
     result.unwrap();
 
     // Inspect the file for sanity's sake!
-    let result = UvfitsReader::new(&output.path(), None, &mut Delays::NotNecessary);
+    let metafits: Option<&str> = None;
+    let result = UvfitsReader::new(&output.path(), metafits, &mut Delays::NotNecessary);
     assert!(
         result.is_ok(),
         "Failed to read the just-created uvfits file"

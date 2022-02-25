@@ -279,152 +279,160 @@ impl CalibrateUserArgs {
     ///
     /// This function should only ever merge arguments, and not try to make
     /// sense of them.
-    pub fn merge<T: AsRef<Path>>(
+    pub fn merge<P: AsRef<Path>>(
         self,
-        arg_file: &T,
+        arg_file: P,
     ) -> Result<CalibrateUserArgs, CalibrateArgsFileError> {
-        // Make it abundantly clear that "self" should be considered the
-        // command-line arguments.
-        let cli_args = self;
+        fn inner(
+            cli_args: CalibrateUserArgs,
+            arg_file: &Path,
+        ) -> Result<CalibrateUserArgs, CalibrateArgsFileError> {
+            // Read in the file arguments.
+            let file_args: CalibrateUserArgs = {
+                let file_args_path = PathBuf::from(arg_file);
+                debug!(
+                    "Attempting to parse argument file {} ...",
+                    file_args_path.display()
+                );
 
-        // Read in the file arguments.
-        let file_args: Self = {
-            let file_args_path = PathBuf::from(arg_file.as_ref());
-            debug!(
-                "Attempting to parse argument file {} ...",
-                file_args_path.display()
-            );
-
-            let mut contents = String::new();
-            let file_args_extension = file_args_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase())
-                .and_then(|e| ArgFileTypes::from_str(&e).ok());
-            match file_args_extension {
-                Some(ArgFileTypes::Toml) => {
-                    debug!("Parsing toml file...");
-                    let mut fh = File::open(&arg_file)?;
-                    fh.read_to_string(&mut contents)?;
-                    match toml::from_str(&contents) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            return Err(CalibrateArgsFileError::TomlDecode {
-                                file: file_args_path.display().to_string(),
-                                err: e.to_string(),
-                            })
+                let mut contents = String::new();
+                let file_args_extension = file_args_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_lowercase())
+                    .and_then(|e| ArgFileTypes::from_str(&e).ok());
+                match file_args_extension {
+                    Some(ArgFileTypes::Toml) => {
+                        debug!("Parsing toml file...");
+                        let mut fh = File::open(&arg_file)?;
+                        fh.read_to_string(&mut contents)?;
+                        match toml::from_str(&contents) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                return Err(CalibrateArgsFileError::TomlDecode {
+                                    file: file_args_path.display().to_string(),
+                                    err: e.to_string(),
+                                })
+                            }
                         }
                     }
-                }
 
-                Some(ArgFileTypes::Json) => {
-                    debug!("Parsing json file...");
-                    let mut fh = File::open(&arg_file)?;
-                    fh.read_to_string(&mut contents)?;
-                    match serde_json::from_str(&contents) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            return Err(CalibrateArgsFileError::JsonDecode {
-                                file: file_args_path.display().to_string(),
-                                err: e.to_string(),
-                            })
+                    Some(ArgFileTypes::Json) => {
+                        debug!("Parsing json file...");
+                        let mut fh = File::open(&arg_file)?;
+                        fh.read_to_string(&mut contents)?;
+                        match serde_json::from_str(&contents) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                return Err(CalibrateArgsFileError::JsonDecode {
+                                    file: file_args_path.display().to_string(),
+                                    err: e.to_string(),
+                                })
+                            }
                         }
                     }
-                }
 
-                _ => {
-                    return Err(CalibrateArgsFileError::UnrecognisedArgFileExt(
-                        file_args_path.display().to_string(),
-                    ))
+                    _ => {
+                        return Err(CalibrateArgsFileError::UnrecognisedArgFileExt(
+                            file_args_path.display().to_string(),
+                        ))
+                    }
                 }
-            }
-        };
+            };
 
-        // Ensure all of the file args are accounted for by pattern matching.
-        let CalibrateUserArgs {
-            data,
-            source_list,
-            source_list_type,
-            outputs,
-            model_filename,
-            ignore_autos,
-            output_vis_time_average,
-            output_vis_freq_average,
-            num_sources,
-            source_dist_cutoff,
-            veto_threshold,
-            beam_file,
-            unity_dipole_gains,
-            delays,
-            no_beam,
-            time_average_factor,
-            freq_average_factor,
-            timesteps,
-            uvw_min,
-            uvw_max,
-            max_iterations,
-            stop_thresh,
-            min_thresh,
-            array_longitude_deg,
-            array_latitude_deg,
-            #[cfg(feature = "cuda")]
-            cpu,
-            tile_flags,
-            ignore_input_data_tile_flags,
-            ignore_input_data_fine_channel_flags,
-            fine_chan_flags_per_coarse_chan,
-            fine_chan_flags,
-            pfb_flavour,
-            no_digital_gains,
-            no_cable_length_correction,
-            no_geometric_correction,
-            no_progress_bars,
-        } = file_args;
-        // Merge all the arguments, preferring the CLI args when available.
-        Ok(CalibrateUserArgs {
-            data: cli_args.data.or(data),
-            source_list: cli_args.source_list.or(source_list),
-            source_list_type: cli_args.source_list_type.or(source_list_type),
-            outputs: cli_args.outputs.or(outputs),
-            model_filename: cli_args.model_filename.or(model_filename),
-            ignore_autos: cli_args.ignore_autos || ignore_autos,
-            output_vis_time_average: cli_args.output_vis_time_average.or(output_vis_time_average),
-            output_vis_freq_average: cli_args.output_vis_freq_average.or(output_vis_freq_average),
-            num_sources: cli_args.num_sources.or(num_sources),
-            source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
-            veto_threshold: cli_args.veto_threshold.or(veto_threshold),
-            beam_file: cli_args.beam_file.or(beam_file),
-            unity_dipole_gains: cli_args.unity_dipole_gains || unity_dipole_gains,
-            delays: cli_args.delays.or(delays),
-            no_beam: cli_args.no_beam || no_beam,
-            time_average_factor: cli_args.time_average_factor.or(time_average_factor),
-            freq_average_factor: cli_args.freq_average_factor.or(freq_average_factor),
-            timesteps: cli_args.timesteps.or(timesteps),
-            uvw_min: cli_args.uvw_min.or(uvw_min),
-            uvw_max: cli_args.uvw_max.or(uvw_max),
-            max_iterations: cli_args.max_iterations.or(max_iterations),
-            stop_thresh: cli_args.stop_thresh.or(stop_thresh),
-            min_thresh: cli_args.min_thresh.or(min_thresh),
-            array_longitude_deg: cli_args.array_longitude_deg.or(array_longitude_deg),
-            array_latitude_deg: cli_args.array_latitude_deg.or(array_latitude_deg),
-            #[cfg(feature = "cuda")]
-            cpu: cli_args.cpu || cpu,
-            tile_flags: cli_args.tile_flags.or(tile_flags),
-            ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
-                || ignore_input_data_tile_flags,
-            ignore_input_data_fine_channel_flags: cli_args.ignore_input_data_fine_channel_flags
-                || ignore_input_data_fine_channel_flags,
-            fine_chan_flags_per_coarse_chan: cli_args
-                .fine_chan_flags_per_coarse_chan
-                .or(fine_chan_flags_per_coarse_chan),
-            fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
-            pfb_flavour: cli_args.pfb_flavour.or(pfb_flavour),
-            no_digital_gains: cli_args.no_digital_gains || no_digital_gains,
-            no_cable_length_correction: cli_args.no_cable_length_correction
-                || no_cable_length_correction,
-            no_geometric_correction: cli_args.no_geometric_correction || no_geometric_correction,
-            no_progress_bars: cli_args.no_progress_bars || no_progress_bars,
-        })
+            // Ensure all of the file args are accounted for by pattern
+            // matching.
+            let CalibrateUserArgs {
+                data,
+                source_list,
+                source_list_type,
+                outputs,
+                model_filename,
+                ignore_autos,
+                output_vis_time_average,
+                output_vis_freq_average,
+                num_sources,
+                source_dist_cutoff,
+                veto_threshold,
+                beam_file,
+                unity_dipole_gains,
+                delays,
+                no_beam,
+                time_average_factor,
+                freq_average_factor,
+                timesteps,
+                uvw_min,
+                uvw_max,
+                max_iterations,
+                stop_thresh,
+                min_thresh,
+                array_longitude_deg,
+                array_latitude_deg,
+                #[cfg(feature = "cuda")]
+                cpu,
+                tile_flags,
+                ignore_input_data_tile_flags,
+                ignore_input_data_fine_channel_flags,
+                fine_chan_flags_per_coarse_chan,
+                fine_chan_flags,
+                pfb_flavour,
+                no_digital_gains,
+                no_cable_length_correction,
+                no_geometric_correction,
+                no_progress_bars,
+            } = file_args;
+            // Merge all the arguments, preferring the CLI args when available.
+            Ok(CalibrateUserArgs {
+                data: cli_args.data.or(data),
+                source_list: cli_args.source_list.or(source_list),
+                source_list_type: cli_args.source_list_type.or(source_list_type),
+                outputs: cli_args.outputs.or(outputs),
+                model_filename: cli_args.model_filename.or(model_filename),
+                ignore_autos: cli_args.ignore_autos || ignore_autos,
+                output_vis_time_average: cli_args
+                    .output_vis_time_average
+                    .or(output_vis_time_average),
+                output_vis_freq_average: cli_args
+                    .output_vis_freq_average
+                    .or(output_vis_freq_average),
+                num_sources: cli_args.num_sources.or(num_sources),
+                source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
+                veto_threshold: cli_args.veto_threshold.or(veto_threshold),
+                beam_file: cli_args.beam_file.or(beam_file),
+                unity_dipole_gains: cli_args.unity_dipole_gains || unity_dipole_gains,
+                delays: cli_args.delays.or(delays),
+                no_beam: cli_args.no_beam || no_beam,
+                time_average_factor: cli_args.time_average_factor.or(time_average_factor),
+                freq_average_factor: cli_args.freq_average_factor.or(freq_average_factor),
+                timesteps: cli_args.timesteps.or(timesteps),
+                uvw_min: cli_args.uvw_min.or(uvw_min),
+                uvw_max: cli_args.uvw_max.or(uvw_max),
+                max_iterations: cli_args.max_iterations.or(max_iterations),
+                stop_thresh: cli_args.stop_thresh.or(stop_thresh),
+                min_thresh: cli_args.min_thresh.or(min_thresh),
+                array_longitude_deg: cli_args.array_longitude_deg.or(array_longitude_deg),
+                array_latitude_deg: cli_args.array_latitude_deg.or(array_latitude_deg),
+                #[cfg(feature = "cuda")]
+                cpu: cli_args.cpu || cpu,
+                tile_flags: cli_args.tile_flags.or(tile_flags),
+                ignore_input_data_tile_flags: cli_args.ignore_input_data_tile_flags
+                    || ignore_input_data_tile_flags,
+                ignore_input_data_fine_channel_flags: cli_args.ignore_input_data_fine_channel_flags
+                    || ignore_input_data_fine_channel_flags,
+                fine_chan_flags_per_coarse_chan: cli_args
+                    .fine_chan_flags_per_coarse_chan
+                    .or(fine_chan_flags_per_coarse_chan),
+                fine_chan_flags: cli_args.fine_chan_flags.or(fine_chan_flags),
+                pfb_flavour: cli_args.pfb_flavour.or(pfb_flavour),
+                no_digital_gains: cli_args.no_digital_gains || no_digital_gains,
+                no_cable_length_correction: cli_args.no_cable_length_correction
+                    || no_cable_length_correction,
+                no_geometric_correction: cli_args.no_geometric_correction
+                    || no_geometric_correction,
+                no_progress_bars: cli_args.no_progress_bars || no_progress_bars,
+            })
+        }
+        inner(self, arg_file.as_ref())
     }
 
     pub(crate) fn into_params(self) -> Result<CalibrateParams, InvalidArgsError> {

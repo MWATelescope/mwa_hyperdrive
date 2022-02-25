@@ -73,8 +73,8 @@ impl<'a> UvfitsWriter<'a> {
     /// If `fine_chan_width_hz` is unknown, then zero is written as the FREQ
     /// CDELT.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new<T: AsRef<Path>>(
-        filename: T,
+    pub(crate) fn new<P: AsRef<Path>>(
+        filename: P,
         num_timesteps: usize,
         num_baselines: usize,
         num_chans: usize,
@@ -87,173 +87,202 @@ impl<'a> UvfitsWriter<'a> {
         unflagged_cross_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
         flagged_channels: &'a HashSet<usize>,
     ) -> Result<UvfitsWriter<'a>, UvfitsWriteError> {
-        // Delete any file that already exists.
-        if filename.as_ref().exists() {
-            std::fs::remove_file(&filename)?;
-        }
-
-        // Create a new fits file.
-        let mut status = 0;
-        let c_filename = CString::new(filename.as_ref().to_str().unwrap())?;
-        let mut fptr = std::ptr::null_mut();
-        unsafe {
-            fitsio_sys::ffinit(
-                &mut fptr as *mut *mut _, /* O - FITS file pointer                   */
-                c_filename.as_ptr(),      /* I - name of file to create              */
-                &mut status,              /* IO - error status                       */
-            );
-        }
-        fits_check_status(status)?;
-
-        // Initialise the group header. Copied from cotter. -32 means FLOAT_IMG.
-        let mut naxes = [0, 3, 4, num_chans as i64, 1, 1];
-        let num_group_params = 5;
-        let total_num_rows = num_timesteps * num_baselines;
-        unsafe {
-            fitsio_sys::ffphpr(
-                fptr,                  /* I - FITS file pointer                        */
-                1,                     /* I - does file conform to FITS standard? 1/0  */
-                -32,                   /* I - number of bits per data value pixel      */
-                naxes.len() as i32,    /* I - number of axes in the data array         */
-                naxes.as_mut_ptr(),    /* I - length of each data axis                 */
-                num_group_params,      /* I - number of group parameters (usually 0)   */
-                total_num_rows as i64, /* I - number of random groups (usually 1 or 0) */
-                1,                     /* I - may FITS file have extensions?           */
-                &mut status,           /* IO - error status                            */
-            );
-        }
-        fits_check_status(status)?;
-
-        // Finally close the file.
-        unsafe {
-            fitsio_sys::ffclos(fptr, &mut status);
-        }
-        fits_check_status(status)?;
-
-        // Open the fits file with rust-fitsio.
-        let mut u = FitsFile::edit(&filename)?;
-        let hdu = u.hdu(0)?;
-        hdu.write_key(&mut u, "BSCALE", 1.0)?;
-
-        // Set header names and scales.
-        for (i, &param) in ["UU", "VV", "WW", "BASELINE", "DATE"].iter().enumerate() {
-            let ii = i + 1;
-            hdu.write_key(&mut u, &format!("PTYPE{}", ii), param)?;
-            hdu.write_key(&mut u, &format!("PSCAL{}", ii), 1.0)?;
-            if param != "DATE" {
-                hdu.write_key(&mut u, &format!("PZERO{}", ii), 0.0)?;
-            } else {
-                // Set the zero level for the DATE column.
-                hdu.write_key(
-                    &mut u,
-                    &format!("PZERO{}", ii),
-                    start_epoch.as_jde_utc_days().floor() + 0.5,
-                )?;
+        fn inner<'a>(
+            filename: &Path,
+            num_timesteps: usize,
+            num_baselines: usize,
+            num_chans: usize,
+            autocorrelations_present: bool,
+            start_epoch: Epoch,
+            fine_chan_width_hz: Option<f64>,
+            centre_freq_hz: f64,
+            phase_centre: RADec,
+            obs_name: Option<&str>,
+            unflagged_cross_baseline_to_ants_map: &'a HashMap<usize, (usize, usize)>,
+            flagged_channels: &'a HashSet<usize>,
+        ) -> Result<UvfitsWriter<'a>, UvfitsWriteError> {
+            // Delete any file that already exists.
+            if filename.exists() {
+                std::fs::remove_file(&filename)?;
             }
+
+            // Create a new fits file.
+            let mut status = 0;
+            let c_filename = CString::new(filename.to_str().unwrap())?;
+            let mut fptr = std::ptr::null_mut();
+            unsafe {
+                fitsio_sys::ffinit(
+                    &mut fptr as *mut *mut _, /* O - FITS file pointer                   */
+                    c_filename.as_ptr(),      /* I - name of file to create              */
+                    &mut status,              /* IO - error status                       */
+                );
+            }
+            fits_check_status(status)?;
+
+            // Initialise the group header. Copied from cotter. -32 means FLOAT_IMG.
+            let mut naxes = [0, 3, 4, num_chans as i64, 1, 1];
+            let num_group_params = 5;
+            let total_num_rows = num_timesteps * num_baselines;
+            unsafe {
+                fitsio_sys::ffphpr(
+                    fptr,                  /* I - FITS file pointer                        */
+                    1,                     /* I - does file conform to FITS standard? 1/0  */
+                    -32,                   /* I - number of bits per data value pixel      */
+                    naxes.len() as i32,    /* I - number of axes in the data array         */
+                    naxes.as_mut_ptr(),    /* I - length of each data axis                 */
+                    num_group_params,      /* I - number of group parameters (usually 0)   */
+                    total_num_rows as i64, /* I - number of random groups (usually 1 or 0) */
+                    1,                     /* I - may FITS file have extensions?           */
+                    &mut status,           /* IO - error status                            */
+                );
+            }
+            fits_check_status(status)?;
+
+            // Finally close the file.
+            unsafe {
+                fitsio_sys::ffclos(fptr, &mut status);
+            }
+            fits_check_status(status)?;
+
+            // Open the fits file with rust-fitsio.
+            let mut u = FitsFile::edit(filename)?;
+            let hdu = u.hdu(0)?;
+            hdu.write_key(&mut u, "BSCALE", 1.0)?;
+
+            // Set header names and scales.
+            for (i, &param) in ["UU", "VV", "WW", "BASELINE", "DATE"].iter().enumerate() {
+                let ii = i + 1;
+                hdu.write_key(&mut u, &format!("PTYPE{}", ii), param)?;
+                hdu.write_key(&mut u, &format!("PSCAL{}", ii), 1.0)?;
+                if param != "DATE" {
+                    hdu.write_key(&mut u, &format!("PZERO{}", ii), 0.0)?;
+                } else {
+                    // Set the zero level for the DATE column.
+                    hdu.write_key(
+                        &mut u,
+                        &format!("PZERO{}", ii),
+                        start_epoch.as_jde_utc_days().floor() + 0.5,
+                    )?;
+                }
+            }
+            hdu.write_key(&mut u, "DATE-OBS", get_truncated_date_string(start_epoch))?;
+
+            // Dimensions.
+            hdu.write_key(&mut u, "CTYPE2", "COMPLEX")?;
+            hdu.write_key(&mut u, "CRVAL2", 1.0)?;
+            hdu.write_key(&mut u, "CRPIX2", 1.0)?;
+            hdu.write_key(&mut u, "CDELT2", 1.0)?;
+
+            // Linearly polarised.
+            hdu.write_key(&mut u, "CTYPE3", "STOKES")?;
+            hdu.write_key(&mut u, "CRVAL3", -5)?;
+            hdu.write_key(&mut u, "CDELT3", -1)?;
+            hdu.write_key(&mut u, "CRPIX3", 1.0)?;
+
+            hdu.write_key(&mut u, "CTYPE4", "FREQ")?;
+            hdu.write_key(&mut u, "CRVAL4", centre_freq_hz)?;
+            hdu.write_key(&mut u, "CDELT4", fine_chan_width_hz.unwrap_or(0.0))?;
+            hdu.write_key(&mut u, "CRPIX4", (num_chans / 2) as u64 + 1)?;
+
+            hdu.write_key(&mut u, "CTYPE5", "RA")?;
+            hdu.write_key(&mut u, "CRVAL5", phase_centre.ra.to_degrees())?;
+            hdu.write_key(&mut u, "CDELT5", 1)?;
+            hdu.write_key(&mut u, "CRPIX5", 1)?;
+
+            hdu.write_key(&mut u, "CTYPE6", "DEC")?;
+            hdu.write_key(&mut u, "CRVAL6", phase_centre.dec.to_degrees())?;
+            hdu.write_key(&mut u, "CDELT6", 1)?;
+            hdu.write_key(&mut u, "CRPIX6", 1)?;
+
+            hdu.write_key(&mut u, "OBSRA", phase_centre.ra.to_degrees())?;
+            hdu.write_key(&mut u, "OBSDEC", phase_centre.dec.to_degrees())?;
+            hdu.write_key(&mut u, "EPOCH", 2000.0)?;
+
+            hdu.write_key(&mut u, "OBJECT", obs_name.unwrap_or("Undefined"))?;
+            hdu.write_key(&mut u, "TELESCOP", "MWA")?;
+            hdu.write_key(&mut u, "INSTRUME", "MWA")?;
+
+            // This is apparently required...
+            let history = CString::new("AIPS WTSCAL =  1.0").unwrap();
+            unsafe {
+                fitsio_sys::ffphis(
+                    u.as_raw(),       /* I - FITS file pointer  */
+                    history.as_ptr(), /* I - history string     */
+                    &mut status,      /* IO - error status      */
+                );
+            }
+            fits_check_status(status)?;
+
+            // Add in version information
+            let comment = CString::new(format!(
+                "Created by {} v{}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION")
+            ))
+            .unwrap();
+            unsafe {
+                fitsio_sys::ffpcom(
+                    u.as_raw(),       /* I - FITS file pointer   */
+                    comment.as_ptr(), /* I - comment string      */
+                    &mut status,      /* IO - error status       */
+                );
+            }
+            fits_check_status(status)?;
+
+            hdu.write_key(&mut u, "SOFTWARE", env!("CARGO_PKG_NAME"))?;
+            hdu.write_key(
+                &mut u,
+                "GITLABEL",
+                format!("v{}", env!("CARGO_PKG_VERSION")),
+            )?;
+
+            // Get the unflagged tile indices; get the unique tiles in the baseline
+            // map.
+            let mut unflagged_antenna_set = HashSet::new();
+            for &(tile1, tile2) in unflagged_cross_baseline_to_ants_map.values() {
+                unflagged_antenna_set.insert(tile1);
+                unflagged_antenna_set.insert(tile2);
+            }
+            // Convert the set to a vector and sort it.
+            let mut unflagged_ants: Vec<usize> = unflagged_antenna_set.into_iter().collect();
+            unflagged_ants.sort_unstable();
+            // Make a map between unflagged antennas and uvfits antennas.
+            let unflagged_antenna_map: HashMap<usize, usize> = unflagged_ants
+                .iter()
+                .enumerate()
+                .map(|(uvfits_ant, &ant)| (ant, uvfits_ant))
+                .collect();
+
+            Ok(UvfitsWriter {
+                path: filename.to_path_buf(),
+                num_timesteps,
+                num_baselines,
+                num_chans,
+                total_num_rows,
+                current_num_rows: 0,
+                centre_freq: centre_freq_hz,
+                start_epoch,
+                autocorrelations_present,
+                unflagged_cross_baseline_to_ants_map,
+                unflagged_ants,
+                unflagged_antenna_map,
+                flagged_channels,
+            })
         }
-        hdu.write_key(&mut u, "DATE-OBS", get_truncated_date_string(start_epoch))?;
-
-        // Dimensions.
-        hdu.write_key(&mut u, "CTYPE2", "COMPLEX")?;
-        hdu.write_key(&mut u, "CRVAL2", 1.0)?;
-        hdu.write_key(&mut u, "CRPIX2", 1.0)?;
-        hdu.write_key(&mut u, "CDELT2", 1.0)?;
-
-        // Linearly polarised.
-        hdu.write_key(&mut u, "CTYPE3", "STOKES")?;
-        hdu.write_key(&mut u, "CRVAL3", -5)?;
-        hdu.write_key(&mut u, "CDELT3", -1)?;
-        hdu.write_key(&mut u, "CRPIX3", 1.0)?;
-
-        hdu.write_key(&mut u, "CTYPE4", "FREQ")?;
-        hdu.write_key(&mut u, "CRVAL4", centre_freq_hz)?;
-        hdu.write_key(&mut u, "CDELT4", fine_chan_width_hz.unwrap_or(0.0))?;
-        hdu.write_key(&mut u, "CRPIX4", (num_chans / 2) as u64 + 1)?;
-
-        hdu.write_key(&mut u, "CTYPE5", "RA")?;
-        hdu.write_key(&mut u, "CRVAL5", phase_centre.ra.to_degrees())?;
-        hdu.write_key(&mut u, "CDELT5", 1)?;
-        hdu.write_key(&mut u, "CRPIX5", 1)?;
-
-        hdu.write_key(&mut u, "CTYPE6", "DEC")?;
-        hdu.write_key(&mut u, "CRVAL6", phase_centre.dec.to_degrees())?;
-        hdu.write_key(&mut u, "CDELT6", 1)?;
-        hdu.write_key(&mut u, "CRPIX6", 1)?;
-
-        hdu.write_key(&mut u, "OBSRA", phase_centre.ra.to_degrees())?;
-        hdu.write_key(&mut u, "OBSDEC", phase_centre.dec.to_degrees())?;
-        hdu.write_key(&mut u, "EPOCH", 2000.0)?;
-
-        hdu.write_key(&mut u, "OBJECT", obs_name.unwrap_or("Undefined"))?;
-        hdu.write_key(&mut u, "TELESCOP", "MWA")?;
-        hdu.write_key(&mut u, "INSTRUME", "MWA")?;
-
-        // This is apparently required...
-        let history = CString::new("AIPS WTSCAL =  1.0").unwrap();
-        unsafe {
-            fitsio_sys::ffphis(
-                u.as_raw(),       /* I - FITS file pointer  */
-                history.as_ptr(), /* I - history string     */
-                &mut status,      /* IO - error status      */
-            );
-        }
-        fits_check_status(status)?;
-
-        // Add in version information
-        let comment = CString::new(format!(
-            "Created by {} v{}",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        ))
-        .unwrap();
-        unsafe {
-            fitsio_sys::ffpcom(
-                u.as_raw(),       /* I - FITS file pointer   */
-                comment.as_ptr(), /* I - comment string      */
-                &mut status,      /* IO - error status       */
-            );
-        }
-        fits_check_status(status)?;
-
-        hdu.write_key(&mut u, "SOFTWARE", env!("CARGO_PKG_NAME"))?;
-        hdu.write_key(
-            &mut u,
-            "GITLABEL",
-            format!("v{}", env!("CARGO_PKG_VERSION")),
-        )?;
-
-        // Get the unflagged tile indices; get the unique tiles in the baseline
-        // map.
-        let mut unflagged_antenna_set = HashSet::new();
-        for &(tile1, tile2) in unflagged_cross_baseline_to_ants_map.values() {
-            unflagged_antenna_set.insert(tile1);
-            unflagged_antenna_set.insert(tile2);
-        }
-        // Convert the set to a vector and sort it.
-        let mut unflagged_ants: Vec<usize> = unflagged_antenna_set.into_iter().collect();
-        unflagged_ants.sort_unstable();
-        // Make a map between unflagged antennas and uvfits antennas.
-        let unflagged_antenna_map: HashMap<usize, usize> = unflagged_ants
-            .iter()
-            .enumerate()
-            .map(|(uvfits_ant, &ant)| (ant, uvfits_ant))
-            .collect();
-
-        Ok(UvfitsWriter {
-            path: filename.as_ref().to_path_buf(),
+        inner(
+            filename.as_ref(),
             num_timesteps,
             num_baselines,
             num_chans,
-            total_num_rows,
-            current_num_rows: 0,
-            centre_freq: centre_freq_hz,
-            start_epoch,
             autocorrelations_present,
+            start_epoch,
+            fine_chan_width_hz,
+            centre_freq_hz,
+            phase_centre,
+            obs_name,
             unflagged_cross_baseline_to_ants_map,
-            unflagged_ants,
-            unflagged_antenna_map,
             flagged_channels,
-        })
+        )
     }
 
     /// Opens the associated uvfits file in edit mode, returning the [FitsFile]
@@ -275,9 +304,9 @@ impl<'a> UvfitsWriter<'a> {
     /// `Self` must have only have a single HDU when this function is called
     /// (true when using methods only provided by `Self`).
     // Derived from cotter.
-    pub(crate) fn write_uvfits_antenna_table<T: AsRef<str>>(
+    pub(crate) fn write_uvfits_antenna_table<S: AsRef<str>>(
         self,
-        antenna_names: &[T],
+        antenna_names: &[S],
         positions: &[XyzGeodetic],
     ) -> Result<(), UvfitsWriteError> {
         if self.current_num_rows != self.total_num_rows {

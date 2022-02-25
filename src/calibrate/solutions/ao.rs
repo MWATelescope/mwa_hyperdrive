@@ -21,8 +21,8 @@ use super::{error::*, CalibrationSolutions};
 use crate::math::average_epoch;
 use mwa_hyperdrive_common::{byteorder, hifitime, marlu, ndarray, rayon, Complex};
 
-pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, ReadSolutionsError> {
-    let file_str = file.as_ref().display().to_string();
+pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsError> {
+    let file_str = file.display().to_string();
     let mut bin_file = BufReader::new(File::open(&file)?);
     // The first 7 bytes should be ASCII "MWAOCAL".
     let mwaocal_str = String::from_utf8(vec![
@@ -129,10 +129,7 @@ pub(super) fn read<T: AsRef<Path>>(file: T) -> Result<CalibrationSolutions, Read
 }
 
 /// Write a "André-Offringa calibrate format" calibration solutions binary file.
-pub(super) fn write<T: AsRef<Path>>(
-    sols: &CalibrationSolutions,
-    file: T,
-) -> Result<(), WriteSolutionsError> {
+pub(super) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), WriteSolutionsError> {
     let num_polarisations = 4;
     let (num_timeblocks, total_num_tiles, total_num_chanblocks) = sols.di_jones.dim();
 

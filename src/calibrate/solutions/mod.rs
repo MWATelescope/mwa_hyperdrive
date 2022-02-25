@@ -83,28 +83,33 @@ impl CalibrationSolutions {
     /// determined by the file's extension (e.g. ".fits"). If the file is
     /// actually a directory, we attempt to read RTS DI calibration solution
     /// files from the directory.
-    pub fn read_solutions_from_ext<T: AsRef<Path>, T2: AsRef<Path>>(
-        file: T,
-        metafits: Option<T2>,
+    pub fn read_solutions_from_ext<P: AsRef<Path>, P2: AsRef<Path>>(
+        file: P,
+        metafits: Option<P2>,
     ) -> Result<CalibrationSolutions, ReadSolutionsError> {
-        let f = file.as_ref();
-        if f.is_dir() {
-            debug!(
-                "Got a directory '{}', looking for RTS solutions...",
-                f.display()
-            );
-            let metafits = metafits.ok_or(ReadSolutionsError::RtsMetafitsRequired)?;
-            rts::read(f, metafits).map_err(ReadSolutionsError::from)
-        } else {
-            match f.extension().and_then(|s| s.to_str()) {
-                Some("fits") => hyperdrive::read(file),
-                Some("bin") => ao::read(file),
-                s => {
-                    let ext = s.unwrap_or("<no extension>").to_string();
-                    Err(ReadSolutionsError::UnsupportedExt { ext })
+        fn inner(
+            file: &Path,
+            metafits: Option<&Path>,
+        ) -> Result<CalibrationSolutions, ReadSolutionsError> {
+            if file.is_dir() {
+                debug!(
+                    "Got a directory '{}', looking for RTS solutions...",
+                    file.display()
+                );
+                let metafits = metafits.ok_or(ReadSolutionsError::RtsMetafitsRequired)?;
+                rts::read(file, metafits).map_err(ReadSolutionsError::from)
+            } else {
+                match file.extension().and_then(|s| s.to_str()) {
+                    Some("fits") => hyperdrive::read(file),
+                    Some("bin") => ao::read(file),
+                    s => {
+                        let ext = s.unwrap_or("<no extension>").to_string();
+                        Err(ReadSolutionsError::UnsupportedExt { ext })
+                    }
                 }
             }
         }
+        inner(file.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
     }
 
     pub fn write_solutions_from_ext<P: AsRef<Path>, P2: AsRef<Path>>(
@@ -112,22 +117,28 @@ impl CalibrationSolutions {
         file: P,
         metafits: Option<P2>,
     ) -> Result<(), WriteSolutionsError> {
-        let file = file.as_ref();
-        if file.is_dir() {
-            let metafits = metafits.ok_or(WriteSolutionsError::RtsMetafitsRequired)?;
-            rts::write(self, file, metafits)?;
-        } else {
-            let ext = file.extension().and_then(|e| e.to_str());
-            match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
-                Some(CalSolutionType::Fits) => hyperdrive::write(self, file),
-                Some(CalSolutionType::Bin) => ao::write(self, file),
-                None => Err(WriteSolutionsError::UnsupportedExt {
-                    ext: ext.unwrap_or("<no extension>").to_string(),
-                }),
-            }?;
-        }
+        fn inner(
+            sols: &CalibrationSolutions,
+            file: &Path,
+            metafits: Option<&Path>,
+        ) -> Result<(), WriteSolutionsError> {
+            if file.is_dir() {
+                let metafits = metafits.ok_or(WriteSolutionsError::RtsMetafitsRequired)?;
+                rts::write(sols, file, metafits)?;
+            } else {
+                let ext = file.extension().and_then(|e| e.to_str());
+                match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
+                    Some(CalSolutionType::Fits) => hyperdrive::write(sols, file),
+                    Some(CalSolutionType::Bin) => ao::write(sols, file),
+                    None => Err(WriteSolutionsError::UnsupportedExt {
+                        ext: ext.unwrap_or("<no extension>").to_string(),
+                    }),
+                }?;
+            }
 
-        Ok(())
+            Ok(())
+        }
+        inner(self, file.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
     }
 
     #[cfg(feature = "plotting")]

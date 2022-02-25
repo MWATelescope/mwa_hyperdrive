@@ -51,8 +51,8 @@ impl VerifyArgs {
 ///
 /// If the source list type is provided, then assume that all source lists have
 /// that type.
-pub fn verify<T: AsRef<Path>>(
-    source_lists: &[T],
+pub fn verify<P: AsRef<Path>>(
+    source_lists: &[P],
     input_type: Option<&String>,
 ) -> Result<(), SrclistError> {
     if source_lists.is_empty() {

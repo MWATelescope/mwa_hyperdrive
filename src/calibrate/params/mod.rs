@@ -1402,8 +1402,8 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
 /// With this approach, we potentially avoid doing a whole run of calibration
 /// only to be unable to write to a file at the end. This code _doesn't_ alter
 /// the file if it exists.
-fn can_write_to_file<T: AsRef<Path>>(file: T) -> Result<(), InvalidArgsError> {
-    let file_exists = file.as_ref().exists();
+fn can_write_to_file(file: &Path) -> Result<(), InvalidArgsError> {
+    let file_exists = file.exists();
 
     match OpenOptions::new()
         .write(true)
@@ -1414,17 +1414,14 @@ fn can_write_to_file<T: AsRef<Path>>(file: T) -> Result<(), InvalidArgsError> {
         // File is writable.
         Ok(_) => {
             if file_exists {
-                warn!(
-                    "Will overwrite the existing file '{}'",
-                    file.as_ref().display()
-                )
+                warn!("Will overwrite the existing file '{}'", file.display())
             }
         }
 
         // File doesn't exist. Attempt to make the directories leading up to the
         // file; if this fails, then we can't write the file anyway.
         Err(std::io::ErrorKind::NotFound) => {
-            if let Some(p) = file.as_ref().parent() {
+            if let Some(p) = file.parent() {
                 match std::fs::DirBuilder::new()
                     .recursive(true)
                     .create(p)
@@ -1441,7 +1438,7 @@ fn can_write_to_file<T: AsRef<Path>>(file: T) -> Result<(), InvalidArgsError> {
 
         Err(std::io::ErrorKind::PermissionDenied) => {
             return Err(InvalidArgsError::FileNotWritable {
-                file: file.as_ref().display().to_string(),
+                file: file.display().to_string(),
             })
         }
 
