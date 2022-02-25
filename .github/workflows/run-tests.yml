@@ -12,6 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   test:
@@ -60,10 +61,10 @@ jobs:
       # Test that building works. Build statically first so less compiling is
       # needed when running tests.
       - name: Debug build with static features
-        run: cargo build --features=cuda,all-static
+        run: cargo test --no-run --locked --features=cuda,all-static
 
       - name: Debug build
-        run: cargo build --features=cuda
+        run: cargo test --no-run --locked --features=cuda
 
       # Can't test with CUDA, no GPUs available in CI
       - name: Run tests
