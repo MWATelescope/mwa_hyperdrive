@@ -508,9 +508,9 @@ fn test_1090008640_quality() {
     // Only one timeblock.
     assert_eq!(cal_results.dim().0, 1);
 
-    // 15 chanblocks need 50 iterations and 3 need 42 iterations. The rest are
+    // 14 chanblocks need 50 iterations and 3 need 42 iterations. The rest are
     // somewhere inbetween.
-    let mut count_50 = 15;
+    let mut count_50 = 14;
     let mut count_42 = 3;
     for cal_result in cal_results {
         match cal_result.num_iterations {

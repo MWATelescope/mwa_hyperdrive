@@ -132,8 +132,9 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "birli"
-version = "0.4.1"
-source = "git+https://github.com/MWATelescope/Birli?branch=main#2a27efbe8e9ad596e13cb5934f5cdb07a73de1db"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92ae78aca5d76c7a810e9c93d31329409dc24242742c182859a501a70bafe150"
 dependencies = [
  "built",
  "byteorder",

@@ -366,25 +366,25 @@ fn test_digital_gains() {
         weights_array: weights_no_dg,
     } = get_cross_vis(args);
 
-    let i_bl = 1;
+    let i_bl = 0;
     // Promote the Jones matrices for better accuracy.
     let mut result: Array1<Jones<f64>> = vis_dg.slice(s![i_bl, ..]).mapv(Jones::from);
     result /= &vis_no_dg.slice(s![i_bl, ..]).mapv(Jones::from);
-    // Baseline 1 is made from antennas 0 and 1. Both have a digital gain of 65.
-    let dg: f64 = 65.0 / 64.0;
+    // Baseline 0 is made from antennas 0 and 1. Both have a digital gain of 78.
+    let dg: f64 = 78.0 / 64.0;
     let expected = Array1::from_elem(result.dim(), Jones::identity()) / dg / dg;
     assert_abs_diff_eq!(
         result.mapv(TestJones::from),
         expected.mapv(TestJones::from),
-        epsilon = 1e-6
+        epsilon = 1e-7
     );
 
     let i_bl = 103;
     let mut result: Array1<Jones<f64>> = vis_dg.slice(s![i_bl, ..]).mapv(Jones::from);
     result /= &vis_no_dg.slice(s![i_bl, ..]).mapv(Jones::from);
-    // Baseline 103 is made from antennas 0 and 103.
-    let dg1: f64 = 65.0 / 64.0;
-    let dg2: f64 = 67.0 / 64.0;
+    // Baseline 103 is made from antennas 0 and 104.
+    let dg1: f64 = 78.0 / 64.0;
+    let dg2: f64 = 97.0 / 64.0;
     let expected = Array1::from_elem(result.dim(), Jones::identity()) / dg1 / dg2;
     assert_abs_diff_eq!(
         result.mapv(TestJones::from),

@@ -60,6 +60,10 @@ pub(crate) struct RawDataReader {
     /// Should geometric corrections be applied?
     geometric_correction: bool,
 
+    /// A pair of tiles for each baseline in the data (including autos and
+    /// ignoring all flags). e.g. The first element is (0, 0).
+    all_baseline_tile_pairs: Vec<(usize, usize)>,
+
     /// AOFlagger flags.
     aoflags: Option<AOFlags>,
 }
@@ -388,6 +392,12 @@ impl RawDataReader {
             flagged_fine_chans_per_coarse_chan,
         };
 
+        let all_baseline_tile_pairs = metafits_context
+            .baselines
+            .iter()
+            .map(|bl| (bl.ant1_index, bl.ant2_index))
+            .collect();
+
         Ok(RawDataReader {
             obs_context,
             mwalib_context,
@@ -396,6 +406,7 @@ impl RawDataReader {
             cable_length_correction,
             geometric_correction,
             aoflags,
+            all_baseline_tile_pairs,
         })
     }
 
@@ -412,65 +423,6 @@ impl RawDataReader {
                         // Do the multiplication at double precision.
                         let vd: Jones<f64> = Jones::from(*v) * pfb_gain;
                         *v = Jones::from(vd);
-                    });
-                });
-        }
-    }
-
-    /// Apply digital gains to the supplied visibilities.
-    fn apply_digital_gains(&self, mut vis: ArrayViewMut2<Jones<f32>>) {
-        if self.digital_gains {
-            vis.axis_iter_mut(Axis(1))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(i_bl, mut vis)| {
-                    let (tile1, tile2) =
-                        baseline_to_tiles(self.mwalib_context.metafits_context.num_ants, i_bl);
-                    // The digital gains in a metafits file are listed in
-                    // increasing frequency; that is, the first gain corresponds
-                    // to the lowest-frequency coarse channel, the last gain the
-                    // highest-frequency coarse channel. Confirmed by Andrew
-                    // Williams.
-
-                    // tile_gains has at most two references to a bunch of
-                    // digital gains. The references correspond to the tiles
-                    // making up this baseline. If this is an auto-correlation,
-                    // there's only one tile.
-
-                    // Set tile_gains to anything to make Rust happy. I don't
-                    // want to allocate a new vector even though it's probably
-                    // not significantly affecting performance.
-                    let mut tile_gains: [&Vec<f64>; 2] = [
-                        &self.mwalib_context.metafits_context.rf_inputs[0].digital_gains,
-                        &self.mwalib_context.metafits_context.rf_inputs[0].digital_gains,
-                    ];
-                    self.mwalib_context
-                        .metafits_context
-                        .rf_inputs
-                        .iter()
-                        // Discard every second RF input; the digital gains are
-                        // the same for both.
-                        .filter(|rf| rf.pol == Pol::X)
-                        // RFs are ordered by increasing antenna number. So
-                        // tile1 always comes before tile2.
-                        .filter(|rf| rf.ant == tile1 as u32 || rf.ant == tile2 as u32)
-                        .map(|rf| &rf.digital_gains)
-                        .enumerate()
-                        .for_each(|(i, rf)| tile_gains[i] = rf);
-
-                    vis.iter_mut().enumerate().for_each(|(i_chan, vis)| {
-                        let i_cc = i_chan
-                            / self
-                                .mwalib_context
-                                .metafits_context
-                                .num_corr_fine_chans_per_coarse;
-                        let mut gain = tile_gains[0][i_cc];
-                        let i = if tile1 != tile2 { 1 } else { 0 };
-                        gain *= tile_gains[i][i_cc];
-
-                        // Do the division at double precision.
-                        let vd: Jones<f64> = Jones::from(*vis) / gain;
-                        *vis = Jones::from(vd);
                     });
                 });
         }
@@ -607,7 +559,12 @@ impl RawDataReader {
         if !self.mwalib_context.metafits_context.cable_delays_applied
             && self.cable_length_correction
         {
-            birli::correct_cable_lengths(&self.mwalib_context, &mut vis, &coarse_chan_range, false);
+            birli::corrections::correct_cable_lengths(
+                &self.mwalib_context,
+                &mut vis,
+                &coarse_chan_range,
+                false,
+            );
         }
         match (
             self.mwalib_context
@@ -618,7 +575,7 @@ impl RawDataReader {
             // Nothing to do; user has spoken!
             (_, false) => (),
 
-            (mwalib::GeometricDelaysApplied::No, true) => birli::correct_geometry(
+            (mwalib::GeometricDelaysApplied::No, true) => birli::corrections::correct_geometry(
                 &self.mwalib_context,
                 &mut vis,
                 &timestep_range,
@@ -637,6 +594,15 @@ impl RawDataReader {
                 _,
             ) => (),
         }
+        if self.digital_gains {
+            birli::corrections::correct_digital_gains(
+                &self.mwalib_context,
+                &mut vis,
+                &coarse_chan_range,
+                &self.all_baseline_tile_pairs,
+            )?;
+        }
+
         // Remove the extraneous time dimension; there's only ever one timestep.
         let mut vis = vis.remove_axis(Axis(0));
         let mut weights = weights.remove_axis(Axis(0));
@@ -645,7 +611,6 @@ impl RawDataReader {
         // visibilities once, applying PFB gains, digital gains and weights all
         // at the same time.
         self.apply_pfb_gains(vis.view_mut());
-        self.apply_digital_gains(vis.view_mut());
         self.apply_mwaf_flags(
             mwaf_timestep,
             gpubox_channels,
