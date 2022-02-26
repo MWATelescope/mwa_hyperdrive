@@ -19,17 +19,17 @@ use mwa_hyperdrive_srclist::utilities::*;
 
 #[derive(Parser)]
 #[clap(name = "hyperdrive", version, author = env!("CARGO_PKG_HOMEPAGE"), about)]
-#[clap(global_setting(AppSettings::ArgRequiredElseHelp))]
 #[clap(global_setting(AppSettings::DeriveDisplayOrder))]
-#[clap(global_setting(AppSettings::DisableHelpSubcommand))]
-#[clap(global_setting(AppSettings::InferLongArgs))]
-#[clap(global_setting(AppSettings::InferSubcommands))]
-#[clap(global_setting(AppSettings::PropagateVersion))]
+#[clap(disable_help_subcommand = true)]
+#[clap(infer_subcommands = true)]
+#[clap(propagate_version = true)]
 enum Args {
     /// Perform direction-independent calibration on the input MWA data. See for
     /// more info:
     /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-usage
     #[clap(alias = "calibrate")]
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     DiCalibrate {
         // Share the arguments that could be passed in via a parameter file.
         #[clap(flatten)]
@@ -52,6 +52,8 @@ enum Args {
     },
 
     /// Simulate visibilities of a sky-model source list.
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     SimulateVis {
         #[clap(flatten)]
         args: SimulateVisArgs,
@@ -74,6 +76,8 @@ enum Args {
     },
 
     /// Convert between calibration solution file formats.
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     SolutionsConvert {
         /// The path to the input file. If this is a directory instead, then we
         /// attempt to read RTS calibration files in the directory.
@@ -98,6 +102,8 @@ enum Args {
 
     /// Plot calibration solutions.
     #[cfg(feature = "plotting")]
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     SolutionsPlot {
         #[clap(name = "SOLUTIONS_FILES", parse(from_os_str))]
         files: Vec<PathBuf>,
@@ -135,27 +141,37 @@ enum Args {
         verbosity: u8,
     },
 
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     SrclistByBeam {
         #[clap(flatten)]
         args: ByBeamArgs,
     },
 
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     SrclistConvert {
         #[clap(flatten)]
         args: ConvertArgs,
     },
 
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     SrclistShift {
         #[clap(flatten)]
         args: ShiftArgs,
     },
 
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     SrclistVerify {
         #[clap(flatten)]
         args: VerifyArgs,
     },
 
     /// Print information on the dipole gains listed by a metafits file.
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
     DipoleGains {
         #[clap(name = "METAFITS_FILE", parse(from_os_str))]
         metafits: PathBuf,

@@ -16,7 +16,7 @@ atty = "0.2.11"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
 chrono = "0.4.0"
-clap = { version = "3.0.14", features = ["derive", "wrap_help"] }
+clap = { version = "3.1.0", features = ["derive", "wrap_help"] }
 fern = { version = "0.6.0", features = ["chrono", "colored"] }
 flate2 = "1.0.13"
 itertools = "0.10.0"

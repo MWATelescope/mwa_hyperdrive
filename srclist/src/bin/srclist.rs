@@ -12,24 +12,27 @@ use mwa_hyperdrive_srclist::{utilities::*, *};
 #[derive(Parser, Debug)]
 #[clap(name = "hyperdrive srclist", about,
             author = env!("CARGO_PKG_HOMEPAGE"))]
-#[clap(global_setting(AppSettings::ArgRequiredElseHelp))]
 #[clap(global_setting(AppSettings::DeriveDisplayOrder))]
 enum Args {
+    #[clap(arg_required_else_help = true)]
     ByBeam {
         #[clap(flatten)]
         args: ByBeamArgs,
     },
 
+    #[clap(arg_required_else_help = true)]
     Convert {
         #[clap(flatten)]
         args: ConvertArgs,
     },
 
+    #[clap(arg_required_else_help = true)]
     Shift {
         #[clap(flatten)]
         args: ShiftArgs,
     },
 
+    #[clap(arg_required_else_help = true)]
     Verify {
         #[clap(flatten)]
         args: VerifyArgs,
