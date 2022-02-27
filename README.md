@@ -29,10 +29,17 @@ Currently in heavy development. Major milestones are listed below:
 ## Usage
 A comprehensive use guide can be found on the [wiki](https://github.com/MWATelescope/mwa_hyperdrive/wiki), but below are some TL;DR examples.
 
-Many `hyperdrive` functions require the beam code to function. The
-`MWA_BEAM_FILE` environment variable must be set and gives the path to the MWA
-FEE beam HDF5 file. See the README for
-[`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam) for more info.
+Many `hyperdrive` functions require the beam code to function. The MWA
+FEE beam HDF5 file can be obtained with:
+
+  `wget http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5`
+
+Move the `h5` file anywhere you like, and put the file path in `MWA_BEAM_FILE`:
+
+  `export MWA_BEAM_FILE=/path/to/mwa_full_embedded_element_pattern.h5`
+
+See the README for [`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam)
+for more info.
 
 ### DI Calibration
 <details>
