@@ -96,17 +96,9 @@ pub(crate) struct ObsContext {
     /// observation \[Hz\].
     pub(crate) coarse_chan_freqs: Vec<f64>,
 
-    /// a.k.a coarse channel bandwidth \[Hz\].
-    pub(crate) coarse_chan_width: f64,
-
     /// The number of fine-frequency channels per coarse channel. For 40 kHz
     /// legacy MWA data, this is 32.
     pub(crate) num_fine_chans_per_coarse_chan: usize,
-
-    /// The bandwidth of the supplied data \[Hz\]. This is not necessarily the
-    /// bandwidth of the actual observation, as the data here may only reflect a
-    /// fraction of it.
-    pub(crate) total_bandwidth: f64,
 
     /// The fine-channel resolution of the supplied data \[Hz\]. This is not
     /// necessarily the fine-channel resolution of the original observation's

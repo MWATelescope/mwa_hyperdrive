@@ -380,12 +380,7 @@ impl RawDataReader {
                 .iter()
                 .map(|cc| cc.chan_centre_hz as f64)
                 .collect(),
-            coarse_chan_width: metafits_context.coarse_chan_width_hz as f64,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
-            total_bandwidth: common_good_coarse_chans
-                .iter()
-                .map(|cc| cc.chan_width_hz as f64)
-                .sum(),
             freq_res: Some(metafits_context.corr_fine_chan_width_hz as f64),
             fine_chan_freqs,
             flagged_fine_chans,

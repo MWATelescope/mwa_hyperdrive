@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use clap::{AppSettings, Parser};
-use log::{debug, info, warn};
+use log::info;
 
 use mwa_hyperdrive::{
     calibrate::{args::CalibrateUserArgs, di_calibrate, solutions::CalibrationSolutions},
@@ -276,6 +276,8 @@ fn try_main() -> Result<(), HyperdriveError> {
             metafits,
             verbosity: _,
         } => {
+            use log::{debug, warn};
+
             if files.is_empty() {
                 eprintln!("Error: No solutions files supplied!");
                 std::process::exit(1);

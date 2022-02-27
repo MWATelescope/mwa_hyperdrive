@@ -439,7 +439,6 @@ impl MS {
                 Some(context) => Some(metafits::get_dipole_gains(context)),
             };
 
-            let coarse_chan_width = total_bandwidth_hz / coarse_chan_nums.len() as f64;
             // Round the values in here because sometimes they have a fractional
             // component, for some reason. We're unlikely to ever have a fraction of
             // a Hz as the channel resolution.
@@ -555,9 +554,7 @@ impl MS {
                 array_latitude_rad: None,
                 coarse_chan_nums,
                 coarse_chan_freqs,
-                coarse_chan_width,
                 num_fine_chans_per_coarse_chan,
-                total_bandwidth: total_bandwidth_hz,
                 freq_res: Some(freq_res),
                 fine_chan_freqs,
                 flagged_fine_chans,

@@ -68,7 +68,7 @@ fn model_benchmarks(c: &mut Criterion) {
             phase_centre,
             MWA_LONG_RAD,
             MWA_LAT_RAD,
-            true,
+            apply_precession,
         );
 
         b.iter(|| {
@@ -210,7 +210,7 @@ fn model_benchmarks(c: &mut Criterion) {
             phase_centre,
             MWA_LONG_RAD,
             MWA_LAT_RAD,
-            true,
+            apply_precession,
         );
 
         b.iter(|| {
@@ -370,7 +370,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 phase_centre,
                 MWA_LONG_RAD,
                 MWA_LAT_RAD,
-                true,
+                apply_precession,
             );
 
             b.iter(|| {

@@ -323,9 +323,6 @@ impl UvfitsReader {
             }
             let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
-            let total_bandwidth =
-                (*fine_chan_freqs.last() - *fine_chan_freqs.first()) as f64 + freq_res;
-
             let obs_context = ObsContext {
                 obsid,
                 timestamps,
@@ -346,9 +343,7 @@ impl UvfitsReader {
                 // use coarse channel information.
                 coarse_chan_nums: vec![1],
                 coarse_chan_freqs: vec![150e6],
-                coarse_chan_width: 40e3 * 32.0,
                 num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
-                total_bandwidth,
                 freq_res: Some(freq_res),
                 fine_chan_freqs,
                 // TODO: Get flagging right. I think that info is in an optional table.

@@ -653,10 +653,7 @@ source {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.0298759753097615, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.30480564447181374, epsilon = 1e-10);
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
         let (fd, si) = match &comp.flux_type {
             FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
@@ -666,10 +663,7 @@ source {
         assert_abs_diff_eq!(fd.q, 0.0, epsilon = 1e-10);
         assert_abs_diff_eq!(*si, -0.81, epsilon = 1e-10);
 
-        assert!(match comp.comp_type {
-            ComponentType::Point => true,
-            _ => false,
-        });
+        assert!(matches!(comp.comp_type, ComponentType::Point));
     }
 
     #[test]
@@ -701,10 +695,7 @@ source {
         let comp = &s.components[0];
         assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);
         assert_abs_diff_eq!(comp.radec.dec, -0.2106621177436647, epsilon = 1e-10);
-        assert!(match comp.flux_type {
-            FluxDensityType::PowerLaw { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.flux_type, FluxDensityType::PowerLaw { .. }));
         let (fd, si) = match &comp.flux_type {
             FluxDensityType::PowerLaw { fd, si } => (fd, si),
             _ => unreachable!(),
@@ -714,10 +705,7 @@ source {
         assert_abs_diff_eq!(fd.q, 0.0, epsilon = 1e-10);
         assert_abs_diff_eq!(*si, -0.88, epsilon = 1e-10);
 
-        assert!(match comp.comp_type {
-            ComponentType::Gaussian { .. } => true,
-            _ => false,
-        });
+        assert!(matches!(comp.comp_type, ComponentType::Gaussian { .. }));
         let (maj, min, pa) = match &comp.comp_type {
             ComponentType::Gaussian { maj, min, pa } => (maj, min, pa),
             _ => unreachable!(),

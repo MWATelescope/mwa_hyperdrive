@@ -100,7 +100,7 @@ pub(super) fn channels_to_chanblocks(
                     vec![Chanblock {
                         chanblock_index: 0,
                         unflagged_index: 0,
-                        freq: *f as f64,
+                        _freq: *f as f64,
                     }],
                     vec![],
                 )
@@ -169,7 +169,7 @@ pub(super) fn channels_to_chanblocks(
                 chanblocks.push(Chanblock {
                     chanblock_index: i_chanblock,
                     unflagged_index: i_unflagged_chanblock,
-                    freq: centroid_freq as f64,
+                    _freq: centroid_freq as f64,
                 });
                 i_unflagged_chanblock += 1;
             }
@@ -205,7 +205,7 @@ pub(super) fn channels_to_chanblocks(
             chanblocks.push(Chanblock {
                 chanblock_index: i_chanblock,
                 unflagged_index: i_unflagged_chanblock,
-                freq: centroid_freq as f64,
+                _freq: centroid_freq as f64,
             });
         }
         fences.push(Fence {

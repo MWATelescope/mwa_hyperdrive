@@ -23,8 +23,10 @@ pub(crate) struct UvfitsWriter<'a> {
     /// The path to the uvifts file.
     path: PathBuf,
 
+    // TODO: Check that the number of timesteps we were told to expect in `new`
+    // was actually received.
     /// The number of timesteps to be written.    
-    num_timesteps: usize,
+    _num_timesteps: usize,
 
     /// The number of baselines per timestep to be written.
     num_baselines: usize,
@@ -47,8 +49,9 @@ pub(crate) struct UvfitsWriter<'a> {
     /// data.
     start_epoch: Epoch,
 
+    // TODO: Handle autos properly.
     /// Are autocorrelations accompanying the cross-correlation visibilities?
-    autocorrelations_present: bool,
+    _autocorrelations_present: bool,
 
     /// A map from an unflagged cross-correlation baseline to its constituent
     /// antennas.
@@ -255,14 +258,14 @@ impl<'a> UvfitsWriter<'a> {
 
             Ok(UvfitsWriter {
                 path: filename.to_path_buf(),
-                num_timesteps,
+                _num_timesteps: num_timesteps,
                 num_baselines,
                 num_chans,
                 total_num_rows,
                 current_num_rows: 0,
                 centre_freq: centre_freq_hz,
                 start_epoch,
-                autocorrelations_present,
+                _autocorrelations_present: autocorrelations_present,
                 unflagged_cross_baseline_to_ants_map,
                 unflagged_ants,
                 unflagged_antenna_map,

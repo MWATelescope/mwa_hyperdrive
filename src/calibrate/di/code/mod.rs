@@ -32,7 +32,7 @@ use crate::{
     data_formats::UvfitsWriter,
     model,
 };
-use mwa_hyperdrive_common::{hifitime, indicatif, log, marlu, ndarray, rayon};
+use mwa_hyperdrive_common::{cfg_if, hifitime, indicatif, log, marlu, ndarray, rayon};
 
 pub(super) struct CalVis {
     /// Visibilites read from input data.
@@ -51,21 +51,23 @@ pub(super) fn get_cal_vis(
     params: &CalibrateParams,
     draw_progress_bar: bool,
 ) -> Result<CalVis, CalibrateError> {
-    // Witchcraft to allow this code to be used with or without CUDA support
-    // compiled.
-    #[cfg(not(feature = "cuda"))]
-    let use_cpu_for_modelling = true;
-    #[cfg(feature = "cuda")]
-    let use_cpu_for_modelling = params.use_cpu_for_modelling;
-
-    if use_cpu_for_modelling {
-        info!("Generating sky model visibilities on the CPU");
-    } else {
-        // TODO: Display GPU info.
-        #[cfg(not(feature = "cuda-single"))]
-        info!("Generating sky model visibilities on the GPU (double precision)");
-        #[cfg(feature = "cuda-single")]
-        info!("Generating sky model visibilities on the GPU (single precision)");
+    // TODO: Display GPU info.
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "cuda-single")] {
+            if params.use_cpu_for_modelling {
+                info!("Generating sky model visibilities on the CPU");
+            } else {
+                info!("Generating sky model visibilities on the GPU (single precision)");
+            }
+        } else if #[cfg(feature = "cuda")] {
+            if params.use_cpu_for_modelling {
+                info!("Generating sky model visibilities on the CPU");
+            } else {
+                info!("Generating sky model visibilities on the GPU (double precision)");
+            }
+        } else {
+            info!("Generating sky model visibilities on the CPU");
+        }
     }
 
     // TODO: Use all fences, not just the first.
@@ -226,7 +228,8 @@ pub(super) fn get_cal_vis(
                 tx_model,
                 &error,
                 model_progress,
-                use_cpu_for_modelling,
+                #[cfg(feature = "cuda")]
+                params.use_cpu_for_modelling,
             );
             if result.is_err() {
                 error.store(true);
@@ -316,24 +319,23 @@ fn model_vis<'a>(
     tx_model: Sender<(ArrayViewMut2<'a, Jones<f32>>, Vec<UVW>, Epoch)>,
     error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
-    use_cpu_for_modelling: bool,
+    #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
 ) -> Result<(), CalibrateError> {
     let obs_context = params.get_obs_context();
-    let modeller = unsafe {
-        model::new_sky_modeller(
-            use_cpu_for_modelling,
-            params.beam.deref(),
-            &params.source_list,
-            &params.unflagged_tile_xyzs,
-            &params.unflagged_fine_chan_freqs,
-            &params.flagged_tiles,
-            obs_context.phase_centre,
-            params.array_longitude,
-            params.array_latitude,
-            // TODO: Allow the user to turn off precession.
-            true,
-        )
-    }?;
+    let modeller = model::new_sky_modeller(
+        #[cfg(feature = "cuda")]
+        use_cpu_for_modelling,
+        params.beam.deref(),
+        &params.source_list,
+        &params.unflagged_tile_xyzs,
+        &params.unflagged_fine_chan_freqs,
+        &params.flagged_tiles,
+        obs_context.phase_centre,
+        params.array_longitude,
+        params.array_latitude,
+        // TODO: Allow the user to turn off precession.
+        true,
+    )?;
 
     // Iterate over all calibration timesteps and write to the model slices.
     for (&timestep, mut vis_model_slice) in params.timesteps.iter().zip(vis_model_slices) {
@@ -456,18 +458,20 @@ pub(super) struct IncompleteSolutions<'a> {
 
     /// The unflagged chanblocks used in calibration.
     chanblocks: &'a [Chanblock],
-
+    // TODO: Capture and use more calibration information when writing
+    // solutions. This will clarify how the solutions were made and aid
+    // reproducibility.
     /// The baseline weights used during calibration.
-    baseline_weights: &'a [f64],
+    _baseline_weights: &'a [f64],
 
     /// The maximum allowed number of iterations during calibration.
-    max_iterations: usize,
+    _max_iterations: usize,
 
     /// The stop threshold used during calibration.
-    stop_threshold: f64,
+    _stop_threshold: f64,
 
-    /// The minimum threshold used during calibration.    
-    min_threshold: f64,
+    /// The minimum threshold used during calibration.
+    _min_threshold: f64,
 }
 
 impl<'a> IncompleteSolutions<'a> {
@@ -714,10 +718,10 @@ pub(super) fn calibrate_timeblocks<'a>(
             di_jones,
             timeblocks,
             chanblocks,
-            baseline_weights,
-            max_iterations,
-            stop_threshold,
-            min_threshold,
+            _baseline_weights: baseline_weights,
+            _max_iterations: max_iterations,
+            _stop_threshold: stop_threshold,
+            _min_threshold: min_threshold,
         },
         cal_results,
     )

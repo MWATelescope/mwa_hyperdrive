@@ -128,7 +128,7 @@ pub(crate) fn di_calibrate(
     if !params.output_solutions_filenames.is_empty() {
         info!("Writing solutions...");
     }
-    for (sol_type, file) in &params.output_solutions_filenames {
+    for (_, file) in &params.output_solutions_filenames {
         // TODO: Provide a path to the metafits file. This is kinda redundant
         // because only RTS solutions need metafits, and hyperdrive *will not*
         // write RTS solutions out directly from calibration; they're only

@@ -9,22 +9,20 @@ mod cuda;
 
 use std::ops::Deref;
 
-use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
-use itertools::Itertools;
+use approx::assert_abs_diff_eq;
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::xyz::xyzs_to_cross_uvws_parallel,
-    AzEl, Complex, Jones, RADec, XyzGeodetic,
+    Complex, Jones, RADec, XyzGeodetic,
 };
 use ndarray::prelude::*;
-use serial_test::serial;
 
 use super::*;
 use crate::jones_test::TestJones;
 #[cfg(feature = "cuda")]
 use crate::model::cuda::SkyModellerCuda;
-use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Delays};
-use mwa_hyperdrive_common::{itertools, marlu, ndarray};
+use mwa_hyperdrive_beam::create_no_beam_object;
+use mwa_hyperdrive_common::{marlu, ndarray};
 use mwa_hyperdrive_srclist::{
     ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList,
 };
@@ -142,7 +140,9 @@ impl ObsParams {
         }
     }
 
-    fn power_law() -> ObsParams {
+    // TODO: Use. May end up being deleted when the flux-density-estimating code
+    // gets overhauled.
+    fn _power_law() -> ObsParams {
         let phase_centre = RADec::new_degrees(0.0, -27.0);
         let freqs = vec![150e6, 175e6, 200e6];
 

@@ -17,7 +17,6 @@
 
 mod read_files;
 
-use mwa_hyperdrive_beam::Beam;
 use read_files::*;
 
 use std::collections::BTreeMap;
@@ -26,7 +25,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use log::{debug, warn};
-use marlu::{AzEl, Jones};
+use marlu::Jones;
 use ndarray::prelude::*;
 use regex::Regex;
 use thiserror::Error;
@@ -104,7 +103,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
             let node_num = &NODE_NUM.captures(&di_jm.display().to_string()).unwrap()[1]
                 .parse::<u8>()
                 .unwrap();
-            let receiver_number = gpubox_to_receiver.get(node_num).ok_or_else(|| {
+            let receiver_number = gpubox_to_receiver.get(node_num).ok_or({
                 RtsReadSolsError::NoGpuboxForNodeNum {
                     node_num: *node_num,
                 }
@@ -123,7 +122,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
             let node_num = &NODE_NUM.captures(&bp_cal.display().to_string()).unwrap()[1]
                 .parse::<u8>()
                 .unwrap();
-            let receiver_number = gpubox_to_receiver.get(node_num).ok_or_else(|| {
+            let receiver_number = gpubox_to_receiver.get(node_num).ok_or({
                 RtsReadSolsError::NoGpuboxForNodeNum {
                     node_num: *node_num,
                 }

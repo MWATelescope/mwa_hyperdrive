@@ -11,7 +11,6 @@ use rayon::prelude::*;
 use rubbl_casatables::{Table, TableOpenMode};
 
 use super::error::*;
-use crate::constants::*;
 use mwa_hyperdrive_common::{marlu, rayon};
 
 /// Open a measurement set table read only. If `table` is `None`, then open the
@@ -46,13 +45,4 @@ pub(super) fn casacore_positions_to_local_xyz(
         .par_iter()
         .map(|xyz| xyz.to_geodetic_inner(vec, s_long, c_long))
         .collect())
-}
-
-/// casacore's antenna positions are [XyzGeocentric] coordinates, but we use
-/// [XyzGeodetic] coordinates in hyperdrive. This function converts the casacore
-/// positions, assuming we're at the MWA coordinates.
-pub(super) fn casacore_positions_to_local_xyz_mwa(
-    pos: &[XyzGeocentric],
-) -> Result<Vec<XyzGeodetic>, MSError> {
-    casacore_positions_to_local_xyz(pos, MWA_LONG_RAD, MWA_LAT_RAD, MWA_HEIGHT_M)
 }

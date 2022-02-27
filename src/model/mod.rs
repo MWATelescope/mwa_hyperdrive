@@ -206,11 +206,12 @@ pub unsafe fn new_cuda_sky_modeller<'a>(
 ///
 /// # Safety
 ///
-/// If not using the CPU modeller, this function interfaces directly with the
-/// CUDA API. Rust errors attempt to catch problems but there are no guarantees.
+/// If not using the CPU modeller, this function wraps an `unsafe` call, which
+/// interfaces directly with the CUDA API. Rust errors attempt to catch problems
+/// but there are no guarantees.
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn new_sky_modeller<'a>(
-    use_cpu_for_modelling: bool,
+pub fn new_sky_modeller<'a>(
+    #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
     beam: &'a dyn Beam,
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
@@ -235,6 +236,7 @@ pub unsafe fn new_sky_modeller<'a>(
                     apply_precession,
                 ))
             } else {
+                unsafe {
                 new_cuda_sky_modeller(
                     beam,
                     source_list,
@@ -245,7 +247,7 @@ pub unsafe fn new_sky_modeller<'a>(
                     array_longitude_rad,
                     array_latitude_rad,
                     apply_precession,
-                )
+                )}
             }
         } else {
             Ok(new_cpu_sky_modeller(beam,

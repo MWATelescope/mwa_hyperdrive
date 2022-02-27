@@ -11,8 +11,7 @@ mod calibrate;
 mod jones_test;
 mod modelling;
 
-use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Output;
 use std::str::from_utf8;
 
@@ -35,12 +34,6 @@ fn get_cmd_output(result: Result<Output, OutputError>) -> (String, String) {
         from_utf8(&output.stdout).unwrap().to_string(),
         from_utf8(&output.stderr).unwrap().to_string(),
     )
-}
-
-fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(filename: T, dir: U) -> (PathBuf, File) {
-    let path = dir.as_ref().join(filename);
-    let f = File::create(&path).expect("couldn't make file");
-    (path, f)
 }
 
 /// Get the calibration arguments associated with the obsid 1090008640. This

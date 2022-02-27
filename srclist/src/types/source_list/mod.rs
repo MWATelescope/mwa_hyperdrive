@@ -62,9 +62,9 @@ impl SourceList {
                     .components
                     .into_iter()
                     .filter(|c| {
-                        !(filter_points && c.is_point())
-                            && !(filter_gaussians && c.is_gaussian())
-                            && !(filter_shapelets && c.is_shapelet())
+                        !(filter_points && c.is_point()
+                            || filter_gaussians && c.is_gaussian()
+                            || filter_shapelets && c.is_shapelet())
                     })
                     .collect();
                 (name, Source { components: comps })

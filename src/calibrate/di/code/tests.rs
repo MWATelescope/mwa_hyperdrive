@@ -102,17 +102,17 @@ fn incomplete_to_complete_trivial() {
         Chanblock {
             chanblock_index: 0,
             unflagged_index: 0,
-            freq: 150e6,
+            _freq: 150e6,
         },
         Chanblock {
             chanblock_index: 1,
             unflagged_index: 1,
-            freq: 151e6,
+            _freq: 151e6,
         },
         Chanblock {
             chanblock_index: 2,
             unflagged_index: 2,
-            freq: 152e6,
+            _freq: 152e6,
         },
     ];
     let flagged_tiles = [];
@@ -136,10 +136,10 @@ fn incomplete_to_complete_trivial() {
         di_jones: incomplete_di_jones.clone(),
         timeblocks: &timeblocks,
         chanblocks: &chanblocks,
-        baseline_weights: &baseline_weights,
-        max_iterations: 50,
-        stop_threshold: 1e-8,
-        min_threshold: 1e-4,
+        _baseline_weights: &baseline_weights,
+        _max_iterations: 50,
+        _stop_threshold: 1e-8,
+        _min_threshold: 1e-4,
     };
 
     let all_tile_positions = vec![
@@ -184,17 +184,17 @@ fn incomplete_to_complete_flags_simple() {
         Chanblock {
             chanblock_index: 1,
             unflagged_index: 0,
-            freq: 151e6,
+            _freq: 151e6,
         },
         Chanblock {
             chanblock_index: 2,
             unflagged_index: 1,
-            freq: 152e6,
+            _freq: 152e6,
         },
         Chanblock {
             chanblock_index: 3,
             unflagged_index: 2,
-            freq: 153e6,
+            _freq: 153e6,
         },
     ];
     let flagged_tiles = [];
@@ -216,10 +216,10 @@ fn incomplete_to_complete_flags_simple() {
         di_jones: incomplete_di_jones.clone(),
         timeblocks: &timeblocks,
         chanblocks: &chanblocks,
-        baseline_weights: &baseline_weights,
-        max_iterations: 50,
-        stop_threshold: 1e-8,
-        min_threshold: 1e-4,
+        _baseline_weights: &baseline_weights,
+        _max_iterations: 50,
+        _stop_threshold: 1e-8,
+        _min_threshold: 1e-4,
     };
 
     let all_tile_positions = vec![
@@ -276,17 +276,17 @@ fn incomplete_to_complete_flags_simple2() {
         Chanblock {
             chanblock_index: 0,
             unflagged_index: 0,
-            freq: 151e6,
+            _freq: 151e6,
         },
         Chanblock {
             chanblock_index: 1,
             unflagged_index: 1,
-            freq: 152e6,
+            _freq: 152e6,
         },
         Chanblock {
             chanblock_index: 2,
             unflagged_index: 2,
-            freq: 153e6,
+            _freq: 153e6,
         },
     ];
     let flagged_tiles = [];
@@ -311,10 +311,10 @@ fn incomplete_to_complete_flags_simple2() {
         di_jones: incomplete_di_jones.clone(),
         timeblocks: &timeblocks,
         chanblocks: &chanblocks,
-        baseline_weights: &baseline_weights,
-        max_iterations: 50,
-        stop_threshold: 1e-8,
-        min_threshold: 1e-4,
+        _baseline_weights: &baseline_weights,
+        _max_iterations: 50,
+        _stop_threshold: 1e-8,
+        _min_threshold: 1e-4,
     };
 
     let all_tile_positions = vec![
@@ -370,17 +370,17 @@ fn incomplete_to_complete_flags_complex() {
         Chanblock {
             chanblock_index: 0,
             unflagged_index: 0,
-            freq: 150e6,
+            _freq: 150e6,
         },
         Chanblock {
             chanblock_index: 2,
             unflagged_index: 1,
-            freq: 152e6,
+            _freq: 152e6,
         },
         Chanblock {
             chanblock_index: 3,
             unflagged_index: 2,
-            freq: 153e6,
+            _freq: 153e6,
         },
     ];
     let flagged_tiles = [2];
@@ -414,10 +414,10 @@ fn incomplete_to_complete_flags_complex() {
         di_jones: incomplete_di_jones,
         timeblocks: &timeblocks,
         chanblocks: &chanblocks,
-        baseline_weights: &baseline_weights,
-        max_iterations: 50,
-        stop_threshold: 1e-8,
-        min_threshold: 1e-4,
+        _baseline_weights: &baseline_weights,
+        _max_iterations: 50,
+        _stop_threshold: 1e-8,
+        _min_threshold: 1e-4,
     };
 
     let all_tile_positions = vec![

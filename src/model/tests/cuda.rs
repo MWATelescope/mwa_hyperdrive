@@ -4,6 +4,7 @@
 
 //! Tests on generating sky-model visibilities.
 
+use approx::assert_abs_diff_ne;
 use marlu::cuda::DevicePointer;
 use ndarray::prelude::*;
 

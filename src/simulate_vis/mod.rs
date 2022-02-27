@@ -29,7 +29,7 @@ use crate::{
     model,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{clap, hifitime, indicatif, log, marlu, mwalib, ndarray};
+use mwa_hyperdrive_common::{cfg_if, clap, hifitime, indicatif, log, marlu, mwalib, ndarray};
 use mwa_hyperdrive_srclist::{read::read_source_list_file, SourceList};
 
 #[derive(Parser, Debug, Default, Deserialize)]
@@ -382,19 +382,23 @@ pub fn simulate_vis(
     #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
     dry_run: bool,
 ) -> Result<(), SimulateVisError> {
-    // Witchcraft to allow this code to be used with or without CUDA support
-    // compiled.
-    #[cfg(not(feature = "cuda"))]
-    let use_cpu_for_modelling = true;
-
-    if use_cpu_for_modelling {
-        info!("Generating sky model visibilities on the CPU");
-    } else {
-        // TODO: Display GPU info.
-        #[cfg(not(feature = "cuda-single"))]
-        info!("Generating sky model visibilities on the GPU (double precision)");
-        #[cfg(feature = "cuda-single")]
-        info!("Generating sky model visibilities on the GPU (single precision)");
+    // TODO: Display GPU info.
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "cuda-single")] {
+            if use_cpu_for_modelling {
+                info!("Generating sky model visibilities on the CPU");
+            } else {
+                info!("Generating sky model visibilities on the GPU (single precision)");
+            }
+        } else if #[cfg(feature = "cuda")] {
+            if use_cpu_for_modelling {
+                info!("Generating sky model visibilities on the CPU");
+            } else {
+                info!("Generating sky model visibilities on the GPU (double precision)");
+            }
+        } else {
+            info!("Generating sky model visibilities on the CPU");
+        }
     }
 
     let params = SimVisParams::new(args)?;
@@ -445,21 +449,20 @@ pub fn simulate_vis(
     )?;
 
     // Create a "modeller" object.
-    let modeller = unsafe {
-        model::new_sky_modeller(
-            use_cpu_for_modelling,
-            params.beam.deref(),
-            &params.source_list,
-            &params.xyzs,
-            &params.fine_chan_freqs,
-            &params.flagged_tiles,
-            params.phase_centre,
-            params.array_longitude,
-            params.array_latitude,
-            // TODO: Allow the user to turn off precession.
-            true,
-        )
-    }?;
+    let modeller = model::new_sky_modeller(
+        #[cfg(feature = "cuda")]
+        use_cpu_for_modelling,
+        params.beam.deref(),
+        &params.source_list,
+        &params.xyzs,
+        &params.fine_chan_freqs,
+        &params.flagged_tiles,
+        params.phase_centre,
+        params.array_longitude,
+        params.array_latitude,
+        // TODO: Allow the user to turn off precession.
+        true,
+    )?;
 
     // Progress bar.
     let model_progress = ProgressBar::new(params.timestamps.len() as _)

@@ -95,8 +95,10 @@ pub(crate) struct Chanblock {
     /// first unflagged chanblock's index, its unflagged index is 0.
     pub(crate) unflagged_index: u16,
 
+    // TODO: Use frequency information. May become important for calibration
+    // solutions and what frequencies they apply to.
     /// The centroid frequency for this chanblock \[Hz\].
-    pub(crate) freq: f64,
+    pub(crate) _freq: f64,
 }
 
 /// A spectral windows, a.k.a. a contiguous-band of fine-frequency channels
@@ -138,7 +140,7 @@ impl Fence {
         }
     }
 
-    fn get_freqs(&self) -> Vec<f64> {
+    fn _get_freqs(&self) -> Vec<f64> {
         if let Some(freq_res) = self.freq_res {
             (0..self.get_total_num_chanblocks())
                 .into_iter()
