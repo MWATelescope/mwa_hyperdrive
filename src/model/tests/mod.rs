@@ -9,21 +9,23 @@ mod cuda;
 
 use std::ops::Deref;
 
-use approx::assert_abs_diff_eq;
+use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
+use itertools::Itertools;
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::xyz::xyzs_to_cross_uvws_parallel,
-    Complex, Jones, RADec, XyzGeodetic,
+    AzEl, Complex, Jones, RADec, XyzGeodetic,
 };
 use ndarray::prelude::*;
+use serial_test::serial;
 use vec1::vec1;
 
 use super::*;
 use crate::jones_test::TestJones;
 #[cfg(feature = "cuda")]
 use crate::model::cuda::SkyModellerCuda;
-use mwa_hyperdrive_beam::create_no_beam_object;
-use mwa_hyperdrive_common::{marlu, ndarray, vec1};
+use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Delays};
+use mwa_hyperdrive_common::{itertools, marlu, ndarray, vec1};
 use mwa_hyperdrive_srclist::{
     ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList,
 };
@@ -469,4 +471,92 @@ fn shapelet_off_zenith_cpu() {
     );
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
+}
+
+// Test that tile beams are different when their dead dipoles are different.
+#[test]
+#[serial]
+fn dead_dipole_tiles_different() {
+    // Make the first row of gains all unity, but every row after has a dead
+    // dipole.
+    let mut gains: Array2<f64> = Array2::ones((17, 16));
+    let single_dead_perms = (0..16).permutations(1);
+    gains
+        .outer_iter_mut()
+        .skip(1)
+        .zip(single_dead_perms)
+        .for_each(|(mut g, i)| {
+            g[i[0] as usize] = 0.0;
+        });
+    let delays = Delays::Partial(vec![0; 16]);
+    let beam_file: Option<&str> = None;
+    let beam: Box<dyn Beam> =
+        create_fee_beam_object(beam_file, gains.len_of(Axis(0)), delays, Some(gains)).unwrap();
+    for i in 0..17 {
+        for j in 0..17 {
+            if i == j {
+                continue;
+            }
+            assert_abs_diff_ne!(
+                TestJones::from(
+                    beam.calc_jones(AzEl::new_degrees(0.0, 90.0), 150e6, i)
+                        .unwrap()
+                ),
+                TestJones::from(
+                    beam.calc_jones(AzEl::new_degrees(0.0, 90.0), 150e6, j)
+                        .unwrap()
+                )
+            );
+        }
+    }
+
+    // Now check that visibilities correctly apply the dead dipole beam
+    // responses.
+    let mut obs = ObsParams::list();
+    let gains = array![
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    ];
+    let delays = Delays::Partial(vec![0; 16]);
+    obs.beam =
+        create_fee_beam_object(beam_file, gains.len_of(Axis(0)), delays, Some(gains)).unwrap();
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "zenith".to_string(),
+        Source {
+            components: vec1![get_simple_point(
+                obs.phase_centre,
+                obs.flux_density_scale.clone(),
+            )],
+        },
+    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
+    modeller
+        .model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst)
+        .unwrap();
+
+    // Tile 1 (the first tile)'s gains were all unity, the others not, so any
+    // baselines including tile 1 should simply be the beam response
+
+    for (i_baseline, (&freq, vis_per_freq)) in obs
+        .freqs
+        .iter()
+        .zip(visibilities.axis_iter(Axis(1)))
+        .enumerate()
+    {
+        dbg!(i_baseline, freq, vis_per_freq);
+        // let (i_tile1, i_tile2) = cross_correlation_baseline_to_tiles(3, i_baseline);
+        // let beam_response = beam
+        //     .calc_jones(AzEl::new_degrees(0.0, 90.0), freq, i_tile1)
+        //     .unwrap()
+        //     * beam
+        //         .calc_jones(AzEl::new_degrees(0.0, 90.0), freq, i_tile2)
+        //         .unwrap()
+        //         .h();
+
+        // assert_abs_diff_eq!(TestJones::from(vis_per_bl), TestJones::from(beam_response));
+    }
 }
