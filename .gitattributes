@@ -3,3 +3,9 @@
 *.fits binary
 *.metafits binary
 *.mwaf binary
+# Measurement sets
+*.dat binary
+*.f0 binary
+*.f0i binary
+*.info binary
+*.lock binary

@@ -119,7 +119,7 @@ impl AOFlags {
         let mut flags = BTreeMap::new();
         flags.insert(m.gpubox_num, m.flags);
 
-        Ok(Self {
+        Ok(AOFlags {
             start_time_milli: m.start_time_milli,
             num_time_steps: m.num_time_steps,
             num_channels: m.num_channels,
@@ -250,7 +250,7 @@ impl AOFlags {
         num_channels += last.num_channels;
         gpubox_nums.push(last.gpubox_num);
 
-        Ok(Self {
+        Ok(AOFlags {
             start_time_milli: last.start_time_milli,
             num_time_steps: last.num_time_steps,
             num_channels,
@@ -398,7 +398,7 @@ impl Mwaf {
             flags
         };
 
-        Ok(Self {
+        Ok(Mwaf {
             start_time_milli,
             num_channels,
             num_antennas,

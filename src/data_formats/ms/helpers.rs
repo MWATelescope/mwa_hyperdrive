@@ -30,17 +30,11 @@ pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MSErro
 /// positions.
 pub(super) fn casacore_positions_to_local_xyz(
     pos: &[XyzGeocentric],
-    longitude_rad: f64,
-    latitude_rad: f64,
-    height_metres: f64,
+    array_pos: LatLngHeight,
 ) -> Result<Vec<XyzGeodetic>, MSError> {
-    let vec = XyzGeocentric::get_geocentric_vector(LatLngHeight {
-        longitude_rad,
-        latitude_rad,
-        height_metres,
-    })
-    .map_err(|_| MSError::Geodetic2Geocentric)?;
-    let (s_long, c_long) = longitude_rad.sin_cos();
+    let vec = XyzGeocentric::get_geocentric_vector(array_pos)
+        .map_err(|_| MSError::Geodetic2Geocentric)?;
+    let (s_long, c_long) = array_pos.longitude_rad.sin_cos();
     Ok(pos
         .par_iter()
         .map(|xyz| xyz.to_geodetic_inner(vec, s_long, c_long))

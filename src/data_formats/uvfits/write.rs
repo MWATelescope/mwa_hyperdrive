@@ -764,8 +764,8 @@ impl<'a> UvfitsWriter<'a> {
                 let jones = unsafe { jones.uget(unflagged_chan_index) };
                 let weight = unsafe { weights.uget(unflagged_chan_index) };
                 // If this vis is flagged, make the weight negative.
-                let weight = if jones.any_nan() || *weight <= 0.0 {
-                    -(weight.abs())
+                let weight = if jones.any_nan() {
+                    -weight.abs()
                 } else {
                     *weight
                 };

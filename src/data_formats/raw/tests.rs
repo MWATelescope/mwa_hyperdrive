@@ -4,14 +4,17 @@
 
 //! Tests for reading from raw MWA files.
 
-use approx::{abs_diff_eq, abs_diff_ne, assert_abs_diff_eq};
+use approx::{abs_diff_eq, assert_abs_diff_eq};
 use marlu::c32;
 use ndarray::prelude::*;
-use tempfile::TempDir;
+use tempfile::{tempdir, TempDir};
 
 use super::*;
 use crate::{
-    calibrate::args::CalibrateUserArgs,
+    calibrate::{
+        args::CalibrateUserArgs,
+        di::code::{get_cal_vis, tests::test_1090008640_quality},
+    },
     jones_test::TestJones,
     pfb_gains::{EMPIRICAL_40KHZ, LEVINE_40KHZ},
     tests::{deflate_gz_into_file, reduced_obsids::get_reduced_1090008640},
@@ -154,6 +157,39 @@ fn read_1090008640_cross_vis() {
             c32::new(5.270001e2, 7.7025006e2),
             c32::new(4.1725012e2, 7.262501e2),
             c32::new(7.0849994e2, -7.175003e1),
+        ])
+    );
+
+    assert_abs_diff_eq!(weights, Array2::from_elem(weights.dim(), 8.0));
+}
+
+// Test the visibility values with corrections applied (except PFB gains).
+#[test]
+fn read_1090008640_cross_vis_with_corrections() {
+    let mut args = get_reduced_1090008640(false);
+    args.pfb_flavour = Some("none".to_string());
+    args.ignore_input_data_fine_channel_flags = true;
+    let CrossData {
+        data_array: vis,
+        weights_array: weights,
+    } = get_cross_vis(args);
+
+    assert_abs_diff_eq!(
+        TestJones::from(vis[(0, 0)]),
+        TestJones::from([
+            c32::new(-1.2564129e2, -1.497961e1),
+            c32::new(8.207059e1, -1.4936417e2),
+            c32::new(-7.306871e1, 2.36177e2),
+            c32::new(-5.5305626e1, -2.3209404e1)
+        ])
+    );
+    assert_abs_diff_eq!(
+        TestJones::from(vis[(10, 16)]),
+        TestJones::from([
+            c32::new(-4.138127e1, -2.638188e2),
+            c32::new(5.220332e2, -2.6055228e2),
+            c32::new(4.854074e2, -1.9634505e2),
+            c32::new(1.6101791e1, -4.4489478e2),
         ])
     );
 
@@ -376,7 +412,7 @@ fn test_digital_gains() {
     assert_abs_diff_eq!(
         result.mapv(TestJones::from),
         expected.mapv(TestJones::from),
-        epsilon = 1e-7
+        epsilon = 1e-6
     );
 
     let i_bl = 103;
@@ -476,9 +512,7 @@ fn test_mwaf_flags() {
     result.unwrap();
 
     // There's a difference -- mwaf flags applied.
-    assert_ne!(cross_data_array, flagged_cross_data_array);
     assert_ne!(cross_weights_array, flagged_cross_weights_array);
-    assert_ne!(auto_data_array, flagged_auto_data_array);
     assert_ne!(auto_weights_array, flagged_auto_weights_array);
 
     // Iterate over the arrays, where are the differences? They should be
@@ -494,49 +528,44 @@ fn test_mwaf_flags() {
         let i_bl = i / num_freqs;
         let (tile1, tile2) = marlu::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
 
-        let (vis, weight) = if tile1 == tile2 {
+        let weight = if tile1 == tile2 {
             i_auto += 1;
-            (
-                flagged_auto_data_array.as_slice().unwrap()[i_auto - 1],
-                flagged_auto_weights_array.as_slice().unwrap()[i_auto - 1],
-            )
+            flagged_auto_weights_array.as_slice().unwrap()[i_auto - 1]
         } else {
             i_cross += 1;
-            (
-                flagged_cross_data_array.as_slice().unwrap()[i_cross - 1],
-                flagged_cross_weights_array.as_slice().unwrap()[i_cross - 1],
-            )
+            flagged_cross_weights_array.as_slice().unwrap()[i_cross - 1]
         };
         if prime {
+            let expected = -8.0;
             assert!(
-                abs_diff_eq!(TestJones::from(vis), TestJones::from(Jones::default())),
-                "i = {}, tile1 = {}, tile2 = {}",
-                i,
-                tile1,
-                tile2
-            );
-            assert!(
-                abs_diff_eq!(weight, 0.0),
-                "i = {}, tile1 = {}, tile2 = {}",
-                i,
-                tile1,
-                tile2
+                abs_diff_eq!(weight, expected),
+                "weight = {weight}, expected = {expected}, i = {i}, tile1 = {tile1}, tile2 = {tile2}"
             );
         } else {
+            let expected = 8.0;
             assert!(
-                abs_diff_ne!(TestJones::from(vis), TestJones::from(Jones::default())),
-                "i = {}, tile1 = {}, tile2 = {}",
-                i,
-                tile1,
-                tile2
-            );
-            assert!(
-                abs_diff_ne!(weight, 0.0),
-                "i = {}, tile1 = {}, tile2 = {}",
-                i,
-                tile1,
-                tile2
+                abs_diff_eq!(weight, expected),
+                "weight = {weight}, expected = {expected}, i = {i}, tile1 = {tile1}, tile2 = {tile2}"
             );
         }
     }
+}
+
+#[test]
+fn test_1090008640_calibration_quality() {
+    let mut args = get_reduced_1090008640(false);
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
+    args.pfb_flavour = Some("none".to_string());
+    // To be consistent with other data quality tests, add these flags.
+    args.fine_chan_flags = Some(vec![0, 1, 2, 16, 30, 31]);
+
+    let result = args.into_params();
+    let params = match result {
+        Ok(r) => r,
+        Err(e) => panic!("{}", e),
+    };
+
+    let cal_vis = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
+    test_1090008640_quality(params, cal_vis);
 }

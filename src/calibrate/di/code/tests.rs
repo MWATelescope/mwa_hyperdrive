@@ -4,20 +4,17 @@
 
 //! Direction-independent calibration tests.
 
-use approx::assert_abs_diff_eq;
+use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use hifitime::Epoch;
 use marlu::{Jones, XyzGeodetic};
 use ndarray::prelude::*;
-
-use tempfile::tempdir;
 use vec1::vec1;
 
-use super::{calibrate, calibrate_timeblocks, get_cal_vis, CalVis, IncompleteSolutions};
+use super::{calibrate, calibrate_timeblocks, CalVis, IncompleteSolutions};
 use crate::{
-    calibrate::{Chanblock, Timeblock},
+    calibrate::{params::CalibrateParams, Chanblock, Timeblock},
     jones_test::TestJones,
     math::is_prime,
-    tests::reduced_obsids::get_reduced_1090008640,
 };
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 
@@ -36,6 +33,7 @@ fn test_calibrate_trivial() {
 
     let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
+    let vis_weights: Array3<f32> = Array3::ones(vis_shape);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     let mut di_jones = Array3::from_elem(
         (num_timeblocks, num_tiles, num_chanblocks),
@@ -58,12 +56,13 @@ fn test_calibrate_trivial() {
                 chanblock_index..chanblock_index + 1
             ];
             let vis_data_slice = vis_data.slice(range);
+            let vis_weight_slice = vis_weights.slice(range);
             let vis_model_slice = vis_model.slice(range);
             let result = calibrate(
                 vis_data_slice,
+                vis_weight_slice,
                 vis_model_slice,
                 di_jones_rev.view_mut(),
-                &vec![1.0; vis_data.dim().1],
                 20,
                 1e-8,
                 1e-5,
@@ -85,6 +84,151 @@ fn test_calibrate_trivial() {
     let di_jones = di_jones.mapv(TestJones::from);
     let expected = Array3::from_elem(di_jones.dim(), Jones::identity() * 2.0).mapv(TestJones::from);
     assert_abs_diff_eq!(di_jones, expected, epsilon = 1e-14);
+}
+
+/// As above, but make on Jones matrix much bigger than the rest. This should
+/// make the calibration solutions not match what we expected, but when it's
+/// flagged via the weights, things go back to normal.
+#[test]
+fn test_calibrate_trivial_with_flags() {
+    let num_timesteps = 1;
+    let num_timeblocks = 1;
+    let timeblock_length = 1;
+    let num_tiles = 5;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let num_chanblocks = 2;
+
+    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let mut vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    // Make the first chanblock's data be 4x identity.
+    vis_data
+        .slice_mut(s![.., .., 0])
+        .fill(Jones::identity() * 4.0);
+    // Make the second chanblock's data be 9x identity.
+    vis_data
+        .slice_mut(s![.., .., 1])
+        .fill(Jones::identity() * 9.0);
+    // Inject some wicked RFI.
+    let bad_vis = vis_data.get_mut((0, 0, 0)).unwrap();
+    *bad_vis = Jones::identity() * 9000.0;
+    let mut vis_weights: Array3<f32> = Array3::ones(vis_shape);
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    let mut di_jones = Array3::from_elem(
+        (num_timeblocks, num_tiles, num_chanblocks),
+        Jones::<f64>::identity(),
+    );
+
+    for timeblock in 0..num_timeblocks {
+        let time_range_start = timeblock * timeblock_length;
+        let time_range_end = ((timeblock + 1) * timeblock_length).min(vis_data.dim().0);
+
+        let mut di_jones_rev = di_jones.slice_mut(s![timeblock, .., ..]).reversed_axes();
+
+        for (chanblock_index, mut di_jones_rev) in (0..num_chanblocks)
+            .into_iter()
+            .zip(di_jones_rev.outer_iter_mut())
+        {
+            let range = s![
+                time_range_start..time_range_end,
+                ..,
+                chanblock_index..chanblock_index + 1
+            ];
+            let vis_data_slice = vis_data.slice(range);
+            let vis_weight_slice = vis_weights.slice(range);
+            let vis_model_slice = vis_model.slice(range);
+            let result = calibrate(
+                vis_data_slice,
+                vis_weight_slice,
+                vis_model_slice,
+                di_jones_rev.view_mut(),
+                20,
+                1e-8,
+                1e-5,
+            );
+
+            assert!(result.converged);
+            assert_eq!(result.num_failed, 0);
+            let expected = if chanblock_index == 0 {
+                // The solutions should be 2 * identity, but they won't be.
+                Array1::from_elem(di_jones_rev.len(), Jones::identity() * 2.0)
+            } else {
+                // The solutions should be 3 * identity.
+                Array1::from_elem(di_jones_rev.len(), Jones::identity() * 3.0)
+            };
+            let di_jones_rev = di_jones_rev.mapv(TestJones::from);
+            let expected = expected.mapv(TestJones::from);
+            if timeblock == 0 && chanblock_index == 0 {
+                assert_abs_diff_ne!(di_jones_rev, expected);
+            } else {
+                assert_abs_diff_eq!(di_jones_rev, expected);
+            }
+        }
+    }
+
+    // Fix the weight and repeat.
+    let bad_weight = vis_weights.get_mut((0, 0, 0)).unwrap();
+    *bad_weight = -1.0;
+    di_jones.fill(Jones::identity());
+    for timeblock in 0..num_timeblocks {
+        let time_range_start = timeblock * timeblock_length;
+        let time_range_end = ((timeblock + 1) * timeblock_length).min(vis_data.dim().0);
+
+        let mut di_jones_rev = di_jones.slice_mut(s![timeblock, .., ..]).reversed_axes();
+
+        for (chanblock_index, mut di_jones_rev) in (0..num_chanblocks)
+            .into_iter()
+            .zip(di_jones_rev.outer_iter_mut())
+        {
+            let range = s![
+                time_range_start..time_range_end,
+                ..,
+                chanblock_index..chanblock_index + 1
+            ];
+            let vis_data_slice = vis_data.slice(range);
+            let vis_weight_slice = vis_weights.slice(range);
+            let vis_model_slice = vis_model.slice(range);
+            let result = calibrate(
+                vis_data_slice,
+                vis_weight_slice,
+                vis_model_slice,
+                di_jones_rev.view_mut(),
+                20,
+                1e-8,
+                1e-5,
+            );
+
+            assert!(result.converged);
+            if chanblock_index == 0 {
+                assert_eq!(result.num_iterations, 10);
+            } else {
+                assert_eq!(result.num_iterations, 12);
+            }
+            assert_eq!(result.num_failed, 0);
+            assert!(result.max_precision < 1e-13);
+            let expected = if chanblock_index == 0 {
+                // The solutions should be 2 * identity.
+                Array1::from_elem(di_jones_rev.len(), Jones::identity() * 2.0)
+            } else {
+                // The solutions should be 3 * identity.
+                Array1::from_elem(di_jones_rev.len(), Jones::identity() * 3.0)
+            };
+
+            let di_jones_rev = di_jones_rev.mapv(TestJones::from);
+            let expected = expected.mapv(TestJones::from);
+            assert_abs_diff_eq!(di_jones_rev, expected, epsilon = 1e-14);
+        }
+    }
+
+    let di_jones = di_jones.mapv(TestJones::from);
+    let mut expected = Array3::from_elem(di_jones.dim(), Jones::identity());
+    expected
+        .slice_mut(s![.., .., 0])
+        .fill(Jones::identity() * 2.0);
+    // Make the second chanblock's data be 9x identity.
+    expected
+        .slice_mut(s![.., .., 1])
+        .fill(Jones::identity() * 3.0);
+    assert_abs_diff_eq!(di_jones, expected.mapv(TestJones::from), epsilon = 1e-14);
 }
 
 /// Test that converting [IncompleteSolutions] to [CalibrationSolutions] does
@@ -474,28 +618,14 @@ fn incomplete_to_complete_flags_complex() {
     assert!(complete.flagged_chanblocks.contains(&1));
 }
 
-/// Make a toml argument file without a metafits file.
-#[test]
-fn test_1090008640_quality() {
-    let mut args = get_reduced_1090008640(true);
-    let temp_dir = tempdir().expect("Couldn't make temp dir");
-    args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(r) => r,
-        Err(e) => panic!("{}", e),
-    };
-
-    let CalVis {
-        vis_data,
-        vis_weights: _,
-        vis_model,
-    } = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
-
+/// Given calibration parameters and visibilities, this function tests that
+/// everything matches an expected quality. The values may change over time but
+/// they should be consistent with whatever tests use this test code.
+pub(crate) fn test_1090008640_quality(params: CalibrateParams, cal_vis: CalVis) {
     let (_, cal_results) = calibrate_timeblocks(
-        vis_data.view(),
-        vis_model.view(),
+        cal_vis.vis_data.view(),
+        cal_vis.vis_weights.view(),
+        cal_vis.vis_model.view(),
         &params.timeblocks,
         &params.fences.first().chanblocks,
         &params.baseline_weights,
@@ -509,33 +639,64 @@ fn test_1090008640_quality() {
     // Only one timeblock.
     assert_eq!(cal_results.dim().0, 1);
 
-    // 14 chanblocks need 50 iterations and 3 need 42 iterations. The rest are
-    // somewhere inbetween.
-    let mut count_50 = 14;
-    let mut count_42 = 3;
+    let mut count_50 = 0;
+    let mut count_42 = 0;
+    let mut chanblocks_42 = vec![];
+    let mut fewest_iterations = usize::MAX;
     for cal_result in cal_results {
         match cal_result.num_iterations {
             50 => {
-                count_50 -= 1;
+                count_50 += 1;
+                fewest_iterations = fewest_iterations.min(cal_result.num_iterations);
             }
             42 => {
-                count_42 -= 1;
-                assert!([12, 13, 23].contains(&cal_result.chanblock.unwrap()));
+                count_42 += 1;
+                chanblocks_42.push(cal_result.chanblock.unwrap());
+                fewest_iterations = fewest_iterations.min(cal_result.num_iterations);
             }
             0 => panic!("0 iterations? Something is wrong."),
             _ => {
                 if cal_result.num_iterations % 2 == 1 {
                     panic!("An odd number of iterations shouldn't be possible; at the time of writing, only even numbers are allowed.");
-                } else if cal_result.num_iterations < 42 {
-                    panic!("Unexpected fewer iterations: {:?}", cal_result)
                 }
+                fewest_iterations = fewest_iterations.min(cal_result.num_iterations);
             }
         }
 
-        assert!(cal_result.converged);
+        assert!(
+            cal_result.converged,
+            "Chanblock {} did not converge",
+            cal_result.chanblock.unwrap()
+        );
         assert_eq!(cal_result.num_failed, 0);
         assert!(cal_result.max_precision < 1e8);
     }
-    assert_eq!(count_50, 0);
-    assert_eq!(count_42, 0);
+
+    let expected_count_50 = 14;
+    let expected_count_42 = 1;
+    let expected_chanblocks_42 = vec![13];
+    let expected_fewest_iterations = 40;
+    if count_50 != expected_count_50
+        || count_42 != expected_count_42
+        || chanblocks_42 != expected_chanblocks_42
+        || fewest_iterations != expected_fewest_iterations
+    {
+        panic!(
+            r#"
+Calibration quality has changed. This test expects:
+  {} chanblocks with 50 iterations (got {}),
+  {} chanblocks with 42 iterations (got {}),
+  chanblocks {:?} to need 42 iterations (got {:?}), and
+  no chanblocks to finish in less than {} iterations (got {}).
+"#,
+            expected_count_50,
+            count_50,
+            expected_count_42,
+            count_42,
+            expected_chanblocks_42,
+            chanblocks_42,
+            fewest_iterations,
+            expected_fewest_iterations
+        );
+    }
 }

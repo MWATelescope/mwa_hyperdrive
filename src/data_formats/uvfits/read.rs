@@ -9,7 +9,7 @@ use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
-use marlu::{c32, Jones, RADec, XyzGeodetic};
+use marlu::{Jones, RADec, XyzGeodetic};
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -27,7 +27,7 @@ use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
 
 pub(crate) struct UvfitsReader {
     /// Observation metadata.
-    obs_context: ObsContext,
+    pub(super) obs_context: ObsContext,
 
     // uvfits-specific things follow.
     /// The path to the uvfits on disk.
@@ -391,8 +391,8 @@ impl InputData for UvfitsReader {
 
     fn read_crosses(
         &self,
-        mut data_array: ArrayViewMut2<Jones<f32>>,
-        mut weights_array: ArrayViewMut2<f32>,
+        mut vis_data: ArrayViewMut2<Jones<f32>>,
+        mut vis_weights: ArrayViewMut2<f32>,
         timestep_index: usize,
         tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
         flagged_fine_chans: &HashSet<usize>,
@@ -449,7 +449,7 @@ impl InputData for UvfitsReader {
                 }
                 fits_check_status(status).map_err(UvfitsReadError::from)?;
 
-                let vis_array = ArrayView3::from_shape(
+                let data_vis = ArrayView3::from_shape(
                     (
                         self.metadata.num_fine_freq_chans,
                         self.metadata.num_pols,
@@ -461,19 +461,15 @@ impl InputData for UvfitsReader {
                 // Put the data and weights into the shared arrays outside this
                 // scope. Before we can do this, we need to remove any
                 // globally-flagged fine channels.
-                for (i_chan, data_pol_axis) in vis_array
+                let mut out_vis = vis_data.slice_mut(s![i_baseline, ..]);
+                let mut out_weights = vis_weights.slice_mut(s![i_baseline, ..]);
+                data_vis
                     .outer_iter()
                     .enumerate()
                     .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                {
-                    // Skip boundary checks to improve performance.
-                    // TODO: How much does this actually help?
-                    unsafe {
-                        // These are references to the visibilities and weights
-                        // in the output arrays.
-                        let data_array_elem = data_array.uget_mut((i_baseline, i_chan));
-                        let weight_elem = weights_array.uget_mut((i_baseline, i_chan));
-
+                    .zip(out_vis.iter_mut())
+                    .zip(out_weights.iter_mut())
+                    .for_each(|(((_, data_pol_axis), out_vis), out_weight)| {
                         // These are the components of the input data's
                         // visibilities.
                         let data_xx = data_pol_axis.index_axis(Axis(0), 0);
@@ -483,16 +479,15 @@ impl InputData for UvfitsReader {
 
                         // Write to the output weights array. We assume that
                         // each polarisation weight is equal.
-                        *weight_elem = data_xx[2];
+                        *out_weight = data_xx[2];
 
                         // Write the input data visibility components to the
                         // output data array.
-                        data_array_elem[0] = c32::new(data_xx[0], data_xx[1]);
-                        data_array_elem[1] = c32::new(data_xy[0], data_xy[1]);
-                        data_array_elem[2] = c32::new(data_yx[0], data_yx[1]);
-                        data_array_elem[3] = c32::new(data_yy[0], data_yy[1]);
-                    }
-                }
+                        *out_vis = Jones::from([
+                            data_xx[0], data_xx[1], data_xy[0], data_xy[1], data_yx[0], data_yx[1],
+                            data_yy[0], data_yy[1],
+                        ]);
+                    });
             }
         }
 
@@ -501,8 +496,8 @@ impl InputData for UvfitsReader {
 
     fn read_autos(
         &self,
-        mut data_array: ArrayViewMut2<Jones<f32>>,
-        mut weights_array: ArrayViewMut2<f32>,
+        mut vis_data: ArrayViewMut2<Jones<f32>>,
+        mut vis_weights: ArrayViewMut2<f32>,
         timestep_index: usize,
         flagged_tiles: &[usize],
         flagged_fine_chans: &HashSet<usize>,
@@ -557,7 +552,7 @@ impl InputData for UvfitsReader {
                 }
                 fits_check_status(status).map_err(UvfitsReadError::from)?;
 
-                let vis_array = ArrayView3::from_shape(
+                let data_vis = ArrayView3::from_shape(
                     (
                         self.metadata.num_fine_freq_chans,
                         self.metadata.num_pols,
@@ -569,18 +564,17 @@ impl InputData for UvfitsReader {
                 // Put the data and weights into the shared arrays outside this
                 // scope. Before we can do this, we need to remove any
                 // globally-flagged fine channels.
-                for (i_chan, data_pol_axis) in vis_array
+                let mut out_vis = vis_data.slice_mut(s![auto_array_index, ..]);
+                let mut out_weights = vis_weights.slice_mut(s![auto_array_index, ..]);
+                data_vis
                     .outer_iter()
                     .enumerate()
                     .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                {
-                    // Skip boundary checks to improve performance.
-                    // TODO: How much does this actually help?
-                    unsafe {
+                    .zip(out_vis.iter_mut())
+                    .zip(out_weights.iter_mut())
+                    .for_each(|(((_, data_pol_axis), out_vis), out_weight)| {
                         // These are references to the visibilities and weights
                         // in the output arrays.
-                        let data_array_elem = data_array.uget_mut((auto_array_index, i_chan));
-                        let weight_elem = weights_array.uget_mut((auto_array_index, i_chan));
 
                         // These are the components of the input data's
                         // visibilities.
@@ -592,16 +586,15 @@ impl InputData for UvfitsReader {
                         // Get the element of the output weights array, and
                         // write to it. We assume that weights are all equal for
                         // these visibilities.
-                        *weight_elem = data_xx[2];
+                        *out_weight = data_xx[2];
 
                         // Write the input data visibility components to the
-                        // output data array, also multiplying by the weight.
-                        data_array_elem[0] = c32::new(data_xx[0], data_xx[1]) * *weight_elem;
-                        data_array_elem[1] = c32::new(data_xy[0], data_xy[1]) * *weight_elem;
-                        data_array_elem[2] = c32::new(data_yx[0], data_yx[1]) * *weight_elem;
-                        data_array_elem[3] = c32::new(data_yy[0], data_yy[1]) * *weight_elem;
-                    }
-                }
+                        // output data array.
+                        *out_vis = Jones::from([
+                            data_xx[0], data_xx[1], data_xy[0], data_xy[1], data_yx[0], data_yx[1],
+                            data_yy[0], data_yy[1],
+                        ]);
+                    });
                 auto_array_index += 1;
             }
         }

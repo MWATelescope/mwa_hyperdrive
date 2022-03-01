@@ -7,7 +7,7 @@
 //! This code borrows heavily from Torrance Hodgson's excellent Julia code at
 //! https://github.com/torrance/MWAjl
 
-mod code;
+pub(crate) mod code;
 
 pub use code::calibrate_timeblocks;
 use code::*;
@@ -67,6 +67,7 @@ pub(crate) fn di_calibrate(
 
     let (sols, _) = calibrate_timeblocks(
         vis_data.view(),
+        vis_weights.view(),
         vis_model.view(),
         &params.timeblocks,
         &params.fences.first().chanblocks,

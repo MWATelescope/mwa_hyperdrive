@@ -6,6 +6,8 @@
 
 pub(crate) mod error;
 mod helpers;
+#[cfg(test)]
+mod tests;
 
 pub use error::*;
 use helpers::*;
@@ -19,11 +21,11 @@ use marlu::{
     c32,
     constants::{
         COTTER_MWA_HEIGHT_METRES, COTTER_MWA_LATITUDE_RADIANS, COTTER_MWA_LONGITUDE_RADIANS,
-        MWA_HEIGHT_M, MWA_LAT_RAD, MWA_LONG_RAD,
     },
-    Jones, RADec, XyzGeocentric,
+    rubbl_casatables, Jones, LatLngHeight, RADec, XyzGeocentric,
 };
 use ndarray::prelude::*;
+use rubbl_casatables::Table;
 
 use super::*;
 use crate::{context::ObsContext, data_formats::metafits, time::round_hundredths_of_a_second};
@@ -72,6 +74,13 @@ impl MS {
                 return Err(MsReadError::BadFile(ms.to_path_buf()));
             }
 
+            // If a metafits file was provided, get an mwalib object ready.
+            let mwalib_context = match metafits {
+                None => None,
+                // TODO: Let the user supply the MWA version
+                Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
+            };
+
             let mut main_table = read_table(ms, None)?;
             if main_table.n_rows() == 0 {
                 return Err(MsReadError::Empty);
@@ -97,35 +106,45 @@ impl MS {
             let mut antenna_table = read_table(ms, Some("ANTENNA"))?;
             let tile_names: Vec<String> = antenna_table.get_col_as_vec("NAME").unwrap();
             let tile_names = Vec1::try_from_vec(tile_names).map_err(|_| MsReadError::Empty)?;
-            let mut casacore_positions = Vec::with_capacity(antenna_table.n_rows() as usize);
-            antenna_table
-                .for_each_row(|row| {
-                    // TODO: Kill the failure crate, and all unwraps!!
-                    let pos: Vec<f64> = row.get_cell("POSITION").unwrap();
-                    let pos_xyz = XyzGeocentric {
-                        x: pos[0],
-                        y: pos[1],
-                        z: pos[2],
-                    };
-                    casacore_positions.push(pos_xyz);
-                    Ok(())
-                })
-                .unwrap();
-            let (array_longitude_rad, array_latitude_rad, array_height_m) = match flavour {
-                MsFlavour::Birli => (MWA_LONG_RAD, MWA_LAT_RAD, MWA_HEIGHT_M),
-                MsFlavour::Cotter => (
-                    COTTER_MWA_LONGITUDE_RADIANS,
-                    COTTER_MWA_LATITUDE_RADIANS,
-                    COTTER_MWA_HEIGHT_METRES,
-                ),
-                MsFlavour::Casa => todo!(),
+
+            let get_casacore_positions = |antenna_table: &mut Table, flavour: &MsFlavour| {
+                let mut casacore_positions = Vec::with_capacity(antenna_table.n_rows() as usize);
+                antenna_table
+                    .for_each_row(|row| {
+                        // TODO: Kill the failure crate, and all unwraps!!
+                        let pos: Vec<f64> = row.get_cell("POSITION").unwrap();
+                        let pos_xyz = XyzGeocentric {
+                            x: pos[0],
+                            y: pos[1],
+                            z: pos[2],
+                        };
+                        casacore_positions.push(pos_xyz);
+                        Ok(())
+                    })
+                    .unwrap();
+                let array_pos = match flavour {
+                    MsFlavour::Birli => LatLngHeight::new_mwa(),
+                    MsFlavour::Cotter => LatLngHeight {
+                        longitude_rad: COTTER_MWA_LONGITUDE_RADIANS,
+                        latitude_rad: COTTER_MWA_LATITUDE_RADIANS,
+                        height_metres: COTTER_MWA_HEIGHT_METRES,
+                    },
+                    MsFlavour::Casa => todo!(),
+                };
+                casacore_positions_to_local_xyz(&casacore_positions, array_pos)
             };
-            let tile_xyzs = casacore_positions_to_local_xyz(
-                &casacore_positions,
-                array_longitude_rad,
-                array_latitude_rad,
-                array_height_m,
-            )?;
+            let tile_xyzs = match (&flavour, mwalib_context.as_ref()) {
+                // If possible, use the metafits positions because even if the
+                // MS's positions are derived from the same metafits values,
+                // they're stored as geocentric positions, but we want geodetic
+                // positions. The additional transform done for the MS means
+                // that they're slightly less accurate.
+                (MsFlavour::Birli, Some(context)) => marlu::XyzGeodetic::get_tiles_mwa(context),
+                (MsFlavour::Birli, None) => get_casacore_positions(&mut antenna_table, &flavour)?,
+                (MsFlavour::Cotter, _) => get_casacore_positions(&mut antenna_table, &flavour)?,
+                (MsFlavour::Casa, Some(context)) => marlu::XyzGeodetic::get_tiles_mwa(context),
+                (MsFlavour::Casa, None) => todo!(),
+            };
             let tile_xyzs = Vec1::try_from_vec(tile_xyzs).map_err(|_| MsReadError::Empty)?;
             let total_num_tiles = tile_xyzs.len();
             trace!("There are {} total tiles", total_num_tiles);
@@ -343,13 +362,6 @@ impl MS {
                         Some(obsid_int)
                     }
                 }
-            };
-
-            // If a metafits file was provided, get an mwalib object ready.
-            let mwalib_context = match metafits {
-                None => None,
-                // TODO: Let the user supply the MWA version
-                Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
             };
 
             // Populate the dipole delays if we need to, and get the pointing centre
@@ -626,13 +638,8 @@ impl InputData for MS {
                     .get(&(ant1 as usize, ant2 as usize))
                     .cloned()
                 {
-                    // TODO: Filter on UVW lengths, as specified by the user.
-                    let uvw: Vec<f64> = row.get_cell("UVW").unwrap();
-                    if uvw.len() < 3 {
-                        return Err(MSError::NotThreeUVW { row_index }.into());
-                    }
                     // The data array is arranged [frequency][instrumental_pol].
-                    let data: Array2<c32> = row.get_cell("DATA").unwrap();
+                    let data_vis: Array2<c32> = row.get_cell("DATA").unwrap();
                     // The weight array is arranged
                     // [frequency][instrumental_pol], however, we assume the
                     // weights for all instrumental visibility polarisations are
@@ -645,11 +652,11 @@ impl InputData for MS {
 
                     // Ensure that all arrays have appropriate sizes. We have to
                     // panic here because of the way Rubbl does error handling.
-                    if data.len_of(Axis(1)) != 4 {
+                    if data_vis.len_of(Axis(1)) != 4 {
                         panic!(
                             "{}",
                             MSError::BadArraySize {
-                                array_type: "data",
+                                array_type: "data_vis",
                                 row_index,
                                 expected_len: 4,
                                 axis_num: 1,
@@ -678,21 +685,23 @@ impl InputData for MS {
                             }
                         );
                     }
+                    assert_eq!(data_vis.dim(), data_weights.dim());
+                    assert_eq!(data_weights.dim(), flags.dim());
                     if vis_data.len_of(Axis(0)) < bl {
                         panic!(
                             "{}",
                             ReadInputDataError::BadArraySize {
-                                array_type: "data",
+                                array_type: "data_vis",
                                 expected_len: bl,
                                 axis_num: 0,
                             }
                         );
                     }
-                    if vis_data.len_of(Axis(1)) > data.len_of(Axis(0)) {
+                    if vis_data.len_of(Axis(1)) > data_vis.len_of(Axis(0)) {
                         panic!(
                             "{}",
                             ReadInputDataError::BadArraySize {
-                                array_type: "data",
+                                array_type: "data_vis",
                                 expected_len: vis_data.len_of(Axis(0)),
                                 axis_num: 1,
                             }
@@ -702,46 +711,32 @@ impl InputData for MS {
                     // Put the data and weights into the shared arrays outside
                     // this scope. Before we can do this, we need to remove any
                     // globally-flagged fine channels.
-                    for (i_unflagged_chan, ((data, data_weights), flags)) in data
+                    let mut out_vis = vis_data.slice_mut(s![bl, ..]);
+                    data_vis
                         .outer_iter()
-                        .zip(data_weights.outer_iter())
-                        .zip(flags.outer_iter())
                         .enumerate()
                         .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                        // Discard the channel index, we want the unflagged
-                        // channel index.
-                        .map(|(_, data)| data)
-                        .enumerate()
-                    {
-                        // TODO: This block of code could be better.
+                        .zip(out_vis.iter_mut())
+                        .for_each(|((_, data_vis), out_vis)| {
+                            *out_vis =
+                                Jones::from([data_vis[0], data_vis[1], data_vis[2], data_vis[3]]);
+                        });
 
-                        // These are references to the visibilities and weights
-                        // in the output arrays.
-                        let data_array_elem = vis_data.get_mut((bl, i_unflagged_chan)).unwrap();
-                        let weight_elem = vis_weights.get_mut((bl, i_unflagged_chan)).unwrap();
-                        // These are the components of the input
-                        // data's visibility.
-                        let data_xx_elem = data.get(0).unwrap();
-                        let data_xy_elem = data.get(1).unwrap();
-                        let data_yx_elem = data.get(2).unwrap();
-                        let data_yy_elem = data.get(3).unwrap();
-                        // The corresponding flag.
-                        let flag = flags.get(0).unwrap();
-                        // If necessary, adjust the weight by the flag.
-                        if *flag {
-                            *weight_elem = 0.0
-                        } else {
-                            // This is the corresponding weight of the
-                            // visibility. It is the same for all polarisations.
-                            let weight = data_weights.get(0).unwrap();
-                            // Write to the output weights array.
-                            *weight_elem = *weight;
-                        };
-                        data_array_elem[0] = *data_xx_elem;
-                        data_array_elem[1] = *data_xy_elem;
-                        data_array_elem[2] = *data_yx_elem;
-                        data_array_elem[3] = *data_yy_elem;
-                    }
+                    // Apply the flags to the weights (negate if flagged), and
+                    // throw away 3 of the 4 weights; there are 4 weights (for
+                    // XX XY YX YY) and we assume that the first weight is the
+                    // same as the others.
+                    let mut out_weights = vis_weights.slice_mut(s![bl, ..]);
+                    data_weights
+                        .into_iter()
+                        .step_by(4)
+                        .zip(flags.into_iter().step_by(4))
+                        .enumerate()
+                        .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
+                        .zip(out_weights.iter_mut())
+                        .for_each(|((_, (weight, flag)), out_weight)| {
+                            *out_weight = if flag { -weight.abs() } else { weight };
+                        });
                 }
                 row_index += 1;
                 Ok(())

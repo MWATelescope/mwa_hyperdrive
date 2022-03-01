@@ -532,6 +532,7 @@ fn calibrate_benchmarks(c: &mut Criterion) {
 
     let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
+    let vis_weights: Array3<f32> = Array3::ones(vis_shape);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     let baseline_weights = vec![1.0; num_baselines];
 
@@ -541,6 +542,7 @@ fn calibrate_benchmarks(c: &mut Criterion) {
             b.iter(|| {
                 calibrate_timeblocks(
                     vis_data.view(),
+                    vis_weights.view(),
                     vis_model.view(),
                     &timeblocks,
                     &chanblocks,

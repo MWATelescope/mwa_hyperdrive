@@ -191,7 +191,11 @@ impl RawDataReader {
         let timestamps: Vec<Epoch> = mwalib_context
             .timesteps
             .iter()
-            .map(|t| Epoch::from_gpst_seconds(t.gps_time_ms as f64 / 1e3))
+            .map(|t| {
+                Epoch::from_gpst_seconds(
+                    (t.gps_time_ms + metafits_context.corr_int_time_ms / 2) as f64 / 1e3,
+                )
+            })
             .collect();
         let timestamps = Vec1::try_from_vec(timestamps).map_err(|_| RawReadError::NoTimesteps)?;
 
@@ -204,19 +208,11 @@ impl RawDataReader {
             .collect();
         let common_good_coarse_chans = Vec1::try_from_vec(common_good_coarse_chans).unwrap();
 
-        let mut fine_chan_freqs = Vec::with_capacity(
-            metafits_context.num_corr_fine_chans_per_coarse
-                * mwalib_context.num_provided_coarse_chans,
-        );
-        for cc in &common_good_coarse_chans {
-            for i_chan in 0..metafits_context.num_corr_fine_chans_per_coarse as u64 {
-                fine_chan_freqs.push(
-                    (cc.chan_start_hz as u64
-                        + i_chan * metafits_context.corr_fine_chan_width_hz as u64)
-                        as u64,
-                )
-            }
-        }
+        let fine_chan_freqs = mwalib_context
+            .get_fine_chan_freqs_hz_array(&mwalib_context.common_good_coarse_chan_indices)
+            .into_iter()
+            .map(|f| f.round() as u64)
+            .collect();
         let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
         let phase_centre = RADec::new(
@@ -423,11 +419,12 @@ impl RawDataReader {
         }
     }
 
+    /// From the given mwaf flags for a timestep, make weights negative
+    /// (flagged) or leave them as is.
     fn apply_mwaf_flags(
         &self,
         mwaf_timestep: Option<usize>,
         gpubox_channels: Range<usize>,
-        mut vis: ArrayViewMut2<Jones<f32>>,
         mut weights: ArrayViewMut2<f32>,
     ) {
         if let Some(timestep) = mwaf_timestep {
@@ -441,34 +438,26 @@ impl RawDataReader {
                     .. // All baselines
                 ];
 
-                vis.slice_mut(selection)
+                weights
+                    .slice_mut(selection)
                     .outer_iter_mut()
-                    // .into_par_iter()
-                    .zip(weights.slice_mut(selection).outer_iter_mut())
                     .enumerate()
-                    .for_each(|(i_freq, (mut vis, mut weights))| {
+                    .for_each(|(i_freq, mut weights)| {
                         // Get the right bit for this frequency channel.
                         let bit = i_freq % 8;
                         // Get the right flags for this frequency channel. There
                         // are 8 flags per value in flags (an 8-bit byte).
-                        let flags_for_bls = flags.slice(s![.., i_freq / 8]).mapv(|f| {
-                            if ((f.reverse_bits() >> bit) & 0x01) == 0x01 {
-                                // If we are flagging, keep 0, otherwise 1. This
-                                // saves a conditional when actually applying
-                                // the flag.
-                                0_u8
-                            } else {
-                                1
-                            }
-                        });
+                        let flags_for_bls = flags
+                            .slice(s![.., i_freq / 8])
+                            .mapv(|f| ((f.reverse_bits() >> bit) & 0x01) == 0x01);
 
-                        vis.iter_mut()
-                            .zip(weights.iter_mut())
+                        weights
+                            .iter_mut()
                             .zip(flags_for_bls)
-                            .for_each(|((vis, weight), flag)| {
-                                let f = flag as f32;
-                                *vis *= f;
-                                *weight *= f;
+                            .for_each(|(weight, flag)| {
+                                if flag {
+                                    *weight = -weight.abs();
+                                }
                             });
                     });
             }
@@ -493,8 +482,10 @@ impl RawDataReader {
                 // The time resolution is always specified for raw MWA data. Use
                 // units of milliseconds with the flags.
                 let time_res = self.obs_context.time_res.unwrap();
-                let flags_start = aoflags.start_time_milli as f64 / 1e3;
-                let flags_end = flags_start + aoflags.num_time_steps as f64 * time_res;
+                // The start and end times need to be adjusted to be centroids.
+                let flags_start = aoflags.start_time_milli as f64 / 1e3 + time_res / 2.0;
+                let flags_end =
+                    flags_start + aoflags.num_time_steps as f64 * time_res + time_res / 2.0;
                 let gps = self.obs_context.timestamps[timestep].as_gpst_seconds();
                 if !(flags_start..flags_end).contains(&gps) {
                     return Err(ReadInputDataError::MwafFlagsMissingForTimestep { timestep, gps });
@@ -548,7 +539,11 @@ impl RawDataReader {
             false,
         )?;
         let weight_factor = birli::flags::get_weight_factor(&self.mwalib_context);
-        let weights = birli::flags::flag_to_weight_array(flags.view(), weight_factor);
+        // Birli has a function `flag_to_weight_array`, but this just makes an
+        // array the same shape as `flags` and fills it with `weight_factor`.
+        // We'd like negative weights where we have flags.
+        let weights =
+            flags.mapv_into_any(|f| if f { -weight_factor } else { weight_factor } as f32);
 
         // Correct the raw data.
         if !self.mwalib_context.metafits_context.cable_delays_applied
@@ -561,34 +556,6 @@ impl RawDataReader {
                 false,
             );
         }
-        match (
-            self.mwalib_context
-                .metafits_context
-                .geometric_delays_applied,
-            self.geometric_correction,
-        ) {
-            // Nothing to do; user has spoken!
-            (_, false) => (),
-
-            (mwalib::GeometricDelaysApplied::No, true) => birli::corrections::correct_geometry(
-                &self.mwalib_context,
-                &mut vis,
-                &timestep_range,
-                &coarse_chan_range,
-                None,
-                Some(self.obs_context.phase_centre),
-                false,
-            ),
-
-            // Nothing to do; metafits indicates delay corrections have been
-            // applied, and this is reported to the user in the new method.
-            (
-                mwalib::GeometricDelaysApplied::AzElTracking
-                | mwalib::GeometricDelaysApplied::TilePointing
-                | mwalib::GeometricDelaysApplied::Zenith,
-                _,
-            ) => (),
-        }
         if self.digital_gains {
             birli::corrections::correct_digital_gains(
                 &self.mwalib_context,
@@ -596,6 +563,29 @@ impl RawDataReader {
                 &coarse_chan_range,
                 &self.all_baseline_tile_pairs,
             )?;
+        }
+        if self.geometric_correction {
+            match self
+                .mwalib_context
+                .metafits_context
+                .geometric_delays_applied
+            {
+                mwalib::GeometricDelaysApplied::No => birli::corrections::correct_geometry(
+                    &self.mwalib_context,
+                    &mut vis,
+                    &timestep_range,
+                    &coarse_chan_range,
+                    None,
+                    Some(self.obs_context.phase_centre),
+                    false,
+                ),
+
+                // Nothing to do; metafits indicates delay corrections have been
+                // applied, and this is reported to the user in the new method.
+                mwalib::GeometricDelaysApplied::AzElTracking
+                | mwalib::GeometricDelaysApplied::TilePointing
+                | mwalib::GeometricDelaysApplied::Zenith => (),
+            }
         }
 
         // Remove the extraneous time dimension; there's only ever one timestep.
@@ -606,12 +596,7 @@ impl RawDataReader {
         // visibilities once, applying PFB gains, digital gains and weights all
         // at the same time.
         self.apply_pfb_gains(vis.view_mut());
-        self.apply_mwaf_flags(
-            mwaf_timestep,
-            gpubox_channels,
-            vis.view_mut(),
-            weights.view_mut(),
-        );
+        self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, weights.view_mut());
 
         // If applicable, write the cross-correlation visibilities to our
         // `data_array`, ignoring any flagged baselines.
