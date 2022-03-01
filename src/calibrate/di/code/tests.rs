@@ -503,6 +503,7 @@ fn test_1090008640_quality() {
         1e-8,
         1e-4,
         false,
+        false,
     );
 
     // Only one timeblock.

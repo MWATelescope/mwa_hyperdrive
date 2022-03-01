@@ -5,7 +5,7 @@
 //! Code to handle calibration.
 
 pub mod args;
-mod di;
+pub mod di;
 mod error;
 pub(crate) mod params;
 pub mod solutions;
@@ -55,10 +55,10 @@ pub fn di_calibrate<P: AsRef<Path>>(
 
 /// A collection of timesteps to average together *during* calibration.
 #[derive(Debug)]
-struct Timeblock {
+pub struct Timeblock {
     /// The timeblock index. e.g. If all observation timesteps are being used in
     /// a single calibration timeblock, then its index is 0.
-    index: usize,
+    pub index: usize,
 
     /// The range of indices into an *unflagged* array of visibilities. e.g. If
     /// timeblock 0 represents timestep 10 and timeblock 1 represents timesteps
@@ -67,38 +67,38 @@ struct Timeblock {
     ///
     /// We can use a range because the timesteps belonging to a timeblock are
     /// always contiguous.
-    range: Range<usize>,
+    pub range: Range<usize>,
 
     /// The timestamp (centroid) representing the start of the timeblock.
-    start: Epoch,
+    pub start: Epoch,
 
     /// The timestamp (centroid) representing the end of the timeblock.
-    end: Epoch,
+    pub end: Epoch,
 
     /// The timestamp best representing the entire timeblock.
     ///
     /// e.g. If a timeblock comprised GPS times 10 and 11, the average would be
     /// GPS time 10.5.
-    average: Epoch,
+    pub average: Epoch,
 }
 
 /// A collection of fine-frequency channels to average together *before*
 /// calibration.
 #[derive(Debug, Clone)]
-pub(crate) struct Chanblock {
+pub struct Chanblock {
     /// The chanblock index, regardless of flagging. e.g. If the first two
     /// calibration chanblocks are flagged, then the first unflagged chanblock
     /// has a chanblock_index of 2 but an unflagged_index of 0.
-    pub(crate) chanblock_index: u16,
+    pub chanblock_index: u16,
 
     /// The index into an *unflagged* array of visibilities. Regardless of the
     /// first unflagged chanblock's index, its unflagged index is 0.
-    pub(crate) unflagged_index: u16,
+    pub unflagged_index: u16,
 
     // TODO: Use frequency information. May become important for calibration
     // solutions and what frequencies they apply to.
     /// The centroid frequency for this chanblock \[Hz\].
-    pub(crate) _freq: f64,
+    pub _freq: f64,
 }
 
 /// A spectral windows, a.k.a. a contiguous-band of fine-frequency channels

@@ -9,6 +9,7 @@
 
 mod code;
 
+pub use code::calibrate_timeblocks;
 use code::*;
 
 use hifitime::Epoch;
@@ -74,6 +75,7 @@ pub(crate) fn di_calibrate(
         params.stop_threshold,
         params.min_threshold,
         !params.no_progress_bars,
+        true,
     );
 
     // The model visibilities are no longer needed.

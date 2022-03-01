@@ -12,7 +12,10 @@ use marlu::{
 };
 use ndarray::prelude::*;
 
-use mwa_hyperdrive::model;
+use mwa_hyperdrive::{
+    calibrate::{di::calibrate_timeblocks, Chanblock, Timeblock},
+    model,
+};
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
 use mwa_hyperdrive_srclist::{
@@ -31,7 +34,7 @@ fn model_benchmarks(c: &mut Criterion) {
     let beam =
         create_fee_beam_object(beam_file, num_tiles, Delays::Partial(vec![0; 16]), None).unwrap();
 
-    let mut points = c.benchmark_group("Model points");
+    let mut points = c.benchmark_group("model points");
     points.bench_function("100 with CPU, 128 tiles, 2 channels", |b| {
         let num_points = 100;
         let num_chans = 2;
@@ -169,7 +172,7 @@ fn model_benchmarks(c: &mut Criterion) {
     });
     points.finish();
 
-    let mut gaussians = c.benchmark_group("Model gaussians");
+    let mut gaussians = c.benchmark_group("model gaussians");
     gaussians.bench_function("100 with CPU, 128 tiles, 2 channels", |b| {
         let num_gaussians = 100;
         let num_chans = 2;
@@ -319,7 +322,7 @@ fn model_benchmarks(c: &mut Criterion) {
     });
     gaussians.finish();
 
-    let mut shapelets = c.benchmark_group("Model shapelets");
+    let mut shapelets = c.benchmark_group("model shapelets");
     shapelets.bench_function(
         "100 with CPU (10 coeffs each), 128 tiles, 2 channels",
         |b| {
@@ -503,9 +506,64 @@ fn model_benchmarks(c: &mut Criterion) {
     shapelets.finish();
 }
 
+fn calibrate_benchmarks(c: &mut Criterion) {
+    let num_timesteps = 10;
+    let num_timeblocks = 1;
+    let mut timeblocks = Vec::with_capacity(num_timeblocks);
+    timeblocks.push(Timeblock {
+        index: 0,
+        range: 0..num_timesteps,
+        start: Epoch::from_gpst_seconds(1090008640.0),
+        end: Epoch::from_gpst_seconds(1090008660.0),
+        average: Epoch::from_gpst_seconds(1090008650.0),
+    });
+
+    let num_chanblocks = 100;
+    let mut chanblocks = Vec::with_capacity(num_chanblocks);
+    for i_chanblock in 0..num_chanblocks {
+        chanblocks.push(Chanblock {
+            chanblock_index: i_chanblock as _,
+            unflagged_index: i_chanblock as _,
+            _freq: 150e6 + i_chanblock as f64,
+        })
+    }
+    let num_tiles = 128;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+
+    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    let baseline_weights = vec![1.0; num_baselines];
+
+    c.bench_function(
+        &format!("calibrate with {num_timesteps} timesteps, {num_baselines} baselines, {num_chanblocks} chanblocks"),
+        |b| {
+            b.iter(|| {
+                calibrate_timeblocks(
+                    vis_data.view(),
+                    vis_model.view(),
+                    &timeblocks,
+                    &chanblocks,
+                    &baseline_weights,
+                    50,
+                    1e-8,
+                    1e-4,
+                    false,
+                    false,
+                );
+            });
+        }
+    );
+}
+
 criterion_group!(
-    name = modelling;
+    name = model;
     config = Criterion::default().sample_size(10);
     targets = model_benchmarks,
 );
-criterion_main!(modelling);
+criterion_group!(
+    name = calibrate;
+    config = Criterion::default().sample_size(10);
+    targets = calibrate_benchmarks,
+);
+criterion_main!(model, calibrate);

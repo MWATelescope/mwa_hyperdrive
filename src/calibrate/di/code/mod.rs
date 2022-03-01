@@ -447,11 +447,11 @@ fn model_write(
 /// solutions are made from only unflagged data, these incomplete solutions need
 /// to be "padded" with NaNs such that the complete calibration solutions can be
 /// saved to disk or applied to an observation.
-pub(super) struct IncompleteSolutions<'a> {
+pub struct IncompleteSolutions<'a> {
     /// Direction-independent calibration solutions *for only unflagged data*.
     /// The first dimension is timeblock, the second is unflagged tile, the
     /// third is unflagged chanblock.
-    pub(super) di_jones: Array3<Jones<f64>>,
+    pub di_jones: Array3<Jones<f64>>,
 
     /// The timeblocks used in calibration.
     timeblocks: &'a [Timeblock],
@@ -485,7 +485,7 @@ impl<'a> IncompleteSolutions<'a> {
     /// `all_chanblocks` would be the same as `self.chanblocks` if all channels
     /// were unflagged. Comparing these two collections lets us pad the flagged
     /// chanblocks.
-    pub(super) fn into_cal_sols(
+    pub fn into_cal_sols(
         self,
         all_tile_positions: &[XyzGeodetic],
         flagged_tiles: &[usize],
@@ -578,7 +578,7 @@ impl<'a> IncompleteSolutions<'a> {
 /// calibrated together (as if they all belonged to a single timeblock) before
 /// any timeblocks are individually calibrated. This decision can be revisited.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn calibrate_timeblocks<'a>(
+pub fn calibrate_timeblocks<'a>(
     vis_data: ArrayView3<Jones<f32>>,
     vis_model: ArrayView3<Jones<f32>>,
     timeblocks: &'a [Timeblock],
@@ -588,6 +588,7 @@ pub(super) fn calibrate_timeblocks<'a>(
     stop_threshold: f64,
     min_threshold: f64,
     draw_progress_bar: bool,
+    print_convergence_messages: bool,
 ) -> (IncompleteSolutions<'a>, Array2<CalibrationResult>) {
     let num_unflagged_tiles = num_tiles_from_num_cross_correlation_baselines(vis_data.dim().1);
     let num_timeblocks = timeblocks.len();
@@ -613,6 +614,7 @@ pub(super) fn calibrate_timeblocks<'a>(
             stop_threshold,
             min_threshold,
             pb,
+            print_convergence_messages,
         );
         let total_converged_count = cal_results.iter().filter(|r| r.converged).count();
         info!(
@@ -664,6 +666,7 @@ pub(super) fn calibrate_timeblocks<'a>(
             stop_threshold,
             min_threshold,
             pb,
+            print_convergence_messages,
         );
         let total_converged_count = cal_results.into_iter().filter(|r| r.converged).count();
         info!(
@@ -699,6 +702,7 @@ pub(super) fn calibrate_timeblocks<'a>(
                 stop_threshold,
                 min_threshold,
                 pb,
+                print_convergence_messages,
             );
             let total_converged_count = cal_results.iter().filter(|r| r.converged).count();
             info!(
@@ -766,6 +770,7 @@ fn calibrate_timeblock(
     stop_threshold: f64,
     min_threshold: f64,
     progress_bar: ProgressBar,
+    print_convergence_messages: bool,
 ) -> Vec<CalibrationResult> {
     let (_, num_unflagged_tiles, num_chanblocks) = di_jones.dim();
 
@@ -824,10 +829,12 @@ fn calibrate_timeblock(
                 ));
             }
             progress_bar.inc(1);
-            if progress_bar.is_hidden() {
-                println!("{status_str}");
-            } else {
-                progress_bar.println(status_str);
+            if print_convergence_messages {
+                if progress_bar.is_hidden() {
+                    println!("{status_str}");
+                } else {
+                    progress_bar.println(status_str);
+                }
             }
             cal_result
         })
@@ -970,17 +977,17 @@ fn calibrate_timeblock(
 }
 
 #[derive(Debug)]
-pub(super) struct CalibrationResult {
-    pub(super) num_iterations: usize,
-    pub(super) converged: bool,
-    pub(super) max_precision: f64,
-    pub(super) num_failed: usize,
-    pub(super) chanblock: Option<usize>,
+pub struct CalibrationResult {
+    pub num_iterations: usize,
+    pub converged: bool,
+    pub max_precision: f64,
+    pub num_failed: usize,
+    pub chanblock: Option<usize>,
 
     /// The unflagged index of the chanblock. e.g. If there are 10 chanblocks
     /// that *could* be calibrated, but we calibrate only 2-9 (i.e. 0 and 1 are
     /// flagged), then the first chanblock index is 2, but its i_chanblock is 0.
-    pub(super) i_chanblock: Option<usize>,
+    pub i_chanblock: Option<usize>,
 }
 
 /// Calibrate the antennas of the array by comparing the observed input data
