@@ -121,7 +121,7 @@ pub(crate) fn di_calibrate(
 
     // "Complete" the solutions.
     let sols = sols.into_cal_sols(
-        &obs_context.tile_xyzs,
+        obs_context.tile_xyzs.len(),
         &params.flagged_tiles,
         &params.fences.first().flagged_chanblock_indices,
         obs_context.obsid,

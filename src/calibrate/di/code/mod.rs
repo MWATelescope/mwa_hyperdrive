@@ -18,7 +18,7 @@ use log::{debug, info, trace};
 use marlu::{
     c64,
     math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_cross_correlation_baselines},
-    Jones, XyzGeodetic, UVW,
+    Jones, UVW,
 };
 use ndarray::{iter::AxisIterMut, prelude::*};
 use rayon::prelude::*;
@@ -478,22 +478,21 @@ impl<'a> IncompleteSolutions<'a> {
     /// Convert these [IncompleteSolutions] into "padded"
     /// [CalibrationSolutions].
     ///
-    /// `all_tile_positions` includes flagged tiles, and its length is used as
-    /// the total number of tiles. In conjunction with `tile_flags`, the
-    /// solutions are "padded" for the flagged tiles.
+    /// `total_num_tiles` is the total number of tiles (including flagged
+    /// tiles).
     ///
-    /// `all_chanblocks` would be the same as `self.chanblocks` if all channels
-    /// were unflagged. Comparing these two collections lets us pad the flagged
-    /// chanblocks.
+    /// `tile_flags` and `flagged_chanblock_indices` are the flagged tile and
+    /// chanblock indices, respectively.
+    ///
+    /// `obsid` is the observation ID.
     pub fn into_cal_sols(
         self,
-        all_tile_positions: &[XyzGeodetic],
+        total_num_tiles: usize,
         flagged_tiles: &[usize],
         flagged_chanblock_indices: &[u16],
         obsid: Option<u32>,
     ) -> CalibrationSolutions {
         let (num_timeblocks, num_unflagged_tiles, num_unflagged_chanblocks) = self.di_jones.dim();
-        let total_num_tiles = all_tile_positions.len();
         let total_num_chanblocks = self.chanblocks.len() + flagged_chanblock_indices.len();
 
         // These things should always be true; if they aren't, it's a

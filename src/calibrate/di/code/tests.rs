@@ -6,7 +6,7 @@
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use hifitime::Epoch;
-use marlu::{Jones, XyzGeodetic};
+use marlu::Jones;
 use ndarray::prelude::*;
 use vec1::vec1;
 
@@ -286,16 +286,8 @@ fn incomplete_to_complete_trivial() {
         _min_threshold: 1e-4,
     };
 
-    let all_tile_positions = vec![
-        XyzGeodetic {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-        };
-        num_tiles + flagged_tiles.len()
-    ];
     let complete = incomplete.into_cal_sols(
-        &all_tile_positions,
+        num_tiles + flagged_tiles.len(),
         &flagged_tiles,
         &flagged_chanblock_indices,
         Some(1065880128),
@@ -366,16 +358,8 @@ fn incomplete_to_complete_flags_simple() {
         _min_threshold: 1e-4,
     };
 
-    let all_tile_positions = vec![
-        XyzGeodetic {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-        };
-        total_num_tiles
-    ];
     let complete = incomplete.into_cal_sols(
-        &all_tile_positions,
+        total_num_tiles,
         &flagged_tiles,
         &flagged_chanblock_indices,
         Some(1065880128),
@@ -461,16 +445,8 @@ fn incomplete_to_complete_flags_simple2() {
         _min_threshold: 1e-4,
     };
 
-    let all_tile_positions = vec![
-        XyzGeodetic {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-        };
-        total_num_tiles
-    ];
     let complete = incomplete.into_cal_sols(
-        &all_tile_positions,
+        total_num_tiles,
         &flagged_tiles,
         &flagged_chanblock_indices,
         Some(1065880128),
@@ -564,16 +540,8 @@ fn incomplete_to_complete_flags_complex() {
         _min_threshold: 1e-4,
     };
 
-    let all_tile_positions = vec![
-        XyzGeodetic {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-        };
-        total_num_tiles
-    ];
     let complete = incomplete.into_cal_sols(
-        &all_tile_positions,
+        total_num_tiles,
         &flagged_tiles,
         &flagged_chanblock_indices,
         Some(1065880128),
