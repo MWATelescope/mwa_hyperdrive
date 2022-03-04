@@ -211,17 +211,21 @@ impl RawDataReader {
             .collect();
         let timestamps = Vec1::try_from_vec(timestamps).map_err(|_| RawReadError::NoTimesteps)?;
 
-        let common_good_coarse_chans: Vec<&mwalib::CoarseChannel> = mwalib_context
+        // Use the "common good" coarse channels. If there aren't any, complain.
+        let coarse_chan_indices = &mwalib_context.common_good_coarse_chan_indices;
+        if coarse_chan_indices.is_empty() {
+            return Err(RawReadError::NoGoodCoarseChannels);
+        }
+        let (coarse_chan_nums, coarse_chan_freqs) = mwalib_context
             .coarse_chans
             .iter()
             .enumerate()
-            .filter(|(i, _)| mwalib_context.common_good_coarse_chan_indices.contains(i))
-            .map(|(_, cc)| cc)
-            .collect();
-        let common_good_coarse_chans = Vec1::try_from_vec(common_good_coarse_chans).unwrap();
+            .filter(|(i, _)| coarse_chan_indices.contains(i))
+            .map(|(_, cc)| (cc.corr_chan_number as u32, cc.chan_centre_hz as f64))
+            .unzip();
 
         let fine_chan_freqs = mwalib_context
-            .get_fine_chan_freqs_hz_array(&mwalib_context.common_good_coarse_chan_indices)
+            .get_fine_chan_freqs_hz_array(coarse_chan_indices)
             .into_iter()
             .map(|f| f.round() as u64)
             .collect();
@@ -370,14 +374,8 @@ impl RawDataReader {
             time_res,
             array_longitude_rad: Some(MWA_LONG_RAD),
             array_latitude_rad: Some(MWA_LAT_RAD),
-            coarse_chan_nums: common_good_coarse_chans
-                .iter()
-                .map(|cc| cc.corr_chan_number as u32)
-                .collect(),
-            coarse_chan_freqs: common_good_coarse_chans
-                .iter()
-                .map(|cc| cc.chan_centre_hz as f64)
-                .collect(),
+            coarse_chan_nums,
+            coarse_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
             freq_res: Some(metafits_context.corr_fine_chan_width_hz as f64),
             fine_chan_freqs,
@@ -400,8 +398,8 @@ impl RawDataReader {
             digital_gains,
             cable_length_correction,
             geometric_correction,
-            aoflags,
             all_baseline_tile_pairs,
+            aoflags,
         })
     }
 
@@ -490,19 +488,11 @@ impl RawDataReader {
             None => None,
         };
 
-        // mwalib won't provide a context without gpubox files, so it is safe to
-        // unwrap `first` and `last`.
-        let coarse_chan_range = *self
-            .mwalib_context
-            .common_good_coarse_chan_indices
-            .first()
-            .unwrap()
-            ..*self
-                .mwalib_context
-                .common_good_coarse_chan_indices
-                .last()
-                .unwrap()
-                + 1;
+        // We checked mwalib has some common good coarse channels in the new
+        // method, so it is safe to unwrap `first` and `last`.
+        let coarse_chan_indices = &self.mwalib_context.common_good_coarse_chan_indices;
+        let coarse_chan_range =
+            *coarse_chan_indices.first().unwrap()..*coarse_chan_indices.last().unwrap() + 1;
         let gpubox_channels = self.mwalib_context.gpubox_batches[0]
             .gpubox_files
             .first()
