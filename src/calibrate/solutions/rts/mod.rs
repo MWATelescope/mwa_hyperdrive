@@ -342,7 +342,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
                         })
                         .zip(bp_cal_data.iter())
                     {
-                        *di_jones = *bp_cal_data;
+                        *di_jones = *bp_cal_data / 2.0;
                     }
                 }
             }
@@ -483,9 +483,9 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
                         },
                     );
                     if length > 0 {
-                        sum / length as f64
+                        sum / length as f64 * 2.0
                     } else {
-                        sum
+                        sum * 2.0
                     }
                 };
                 writeln!(
@@ -529,7 +529,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
                     }) {
                         bp_cal_line.push_str(&format!(
                             "{:+.6},{:+.6}, ",
-                            j[i_jones_elem].norm(),
+                            j[i_jones_elem].norm() * 2.0,
                             j[i_jones_elem].arg()
                         ));
                     }
