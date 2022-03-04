@@ -23,9 +23,8 @@ use marlu::{
     math::baseline_to_tiles,
     Jones, RADec, XyzGeodetic,
 };
-use mwalib::{CorrelatorContext, Pol};
+use mwalib::{CorrelatorContext, MWAVersion, Pol};
 use ndarray::prelude::*;
-use rayon::prelude::*;
 use vec1::Vec1;
 
 use super::*;
@@ -36,7 +35,7 @@ use crate::{
     pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray, rayon, vec1};
+use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray, vec1};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawDataReader {
@@ -47,9 +46,16 @@ pub(crate) struct RawDataReader {
     /// The interface to the raw data via mwalib.
     mwalib_context: CorrelatorContext,
 
+    /// Is this MWAX data? Store this boolean here so we don't have to do error
+    /// handling again.
+    is_mwax: bool,
+
     /// The poly-phase filter bank gains to be used to correct the bandpass
     /// shape for each coarse channel.
-    pfb_gains: Option<Vec<f64>>,
+    pfb_gains: Option<&'static [f64]>,
+
+    /// What 'flavour' are the PFB gains?
+    pfb_flavour: PfbFlavour,
 
     /// Should digital gains be applied?
     digital_gains: bool,
@@ -93,6 +99,14 @@ impl RawDataReader {
         trace!("Creating mwalib context");
         let mwalib_context = get_mwalib_correlator_context(meta_pb, gpubox_pbs)?;
         let metafits_context = &mwalib_context.metafits_context;
+
+        let is_mwax = match mwalib_context.mwa_version {
+            MWAVersion::CorrMWAXv2 => true,
+            MWAVersion::CorrLegacy | MWAVersion::CorrOldLegacy => false,
+            MWAVersion::VCSLegacyRecombined | MWAVersion::VCSMWAXv2 => {
+                return Err(RawReadError::Vcs)
+            }
+        };
 
         let total_num_tiles = metafits_context.num_ants;
         trace!("There are {} total tiles", total_num_tiles);
@@ -146,12 +160,10 @@ impl RawDataReader {
             }
         }
 
-        let mwax = matches!(mwalib_context.mwa_version, mwalib::MWAVersion::CorrMWAXv2);
-
         let flagged_fine_chans_per_coarse_chan: Vec<usize> =
             // If the flags aren't specified, use the observation's fine-channel
             // frequency resolution to set them.
-            match (metafits_context.corr_fine_chan_width_hz, mwax) {
+            match (metafits_context.corr_fine_chan_width_hz, is_mwax) {
                 // 10 kHz, 128 channels.
                 (10000, true) => vec![
                     0, 1, 2, 3, 4, 5, 6, 7, 120, 121, 122, 123, 124, 125, 126, 127,
@@ -262,27 +274,17 @@ impl RawDataReader {
             ),
         }
 
-        // TODO: Supply gains for all frequency resolutions. Delete this
-        // frequency check when that's done.
-        let pfb_gains = match (
-            pfb_flavour,
-            metafits_context.corr_fine_chan_width_hz == 40000,
-        ) {
+        let pfb_gains = match pfb_flavour {
             // Not using any gains.
-            (PfbFlavour::None, _) => None,
+            PfbFlavour::None => None,
 
-            (_, false) => {
-                warn!("Not using any PFB gains (only 40kHz currently supported)");
-                None
-            }
+            PfbFlavour::Jake => Some(birli::passband_gains::PFB_JAKE_2022_200HZ),
 
-            (PfbFlavour::Empirical, _) => {
-                // Multiplication is cheaper than division; do the division
-                // once so these values can be multiplied later.
-                Some(EMPIRICAL_40KHZ.iter().map(|&g| 1.0 / g).collect())
-            }
+            PfbFlavour::Cotter2014 => Some(birli::passband_gains::PFB_COTTER_2014_10KHZ),
 
-            (PfbFlavour::Levine, _) => Some(LEVINE_40KHZ.iter().map(|&g| 1.0 / g).collect()),
+            PfbFlavour::Empirical => Some(EMPIRICAL_40KHZ.as_slice()),
+
+            PfbFlavour::Levine => Some(LEVINE_40KHZ.as_slice()),
         };
 
         let aoflags = if let Some(m) = mwafs {
@@ -392,31 +394,15 @@ impl RawDataReader {
         Ok(RawDataReader {
             obs_context,
             mwalib_context,
+            is_mwax,
             pfb_gains,
+            pfb_flavour,
             digital_gains,
             cable_length_correction,
             geometric_correction,
             aoflags,
             all_baseline_tile_pairs,
         })
-    }
-
-    /// Uh... applies poly-phase filter bank gains (selected by the "new"
-    /// method) to the supplied visibilities.
-    fn apply_pfb_gains(&self, mut vis: ArrayViewMut2<Jones<f32>>) {
-        if let Some(pfb_gains) = &self.pfb_gains {
-            vis.outer_iter_mut()
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(i_freq, mut vis_bl)| {
-                    let pfb_gain = pfb_gains[i_freq % pfb_gains.len()];
-                    vis_bl.iter_mut().for_each(|v| {
-                        // Do the multiplication at double precision.
-                        let vd: Jones<f64> = Jones::from(*v) * pfb_gain;
-                        *v = Jones::from(vd);
-                    });
-                });
-        }
     }
 
     /// From the given mwaf flags for a timestep, make weights negative
@@ -542,13 +528,12 @@ impl RawDataReader {
         // Birli has a function `flag_to_weight_array`, but this just makes an
         // array the same shape as `flags` and fills it with `weight_factor`.
         // We'd like negative weights where we have flags.
-        let weights =
+        let mut weights =
             flags.mapv_into_any(|f| if f { -weight_factor } else { weight_factor } as f32);
 
         // Correct the raw data.
-        if !self.mwalib_context.metafits_context.cable_delays_applied
-            && self.cable_length_correction
-        {
+        let metafits_context = &self.mwalib_context.metafits_context;
+        if !metafits_context.cable_delays_applied && self.cable_length_correction {
             birli::corrections::correct_cable_lengths(
                 &self.mwalib_context,
                 &mut vis,
@@ -564,12 +549,22 @@ impl RawDataReader {
                 &self.all_baseline_tile_pairs,
             )?;
         }
+        if let Some(pfb_gains) = self.pfb_gains.as_ref() {
+            birli::corrections::correct_coarse_passband_gains(
+                &mut vis,
+                &mut weights,
+                pfb_gains,
+                metafits_context.num_corr_fine_chans_per_coarse,
+                self.is_mwax,
+            )
+            .map_err(|e| ReadInputDataError::PfbRefuse {
+                pfb_flavour: self.pfb_flavour.to_string(),
+                freq_res_hz: self.obs_context.freq_res.unwrap(),
+                birli_error: e,
+            })?;
+        }
         if self.geometric_correction {
-            match self
-                .mwalib_context
-                .metafits_context
-                .geometric_delays_applied
-            {
+            match metafits_context.geometric_delays_applied {
                 mwalib::GeometricDelaysApplied::No => birli::corrections::correct_geometry(
                     &self.mwalib_context,
                     &mut vis,
@@ -589,13 +584,9 @@ impl RawDataReader {
         }
 
         // Remove the extraneous time dimension; there's only ever one timestep.
-        let mut vis = vis.remove_axis(Axis(0));
+        let vis = vis.remove_axis(Axis(0));
         let mut weights = weights.remove_axis(Axis(0));
 
-        // TODO: It's (probably) a lot more efficient to traverse the
-        // visibilities once, applying PFB gains, digital gains and weights all
-        // at the same time.
-        self.apply_pfb_gains(vis.view_mut());
         self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, weights.view_mut());
 
         // If applicable, write the cross-correlation visibilities to our
@@ -621,10 +612,8 @@ impl RawDataReader {
                         .enumerate()
                         // Let only unflagged baselines proceed.
                         .filter(|(i_baseline, _)| {
-                            let (tile1, tile2) = baseline_to_tiles(
-                                self.mwalib_context.metafits_context.num_ants,
-                                *i_baseline,
-                            );
+                            let (tile1, tile2) =
+                                baseline_to_tiles(metafits_context.num_ants, *i_baseline);
                             tile_to_unflagged_baseline_map
                                 .get(&(tile1, tile2))
                                 .is_some()
@@ -663,10 +652,8 @@ impl RawDataReader {
                         .enumerate()
                         // Let only unflagged autos proceed.
                         .filter(|(i_baseline, _)| {
-                            let (tile1, tile2) = baseline_to_tiles(
-                                self.mwalib_context.metafits_context.num_ants,
-                                *i_baseline,
-                            );
+                            let (tile1, tile2) =
+                                baseline_to_tiles(metafits_context.num_ants, *i_baseline);
                             tile1 == tile2 && !flagged_tiles.contains(&tile1)
                         })
                         // Discard the baseline index and get the unflagged tile

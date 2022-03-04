@@ -21,11 +21,19 @@ use mwa_hyperdrive_common::{itertools, lazy_static};
 /// All available kinds of PFB gains.
 #[derive(Debug, Display, Clone, Copy, EnumIter, EnumString)]
 pub(crate) enum PfbFlavour {
-    /// Use the "RTS empirical" gains.
+    /// Use the "Jake Jones" gains (200 Hz).
+    #[strum(serialize = "jake")]
+    Jake,
+
+    /// Use the "Cotter 2014" gains (10 kHz).
+    #[strum(serialize = "cotter2014")]
+    Cotter2014,
+
+    /// Use the "RTS empirical" gains (40 kHz).
     #[strum(serialize = "empirical")]
     Empirical,
 
-    /// Use the "Alan Levine" gains.
+    /// Use the "Alan Levine" gains (40 kHz).
     #[strum(serialize = "levine")]
     Levine,
 
@@ -34,7 +42,7 @@ pub(crate) enum PfbFlavour {
     None,
 }
 
-pub(super) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Empirical;
+pub(super) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Jake;
 
 lazy_static::lazy_static! {
     // Useful for help texts.
@@ -61,7 +69,7 @@ pub(crate) const EMPIRICAL_40KHZ: [f64; 32] = [
     1.05893943,
     1.05765503,
     1.05601938,
-    1.056496995, // This value for the centre channel was originally 0.5 (a placeholder as its usually flaggec), but MWAX data can use the centre channel, so it has been changed to be the average of its neighbours.
+    1.056496995, // This value for the centre channel was originally 0.5 (a placeholder as its usually flagged), but MWAX data can use the centre channel, so it has been changed to be the average of its neighbours.
     1.05697461,
     1.05691842,
     1.05688129,

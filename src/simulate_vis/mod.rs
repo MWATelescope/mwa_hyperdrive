@@ -286,10 +286,7 @@ impl SimVisParams {
             for i in 0..num_timesteps {
                 timestamps.push(
                     start
-                        + hifitime::Duration::from_f64(
-                            time_res * i as f64,
-                            hifitime::TimeUnit::Second,
-                        ),
+                        + hifitime::Duration::from_f64(time_res * i as f64, hifitime::Unit::Second),
                 );
             }
             timestamps

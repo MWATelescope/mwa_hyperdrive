@@ -12,6 +12,7 @@ mod tests;
 use hifitime::Epoch;
 use std::collections::HashMap;
 
+use crate::time::round_hundredths_of_a_second;
 use mwa_hyperdrive_common::{c64, hifitime};
 
 // Make traditional trigonometry possible.
@@ -95,7 +96,8 @@ pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
     let duration_sum = es.iter().fold(Epoch::from_gpst_seconds(0.0), |acc, t| {
         acc + t.as_gpst_seconds()
     });
-    Epoch::from_gpst_seconds(duration_sum.as_gpst_seconds() / es.len() as f64)
+    let average = duration_sum.as_gpst_seconds() / es.len() as f64;
+    round_hundredths_of_a_second(Epoch::from_gpst_seconds(average))
 }
 
 pub struct TileBaselineMaps {

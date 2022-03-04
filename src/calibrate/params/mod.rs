@@ -337,6 +337,8 @@ impl CalibrateParams {
                 info!("Using {} gpubox files", gpuboxes.len());
                 match pfb_flavour {
                     PfbFlavour::None => info!("Not doing any PFB correction"),
+                    PfbFlavour::Jake => info!("Using 'Jake Jones' PFB gains"),
+                    PfbFlavour::Cotter2014 => info!("Using 'Cotter 2014' PFB gains"),
                     PfbFlavour::Empirical => info!("Using 'RTS empirical' PFB gains"),
                     PfbFlavour::Levine => info!("Using 'Alan Levine' PFB gains"),
                 }

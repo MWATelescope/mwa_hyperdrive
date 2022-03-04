@@ -43,6 +43,9 @@ pub enum RawReadError {
     #[error("The raw MWA data contains no timesteps")]
     NoTimesteps,
 
+    #[error("Attempted to read in MWA VCS data; this is unsupported")]
+    Vcs,
+
     #[error("{0}")]
     MwafMerge(#[from] MwafMergeError),
 

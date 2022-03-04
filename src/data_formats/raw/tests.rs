@@ -4,7 +4,7 @@
 
 //! Tests for reading from raw MWA files.
 
-use approx::{abs_diff_eq, assert_abs_diff_eq};
+use approx::{abs_diff_eq, assert_abs_diff_eq, assert_abs_diff_ne};
 use marlu::c32;
 use ndarray::prelude::*;
 use tempfile::{tempdir, TempDir};
@@ -340,8 +340,8 @@ fn pfb_empirical_gains() {
             );
         });
 
-    // Weights are definitely the same.
-    assert_abs_diff_eq!(weights_pfb, weights_no_pfb);
+    // Weights are definitely not the same.
+    assert_abs_diff_ne!(weights_pfb, weights_no_pfb);
 }
 
 #[test]
@@ -378,8 +378,8 @@ fn pfb_levine_gains() {
             );
         });
 
-    // Weights are definitely the same.
-    assert_abs_diff_eq!(weights_pfb, weights_no_pfb);
+    // Weights are definitely not the same.
+    assert_abs_diff_ne!(weights_pfb, weights_no_pfb);
 }
 
 #[test]
@@ -438,7 +438,7 @@ fn test_mwaf_flags() {
     let mut args = get_reduced_1090008640(false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
-    args.pfb_flavour = None;
+    args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = false;
 
     let result = args.into_params();
@@ -476,7 +476,7 @@ fn test_mwaf_flags() {
     let mut args = get_reduced_1090008640(false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
-    args.pfb_flavour = None;
+    args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = false;
     let temp_dir = TempDir::new().unwrap();
     let mwaf_pb = temp_dir.path().join("primes.mwaf");
