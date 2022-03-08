@@ -20,7 +20,8 @@ use mwa_hyperdrive::{
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
 use mwa_hyperdrive_srclist::{
-    ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList,
+    get_instrumental_flux_densities, ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff,
+    Source, SourceComponent, SourceList,
 };
 
 fn model_benchmarks(c: &mut Criterion) {
@@ -559,6 +560,46 @@ fn calibrate_benchmarks(c: &mut Criterion) {
     );
 }
 
+fn source_list_benchmarks(c: &mut Criterion) {
+    let num_comps = 1000;
+    let num_freqs = 400;
+
+    let fds = vec1![
+        FluxDensity {
+            freq: 150e6,
+            i: 1.0,
+            q: 0.0,
+            u: 0.0,
+            v: 0.0,
+        },
+        FluxDensity {
+            freq: 175e6,
+            i: 3.0,
+            q: 0.0,
+            u: 0.0,
+            v: 0.0,
+        },
+        FluxDensity {
+            freq: 200e6,
+            i: 2.0,
+            q: 0.0,
+            u: 0.0,
+            v: 0.0,
+        }
+    ];
+    let comp_fds = vec![FluxDensityType::List { fds }; num_comps];
+    let freqs: Vec<f64> = Array1::linspace(140e6, 210e6, num_comps).to_vec();
+
+    c.bench_function(
+        &format!("Estimate flux densities for source list with {num_comps} 'list' components over {num_freqs} frequencies"),
+        |b| {
+            b.iter(|| {
+                get_instrumental_flux_densities(&comp_fds, &freqs);
+            });
+        }
+    );
+}
+
 criterion_group!(
     name = model;
     config = Criterion::default().sample_size(10);
@@ -569,4 +610,9 @@ criterion_group!(
     config = Criterion::default().sample_size(10);
     targets = calibrate_benchmarks,
 );
-criterion_main!(model, calibrate);
+criterion_group!(
+    name = source_lists;
+    config = Criterion::default().sample_size(100);
+    targets = source_list_benchmarks,
+);
+criterion_main!(model, calibrate, source_lists);
