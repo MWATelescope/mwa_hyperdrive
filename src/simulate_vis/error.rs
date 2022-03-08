@@ -38,6 +38,9 @@ pub enum SimulateVisError {
     #[error("Error when trying to read source list: {0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
+    #[error("Error when trying to veto the source list: {0}")]
+    Veto(#[from] mwa_hyperdrive_srclist::VetoError),
+
     #[error("{0}")]
     Beam(#[from] mwa_hyperdrive_beam::BeamError),
 

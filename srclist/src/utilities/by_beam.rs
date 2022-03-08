@@ -67,11 +67,6 @@ pub struct ByBeamArgs {
     #[clap(short, long)]
     pub beam_file: Option<PathBuf>,
 
-    /// Attempt to convert flux density lists to power laws. See the online help
-    /// for more information.
-    #[clap(short, long)]
-    pub convert_lists: bool,
-
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source. This is suitable
     /// for an "RTS patch source list".
@@ -109,7 +104,6 @@ impl ByBeamArgs {
             self.source_dist_cutoff,
             self.veto_threshold,
             self.beam_file.as_ref(),
-            self.convert_lists,
             self.collapse_into_single_source,
             self.filter_points,
             self.filter_gaussians,
@@ -129,7 +123,6 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
     source_dist_cutoff: Option<f64>,
     veto_threshold: Option<f64>,
     beam_file: Option<P>,
-    convert_lists: bool,
     collapse_into_single_source: bool,
     filter_points: bool,
     filter_gaussians: bool,
@@ -145,7 +138,6 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         source_dist_cutoff: Option<f64>,
         veto_threshold: Option<f64>,
         beam_file: Option<&Path>,
-        convert_lists: bool,
         collapse_into_single_source: bool,
         filter_points: bool,
         filter_gaussians: bool,
@@ -247,13 +239,6 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         } else {
             sl
         };
-        // If we were told to, attempt to convert lists of flux densities to power
-        // laws.
-        if convert_lists {
-            sl.values_mut()
-                .flat_map(|src| &mut src.components)
-                .for_each(|comp| comp.flux_type.convert_list_to_power_law());
-        }
 
         // Veto sources.
         let brightest_source_name = veto_sources(
@@ -341,7 +326,6 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         source_dist_cutoff,
         veto_threshold,
         beam_file.as_ref().map(|f| f.as_ref()),
-        convert_lists,
         collapse_into_single_source,
         filter_points,
         filter_gaussians,

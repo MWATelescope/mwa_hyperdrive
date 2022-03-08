@@ -8,19 +8,10 @@
 mod tests;
 
 use marlu::Jones;
-use ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
-use mwa_hyperdrive_common::{marlu, ndarray, Complex};
-
-/// When converting a list to a power law, this is the maximum condition number
-/// allowed for the power law fit. This setting is somewhat subjective;
-/// condition numbers just less than this look fine to me.
-const ILL_CONDITIONED_LIMIT: f64 = 1e7;
-/// When converting a list to a power law, this is the maximum fractional
-/// difference allowed between the fit and the original list flux densities.
-const LIST_TO_POWER_LAW_MAX_DIFF: f64 = 0.01; // 1%
+use mwa_hyperdrive_common::{marlu, Complex};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 /// At a frequency, four flux densities for each Stokes parameter.
@@ -252,125 +243,6 @@ impl FluxDensityType {
                     }
                 } else {
                     fd
-                }
-            }
-        }
-    }
-
-    /// If certain conditions are met, convert a [FluxDensityType::List] to
-    /// [FluxDensityType::PowerLaw]. Specifically: if there are one or two flux
-    /// densities in the list, or the list flux densities track a power law well
-    /// enough.
-    ///
-    /// This function assumes that the list flux densities are ascendingly
-    /// sorted by frequency and that there is always at least one flux density.
-    #[allow(clippy::many_single_char_names)]
-    pub fn convert_list_to_power_law(&mut self) {
-        if let FluxDensityType::List { fds } = self {
-            match fds.len() {
-                0 => panic!(
-                    "convert_list_to_power_law got a FluxDensityType without any flux densities!"
-                ),
-                1 => {
-                    *self = FluxDensityType::PowerLaw {
-                        si: DEFAULT_SPEC_INDEX,
-                        fd: fds[0].clone(),
-                    }
-                }
-                2 => {
-                    let si = fds[0].calc_spec_index(&fds[1]);
-                    *self = FluxDensityType::PowerLaw {
-                        si,
-                        fd: fds[0].clone(),
-                    };
-                }
-                // Lengths > 2.
-                _ => {
-                    // Solving for the spectral index and reference flux
-                    // density.
-
-                    // S_0 \nu ^ \alpha = S
-                    // Arrange this as Ax = b
-                    // ln(S_0 \nu ^ \alpha) = ln(S)
-                    // ln(S_0) + ln(\nu ^ \alpha) = ln(S)
-                    // ln(S_0) + \alpha * ln(\nu) = ln(S)
-                    // A_i = [ln(\nu_i), 1]
-                    // x_0 = \alpha
-                    // x_1 = ln(S_0)
-                    // b_i = ln(S_i)
-
-                    let mut a = Array2::ones((fds.len(), 2));
-                    a.outer_iter_mut()
-                        .zip(fds.iter())
-                        .for_each(|(mut row, fd)| {
-                            // Just use the Stokes I values.
-                            row[[0]] = fd.freq.ln();
-                            // We don't need to set the other value because
-                            // that's already one.
-                        });
-                    let b = Array1::from(fds.iter().map(|fd| fd.i.ln()).collect::<Vec<_>>());
-
-                    // A^T A (call this C)
-                    let at = a.t();
-                    let c = at.dot(&a).into_raw_vec();
-
-                    // (A^T A)^-1
-                    // Fortunately, no fancy linalg is needed because A^T A is
-                    // always 2x2 here.
-                    let det = c[0] * c[3] - c[1] * c[2];
-                    let c_inv = vec![c[3] / det, -c[1] / det, -c[2] / det, c[0] / det];
-                    {
-                        // Get the condition number of C with the 1-norm.
-                        let norm_1_c = (c[0].abs() + c[2].abs()).max(c[1].abs() + c[3].abs());
-                        let norm_1_c_inv =
-                            (c_inv[0].abs() + c_inv[2].abs()).max(c_inv[1].abs() + c_inv[3].abs());
-                        let cond = norm_1_c * norm_1_c_inv;
-                        if cond > ILL_CONDITIONED_LIMIT {
-                            // Bad condition number; abort.
-                            return;
-                        }
-                    }
-                    // Shadow c with c_inv.
-                    let c = Array2::from_shape_vec((2, 2), c_inv).unwrap();
-
-                    // x = (A^T A)^-1 A^T b
-                    let x = c.dot(&at).dot(&b).to_vec();
-
-                    // Form a new FluxDensityType and account for the other
-                    // Stokes parameters.
-                    let middle = fds.len() / 2;
-                    let fd = &fds[middle];
-                    let i = x[1].exp() * fd.freq.powf(x[0]);
-                    let ratio = i / fd.i;
-
-                    let new_fdt = FluxDensityType::PowerLaw {
-                        si: x[0],
-                        fd: FluxDensity {
-                            freq: fd.freq,
-                            i,
-                            q: fd.q * ratio,
-                            u: fd.u * ratio,
-                            v: fd.v * ratio,
-                        },
-                    };
-
-                    // How well does this new power law compare to the original
-                    // data?
-                    for old_fd in fds {
-                        let new_fd = new_fdt.estimate_at_freq(old_fd.freq);
-                        // If any of the differences are too big, the flux
-                        // densities should not be modelled as a power law.
-                        if ((new_fd.i - old_fd.i) / new_fd.i).abs() > LIST_TO_POWER_LAW_MAX_DIFF
-                            || ((new_fd.q - old_fd.q) / new_fd.q).abs() > LIST_TO_POWER_LAW_MAX_DIFF
-                            || ((new_fd.u - old_fd.u) / new_fd.u).abs() > LIST_TO_POWER_LAW_MAX_DIFF
-                            || ((new_fd.v - old_fd.v) / new_fd.v).abs() > LIST_TO_POWER_LAW_MAX_DIFF
-                        {
-                            return;
-                        }
-                    }
-
-                    // Overwrite the input list with a power law.
-                    *self = new_fdt;
                 }
             }
         }

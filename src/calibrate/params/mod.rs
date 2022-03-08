@@ -51,9 +51,7 @@ use crate::{
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon};
-use mwa_hyperdrive_srclist::{
-    constants::*, veto_sources, FluxDensityType, SourceList, SourceListType,
-};
+use mwa_hyperdrive_srclist::{constants::*, veto_sources, SourceList, SourceListType};
 
 /// Parameters needed to perform calibration.
 pub(crate) struct CalibrateParams {
@@ -799,31 +797,6 @@ impl CalibrateParams {
         if source_list.is_empty() {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
-
-        // Convert list flux densities into a power law if possible.
-        // TODO: Make this user controllable.
-        let num_list_types = source_list
-            .par_iter()
-            .flat_map(|(_, source)| &source.components)
-            .filter(|comp| matches!(comp.flux_type, FluxDensityType::List { .. }))
-            .count();
-        source_list
-            .par_iter_mut()
-            .flat_map(|(_, source)| &mut source.components)
-            .for_each(|comp| {
-                if let FluxDensityType::List { .. } = comp.flux_type {
-                    comp.flux_type.convert_list_to_power_law();
-                }
-            });
-        let new_num_list_types = source_list
-            .par_iter()
-            .flat_map(|(_, source)| &source.components)
-            .filter(|comp| matches!(comp.flux_type, FluxDensityType::List { .. }))
-            .count();
-        debug!(
-            "{} components converted from flux density lists to power laws",
-            num_list_types - new_num_list_types
-        );
 
         // Handle output visibility arguments.
         let (output_vis_time_average_factor, output_vis_freq_average_factor) =

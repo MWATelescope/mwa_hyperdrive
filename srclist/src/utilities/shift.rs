@@ -42,11 +42,6 @@ pub struct ShiftArgs {
     #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
     pub output_type: Option<String>,
 
-    /// Attempt to convert flux density lists to power laws. See the online help
-    /// for more information.
-    #[clap(short, long)]
-    pub convert_lists: bool,
-
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source. This is suitable
     /// for an "RTS patch source list".
@@ -77,7 +72,6 @@ impl ShiftArgs {
             self.output_source_list.as_ref(),
             self.input_type.as_ref(),
             self.output_type.as_ref(),
-            self.convert_lists,
             self.collapse_into_single_source,
             self.include_unshifted_sources,
             self.metafits.as_ref(),
@@ -92,7 +86,6 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
     output_source_list_file: Option<P>,
     source_list_input_type: Option<S>,
     source_list_output_type: Option<S>,
-    convert_lists: bool,
     collapse_into_single_source: bool,
     include_unshifted_sources: bool,
     metafits_file: Option<P>,
@@ -103,7 +96,6 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
         output_source_list_file: Option<&Path>,
         source_list_input_type: Option<&str>,
         source_list_output_type: Option<&str>,
-        convert_lists: bool,
         collapse_into_single_source: bool,
         include_unshifted_sources: bool,
         metafits_file: Option<&Path>,
@@ -205,14 +197,6 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
                 .collect();
             SourceList::from(tmp_sl)
         };
-
-        // If we were told to, attempt to convert lists of flux densities to power
-        // laws.
-        if convert_lists {
-            sl.values_mut()
-                .flat_map(|src| &mut src.components)
-                .for_each(|comp| comp.flux_type.convert_list_to_power_law());
-        }
 
         // If requested, collapse the source list.
         sl = if let Some(meta) = metafits {
@@ -350,7 +334,6 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
         output_source_list_file.as_ref().map(|f| f.as_ref()),
         source_list_input_type.as_ref().map(|f| f.as_ref()),
         source_list_output_type.as_ref().map(|f| f.as_ref()),
-        convert_lists,
         collapse_into_single_source,
         include_unshifted_sources,
         metafits_file.as_ref().map(|f| f.as_ref()),

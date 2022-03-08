@@ -17,6 +17,7 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use log::{debug, info};
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    precession::precess_time,
     Jones, RADec, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
@@ -30,89 +31,120 @@ use crate::{
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{cfg_if, clap, hifitime, indicatif, log, marlu, mwalib, ndarray};
-use mwa_hyperdrive_srclist::{read::read_source_list_file, SourceList};
+use mwa_hyperdrive_srclist::{
+    constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
+    read::read_source_list_file,
+    veto_sources, SourceList, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
+};
 
 #[derive(Parser, Debug, Default, Deserialize)]
 pub struct SimulateVisArgs {
-    /// Path to the sky-model source list used for simulation.
-    #[clap(short, long)]
-    source_list: String,
-
     /// Path to the metafits file.
-    #[clap(short, long, parse(from_str))]
+    #[clap(short, long, parse(from_str), help_heading = "INPUT AND OUTPUT")]
     metafits: PathBuf,
 
     /// Path to the output visibilities file.
-    #[clap(short = 'o', long, default_value = "model.uvfits")]
+    #[clap(
+        short = 'o',
+        long,
+        default_value = "hyp_model.uvfits",
+        help_heading = "INPUT AND OUTPUT"
+    )]
     output_model_file: PathBuf,
+
+    /// Path to the sky-model source list used for simulation.
+    #[clap(short, long, help_heading = "INPUT AND OUTPUT")]
+    source_list: String,
+
+    /// The number of sources to use in the source list. The default is to use
+    /// them all. Example: If 1000 sources are specified here, then the top 1000
+    /// sources are used (based on their flux densities after the beam
+    /// attenuation) within the specified source distance cutoff.
+    #[clap(short, long, help_heading = "SKY-MODEL SOURCES")]
+    num_sources: Option<usize>,
+
+    #[clap(long, help = SOURCE_DIST_CUTOFF_HELP.as_str(), help_heading = "SKY-MODEL SOURCES")]
+    source_dist_cutoff: Option<f64>,
+
+    #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY-MODEL SOURCES")]
+    veto_threshold: Option<f64>,
+
+    /// Don't include point components from the input sky model.
+    #[clap(long, help_heading = "SKY-MODEL SOURCES")]
+    filter_points: bool,
+
+    /// Don't include Gaussian components from the input sky model.
+    #[clap(long, help_heading = "SKY-MODEL SOURCES")]
+    filter_gaussians: bool,
+
+    /// Don't include shapelet components from the input sky model.
+    #[clap(long, help_heading = "SKY-MODEL SOURCES")]
+    filter_shapelets: bool,
 
     /// The phase centre right ascension [degrees]. If this is not specified,
     /// then the metafits phase/pointing centre is used.
-    #[clap(short, long)]
+    #[clap(short, long, help_heading = "OBSERVATION PARAMETERS")]
     ra: Option<f64>,
 
     /// The phase centre declination [degrees]. If this is not specified, then
     /// the metafits phase/pointing centre is used.
-    #[clap(short, long)]
+    #[clap(short, long, help_heading = "OBSERVATION PARAMETERS")]
     dec: Option<f64>,
 
     /// The total number of fine channels in the observation.
-    #[clap(short = 'c', long, default_value = "384")]
+    #[clap(
+        short = 'c',
+        long,
+        default_value = "384",
+        help_heading = "OBSERVATION PARAMETERS"
+    )]
     num_fine_channels: usize,
 
     /// The fine-channel resolution [kHz].
-    #[clap(short, long, default_value = "80")]
+    #[clap(
+        short,
+        long,
+        default_value = "80",
+        help_heading = "OBSERVATION PARAMETERS"
+    )]
     freq_res: f64,
 
-    /// The middle frequency of the simulation [MHz]. If this is not specified,
-    /// then the middle frequency specified in the metafits is used.
-    #[clap(long)]
+    /// The centroid frequency of the simulation [MHz]. If this is not
+    /// specified, then the FREQCENT specified in the metafits is used.
+    #[clap(long, help_heading = "OBSERVATION PARAMETERS")]
     middle_freq: Option<f64>,
 
     /// The number of time steps used from the metafits epoch.
-    #[clap(short = 't', long, default_value = "14")]
+    #[clap(
+        short = 't',
+        long,
+        default_value = "14",
+        help_heading = "OBSERVATION PARAMETERS"
+    )]
     num_timesteps: usize,
 
     /// The time resolution [seconds].
-    #[clap(long, default_value = "8")]
+    #[clap(long, default_value = "8", help_heading = "OBSERVATION PARAMETERS")]
     time_res: f64,
 
     /// Should we use a beam? Default is to use the FEE beam.
-    #[clap(long)]
+    #[clap(long, help_heading = "MODEL PARAMETERS")]
     no_beam: bool,
 
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided by the MWA_BEAM_FILE environment variable.
-    #[clap(long)]
+    #[clap(long, help_heading = "MODEL PARAMETERS")]
     beam_file: Option<PathBuf>,
 
     /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
     /// the metafits file.
-    #[clap(long)]
+    #[clap(long, help_heading = "MODEL PARAMETERS")]
     unity_dipole_gains: bool,
 
     /// Specify the MWA dipoles delays, ignoring whatever is in the metafits
     /// file.
-    #[clap(long, multiple_values(true))]
+    #[clap(long, multiple_values(true), help_heading = "MODEL PARAMETERS")]
     dipole_delays: Option<Vec<u32>>,
-
-    /// Don't attempt to convert "list" flux densities to power law flux
-    /// densities. See for more info:
-    /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
-    #[clap(long)]
-    dont_convert_lists: bool,
-
-    /// Don't include point components from the input sky model.
-    #[clap(long)]
-    filter_points: bool,
-
-    /// Don't include Gaussian components from the input sky model.
-    #[clap(long)]
-    filter_gaussians: bool,
-
-    /// Don't include shapelet components from the input sky model.
-    #[clap(long)]
-    filter_shapelets: bool,
 }
 
 /// Parameters needed to do sky-model visibility simulation.
@@ -161,9 +193,15 @@ impl SimVisParams {
 
         // Expose all the struct fields to ensure they're all used.
         let SimulateVisArgs {
-            source_list,
             metafits,
             output_model_file,
+            source_list,
+            num_sources,
+            source_dist_cutoff,
+            veto_threshold,
+            filter_points,
+            filter_gaussians,
+            filter_shapelets,
             ra,
             dec,
             num_fine_channels,
@@ -173,12 +211,8 @@ impl SimVisParams {
             time_res,
             no_beam,
             beam_file,
-            dipole_delays,
             unity_dipole_gains,
-            dont_convert_lists,
-            filter_points,
-            filter_gaussians,
-            filter_shapelets,
+            dipole_delays,
         } = args;
 
         // Read the metafits file with mwalib.
@@ -326,15 +360,6 @@ impl SimVisParams {
         } else {
             source_list
         };
-        if !dont_convert_lists {
-            // Convert flux density lists into power laws.
-            source_list
-                .values_mut()
-                .flat_map(|src| &mut src.components)
-                .for_each(|comp| {
-                    comp.flux_type.convert_list_to_power_law();
-                });
-        }
         let beam = if no_beam {
             create_no_beam_object(xyzs.len())
         } else {
@@ -357,6 +382,32 @@ impl SimVisParams {
             )?
         };
 
+        let array_latitude = MWA_LAT_RAD;
+        let array_longitude = MWA_LONG_RAD;
+        let precession_info = precess_time(
+            phase_centre,
+            *timestamps.first().unwrap(),
+            array_longitude,
+            array_latitude,
+        );
+        veto_sources(
+            &mut source_list,
+            precession_info
+                .hadec_j2000
+                .to_radec(precession_info.lmst_j2000),
+            precession_info.lmst_j2000,
+            precession_info.array_latitude_j2000,
+            &metafits
+                .metafits_coarse_chans
+                .iter()
+                .map(|cc| cc.chan_centre_hz as _)
+                .collect::<Vec<_>>(),
+            beam.deref(),
+            num_sources,
+            source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
+            veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
+        )?;
+
         info!("Writing the sky model to {}", output_model_file.display());
 
         Ok(SimVisParams {
@@ -370,8 +421,8 @@ impl SimVisParams {
             flagged_tiles,
             timestamps,
             beam,
-            array_latitude: MWA_LAT_RAD,
-            array_longitude: MWA_LONG_RAD,
+            array_latitude,
+            array_longitude,
         })
     }
 }
