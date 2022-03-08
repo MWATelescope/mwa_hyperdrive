@@ -5,13 +5,12 @@
 //! Code to handle reading from and writing to various data container formats.
 
 mod error;
-mod metafits;
+pub mod metafits;
 mod ms;
 mod raw;
 mod uvfits;
 
 pub(crate) use error::ReadInputDataError;
-pub use metafits::*;
 pub(crate) use ms::{MsReadError, MS};
 pub(crate) use raw::{RawDataReader, RawReadError};
 pub(crate) use uvfits::{UvfitsReadError, UvfitsReader, UvfitsWriteError, UvfitsWriter};

@@ -137,7 +137,8 @@ pub(crate) fn di_calibrate(
         // write RTS solutions out directly from calibration; they're only
         // written out when converting from another format.
         let metafits: Option<&str> = None;
-        sols.write_solutions_from_ext(file, metafits)?;
+        let fee_beam_file: Option<&str> = None;
+        sols.write_solutions_from_ext(file, metafits, fee_beam_file)?;
         info!("Calibration solutions written to {}", file.display());
     }
 

@@ -98,6 +98,11 @@ enum Args {
         /// (e.g. -vv). The default is to print only high-level information.
         #[clap(short, long, parse(from_occurrences))]
         verbosity: u8,
+
+        /// The path to the HDF5 MWA FEE beam file. If not specified, this must
+        /// be provided by the MWA_BEAM_FILE environment variable.
+        #[clap(long, help_heading = "RTS ONLY ARGS")]
+        beam_file: Option<PathBuf>,
     },
 
     /// Plot calibration solutions.
@@ -259,10 +264,12 @@ fn try_main() -> Result<(), HyperdriveError> {
             output,
             metafits,
             verbosity: _,
+            beam_file,
         } => {
             let sols =
                 CalibrationSolutions::read_solutions_from_ext(input, metafits.as_ref()).unwrap();
-            sols.write_solutions_from_ext(output, metafits).unwrap();
+            sols.write_solutions_from_ext(output, metafits, beam_file)
+                .unwrap();
         }
 
         #[cfg(feature = "plotting")]
@@ -363,7 +370,7 @@ fn try_main() -> Result<(), HyperdriveError> {
 
         Args::DipoleGains { metafits } => {
             let meta = mwalib::MetafitsContext::new(&metafits, None).unwrap();
-            let gains = mwa_hyperdrive::data_formats::get_dipole_gains(&meta);
+            let gains = mwa_hyperdrive::data_formats::metafits::get_dipole_gains(&meta);
             let mut all_unity = vec![];
             let mut non_unity = vec![];
             for (i, tile_gains) in gains.outer_iter().enumerate() {

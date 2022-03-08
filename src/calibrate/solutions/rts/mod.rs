@@ -17,6 +17,7 @@
 
 mod read_files;
 
+use birli::mwalib::MetafitsContext;
 use read_files::*;
 
 use std::collections::BTreeMap;
@@ -25,7 +26,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use log::{debug, warn};
-use marlu::Jones;
+use marlu::{c64, Jones, RADec};
 use ndarray::prelude::*;
 use regex::Regex;
 use thiserror::Error;
@@ -153,224 +154,247 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
             out
         };
 
-        // The number of files corresponds to the number of *provided* coarse
-        // channels. We trust the metafits to represent that total number of coarse
-        // channels so we can fill any gaps.
-        let num_coarse_chans = context.num_metafits_coarse_chans;
-        if receiver_channel_to_data.len() != num_coarse_chans {
-            warn!("The number of coarse channels expected by the metafits ({num_coarse_chans})");
-            warn!("    wasn't equal to the number of node files. We will");
-            warn!("    use NaNs for the missing coarse channels.");
-        };
-
-        // Check that the number of tiles is the same everywhere.
-        let (_, some_di_jm, some_bp_cal) = receiver_channel_to_data.iter().next().unwrap().1;
-        let total_num_tiles = some_di_jm.pre_alignment_matrices.len();
-        let num_unflagged_tiles = some_bp_cal.unflagged_rf_input_indices.len();
-        for (gpubox_num, di_jm, bp_cal) in receiver_channel_to_data.values() {
-            if di_jm.pre_alignment_matrices.len() < total_num_tiles {
-                return Err(RtsReadSolsError::UnequalTileCountDiJm {
-                    expected: total_num_tiles,
-                    got: di_jm.pre_alignment_matrices.len(),
-                    gpubox_num: *gpubox_num,
-                });
-            }
-            if bp_cal.unflagged_rf_input_indices.len() != num_unflagged_tiles {
-                return Err(RtsReadSolsError::UnequalTileCountBpCal {
-                    expected: num_unflagged_tiles,
-                    got: bp_cal.unflagged_rf_input_indices.len(),
-                    gpubox_num: *gpubox_num,
-                });
-            }
-        }
-
-        // Get the flagged tile indices from the flagged RF inputs.
-        let flagged_tiles = (0..total_num_tiles)
-            .into_iter()
-            .filter(|i_tile| {
-                let i_input = context
-                    .rf_inputs
-                    .iter()
-                    .find(|rf| rf.ant == *i_tile as u32)
-                    .unwrap()
-                    .input
-                    / 2;
-                !some_bp_cal
-                    .unflagged_rf_input_indices
-                    .contains(&(i_input.try_into().unwrap()))
-            })
-            .collect();
-
-        // Try to work out the total number of fine frequency channels.
-        let num_fine_chans_per_coarse_chan = {
-            let smallest_fine_chan_res = receiver_channel_to_data
-                .iter()
-                .fold(f64::INFINITY, |acc, (_, (_, _, bp))| {
-                    acc.min(bp.fine_channel_resolution.unwrap_or(f64::INFINITY))
-                });
-
-            // Only handling legacy correlator settings for now.
-            if (smallest_fine_chan_res - 40e3).abs() < f64::EPSILON {
-                32
-            } else if (smallest_fine_chan_res - 20e3).abs() < f64::EPSILON {
-                64
-            } else if (smallest_fine_chan_res - 10e3).abs() < f64::EPSILON {
-                128
-            } else {
-                return Err(RtsReadSolsError::UnhandledFreqRes(smallest_fine_chan_res));
-            }
-        };
-        let total_num_fine_freq_chans = num_fine_chans_per_coarse_chan * num_coarse_chans;
-
-        // Get the flagged tile indices from the flagged RF inputs.
-        let flagged_fine_channels: Vec<u16> = (0..total_num_fine_freq_chans)
-            .into_iter()
-            .filter(|&i_chan| {
-                let i_coarse_chan = i_chan / num_fine_chans_per_coarse_chan;
-                let i_fine_chan_in_coarse_chan = i_chan % num_fine_chans_per_coarse_chan;
-                let bp_cal = receiver_channel_to_data
-                    .iter()
-                    .find(|(_, (gpubox_num, _, _))| *gpubox_num == (i_coarse_chan as u8 + 1))
-                    .map(|(_, (_, _, bp))| bp)
-                    .unwrap();
-                !bp_cal
-                    .unflagged_fine_channel_indices
-                    .contains(&i_fine_chan_in_coarse_chan)
-            })
-            .map(|i_chan| i_chan.try_into().unwrap())
-            .collect();
-
-        let mut di_jones = Array3::from_elem(
-            (
-                1, // RTS solutions don't change over time.
-                total_num_tiles,
-                total_num_fine_freq_chans,
-            ),
-            Jones::nan(),
-        );
-        // Iterating over the BTreeMap gives the solutions in the correct order,
-        // becauase the map's keys are ascendingly sorted and correspond to
-        // ascending sky frequency (which is how we want the data).
-        for (i_cc, (_, (_, di_jm, mut bp_cal))) in receiver_channel_to_data.into_iter().enumerate()
-        {
-            let unflagged_rf_input_indices = bp_cal.unflagged_rf_input_indices;
-
-            // Apply di_jm to the bp_cal data. Modify the bp_cal data in place, then
-            // put it in the outgoing di_jones.
-            let mut bp_cal_data = bp_cal.data.slice_mut(s![
-                ..,
-                0, // Throw away the "fit" data; only use "lsq".
-                ..
-            ]);
-            let post_inv = di_jm.post_alignment_matrix.inv();
-            bp_cal_data
-                .outer_iter_mut()
-                .zip(
-                    di_jm
-                        .pre_alignment_matrices
-                        .iter()
-                        .enumerate()
-                        .filter(|(i_input, _)| {
-                            unflagged_rf_input_indices.contains(&((*i_input).try_into().unwrap()))
-                        })
-                        .map(|pair| pair.1),
-                )
-                .for_each(|(mut bp_cal, &di_jm_pre)| {
-                    bp_cal.iter_mut().for_each(|bp_cal| {
-                        *bp_cal = di_jm_pre * post_inv * *bp_cal;
-
-                        // These Jones matrices are currently in [PX, PY, QX, QY].
-                        // Map them to [XX, XY, YX, YY].
-                        *bp_cal = Jones::from([bp_cal[3], bp_cal[2], bp_cal[1], bp_cal[0]]);
-                    });
-                });
-
-            // Put unflagged data into the output di_jones. di_jones tiles are
-            // ordered by metafits antenna number, whereas RTS data is ordered by
-            // metafits input number. Flagged tiles and channels already have NaN
-            // written.
-            for (i_tile, mut di_jones) in di_jones
-                .slice_mut(s![0, .., ..])
-                .outer_iter_mut()
-                .enumerate()
-            {
-                // Get the input number for this tile.
-                let mut i_input = context
-                    .rf_inputs
-                    .iter()
-                    .find(|rf| rf.ant == i_tile as u32)
-                    .map(|rf| rf.input / 2)
-                    .unwrap()
-                    .try_into()
-                    .unwrap();
-                // Is it unflagged?
-                if unflagged_rf_input_indices.contains(&i_input) {
-                    // Now adjust i_input based on how many inputs were flagged
-                    // before it, so that we can index the array of data (it doesn't
-                    // include flagged data).
-                    let mut last = 0;
-                    let mut flagged_count = 0;
-                    for (i_unflagged_input, &unflagged_input) in
-                        unflagged_rf_input_indices.iter().enumerate()
-                    {
-                        if i_unflagged_input == 0 {
-                            flagged_count += unflagged_input;
-                            last = unflagged_input;
-                            continue;
-                        }
-
-                        if unflagged_input > i_input {
-                            break;
-                        }
-                        if unflagged_input - last > 1 {
-                            flagged_count += 1;
-                        }
-                        last = unflagged_input;
-                    }
-                    i_input -= flagged_count;
-
-                    let bp_cal_data = bp_cal_data.slice(s![i_input as usize, ..]);
-
-                    // Unpack the unflagged channels.
-                    let offset = i_cc * num_fine_chans_per_coarse_chan;
-                    for ((_, di_jones), bp_cal_data) in di_jones
-                        .iter_mut()
-                        .skip(offset)
-                        .enumerate()
-                        .filter(|(i_chan, _)| {
-                            bp_cal.unflagged_fine_channel_indices.contains(i_chan)
-                        })
-                        .zip(bp_cal_data.iter())
-                    {
-                        *di_jones = *bp_cal_data / 2.0;
-                    }
-                }
-            }
-        }
-
-        Ok(CalibrationSolutions {
-            di_jones,
-            flagged_tiles,
-            flagged_chanblocks: flagged_fine_channels,
-            obsid: Some(context.obs_id),
-            // lmao
-            start_timestamps: vec![],
-            end_timestamps: vec![],
-            average_timestamps: vec![],
-        })
+        read_no_files(receiver_channel_to_data, &context)
     }
     inner(dir.as_ref(), metafits.as_ref())
 }
 
-pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
+fn read_no_files(
+    receiver_channel_to_data: BTreeMap<u8, (u8, DiJm, BpCal)>,
+    context: &MetafitsContext,
+) -> Result<CalibrationSolutions, RtsReadSolsError> {
+    // The number of files corresponds to the number of *provided* coarse
+    // channels. We trust the metafits to represent that total number of coarse
+    // channels so we can fill any gaps.
+    let available_num_coarse_chans = receiver_channel_to_data.len();
+    let total_num_coarse_chans = context.num_metafits_coarse_chans;
+    if available_num_coarse_chans != total_num_coarse_chans {
+        warn!("The number of coarse channels expected by the metafits ({total_num_coarse_chans})");
+        warn!("    wasn't equal to the number of node files ({available_num_coarse_chans}).");
+        warn!("    We will use NaNs for the missing coarse channels.");
+    };
+
+    // Check that the number of tiles is the same everywhere.
+    let (_, some_di_jm, some_bp_cal) = receiver_channel_to_data.iter().next().unwrap().1;
+    let total_num_tiles = some_di_jm.pre_alignment_matrices.len();
+    let num_unflagged_tiles = some_bp_cal.unflagged_rf_input_indices.len();
+    for (gpubox_num, di_jm, bp_cal) in receiver_channel_to_data.values() {
+        if di_jm.pre_alignment_matrices.len() < total_num_tiles {
+            return Err(RtsReadSolsError::UnequalTileCountDiJm {
+                expected: total_num_tiles,
+                got: di_jm.pre_alignment_matrices.len(),
+                gpubox_num: *gpubox_num,
+            });
+        }
+        if bp_cal.unflagged_rf_input_indices.len() != num_unflagged_tiles {
+            return Err(RtsReadSolsError::UnequalTileCountBpCal {
+                expected: num_unflagged_tiles,
+                got: bp_cal.unflagged_rf_input_indices.len(),
+                gpubox_num: *gpubox_num,
+            });
+        }
+    }
+
+    // Get the flagged tile indices from the flagged RF inputs.
+    let flagged_tiles = (0..total_num_tiles)
+        .into_iter()
+        .filter(|i_tile| {
+            let i_input = context
+                .rf_inputs
+                .iter()
+                .find(|rf| rf.ant == *i_tile as u32)
+                .unwrap()
+                .input
+                / 2;
+            !some_bp_cal
+                .unflagged_rf_input_indices
+                .contains(&(i_input.try_into().unwrap()))
+        })
+        .collect();
+
+    // Try to work out the total number of fine frequency channels.
+    let num_fine_chans_per_coarse_chan = {
+        let smallest_fine_chan_res = receiver_channel_to_data
+            .iter()
+            .fold(f64::INFINITY, |acc, (_, (_, _, bp))| {
+                acc.min(bp.fine_channel_resolution.unwrap_or(f64::INFINITY))
+            });
+
+        // Only handling legacy correlator settings for now.
+        if (smallest_fine_chan_res - 40e3).abs() < f64::EPSILON {
+            32
+        } else if (smallest_fine_chan_res - 20e3).abs() < f64::EPSILON {
+            64
+        } else if (smallest_fine_chan_res - 10e3).abs() < f64::EPSILON {
+            128
+        } else {
+            return Err(RtsReadSolsError::UnhandledFreqRes(smallest_fine_chan_res));
+        }
+    };
+    let total_num_fine_freq_chans = num_fine_chans_per_coarse_chan * total_num_coarse_chans;
+    let available_num_fine_freq_chans = num_fine_chans_per_coarse_chan * available_num_coarse_chans;
+
+    // Get the flagged tile indices from the flagged RF inputs.
+    let flagged_fine_channels: Vec<u16> = (0..available_num_fine_freq_chans)
+        .into_iter()
+        .filter(|&i_chan| {
+            let i_coarse_chan = i_chan / num_fine_chans_per_coarse_chan;
+            let i_fine_chan_in_coarse_chan = i_chan % num_fine_chans_per_coarse_chan;
+            let bp_cal = receiver_channel_to_data
+                .iter()
+                .find(|(_, (gpubox_num, _, _))| *gpubox_num == (i_coarse_chan as u8 + 1))
+                .map(|(_, (_, _, bp))| bp)
+                .unwrap();
+            !bp_cal
+                .unflagged_fine_channel_indices
+                .contains(&i_fine_chan_in_coarse_chan)
+        })
+        .map(|i_chan| i_chan.try_into().unwrap())
+        .collect();
+
+    let mut di_jones = Array3::from_elem(
+        (
+            1, // RTS solutions don't change over time.
+            total_num_tiles,
+            total_num_fine_freq_chans,
+        ),
+        Jones::nan(),
+    );
+    // Iterating over the BTreeMap gives the solutions in the correct order,
+    // becauase the map's keys are ascendingly sorted and correspond to
+    // ascending sky frequency (which is how we want the data).
+    for (i_cc, (_, (_, di_jm, mut bp_cal))) in receiver_channel_to_data.into_iter().enumerate() {
+        let unflagged_rf_input_indices = bp_cal.unflagged_rf_input_indices;
+
+        // Apply di_jm to the bp_cal data. Modify the bp_cal data in place, then
+        // put it in the outgoing di_jones.
+        let mut bp_cal_data = bp_cal.data.slice_mut(s![
+            ..,
+            1, // Throw away the "lsq" data; only use "fit".
+            ..
+        ]);
+        let post_inv = di_jm.post_alignment_matrix.inv();
+        bp_cal_data
+            .outer_iter_mut()
+            .zip(
+                di_jm
+                    .pre_alignment_matrices
+                    .iter()
+                    .enumerate()
+                    .filter(|(i_input, _)| {
+                        unflagged_rf_input_indices.contains(&((*i_input).try_into().unwrap()))
+                    })
+                    .map(|pair| pair.1),
+            )
+            .for_each(|(mut bp_cal, &di_jm_pre)| {
+                bp_cal.iter_mut().for_each(|bp_cal| {
+                    // *bp_cal = di_jm_pre * post_inv * *bp_cal;
+                    *bp_cal = Jones::from([
+                        di_jm_pre[0].re,
+                        -di_jm_pre[0].im,
+                        di_jm_pre[1].re,
+                        -di_jm_pre[1].im,
+                        di_jm_pre[2].re,
+                        -di_jm_pre[2].im,
+                        di_jm_pre[3].re,
+                        -di_jm_pre[3].im,
+                    ])
+                    .inv()
+                        * post_inv
+                        * *bp_cal;
+
+                    // These Jones matrices are currently in [PX, PY, QX, QY].
+                    // Map them to [XX, XY, YX, YY].
+                    *bp_cal = Jones::from([bp_cal[3], bp_cal[2], bp_cal[1], bp_cal[0]]);
+                });
+            });
+
+        // Put unflagged data into the output di_jones. di_jones tiles are
+        // ordered by metafits antenna number, whereas RTS data is ordered by
+        // metafits input number. Flagged tiles and channels already have NaN
+        // written.
+        for (i_tile, mut di_jones) in di_jones
+            .slice_mut(s![0, .., ..])
+            .outer_iter_mut()
+            .enumerate()
+        {
+            // Get the input number for this tile.
+            let mut i_input = context
+                .rf_inputs
+                .iter()
+                .find(|rf| rf.ant == i_tile as u32)
+                .map(|rf| rf.input / 2)
+                .unwrap()
+                .try_into()
+                .unwrap();
+            // Is it unflagged?
+            if unflagged_rf_input_indices.contains(&i_input) {
+                // Now adjust i_input based on how many inputs were flagged
+                // before it, so that we can index the array of data (it doesn't
+                // include flagged data).
+                let mut last = 0;
+                let mut flagged_count = 0;
+                for (i_unflagged_input, &unflagged_input) in
+                    unflagged_rf_input_indices.iter().enumerate()
+                {
+                    if i_unflagged_input == 0 {
+                        flagged_count += unflagged_input;
+                        last = unflagged_input;
+                        continue;
+                    }
+
+                    if unflagged_input > i_input {
+                        break;
+                    }
+                    if unflagged_input - last > 1 {
+                        flagged_count += 1;
+                    }
+                    last = unflagged_input;
+                }
+                i_input -= flagged_count;
+
+                let bp_cal_data = bp_cal_data.slice(s![i_input as usize, ..]);
+
+                // Unpack the unflagged channels.
+                let offset = i_cc * num_fine_chans_per_coarse_chan;
+                for ((_, di_jones), bp_cal_data) in di_jones
+                    .iter_mut()
+                    .skip(offset)
+                    .enumerate()
+                    .filter(|(i_chan, _)| bp_cal.unflagged_fine_channel_indices.contains(i_chan))
+                    .zip(bp_cal_data.iter())
+                {
+                    *di_jones = *bp_cal_data;
+                }
+            }
+        }
+    }
+
+    Ok(CalibrationSolutions {
+        di_jones,
+        flagged_tiles,
+        flagged_chanblocks: flagged_fine_channels,
+        obsid: Some(context.obs_id),
+        // lmao
+        start_timestamps: vec![],
+        end_timestamps: vec![],
+        average_timestamps: vec![],
+    })
+}
+
+pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
     sols: &CalibrationSolutions,
     dir: P,
     metafits: P2,
+    fee_beam_file: Option<P3>,
+    num_decimal_points: Option<u8>,
 ) -> Result<(), RtsWriteSolsError> {
     fn inner(
         sols: &CalibrationSolutions,
         dir: &Path,
         metafits: &Path,
+        fee_beam_file: Option<&Path>,
+        num_decimal_points: Option<u8>,
     ) -> Result<(), RtsWriteSolsError> {
         if dir.exists() {
             // If it exists, check that `dir` really is a directory.
@@ -389,6 +413,25 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
         let context = mwalib::MetafitsContext::new(&metafits, None)?;
         let num_fine_chans_per_coarse_chan = context.num_corr_fine_chans_per_coarse;
         let freq_res = context.corr_fine_chan_width_hz as f64;
+        let phase_centre_radec = RADec::new_degrees(
+            context
+                .ra_phase_center_degrees
+                .unwrap_or(context.ra_tile_pointing_degrees),
+            context
+                .dec_phase_center_degrees
+                .unwrap_or(context.dec_tile_pointing_degrees),
+        );
+        let phase_centre = phase_centre_radec.to_hadec(context.lst_rad).to_azel_mwa();
+
+        let fee_beam = mwa_hyperdrive_beam::create_fee_beam_object(
+            fee_beam_file,
+            1,
+            mwa_hyperdrive_beam::Delays::Partial(
+                crate::data_formats::metafits::get_ideal_dipole_delays(&context),
+            ),
+            None,
+        )
+        .unwrap();
 
         if sols.di_jones.len_of(Axis(0)) > 1 {
             warn!("Multiple timeblocks of solutions aren't supported by the RTS; using only the first one");
@@ -400,6 +443,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
         for cc in &context.metafits_coarse_chans {
             receiver_to_gpubox.insert(cc.rec_chan_number, cc.gpubox_number);
         }
+        dbg!(&receiver_to_gpubox);
         debug!("Receiver channel map to RTS DI calibration file node num:");
         debug!("{:?}", receiver_to_gpubox);
         // And a map from the RF input number divided by 2 to the tile (a.k.a.
@@ -411,7 +455,9 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
         debug!("RF input / 2 map to tile index:");
         debug!("{:?}", input_to_tile);
 
-        for (i_cc, (_, i_gpubox)) in receiver_to_gpubox.into_iter().enumerate() {
+        let num_decimal_points = num_decimal_points.unwrap_or(12) as usize;
+
+        for (i_cc, (i_recv, i_gpubox)) in receiver_to_gpubox.into_iter().enumerate() {
             // Create the RTS files.
             let di_jm_fp = format!("{}/DI_JonesMatrices_node{:03}.dat", dir.display(), i_gpubox);
             debug!("Writing to {di_jm_fp}");
@@ -427,19 +473,159 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
             // Isolate the applicable data.
             let chan_offset = i_cc * num_fine_chans_per_coarse_chan;
             let chan_range = chan_offset..((i_cc + 1) * num_fine_chans_per_coarse_chan);
+            dbg!(chan_offset, &chan_range);
             let data = sols.di_jones.slice(s![0, .., chan_range]);
 
             // Write the useless alignment flux density...
-            writeln!(&mut di_jm_file, "{:.6}", 1.0)?;
-            // ... and make the post-aligment matrix identity.
-            write!(&mut di_jm_file, "{:+.6}, ", 1.0)?;
-            write!(&mut di_jm_file, "{:+.6}, ", 0.0)?;
-            write!(&mut di_jm_file, "{:+.6}, ", 0.0)?;
-            write!(&mut di_jm_file, "{:+.6}, ", 0.0)?;
-            write!(&mut di_jm_file, "{:+.6}, ", 0.0)?;
-            write!(&mut di_jm_file, "{:+.6}, ", 0.0)?;
-            write!(&mut di_jm_file, "{:+.6}, ", 1.0)?;
-            writeln!(&mut di_jm_file, "{:+.6}", 0.0)?;
+            writeln!(&mut di_jm_file, "{1:.0$}", num_decimal_points, 1.0)?;
+            // ... and write the beam response for this coarse channel.
+            // let freq_hz = i_recv as f64 * 1.28e6;
+            // let beam_response = fee_beam.calc_jones(phase_centre, freq_hz, 0).unwrap();
+            let beam_response = Jones::from(match i_gpubox {
+                1 => [
+                    0.823644, 0.005932, -0.049899, -0.000282, 0.047816, -0.000096, 0.800999,
+                    -0.003228,
+                ],
+                2 => [
+                    0.825069, 0.006439, -0.049982, -0.000314, 0.047960, -0.000097, 0.803325,
+                    -0.003212,
+                ],
+                3 => [
+                    0.826439, 0.006867, -0.050071, -0.000342, 0.048094, -0.000097, 0.805604,
+                    -0.003191,
+                ],
+                4 => [
+                    0.827763, 0.007216, -0.050143, -0.000360, 0.048230, -0.000094, 0.807838,
+                    -0.003176,
+                ],
+                5 => [
+                    0.829058, 0.007474, -0.050211, -0.000376, 0.048354, -0.000095, 0.810031,
+                    -0.003172,
+                ],
+                6 => [
+                    0.830318, 0.007647, -0.050299, -0.000387, 0.048486, -0.000094, 0.812185,
+                    -0.003191,
+                ],
+                7 => [
+                    0.831571, 0.007722, -0.050371, -0.000379, 0.048612, -0.000094, 0.814312,
+                    -0.003237,
+                ],
+                8 => [
+                    0.832825, 0.007704, -0.050451, -0.000377, 0.048734, -0.000098, 0.816416,
+                    -0.003308,
+                ],
+                9 => [
+                    0.834089, 0.007598, -0.050526, -0.000367, 0.048853, -0.000097, 0.818507,
+                    -0.003411,
+                ],
+                10 => [
+                    0.835377, 0.007404, -0.050611, -0.000357, 0.048982, -0.000100, 0.820593,
+                    -0.003540,
+                ],
+                11 => [
+                    0.836703, 0.007132, -0.050699, -0.000335, 0.049095, -0.000107, 0.822678,
+                    -0.003693,
+                ],
+                12 => [
+                    0.838512, 0.006706, -0.050832, -0.000300, 0.049224, -0.000121, 0.825254,
+                    -0.003946,
+                ],
+                13 => [
+                    0.839887, 0.006343, -0.050911, -0.000282, 0.049333, -0.000135, 0.827323,
+                    -0.004102,
+                ],
+                14 => [
+                    0.841318, 0.005931, -0.051015, -0.000253, 0.049451, -0.000145, 0.829395,
+                    -0.004272,
+                ],
+                15 => [
+                    0.842840, 0.005466, -0.051112, -0.000226, 0.049583, -0.000156, 0.831477,
+                    -0.004436,
+                ],
+                16 => [
+                    0.844344, 0.004993, -0.051200, -0.000196, 0.049703, -0.000167, 0.833564,
+                    -0.004628,
+                ],
+                17 => [
+                    0.845931, 0.004462, -0.051348, -0.000126, 0.049781, -0.000135, 0.835694,
+                    -0.004822,
+                ],
+                18 => [
+                    0.847601, 0.003947, -0.051454, -0.000096, 0.049896, -0.000150, 0.837831,
+                    -0.005004,
+                ],
+                19 => [
+                    0.849314, 0.003428, -0.051570, -0.000075, 0.050021, -0.000167, 0.839929,
+                    -0.005176,
+                ],
+                20 => [
+                    0.851081, 0.002916, -0.051679, -0.000048, 0.050142, -0.000184, 0.842027,
+                    -0.005346,
+                ],
+                21 => [
+                    0.852896, 0.002418, -0.051794, -0.000015, 0.050247, -0.000192, 0.844125,
+                    -0.005507,
+                ],
+                22 => [
+                    0.854748, 0.001938, -0.051908, 0.000001, 0.050377, -0.000206, 0.846222,
+                    -0.005661,
+                ],
+                23 => [
+                    0.856636, 0.001483, -0.052033, 0.000029, 0.050498, -0.000225, 0.848318,
+                    -0.005806,
+                ],
+                24 => [
+                    0.858554, 0.001054, -0.052150, 0.000047, 0.050618, -0.000236, 0.850410,
+                    -0.005945,
+                ],
+                _ => unreachable!(),
+            });
+            let beam_response = Jones::from([
+                beam_response[3],
+                beam_response[2],
+                beam_response[1],
+                beam_response[0],
+            ]);
+            write!(
+                &mut di_jm_file,
+                "{1:+.0$}, ",
+                num_decimal_points, beam_response[3].re
+            )?;
+            write!(
+                &mut di_jm_file,
+                "{1:+.0$}, ",
+                num_decimal_points, beam_response[3].im
+            )?;
+            write!(
+                &mut di_jm_file,
+                "{1:+.0$}, ",
+                num_decimal_points, beam_response[2].re
+            )?;
+            write!(
+                &mut di_jm_file,
+                "{1:+.0$}, ",
+                num_decimal_points, beam_response[2].im
+            )?;
+            write!(
+                &mut di_jm_file,
+                "{1:+.0$}, ",
+                num_decimal_points, beam_response[1].re
+            )?;
+            write!(
+                &mut di_jm_file,
+                "{1:+.0$}, ",
+                num_decimal_points, beam_response[1].im
+            )?;
+            write!(
+                &mut di_jm_file,
+                "{1:+.0$}, ",
+                num_decimal_points, beam_response[0].re
+            )?;
+            writeln!(
+                &mut di_jm_file,
+                "{1:+.0$}",
+                num_decimal_points, beam_response[0].im
+            )?;
 
             // Write the unflagged fine channel frequencies in MHz.
             let mut unflagged_chan_line = String::new();
@@ -449,7 +635,8 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
                     .contains(&((i_chan + chan_offset).try_into().unwrap()))
                 {
                     unflagged_chan_line.push_str(&format!(
-                        "{:.6}, ",
+                        "{1:.0$}, ",
+                        num_decimal_points,
                         (i_chan as f64 * freq_res).round() / 1e6
                     ));
                 }
@@ -482,15 +669,25 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
                             }
                         },
                     );
-                    if length > 0 {
-                        sum / length as f64 * 2.0
-                    } else {
-                        sum * 2.0
-                    }
+                    let average = if length > 0 { sum / length as f64 } else { sum };
+                    // average
+                    // average.inv()
+                    Jones::from([
+                        average[0].re,
+                        -average[0].im,
+                        average[1].re,
+                        -average[1].im,
+                        average[2].re,
+                        -average[2].im,
+                        average[3].re,
+                        -average[3].im,
+                    ])
+                    .inv()
                 };
                 writeln!(
                     &mut di_jm_file,
-                    "{:+.6}, {:+.6}, {:+.6}, {:+.6}, {:+.6}, {:+.6}, {:+.6}, {:+.6}",
+                    "{1:+.0$}, {2:+.0$}, {3:+.0$}, {4:+.0$}, {5:+.0$}, {6:+.0$}, {7:+.0$}, {8:+.0$}",
+                    num_decimal_points,
                     // Don't forget to reorder into RTS PX, PY, QX, QY.
                     average[3].re,
                     average[3].im,
@@ -508,7 +705,18 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
                 }
 
                 // With the average, find the bandpass Jones matrices.
-                let avg_inv = average.inv();
+                let average = Jones::from([
+                    average[0].re,
+                    -average[0].im,
+                    average[1].re,
+                    -average[1].im,
+                    average[2].re,
+                    -average[2].im,
+                    average[3].re,
+                    -average[3].im,
+                ]);
+                let avg_inv = (average.inv() * beam_response.inv()).inv();
+                // let avg_inv = average.inv() * beam_response;
                 let bp_data = data.mapv(|j| avg_inv * j);
                 // Write "fit" data the same as "lsq". No one cares...
                 let mut bp_cal_line = String::new();
@@ -528,8 +736,9 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
                             .contains(&((i_chan + chan_offset) as _))
                     }) {
                         bp_cal_line.push_str(&format!(
-                            "{:+.6},{:+.6}, ",
-                            j[i_jones_elem].norm() * 2.0,
+                            "{1:+.0$},{2:+.0$}, ",
+                            num_decimal_points,
+                            j[i_jones_elem].norm(),
                             j[i_jones_elem].arg()
                         ));
                     }
@@ -543,7 +752,13 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
 
         Ok(())
     }
-    inner(sols, dir.as_ref(), metafits.as_ref())
+    inner(
+        sols,
+        dir.as_ref(),
+        metafits.as_ref(),
+        fee_beam_file.as_ref().map(|f| f.as_ref()),
+        num_decimal_points,
+    )
 }
 
 #[derive(Error, Debug)]

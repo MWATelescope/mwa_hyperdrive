@@ -6,6 +6,7 @@ use approx::assert_abs_diff_eq;
 use hifitime::Epoch;
 use marlu::{c64, Jones};
 use ndarray::prelude::*;
+use serial_test::serial;
 
 use super::*;
 use crate::{jones_test::TestJones, tests::reduced_obsids::get_reduced_1090008640};
@@ -125,13 +126,18 @@ fn test_write_and_read_ao_solutions() {
 }
 
 #[test]
+#[serial]
 fn test_write_and_read_rts_solutions() {
     let sols = make_solutions();
-    let args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false);
+    args.no_beam = false;
     let metafits = &args.data.unwrap()[0];
+    // No need to supply the beam file; hyperdrive tests require the
+    // MWA_BEAM_FILE variable to be set.
+    let fee_beam_file: Option<&str> = None;
     let tmp_dir = tempfile::tempdir().expect("Couldn't make tmp dir");
 
-    let result = rts::write(&sols, tmp_dir.path(), metafits);
+    let result = rts::write(&sols, tmp_dir.path(), metafits, fee_beam_file, None);
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
 

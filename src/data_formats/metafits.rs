@@ -34,6 +34,24 @@ pub(crate) fn get_dipole_delays(context: &mwalib::MetafitsContext) -> Array2<u32
     all_tile_delays
 }
 
+/// Get the *ideal* delays for this observation's dipoles. This function assumes
+/// that all tiles would have the same delays if nothing was dead/flagged.
+pub(crate) fn get_ideal_dipole_delays(context: &mwalib::MetafitsContext) -> Vec<u32> {
+    let mut delays = vec![32; 16];
+    for rf in &context.rf_inputs {
+        for (&rf_delay, delay) in rf.dipole_delays.iter().zip(delays.iter_mut()) {
+            if rf_delay != 32 {
+                *delay = rf_delay;
+            }
+        }
+        // If all the delays are not 32, we're done.
+        if delays.iter().all(|&d| d != 32) {
+            break;
+        }
+    }
+    delays
+}
+
 /// Get the gains for each tile's dipoles. If a dipole is "alive", its gain is
 /// one, otherwise it is "dead" and has a gain of zero.
 pub fn get_dipole_gains(context: &MetafitsContext) -> Array2<f64> {

@@ -25,7 +25,10 @@ use ndarray::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    data_formats::{get_dipole_delays, get_dipole_gains, UvfitsWriter},
+    data_formats::{
+        metafits::{get_dipole_delays, get_dipole_gains},
+        UvfitsWriter,
+    },
     glob::get_single_match_from_glob,
     model,
 };

@@ -112,19 +112,22 @@ impl CalibrationSolutions {
         inner(file.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
     }
 
-    pub fn write_solutions_from_ext<P: AsRef<Path>, P2: AsRef<Path>>(
+    pub fn write_solutions_from_ext<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
         &self,
         file: P,
         metafits: Option<P2>,
+        fee_beam_file: Option<P3>,
     ) -> Result<(), WriteSolutionsError> {
         fn inner(
             sols: &CalibrationSolutions,
             file: &Path,
             metafits: Option<&Path>,
+            fee_beam_file: Option<&Path>,
         ) -> Result<(), WriteSolutionsError> {
             if file.is_dir() {
+                debug!("{file:?} is a directiory - looking for RTS solution files");
                 let metafits = metafits.ok_or(WriteSolutionsError::RtsMetafitsRequired)?;
-                rts::write(sols, file, metafits)?;
+                rts::write(sols, file, metafits, fee_beam_file, None)?;
             } else {
                 let ext = file.extension().and_then(|e| e.to_str());
                 match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
@@ -138,7 +141,12 @@ impl CalibrationSolutions {
 
             Ok(())
         }
-        inner(self, file.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
+        inner(
+            self,
+            file.as_ref(),
+            metafits.as_ref().map(|f| f.as_ref()),
+            fee_beam_file.as_ref().map(|f| f.as_ref()),
+        )
     }
 
     #[cfg(feature = "plotting")]
