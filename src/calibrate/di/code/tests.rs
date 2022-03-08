@@ -16,7 +16,7 @@ use crate::{
     jones_test::TestJones,
     math::is_prime,
 };
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
 
 /// Make some data "four times as bright as the model". The solutions should
 /// then be all "twos". As data and model visibilities are given per baseline

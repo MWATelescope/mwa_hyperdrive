@@ -28,7 +28,7 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use crate::math::cexp;
-use mwa_hyperdrive_common::{marlu, ndarray, thiserror};
+use mwa_hyperdrive_common::{marlu, ndarray, thiserror, vec1};
 
 // DI_JonesMatrices_node???.dat files are structured by lines as follows:
 // 1) A single float for the "alignment flux density",

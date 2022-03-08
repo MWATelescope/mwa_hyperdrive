@@ -7,10 +7,11 @@
 use approx::assert_abs_diff_ne;
 use marlu::cuda::DevicePointer;
 use ndarray::prelude::*;
+use vec1::vec1;
 
 use super::*;
 use crate::model::cuda::CudaFloat;
-use mwa_hyperdrive_common::{marlu, ndarray};
+use mwa_hyperdrive_common::{marlu, ndarray, vec1};
 use mwa_hyperdrive_cuda as cuda;
 
 /// Helper function to copy [UVW]s to the device.
@@ -36,7 +37,7 @@ fn point_zenith_gpu_list() {
     srclist.insert(
         "zenith".to_string(),
         Source {
-            components: vec![get_simple_point(
+            components: vec1![get_simple_point(
                 obs.phase_centre,
                 obs.flux_density_scale.clone(),
             )],
@@ -62,7 +63,7 @@ fn point_off_zenith_gpu_list() {
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_point(pos, obs.flux_density_scale.clone())],
+            components: vec1![get_simple_point(pos, obs.flux_density_scale.clone())],
         },
     );
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
@@ -85,7 +86,7 @@ fn gaussian_zenith_gpu_list() {
     srclist.insert(
         "zenith".to_string(),
         Source {
-            components: vec![get_simple_gaussian(
+            components: vec1![get_simple_gaussian(
                 obs.phase_centre,
                 obs.flux_density_scale.clone(),
             )],
@@ -121,7 +122,7 @@ fn gaussian_off_zenith_gpu_list() {
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_gaussian(pos, obs.flux_density_scale.clone())],
+            components: vec1![get_simple_gaussian(pos, obs.flux_density_scale.clone())],
         },
     );
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
@@ -144,7 +145,7 @@ fn shapelet_zenith_gpu_list() {
     srclist.insert(
         "zenith".to_string(),
         Source {
-            components: vec![get_simple_shapelet(
+            components: vec1![get_simple_shapelet(
                 obs.phase_centre,
                 obs.flux_density_scale.clone(),
             )],
@@ -171,7 +172,7 @@ fn shapelet_off_zenith_gpu_list() {
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_shapelet(pos, obs.flux_density_scale.clone())],
+            components: vec1![get_simple_shapelet(pos, obs.flux_density_scale.clone())],
         },
     );
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
@@ -194,7 +195,7 @@ fn copy_reset_cuda_vis_works() {
     srclist.insert(
         "zenith".to_string(),
         Source {
-            components: vec![get_simple_point(
+            components: vec1![get_simple_point(
                 obs.phase_centre,
                 obs.flux_density_scale.clone(),
             )],

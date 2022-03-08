@@ -9,9 +9,10 @@ mod tests;
 
 use marlu::Jones;
 use serde::{Deserialize, Serialize};
+use vec1::Vec1;
 
 use crate::constants::*;
-use mwa_hyperdrive_common::{marlu, Complex};
+use mwa_hyperdrive_common::{marlu, vec1, Complex};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 /// At a frequency, four flux densities for each Stokes parameter.
@@ -104,7 +105,7 @@ pub enum FluxDensityType {
     /// A list of flux densities specified at multiple frequencies.
     /// Interpolation/extrapolation is needed to get flux densities at
     /// non-specified frequencies.
-    List { fds: Vec<FluxDensity> },
+    List { fds: Vec1<FluxDensity> },
 }
 
 impl FluxDensityType {
@@ -135,10 +136,6 @@ impl FluxDensityType {
             }
 
             FluxDensityType::List { fds } => {
-                if fds.is_empty() {
-                    panic!("Tried to estimate a flux density for a component, but it had no flux densities");
-                }
-
                 let mut old_freq = -1.0;
 
                 // `smaller_flux_density` is a bad name given to the component's flux

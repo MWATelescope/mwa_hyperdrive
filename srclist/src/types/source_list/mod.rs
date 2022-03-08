@@ -57,20 +57,17 @@ impl SourceList {
         let sl: BTreeMap<_, _> = self
             .0
             .into_iter()
-            .map(|(name, src)| {
-                let comps = src
-                    .components
-                    .into_iter()
-                    .filter(|c| {
-                        !(filter_points && c.is_point()
-                            || filter_gaussians && c.is_gaussian()
-                            || filter_shapelets && c.is_shapelet())
-                    })
-                    .collect();
-                (name, Source { components: comps })
+            // Filter sources containing any of the rejected types.
+            .filter_map(|(name, src)| {
+                if !(filter_points && src.components.iter().any(|c| c.comp_type.is_point())
+                    || filter_gaussians && src.components.iter().any(|c| c.comp_type.is_gaussian())
+                    || filter_shapelets && src.components.iter().any(|c| c.comp_type.is_shapelet()))
+                {
+                    Some((name, src))
+                } else {
+                    None
+                }
             })
-            // Make sure there are no empty sources.
-            .filter(|(_, src)| !src.components.is_empty())
             .collect();
         SourceList(sl)
     }
@@ -105,7 +102,7 @@ impl SourceList {
     /// with sources and their components.
     pub fn get_azel_parallel(&self, lst_rad: f64, latitude_rad: f64) -> Vec<AzEl> {
         self.par_iter()
-            .flat_map(|(_, src)| &src.components)
+            .flat_map(|(_, src)| src.components.as_slice())
             .map(|comp| comp.radec.to_hadec(lst_rad).to_azel(latitude_rad))
             .collect()
     }
@@ -130,7 +127,7 @@ impl SourceList {
     /// are iterated in parallel.
     pub fn get_lmns_parallel(&self, phase_centre: RADec) -> Vec<LMN> {
         self.par_iter()
-            .flat_map(|(_, src)| &src.components)
+            .flat_map(|(_, src)| src.components.as_slice())
             .map(|comp| comp.radec.to_lmn(phase_centre))
             .collect()
     }

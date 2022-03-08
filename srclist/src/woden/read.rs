@@ -28,10 +28,11 @@ use std::convert::TryInto;
 
 use log::warn;
 use marlu::{constants::DH2R, RADec};
+use vec1::Vec1;
 
 use super::*;
 use crate::constants::DEFAULT_SPEC_INDEX;
-use mwa_hyperdrive_common::{log, marlu};
+use mwa_hyperdrive_common::{log, marlu, vec1};
 
 /// Parse a buffer containing a WODEN-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -663,12 +664,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 } else if in_component {
                     return Err(ReadSourceListCommonError::MissingEndComponent(line_num).into());
                 }
-                let mut source = Source { components: vec![] };
-                source.components.append(&mut components);
-
-                if source.components.is_empty() {
+                if components.is_empty() {
                     return Err(ReadSourceListCommonError::NoComponents(line_num).into());
                 }
+
+                let source = Source {
+                    components: Vec1::try_from_vec(components).unwrap(),
+                };
+                components = vec![];
 
                 // Check that the specified counts of each component type were
                 // read in. Also ensure that the sum of each Stokes' flux

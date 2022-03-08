@@ -8,8 +8,11 @@
 //! source lists.
 
 use marlu::{sexagesimal::*, RADec};
+use vec1::Vec1;
 
 use super::*;
+use crate::hyperdrive::{TmpComponent, TmpFluxDensityType};
+use mwa_hyperdrive_common::vec1;
 
 /// Parse a buffer containing an AO-style source list into a [SourceList].
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -25,7 +28,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
     let mut measurement_got_fd = false;
     let mut measurement_made_fd = false;
     let mut source_name = String::new();
-    let mut components: Vec<SourceComponent> = vec![];
+    let mut components: Vec<TmpComponent> = vec![];
     let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
@@ -91,10 +94,11 @@ pub fn parse_source_list<T: std::io::BufRead>(
 
                 // We have to assume everything about the component, and
                 // overwrite it later.
-                components.push(SourceComponent {
-                    radec: RADec::new(0.0, 0.0),
+                components.push(TmpComponent {
+                    ra: 0.0,
+                    dec: 0.0,
                     comp_type: ComponentType::Point,
-                    flux_type: FluxDensityType::PowerLaw {
+                    flux_type: TmpFluxDensityType::PowerLaw {
                         si: 0.0,
                         fd: FluxDensity::default(),
                     },
@@ -188,8 +192,9 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     return Err(ReadSourceListError::InvalidDec(declination));
                 }
 
-                components.iter_mut().last().unwrap().radec =
-                    RADec::new_degrees(right_ascension, declination);
+                let comp = components.iter_mut().last().unwrap();
+                comp.ra = right_ascension.to_radians();
+                comp.dec = declination.to_radians();
             }
 
             Some("shape") => {
@@ -237,7 +242,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
             Some("sed") => {
                 in_sed = true;
 
-                components.iter_mut().last().unwrap().flux_type = FluxDensityType::PowerLaw {
+                components.iter_mut().last().unwrap().flux_type = TmpFluxDensityType::PowerLaw {
                     si: 0.0,
                     fd: FluxDensity::default(),
                 };
@@ -249,7 +254,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
 
                 if !measurement_made_fd {
                     components.iter_mut().last().unwrap().flux_type =
-                        FluxDensityType::List { fds: vec![] };
+                        TmpFluxDensityType::List(vec![]);
                     measurement_made_fd = true;
                 }
             }
@@ -295,12 +300,12 @@ pub fn parse_source_list<T: std::io::BufRead>(
 
                 if in_sed {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        FluxDensityType::PowerLaw { fd, .. } => fd.freq = freq * freq_unit,
+                        TmpFluxDensityType::PowerLaw { fd, .. } => fd.freq = freq * freq_unit,
                         _ => unreachable!(),
                     }
                 } else if in_measurement {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        FluxDensityType::List { fds } => {
+                        TmpFluxDensityType::List(fds) => {
                             // If both bools are false, then we need to make a
                             // new `FluxDensity` struct.
                             if !measurement_got_freq && !measurement_got_fd {
@@ -391,7 +396,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
 
                 if in_sed {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        FluxDensityType::PowerLaw { fd, .. } => {
+                        TmpFluxDensityType::PowerLaw { fd, .. } => {
                             fd.i = i * fd_unit;
                             fd.q = q * fd_unit;
                             fd.u = u * fd_unit;
@@ -401,7 +406,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     }
                 } else if in_measurement {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        FluxDensityType::List { fds } => {
+                        TmpFluxDensityType::List(fds) => {
                             // If both bools are false, then we need to make a
                             // new `FluxDensity` struct.
                             if !measurement_got_freq && !measurement_got_fd {
@@ -474,7 +479,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 match &mut components.iter_mut().last().unwrap().flux_type {
-                    FluxDensityType::PowerLaw { si, .. } => *si = spec_index,
+                    TmpFluxDensityType::PowerLaw { si, .. } => *si = spec_index,
                     _ => unreachable!(),
                 }
             }
@@ -493,15 +498,15 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     // Check that the last component struct added actually has flux
                     // densities.
                     match &components.iter().last().unwrap().flux_type {
-                        FluxDensityType::PowerLaw { fd, .. } => {
+                        TmpFluxDensityType::PowerLaw { fd, .. } => {
                             if (fd.i + fd.q + fd.u + fd.v) < 1e-6 {
                                 return Err(
                                     ReadSourceListCommonError::NoFluxDensities(line_num).into()
                                 );
                             }
                         }
-                        FluxDensityType::List { fds } => {
-                            let fd = &fds.last().unwrap();
+                        TmpFluxDensityType::List(fds) => {
+                            let fd = fds.last().unwrap();
                             if (fd.i + fd.q + fd.u + fd.v) < 1e-6 {
                                 return Err(
                                     ReadSourceListCommonError::NoFluxDensities(line_num).into()
@@ -511,8 +516,43 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         _ => unreachable!(),
                     }
                 } else if in_source {
-                    let mut source = Source { components: vec![] };
-                    source.components.append(&mut components);
+                    if components.is_empty() {
+                        return Err(ReadSourceListAOError::MissingComponents(line_num).into());
+                    }
+                    let mut out_components = vec![];
+                    for comp in components {
+                        let flux_type = match comp.flux_type {
+                            TmpFluxDensityType::List(fds) => FluxDensityType::List {
+                                fds: Vec1::try_from_vec(fds).map_err(|_| {
+                                    ReadSourceListAOError::MissingFluxes {
+                                        line_num,
+                                        comp_type: match comp.comp_type {
+                                            ComponentType::Point => "Point",
+                                            ComponentType::Gaussian { .. } => "Gaussian",
+                                            ComponentType::Shapelet { .. } => "Shapelet",
+                                        },
+                                        ra: comp.ra,
+                                        dec: comp.dec,
+                                    }
+                                })?,
+                            },
+                            TmpFluxDensityType::PowerLaw { si, fd } => {
+                                FluxDensityType::PowerLaw { si, fd }
+                            }
+                            TmpFluxDensityType::CurvedPowerLaw { si, fd, q } => {
+                                FluxDensityType::CurvedPowerLaw { si, fd, q }
+                            }
+                        };
+                        out_components.push(SourceComponent {
+                            radec: RADec::new(comp.ra, comp.dec),
+                            comp_type: comp.comp_type,
+                            flux_type,
+                        })
+                    }
+                    let source = Source {
+                        components: Vec1::try_from_vec(out_components).unwrap(),
+                    };
+                    components = vec![];
 
                     // Ensure that the sum of each Stokes' flux densities is
                     // positive.

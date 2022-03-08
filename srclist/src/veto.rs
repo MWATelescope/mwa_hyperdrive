@@ -223,9 +223,11 @@ mod tests {
     use marlu::{AzEl, constants::MWA_LAT_RAD};
     use approx::assert_abs_diff_eq;
     use serial_test::*;
+    use vec1::vec1;
 
     use super::*;
     use crate::{ComponentType, FluxDensityType, Source, SourceComponent, read::read_source_list_file};
+    use mwa_hyperdrive_common::vec1;
 
     #[test]
     fn test_beam_attenuated_flux_density_no_beam() {
@@ -301,7 +303,7 @@ mod tests {
         source_list.insert(
             "bad_source1".to_string(),
             Source {
-                components: vec![SourceComponent {
+                components: vec1![SourceComponent {
                     radec: RADec::new_degrees(330.0, -80.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
@@ -320,7 +322,7 @@ mod tests {
         source_list.insert(
             "bad_source2".to_string(),
             Source {
-                components: vec![SourceComponent {
+                components: vec1![SourceComponent {
                     radec: RADec::new_degrees(30.0, -80.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
@@ -339,7 +341,7 @@ mod tests {
         source_list.insert(
             "bad_source3".to_string(),
             Source {
-                components: vec![SourceComponent {
+                components: vec1![SourceComponent {
                     radec: RADec::new_degrees(285.0, 40.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {

@@ -17,5 +17,5 @@ pub fn is_a_tty() -> bool {
 pub use {
     byteorder, cfg_if, chrono, clap, fern, flate2, indicatif, itertools, lazy_static, log, marlu,
     marlu::{c32, c64, erfa_sys, hifitime, mwalib, ndarray, num_traits, rayon, Complex},
-    serde_json, thiserror, toml,
+    serde_json, thiserror, toml, vec1,
 };

@@ -10,7 +10,7 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use super::filenames::SUPPORTED_INPUT_FILE_COMBINATIONS;
-use mwa_hyperdrive_common::thiserror;
+use mwa_hyperdrive_common::{thiserror, vec1};
 
 /// Errors associated with setting up [super::CalibrateParams].
 #[derive(Error, Debug)]

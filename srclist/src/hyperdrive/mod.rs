@@ -16,18 +16,17 @@ use serde::{Deserialize, Serialize};
 
 use super::error::*;
 use crate::*;
-// use mwa_hyperdrive_common::serde;
 
 pub(super) type TmpSourceList = BTreeMap<String, Vec<TmpComponent>>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct TmpComponent {
     /// \[degrees\]
-    ra: f64,
+    pub(super) ra: f64,
     /// \[degrees\]
-    dec: f64,
-    comp_type: ComponentType,
-    flux_type: TmpFluxDensityType,
+    pub(super) dec: f64,
+    pub(super) comp_type: ComponentType,
+    pub(super) flux_type: TmpFluxDensityType,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

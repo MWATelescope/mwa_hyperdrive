@@ -14,8 +14,9 @@ mod tests {
 
     use marlu::RADec;
     use tempfile::NamedTempFile;
+    use vec1::vec1;
 
-    use mwa_hyperdrive_common::marlu;
+    use mwa_hyperdrive_common::{marlu, vec1};
     use mwa_hyperdrive_srclist::{
         hyperdrive, ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source,
         SourceComponent, SourceList,
@@ -25,11 +26,11 @@ mod tests {
     /// what is in the examples.
     fn get_example_sl() -> SourceList {
         let source1 = Source {
-            components: vec![SourceComponent {
+            components: vec1![SourceComponent {
                 radec: RADec::new_degrees(10.0, -27.0),
                 comp_type: ComponentType::Point,
                 flux_type: FluxDensityType::List {
-                    fds: vec![
+                    fds: vec1![
                         FluxDensity {
                             freq: 180e6,
                             i: 10.0,
@@ -49,7 +50,7 @@ mod tests {
             }],
         };
         let source2 = Source {
-            components: vec![
+            components: vec1![
                 SourceComponent {
                     radec: RADec::new_degrees(0.0, -35.0),
                     comp_type: ComponentType::Gaussian {

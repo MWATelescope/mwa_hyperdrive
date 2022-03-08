@@ -193,7 +193,7 @@ impl ComponentList {
                         min: *min,
                         pa: *pa,
                     });
-                    shapelet_coeffs.push(coeffs.clone());
+                    shapelet_coeffs.push(coeffs.to_vec());
                 }
             }
         }

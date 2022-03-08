@@ -5,9 +5,11 @@
 use std::f64::consts::*;
 
 use approx::*;
+use vec1::vec1;
 
 use super::*;
 use crate::{FluxDensity, FluxDensityType};
+use mwa_hyperdrive_common::vec1;
 
 #[test]
 // Test that the (Az, El) coordinates retrieved from the
@@ -30,38 +32,40 @@ fn test_get_azel_mwa() {
             },
         },
     };
-    let mut s = Source { components: vec![] };
-
     // Don't modify the first component.
-    s.components.push(comp.clone());
+    let mut s = Source {
+        components: vec1![comp.clone()],
+    };
 
     // Modify the coordinates of other components.
     s.components.push(comp.clone());
-    s.components.last_mut().unwrap().radec = RADec::new(PI - 0.1, FRAC_PI_4 + 0.1);
+    s.components.last_mut().radec = RADec::new(PI - 0.1, FRAC_PI_4 + 0.1);
 
     s.components.push(comp.clone());
-    s.components.last_mut().unwrap().radec = RADec::new(PI + 0.1, FRAC_PI_4 - 0.1);
+    s.components.last_mut().radec = RADec::new(PI + 0.1, FRAC_PI_4 - 0.1);
 
     // Push "source_1".
     sl.insert("source_1".to_string(), s);
 
-    let mut s = Source { components: vec![] };
-    s.components.push(comp.clone());
+    let mut s = Source {
+        components: vec1![comp.clone()],
+    };
 
     s.components.push(comp.clone());
-    s.components.last_mut().unwrap().radec = RADec::new(PI - 0.1, FRAC_PI_4 + 0.1);
+    s.components.last_mut().radec = RADec::new(PI - 0.1, FRAC_PI_4 + 0.1);
 
     s.components.push(comp.clone());
-    s.components.last_mut().unwrap().radec = RADec::new(PI + 0.1, FRAC_PI_4 - 0.1);
+    s.components.last_mut().radec = RADec::new(PI + 0.1, FRAC_PI_4 - 0.1);
 
     sl.insert("source_2".to_string(), s);
 
-    let mut s = Source { components: vec![] };
-    s.components.push(comp.clone());
-    s.components.last_mut().unwrap().radec = RADec::new(FRAC_PI_2, PI);
+    let mut s = Source {
+        components: vec1![comp.clone()],
+    };
+    s.components.last_mut().radec = RADec::new(FRAC_PI_2, PI);
 
     s.components.push(comp);
-    s.components.last_mut().unwrap().radec = RADec::new(FRAC_PI_2 - 0.1, PI + 0.2);
+    s.components.last_mut().radec = RADec::new(FRAC_PI_2 - 0.1, PI + 0.2);
 
     sl.insert("source_3".to_string(), s);
 

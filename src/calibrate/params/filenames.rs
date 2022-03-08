@@ -16,7 +16,7 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use crate::glob::{get_all_matches_from_glob, GlobError};
-use mwa_hyperdrive_common::{lazy_static, thiserror};
+use mwa_hyperdrive_common::{lazy_static, thiserror, vec1};
 
 lazy_static::lazy_static! {
     // gpubox files should not be renamed in any way! This includes the case of

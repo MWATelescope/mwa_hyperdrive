@@ -16,13 +16,14 @@ use marlu::{
     Complex, Jones, RADec, XyzGeodetic,
 };
 use ndarray::prelude::*;
+use vec1::vec1;
 
 use super::*;
 use crate::jones_test::TestJones;
 #[cfg(feature = "cuda")]
 use crate::model::cuda::SkyModellerCuda;
 use mwa_hyperdrive_beam::create_no_beam_object;
-use mwa_hyperdrive_common::{marlu, ndarray};
+use mwa_hyperdrive_common::{marlu, ndarray, vec1};
 use mwa_hyperdrive_srclist::{
     ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList,
 };
@@ -83,7 +84,7 @@ impl ObsParams {
         let freqs = vec![150e6, 175e6, 200e6];
 
         let flux_density_scale = FluxDensityType::List {
-            fds: vec![
+            fds: vec1![
                 FluxDensity {
                     freq: 150e6,
                     i: 1.0,
@@ -334,7 +335,7 @@ fn point_zenith_cpu() {
     srclist.insert(
         "zenith".to_string(),
         Source {
-            components: vec![get_simple_point(
+            components: vec1![get_simple_point(
                 obs.phase_centre,
                 obs.flux_density_scale.clone(),
             )],
@@ -355,7 +356,7 @@ fn point_off_zenith_cpu() {
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_point(
+            components: vec1![get_simple_point(
                 RADec::new_degrees(1.0, -27.0),
                 obs.flux_density_scale.clone(),
             )],
@@ -376,7 +377,7 @@ fn gaussian_zenith_cpu() {
     srclist.insert(
         "zenith".to_string(),
         Source {
-            components: vec![get_simple_gaussian(
+            components: vec1![get_simple_gaussian(
                 obs.phase_centre,
                 obs.flux_density_scale.clone(),
             )],
@@ -397,7 +398,7 @@ fn gaussian_off_zenith_cpu() {
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_gaussian(
+            components: vec1![get_simple_gaussian(
                 RADec::new_degrees(1.0, -27.0),
                 obs.flux_density_scale.clone(),
             )],
@@ -418,7 +419,7 @@ fn shapelet_zenith_cpu() {
     srclist.insert(
         "zenith".to_string(),
         Source {
-            components: vec![get_simple_shapelet(
+            components: vec1![get_simple_shapelet(
                 obs.phase_centre,
                 obs.flux_density_scale.clone(),
             )],
@@ -448,7 +449,7 @@ fn shapelet_off_zenith_cpu() {
     srclist.insert(
         "off_zenith".to_string(),
         Source {
-            components: vec![get_simple_shapelet(
+            components: vec1![get_simple_shapelet(
                 RADec::new_degrees(1.0, -27.0),
                 obs.flux_density_scale.clone(),
             )],

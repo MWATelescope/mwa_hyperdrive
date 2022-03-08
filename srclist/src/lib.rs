@@ -93,8 +93,10 @@ mod tests {
 
     use approx::assert_abs_diff_eq;
     use marlu::RADec;
+    use vec1::{vec1, Vec1};
 
     use super::*;
+    use mwa_hyperdrive_common::vec1;
 
     fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
         assert_eq!(sl1.len(), sl2.len());
@@ -255,7 +257,7 @@ mod tests {
         sl.insert(
             "point".to_string(),
             Source {
-                components: vec![SourceComponent {
+                components: vec1![SourceComponent {
                     radec: RADec::new_degrees(60.0, -27.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
@@ -274,7 +276,7 @@ mod tests {
         sl.insert(
             "gaussian".to_string(),
             Source {
-                components: vec![SourceComponent {
+                components: vec1![SourceComponent {
                     radec: RADec::new_degrees(61.0, -28.0),
                     comp_type: ComponentType::Gaussian {
                         maj: 1.0,
@@ -297,7 +299,7 @@ mod tests {
         sl.insert(
             "shapelet".to_string(),
             Source {
-                components: vec![SourceComponent {
+                components: vec1![SourceComponent {
                     radec: RADec::new_degrees(59.0, -26.0),
                     comp_type: ComponentType::Shapelet {
                         maj: 1.0,
@@ -365,7 +367,12 @@ mod tests {
                 .filter(|comp| !matches!(comp.comp_type, ComponentType::Shapelet { .. }))
                 .collect();
             if !comps.is_empty() {
-                new_hyperdrive_sl.insert(name, Source { components: comps });
+                new_hyperdrive_sl.insert(
+                    name,
+                    Source {
+                        components: Vec1::try_from_vec(comps).unwrap(),
+                    },
+                );
             }
         }
 

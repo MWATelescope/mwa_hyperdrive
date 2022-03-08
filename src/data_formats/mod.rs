@@ -24,7 +24,7 @@ use strum_macros::{Display, EnumIter, EnumString};
 use vec1::Vec1;
 
 use crate::context::ObsContext;
-use mwa_hyperdrive_common::{marlu, ndarray};
+use mwa_hyperdrive_common::{marlu, ndarray, vec1};
 
 #[derive(Debug)]
 pub(crate) enum VisInputType {

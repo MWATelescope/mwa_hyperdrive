@@ -4,9 +4,11 @@
 
 use approx::assert_abs_diff_eq;
 use marlu::c64;
+use vec1::vec1;
 
 use super::*;
 use crate::jones_test::TestJones;
+use mwa_hyperdrive_common::vec1;
 
 #[test]
 fn calc_freq_ratio_1() {
@@ -34,7 +36,7 @@ fn calc_freq_ratio_2() {
 fn estimate_with_negative_fds() {
     // MLT011814-4027 from LoBES
     let fdt = FluxDensityType::List {
-        fds: vec![
+        fds: vec1![
             FluxDensity {
                 freq: 130e6,
                 i: -0.006830723490566015,

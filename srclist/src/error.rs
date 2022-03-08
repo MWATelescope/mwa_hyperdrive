@@ -29,6 +29,17 @@ pub enum ReadSourceListError {
         source_name: String,
     },
 
+    #[error("{comp_type} component of source {name} at RA {ra} Dec {dec} has no flux density information")]
+    MissingFluxes {
+        name: String,
+        comp_type: &'static str,
+        ra: f64,
+        dec: f64,
+    },
+
+    #[error("Source {0} has no components")]
+    NoComponents(String),
+
     #[error("Could not interpret the contents of the source list. Specify which style source list it is, and a more specific error can be shown.")]
     FailedToReadAsAnyType,
 
@@ -117,6 +128,9 @@ pub enum ReadSourceListCommonError {
 
     #[error("Source list line {0}: ENDSOURCE reached, but no components found")]
     NoComponents(u32),
+
+    #[error("Source list line {0}: Source has no non SHAPELET components, which can't be used (SHAPELET2 is OK)")]
+    NoNonShapeletComponents(u32),
 
     #[error("Source list line {0}: A component did not have any flux density information")]
     NoFluxDensities(u32),
@@ -214,6 +228,17 @@ pub enum ReadSourceListAOError {
 
     #[error("Source list line {0}: Missing component type")]
     MissingComponentType(u32),
+
+    #[error("Source list line {0}: Source has no components")]
+    MissingComponents(u32),
+
+    #[error("Source list line {0}: {comp_type} component at RA {ra}, Dec {dec} did not contain any flux densities")]
+    MissingFluxes {
+        line_num: u32,
+        comp_type: &'static str,
+        ra: f64,
+        dec: f64,
+    },
 
     #[error("Source list line {0}: Incomplete position")]
     IncompletePositionLine(u32),

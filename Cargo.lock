@@ -1340,7 +1340,6 @@ dependencies = [
  "strum",
  "strum_macros",
  "tempfile",
- "vec1",
 ]
 
 [[package]]
@@ -1375,6 +1374,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "toml",
+ "vec1",
 ]
 
 [[package]]

@@ -9,9 +9,11 @@
 
 use log::warn;
 use marlu::{constants::DH2R, RADec};
+use vec1::Vec1;
 
 use super::*;
-use mwa_hyperdrive_common::{log, marlu};
+use crate::hyperdrive::{TmpComponent, TmpFluxDensityType};
+use mwa_hyperdrive_common::{log, marlu, vec1};
 
 /// Parse a buffer containing an RTS-style source list into a `SourceList`.
 pub fn parse_source_list<T: std::io::BufRead>(
@@ -26,7 +28,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
     let mut found_shapelets = vec![];
     let mut component_type_set = false;
     let mut source_name = String::new();
-    let mut components: Vec<SourceComponent> = vec![];
+    let mut components: Vec<TmpComponent> = vec![];
     let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
@@ -112,14 +114,14 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     if !(-90.0..=90.0).contains(&declination) {
                         return Err(ReadSourceListError::InvalidDec(declination));
                     }
-                    let radec = RADec::new(hour_angle * DH2R, declination.to_radians());
 
-                    components.push(SourceComponent {
-                        radec,
+                    components.push(TmpComponent {
+                        ra: hour_angle * DH2R,
+                        dec: declination.to_radians(),
                         // Assume the base source is a point source. If we find
                         // component type information, we can overwrite this.
                         comp_type: ComponentType::Point,
-                        flux_type: FluxDensityType::List { fds: vec![] },
+                        flux_type: TmpFluxDensityType::List(vec![]),
                     });
                 }
             }
@@ -181,7 +183,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 };
 
                 match components.iter_mut().last().map(|c| &mut c.flux_type) {
-                    Some(FluxDensityType::List { fds }) => fds.push(fd),
+                    Some(TmpFluxDensityType::List(fds)) => fds.push(fd),
                     _ => unreachable!(),
                 }
             }
@@ -398,7 +400,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 // struct corresponds to the "base source"). RTS source lists
                 // can only have the "list" type.
                 match &components.last().unwrap().flux_type {
-                    FluxDensityType::List { fds } => {
+                    TmpFluxDensityType::List(fds) => {
                         if fds.is_empty() {
                             return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
                         }
@@ -440,12 +442,13 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
                 let radec = RADec::new(hour_angle * DH2R, declination.to_radians());
 
-                components.push(SourceComponent {
-                    radec,
+                components.push(TmpComponent {
+                    ra: radec.ra,
+                    dec: radec.dec,
                     // Assume the base source is a point source. If we find
                     // component type information, we can overwrite this.
                     comp_type: ComponentType::Point,
-                    flux_type: FluxDensityType::List { fds: vec![] },
+                    flux_type: TmpFluxDensityType::List(vec![]),
                 });
 
                 in_shapelet = false;
@@ -461,7 +464,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 // Check that the last component struct added actually has flux
                 // densities. RTS source lists can only have the "list" type.
                 match &mut components.iter_mut().last().unwrap().flux_type {
-                    FluxDensityType::List { fds } => {
+                    TmpFluxDensityType::List(fds) => {
                         if fds.is_empty() {
                             return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
                         } else {
@@ -503,8 +506,42 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 } else if in_component {
                     return Err(ReadSourceListCommonError::MissingEndComponent(line_num).into());
                 }
-                let mut source = Source { components: vec![] };
-                source.components.append(&mut components);
+
+                let mut out_components = vec![];
+                for comp in components {
+                    let flux_type = match comp.flux_type {
+                        TmpFluxDensityType::List(fds) => FluxDensityType::List {
+                            fds: Vec1::try_from_vec(fds).map_err(|_| {
+                                ReadSourceListAOError::MissingFluxes {
+                                    line_num,
+                                    comp_type: match comp.comp_type {
+                                        ComponentType::Point => "Point",
+                                        ComponentType::Gaussian { .. } => "Gaussian",
+                                        ComponentType::Shapelet { .. } => "Shapelet",
+                                    },
+                                    ra: comp.ra,
+                                    dec: comp.dec,
+                                }
+                            })?,
+                        },
+                        TmpFluxDensityType::PowerLaw { si, fd } => {
+                            FluxDensityType::PowerLaw { si, fd }
+                        }
+                        TmpFluxDensityType::CurvedPowerLaw { si, fd, q } => {
+                            FluxDensityType::CurvedPowerLaw { si, fd, q }
+                        }
+                    };
+                    out_components.push(SourceComponent {
+                        radec: RADec::new(comp.ra, comp.dec),
+                        comp_type: comp.comp_type,
+                        flux_type,
+                    })
+                }
+
+                let mut source = Source {
+                    components: Vec1::try_from_vec(out_components).unwrap(),
+                };
+                components = vec![];
 
                 // Find any SHAPELET components (not SHAPELET2 components). If
                 // we find one, we ignore it, and we don't need to return an
@@ -560,8 +597,11 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 // Delete any found shapelets.
+                if source.components.len() == found_shapelets.len() {
+                    return Err(ReadSourceListCommonError::NoNonShapeletComponents(line_num).into());
+                }
                 for &i in &found_shapelets {
-                    source.components.remove(i);
+                    source.components.remove(i).unwrap();
                 }
 
                 if source.components.is_empty() && found_shapelets.is_empty() {
@@ -594,7 +634,7 @@ pub fn parse_source_list<T: std::io::BufRead>(
                 // If we were reading a SHAPELET2 component, check that
                 // shapelet coefficients were read.
                 if in_shapelet2 {
-                    match &source.components.last().unwrap().comp_type {
+                    match &source.components.last().comp_type {
                         ComponentType::Shapelet { coeffs, .. } => {
                             if coeffs.is_empty() {
                                 return Err(

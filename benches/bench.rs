@@ -11,13 +11,14 @@ use marlu::{
     Jones, RADec, XyzGeodetic,
 };
 use ndarray::prelude::*;
+use vec1::vec1;
 
 use mwa_hyperdrive::{
     calibrate::{di::calibrate_timeblocks, Chanblock, Timeblock},
     model,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
 use mwa_hyperdrive_srclist::{
     ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent, SourceList,
 };
@@ -45,7 +46,7 @@ fn model_benchmarks(c: &mut Criterion) {
             source_list.insert(
                 format!("source{i}"),
                 Source {
-                    components: vec![SourceComponent {
+                    components: vec1![SourceComponent {
                         radec: RADec::new_degrees(0.0, -27.0),
                         comp_type: ComponentType::Point,
                         flux_type: FluxDensityType::PowerLaw {
@@ -90,7 +91,7 @@ fn model_benchmarks(c: &mut Criterion) {
             source_list.insert(
                 format!("source{i}"),
                 Source {
-                    components: vec![SourceComponent {
+                    components: vec1![SourceComponent {
                         radec: RADec::new_degrees(0.0, -27.0),
                         comp_type: ComponentType::Point,
                         flux_type: FluxDensityType::PowerLaw {
@@ -136,7 +137,7 @@ fn model_benchmarks(c: &mut Criterion) {
             source_list.insert(
                 format!("source{i}"),
                 Source {
-                    components: vec![SourceComponent {
+                    components: vec1![SourceComponent {
                         radec: RADec::new_degrees(0.0, -27.0),
                         comp_type: ComponentType::Point,
                         flux_type: FluxDensityType::PowerLaw {
@@ -183,7 +184,7 @@ fn model_benchmarks(c: &mut Criterion) {
             source_list.insert(
                 format!("source{i}"),
                 Source {
-                    components: vec![SourceComponent {
+                    components: vec1![SourceComponent {
                         radec: RADec::new_degrees(0.0, -27.0),
                         comp_type: ComponentType::Gaussian {
                             maj: 1.0,
@@ -232,7 +233,7 @@ fn model_benchmarks(c: &mut Criterion) {
             source_list.insert(
                 format!("source{i}"),
                 Source {
-                    components: vec![SourceComponent {
+                    components: vec1![SourceComponent {
                         radec: RADec::new_degrees(0.0, -27.0),
                         comp_type: ComponentType::Gaussian {
                             maj: 1.0,
@@ -282,7 +283,7 @@ fn model_benchmarks(c: &mut Criterion) {
             source_list.insert(
                 format!("source{i}"),
                 Source {
-                    components: vec![SourceComponent {
+                    components: vec1![SourceComponent {
                         radec: RADec::new_degrees(0.0, -27.0),
                         comp_type: ComponentType::Gaussian {
                             maj: 1.0,
@@ -335,7 +336,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 source_list.insert(
                     format!("source{i}"),
                     Source {
-                        components: vec![SourceComponent {
+                        components: vec1![SourceComponent {
                             radec: RADec::new_degrees(0.0, -27.0),
                             comp_type: ComponentType::Shapelet {
                                 maj: 1.0,
@@ -395,7 +396,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 source_list.insert(
                     format!("source{i}"),
                     Source {
-                        components: vec![SourceComponent {
+                        components: vec1![SourceComponent {
                             radec: RADec::new_degrees(0.0, -27.0),
                             comp_type: ComponentType::Shapelet {
                                 maj: 1.0,
@@ -456,7 +457,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 source_list.insert(
                     format!("source{i}"),
                     Source {
-                        components: vec![SourceComponent {
+                        components: vec1![SourceComponent {
                             radec: RADec::new_degrees(0.0, -27.0),
                             comp_type: ComponentType::Shapelet {
                                 maj: 1.0,

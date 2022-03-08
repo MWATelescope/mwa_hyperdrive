@@ -69,15 +69,18 @@ pub struct SimulateVisArgs {
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY-MODEL SOURCES")]
     veto_threshold: Option<f64>,
 
-    /// Don't include point components from the input sky model.
+    /// Don't include sources containing point components in the input sky
+    /// model.
     #[clap(long, help_heading = "SKY-MODEL SOURCES")]
     filter_points: bool,
 
-    /// Don't include Gaussian components from the input sky model.
+    /// Don't include sources containing Gaussian components in the input sky
+    /// model.
     #[clap(long, help_heading = "SKY-MODEL SOURCES")]
     filter_gaussians: bool,
 
-    /// Don't include shapelet components from the input sky model.
+    /// Don't include sources containing shapelet components in the input sky
+    /// model.
     #[clap(long, help_heading = "SKY-MODEL SOURCES")]
     filter_shapelets: bool,
 

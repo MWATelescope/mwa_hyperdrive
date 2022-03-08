@@ -42,7 +42,7 @@ fn source_list_to_tmp_sl(sl: &SourceList) -> TmpSourceList {
                 dec: comp.radec.dec.to_degrees(),
                 comp_type,
                 flux_type: match &comp.flux_type {
-                    FluxDensityType::List { fds } => TmpFluxDensityType::List(fds.clone()),
+                    FluxDensityType::List { fds } => TmpFluxDensityType::List(fds.to_vec()),
                     FluxDensityType::PowerLaw { si, fd } => TmpFluxDensityType::PowerLaw {
                         si: *si,
                         fd: fd.clone(),

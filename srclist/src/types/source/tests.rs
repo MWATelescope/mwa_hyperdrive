@@ -6,6 +6,7 @@ use std::f64::consts::{FRAC_PI_4, LOG2_10, PI};
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use marlu::RADec;
+use vec1::vec1;
 
 use crate::{
     calc_flux_ratio,
@@ -13,14 +14,15 @@ use crate::{
     marlu,
     types::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent},
 };
+use mwa_hyperdrive_common::vec1;
 
 fn get_list_source_1() -> Source {
     Source {
-        components: vec![SourceComponent {
+        components: vec1![SourceComponent {
             radec: RADec::new(PI, FRAC_PI_4),
             comp_type: ComponentType::Point,
             flux_type: FluxDensityType::List {
-                fds: vec![
+                fds: vec1![
                     FluxDensity {
                         freq: 100.0,
                         i: 10.0,
@@ -52,11 +54,11 @@ fn get_list_source_1() -> Source {
 // This is an extreme example; particularly useful for verifying a SI cap.
 fn get_list_source_2() -> Source {
     Source {
-        components: vec![SourceComponent {
+        components: vec1![SourceComponent {
             radec: RADec::new(PI - 0.82, -FRAC_PI_4),
             comp_type: ComponentType::Point,
             flux_type: FluxDensityType::List {
-                fds: vec![
+                fds: vec1![
                     FluxDensity {
                         freq: 100.0,
                         i: 10.0,
@@ -117,19 +119,17 @@ fn list_calc_spec_index_source_2() {
 #[should_panic]
 fn list_estimate_flux_density_at_freq_no_comps() {
     let mut source = get_list_source_1();
-    // Delete all flux densities.
+    // Delete all flux densities. This will panic on the unwrap because `fds` needs to have at least 1 elements.
     match &mut source.components[0].flux_type {
-        FluxDensityType::List { fds } => fds.drain(..),
+        FluxDensityType::List { fds } => fds.drain(..).unwrap(),
         _ => unreachable!(),
     };
-    let _fd = source.components[0].flux_type.estimate_at_freq(90.0);
 }
-
 #[test]
 fn list_estimate_flux_density_at_freq_extrapolation_single_comp1() {
     let mut source = get_list_source_1();
     match &mut source.components[0].flux_type {
-        FluxDensityType::List { fds } => fds.drain(1..),
+        FluxDensityType::List { fds } => fds.drain(1..).unwrap(),
         _ => unreachable!(),
     };
 

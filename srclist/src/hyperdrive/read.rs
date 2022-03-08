@@ -9,9 +9,10 @@
 //! types here to do the serde magic and give the caller a [SourceList].
 
 use marlu::RADec;
+use vec1::Vec1;
 
 use super::*;
-use mwa_hyperdrive_common::serde_json;
+use mwa_hyperdrive_common::{serde_json, vec1};
 
 fn source_list_from_tmp_sl(
     tmp_sl: BTreeMap<String, Vec<TmpComponent>>,
@@ -64,7 +65,20 @@ fn source_list_from_tmp_sl(
                         sum_u += fd.u;
                         sum_v += fd.v;
                     }
-                    FluxDensityType::List { fds }
+                    FluxDensityType::List {
+                        fds: Vec1::try_from_vec(fds).map_err(|_| {
+                            ReadSourceListError::MissingFluxes {
+                                name: name.clone(),
+                                comp_type: match comp_type {
+                                    ComponentType::Point => "Point",
+                                    ComponentType::Gaussian { .. } => "Gaussian",
+                                    ComponentType::Shapelet { .. } => "Shapelet",
+                                },
+                                ra: radec.ra,
+                                dec: radec.dec,
+                            }
+                        })?,
+                    }
                 }
 
                 TmpFluxDensityType::PowerLaw { si, fd } => {
@@ -117,7 +131,13 @@ fn source_list_from_tmp_sl(
             });
         }
 
-        sl.insert(name.clone(), Source { components: comps });
+        sl.insert(
+            name.clone(),
+            Source {
+                components: Vec1::try_from_vec(comps)
+                    .map_err(|_| ReadSourceListError::NoComponents(name))?,
+            },
+        );
     }
 
     Ok(sl)

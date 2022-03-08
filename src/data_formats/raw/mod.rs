@@ -36,7 +36,7 @@ use crate::{
     pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray, rayon};
+use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray, rayon, vec1};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawDataReader {

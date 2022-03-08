@@ -9,7 +9,7 @@ use marlu::{RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray};
+use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
 
 /// MWA observation metadata.
 ///

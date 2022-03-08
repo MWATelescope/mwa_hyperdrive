@@ -6,6 +6,7 @@ use std::f64::consts::TAU;
 
 use approx::assert_abs_diff_eq;
 use marlu::{Jones, RADec};
+use vec1::vec1;
 
 use crate::{
     jones_test::TestJones,
@@ -13,6 +14,7 @@ use crate::{
     types::{ComponentList, ComponentType, FluxDensity, FluxDensityType, SourceList},
     SourceListType,
 };
+use mwa_hyperdrive_common::vec1;
 
 fn get_srclist() -> SourceList {
     let (mut source_list, _) = crate::read::read_source_list_file(
@@ -85,7 +87,7 @@ fn test_split_components() {
 
     // Test one of the component's instrumental flux densities.
     let fd = FluxDensityType::List {
-        fds: vec![
+        fds: vec1![
             FluxDensity {
                 freq: 80e6,
                 i: 2.13017,

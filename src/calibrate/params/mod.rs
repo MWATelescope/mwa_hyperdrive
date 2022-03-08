@@ -50,7 +50,7 @@ use crate::{
     unit_parsing::{parse_wavelength, WavelengthUnit},
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon};
+use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon, vec1};
 use mwa_hyperdrive_srclist::{constants::*, veto_sources, SourceList, SourceListType};
 
 /// Parameters needed to perform calibration.

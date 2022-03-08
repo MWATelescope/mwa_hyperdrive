@@ -89,10 +89,7 @@ pub fn write_source_list<T: std::io::Write>(
 ) -> Result<(), WriteSourceListError> {
     for (name, source) in sl.iter() {
         // Write out the first component as the RTS base source.
-        let first_comp = match source.components.first() {
-            Some(c) => c,
-            None => return Err(WriteSourceListError::NoComponents(name.clone())),
-        };
+        let first_comp = source.components.first();
         writeln!(
             buf,
             "SOURCE {} {} {}",
@@ -138,10 +135,7 @@ pub(crate) fn write_source_list_with_order<T: std::io::Write>(
     for name in source_name_order {
         let source = &sl[&name];
         // Write out the first component as the RTS base source.
-        let first_comp = match source.components.first() {
-            Some(c) => c,
-            None => return Err(WriteSourceListError::NoComponents(name.clone())),
-        };
+        let first_comp = source.components.first();
         writeln!(
             buf,
             "SOURCE {} {} {}",

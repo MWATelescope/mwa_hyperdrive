@@ -9,16 +9,17 @@ mod tests;
 
 use marlu::{RADec, LMN};
 use rayon::prelude::*;
+use vec1::Vec1;
 
 use super::SourceComponent;
 use crate::FluxDensity;
-use mwa_hyperdrive_common::{marlu, rayon};
+use mwa_hyperdrive_common::{marlu, rayon, vec1};
 
 /// A collection of components.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Source {
     /// The components associated with the source.
-    pub components: Vec<SourceComponent>,
+    pub components: Vec1<SourceComponent>,
 }
 
 impl Source {
