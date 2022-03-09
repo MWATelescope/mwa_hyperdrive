@@ -5,13 +5,14 @@
 //! Integration tests for sky-model visibilities generated during calibration.
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
+use marlu::Jones;
 use mwalib::{fitsio_sys, *};
 use ndarray::prelude::*;
 use serial_test::serial;
 
 use crate::*;
 use mwa_hyperdrive::calibrate::solutions::CalibrationSolutions;
-use mwa_hyperdrive_common::{mwalib, ndarray};
+use mwa_hyperdrive_common::{marlu, mwalib, ndarray};
 
 #[test]
 #[serial]
@@ -168,10 +169,7 @@ fn test_1090008640_calibrate_model() {
     let sols = result.unwrap();
     assert_abs_diff_eq!(
         sols.di_jones.mapv(TestJones::from),
-        Array3::from_elem(
-            sols.di_jones.dim(),
-            TestJones::from([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0])
-        ),
+        Array3::from_elem(sols.di_jones.dim(), TestJones::from(Jones::identity())),
         epsilon = 1e-15
     );
 }

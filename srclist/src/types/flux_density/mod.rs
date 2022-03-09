@@ -7,12 +7,13 @@
 #[cfg(test)]
 mod tests;
 
+use log::{log_enabled, trace, Level::Trace};
 use marlu::Jones;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 use crate::constants::*;
-use mwa_hyperdrive_common::{marlu, vec1, Complex};
+use mwa_hyperdrive_common::{log, marlu, vec1, Complex};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 /// At a frequency, four flux densities for each Stokes parameter.
@@ -43,8 +44,8 @@ pub struct FluxDensity {
 impl FluxDensity {
     /// Given two flux densities, calculate the spectral index that fits them.
     /// Uses only Stokes I.
-    pub fn calc_spec_index(&self, fd2: &Self) -> f64 {
-        (fd2.i.abs() / self.i.abs()).ln() / (fd2.freq / self.freq).ln()
+    pub(super) fn calc_spec_index(&self, fd2: &Self) -> f64 {
+        (fd2.i / self.i).ln() / (fd2.freq / self.freq).ln()
     }
 
     /// Convert a `FluxDensity` into a [Jones] matrix representing instrumental
@@ -120,6 +121,8 @@ impl FluxDensityType {
     /// Stokes I component, so any other Stokes parameters may be poorly
     /// estimated.
     pub fn estimate_at_freq(&self, freq_hz: f64) -> FluxDensity {
+        let we_should_trace_log = log_enabled!(Trace);
+
         match self {
             FluxDensityType::PowerLaw { si, fd } => {
                 let ratio = calc_flux_ratio(freq_hz, fd.freq, *si);
@@ -136,8 +139,6 @@ impl FluxDensityType {
             }
 
             FluxDensityType::List { fds } => {
-                let mut old_freq = -1.0;
-
                 // `smaller_flux_density` is a bad name given to the component's flux
                 // density corresponding to a frequency smaller than but nearest to the
                 // specified frequency.
@@ -145,69 +146,77 @@ impl FluxDensityType {
                     // If there's only one source component, then we must assume the
                     // spectral index for extrapolation.
                     if fds.len() == 1 {
-                        // trace!("Only one flux density in a component's list; extrapolating with spectral index {}", DEFAULT_SPEC_INDEX);
+                        if we_should_trace_log {
+                            trace!("Only one flux density in a component's list; extrapolating with spectral index {}", DEFAULT_SPEC_INDEX);
+                        }
                         (DEFAULT_SPEC_INDEX, &fds[0])
                     }
-                    // Otherwise, find the frequencies that bound the given frequency. As we
-                    // assume that the input source components are sorted by frequency, we
-                    // can assume that the comp. with the smallest frequency is at index 0,
-                    // and similarly for the last component.
+                    // Otherwise, find the two closest `FluxDensity`s closest to
+                    // the given frequency. We enforce that the input list of
+                    // `FluxDensity`s is sorted by frequency.
                     else {
-                        let mut smaller_comp_index: usize = 0;
-                        let mut larger_comp_index: usize = fds.len() - 1;
-                        for (i, fd) in fds.iter().enumerate() {
-                            let f = fd.freq;
-                            // Bail if this frequency is smaller than the old
-                            // frequency; we require the list of flux densities
-                            // to be sorted by frequency.
-                            if f < old_freq {
+                        let mut pair: (&FluxDensity, &FluxDensity) = (&fds[0], &fds[1]);
+                        for window in fds.windows(2) {
+                            // Bail if the frequencies are out of order.
+                            if window[1].freq < window[0].freq {
                                 panic!("The list of flux densities used for estimation were not sorted");
                             }
-                            old_freq = f;
 
-                            // Iterate until we hit a catalogue frequency bigger than the
-                            // desired frequency.
+                            pair = (&window[0], &window[1]);
 
-                            // If this freq and the specified freq are the same...
-                            if (f - freq_hz).abs() < 1e-3 {
-                                // ... then just return the flux density information from
-                                // this frequency.
-                                return fd.clone();
+                            // If either element's and the specified freq are the same...
+                            if (window[0].freq - freq_hz).abs() < 1e-3 {
+                                // ... then just return the flux density
+                                // information from this frequency.
+                                return window[0].clone();
                             }
-                            // If this freq is smaller than the specified freq...
-                            else if f < freq_hz {
-                                // Check if we've iterated to the last catalogue component -
-                                // if so, then we must extrapolate (i.e. the specified
-                                // freq. is bigger than all catalogue frequencies).
-                                if i == fds.len() - 1 {
-                                    smaller_comp_index = fds.len() - 2;
-                                }
+                            if (window[1].freq - freq_hz).abs() < 1e-3 {
+                                return window[1].clone();
                             }
-                            // We only arrive here if f > freq.
-                            else {
-                                // Because the array is sorted, we now know the closest two
-                                // frequencies. The only exception is if this is the first
-                                // catalogue frequency (i.e. the desired freq is smaller
-                                // than all catalogue freqs -> extrapolate).
-                                if i == 0 {
-                                    larger_comp_index = 1;
-                                } else {
-                                    smaller_comp_index = i - 1;
-                                }
+                            // If the specified freq is smaller than the second
+                            // element...
+                            if freq_hz < window[1].freq {
+                                // ... we're done.
                                 break;
                             }
                         }
 
-                        let mut spec_index =
-                            fds[smaller_comp_index].calc_spec_index(&fds[larger_comp_index]);
+                        // We now have the two relevant flux densities (on
+                        // either side of the target frequency, or the two
+                        // closest to the target frequency). If one is positive
+                        // and one negative, we have to use a linear fit, not a
+                        // spectral index.
+                        let (fd1, fd2) = pair;
+                        if pair.0.i.signum() != pair.1.i.signum() {
+                            let i_rise = fd2.i - fd1.i;
+                            let q_rise = fd2.q - fd1.q;
+                            let u_rise = fd2.u - fd1.u;
+                            let v_rise = fd2.v - fd1.v;
+                            let run = fd2.freq - fd1.freq;
+                            let i_slope = i_rise / run;
+                            let q_slope = q_rise / run;
+                            let u_slope = u_rise / run;
+                            let v_slope = v_rise / run;
+                            return FluxDensity {
+                                freq: freq_hz,
+                                i: fd1.i + i_slope * (freq_hz - fd1.freq),
+                                q: fd1.q + q_slope * (freq_hz - fd1.freq),
+                                u: fd1.u + u_slope * (freq_hz - fd1.freq),
+                                v: fd1.v + v_slope * (freq_hz - fd1.freq),
+                            };
+                        }
+
+                        let mut spec_index = fd1.calc_spec_index(fd2);
 
                         // Stop stupid spectral indices.
                         if spec_index < SPEC_INDEX_CAP {
-                            // trace!(
-                            //     "Component had a spectral index {}; capping at {}",
-                            //     spec_index,
-                            //     SPEC_INDEX_CAP
-                            // );
+                            if we_should_trace_log {
+                                trace!(
+                                    "Component had a spectral index {}; capping at {}",
+                                    spec_index,
+                                    SPEC_INDEX_CAP
+                                );
+                            }
                             spec_index = SPEC_INDEX_CAP;
                         }
 
@@ -215,11 +224,7 @@ impl FluxDensityType {
                             spec_index,
                             // If our last component's frequency is smaller than the specified
                             // freq., then we should use that for flux densities.
-                            if fds[larger_comp_index].freq < freq_hz {
-                                &fds[larger_comp_index]
-                            } else {
-                                &fds[smaller_comp_index]
-                            },
+                            if fd2.freq < freq_hz { fd2 } else { fd1 },
                         )
                     }
                 };
@@ -227,27 +232,17 @@ impl FluxDensityType {
                 // Now scale the flux densities given the calculated
                 // spectral index.
                 let flux_ratio = calc_flux_ratio(freq_hz, smaller_flux_density.freq, spec_index);
-                let fd = FluxDensity {
+                FluxDensity {
                     freq: freq_hz,
                     ..*smaller_flux_density
-                } * flux_ratio;
-
-                // Handle NaNs by setting the flux densities to 0.
-                if fd.i.is_nan() {
-                    FluxDensity {
-                        freq: fd.freq,
-                        ..Default::default()
-                    }
-                } else {
-                    fd
-                }
+                } * flux_ratio
             }
         }
     }
 }
 
 /// Given a spectral index, determine the flux-density ratio of two frequencies.
-pub fn calc_flux_ratio(desired_freq_hz: f64, cat_freq_hz: f64, spec_index: f64) -> f64 {
+pub(crate) fn calc_flux_ratio(desired_freq_hz: f64, cat_freq_hz: f64, spec_index: f64) -> f64 {
     (desired_freq_hz / cat_freq_hz).powf(spec_index)
 }
 

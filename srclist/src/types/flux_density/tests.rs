@@ -31,65 +31,195 @@ fn calc_freq_ratio_2() {
 }
 
 #[test]
-#[ignore]
-// TODO: Fix!
 fn estimate_with_negative_fds() {
-    // MLT011814-4027 from LoBES
+    // All negative to start with.
     let fdt = FluxDensityType::List {
         fds: vec1![
             FluxDensity {
-                freq: 130e6,
-                i: -0.006830723490566015,
+                freq: 150e6,
+                i: -1.0,
                 ..Default::default()
             },
             FluxDensity {
-                freq: 143e6,
-                i: -0.027053141966462135,
+                freq: 175e6,
+                i: -3.0,
                 ..Default::default()
             },
             FluxDensity {
-                freq: 151e6,
-                i: -0.038221485912799835,
+                freq: 200e6,
+                i: -2.0,
+                ..Default::default()
+            }
+        ],
+    };
+    assert_abs_diff_eq!(
+        fdt.estimate_at_freq(140e6),
+        FluxDensity {
+            freq: 140e6,
+            // Using the FDs with 150 and 175 MHz, SI = 0.611.
+            i: -0.611583722518741,
+            ..Default::default()
+        }
+    );
+    assert_abs_diff_eq!(
+        fdt.estimate_at_freq(150e6),
+        FluxDensity {
+            freq: 150e6,
+            // Exact match.
+            i: -1.0,
+            ..Default::default()
+        }
+    );
+    assert_abs_diff_eq!(
+        fdt.estimate_at_freq(160e6),
+        FluxDensity {
+            freq: 160e6,
+            // Spec index 7.126.
+            i: -1.584007188344133,
+            ..Default::default()
+        }
+    );
+    assert_abs_diff_eq!(
+        fdt.estimate_at_freq(190e6),
+        FluxDensity {
+            freq: 190e6,
+            // Spectral index would be -3.036, but it gets capped to -2.
+            i: -2.545013850415513,
+            ..Default::default()
+        }
+    );
+    assert_abs_diff_eq!(
+        fdt.estimate_at_freq(210e6),
+        FluxDensity {
+            freq: 210e6,
+            // Spectral index would be -3.036, but it gets capped to -2.
+            i: -1.8140589569160996,
+            ..Default::default()
+        }
+    );
+
+    // One negative, one positive.
+    let fdt = FluxDensityType::List {
+        fds: vec1![
+            FluxDensity {
+                freq: 100e6,
+                i: -1.0,
                 ..Default::default()
             },
             FluxDensity {
-                freq: 166e6,
-                i: 0.08616726100444794,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 174e6,
-                i: 0.11915085464715958,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 181e6,
-                i: 0.06860895454883575,
+                freq: 200e6,
+                i: 1.0,
                 ..Default::default()
             },
         ],
     };
-    let desired_freq = 136.5e6;
+    let fds = match &fdt {
+        FluxDensityType::List { fds } => fds,
+        _ => unreachable!(),
+    };
+    let desired_freq = 90e6;
     let result = fdt.estimate_at_freq(desired_freq);
-    let si = (0.027053141966462135_f64 / 0.006830723490566015).ln() / (143e6_f64 / 130e6).ln();
-    let flux_ratio = calc_flux_ratio(desired_freq, 130e6, si);
     let expected = FluxDensity {
         freq: desired_freq,
-        i: -0.004744315639,
-        ..Default::default()
-    } * flux_ratio;
-    assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
+        // IQUV are increased/decreased with the straight line fit between the
+        // positive and negative FDs.
+        i: fds[0].i - 0.2,
+        q: 0.0,
+        u: 0.0,
+        v: 0.0,
+    };
+    assert_abs_diff_eq!(result, expected);
 
-    let desired_freq = 158.5e6;
+    let desired_freq = 210e6;
     let result = fdt.estimate_at_freq(desired_freq);
-    let si = (0.08616726100444794_f64 / 0.038221485912799835).ln() / (166e6_f64 / 151e6).ln();
-    let flux_ratio = calc_flux_ratio(desired_freq, 151e6, si);
     let expected = FluxDensity {
         freq: desired_freq,
-        i: -0.013818502583985523,
-        ..Default::default()
-    } * flux_ratio;
-    assert_abs_diff_eq!(result, expected, epsilon = 1e-10);
+        i: fds[1].i + 0.2,
+        q: 0.0,
+        u: 0.0,
+        v: 0.0,
+    };
+    assert_abs_diff_eq!(result, expected);
+
+    let desired_freq = 150e6;
+    let result = fdt.estimate_at_freq(desired_freq);
+    let expected = FluxDensity {
+        freq: desired_freq,
+        i: 0.0,
+        q: 0.0,
+        u: 0.0,
+        v: 0.0,
+    };
+    assert_abs_diff_eq!(result, expected);
+
+    // Two negative, one positive.
+    let fdt = FluxDensityType::List {
+        fds: vec1![
+            FluxDensity {
+                freq: 100e6,
+                i: -1.0,
+                ..Default::default()
+            },
+            FluxDensity {
+                freq: 150e6,
+                i: -0.5,
+                ..Default::default()
+            },
+            FluxDensity {
+                freq: 200e6,
+                i: 1.0,
+                ..Default::default()
+            },
+        ],
+    };
+    let fds = match &fdt {
+        FluxDensityType::List { fds } => fds,
+        _ => unreachable!(),
+    };
+    let desired_freq = 90e6;
+    let result = fdt.estimate_at_freq(desired_freq);
+    // A spectral index is used for frequencies < 150e6.
+    let spec_index = (fds[1].i / fds[0].i).ln() / (fds[1].freq / fds[0].freq).ln();
+    let ratio = calc_flux_ratio(desired_freq, fds[0].freq, spec_index);
+    let expected = FluxDensity {
+        freq: desired_freq,
+        ..fds[0]
+    } * ratio;
+    assert_abs_diff_eq!(result, expected);
+    assert_abs_diff_eq!(result.i, -1.1973550404744007);
+
+    let desired_freq = 145e6;
+    let result = fdt.estimate_at_freq(desired_freq);
+    let ratio = calc_flux_ratio(desired_freq, fds[0].freq, spec_index);
+    let expected = FluxDensity {
+        freq: desired_freq,
+        ..fds[0]
+    } * ratio;
+    assert_abs_diff_eq!(result, expected);
+    assert_abs_diff_eq!(result.i, -0.5298337000434852);
+
+    // The straight line is used again > 150e6.
+    let desired_freq = 155e6;
+    let result = fdt.estimate_at_freq(desired_freq);
+    let expected = FluxDensity {
+        freq: desired_freq,
+        i: fds[1].i + 1.5 / 50.0 * 5.0,
+        q: 0.0,
+        u: 0.0,
+        v: 0.0,
+    };
+    assert_abs_diff_eq!(result, expected);
+
+    let desired_freq = 210e6;
+    let result = fdt.estimate_at_freq(desired_freq);
+    let expected = FluxDensity {
+        freq: desired_freq,
+        i: fds[2].i + 1.5 / 50.0 * 10.0,
+        q: 0.0,
+        u: 0.0,
+        v: 0.0,
+    };
+    assert_abs_diff_eq!(result, expected);
 }
 
 #[test]
