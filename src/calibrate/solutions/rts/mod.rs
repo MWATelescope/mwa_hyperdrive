@@ -20,7 +20,7 @@ mod read_files;
 use birli::mwalib::MetafitsContext;
 use read_files::*;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -232,25 +232,23 @@ fn read_no_files(
         }
     };
     let total_num_fine_freq_chans = num_fine_chans_per_coarse_chan * total_num_coarse_chans;
-    let available_num_fine_freq_chans = num_fine_chans_per_coarse_chan * available_num_coarse_chans;
-
-    // Get the flagged tile indices from the flagged RF inputs.
-    let flagged_fine_channels: Vec<u16> = (0..available_num_fine_freq_chans)
+    // Get the flagged fine channels. Start by checking available channels.
+    let unflagged_fine_chans = receiver_channel_to_data
+        .values()
+        .flat_map(|(_, _, bp)| &bp.unflagged_fine_channel_indices)
+        .collect::<HashSet<_>>();
+    let mut flagged_fine_channels: Vec<u16> = (0..total_num_fine_freq_chans)
         .into_iter()
-        .filter(|&i_chan| {
-            let i_coarse_chan = i_chan / num_fine_chans_per_coarse_chan;
-            let i_fine_chan_in_coarse_chan = i_chan % num_fine_chans_per_coarse_chan;
-            let bp_cal = receiver_channel_to_data
-                .iter()
-                .find(|(_, (gpubox_num, _, _))| *gpubox_num == (i_coarse_chan as u8 + 1))
-                .map(|(_, (_, _, bp))| bp)
-                .unwrap();
-            !bp_cal
-                .unflagged_fine_channel_indices
-                .contains(&i_fine_chan_in_coarse_chan)
-        })
+        .filter(|i_chan| !unflagged_fine_chans.contains(i_chan))
         .map(|i_chan| i_chan.try_into().unwrap())
         .collect();
+    // Now flag all unavailable channels.
+    for i_chan in 0..total_num_fine_freq_chans {
+        if !unflagged_fine_chans.contains(&i_chan) {
+            flagged_fine_channels.push(i_chan.try_into().unwrap());
+        }
+    }
+    flagged_fine_channels.sort_unstable();
 
     let mut di_jones = Array3::from_elem(
         (
@@ -287,25 +285,27 @@ fn read_no_files(
                     .map(|pair| pair.1),
             )
             .for_each(|(mut bp_cal, &di_jm_pre)| {
+                dbg!(di_jm_pre);
+                let di_jm = Jones::from([
+                    di_jm_pre[0].re,
+                    -di_jm_pre[0].im,
+                    di_jm_pre[1].re,
+                    -di_jm_pre[1].im,
+                    di_jm_pre[2].re,
+                    -di_jm_pre[2].im,
+                    di_jm_pre[3].re,
+                    -di_jm_pre[3].im,
+                ])
+                .inv()
+                    * post_inv;
+                dbg!(di_jm);
                 bp_cal.iter_mut().for_each(|bp_cal| {
-                    // *bp_cal = di_jm_pre * post_inv * *bp_cal;
-                    *bp_cal = Jones::from([
-                        di_jm_pre[0].re,
-                        -di_jm_pre[0].im,
-                        di_jm_pre[1].re,
-                        -di_jm_pre[1].im,
-                        di_jm_pre[2].re,
-                        -di_jm_pre[2].im,
-                        di_jm_pre[3].re,
-                        -di_jm_pre[3].im,
-                    ])
-                    .inv()
-                        * post_inv
-                        * *bp_cal;
+                    *bp_cal = di_jm * *bp_cal;
 
                     // These Jones matrices are currently in [PX, PY, QX, QY].
                     // Map them to [XX, XY, YX, YY].
                     *bp_cal = Jones::from([bp_cal[3], bp_cal[2], bp_cal[1], bp_cal[0]]);
+                    dbg!(bp_cal);
                 });
             });
 
@@ -443,7 +443,6 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
         for cc in &context.metafits_coarse_chans {
             receiver_to_gpubox.insert(cc.rec_chan_number, cc.gpubox_number);
         }
-        dbg!(&receiver_to_gpubox);
         debug!("Receiver channel map to RTS DI calibration file node num:");
         debug!("{:?}", receiver_to_gpubox);
         // And a map from the RF input number divided by 2 to the tile (a.k.a.
@@ -457,7 +456,13 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
 
         let num_decimal_points = num_decimal_points.unwrap_or(12) as usize;
 
+        let smallest_rec_chan = context
+            .metafits_coarse_chans
+            .iter()
+            .fold(usize::MAX, |acc, cc| acc.min(cc.rec_chan_number));
         for (i_cc, (i_recv, i_gpubox)) in receiver_to_gpubox.into_iter().enumerate() {
+            let offset = i_recv - smallest_rec_chan;
+
             // Create the RTS files.
             let di_jm_fp = format!("{}/DI_JonesMatrices_node{:03}.dat", dir.display(), i_gpubox);
             debug!("Writing to {di_jm_fp}");
@@ -471,9 +476,8 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
             let mut bp_cal_file = BufWriter::new(File::create(bp_cal_fp)?);
 
             // Isolate the applicable data.
-            let chan_offset = i_cc * num_fine_chans_per_coarse_chan;
-            let chan_range = chan_offset..((i_cc + 1) * num_fine_chans_per_coarse_chan);
-            dbg!(chan_offset, &chan_range);
+            let chan_offset = offset * num_fine_chans_per_coarse_chan;
+            let chan_range = chan_offset..((offset + 1) * num_fine_chans_per_coarse_chan);
             let data = sols.di_jones.slice(s![0, .., chan_range]);
 
             // Write the useless alignment flux density...
@@ -653,6 +657,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
 
                 // Find the "average" Jones matrix for the DI JM file.
                 let data = data.slice(s![i_tile, ..]);
+
                 let average = if flagged {
                     Jones::default()
                 } else {
@@ -672,7 +677,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
                     let average = if length > 0 { sum / length as f64 } else { sum };
                     // average
                     // average.inv()
-                    Jones::from([
+                    let average = Jones::from([
                         average[0].re,
                         -average[0].im,
                         average[1].re,
@@ -681,9 +686,17 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
                         -average[2].im,
                         average[3].re,
                         -average[3].im,
-                    ])
-                    .inv()
+                    ]);
+                    // ]) * beam_response.inv())
+                    // .inv()
+                    // dbg!(average, beam_response, (average * beam_response).inv());
+                    dbg!(average, average.inv());
+                    (average * beam_response).inv()
+                    // average.inv()
                 };
+                if !flagged {
+                    dbg!(i_input, i_tile, average);
+                }
                 writeln!(
                     &mut di_jm_file,
                     "{1:+.0$}, {2:+.0$}, {3:+.0$}, {4:+.0$}, {5:+.0$}, {6:+.0$}, {7:+.0$}, {8:+.0$}",
