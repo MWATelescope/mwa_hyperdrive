@@ -1383,9 +1383,6 @@ version = "0.0.0"
 dependencies = [
  "cc",
  "cfg-if",
- "mwa_hyperdrive_beam",
- "mwa_hyperdrive_common",
- "mwa_hyperdrive_srclist",
 ]
 
 [[package]]

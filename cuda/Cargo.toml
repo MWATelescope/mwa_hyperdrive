@@ -12,11 +12,6 @@ cuda-single = []
 # Link the CUDA library statically.
 static = []
 
-[dependencies]
-mwa_hyperdrive_common  = { path = "../common", features = ["cuda"] }
-mwa_hyperdrive_beam    = { path = "../beam", features = ["cuda"] }
-mwa_hyperdrive_srclist = { path = "../srclist" }
-
 [build-dependencies]
 cc = { version = "1.0.72", features = ["parallel"] }
 cfg-if = "1.0.0"
