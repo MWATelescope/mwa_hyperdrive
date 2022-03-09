@@ -21,7 +21,7 @@ pub(crate) const DEFAULT_STOP_THRESHOLD: f64 = 1e-8;
 pub(crate) const DEFAULT_MIN_THRESHOLD: f64 = 1e-4;
 
 /// The default calibration solutions filename to use.
-pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions.bin";
+pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions.fits";
 
 // sqrt(pi^2 / (2 ln(2)))
 pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.6682231283184983;
