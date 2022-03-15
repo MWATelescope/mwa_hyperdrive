@@ -147,7 +147,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu 0.5.0",
+ "marlu",
  "prettytable-rs",
  "regex",
  "thiserror",
@@ -901,7 +901,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "ndarray",
- "parking_lot",
+ "parking_lot 0.11.2",
  "paste",
 ]
 
@@ -975,20 +975,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "hifitime"
-version = "2.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07370e857b383e84426e78ac60145d231fcf0981f0100d14d5db762b89725464"
-dependencies = [
- "rand",
- "rand_distr",
- "regex",
- "serde",
- "serde_derive",
- "twofloat",
 ]
 
 [[package]]
@@ -1201,29 +1187,6 @@ dependencies = [
 
 [[package]]
 name = "marlu"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8ca44f4b14a452a995d2248cd8af2c41763b52f19e469290c94893fe1ecab81"
-dependencies = [
- "cfg-if",
- "cuda-runtime-sys",
- "erfa-sys",
- "flate2",
- "hifitime 2.3.2",
- "indicatif",
- "itertools",
- "lazy_static",
- "log",
- "ndarray",
- "num-complex",
- "num-traits",
- "rayon",
- "tar",
- "thiserror",
-]
-
-[[package]]
-name = "marlu"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec71c7aed97e4be79d0e06c6fa7b1d9ed2cee17f579cad9d4f030d721c9989a2"
@@ -1232,7 +1195,7 @@ dependencies = [
  "cuda-runtime-sys",
  "erfa-sys",
  "flate2",
- "hifitime 3.0.0-beta.3",
+ "hifitime",
  "indicatif",
  "itertools",
  "lazy_static",
@@ -1300,16 +1263,15 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "154c4d1d249a460a0349b672e46bdb96bff8bfb2f39fc98e8b5df4a0697c5fd7"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=analytic#fb54a828b8b10ed0ef1b8bfb4a61eea6c94de1eb"
 dependencies = [
  "cbindgen",
  "cc",
  "cfg-if",
  "hdf5",
  "hdf5-sys",
- "marlu 0.3.4",
- "parking_lot",
+ "marlu",
+ "parking_lot 0.12.0",
  "thiserror",
 ]
 
@@ -1369,7 +1331,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu 0.5.0",
+ "marlu",
  "serde_json",
  "thiserror",
  "toml",
@@ -1553,7 +1515,17 @@ checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
 dependencies = [
  "instant",
  "lock_api",
- "parking_lot_core",
+ "parking_lot_core 0.8.5",
+]
+
+[[package]]
+name = "parking_lot"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87f5ec2493a61ac0506c0f4199f99070cbe83857b0337006a30f3e6719b8ef58"
+dependencies = [
+ "lock_api",
+ "parking_lot_core 0.9.1",
 ]
 
 [[package]]
@@ -1568,6 +1540,19 @@ dependencies = [
  "redox_syscall 0.2.11",
  "smallvec",
  "winapi",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28141e0cc4143da2443301914478dc976a61ffdb3f043058310c70df2fed8954"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "redox_syscall 0.2.11",
+ "smallvec",
+ "windows-sys",
 ]
 
 [[package]]
@@ -2088,7 +2073,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0bccbcf40c8938196944a3da0e133e031a33f4d6b72db3bda3cc556e361905d"
 dependencies = [
  "lazy_static",
- "parking_lot",
+ "parking_lot 0.11.2",
  "serial_test_derive",
 ]
 
@@ -2334,12 +2319,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ae2f58a822f08abdaf668897e96a5656fe72f5a9ce66422423e8849384872e6"
 
 [[package]]
-name = "twofloat"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1d3b9d87a28e878668a297cde8c31403d85dab3f34e8eb38e110d3dccc84253"
-
-[[package]]
 name = "ucd-trie"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2546,6 +2525,49 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "windows-sys"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3df6e476185f92a12c072be4a189a0210dcdcf512a1891d6dff9edb874deadc6"
+dependencies = [
+ "windows_aarch64_msvc",
+ "windows_i686_gnu",
+ "windows_i686_msvc",
+ "windows_x86_64_gnu",
+ "windows_x86_64_msvc",
+]
+
+[[package]]
+name = "windows_aarch64_msvc"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8e92753b1c443191654ec532f14c199742964a061be25d77d7a96f09db20bf5"
+
+[[package]]
+name = "windows_i686_gnu"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a711c68811799e017b6038e0922cb27a5e2f43a2ddb609fe0b6f3eeda9de615"
+
+[[package]]
+name = "windows_i686_msvc"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "146c11bb1a02615db74680b32a68e2d61f553cc24c4eb5b4ca10311740e44172"
+
+[[package]]
+name = "windows_x86_64_gnu"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c912b12f7454c6620635bbff3450962753834be2a594819bd5e945af18ec64bc"
+
+[[package]]
+name = "windows_x86_64_msvc"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "504a2476202769977a040c6364301a3f65d0cc9e3fb08600b2bda150a0488316"
 
 [[package]]
 name = "winreg"

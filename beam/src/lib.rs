@@ -25,6 +25,7 @@ pub use fee::*;
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 
+pub use mwa_hyperbeam;
 use mwa_hyperdrive_common::{cfg_if, marlu, ndarray};
 
 // Set a compile-time variable type.

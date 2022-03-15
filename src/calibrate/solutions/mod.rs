@@ -127,7 +127,8 @@ impl CalibrationSolutions {
             if file.is_dir() {
                 debug!("{file:?} is a directiory - looking for RTS solution files");
                 let metafits = metafits.ok_or(WriteSolutionsError::RtsMetafitsRequired)?;
-                rts::write(sols, file, metafits, fee_beam_file, None)?;
+                // rts::write(sols, file, metafits, fee_beam_file, None)?;
+                rts::write(sols, file, metafits, None)?;
             } else {
                 let ext = file.extension().and_then(|e| e.to_str());
                 match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {

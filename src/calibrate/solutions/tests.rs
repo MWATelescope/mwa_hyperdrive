@@ -137,7 +137,8 @@ fn test_write_and_read_rts_solutions() {
     let fee_beam_file: Option<&str> = None;
     let tmp_dir = tempfile::tempdir().expect("Couldn't make tmp dir");
 
-    let result = rts::write(&sols, tmp_dir.path(), metafits, fee_beam_file, None);
+    // let result = rts::write(&sols, tmp_dir.path(), metafits, fee_beam_file, None);
+    let result = rts::write(&sols, tmp_dir.path(), metafits, None);
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
 

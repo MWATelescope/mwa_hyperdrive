@@ -4,16 +4,13 @@
 
 //! Code to read and write RTS calibration solutions.
 //!
+//! This code is pretty gnarly. We want things to be correct, sure, but it's
+//! very, very difficult for not a huge amount of gain. If and when hyperdrive
+//! is able to do DD calibration, this code (at least the writing part) should
+//! be removed.
+//!
 //! See for more info:
 //! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
-
-// The RTS calls DI_JonesMatrices files "alignment files". The first two lines
-// of these files correspond to "alignment flux density" (or "flux scale") and
-// "post-alignment matrix". The reference line is structured the same as all
-// those that follow it; 4 complex number pairs. All lines after the first two
-// are "pre-alignment matrices". When reading in this data, the post-alignment
-// matrix is inverted and applied to each pre-alignment matrix (as in, A*B where
-// A is pre- and B- is inverse post).
 
 mod read_files;
 
@@ -26,7 +23,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use log::{debug, warn};
-use marlu::{c64, Jones, RADec};
+use marlu::{Jones, RADec};
 use ndarray::prelude::*;
 use regex::Regex;
 use thiserror::Error;
@@ -271,7 +268,13 @@ fn read_no_files(
             1, // Throw away the "lsq" data; only use "fit".
             ..
         ]);
-        let post_inv = di_jm.post_alignment_matrix.inv();
+        let post_inv = Jones::from([
+            di_jm.post_alignment_matrix[3],
+            di_jm.post_alignment_matrix[2],
+            di_jm.post_alignment_matrix[1],
+            di_jm.post_alignment_matrix[0],
+        ])
+        .inv();
         bp_cal_data
             .outer_iter_mut()
             .zip(
@@ -285,7 +288,6 @@ fn read_no_files(
                     .map(|pair| pair.1),
             )
             .for_each(|(mut bp_cal, &di_jm_pre)| {
-                dbg!(di_jm_pre);
                 let di_jm = Jones::from([
                     di_jm_pre[0].re,
                     -di_jm_pre[0].im,
@@ -298,14 +300,12 @@ fn read_no_files(
                 ])
                 .inv()
                     * post_inv;
-                dbg!(di_jm);
                 bp_cal.iter_mut().for_each(|bp_cal| {
                     *bp_cal = di_jm * *bp_cal;
 
                     // These Jones matrices are currently in [PX, PY, QX, QY].
                     // Map them to [XX, XY, YX, YY].
                     *bp_cal = Jones::from([bp_cal[3], bp_cal[2], bp_cal[1], bp_cal[0]]);
-                    dbg!(bp_cal);
                 });
             });
 
@@ -374,26 +374,29 @@ fn read_no_files(
         di_jones,
         flagged_tiles,
         flagged_chanblocks: flagged_fine_channels,
+        // We assume that the metafits file is the right one.
         obsid: Some(context.obs_id),
-        // lmao
+        // We don't know these things from the file.
         start_timestamps: vec![],
         end_timestamps: vec![],
         average_timestamps: vec![],
     })
 }
 
-pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
+pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
+    // pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
     sols: &CalibrationSolutions,
     dir: P,
     metafits: P2,
-    fee_beam_file: Option<P3>,
+    // fee_beam_file: Option<P3>,
     num_decimal_points: Option<u8>,
 ) -> Result<(), RtsWriteSolsError> {
     fn inner(
         sols: &CalibrationSolutions,
         dir: &Path,
         metafits: &Path,
-        fee_beam_file: Option<&Path>,
+        // use_fee_beam: bool,
+        // fee_beam_file: Option<&Path>,
         num_decimal_points: Option<u8>,
     ) -> Result<(), RtsWriteSolsError> {
         if dir.exists() {
@@ -423,25 +426,26 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
         );
         let phase_centre = phase_centre_radec.to_hadec(context.lst_rad).to_azel_mwa();
 
-        let fee_beam = mwa_hyperdrive_beam::create_fee_beam_object(
-            fee_beam_file,
-            1,
-            mwa_hyperdrive_beam::Delays::Partial(
-                crate::data_formats::metafits::get_ideal_dipole_delays(&context),
-            ),
-            None,
-        )
-        .unwrap();
+        let ideal_delays = crate::data_formats::metafits::get_ideal_dipole_delays(&context);
+        let beam = mwa_hyperdrive_beam::mwa_hyperbeam::analytic::AnalyticBeam::new_rts();
+        // let beam = mwa_hyperdrive_beam::create_fee_beam_object(
+        //     fee_beam_file,
+        //     1,
+        //     mwa_hyperdrive_beam::Delays::Partial(ideal_delays.clone()),
+        //     None,
+        // )
+        // .unwrap();
 
         if sols.di_jones.len_of(Axis(0)) > 1 {
             warn!("Multiple timeblocks of solutions aren't supported by the RTS; using only the first one");
         }
 
-        // Make a map from the receiver channel (a proxy for the sky frequency) to
-        // the gpubox number (which is the same as the node??? number in the files).
-        let mut receiver_to_gpubox: BTreeMap<usize, usize> = BTreeMap::new();
+        // Make a map from the receiver channel (a proxy for the sky frequency)
+        // to the gpubox number (which is the same as the node??? number in the
+        // files) and its centre frequency..
+        let mut receiver_to_gpubox: BTreeMap<usize, (usize, u32)> = BTreeMap::new();
         for cc in &context.metafits_coarse_chans {
-            receiver_to_gpubox.insert(cc.rec_chan_number, cc.gpubox_number);
+            receiver_to_gpubox.insert(cc.rec_chan_number, (cc.gpubox_number, cc.chan_centre_hz));
         }
         debug!("Receiver channel map to RTS DI calibration file node num:");
         debug!("{:?}", receiver_to_gpubox);
@@ -460,7 +464,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
             .metafits_coarse_chans
             .iter()
             .fold(usize::MAX, |acc, cc| acc.min(cc.rec_chan_number));
-        for (i_cc, (i_recv, i_gpubox)) in receiver_to_gpubox.into_iter().enumerate() {
+        for (i_recv, (i_gpubox, freq_hz)) in receiver_to_gpubox {
             let offset = i_recv - smallest_rec_chan;
 
             // Create the RTS files.
@@ -481,154 +485,34 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
             let data = sols.di_jones.slice(s![0, .., chan_range]);
 
             // Write the useless alignment flux density...
-            writeln!(&mut di_jm_file, "{1:.0$}", num_decimal_points, 1.0)?;
-            // ... and write the beam response for this coarse channel.
-            // let freq_hz = i_recv as f64 * 1.28e6;
-            // let beam_response = fee_beam.calc_jones(phase_centre, freq_hz, 0).unwrap();
-            let beam_response = Jones::from(match i_gpubox {
-                1 => [
-                    0.823644, 0.005932, -0.049899, -0.000282, 0.047816, -0.000096, 0.800999,
-                    -0.003228,
-                ],
-                2 => [
-                    0.825069, 0.006439, -0.049982, -0.000314, 0.047960, -0.000097, 0.803325,
-                    -0.003212,
-                ],
-                3 => [
-                    0.826439, 0.006867, -0.050071, -0.000342, 0.048094, -0.000097, 0.805604,
-                    -0.003191,
-                ],
-                4 => [
-                    0.827763, 0.007216, -0.050143, -0.000360, 0.048230, -0.000094, 0.807838,
-                    -0.003176,
-                ],
-                5 => [
-                    0.829058, 0.007474, -0.050211, -0.000376, 0.048354, -0.000095, 0.810031,
-                    -0.003172,
-                ],
-                6 => [
-                    0.830318, 0.007647, -0.050299, -0.000387, 0.048486, -0.000094, 0.812185,
-                    -0.003191,
-                ],
-                7 => [
-                    0.831571, 0.007722, -0.050371, -0.000379, 0.048612, -0.000094, 0.814312,
-                    -0.003237,
-                ],
-                8 => [
-                    0.832825, 0.007704, -0.050451, -0.000377, 0.048734, -0.000098, 0.816416,
-                    -0.003308,
-                ],
-                9 => [
-                    0.834089, 0.007598, -0.050526, -0.000367, 0.048853, -0.000097, 0.818507,
-                    -0.003411,
-                ],
-                10 => [
-                    0.835377, 0.007404, -0.050611, -0.000357, 0.048982, -0.000100, 0.820593,
-                    -0.003540,
-                ],
-                11 => [
-                    0.836703, 0.007132, -0.050699, -0.000335, 0.049095, -0.000107, 0.822678,
-                    -0.003693,
-                ],
-                12 => [
-                    0.838512, 0.006706, -0.050832, -0.000300, 0.049224, -0.000121, 0.825254,
-                    -0.003946,
-                ],
-                13 => [
-                    0.839887, 0.006343, -0.050911, -0.000282, 0.049333, -0.000135, 0.827323,
-                    -0.004102,
-                ],
-                14 => [
-                    0.841318, 0.005931, -0.051015, -0.000253, 0.049451, -0.000145, 0.829395,
-                    -0.004272,
-                ],
-                15 => [
-                    0.842840, 0.005466, -0.051112, -0.000226, 0.049583, -0.000156, 0.831477,
-                    -0.004436,
-                ],
-                16 => [
-                    0.844344, 0.004993, -0.051200, -0.000196, 0.049703, -0.000167, 0.833564,
-                    -0.004628,
-                ],
-                17 => [
-                    0.845931, 0.004462, -0.051348, -0.000126, 0.049781, -0.000135, 0.835694,
-                    -0.004822,
-                ],
-                18 => [
-                    0.847601, 0.003947, -0.051454, -0.000096, 0.049896, -0.000150, 0.837831,
-                    -0.005004,
-                ],
-                19 => [
-                    0.849314, 0.003428, -0.051570, -0.000075, 0.050021, -0.000167, 0.839929,
-                    -0.005176,
-                ],
-                20 => [
-                    0.851081, 0.002916, -0.051679, -0.000048, 0.050142, -0.000184, 0.842027,
-                    -0.005346,
-                ],
-                21 => [
-                    0.852896, 0.002418, -0.051794, -0.000015, 0.050247, -0.000192, 0.844125,
-                    -0.005507,
-                ],
-                22 => [
-                    0.854748, 0.001938, -0.051908, 0.000001, 0.050377, -0.000206, 0.846222,
-                    -0.005661,
-                ],
-                23 => [
-                    0.856636, 0.001483, -0.052033, 0.000029, 0.050498, -0.000225, 0.848318,
-                    -0.005806,
-                ],
-                24 => [
-                    0.858554, 0.001054, -0.052150, 0.000047, 0.050618, -0.000236, 0.850410,
-                    -0.005945,
-                ],
-                _ => unreachable!(),
-            });
-            let beam_response = Jones::from([
-                beam_response[3],
-                beam_response[2],
-                beam_response[1],
-                beam_response[0],
-            ]);
-            write!(
-                &mut di_jm_file,
-                "{1:+.0$}, ",
-                num_decimal_points, beam_response[3].re
-            )?;
-            write!(
-                &mut di_jm_file,
-                "{1:+.0$}, ",
-                num_decimal_points, beam_response[3].im
-            )?;
-            write!(
-                &mut di_jm_file,
-                "{1:+.0$}, ",
-                num_decimal_points, beam_response[2].re
-            )?;
-            write!(
-                &mut di_jm_file,
-                "{1:+.0$}, ",
-                num_decimal_points, beam_response[2].im
-            )?;
-            write!(
-                &mut di_jm_file,
-                "{1:+.0$}, ",
-                num_decimal_points, beam_response[1].re
-            )?;
-            write!(
-                &mut di_jm_file,
-                "{1:+.0$}, ",
-                num_decimal_points, beam_response[1].im
-            )?;
-            write!(
-                &mut di_jm_file,
-                "{1:+.0$}, ",
-                num_decimal_points, beam_response[0].re
-            )?;
+            writeln!(&mut di_jm_file, "1.0")?;
+            // ... and write the beam response for this coarse channel. This
+            // frequency isn't actually what the RTS uses; I think it's some
+            // kind of weighted average within the coarse channel. However, in
+            // my testing, hyperdrive solutions are much better than RTS
+            // solutions using this frequency anyway, so...
+            let beam_response = beam
+                .calc_jones(
+                    phase_centre.az,
+                    phase_centre.za(),
+                    freq_hz,
+                    &ideal_delays,
+                    &[1.0; 16],
+                    true,
+                )
+                .unwrap();
             writeln!(
                 &mut di_jm_file,
-                "{1:+.0$}",
-                num_decimal_points, beam_response[0].im
+                "{1:+.0$}, {2:+.0$}, {3:+.0$}, {4:+.0$}, {5:+.0$}, {6:+.0$}, {7:+.0$}, {8:+.0$}",
+                num_decimal_points,
+                beam_response[0].re,
+                beam_response[0].im,
+                beam_response[1].re,
+                beam_response[1].im,
+                beam_response[2].re,
+                beam_response[2].im,
+                beam_response[3].re,
+                beam_response[3].im,
             )?;
 
             // Write the unflagged fine channel frequencies in MHz.
@@ -675,8 +559,6 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
                         },
                     );
                     let average = if length > 0 { sum / length as f64 } else { sum };
-                    // average
-                    // average.inv()
                     let average = Jones::from([
                         average[0].re,
                         -average[0].im,
@@ -687,16 +569,8 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
                         average[3].re,
                         -average[3].im,
                     ]);
-                    // ]) * beam_response.inv())
-                    // .inv()
-                    // dbg!(average, beam_response, (average * beam_response).inv());
-                    dbg!(average, average.inv());
                     (average * beam_response).inv()
-                    // average.inv()
                 };
-                if !flagged {
-                    dbg!(i_input, i_tile, average);
-                }
                 writeln!(
                     &mut di_jm_file,
                     "{1:+.0$}, {2:+.0$}, {3:+.0$}, {4:+.0$}, {5:+.0$}, {6:+.0$}, {7:+.0$}, {8:+.0$}",
@@ -729,7 +603,6 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
                     -average[3].im,
                 ]);
                 let avg_inv = (average.inv() * beam_response.inv()).inv();
-                // let avg_inv = average.inv() * beam_response;
                 let bp_data = data.mapv(|j| avg_inv * j);
                 // Write "fit" data the same as "lsq". No one cares...
                 let mut bp_cal_line = String::new();
@@ -769,7 +642,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
         sols,
         dir.as_ref(),
         metafits.as_ref(),
-        fee_beam_file.as_ref().map(|f| f.as_ref()),
+        // fee_beam_file.as_ref().map(|f| f.as_ref()),
         num_decimal_points,
     )
 }

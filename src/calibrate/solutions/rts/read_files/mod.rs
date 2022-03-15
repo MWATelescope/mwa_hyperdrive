@@ -10,10 +10,9 @@
 // because this "format" is laughably insane.
 //
 // RTS calibration solutions are stored in BandpassCalibration_node???.dat and
-// DI_JonesMatrices_node???.dat files, one of each of these files for each
+// DI_JonesMatrices_node???.dat files. Every node-numbered file corresponds to a
 // coarse channel used in the DI run (typically 24), starting from node001. We
-// assume that each, for the given directory `dir`, these belong to the same DI
-// run.
+// assume that each, for the given directory `dir`, belong to the same DI run.
 
 #[cfg(test)]
 mod tests;
@@ -31,14 +30,15 @@ use crate::math::cexp;
 use mwa_hyperdrive_common::{marlu, ndarray, thiserror, vec1};
 
 // DI_JonesMatrices_node???.dat files are structured by lines as follows:
-// 1) A single float for the "alignment flux density",
-// 2) A Jones matrix for the "post-alignment matrix",
-// 3-end) Each line is a Jones matrix representing a "pre-alignment matrix".
-// Each of these Jones matrices corresponds to a tile.
+// 1) A single float for the "alignment flux density" (which isn't used by
+//    anyone),
+// 2) A Jones matrix for the "post-alignment matrix", 3-end) Each line is a
+// Jones matrix representing a "pre-alignment matrix". Each of these Jones
+// matrices corresponds to a tile.
 //
 // The Jones matrices are ", " separated floats and 8 floats are expected on
-// each line (4 complex number pairs). It appears that there is a Jones matrix
-// for flagged tiles, too.
+// each line (4 complex number pairs). There is a Jones matrix for flagged
+// tiles, too.
 
 /// RTS "DI Jones matrices".
 ///
@@ -208,7 +208,7 @@ pub enum ReadDiJmFileError {
 // 8) QY_fit
 //
 // "lsq" lines are "measured values", whereas "fit" lines are "fitted values".
-// Apparently only the measured data is interesting.
+// Apparently only the fit data is interesting.
 
 /// RTS "Bandpass calibration" Jones matrices.
 ///
