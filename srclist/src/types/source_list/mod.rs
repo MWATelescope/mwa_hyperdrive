@@ -30,21 +30,34 @@ impl SourceList {
         Self::default()
     }
 
-    /// Get counts of each of the component types. The first returned value is
-    /// the number of points, second Gaussians, third shapelets.
-    pub fn get_counts(&self) -> (usize, usize, usize) {
+    /// Get counts of each of the component types and flux-density types.
+    pub fn get_counts(&self) -> ComponentCounts {
+        let mut counts = ComponentCounts::default();
         self.iter()
             .flat_map(|(_, src)| &src.components)
-            .fold((0, 0, 0), |acc, c| {
+            .for_each(|c| {
                 match (c.is_point(), c.is_gaussian(), c.is_shapelet()) {
-                    (true, false, false) => (acc.0 + 1, acc.1, acc.2),
-                    (false, true, false) => (acc.0, acc.1 + 1, acc.2),
-                    (false, false, true) => (acc.0, acc.1, acc.2 + 1),
+                    (true, false, false) => counts.num_points += 1,
+                    (false, true, false) => counts.num_gaussians += 1,
+                    (false, false, true) => counts.num_shapelets += 1,
                     _ => {
                         unreachable!();
                     }
                 }
-            })
+                match (
+                    matches!(c.flux_type, FluxDensityType::PowerLaw { .. }),
+                    matches!(c.flux_type, FluxDensityType::CurvedPowerLaw { .. }),
+                    matches!(c.flux_type, FluxDensityType::List { .. }),
+                ) {
+                    (true, false, false) => counts.num_power_laws += 1,
+                    (false, true, false) => counts.num_curved_power_laws += 1,
+                    (false, false, true) => counts.num_lists += 1,
+                    _ => {
+                        unreachable!();
+                    }
+                }
+            });
+        counts
     }
 
     /// Filter component types from one [SourceList] and return a new one.
@@ -160,4 +173,14 @@ impl IntoIterator for SourceList {
     fn into_iter(self) -> std::collections::btree_map::IntoIter<String, Source> {
         self.0.into_iter()
     }
+}
+
+#[derive(Debug, Default)]
+pub struct ComponentCounts {
+    pub num_points: usize,
+    pub num_gaussians: usize,
+    pub num_shapelets: usize,
+    pub num_power_laws: usize,
+    pub num_curved_power_laws: usize,
+    pub num_lists: usize,
 }

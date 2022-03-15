@@ -51,7 +51,9 @@ use crate::{
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon, vec1};
-use mwa_hyperdrive_srclist::{constants::*, veto_sources, SourceList, SourceListType};
+use mwa_hyperdrive_srclist::{
+    constants::*, veto_sources, ComponentCounts, SourceList, SourceListType,
+};
 
 /// Parameters needed to perform calibration.
 pub(crate) struct CalibrateParams {
@@ -1251,16 +1253,21 @@ impl<'a> ExtraInfo<'a> {
             params.fences.first().chanblocks.len()
         );
 
-        let (num_points, num_gaussians, num_shapelets) = params.source_list.get_counts();
+        let ComponentCounts {
+            num_points,
+            num_gaussians,
+            num_shapelets,
+            ..
+        } = params.source_list.get_counts();
         let num_components = num_points + num_gaussians + num_shapelets;
         info!(
             "Using {} sources with a total of {} components",
             params.source_list.len(),
             num_components
         );
-        info!("{} point components", num_points);
-        info!("{} Gaussian components", num_gaussians);
-        info!("{} shapelet components", num_shapelets);
+        info!("{num_points} point components");
+        info!("{num_gaussians} Gaussian components");
+        info!("{num_shapelets} shapelet components");
         if num_components > 10000 {
             warn!("Using more than 10,000 components!");
         }

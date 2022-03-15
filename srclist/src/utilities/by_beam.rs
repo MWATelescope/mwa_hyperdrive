@@ -156,7 +156,7 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         let counts = sl.get_counts();
         info!(
             "{} points, {} gaussians, {} shapelets",
-            counts.0, counts.1, counts.2
+            counts.num_points, counts.num_gaussians, counts.num_shapelets
         );
 
         // Handle the output path and type.
@@ -233,7 +233,7 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
             let counts = sl.get_counts();
             debug!(
                 "After filtering, there are {} points, {} gaussians, {} shapelets",
-                counts.0, counts.1, counts.2
+                counts.num_points, counts.num_gaussians, counts.num_shapelets
             );
             sl
         } else {

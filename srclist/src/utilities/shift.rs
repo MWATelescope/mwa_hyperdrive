@@ -134,7 +134,7 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
         let counts = sl.get_counts();
         info!(
             "Input has {} points, {} gaussians, {} shapelets",
-            counts.0, counts.1, counts.2
+            counts.num_points, counts.num_gaussians, counts.num_shapelets
         );
 
         let metafits: Option<mwalib::MetafitsContext> =
@@ -267,7 +267,7 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
         let counts = sl.get_counts();
         info!(
             "Shifted {} points, {} gaussians, {} shapelets",
-            counts.0, counts.1, counts.2
+            counts.num_points, counts.num_gaussians, counts.num_shapelets
         );
 
         // Write the output source list.

@@ -92,15 +92,21 @@ pub fn verify<P: AsRef<Path>>(
             }
         };
         info!("    {}-style source list", sl_type);
-        let (points, gaussians, shapelets) = sl.get_counts();
-        let num_components = points + gaussians + shapelets;
+        let crate::ComponentCounts {
+            num_points,
+            num_gaussians,
+            num_shapelets,
+            num_power_laws,
+            num_curved_power_laws,
+            num_lists,
+        } = sl.get_counts();
+        let num_components = num_points + num_gaussians + num_shapelets;
         info!(
-            "    {} sources, {} components ({} points, {} gaussians, {} shapelets)",
-            sl.len(),
-            num_components,
-            points,
-            gaussians,
-            shapelets
+            "    {} sources, {num_components} components ({num_points} points, {num_gaussians} gaussians, {num_shapelets} shapelets)",
+            sl.len()
+        );
+        info!(
+            "    Flux-density types: {num_power_laws} power laws, {num_curved_power_laws} curved power laws, {num_lists} lists"
         );
         info!("");
     }

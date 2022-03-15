@@ -34,7 +34,7 @@ use mwa_hyperdrive_common::{cfg_if, clap, hifitime, indicatif, log, marlu, mwali
 use mwa_hyperdrive_srclist::{
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     read::read_source_list_file,
-    veto_sources, SourceList, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
+    veto_sources, ComponentCounts, SourceList, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
 };
 
 #[derive(Parser, Debug, Default, Deserialize)]
@@ -342,19 +342,25 @@ impl SimVisParams {
             }
             Err(e) => return Err(SimulateVisError::from(e)),
         };
-        let counts = source_list.get_counts();
-        debug!(
-            "Found {} points, {} gaussians, {} shapelets",
-            counts.0, counts.1, counts.2
-        );
+        let ComponentCounts {
+            num_points,
+            num_gaussians,
+            num_shapelets,
+            ..
+        } = source_list.get_counts();
+        debug!("Found {num_points} points, {num_gaussians} gaussians, {num_shapelets} shapelets");
 
         // Apply any filters.
         let mut source_list = if filter_points || filter_gaussians || filter_shapelets {
             let sl = source_list.filter(filter_points, filter_gaussians, filter_shapelets);
-            let counts = sl.get_counts();
+            let ComponentCounts {
+                num_points,
+                num_gaussians,
+                num_shapelets,
+                ..
+            } = sl.get_counts();
             debug!(
-                "After filtering, there are {} points, {} gaussians, {} shapelets",
-                counts.0, counts.1, counts.2
+                "After filtering, there are {num_points} points, {num_gaussians} gaussians, {num_shapelets} shapelets"
             );
             sl
         } else {
