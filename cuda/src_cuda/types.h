@@ -18,6 +18,8 @@
 #define JONES JonesF64
 #endif
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -135,6 +137,15 @@ typedef struct Points {
     // Spectral indices.
     FLOAT *power_law_sis;
 
+    size_t num_curved_power_law_points;
+    LMN *curved_power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    JONES *curved_power_law_fds;
+    // Spectral indices.
+    FLOAT *curved_power_law_sis;
+    // Spectral curvatures.
+    FLOAT *curved_power_law_qs;
+
     size_t num_list_points;
     LMN *list_lmns;
     // Instrumental (i.e. XX, XY, YX, XX).
@@ -152,6 +163,16 @@ typedef struct Gaussians {
     // Spectral indices.
     FLOAT *power_law_sis;
     GaussianParams *power_law_gps;
+
+    size_t num_curved_power_law_gaussians;
+    LMN *curved_power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    JONES *curved_power_law_fds;
+    // Spectral indices.
+    FLOAT *curved_power_law_sis;
+    // Spectral curvatures.
+    FLOAT *curved_power_law_qs;
+    GaussianParams *curved_power_law_gps;
 
     size_t num_list_gaussians;
     LMN *list_lmns;
@@ -174,6 +195,19 @@ typedef struct Shapelets {
     ShapeletUV *power_law_shapelet_uvs;
     ShapeletCoeff *power_law_shapelet_coeffs;
     size_t *power_law_num_shapelet_coeffs;
+
+    size_t num_curved_power_law_shapelets;
+    LMN *curved_power_law_lmns;
+    // Instrumental flux densities calculated at 150 MHz.
+    JONES *curved_power_law_fds;
+    // Spectral indices.
+    FLOAT *curved_power_law_sis;
+    // Spectral curvatures.
+    FLOAT *curved_power_law_qs;
+    GaussianParams *curved_power_law_gps;
+    ShapeletUV *curved_power_law_shapelet_uvs;
+    ShapeletCoeff *curved_power_law_shapelet_coeffs;
+    size_t *curved_power_law_num_shapelet_coeffs;
 
     size_t num_list_shapelets;
     LMN *list_lmns;

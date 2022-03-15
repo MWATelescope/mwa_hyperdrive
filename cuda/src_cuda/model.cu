@@ -21,6 +21,8 @@
 #define FLOOR     floorf
 #define CUCOMPLEX cuFloatComplex
 #define CUCONJ    cuConjf
+#define LOG       logf
+#define EXP       expf
 #else
 #define FLOAT4    double4
 #define SINCOS    sincos
@@ -29,6 +31,8 @@
 #define FLOOR     floor
 #define CUCOMPLEX cuDoubleComplex
 #define CUCONJ    cuConj
+#define LOG       log
+#define EXP       exp
 #endif
 
 /**
@@ -210,6 +214,14 @@ inline __device__ void extrap_power_law_fd(const int i_comp, const FLOAT freq, c
     *out = d_ref_fds[i_comp] * flux_ratio;
 }
 
+inline __device__ void extrap_curved_power_law_fd(const int i_comp, const FLOAT freq, const JONES *d_ref_fds,
+                                                  const FLOAT *d_sis, const FLOAT *d_qs, JONES *out) {
+    const FLOAT flux_ratio = POW(freq / POWER_LAW_FD_REF_FREQ, d_sis[i_comp]);
+    const FLOAT log_term = LOG(freq / POWER_LAW_FD_REF_FREQ);
+    const FLOAT curved_component = EXP(d_qs[i_comp] * log_term * log_term);
+    *out = d_ref_fds[i_comp] * flux_ratio * curved_component;
+}
+
 /**
  * Kernel for calculating point-source-component visibilities.
  */
@@ -251,6 +263,15 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
+        complex_multiply(&fd, real, imag, &delta_vis);
+    }
+
+    for (int i_comp = 0; i_comp < d_comps.num_curved_power_law_points; i_comp++) {
+        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+
+        extrap_curved_power_law_fd(i_comp, freq, d_comps.curved_power_law_fds, d_comps.curved_power_law_sis,
+                                   d_comps.curved_power_law_qs, &fd);
         complex_multiply(&fd, real, imag, &delta_vis);
     }
 
@@ -319,6 +340,27 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
         imag *= envelope;
 
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
+        complex_multiply(&fd, real, imag, &delta_vis);
+    }
+
+    for (size_t i_comp = 0; i_comp < d_comps.num_curved_power_law_gaussians; i_comp++) {
+        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+
+        const GaussianParams g_params = d_comps.curved_power_law_gps[i_comp];
+        SINCOS(g_params.pa, &s_pa, &c_pa);
+        // Temporary variables for clarity.
+        k_x = uvw.u * s_pa + uvw.v * c_pa;
+        k_y = uvw.u * c_pa - uvw.v * s_pa;
+        envelope = EXP(EXP_CONST *
+                       ((g_params.maj * g_params.maj) * (k_x * k_x) + (g_params.min * g_params.min) * (k_y * k_y)));
+
+        // Scale by envelope.
+        real *= envelope;
+        imag *= envelope;
+
+        extrap_curved_power_law_fd(i_comp, freq, d_comps.curved_power_law_fds, d_comps.curved_power_law_sis,
+                                   d_comps.curved_power_law_qs, &fd);
         complex_multiply(&fd, real, imag, &delta_vis);
     }
 
@@ -456,6 +498,71 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
     }
 
     coeff_depth = 0;
+    i_uv = i_bl * d_comps.num_curved_power_law_shapelets;
+    for (int i_comp = 0; i_comp < d_comps.num_curved_power_law_shapelets; i_comp++) {
+        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+
+        ShapeletUV s_uv = d_comps.curved_power_law_shapelet_uvs[i_uv + i_comp];
+        FLOAT shapelet_u = s_uv.u * one_on_lambda;
+        FLOAT shapelet_v = s_uv.v * one_on_lambda;
+        const GaussianParams g_params = d_comps.curved_power_law_gps[i_comp];
+        SINCOS(g_params.pa, &s_pa, &c_pa);
+
+        // Temporary variables for clarity.
+        FLOAT x = shapelet_u * s_pa + shapelet_v * c_pa;
+        FLOAT y = shapelet_u * c_pa - shapelet_v * s_pa;
+        FLOAT const_x = g_params.maj * chewie;
+        FLOAT const_y = -g_params.min * chewie;
+        FLOAT x_pos = x * const_x + sbf_c;
+        FLOAT y_pos = y * const_y + sbf_c;
+        int x_pos_int = (int)FLOOR(x_pos);
+        int y_pos_int = (int)FLOOR(y_pos);
+
+        FLOAT envelope_re = 0.0;
+        FLOAT envelope_im = 0.0;
+        for (int i_coeff = 0; i_coeff < d_comps.curved_power_law_num_shapelet_coeffs[i_comp]; i_coeff++) {
+            const ShapeletCoeff coeff = d_comps.curved_power_law_shapelet_coeffs[coeff_depth];
+
+            FLOAT x_low = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int];
+            FLOAT x_high = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int + 1];
+            FLOAT u_value = x_low + (x_high - x_low) * (x_pos - FLOOR(x_pos));
+
+            FLOAT y_low = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int];
+            FLOAT y_high = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int + 1];
+            FLOAT v_value = y_low + (y_high - y_low) * (y_pos - FLOOR(y_pos));
+
+            // I_POWER_TABLE stuff. The intention is just to find the
+            // appropriate power of i, i.e.:
+            // index = (n1 + n2) % 4    (so that index is between 0 and 3 inclusive)
+            // i^index, e.g.
+            // i^0 =  1.0 + 0.0i
+            // i^1 =  0.0 + 1.0i
+            // i^2 = -1.0 + 0.0i
+            // i^3 =  0.0 - 1.0i
+            //
+            // The following my attempt at doing this efficiently.
+            int i_power_index = (coeff.n1 + coeff.n2) % 4;
+            FLOAT i_power_re = I_POWERS_REAL[i_power_index];
+            FLOAT i_power_im = I_POWERS_IMAG[i_power_index];
+
+            FLOAT rest = coeff.value * u_value * v_value;
+            envelope_re += i_power_re * rest;
+            envelope_im += i_power_im * rest;
+
+            coeff_depth++;
+        }
+
+        // Scale by envelope.
+        real2 = real * envelope_re - imag * envelope_im;
+        imag2 = real * envelope_im + imag * envelope_re;
+
+        extrap_curved_power_law_fd(i_comp, freq, d_comps.curved_power_law_fds, d_comps.curved_power_law_sis,
+                                   d_comps.curved_power_law_qs, &fd);
+        complex_multiply(&fd, real2, imag2, &delta_vis);
+    }
+
+    coeff_depth = 0;
     i_uv = i_bl * d_comps.num_list_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_list_shapelets; i_comp++) {
         const LMN lmn = d_comps.list_lmns[i_comp];
@@ -576,7 +683,7 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
     int i_j1_row = d_tile_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.x]];
     int i_j2_row = d_tile_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.y]];
     int i_col = d_freq_map[i_freq];
-    int num_directions = d_comps.num_power_law_points + d_comps.num_list_points;
+    int num_directions = d_comps.num_power_law_points + d_comps.num_curved_power_law_points + d_comps.num_list_points;
 
     for (int i_comp = 0; i_comp < d_comps.num_power_law_points; i_comp++) {
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
@@ -589,13 +696,27 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
         complex_multiply(&fd, real, imag, &delta_vis);
     }
 
-    int i_fd = i_freq * d_comps.num_list_points;
-    for (int i_comp = 0; i_comp < d_comps.num_list_points; i_comp++) {
-        fd = d_comps.list_fds[i_fd + i_comp];
+    for (int i_comp = 0; i_comp < d_comps.num_curved_power_law_points; i_comp++) {
+        extrap_curved_power_law_fd(i_comp, freq, d_comps.curved_power_law_fds, d_comps.curved_power_law_sis,
+                                   d_comps.curved_power_law_qs, &fd);
         JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * i_j1_row) + num_directions * i_col) + i_comp +
                                   d_comps.num_power_law_points];
         JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp +
                                   d_comps.num_power_law_points];
+        apply_beam(&j1, &fd, &j2);
+
+        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+        complex_multiply(&fd, real, imag, &delta_vis);
+    }
+
+    int i_fd = i_freq * d_comps.num_list_points;
+    for (int i_comp = 0; i_comp < d_comps.num_list_points; i_comp++) {
+        fd = d_comps.list_fds[i_fd + i_comp];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * i_j1_row) + num_directions * i_col) + i_comp +
+                                  (d_comps.num_power_law_points + d_comps.num_curved_power_law_points)];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp +
+                                  (d_comps.num_power_law_points + d_comps.num_curved_power_law_points)];
         apply_beam(&j1, &fd, &j2);
 
         const LMN lmn = d_comps.list_lmns[i_comp];
@@ -660,7 +781,8 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
     int i_j1_row = d_tile_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.x]];
     int i_j2_row = d_tile_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.y]];
     int i_col = d_freq_map[i_freq];
-    int num_directions = d_comps.num_power_law_gaussians + d_comps.num_list_gaussians;
+    int num_directions =
+        d_comps.num_power_law_gaussians + d_comps.num_curved_power_law_gaussians + d_comps.num_list_gaussians;
 
     for (size_t i_comp = 0; i_comp < d_comps.num_power_law_gaussians; i_comp++) {
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
@@ -686,13 +808,40 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
         complex_multiply(&fd, real, imag, &delta_vis);
     }
 
-    int i_fd = i_freq * d_comps.num_list_gaussians;
-    for (size_t i_comp = 0; i_comp < d_comps.num_list_gaussians; i_comp++) {
-        fd = d_comps.list_fds[i_fd + i_comp];
+    for (size_t i_comp = 0; i_comp < d_comps.num_curved_power_law_gaussians; i_comp++) {
+        extrap_curved_power_law_fd(i_comp, freq, d_comps.curved_power_law_fds, d_comps.curved_power_law_sis,
+                                   d_comps.curved_power_law_qs, &fd);
         JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * i_j1_row) + num_directions * i_col) + i_comp +
                                   d_comps.num_power_law_gaussians];
         JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp +
                                   d_comps.num_power_law_gaussians];
+        apply_beam(&j1, &fd, &j2);
+
+        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+
+        const GaussianParams g_params = d_comps.curved_power_law_gps[i_comp];
+        SINCOS(g_params.pa, &s_pa, &c_pa);
+        // Temporary variables for clarity.
+        k_x = uvw.u * s_pa + uvw.v * c_pa;
+        k_y = uvw.u * c_pa - uvw.v * s_pa;
+        envelope = EXP(EXP_CONST *
+                       ((g_params.maj * g_params.maj) * (k_x * k_x) + (g_params.min * g_params.min) * (k_y * k_y)));
+
+        // Scale by envelope.
+        real *= envelope;
+        imag *= envelope;
+
+        complex_multiply(&fd, real, imag, &delta_vis);
+    }
+
+    int i_fd = i_freq * d_comps.num_list_gaussians;
+    for (size_t i_comp = 0; i_comp < d_comps.num_list_gaussians; i_comp++) {
+        fd = d_comps.list_fds[i_fd + i_comp];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * i_j1_row) + num_directions * i_col) + i_comp +
+                                  (d_comps.num_power_law_gaussians + d_comps.num_curved_power_law_gaussians)];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp +
+                                  (d_comps.num_power_law_gaussians + d_comps.num_curved_power_law_gaussians)];
         apply_beam(&j1, &fd, &j2);
 
         const LMN lmn = d_comps.list_lmns[i_comp];
@@ -775,7 +924,8 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     int i_j1_row = d_tile_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.x]];
     int i_j2_row = d_tile_map[d_tile_index_to_unflagged_tile_index_map[blockIdx.y]];
     int i_col = d_freq_map[i_freq];
-    int num_directions = d_comps.num_power_law_shapelets + d_comps.num_list_shapelets;
+    int num_directions =
+        d_comps.num_power_law_shapelets + d_comps.num_curved_power_law_shapelets + d_comps.num_list_shapelets;
 
     const FLOAT chewie = SQRT_FRAC_PI_SQ_2_LN_2 / sbf_dx;
     const FLOAT I_POWERS_REAL[4] = {1.0, 0.0, -1.0, 0.0};
@@ -849,6 +999,76 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     }
 
     coeff_depth = 0;
+    i_uv = i_bl * d_comps.num_curved_power_law_shapelets;
+    for (int i_comp = 0; i_comp < d_comps.num_curved_power_law_shapelets; i_comp++) {
+        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
+
+        ShapeletUV s_uv = d_comps.curved_power_law_shapelet_uvs[i_uv + i_comp];
+        FLOAT shapelet_u = s_uv.u * one_on_lambda;
+        FLOAT shapelet_v = s_uv.v * one_on_lambda;
+        const GaussianParams g_params = d_comps.curved_power_law_gps[i_comp];
+        SINCOS(g_params.pa, &s_pa, &c_pa);
+
+        // Temporary variables for clarity.
+        FLOAT x = shapelet_u * s_pa + shapelet_v * c_pa;
+        FLOAT y = shapelet_u * c_pa - shapelet_v * s_pa;
+        FLOAT const_x = g_params.maj * chewie;
+        FLOAT const_y = -g_params.min * chewie;
+        FLOAT x_pos = x * const_x + sbf_c;
+        FLOAT y_pos = y * const_y + sbf_c;
+        int x_pos_int = (int)FLOOR(x_pos);
+        int y_pos_int = (int)FLOOR(y_pos);
+
+        FLOAT envelope_re = 0.0;
+        FLOAT envelope_im = 0.0;
+        for (int i_coeff = 0; i_coeff < d_comps.curved_power_law_num_shapelet_coeffs[i_comp]; i_coeff++) {
+            const ShapeletCoeff coeff = d_comps.curved_power_law_shapelet_coeffs[coeff_depth];
+
+            FLOAT x_low = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int];
+            FLOAT x_high = d_shapelet_basis_values[sbf_l * coeff.n1 + x_pos_int + 1];
+            FLOAT u_value = x_low + (x_high - x_low) * (x_pos - FLOOR(x_pos));
+
+            FLOAT y_low = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int];
+            FLOAT y_high = d_shapelet_basis_values[sbf_l * coeff.n2 + y_pos_int + 1];
+            FLOAT v_value = y_low + (y_high - y_low) * (y_pos - FLOOR(y_pos));
+
+            // I_POWER_TABLE stuff. The intention is just to find the
+            // appropriate power of i, i.e.:
+            // index = (n1 + n2) % 4    (so that index is between 0 and 3 inclusive)
+            // i^index, e.g.
+            // i^0 =  1.0 + 0.0i
+            // i^1 =  0.0 + 1.0i
+            // i^2 = -1.0 + 0.0i
+            // i^3 =  0.0 - 1.0i
+            //
+            // The following my attempt at doing this efficiently.
+            int i_power_index = (coeff.n1 + coeff.n2) % 4;
+            FLOAT i_power_re = I_POWERS_REAL[i_power_index];
+            FLOAT i_power_im = I_POWERS_IMAG[i_power_index];
+
+            FLOAT rest = coeff.value * u_value * v_value;
+            envelope_re += i_power_re * rest;
+            envelope_im += i_power_im * rest;
+
+            coeff_depth++;
+        }
+
+        // Scale by envelope.
+        real2 = real * envelope_re - imag * envelope_im;
+        imag2 = real * envelope_im + imag * envelope_re;
+
+        extrap_curved_power_law_fd(i_comp, freq, d_comps.curved_power_law_fds, d_comps.curved_power_law_sis,
+                                   d_comps.curved_power_law_qs, &fd);
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * i_j1_row) + num_directions * i_col) + i_comp +
+                                  d_comps.num_power_law_shapelets];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp +
+                                  d_comps.num_power_law_shapelets];
+        apply_beam(&j1, &fd, &j2);
+        complex_multiply(&fd, real2, imag2, &delta_vis);
+    }
+
+    coeff_depth = 0;
     i_uv = i_bl * d_comps.num_list_shapelets;
     const int i_fd = i_freq * d_comps.num_list_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_list_shapelets; i_comp++) {
@@ -910,8 +1130,10 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
         imag2 = real * envelope_im + imag * envelope_re;
 
         fd = d_comps.list_fds[i_fd + i_comp];
-        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * i_j1_row) + num_directions * i_col) + i_comp];
-        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp];
+        JONES_C j1 = d_beam_jones[((num_directions * num_fee_freqs * i_j1_row) + num_directions * i_col) + i_comp +
+                                  (d_comps.num_power_law_shapelets + d_comps.num_curved_power_law_shapelets)];
+        JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp +
+                                  (d_comps.num_power_law_shapelets + d_comps.num_curved_power_law_shapelets)];
         apply_beam(&j1, &fd, &j2);
         complex_multiply(&fd, real2, imag2, &delta_vis);
     }

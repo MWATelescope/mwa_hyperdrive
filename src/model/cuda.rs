@@ -40,7 +40,6 @@ mwa_hyperdrive_common::cfg_if::cfg_if! {
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
 /// second is the source component. The length of `hadecs`, `lmns`,
 /// `*_list_fds`'s second axis are the same.
-// TODO: Curved power laws.
 pub(crate) struct SkyModellerCuda<'a> {
     cuda_beam: Box<dyn BeamCUDA>,
 
@@ -86,6 +85,12 @@ pub(crate) struct SkyModellerCuda<'a> {
     /// Spectral indices.
     point_power_law_sis: DevicePointer<CudaFloat>,
 
+    point_curved_power_law_radecs: Vec<RADec>,
+    point_curved_power_law_lmns: DevicePointer<cuda::LMN>,
+    point_curved_power_law_fds: DevicePointer<CudaJones>,
+    point_curved_power_law_sis: DevicePointer<CudaFloat>,
+    point_curved_power_law_qs: DevicePointer<CudaFloat>,
+
     point_list_radecs: Vec<RADec>,
     point_list_lmns: DevicePointer<cuda::LMN>,
     /// Instrumental (i.e. XX, XY, YX, XX).
@@ -98,6 +103,13 @@ pub(crate) struct SkyModellerCuda<'a> {
     /// Spectral indices.
     gaussian_power_law_sis: DevicePointer<CudaFloat>,
     gaussian_power_law_gps: DevicePointer<cuda::GaussianParams>,
+
+    gaussian_curved_power_law_radecs: Vec<RADec>,
+    gaussian_curved_power_law_lmns: DevicePointer<cuda::LMN>,
+    gaussian_curved_power_law_fds: DevicePointer<CudaJones>,
+    gaussian_curved_power_law_sis: DevicePointer<CudaFloat>,
+    gaussian_curved_power_law_qs: DevicePointer<CudaFloat>,
+    gaussian_curved_power_law_gps: DevicePointer<cuda::GaussianParams>,
 
     gaussian_list_radecs: Vec<RADec>,
     gaussian_list_lmns: DevicePointer<cuda::LMN>,
@@ -114,6 +126,15 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_power_law_gps: DevicePointer<cuda::GaussianParams>,
     shapelet_power_law_coeffs: DevicePointer<cuda::ShapeletCoeff>,
     shapelet_power_law_coeff_lens: DevicePointer<usize>,
+
+    shapelet_curved_power_law_radecs: Vec<RADec>,
+    shapelet_curved_power_law_lmns: DevicePointer<cuda::LMN>,
+    shapelet_curved_power_law_fds: DevicePointer<CudaJones>,
+    shapelet_curved_power_law_sis: DevicePointer<CudaFloat>,
+    shapelet_curved_power_law_qs: DevicePointer<CudaFloat>,
+    shapelet_curved_power_law_gps: DevicePointer<cuda::GaussianParams>,
+    shapelet_curved_power_law_coeffs: DevicePointer<cuda::ShapeletCoeff>,
+    shapelet_curved_power_law_coeff_lens: DevicePointer<usize>,
 
     shapelet_list_radecs: Vec<RADec>,
     shapelet_list_lmns: DevicePointer<cuda::LMN>,
@@ -153,6 +174,12 @@ impl<'a> SkyModellerCuda<'a> {
         let mut point_power_law_fds: Vec<_> = vec![];
         let mut point_power_law_sis: Vec<_> = vec![];
 
+        let mut point_curved_power_law_radecs: Vec<RADec> = vec![];
+        let mut point_curved_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut point_curved_power_law_fds: Vec<_> = vec![];
+        let mut point_curved_power_law_sis: Vec<_> = vec![];
+        let mut point_curved_power_law_qs: Vec<_> = vec![];
+
         let mut point_list_radecs: Vec<RADec> = vec![];
         let mut point_list_lmns: Vec<cuda::LMN> = vec![];
         let mut point_list_fds: Vec<FluxDensityType> = vec![];
@@ -162,6 +189,13 @@ impl<'a> SkyModellerCuda<'a> {
         let mut gaussian_power_law_fds: Vec<_> = vec![];
         let mut gaussian_power_law_sis: Vec<_> = vec![];
         let mut gaussian_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+
+        let mut gaussian_curved_power_law_radecs: Vec<RADec> = vec![];
+        let mut gaussian_curved_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut gaussian_curved_power_law_fds: Vec<_> = vec![];
+        let mut gaussian_curved_power_law_sis: Vec<_> = vec![];
+        let mut gaussian_curved_power_law_qs: Vec<_> = vec![];
+        let mut gaussian_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
 
         let mut gaussian_list_radecs: Vec<RADec> = vec![];
         let mut gaussian_list_lmns: Vec<cuda::LMN> = vec![];
@@ -174,6 +208,14 @@ impl<'a> SkyModellerCuda<'a> {
         let mut shapelet_power_law_sis: Vec<_> = vec![];
         let mut shapelet_power_law_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_power_law_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
+
+        let mut shapelet_curved_power_law_radecs: Vec<RADec> = vec![];
+        let mut shapelet_curved_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut shapelet_curved_power_law_fds: Vec<_> = vec![];
+        let mut shapelet_curved_power_law_sis: Vec<_> = vec![];
+        let mut shapelet_curved_power_law_qs: Vec<_> = vec![];
+        let mut shapelet_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_curved_power_law_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
         let mut shapelet_list_radecs: Vec<RADec> = vec![];
         let mut shapelet_list_lmns: Vec<cuda::LMN> = vec![];
@@ -231,7 +273,16 @@ impl<'a> SkyModellerCuda<'a> {
                         point_power_law_sis.push(si as CudaFloat);
                     }
 
-                    FluxDensityType::CurvedPowerLaw { .. } => todo!(),
+                    FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                        point_curved_power_law_radecs.push(radec);
+                        point_curved_power_law_lmns.push(lmn);
+                        let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                        let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                        point_curved_power_law_fds.push(cuda_inst_fd);
+                        point_curved_power_law_qs.push(q as CudaFloat);
+                        point_curved_power_law_sis.push(si as CudaFloat);
+                    }
 
                     FluxDensityType::List { .. } => {
                         point_list_radecs.push(radec);
@@ -259,7 +310,18 @@ impl<'a> SkyModellerCuda<'a> {
                             gaussian_power_law_gps.push(gp);
                         }
 
-                        FluxDensityType::CurvedPowerLaw { .. } => todo!(),
+                        FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                            gaussian_curved_power_law_radecs.push(radec);
+                            gaussian_curved_power_law_lmns.push(lmn);
+                            let fd_at_150mhz =
+                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                            gaussian_curved_power_law_fds.push(cuda_inst_fd);
+                            gaussian_curved_power_law_qs.push(q as CudaFloat);
+                            gaussian_curved_power_law_sis.push(si as CudaFloat);
+                            gaussian_curved_power_law_gps.push(gp);
+                        }
 
                         FluxDensityType::List { .. } => {
                             gaussian_list_radecs.push(radec);
@@ -296,7 +358,19 @@ impl<'a> SkyModellerCuda<'a> {
                             shapelet_power_law_coeffs.push(coeffs.clone());
                         }
 
-                        FluxDensityType::CurvedPowerLaw { .. } => todo!(),
+                        FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                            shapelet_curved_power_law_radecs.push(radec);
+                            shapelet_curved_power_law_lmns.push(lmn);
+                            let fd_at_150mhz =
+                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                            shapelet_curved_power_law_fds.push(cuda_inst_fd);
+                            shapelet_curved_power_law_qs.push(q as CudaFloat);
+                            shapelet_curved_power_law_sis.push(si as CudaFloat);
+                            shapelet_curved_power_law_gps.push(gp);
+                            shapelet_curved_power_law_coeffs.push(coeffs.clone());
+                        }
 
                         FluxDensityType::List { .. } => {
                             shapelet_list_radecs.push(radec);
@@ -322,6 +396,8 @@ impl<'a> SkyModellerCuda<'a> {
 
         let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
             get_flattened_coeffs(shapelet_power_law_coeffs);
+        let (shapelet_curved_power_law_coeffs, shapelet_curved_power_law_coeff_lens) =
+            get_flattened_coeffs(shapelet_curved_power_law_coeffs);
         let (shapelet_list_coeffs, shapelet_list_coeff_lens) =
             get_flattened_coeffs(shapelet_list_coeffs);
 
@@ -396,6 +472,15 @@ impl<'a> SkyModellerCuda<'a> {
             point_power_law_lmns: DevicePointer::copy_to_device(&point_power_law_lmns)?,
             point_power_law_fds: DevicePointer::copy_to_device(&point_power_law_fds)?,
             point_power_law_sis: DevicePointer::copy_to_device(&point_power_law_sis)?,
+
+            point_curved_power_law_radecs,
+            point_curved_power_law_lmns: DevicePointer::copy_to_device(
+                &point_curved_power_law_lmns,
+            )?,
+            point_curved_power_law_fds: DevicePointer::copy_to_device(&point_curved_power_law_fds)?,
+            point_curved_power_law_sis: DevicePointer::copy_to_device(&point_curved_power_law_sis)?,
+            point_curved_power_law_qs: DevicePointer::copy_to_device(&point_curved_power_law_qs)?,
+
             point_list_radecs,
             point_list_lmns: DevicePointer::copy_to_device(&point_list_lmns)?,
             point_list_fds: DevicePointer::copy_to_device(point_list_fds.as_slice().unwrap())?,
@@ -405,6 +490,24 @@ impl<'a> SkyModellerCuda<'a> {
             gaussian_power_law_fds: DevicePointer::copy_to_device(&gaussian_power_law_fds)?,
             gaussian_power_law_sis: DevicePointer::copy_to_device(&gaussian_power_law_sis)?,
             gaussian_power_law_gps: DevicePointer::copy_to_device(&gaussian_power_law_gps)?,
+
+            gaussian_curved_power_law_radecs,
+            gaussian_curved_power_law_lmns: DevicePointer::copy_to_device(
+                &gaussian_curved_power_law_lmns,
+            )?,
+            gaussian_curved_power_law_fds: DevicePointer::copy_to_device(
+                &gaussian_curved_power_law_fds,
+            )?,
+            gaussian_curved_power_law_sis: DevicePointer::copy_to_device(
+                &gaussian_curved_power_law_sis,
+            )?,
+            gaussian_curved_power_law_qs: DevicePointer::copy_to_device(
+                &gaussian_curved_power_law_qs,
+            )?,
+            gaussian_curved_power_law_gps: DevicePointer::copy_to_device(
+                &gaussian_curved_power_law_gps,
+            )?,
+
             gaussian_list_radecs,
             gaussian_list_lmns: DevicePointer::copy_to_device(&gaussian_list_lmns)?,
             gaussian_list_fds: DevicePointer::copy_to_device(
@@ -421,6 +524,30 @@ impl<'a> SkyModellerCuda<'a> {
             shapelet_power_law_coeff_lens: DevicePointer::copy_to_device(
                 &shapelet_power_law_coeff_lens,
             )?,
+
+            shapelet_curved_power_law_radecs,
+            shapelet_curved_power_law_lmns: DevicePointer::copy_to_device(
+                &shapelet_curved_power_law_lmns,
+            )?,
+            shapelet_curved_power_law_fds: DevicePointer::copy_to_device(
+                &shapelet_curved_power_law_fds,
+            )?,
+            shapelet_curved_power_law_sis: DevicePointer::copy_to_device(
+                &shapelet_curved_power_law_sis,
+            )?,
+            shapelet_curved_power_law_qs: DevicePointer::copy_to_device(
+                &shapelet_curved_power_law_qs,
+            )?,
+            shapelet_curved_power_law_gps: DevicePointer::copy_to_device(
+                &shapelet_curved_power_law_gps,
+            )?,
+            shapelet_curved_power_law_coeffs: DevicePointer::copy_to_device(
+                &shapelet_curved_power_law_coeffs,
+            )?,
+            shapelet_curved_power_law_coeff_lens: DevicePointer::copy_to_device(
+                &shapelet_curved_power_law_coeff_lens,
+            )?,
+
             shapelet_list_radecs,
             shapelet_list_lmns: DevicePointer::copy_to_device(&shapelet_list_lmns)?,
             shapelet_list_fds: DevicePointer::copy_to_device(
@@ -449,14 +576,24 @@ impl<'a> SkyModellerCuda<'a> {
         d_uvws: &DevicePointer<cuda::UVW>,
         lst_rad: f64,
     ) -> Result<(), BeamError> {
-        if self.point_power_law_radecs.is_empty() && self.point_list_radecs.is_empty() {
+        if self.point_power_law_radecs.is_empty()
+            && self.point_curved_power_law_radecs.is_empty()
+            && self.point_list_radecs.is_empty()
+        {
             return Ok(());
         }
 
         let point_beam_jones = {
-            let mut azels = to_azels(&self.point_power_law_radecs, lst_rad, self.array_latitude);
-            let mut list_azels = to_azels(&self.point_list_radecs, lst_rad, self.array_latitude);
-            azels.append(&mut list_azels);
+            // Can't use self.array_latitude in the par_iter chain; complains
+            // about part of self not being able to be passed between threads.
+            let array_latitude = self.array_latitude;
+            let azels: Vec<AzEl> = self
+                .point_power_law_radecs
+                .par_iter()
+                .chain(self.point_curved_power_law_radecs.par_iter())
+                .chain(self.point_list_radecs.par_iter())
+                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude))
+                .collect();
             self.cuda_beam.calc_jones(&azels)?
         };
 
@@ -466,6 +603,11 @@ impl<'a> SkyModellerCuda<'a> {
                 power_law_lmns: self.point_power_law_lmns.get_mut(),
                 power_law_fds: self.point_power_law_fds.get_mut(),
                 power_law_sis: self.point_power_law_sis.get_mut(),
+                num_curved_power_law_points: self.point_curved_power_law_radecs.len(),
+                curved_power_law_lmns: self.point_curved_power_law_lmns.get_mut(),
+                curved_power_law_fds: self.point_curved_power_law_fds.get_mut(),
+                curved_power_law_sis: self.point_curved_power_law_sis.get_mut(),
+                curved_power_law_qs: self.point_curved_power_law_qs.get_mut(),
                 num_list_points: self.point_list_radecs.len(),
                 list_lmns: self.point_list_lmns.get_mut(),
                 list_fds: self.point_list_fds.get_mut(),
@@ -498,18 +640,24 @@ impl<'a> SkyModellerCuda<'a> {
         d_uvws: &DevicePointer<cuda::UVW>,
         lst_rad: f64,
     ) -> Result<(), BeamError> {
-        if self.gaussian_power_law_radecs.is_empty() && self.gaussian_list_radecs.is_empty() {
+        if self.gaussian_power_law_radecs.is_empty()
+            && self.gaussian_curved_power_law_radecs.is_empty()
+            && self.gaussian_list_radecs.is_empty()
+        {
             return Ok(());
         }
 
         let gaussian_beam_jones = {
-            let mut azels = to_azels(
-                &self.gaussian_power_law_radecs,
-                lst_rad,
-                self.array_latitude,
-            );
-            let mut list_azels = to_azels(&self.gaussian_list_radecs, lst_rad, self.array_latitude);
-            azels.append(&mut list_azels);
+            // Can't use self.array_latitude in the par_iter chain; complains
+            // about part of self not being able to be passed between threads.
+            let array_latitude = self.array_latitude;
+            let azels: Vec<AzEl> = self
+                .gaussian_power_law_radecs
+                .par_iter()
+                .chain(self.gaussian_curved_power_law_radecs.par_iter())
+                .chain(self.gaussian_list_radecs.par_iter())
+                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude))
+                .collect();
             self.cuda_beam.calc_jones(&azels)?
         };
 
@@ -520,6 +668,12 @@ impl<'a> SkyModellerCuda<'a> {
                 power_law_fds: self.gaussian_power_law_fds.get_mut(),
                 power_law_sis: self.gaussian_power_law_sis.get_mut(),
                 power_law_gps: self.gaussian_power_law_gps.get_mut(),
+                num_curved_power_law_gaussians: self.gaussian_curved_power_law_radecs.len(),
+                curved_power_law_lmns: self.gaussian_curved_power_law_lmns.get_mut(),
+                curved_power_law_fds: self.gaussian_curved_power_law_fds.get_mut(),
+                curved_power_law_sis: self.gaussian_curved_power_law_sis.get_mut(),
+                curved_power_law_qs: self.gaussian_curved_power_law_qs.get_mut(),
+                curved_power_law_gps: self.gaussian_curved_power_law_gps.get_mut(),
                 num_list_gaussians: self.gaussian_list_radecs.len(),
                 list_lmns: self.gaussian_list_lmns.get_mut(),
                 list_fds: self.gaussian_list_fds.get_mut(),
@@ -557,23 +711,31 @@ impl<'a> SkyModellerCuda<'a> {
         d_uvws: &DevicePointer<cuda::UVW>,
         lst_rad: f64,
     ) -> Result<(), BeamError> {
-        if self.shapelet_power_law_radecs.is_empty() && self.shapelet_list_radecs.is_empty() {
+        if self.shapelet_power_law_radecs.is_empty()
+            && self.shapelet_curved_power_law_radecs.is_empty()
+            && self.shapelet_list_radecs.is_empty()
+        {
             return Ok(());
         }
 
         let shapelet_beam_jones = {
-            let mut azels = to_azels(
-                &self.shapelet_power_law_radecs,
-                lst_rad,
-                self.array_latitude,
-            );
-            let mut list_azels = to_azels(&self.shapelet_list_radecs, lst_rad, self.array_latitude);
-            azels.append(&mut list_azels);
+            // Can't use self.array_latitude in the par_iter chain; complains
+            // about part of self not being able to be passed between threads.
+            let array_latitude = self.array_latitude;
+            let azels: Vec<AzEl> = self
+                .shapelet_power_law_radecs
+                .par_iter()
+                .chain(self.shapelet_curved_power_law_radecs.par_iter())
+                .chain(self.shapelet_list_radecs.par_iter())
+                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude))
+                .collect();
             self.cuda_beam.calc_jones(&azels)?
         };
 
         let uvs = self.get_shapelet_uvs(lst_rad);
         let power_law_uvs = DevicePointer::copy_to_device(uvs.power_law.as_slice().unwrap())?;
+        let curved_power_law_uvs =
+            DevicePointer::copy_to_device(uvs.curved_power_law.as_slice().unwrap())?;
         let list_uvs = DevicePointer::copy_to_device(uvs.list.as_slice().unwrap())?;
 
         let cuda_status = cuda::model_shapelets(
@@ -586,6 +748,17 @@ impl<'a> SkyModellerCuda<'a> {
                 power_law_shapelet_uvs: power_law_uvs.get_mut(),
                 power_law_shapelet_coeffs: self.shapelet_power_law_coeffs.get_mut(),
                 power_law_num_shapelet_coeffs: self.shapelet_power_law_coeff_lens.get_mut(),
+                num_curved_power_law_shapelets: self.shapelet_curved_power_law_radecs.len(),
+                curved_power_law_lmns: self.shapelet_curved_power_law_lmns.get_mut(),
+                curved_power_law_fds: self.shapelet_curved_power_law_fds.get_mut(),
+                curved_power_law_sis: self.shapelet_curved_power_law_sis.get_mut(),
+                curved_power_law_qs: self.shapelet_curved_power_law_qs.get_mut(),
+                curved_power_law_gps: self.shapelet_curved_power_law_gps.get_mut(),
+                curved_power_law_shapelet_uvs: curved_power_law_uvs.get_mut(),
+                curved_power_law_shapelet_coeffs: self.shapelet_curved_power_law_coeffs.get_mut(),
+                curved_power_law_num_shapelet_coeffs: self
+                    .shapelet_curved_power_law_coeff_lens
+                    .get_mut(),
                 num_list_shapelets: self.shapelet_list_radecs.len(),
                 list_lmns: self.shapelet_list_lmns.get_mut(),
                 list_fds: self.shapelet_list_fds.get_mut(),
@@ -667,6 +840,11 @@ impl<'a> SkyModellerCuda<'a> {
         ShapeletUVs {
             power_law: get_shapelet_uvs_inner(
                 &self.shapelet_power_law_radecs,
+                lst_rad,
+                self.unflagged_tile_xyzs,
+            ),
+            curved_power_law: get_shapelet_uvs_inner(
+                &self.shapelet_curved_power_law_radecs,
                 lst_rad,
                 self.unflagged_tile_xyzs,
             ),
@@ -896,17 +1074,11 @@ impl std::fmt::Debug for SkyModellerCuda<'_> {
     }
 }
 
-fn to_azels(radecs: &[RADec], lst_rad: f64, array_latitude_rad: f64) -> Vec<AzEl> {
-    radecs
-        .par_iter()
-        .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
-        .collect()
-}
-
 /// The return type of [SkyModellerCuda::get_shapelet_uvs]. These arrays have
 /// baseline as the first axis and component as the second.
 struct ShapeletUVs {
     power_law: Array2<cuda::ShapeletUV>,
+    curved_power_law: Array2<cuda::ShapeletUV>,
     list: Array2<cuda::ShapeletUV>,
 }
 
