@@ -77,9 +77,9 @@ fn test_split_components() {
     assert_eq!(points.lmns.len(), num_point_components);
     assert_eq!(gaussians.lmns.len(), num_gauss_components);
     assert!(shapelets.lmns.is_empty());
-    assert_abs_diff_eq!(points.lmns[0].l, 0.0025326811687516274 * TAU);
-    assert_abs_diff_eq!(points.lmns[0].m, -0.12880688061967666 * TAU);
-    assert_abs_diff_eq!(points.lmns[0].n, (0.9916664625927036 - 1.0) * TAU);
+    assert_abs_diff_eq!(points.lmns[1].l / TAU, 0.0025326811687516274);
+    assert_abs_diff_eq!(points.lmns[1].m / TAU, -0.12880688061967666);
+    assert_abs_diff_eq!(points.lmns[1].n / TAU + 1.0, 0.9916664625927036);
 
     assert_eq!(points.flux_densities.dim(), (1, num_point_components));
     assert_eq!(gaussians.flux_densities.dim(), (1, num_gauss_components));
@@ -105,5 +105,5 @@ fn test_split_components() {
 
     let gaussian_flux_densities = gaussians.flux_densities.mapv(TestJones::from);
     let inst_fd = TestJones::from(inst_fd);
-    assert_abs_diff_eq!(gaussian_flux_densities[[0, 2]], inst_fd);
+    assert_abs_diff_eq!(gaussian_flux_densities[[0, 1]], inst_fd);
 }

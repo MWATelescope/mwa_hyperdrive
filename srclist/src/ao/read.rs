@@ -495,25 +495,17 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     in_component = false;
                     measurement_made_fd = false;
 
-                    // Check that the last component struct added actually has flux
-                    // densities.
-                    match &components.iter().last().unwrap().flux_type {
-                        TmpFluxDensityType::PowerLaw { fd, .. } => {
-                            if (fd.i + fd.q + fd.u + fd.v) < 1e-6 {
-                                return Err(
-                                    ReadSourceListCommonError::NoFluxDensities(line_num).into()
-                                );
-                            }
-                        }
+                    // Check that the last component struct added actually has
+                    // flux densities.
+                    let fd = match &components.iter().last().unwrap().flux_type {
+                        TmpFluxDensityType::PowerLaw { fd, .. } => fd.clone(),
                         TmpFluxDensityType::List(fds) => {
-                            let fd = fds.last().unwrap();
-                            if (fd.i + fd.q + fd.u + fd.v) < 1e-6 {
-                                return Err(
-                                    ReadSourceListCommonError::NoFluxDensities(line_num).into()
-                                );
-                            }
+                            fds.iter().fold(FluxDensity::default(), |acc, fd| acc + fd)
                         }
                         _ => unreachable!(),
+                    };
+                    if (fd.i.abs() + fd.q.abs() + fd.u.abs() + fd.v.abs()) < 1e-6 {
+                        return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
                     }
                 } else if in_source {
                     if components.is_empty() {

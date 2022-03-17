@@ -8,13 +8,26 @@
 //! [SourceList] isn't directly serialisable or deserialisable. Use temporary
 //! types here to do the serde magic and write out a [SourceList].
 
-use super::*;
-use mwa_hyperdrive_common::serde_json;
+use log::warn;
 
-fn source_list_to_tmp_sl(sl: &SourceList) -> TmpSourceList {
+use super::*;
+use mwa_hyperdrive_common::{log, serde_json};
+
+fn source_list_to_tmp_sl(sl: &SourceList, num_sources: Option<usize>) -> TmpSourceList {
     let mut tmp_sl: BTreeMap<String, Vec<TmpComponent>> = BTreeMap::new();
 
+    let mut num_written_sources = 0;
+    // Note that, if sorted, each source in the source list is dimmer than the
+    // last!
     for (name, source) in sl.iter() {
+        // If `num_sources` is supplied, then check that we're not writing out
+        // too many sources.
+        if let Some(num_sources) = num_sources {
+            if num_written_sources == num_sources {
+                break;
+            }
+        }
+
         let mut tmp_comps = Vec::with_capacity(source.components.len());
         for comp in &source.components {
             let comp_type = match &comp.comp_type {
@@ -59,6 +72,13 @@ fn source_list_to_tmp_sl(sl: &SourceList) -> TmpSourceList {
         }
 
         tmp_sl.insert(name.clone(), tmp_comps);
+        num_written_sources += 1;
+    }
+
+    if let Some(num_sources) = num_sources {
+        if num_sources > num_written_sources {
+            warn!("Couldn't write the requested number of sources ({num_sources}): wrote {num_written_sources}")
+        }
     }
 
     tmp_sl
@@ -68,8 +88,9 @@ fn source_list_to_tmp_sl(sl: &SourceList) -> TmpSourceList {
 pub fn source_list_to_yaml<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
+    num_sources: Option<usize>,
 ) -> Result<(), WriteSourceListError> {
-    let tmp_sl = source_list_to_tmp_sl(sl);
+    let tmp_sl = source_list_to_tmp_sl(sl, num_sources);
     serde_yaml::to_writer(buf, &tmp_sl)?;
     Ok(())
 }
@@ -78,8 +99,9 @@ pub fn source_list_to_yaml<T: std::io::Write>(
 pub fn source_list_to_json<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
+    num_sources: Option<usize>,
 ) -> Result<(), WriteSourceListError> {
-    let tmp_sl = source_list_to_tmp_sl(sl);
+    let tmp_sl = source_list_to_tmp_sl(sl, num_sources);
     serde_json::to_writer_pretty(buf, &tmp_sl)?;
     Ok(())
 }

@@ -21,6 +21,7 @@ hdf5-static = ["mwa_hyperdrive_beam/hdf5-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static"]
 
 [dependencies]
+indexmap = { version = "1.8.0", features = ["rayon"] }
 serde = { version = "1.0.103", features = ["derive"] }
 serde_yaml = "0.8.3"
 strum = "0.24.0"

@@ -179,57 +179,24 @@ fn test_1090008640_simulate_vis() {
         assert_eq!(status, 0, "Status wasn't 0");
     };
 
-    assert_abs_diff_eq!(group_params[0], -1.8128954e-7);
-    assert_abs_diff_eq!(group_params[1], -1.6615635e-8);
-    assert_abs_diff_eq!(group_params[2], -4.8240993e-9);
-    assert_abs_diff_eq!(group_params[3], 258.0);
-    assert_abs_diff_eq!(group_params[4], -0.15944445);
+    assert_abs_diff_eq!(
+        group_params[..],
+        [
+            -1.8128954e-7,
+            -1.6615635e-8,
+            -4.8240993e-9,
+            258.0,
+            -0.15944445
+        ]
+    );
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3405555487);
 
     // The values of the visibilities changes slightly depending on the precision.
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0], 36.740784);
-            assert_abs_diff_eq!(vis[1], -37.80606);
-            assert_abs_diff_eq!(vis[3], 36.464603);
-            assert_abs_diff_eq!(vis[4], -38.02713);
-            assert_abs_diff_eq!(vis[6], 0.12835015);
-            assert_abs_diff_eq!(vis[7], -0.07698194);
-            assert_abs_diff_eq!(vis[9], 0.13591044);
-            assert_abs_diff_eq!(vis[10], -0.051941235);
-            assert_abs_diff_eq!(vis[12], 36.677784);
-            assert_abs_diff_eq!(vis[13], -37.855076);
-            assert_abs_diff_eq!(vis[15], 36.411377);
-            assert_abs_diff_eq!(vis[16], -38.083076);
-            assert_abs_diff_eq!(vis[18], 0.13199334);
-            assert_abs_diff_eq!(vis[19], -0.07526353);
-            assert_abs_diff_eq!(vis[21], 0.13950741);
-            assert_abs_diff_eq!(vis[22], -0.050253063);
-            assert_abs_diff_eq!(vis[24], 36.61131);
-            assert_abs_diff_eq!(vis[25], -37.901936);
-            assert_abs_diff_eq!(vis[27], 36.354816);
-            assert_abs_diff_eq!(vis[28], -38.13698);
+            assert_abs_diff_eq!(vis[0..29], [36.740772, -37.80606, 1.0, 36.464615, -38.027126, 1.0, 0.12835014, -0.07698195, 1.0, 0.13591047, -0.051941246, 1.0, 36.677788, -37.855072, 1.0, 36.411392, -38.083076, 1.0, 0.13199338, -0.07526354, 1.0, 0.13950738, -0.050253063, 1.0, 36.61131, -37.90193, 1.0, 36.354816, -38.13698]);
         } else {
-            assert_abs_diff_eq!(vis[0], 36.740982);
-            assert_abs_diff_eq!(vis[1], -37.80591);
-            assert_abs_diff_eq!(vis[3], 36.464863);
-            assert_abs_diff_eq!(vis[4], -38.02699);
-            assert_abs_diff_eq!(vis[6], 0.12835437);
-            assert_abs_diff_eq!(vis[7], -0.07698456);
-            assert_abs_diff_eq!(vis[9], 0.13591558);
-            assert_abs_diff_eq!(vis[10], -0.05194349);
-            assert_abs_diff_eq!(vis[12], 36.677994);
-            assert_abs_diff_eq!(vis[13], -37.85488);
-            assert_abs_diff_eq!(vis[15], 36.411633);
-            assert_abs_diff_eq!(vis[16], -38.08291);
-            assert_abs_diff_eq!(vis[18], 0.13199718);
-            assert_abs_diff_eq!(vis[19], -0.075266466);
-            assert_abs_diff_eq!(vis[21], 0.1395122);
-            assert_abs_diff_eq!(vis[22], -0.050255615);
-            assert_abs_diff_eq!(vis[24], 36.61154);
-            assert_abs_diff_eq!(vis[25], -37.901764);
-            assert_abs_diff_eq!(vis[27], 36.355083);
-            assert_abs_diff_eq!(vis[28], -38.136826);
+            assert_abs_diff_eq!(vis[0..29], [36.740982, -37.80591, 1.0, 36.464863, -38.02699, 1.0, 0.12835437, -0.07698456, 1.0, 0.13591558, -0.05194349, 1.0, 36.677994, -37.85488, 1.0, 36.411633, -38.08291, 1.0, 0.13199718, -0.075266466, 1.0, 0.1395122, -0.050255615, 1.0, 36.61154, -37.901764, 1.0, 36.355083, -38.136826]);
         }
     }
     // Every third value (a weight) should be 1.
@@ -262,56 +229,23 @@ fn test_1090008640_simulate_vis() {
         assert_eq!(status, 0, "Status wasn't 0");
     };
 
-    assert_abs_diff_eq!(group_params[0], -1.8129641e-7);
-    assert_abs_diff_eq!(group_params[1], -1.6567755e-8);
-    assert_abs_diff_eq!(group_params[2], -4.729797e-9);
-    assert_abs_diff_eq!(group_params[3], 258.0);
-    assert_abs_diff_eq!(group_params[4], -0.15935186);
+    assert_abs_diff_eq!(
+        group_params[..],
+        [
+            -1.8129641e-7,
+            -1.6567755e-8,
+            -4.729797e-9,
+            258.0,
+            -0.15935186
+        ]
+    );
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406481445);
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0], 36.799625);
-            assert_abs_diff_eq!(vis[1], -37.711067);
-            assert_abs_diff_eq!(vis[3], 36.51971);
-            assert_abs_diff_eq!(vis[4], -37.921707);
-            assert_abs_diff_eq!(vis[6], 0.12917346);
-            assert_abs_diff_eq!(vis[7], -0.07720526);
-            assert_abs_diff_eq!(vis[9], 0.1368949);
-            assert_abs_diff_eq!(vis[10], -0.05224684);
-            assert_abs_diff_eq!(vis[12], 36.734447);
-            assert_abs_diff_eq!(vis[13], -37.760387);
-            assert_abs_diff_eq!(vis[15], 36.464058);
-            assert_abs_diff_eq!(vis[16], -37.97802);
-            assert_abs_diff_eq!(vis[18], 0.13280581);
-            assert_abs_diff_eq!(vis[19], -0.07548501);
-            assert_abs_diff_eq!(vis[21], 0.14047989);
-            assert_abs_diff_eq!(vis[22], -0.0505571);
-            assert_abs_diff_eq!(vis[24], 36.66581);
-            assert_abs_diff_eq!(vis[25], -37.807594);
-            assert_abs_diff_eq!(vis[27], 36.405113);
-            assert_abs_diff_eq!(vis[28], -38.03232);
+            assert_abs_diff_eq!(vis[0..29], [36.799625, -37.71107, 1.0, 36.51971, -37.921703, 1.0, 0.12917347, -0.07720526, 1.0, 0.1368949, -0.052246865, 1.0, 36.734455, -37.760387, 1.0, 36.46407, -37.978012, 1.0, 0.13280584, -0.07548499, 1.0, 0.1404799, -0.050557088, 1.0, 36.665825, -37.807594, 1.0, 36.405113, -38.032326]);
         } else {
-            assert_abs_diff_eq!(vis[0], 36.799675);
-            assert_abs_diff_eq!(vis[1], -37.71089);
-            assert_abs_diff_eq!(vis[3], 36.519768);
-            assert_abs_diff_eq!(vis[4], -37.921543);
-            assert_abs_diff_eq!(vis[6], 0.12917838);
-            assert_abs_diff_eq!(vis[7], -0.07721107);
-            assert_abs_diff_eq!(vis[9], 0.13689607);
-            assert_abs_diff_eq!(vis[10], -0.052250482);
-            assert_abs_diff_eq!(vis[12], 36.7345);
-            assert_abs_diff_eq!(vis[13], -37.760174);
-            assert_abs_diff_eq!(vis[15], 36.464123);
-            assert_abs_diff_eq!(vis[16], -37.97782);
-            assert_abs_diff_eq!(vis[18], 0.13281031);
-            assert_abs_diff_eq!(vis[19], -0.07549093);
-            assert_abs_diff_eq!(vis[21], 0.14048097);
-            assert_abs_diff_eq!(vis[22], -0.05056086);
-            assert_abs_diff_eq!(vis[24], 36.66584);
-            assert_abs_diff_eq!(vis[25], -37.807365);
-            assert_abs_diff_eq!(vis[27], 36.405136);
-            assert_abs_diff_eq!(vis[28], -38.032104);
+            assert_abs_diff_eq!(vis[0..29], [36.799675, -37.71089, 1.0, 36.519768, -37.921543, 1.0, 0.12917838, -0.07721107, 1.0, 0.13689607, -0.052250482, 1.0, 36.7345, -37.760174, 1.0, 36.464123, -37.97782, 1.0, 0.13281031, -0.07549093, 1.0, 0.14048097, -0.05056086, 1.0, 36.66584, -37.807365, 1.0, 36.405136, -38.032104]);
         }
     }
     for (i, vis) in vis.iter().enumerate() {

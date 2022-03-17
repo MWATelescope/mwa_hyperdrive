@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use clap::Parser;
 use itertools::Itertools;
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use marlu::RADec;
 use ndarray::{Array1, Array2};
 
@@ -32,63 +32,82 @@ use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, ndarray};
 #[derive(Parser, Debug)]
 pub struct ByBeamArgs {
     /// Path to the source list to be converted.
-    #[clap(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
+    #[clap(
+        name = "INPUT_SOURCE_LIST",
+        parse(from_os_str),
+        help_heading = "INPUT/OUTPUT FILES"
+    )]
     pub input_source_list: PathBuf,
 
     /// Path to the output source list. If not specified, then then "_N" is
     /// appended to the filename.
-    #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+    #[clap(
+        name = "OUTPUT_SOURCE_LIST",
+        parse(from_os_str),
+        help_heading = "INPUT/OUTPUT FILES"
+    )]
     pub output_source_list: Option<PathBuf>,
 
-    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str(), help_heading = "INPUT/OUTPUT FILES")]
     pub input_type: Option<String>,
 
-    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
+    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str(), help_heading = "INPUT/OUTPUT FILES")]
     pub output_type: Option<String>,
+
+    /// Path to the metafits file.
+    #[clap(
+        short = 'm',
+        long,
+        parse(from_str),
+        help_heading = "INPUT/OUTPUT FILES"
+    )]
+    pub metafits: PathBuf,
+
+    /// Path to the MWA FEE beam file. If this is not specified, then the
+    /// MWA_BEAM_FILE environment variable should contain the path.
+    #[clap(short, long, help_heading = "INPUT/OUTPUT FILES")]
+    pub beam_file: Option<PathBuf>,
 
     /// Reduce the input source list to the brightest N sources and write them
     /// to the output source list. If the input source list has less than N
     /// sources, then all sources are used.
-    #[clap(short = 'n', long)]
+    #[clap(short = 'n', long, help_heading = "SOURCE FILTERING")]
     pub number: usize,
 
-    /// Path to the metafits file.
-    #[clap(short = 'm', long, parse(from_str))]
-    pub metafits: PathBuf,
-
-    #[clap(long, help = SOURCE_DIST_CUTOFF_HELP.as_str())]
+    #[clap(long, help = SOURCE_DIST_CUTOFF_HELP.as_str(), help_heading = "SOURCE FILTERING")]
     pub source_dist_cutoff: Option<f64>,
 
-    #[clap(long, help = VETO_THRESHOLD_HELP.as_str())]
+    #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SOURCE FILTERING")]
     pub veto_threshold: Option<f64>,
 
-    /// Path to the MWA FEE beam file. If this is not specified, then the
-    /// MWA_BEAM_FILE environment variable should contain the path.
-    #[clap(short, long)]
-    pub beam_file: Option<PathBuf>,
-
-    /// Collapse all of the sky-model components into a single source; the
-    /// apparently brightest source is used as the base source. This is suitable
-    /// for an "RTS patch source list".
-    #[clap(long)]
-    pub collapse_into_single_source: bool,
-
     /// Don't include point components from the input sky model.
-    #[clap(long)]
+    #[clap(long, help_heading = "SOURCE FILTERING")]
     filter_points: bool,
 
     /// Don't include Gaussian components from the input sky model.
-    #[clap(long)]
+    #[clap(long, help_heading = "SOURCE FILTERING")]
     filter_gaussians: bool,
 
     /// Don't include shapelet components from the input sky model.
-    #[clap(long)]
+    #[clap(long, help_heading = "SOURCE FILTERING")]
     filter_shapelets: bool,
 
     /// The verbosity of the program. The default is to print high-level
     /// information.
     #[clap(short, long, parse(from_occurrences))]
     pub verbosity: u8,
+
+    /// Collapse all of the sky-model components into a single source; the
+    /// apparently brightest source is used as the base source (unless overriden
+    /// below). This is suitable for an "RTS patch source list" in DI
+    /// calibration.
+    #[clap(long, help_heading = "RTS-ONLY ARGUMENTS")]
+    pub collapse_into_single_source: bool,
+
+    /// If collapsing the source list into a single source, use this source as
+    /// the base source; this is very important for RTS DI calibration.
+    #[clap(long, help_heading = "RTS-ONLY ARGUMENTS")]
+    pub rts_base_source: Option<String>,
 }
 
 impl ByBeamArgs {
@@ -104,10 +123,11 @@ impl ByBeamArgs {
             self.source_dist_cutoff,
             self.veto_threshold,
             self.beam_file.as_ref(),
-            self.collapse_into_single_source,
             self.filter_points,
             self.filter_gaussians,
             self.filter_shapelets,
+            self.collapse_into_single_source,
+            self.rts_base_source.as_ref(),
         )
     }
 }
@@ -123,10 +143,11 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
     source_dist_cutoff: Option<f64>,
     veto_threshold: Option<f64>,
     beam_file: Option<P>,
-    collapse_into_single_source: bool,
     filter_points: bool,
     filter_gaussians: bool,
     filter_shapelets: bool,
+    collapse_into_single_source: bool,
+    rts_base_source: Option<S>,
 ) -> Result<(), SrclistError> {
     fn inner(
         input_path: &Path,
@@ -138,10 +159,11 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         source_dist_cutoff: Option<f64>,
         veto_threshold: Option<f64>,
         beam_file: Option<&Path>,
-        collapse_into_single_source: bool,
         filter_points: bool,
         filter_gaussians: bool,
         filter_shapelets: bool,
+        collapse_into_single_source: bool,
+        rts_base_source: Option<&str>,
     ) -> Result<(), SrclistError> {
         // Read the input source list.
         let input_type = input_type.and_then(|t| SourceListType::from_str(t).ok());
@@ -224,6 +246,7 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         );
 
         // Set up the beam.
+        // TODO: Use ideal dipole delays.
         let beam =
             create_fee_beam_object(beam_file, 1, Delays::Full(get_dipole_delays(&meta)), None)?;
 
@@ -241,34 +264,39 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         };
 
         // Veto sources.
-        let brightest_source_name = veto_sources(
+        veto_sources(
             &mut sl,
             phase_centre,
             lst,
             marlu::constants::MWA_LAT_RAD,
             &coarse_chan_freqs,
             beam.deref(),
-            Some(num_sources),
+            None,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
         // Were any sources left after vetoing?
-        let brightest_source_name = match brightest_source_name {
-            Some(n) => n,
-            None => return Err(SrclistError::NoSourcesAfterVeto),
+        if sl.is_empty() {
+            return Err(SrclistError::NoSourcesAfterVeto);
         };
 
         // If requested, collapse the source list.
         sl = if collapse_into_single_source {
+            let base = rts_base_source
+                .unwrap_or(sl.get_index(0).unwrap().0)
+                .to_owned();
             let mut collapsed = SourceList::new();
-            let brightest = sl.remove_entry(&brightest_source_name).unwrap();
-            collapsed.insert(brightest.0, brightest.1);
-            let base_src = collapsed.get_mut(&brightest_source_name).unwrap();
+            let base = sl.remove_entry(&base).unwrap();
+            collapsed.insert(base.0, base.1);
+            let base_src = collapsed.get_index_mut(0).unwrap().1;
             sl.into_iter()
                 .flat_map(|(_, src)| src.components)
                 .for_each(|comp| base_src.components.push(comp));
             collapsed
         } else {
+            if rts_base_source.is_some() {
+                warn!("RTS base source was supplied, but we're not collapsing the source list into a single source.");
+            }
             sl
         };
 
@@ -285,33 +313,32 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
                 .into())
             }
             (SourceListType::Rts, _) => {
-                rts::write_source_list(&mut f, &sl)?;
+                rts::write_source_list(&mut f, &sl, Some(num_sources))?;
                 info!("Wrote rts-style source list to {}", output_path.display());
             }
             (SourceListType::AO, _) => {
-                ao::write_source_list(&mut f, &sl)?;
+                ao::write_source_list(&mut f, &sl, Some(num_sources))?;
                 info!("Wrote ao-style source list to {}", output_path.display());
             }
             (SourceListType::Woden, _) => {
-                woden::write_source_list(&mut f, &sl)?;
+                woden::write_source_list(&mut f, &sl, Some(num_sources))?;
                 info!("Wrote woden-style source list to {}", output_path.display());
             }
             (_, Some(HyperdriveFileType::Yaml)) => {
-                hyperdrive::source_list_to_yaml(&mut f, &sl)?;
+                hyperdrive::source_list_to_yaml(&mut f, &sl, Some(num_sources))?;
                 info!(
                     "Wrote hyperdrive-style source list to {}",
                     output_path.display()
                 );
             }
             (_, Some(HyperdriveFileType::Json)) => {
-                hyperdrive::source_list_to_json(&mut f, &sl)?;
+                hyperdrive::source_list_to_json(&mut f, &sl, Some(num_sources))?;
                 info!(
                     "Wrote hyperdrive-style source list to {}",
                     output_path.display()
                 );
             }
         }
-
         f.flush()?;
 
         Ok(())
@@ -326,10 +353,11 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         source_dist_cutoff,
         veto_threshold,
         beam_file.as_ref().map(|f| f.as_ref()),
-        collapse_into_single_source,
         filter_points,
         filter_gaussians,
         filter_shapelets,
+        collapse_into_single_source,
+        rts_base_source.as_ref().map(|f| f.as_ref()),
     )
 }
 

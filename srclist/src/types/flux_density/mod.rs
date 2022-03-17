@@ -67,6 +67,34 @@ fn is_zero(num: &f64) -> bool {
     num.abs() < f64::EPSILON
 }
 
+impl std::ops::Add<FluxDensity> for FluxDensity {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        FluxDensity {
+            freq: self.freq,
+            i: self.i + rhs.i,
+            q: self.q + rhs.q,
+            u: self.u + rhs.u,
+            v: self.v + rhs.v,
+        }
+    }
+}
+
+impl std::ops::Add<&FluxDensity> for FluxDensity {
+    type Output = Self;
+
+    fn add(self, rhs: &Self) -> Self {
+        FluxDensity {
+            freq: self.freq,
+            i: self.i + rhs.i,
+            q: self.q + rhs.q,
+            u: self.u + rhs.u,
+            v: self.v + rhs.v,
+        }
+    }
+}
+
 impl std::ops::Mul<f64> for FluxDensity {
     type Output = Self;
 

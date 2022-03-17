@@ -396,6 +396,24 @@ impl SimVisParams {
             array_longitude,
             array_latitude,
         );
+
+        // Get the coarse channel information out of the metafits file, but only
+        // the ones aligned with the specified frequencies here.
+        let coarse_chan_freqs: Vec<f64> = {
+            let cc_width = f64::from(metafits.coarse_chan_width_hz);
+
+            metafits
+                .metafits_coarse_chans
+                .iter()
+                .map(|cc| f64::from(cc.chan_centre_hz))
+                .filter(|cc_freq| {
+                    fine_chan_freqs
+                        .iter()
+                        .any(|f| (*f as f64 - *cc_freq).abs() < cc_width / 2.0)
+                })
+                .collect()
+        };
+
         veto_sources(
             &mut source_list,
             precession_info
@@ -403,11 +421,7 @@ impl SimVisParams {
                 .to_radec(precession_info.lmst_j2000),
             precession_info.lmst_j2000,
             precession_info.array_latitude_j2000,
-            &metafits
-                .metafits_coarse_chans
-                .iter()
-                .map(|cc| cc.chan_centre_hz as _)
-                .collect::<Vec<_>>(),
+            &coarse_chan_freqs,
             beam.deref(),
             num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),

@@ -1,0 +1,124 @@
+---
+point-list:
+  - ra: 0.0
+    dec: 1.0
+    comp_type: point
+    flux_type:
+      list:
+        - freq: 150e6
+          i: 1.0
+point-power-law:
+  - ra: 1.0
+    dec: 2.0
+    comp_type: point
+    flux_type:
+      power_law:
+        si: -0.8
+        fd:
+          freq: 150e6
+          i: 1.0
+point-curved-power-law:
+  - ra: 3.0
+    dec: 4.0
+    comp_type: point
+    flux_type:
+      curved_power_law:
+        si: -0.8
+        fd:
+          freq: 150e6
+          i: 1.0
+        q: 0.2
+gaussian-list:
+  - ra: 0.0
+    dec: 1.0
+    comp_type:
+      gaussian:
+        maj: 20.0
+        min: 10.0
+        pa: 75.0
+    flux_type:
+      list:
+        - freq: 150e6
+          i: 1.0
+gaussian-power-law:
+  - ra: 1.0
+    dec: 2.0
+    comp_type:
+      gaussian:
+        maj: 20.0
+        min: 10.0
+        pa: 75.0
+    flux_type:
+      power_law:
+        si: -0.8
+        fd:
+          freq: 150e6
+          i: 1.0
+gaussian-curved-power-law:
+  - ra: 3.0
+    dec: 4.0
+    comp_type:
+      gaussian:
+        maj: 20.0
+        min: 10.0
+        pa: 75.0
+    flux_type:
+      curved_power_law:
+        si: -0.8
+        fd:
+          freq: 150e6
+          i: 1.0
+        q: 0.2
+shapelet-list:
+  - ra: 0.0
+    dec: 1.0
+    comp_type:
+      shapelet:
+        maj: 20.0
+        min: 10.0
+        pa: 75.0
+        coeffs:
+          - n1: 0
+            n2: 1
+            value: 0.5
+    flux_type:
+      list:
+        - freq: 150e6
+          i: 1.0
+shapelet-power-law:
+  - ra: 1.0
+    dec: 2.0
+    comp_type:
+      shapelet:
+        maj: 20.0
+        min: 10.0
+        pa: 75.0
+        coeffs:
+          - n1: 0
+            n2: 1
+            value: 0.5
+    flux_type:
+      power_law:
+        si: -0.8
+        fd:
+          freq: 150e6
+          i: 1.0
+shapelet-curved-power-law:
+  - ra: 3.0
+    dec: 4.0
+    comp_type:
+      shapelet:
+        maj: 20.0
+        min: 10.0
+        pa: 75.0
+        coeffs:
+          - n1: 0
+            n2: 1
+            value: 0.5
+    flux_type:
+      curved_power_law:
+        si: -0.8
+        fd:
+          freq: 150e6
+          i: 1.0
+        q: 0.2

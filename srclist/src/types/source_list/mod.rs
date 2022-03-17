@@ -2,27 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code surrounding the [BTreeMap] used to contain all sky-model sources and
+//! Code surrounding the [IndexMap] used to contain all sky-model sources and
 //! their components.
 
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
+use indexmap::IndexMap;
 use marlu::{constants::MWA_LAT_RAD, AzEl, RADec, LMN};
 use rayon::prelude::*;
 
 use super::*;
 use mwa_hyperdrive_common::{marlu, rayon};
 
-/// A [BTreeMap] of source names for keys and [Source] structs for values.
+/// A [IndexMap] of source names for keys and [Source] structs for values.
 ///
 /// By making [SourceList] a new type (specifically, an anonymous struct),
 /// useful methods can be put onto it.
 #[derive(Debug, Clone, Default)]
-pub struct SourceList(BTreeMap<String, Source>);
+pub struct SourceList(IndexMap<String, Source>);
 
 impl SourceList {
     /// Create an empty [SourceList].
@@ -67,7 +67,7 @@ impl SourceList {
         filter_gaussians: bool,
         filter_shapelets: bool,
     ) -> SourceList {
-        let sl: BTreeMap<_, _> = self
+        let sl: IndexMap<_, _> = self
             .0
             .into_iter()
             // Filter sources containing any of the rejected types.
@@ -88,7 +88,7 @@ impl SourceList {
     /// Get azimuth and elevation coordinates for all components of all sources.
     /// Useful for interfacing with beam code.
     ///
-    /// Because [SourceList] is a [BTreeMap], the order of the sources is always
+    /// Because [SourceList] is a [IndexMap], the order of the sources is always
     /// the same, so the [AzEl] coordinates returned from this function are 1:1
     /// with sources and their components.
     pub fn get_azel(&self, lst_rad: f64, latitude_rad: f64) -> Vec<AzEl> {
@@ -110,7 +110,7 @@ impl SourceList {
     /// Useful for interfacing with beam code. The sources are iterated in
     /// parallel.
     ///
-    /// Because [SourceList] is a [BTreeMap], the order of the sources is always
+    /// Because [SourceList] is a [IndexMap], the order of the sources is always
     /// the same, so the [AzEl] coordinates returned from this function are 1:1
     /// with sources and their components.
     pub fn get_azel_parallel(&self, lst_rad: f64, latitude_rad: f64) -> Vec<AzEl> {
@@ -146,14 +146,14 @@ impl SourceList {
     }
 }
 
-impl From<BTreeMap<String, Source>> for SourceList {
-    fn from(sl: BTreeMap<String, Source>) -> Self {
+impl From<IndexMap<String, Source>> for SourceList {
+    fn from(sl: IndexMap<String, Source>) -> Self {
         Self(sl)
     }
 }
 
 impl Deref for SourceList {
-    type Target = BTreeMap<String, Source>;
+    type Target = IndexMap<String, Source>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -168,9 +168,9 @@ impl DerefMut for SourceList {
 
 impl IntoIterator for SourceList {
     type Item = (String, Source);
-    type IntoIter = std::collections::btree_map::IntoIter<String, Source>;
+    type IntoIter = indexmap::map::IntoIter<String, Source>;
 
-    fn into_iter(self) -> std::collections::btree_map::IntoIter<String, Source> {
+    fn into_iter(self) -> indexmap::map::IntoIter<String, Source> {
         self.0.into_iter()
     }
 }

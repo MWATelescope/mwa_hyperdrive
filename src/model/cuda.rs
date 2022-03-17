@@ -253,7 +253,18 @@ impl<'a> SkyModellerCuda<'a> {
             }
         }
 
-        for comp in source_list.iter().flat_map(|(_, src)| &src.components) {
+        // Reverse the source list; if the source list has been sorted
+        // (brightest sources first), reversing makes the dimmest sources get
+        // used first. This is good because floating-point precision errors are
+        // smaller when similar values are accumulated. Accumulating into a
+        // float starting from the brightest component means that the
+        // floating-point precision errors are greater as we work through the
+        // source list.
+        for comp in source_list
+            .iter()
+            .rev()
+            .flat_map(|(_, src)| &src.components)
+        {
             let radec = comp.radec;
             let LMN { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
             let lmn = cuda::LMN {

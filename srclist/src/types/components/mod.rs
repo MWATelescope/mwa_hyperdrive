@@ -159,7 +159,18 @@ impl ComponentList {
         let mut shapelet_gaussian_params = vec![];
         let mut shapelet_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
-        for comp in source_list.iter().flat_map(|(_, src)| &src.components) {
+        // Reverse the source list; if the source list has been sorted
+        // (brightest sources first), reversing makes the dimmest sources get
+        // used first. This is good because floating-point precision errors are
+        // smaller when similar values are accumulated. Accumulating into a
+        // float starting from the brightest component means that the
+        // floating-point precision errors are greater as we work through the
+        // source list.
+        for comp in source_list
+            .iter()
+            .rev()
+            .flat_map(|(_, src)| &src.components)
+        {
             let comp_lmn = comp.radec.to_lmn(phase_centre).prepare_for_rime();
             match &comp.comp_type {
                 ComponentType::Point => {

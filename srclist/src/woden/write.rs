@@ -8,7 +8,10 @@
 //! only the first flux density in a list of flux densities will be written
 //! here.
 
+use log::{debug, warn};
+
 use super::*;
+use mwa_hyperdrive_common::log;
 
 fn write_comp_type<T: std::io::Write>(
     buf: &mut T,
@@ -84,8 +87,37 @@ fn write_flux_type<T: std::io::Write>(
 pub fn write_source_list<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
+    num_sources: Option<usize>,
 ) -> Result<(), WriteSourceListError> {
+    // The WODEN format can't handle curved-power-law flux types.
+    let mut warned_curved_power_laws = false;
+
+    let mut num_written_sources = 0;
+    // Note that, if sorted, each source in the source list is dimmer than the
+    // last!
     for (name, source) in sl.iter() {
+        if source
+            .components
+            .iter()
+            .any(|comp| matches!(comp.flux_type, FluxDensityType::CurvedPowerLaw { .. }))
+        {
+            if !warned_curved_power_laws {
+                warn!("WODEN source lists don't support curved-power-law flux densities.");
+                warn!("Any sources containing them won't be written.");
+                warned_curved_power_laws = true;
+            }
+            debug!("Ignoring source {name} as it contains a curved power law");
+            continue;
+        }
+
+        // If `num_sources` is supplied, then check that we're not writing out
+        // too many sources.
+        if let Some(num_sources) = num_sources {
+            if num_written_sources == num_sources {
+                break;
+            }
+        }
+
         // Get the counts of each type of component.
         let mut num_points = 0;
         let mut num_gaussians = 0;
@@ -135,8 +167,15 @@ pub fn write_source_list<T: std::io::Write>(
         }
 
         writeln!(buf, "ENDSOURCE")?;
+        num_written_sources += 1;
     }
     buf.flush()?;
+
+    if let Some(num_sources) = num_sources {
+        if num_sources > num_written_sources {
+            warn!("Couldn't write the requested number of sources ({num_sources}): wrote {num_written_sources}")
+        }
+    }
 
     Ok(())
 }

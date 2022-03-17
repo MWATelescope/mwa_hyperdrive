@@ -27,14 +27,16 @@ fn test_1090008640_calibrate_model() {
     let mut model = temp_dir.clone();
     model.push("model.uvfits");
     let args = get_reduced_1090008640(true, false);
+    let metafits = &args.data.as_ref().unwrap()[0];
+    let srclist = args.source_list.unwrap();
 
     let cmd = hyperdrive()
         .args(&[
             "simulate-vis",
             "--metafits",
-            &args.data.as_ref().unwrap()[0],
+            metafits,
             "--source-list",
-            args.source_list.as_ref().unwrap(),
+            &srclist,
             "--output-model-file",
             &format!("{}", model.display()),
             "--num-timesteps",
@@ -55,9 +57,9 @@ fn test_1090008640_calibrate_model() {
             "di-calibrate",
             "--data",
             &format!("{}", model.display()),
-            &args.data.as_ref().unwrap()[0],
+            metafits,
             "--source-list",
-            &args.source_list.unwrap(),
+            &srclist,
             "--outputs",
             &format!("{}", sols.display()),
             "--model-filename",

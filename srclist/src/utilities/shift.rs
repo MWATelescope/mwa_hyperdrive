@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use clap::Parser;
+use indexmap::IndexMap;
 use log::{debug, info, trace, warn};
 use marlu::RADec;
 use rayon::prelude::*;
@@ -179,7 +180,7 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
         // sources. All components of a source get shifted the same amount.
         let mut sl = {
             let no_shift = RaDec { ra: 0.0, dec: 0.0 };
-            let tmp_sl: BTreeMap<String, Source> = sl
+            let tmp_sl: IndexMap<String, Source> = sl
                 .into_iter()
                 .filter(|(name, _)| include_unshifted_sources || source_shifts.contains_key(name))
                 .map(|(name, mut src)| {
@@ -303,22 +304,22 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
                 info!("Wrote rts-style source list to {}", output_path.display());
             }
             (SourceListType::AO, _) => {
-                ao::write_source_list(&mut f, &sl)?;
+                ao::write_source_list(&mut f, &sl, None)?;
                 info!("Wrote ao-style source list to {}", output_path.display());
             }
             (SourceListType::Woden, _) => {
-                woden::write_source_list(&mut f, &sl)?;
+                woden::write_source_list(&mut f, &sl, None)?;
                 info!("Wrote woden-style source list to {}", output_path.display());
             }
             (_, Some(HyperdriveFileType::Yaml)) => {
-                hyperdrive::source_list_to_yaml(&mut f, &sl)?;
+                hyperdrive::source_list_to_yaml(&mut f, &sl, None)?;
                 info!(
                     "Wrote hyperdrive-style source list to {}",
                     output_path.display()
                 );
             }
             (_, Some(HyperdriveFileType::Json)) => {
-                hyperdrive::source_list_to_json(&mut f, &sl)?;
+                hyperdrive::source_list_to_json(&mut f, &sl, None)?;
                 info!(
                     "Wrote hyperdrive-style source list to {}",
                     output_path.display()

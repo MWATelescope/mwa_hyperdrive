@@ -217,14 +217,14 @@ pub fn convert<P: AsRef<Path>, S: AsRef<str>>(
 
         match (output_type, output_file_type) {
             (_, Some(HyperdriveFileType::Yaml)) => {
-                hyperdrive::source_list_to_yaml(&mut f, &sl)?;
+                hyperdrive::source_list_to_yaml(&mut f, &sl, None)?;
                 info!(
                     "Wrote hyperdrive-style source list to {}",
                     output_path.display()
                 );
             }
             (_, Some(HyperdriveFileType::Json)) => {
-                hyperdrive::source_list_to_json(&mut f, &sl)?;
+                hyperdrive::source_list_to_json(&mut f, &sl, None)?;
                 info!(
                     "Wrote hyperdrive-style source list to {}",
                     output_path.display()
@@ -237,15 +237,15 @@ pub fn convert<P: AsRef<Path>, S: AsRef<str>>(
                 .into())
             }
             (Some(SourceListType::Rts), _) => {
-                rts::write_source_list(&mut f, &sl)?;
+                rts::write_source_list(&mut f, &sl, None)?;
                 info!("Wrote rts-style source list to {}", output_path.display());
             }
             (Some(SourceListType::AO), _) => {
-                ao::write_source_list(&mut f, &sl)?;
+                ao::write_source_list(&mut f, &sl, None)?;
                 info!("Wrote ao-style source list to {}", output_path.display());
             }
             (Some(SourceListType::Woden), _) => {
-                woden::write_source_list(&mut f, &sl)?;
+                woden::write_source_list(&mut f, &sl, None)?;
                 info!("Wrote woden-style source list to {}", output_path.display());
             }
             (None, None) => return Err(WriteSourceListError::NotEnoughInfo.into()),

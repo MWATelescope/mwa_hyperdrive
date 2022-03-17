@@ -271,7 +271,7 @@ impl UvfitsReader {
 
             // Get the obsid. There is an "obs. name" in the "object" filed, but
             // that's not the same thing.
-            let obsid = mwalib_context.map(|context| context.obs_id);
+            let obsid = mwalib_context.as_ref().map(|context| context.obs_id);
 
             let step = metadata.num_rows / timestamps.len();
 
@@ -318,10 +318,33 @@ impl UvfitsReader {
             let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
             for i in 0..metadata.num_fine_freq_chans {
                 fine_chan_freqs.push(
-                    (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round() as _,
+                    (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round() as u64,
                 );
             }
             let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
+
+            let (coarse_chan_nums, coarse_chan_freqs) = match mwalib_context {
+                Some(context) => {
+                    // Get the coarse channel information out of the metafits
+                    // file, but only the ones aligned with the frequencies in
+                    // the uvfits file.
+                    let cc_width = f64::from(context.coarse_chan_width_hz);
+
+                    context
+                        .metafits_coarse_chans
+                        .iter()
+                        .map(|cc| (cc.gpubox_number as u32, f64::from(cc.chan_centre_hz)))
+                        .filter(|(_, cc_freq)| {
+                            fine_chan_freqs
+                                .iter()
+                                .any(|f| (*f as f64 - *cc_freq).abs() < cc_width / 2.0)
+                        })
+                        .unzip()
+                }
+                // TODO - populate properly. The values don't matter until we want to
+                // use coarse channel information.
+                None => (vec![1], vec![150e6]),
+            };
 
             let obs_context = ObsContext {
                 obsid,
@@ -339,10 +362,8 @@ impl UvfitsReader {
                 // TODO: Where does this live in a uvfits?
                 array_longitude_rad: None,
                 array_latitude_rad: None,
-                // TODO - populate properly. The values don't matter until we want to
-                // use coarse channel information.
-                coarse_chan_nums: vec![1],
-                coarse_chan_freqs: vec![150e6],
+                coarse_chan_nums,
+                coarse_chan_freqs,
                 num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
                 freq_res: Some(freq_res),
                 fine_chan_freqs,

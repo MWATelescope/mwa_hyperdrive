@@ -4,7 +4,7 @@
 
 //! Writing "André Offringa"-style text source lists.
 
-use log::warn;
+use log::{debug, warn};
 use marlu::sexagesimal::*;
 
 use super::*;
@@ -13,13 +13,53 @@ use mwa_hyperdrive_common::log;
 pub fn write_source_list<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
+    num_sources: Option<usize>,
 ) -> Result<(), WriteSourceListError> {
-    // If we find any shapelets, warn the user, but only do it once.
-    let mut found_shapelets = false;
+    // The AO format can't handle curved-power-law flux types or shapelet
+    // components.
+    let mut warned_shapelets = false;
+    let mut warned_curved_power_laws = false;
 
     writeln!(buf, "skymodel fileformat 1.1")?;
 
+    let mut num_written_sources = 0;
+    // Note that, if sorted, each source in the source list is dimmer than the
+    // last!
     for (name, source) in sl.iter() {
+        let (any_curved_power_laws, any_shapelets) =
+            source.components.iter().fold((false, false), |acc, comp| {
+                (
+                    acc.0 || matches!(comp.flux_type, FluxDensityType::CurvedPowerLaw { .. }),
+                    acc.1 || matches!(comp.comp_type, ComponentType::Shapelet { .. }),
+                )
+            });
+        if any_curved_power_laws {
+            if !warned_curved_power_laws {
+                warn!("AO source lists don't support curved-power-law flux densities.");
+                warn!("Any sources containing them won't be written.");
+                warned_curved_power_laws = true;
+            }
+            debug!("Ignoring source {name} as it contains a curved power law");
+            continue;
+        }
+        if any_shapelets {
+            if !warned_shapelets {
+                warn!("AO source lists don't support shapelet components.");
+                warn!("Any sources containing them won't be written.");
+                warned_shapelets = true;
+            }
+            debug!("Ignoring source {name} as it contains a shapelet component");
+            continue;
+        }
+
+        // If `num_sources` is supplied, then check that we're not writing out
+        // too many sources.
+        if let Some(num_sources) = num_sources {
+            if num_written_sources == num_sources {
+                break;
+            }
+        }
+
         writeln!(buf, "source {{")?;
         writeln!(buf, "  name \"{}\"", name)?;
         for c in &source.components {
@@ -29,11 +69,10 @@ pub fn write_source_list<T: std::io::Write>(
                 ComponentType::Point => ("point", None),
                 ComponentType::Gaussian { maj, min, pa } => ("gaussian", Some((maj, min, pa))),
                 ComponentType::Shapelet { .. } => {
-                    if !found_shapelets {
-                        warn!("AO-style source lists don't support shapelets; ignoring them");
-                    }
-                    found_shapelets = true;
-                    continue;
+                    return Err(WriteSourceListError::UnsupportedComponentType {
+                        source_list_type: "AO",
+                        comp_type: "shapelet",
+                    })
                 }
             };
             writeln!(buf, "    type {}", comp_type)?;
@@ -93,8 +132,15 @@ pub fn write_source_list<T: std::io::Write>(
         }
 
         writeln!(buf, "}}")?;
+        num_written_sources += 1;
     }
     buf.flush()?;
+
+    if let Some(num_sources) = num_sources {
+        if num_sources > num_written_sources {
+            warn!("Couldn't write the requested number of sources ({num_sources}): wrote {num_written_sources}")
+        }
+    }
 
     Ok(())
 }

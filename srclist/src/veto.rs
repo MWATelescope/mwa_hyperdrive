@@ -8,6 +8,8 @@
 //! its brightness too severely (veto), or we request a certain number of
 //! sources (say N) and there are more than N sources in the source list.
 
+use std::collections::BTreeMap;
+
 use log::{debug, trace, log_enabled, Level::Trace};
 use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
@@ -17,33 +19,26 @@ use crate::{FluxDensity, SourceList, constants::*};
 use mwa_hyperdrive_beam::{BeamError, Beam};
 use mwa_hyperdrive_common::{log, rayon, thiserror, marlu};
 
-#[derive(Debug)]
-struct RankedSource<'a> {
-    name: &'a String,
-    apparent_fd: f64,
-}
-
 /// This function mutates the input source list, removing any sources that have
-/// beam-attenuated flux densities less than the threshold, and/or remove
-/// sources that aren't in the top N sources specified by `num_sources`. The
-/// name of the apparently brightest source is returned.
+/// components below the elevation limit, components that are too far from the
+/// phase centre, components with beam-attenuated flux densities less than the
+/// threshold, and/or remove sources that aren't in the top N sources specified
+/// by `num_sources`. The source list is also sorted by reverse brightness; i.e.
+/// the brightest source is first. ([`SourceList`] is actually an
+/// `indexmap::IndexMap`, which is like an order-preserved `HashMap`.)
 ///
 /// This is important for calibration, because it is expensive to generate a sky
 /// model, and using only dim sources would result in poor calibration.
 ///
-/// If the input `source_list` has more sources than `num_sources`, then
-/// `source_cutoff_dist` is used to keep the number of calculations down (filter
-/// any sources that are more than that many degrees away). Otherwise, only
-/// sources that need to be vetoed due to their positions in the beam are
-/// vetoed.
+/// Sources are vetoed if any of their components are further away from the
+/// phase centre than `source_dist_cutoff_deg` or their beam attenuated flux
+/// densities are less than `veto_threshold`.
+///
+/// If there are fewer sources than that of `num_sources`, an error is returned;
+/// it's up to the caller to handle this if they want to.
 ///
 /// `coarse_chan_freqs_hz`: The centre frequencies of each of the coarse
 /// channels of this observation \[Hz\].
-///
-/// Assume an ideal array (all dipoles with unity gain). Also assume that the
-/// observation does not elapse enough time to shift sources into beam nulls
-/// compared to the obs start.
-// TODO: Ensure the documentation is accurate.
 #[allow(clippy::too_many_arguments)]
 pub fn veto_sources(
     source_list: &mut SourceList,
@@ -55,13 +50,15 @@ pub fn veto_sources(
     num_sources: Option<usize>,
     source_dist_cutoff_deg: f64,
     veto_threshold: f64,
-) -> Result<Option<String>, VetoError> {
+) -> Result<(), VetoError> {
     let dist_cutoff = source_dist_cutoff_deg.to_radians();
 
     // TODO: This step is relatively expensive!
-    let (vetoed_sources, mut not_vetoed_sources): (Vec<Result<&String, VetoError>>, Vec<RankedSource>) = source_list
+    let (vetoed_sources, not_vetoed_sources): (Vec<Result<String, VetoError>>, BTreeMap<String, f64>) = source_list
         .par_iter()
         .partition_map(|(source_name, source)| {
+            let source_name = source_name.to_owned();
+
             // For this source, work out its smallest flux density at any of the
             // coarse channel frequencies. This is how we determine which
             // sources are "best".
@@ -74,14 +71,14 @@ pub fn veto_sources(
                 let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                 if azel.el.to_degrees() < ELEVATION_LIMIT {
                     if log_enabled!(Trace) {
-                        trace!("A component's elevation ({}°, source {}) was below the limit ({}°)", azel.el.to_degrees(), source_name, ELEVATION_LIMIT);
+                        trace!("A component's elevation ({}°, source {source_name}) was below the limit ({ELEVATION_LIMIT}°)", azel.el.to_degrees());
                     }
                     return Either::Left(Ok(source_name));
                 }
                 let separation = comp.radec.separation(phase_centre);
                 if separation > dist_cutoff {
                     if log_enabled!(Trace) {
-                        trace!("A component (source {}) was too far from the phase centre (separation {}°)", source_name, separation);
+                        trace!("A component (source {source_name}) was too far from the phase centre (separation {separation}°)");
                     }
                     return Either::Left(Ok(source_name));
                 }
@@ -129,33 +126,36 @@ pub fn veto_sources(
             }
 
             // If we got this far, the source should not be vetoed.
-            Either::Right(RankedSource {
-                name: source_name,
-                apparent_fd: smallest_fd,
-            })
+            Either::Right((source_name, smallest_fd))
         });
 
     // Handle potential errors while vetoing (such as the beam code failing).
     let mut vetoed_sources = vetoed_sources.into_iter().collect::<Result<Vec<_>, _>>()?;
 
-    // Reverse-sort the sources by brightness.
-    not_vetoed_sources.par_sort_unstable_by(|a, b| {
-        b.apparent_fd
-            .partial_cmp(&a.apparent_fd)
-            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.apparent_fd, b.apparent_fd))
+    // Remove vetoed sources from the source list.
+    for name in vetoed_sources.iter() {
+        source_list.remove_entry(name);
+    }
+
+    // Now that only not-vetoed sources are left in the source list, sort the
+    // sources *descendingly* with respect to brightness. i.e. The apparently
+    // brightest source is first.
+    source_list.par_sort_unstable_by(|a_key, _, b_key, _| {
+        let a_brightness = not_vetoed_sources[a_key];
+        let b_brightness = not_vetoed_sources[b_key];
+        b_brightness.partial_cmp(&a_brightness)
+            // No NaNs should be here.
+            .unwrap()
     });
+    drop(not_vetoed_sources);
 
     // Reduce the number of sources if we have to.
     if let Some(n) = num_sources {
-        if not_vetoed_sources.len() > n {
+        if source_list.len() > n {
             // Add the not-top-N sources into `vetoed_sources`.
-            let mut dimmer_sources = not_vetoed_sources.drain(n..).map(|ranked_source| ranked_source.name).collect();
-            vetoed_sources.append(&mut dimmer_sources);
+            source_list.drain(n..).for_each(|(name, _)| vetoed_sources.push(name));
         }
     }
-
-    let first_name = not_vetoed_sources.first().map(|rs| rs.name.clone());
-    drop(not_vetoed_sources);
 
     debug!(
         "{} sources were vetoed from the source list",
@@ -166,13 +166,6 @@ pub fn veto_sources(
         vetoed_sources.len(),
         vetoed_sources
     );
-
-    // TODO: Please, someone, help me!
-    let asdf: Vec<String> = vetoed_sources.iter().map(|s| s.to_owned().to_owned()).collect();
-    drop(vetoed_sources);
-    for name in asdf {
-        source_list.remove(&name);
-    }
 
     // If there are fewer sources than requested after vetoing, we need to bail
     // out.
@@ -185,7 +178,7 @@ pub fn veto_sources(
         }
     }
 
-    Ok(first_name)
+    Ok(())
 }
 
 /// Convert a Stokes flux densities into instrumental flux densities, and
@@ -424,5 +417,30 @@ mod tests {
                 name
             );
         }
+    }
+
+    #[test]
+    fn sorted_by_reverse_brightness() {
+        let beam = create_no_beam_object(1);
+        let (mut source_list, _) = read_source_list_file("../test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
+
+        let phase_centre = RADec::new_degrees(0.0, -27.0);
+        let result = veto_sources(
+            &mut source_list,
+            phase_centre,
+            0.0,
+            MWA_LAT_RAD,
+            &[167.68e6, 197.12e6],
+            beam.deref(),
+            None,
+            180.0,
+            0.1,
+        );
+        assert!(result.is_ok(), "{:?}", result.unwrap_err());
+        result.unwrap();
+
+        assert_eq!(source_list.len(), 100);
+        assert_eq!(source_list.get_index(0).unwrap().0, "J004616-420739");
+        assert_eq!(source_list.get_index(99).unwrap().0, "J000217-253912");
     }
 }
