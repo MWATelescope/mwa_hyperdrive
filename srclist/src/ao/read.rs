@@ -394,6 +394,10 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
 
+                if i.is_nan() || q.is_nan() || u.is_nan() || v.is_nan() {
+                    return Err(ReadSourceListError::NaNsInComponent { source_name });
+                }
+
                 if in_sed {
                     match &mut components.iter_mut().last().unwrap().flux_type {
                         TmpFluxDensityType::PowerLaw { fd, .. } => {

@@ -28,16 +28,41 @@ pub fn read_source_list_file<P: AsRef<Path>>(
         trace!("Attempting to read source list");
         let mut f = std::io::BufReader::new(File::open(&path)?);
 
+        // If the file extension corresponds to YAML or JSON, we know what to
+        // target.
+        let ext = path
+            .extension()
+            .and_then(|os_str| os_str.to_str())
+            .map(|s| s.to_lowercase());
+        match ext.as_deref() {
+            Some("yaml" | "yml") => {
+                return hyperdrive::source_list_from_yaml(&mut f)
+                    .map(|r| (r, SourceListType::Hyperdrive))
+                    .map_err(|e| e.into())
+            }
+            Some("json") => {
+                return hyperdrive::source_list_from_json(&mut f)
+                    .map(|r| (r, SourceListType::Hyperdrive))
+                    .map_err(|e| e.into())
+            }
+            _ => (),
+        }
+
+        // We're guessing what the format is here.
         match sl_type {
             Some(SourceListType::Hyperdrive) => {
                 // Can be either yaml or json.
                 let yaml_err = match hyperdrive::source_list_from_yaml(&mut f) {
                     Ok(sl) => return Ok((sl, SourceListType::Hyperdrive)),
-                    Err(e) => e.to_string(),
+                    // If there was an error in parsing, then pass the parse
+                    // error along and try JSON.
+                    Err(e @ ReadSourceListError::Yaml(_)) => e.to_string(),
+                    Err(e) => return Err(e.into()),
                 };
                 let json_err = match hyperdrive::source_list_from_json(&mut f) {
                     Ok(sl) => return Ok((sl, SourceListType::Hyperdrive)),
-                    Err(e) => e.to_string(),
+                    Err(e @ ReadSourceListError::Json(_)) => e.to_string(),
+                    Err(e) => return Err(e.into()),
                 };
                 Err(ReadSourceListError::FailedToDeserialise { yaml_err, json_err }.into())
             }

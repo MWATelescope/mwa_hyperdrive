@@ -29,6 +29,9 @@ pub enum ReadSourceListError {
         source_name: String,
     },
 
+    #[error("Source {source_name}: A component contains NaNs for its flux densities. This is not allowed.")]
+    NaNsInComponent { source_name: String },
+
     #[error("{comp_type} component of source {name} at RA {ra} Dec {dec} has no flux density information")]
     MissingFluxes {
         name: String,

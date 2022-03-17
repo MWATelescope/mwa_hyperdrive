@@ -174,6 +174,11 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     );
                 }
 
+                if stokes_i.is_nan() || stokes_q.is_nan() || stokes_u.is_nan() || stokes_v.is_nan()
+                {
+                    return Err(ReadSourceListError::NaNsInComponent { source_name });
+                }
+
                 let fd = FluxDensity {
                     freq: freq_hz,
                     i: stokes_i,

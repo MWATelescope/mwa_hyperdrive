@@ -331,6 +331,11 @@ pub fn parse_source_list<T: std::io::BufRead>(
                     );
                 }
 
+                if stokes_i.is_nan() || stokes_q.is_nan() || stokes_u.is_nan() || stokes_v.is_nan()
+                {
+                    return Err(ReadSourceListError::NaNsInComponent { source_name });
+                }
+
                 match components.iter_mut().last().map(|c| &mut c.flux_type) {
                     Some(FluxDensityType::PowerLaw { fd, si }) => {
                         // If the frequency is set (i.e. not 0), the ignore
@@ -410,6 +415,15 @@ pub fn parse_source_list<T: std::io::BufRead>(
                         "Source list line {}: Ignoring trailing contents after spectral index",
                         line_num
                     );
+                }
+
+                if stokes_i.is_nan()
+                    || stokes_q.is_nan()
+                    || stokes_u.is_nan()
+                    || stokes_v.is_nan()
+                    || spectral_index.is_nan()
+                {
+                    return Err(ReadSourceListError::NaNsInComponent { source_name });
                 }
 
                 match components.iter_mut().last().map(|c| &mut c.flux_type) {

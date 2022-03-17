@@ -60,6 +60,10 @@ fn source_list_from_tmp_sl(
             let flux_type = match tmp_comp.flux_type {
                 TmpFluxDensityType::List(fds) => {
                     for fd in fds.iter() {
+                        if fd.i.is_nan() || fd.q.is_nan() || fd.u.is_nan() || fd.v.is_nan() {
+                            return Err(ReadSourceListError::NaNsInComponent { source_name: name });
+                        }
+
                         sum_i += fd.i;
                         sum_q += fd.q;
                         sum_u += fd.u;
@@ -82,6 +86,10 @@ fn source_list_from_tmp_sl(
                 }
 
                 TmpFluxDensityType::PowerLaw { si, fd } => {
+                    if fd.i.is_nan() || fd.q.is_nan() || fd.u.is_nan() || fd.v.is_nan() {
+                        return Err(ReadSourceListError::NaNsInComponent { source_name: name });
+                    }
+
                     sum_i += fd.i;
                     sum_q += fd.q;
                     sum_u += fd.u;
@@ -90,6 +98,10 @@ fn source_list_from_tmp_sl(
                 }
 
                 TmpFluxDensityType::CurvedPowerLaw { si, fd, q } => {
+                    if fd.i.is_nan() || fd.q.is_nan() || fd.u.is_nan() || fd.v.is_nan() {
+                        return Err(ReadSourceListError::NaNsInComponent { source_name: name });
+                    }
+
                     sum_i += fd.i;
                     sum_q += fd.q;
                     sum_u += fd.u;
