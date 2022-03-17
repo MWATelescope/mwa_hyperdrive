@@ -132,9 +132,9 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "birli"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06f682146b2669aa96216d42c2a4e5ad924aaab01112a5015898074f9c67f72a"
+checksum = "94e7996380ee0b2381a4ce992c041302ecd7a3287d28bc84cf9e5a71aa5b6e80"
 dependencies = [
  "built",
  "byteorder",
