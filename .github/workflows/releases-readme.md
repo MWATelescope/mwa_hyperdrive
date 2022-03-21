@@ -2,6 +2,9 @@ This is a release of `mwa_hyperdrive`, calibration software for the Murchison
 Widefield Array radio telescope, obtained from the [GitHub releases
 page](https://github.com/MWATelescope/mwa_hyperdrive/releases).
 
+Documentation on `hyperdrive` can be found
+[here](https://mwatelescope.github.io/mwa_hyperdrive/index.html).
+
 Many `hyperdrive` functions require the beam code to function. The MWA
 FEE beam HDF5 file can be obtained with:
 

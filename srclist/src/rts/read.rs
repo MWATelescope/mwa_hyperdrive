@@ -5,7 +5,7 @@
 //! Parsing of RTS source lists.
 //!
 //! See for more info:
-//! <https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists>
+//! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_rts.html>
 
 use log::warn;
 use marlu::{constants::DH2R, RADec};

@@ -9,7 +9,7 @@ mod helpers;
 #[cfg(test)]
 mod tests;
 
-pub use error::*;
+pub(crate) use error::*;
 use helpers::*;
 
 use std::{
@@ -112,9 +112,18 @@ pub(crate) struct RawDataReader {
 }
 
 impl RawDataReader {
-    /// Create a new instance of the `InputData` trait with raw MWA data.
-    #[allow(clippy::too_many_arguments)]
+    /// Create a new [`RawDataReader`].
     pub(crate) fn new<T: AsRef<Path>>(
+        metadata: &T,
+        gpuboxes: &[T],
+        mwafs: Option<&[T]>,
+        corrections: RawDataCorrections,
+    ) -> Result<RawDataReader, VisReadError> {
+        Self::new_inner(metadata, gpuboxes, mwafs, corrections).map_err(VisReadError::from)
+    }
+
+    /// Create a new [`RawDataReader`].
+    fn new_inner<T: AsRef<Path>>(
         metadata: &T,
         gpuboxes: &[T],
         mwafs: Option<&[T]>,
@@ -587,12 +596,6 @@ impl RawDataReader {
         // TODO(dev): pull this out of preprocess
         let mut durations = HashMap::<String, std::time::Duration>::new();
 
-        // TODO(dev): wrap pfb gains error separately
-        // .map_err(|e| ReadInputDataError::PfbRefuse {
-        //             pfb_flavour: self.pfb_flavour.to_string(),
-        //             freq_res_hz: self.obs_context.freq_res.unwrap(),
-        //             birli_error: e,
-        //         })?
         prep_ctx.preprocess(
             &self.mwalib_context,
             &mut jones_array,

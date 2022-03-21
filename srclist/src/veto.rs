@@ -220,7 +220,7 @@ pub enum VetoError {
     #[error("Tried to use {requested} sources, but only {available} sources were available after vetoing")]
     TooFewSources { requested: usize, available: usize },
 
-    #[error("{0}")]
+    #[error("Error when trying to veto the source list: {0}")]
     Beam(#[from] BeamError),
 }
 

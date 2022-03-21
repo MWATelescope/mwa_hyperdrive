@@ -15,7 +15,7 @@ use crate::{
 use mwa_hyperdrive_common::{thiserror, vec1};
 
 #[derive(Error, Debug)]
-pub enum VisSubtractError {
+pub(crate) enum VisSubtractError {
     #[error("Specified source {name} is not in the input source list; can't subtract it")]
     MissingSource { name: String },
 
@@ -36,14 +36,13 @@ pub enum VisSubtractError {
     )]
     BadDelays,
 
-    #[error(
-        "An invalid combination of formats was given. Supported:\n{}",
-        SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS
-    )]
-    InvalidDataInput,
+    #[error("No input data was given!")]
+    NoInputData,
 
-    #[error("There are no timesteps in the input data.")]
-    NoTimesteps,
+    #[error(
+        "{0}\n\nSupported combinations of file formats:\n{SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS}",
+    )]
+    InvalidDataInput(&'static str),
 
     #[error(
         "An invalid output format was specified ({0}). Supported:\n{}",
@@ -88,22 +87,10 @@ pub enum VisSubtractError {
     BadArrayPosition { pos: Vec<f64> },
 
     #[error(transparent)]
-    InputFiles(#[from] crate::filenames::InputFileError),
-
-    #[error(transparent)]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 
     #[error(transparent)]
-    MsRead(#[from] crate::vis_io::read::MsReadError),
-
-    #[error(transparent)]
-    UvfitsRead(#[from] crate::vis_io::read::UvfitsReadError),
-
-    #[error(transparent)]
-    Read(#[from] crate::vis_io::read::VisReadError),
-
-    #[error(transparent)]
-    Model(#[from] crate::model::ModelError),
+    VisRead(#[from] crate::vis_io::read::VisReadError),
 
     #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),

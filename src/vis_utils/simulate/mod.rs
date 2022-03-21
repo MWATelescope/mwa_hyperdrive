@@ -5,7 +5,8 @@
 //! Generate sky-model visibilities from a sky-model source list.
 
 mod error;
-pub use error::VisSimulateError;
+
+pub(crate) use error::VisSimulateError;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -30,13 +31,14 @@ use vec1::Vec1;
 use crate::{
     averaging::{parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks},
     glob::get_single_match_from_glob,
-    help_texts::{ARRAY_POSITION_HELP, VIS_OUTPUT_EXTENSIONS},
+    help_texts::{ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, VIS_OUTPUT_EXTENSIONS},
     math::TileBaselineMaps,
     messages,
     metafits::{get_dipole_delays, get_dipole_gains},
     model,
     model::SkyModeller,
     vis_io::write::{can_write_to_file, write_vis, VisOutputType, VisTimestep},
+    HyperdriveError,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{
@@ -189,9 +191,7 @@ pub struct VisSimulateArgs {
     #[clap(long, help_heading = "MODEL PARAMETERS")]
     unity_dipole_gains: bool,
 
-    /// Specify the MWA dipoles delays, ignoring whatever is in the metafits
-    /// file.
-    #[clap(long, multiple_values(true), help_heading = "MODEL PARAMETERS")]
+    #[clap(long, multiple_values(true), help = DIPOLE_DELAYS_HELP.as_str(), help_heading = "MODEL PARAMETERS")]
     delays: Option<Vec<u32>>,
 
     #[clap(
@@ -219,8 +219,9 @@ pub struct VisSimulateArgs {
 }
 
 impl VisSimulateArgs {
-    pub fn run(&self, dry_run: bool) -> Result<(), VisSimulateError> {
-        vis_simulate(self, dry_run)
+    pub fn run(&self, dry_run: bool) -> Result<(), HyperdriveError> {
+        vis_simulate(self, dry_run)?;
+        Ok(())
     }
 }
 

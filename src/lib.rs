@@ -4,6 +4,8 @@
 
 //! Calibration software for the Murchison Widefield Array (MWA) radio
 //! telescope.
+//!
+//! <https://mwatelescope.github.io/mwa_hyperdrive/index.html>
 
 pub mod averaging;
 pub mod calibrate;
@@ -22,6 +24,7 @@ pub(crate) mod pfb_gains;
 pub mod solutions;
 pub(crate) mod time;
 pub(crate) mod unit_parsing;
+pub mod utilities;
 pub mod vis_io;
 pub mod vis_utils;
 

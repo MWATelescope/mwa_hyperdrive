@@ -11,44 +11,19 @@ use clap::Parser;
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive::{
-    calibrate::{di_calibrate, CalibrateError},
-    solutions::CalibrationSolutions,
-};
+use mwa_hyperdrive::{calibrate::di_calibrate, solutions::CalibrationSolutions};
 use mwa_hyperdrive_common::clap;
-
-/// If di-calibrate is working, it should not write anything to stderr.
-#[test]
-fn test_no_stderr() {
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let sols = tmp_dir.join("sols.fits");
-    let args = get_reduced_1090008640(true, false);
-    let data = args.data.unwrap();
-
-    #[rustfmt::skip]
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data", &data[0], &data[1],
-            "--source-list", &args.source_list.unwrap(),
-            "--outputs", &format!("{}", sols.display()),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "di-calibrate failed on simple test data!");
-    let (_, stderr) = get_cmd_output(cmd);
-    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
-}
 
 #[test]
 #[serial]
 fn test_1090008640_di_calibrate_writes_solutions() {
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
     let metafits = &data[0];
     let gpufits = &data[1];
-    let sols = tmp_dir.join("sols.fits");
-    let cal_model = tmp_dir.join("hyp_model.uvfits");
+    let sols = tmp_dir.path().join("sols.fits");
+    let cal_model = tmp_dir.path().join("hyp_model.uvfits");
 
     #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
@@ -72,8 +47,8 @@ fn test_1090008640_di_calibrate_writes_solutions() {
 
 #[test]
 fn test_1090008640_woden() {
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let solutions_path = tmp_dir.join("sols.bin");
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let solutions_path = tmp_dir.path().join("sols.bin");
 
     // Reading from a uvfits file without a metafits file should fail because
     // there's no beam information.
@@ -88,11 +63,10 @@ fn test_1090008640_woden() {
 
     // Run di-cal and check that it fails
     let result = di_calibrate(Box::new(cal_args), None, false);
-    assert!(
-        matches!(result, Err(CalibrateError::InvalidArgs(_))),
-        "result={:?} is not InvalidArgs",
-        result.err().unwrap()
-    );
+    assert!(result.is_err());
+    assert!(result.err().unwrap().to_string().contains(
+        "Tried to create a beam object, but MWA dipole delay information isn't available!"
+    ));
 
     // This time give the metafits file.
     let cmd = hyperdrive()
@@ -157,7 +131,7 @@ fn test_1090008640_woden() {
     assert!(!bin_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
     // Re-do calibration, but this time into the hyperdrive fits format.
-    let solutions_path = tmp_dir.join("sols.fits");
+    let solutions_path = tmp_dir.path().join("sols.fits");
 
     #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[

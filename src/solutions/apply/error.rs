@@ -7,13 +7,11 @@ use std::path::PathBuf;
 use thiserror::Error;
 use vec1::Vec1;
 
-use crate::{
-    filenames::SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS, help_texts::VIS_OUTPUT_EXTENSIONS,
-};
+use crate::{filenames::SUPPORTED_INPUT_FILE_COMBINATIONS, help_texts::VIS_OUTPUT_EXTENSIONS};
 use mwa_hyperdrive_common::{thiserror, vec1};
 
 #[derive(Error, Debug)]
-pub enum SolutionsApplyError {
+pub(crate) enum SolutionsApplyError {
     #[error("The input data and the solutions have different numbers of tiles (data: {data}, solutions: {solutions}); cannot continue")]
     TileCountMismatch { data: usize, solutions: usize },
 
@@ -26,11 +24,11 @@ pub enum SolutionsApplyError {
     #[error("Multiple uvfits files were specified: {0:?}\nThis is unsupported.")]
     MultipleUvfits(Vec1<PathBuf>),
 
-    #[error(
-        "An invalid combination of formats was given. Supported:\n{}",
-        SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS
-    )]
-    InvalidDataInput,
+    #[error("No input data was given!\n\nSupported combinations of file formats:\n{SUPPORTED_INPUT_FILE_COMBINATIONS}")]
+    NoInputData,
+
+    #[error("{0}\n\nSupported combinations of file formats:\n{SUPPORTED_INPUT_FILE_COMBINATIONS}")]
+    InvalidDataInput(&'static str),
 
     #[error(
         "An invalid output format was specified ({0}). Supported:\n{}",
@@ -87,22 +85,10 @@ pub enum SolutionsApplyError {
     OutputVisFreqResNotMultiple { out: f64, inp: f64 },
 
     #[error(transparent)]
-    ReadSolutions(#[from] crate::solutions::ReadSolutionsError),
+    SolutionsRead(#[from] crate::solutions::SolutionsReadError),
 
     #[error(transparent)]
-    InputFiles(#[from] crate::filenames::InputFileError),
-
-    #[error(transparent)]
-    RawRead(#[from] crate::vis_io::read::RawReadError),
-
-    #[error(transparent)]
-    MsRead(#[from] crate::vis_io::read::MsReadError),
-
-    #[error(transparent)]
-    UvfitsRead(#[from] crate::vis_io::read::UvfitsReadError),
-
-    #[error(transparent)]
-    Read(#[from] crate::vis_io::read::VisReadError),
+    VisRead(#[from] crate::vis_io::read::VisReadError),
 
     #[error(transparent)]
     FileWrite(#[from] crate::vis_io::write::FileWriteError),

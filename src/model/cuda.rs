@@ -15,7 +15,6 @@ use marlu::{
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use super::ModelError;
 use mwa_hyperdrive_beam::{
     cuda_status_to_error, Beam, BeamCUDA, BeamError, DevicePointer,
     ERROR_STR_LENGTH as CUDA_ERROR_STR_LENGTH,
@@ -869,7 +868,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
@@ -935,7 +934,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
@@ -994,7 +993,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
@@ -1053,7 +1052,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,

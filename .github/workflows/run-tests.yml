@@ -88,6 +88,7 @@ jobs:
         run: |
           MIN_RUST=$(grep -m1 "rust-version" Cargo.toml | sed 's|.*\"\(.*\)\"|\1|')
           ~/.cargo/bin/rustup install $MIN_RUST --profile minimal
+          cargo clean
           cargo +${MIN_RUST} test --locked
           cargo +${MIN_RUST} test --locked --features=all-static
           cargo +${MIN_RUST} test --locked --all-features --no-run

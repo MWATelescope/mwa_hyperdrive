@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Integration tests for generating sky-model visibilities.
+//! Miscellaneous utilities that don't belong anywhere else.
 
-mod calibrate;
-mod vis_simulate;
+pub mod dipole_gains;

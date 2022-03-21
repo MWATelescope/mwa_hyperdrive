@@ -300,7 +300,11 @@ pub fn shift<P: AsRef<Path>, S: AsRef<str>>(
                 .into())
             }
             (SourceListType::Rts, _) => {
-                rts::write_source_list_with_order(&mut f, &sl, source_name_order.unwrap())?;
+                if let Some(source_name_order) = source_name_order {
+                    rts::write_source_list_with_order(&mut f, &sl, source_name_order)?;
+                } else {
+                    rts::write_source_list(&mut f, &sl, None)?;
+                }
                 info!("Wrote rts-style source list to {}", output_path.display());
             }
             (SourceListType::AO, _) => {

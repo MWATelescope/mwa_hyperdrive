@@ -10,9 +10,9 @@ use clap::Parser;
 use marlu::{XyzGeodetic, ENH};
 use mwalib::{fitsio_sys, *};
 use serial_test::serial;
+use tempfile::TempDir;
 
-use crate::*;
-use mwa_hyperdrive::vis_utils::simulate::VisSimulateArgs;
+use crate::{tests::reduced_obsids::get_reduced_1090008640, vis_utils::simulate::VisSimulateArgs};
 use mwa_hyperdrive_common::{cfg_if, clap, marlu, mwalib};
 
 fn read_uvfits_stabxyz(
@@ -25,6 +25,7 @@ fn read_uvfits_stabxyz(
         let mut status = 0;
         let mut col_num = -1;
         let keyword = std::ffi::CString::new("STABXYZ").unwrap();
+        // ffgcno = fits_get_colnum
         fitsio_sys::ffgcno(
             fptr.as_raw(),
             0,
@@ -37,6 +38,7 @@ fn read_uvfits_stabxyz(
         // Now get the column data.
         let mut array = vec![XyzGeodetic::default(); num_tiles];
         let array_ptr = array.as_mut_ptr();
+        // ffgcv = fits_read_col
         fitsio_sys::ffgcv(
             fptr.as_raw(),
             82, // TDOUBLE
@@ -54,47 +56,15 @@ fn read_uvfits_stabxyz(
     }
 }
 
-/// If vis-simulate is working, it should not write anything to stderr.
-#[test]
-fn test_no_stderr() {
-    let num_timesteps = 2;
-    let num_chans = 2;
-
-    let mut output_path = TempDir::new().expect("couldn't make tmp dir").into_path();
-    output_path.push("model.uvfits");
-    let args = get_reduced_1090008640(true, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
-
-    #[rustfmt::skip]
-    let cmd = hyperdrive()
-        .args(&[
-            "vis-simulate",
-            "--metafits", &metafits,
-            "--source-list", &args.source_list.unwrap(),
-            "--output-model-files", &format!("{}", output_path.display()),
-            "--num-timesteps", &format!("{}", num_timesteps),
-            "--num-fine-channels", &format!("{}", num_chans),
-            "--no-progress-bars"
-        ])
-        .ok();
-    assert!(
-        cmd.is_ok(),
-        "vis-simulate failed on simple test data!\n{}",
-        cmd.unwrap_err()
-    );
-    let (_, stderr) = get_cmd_output(cmd);
-    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
-}
-
 #[test]
 #[serial]
 fn test_1090008640_vis_simulate() {
     let num_timesteps = 2;
     let num_chans = 10;
 
-    let mut output_path = TempDir::new().expect("couldn't make tmp dir").into_path();
-    output_path.push("model.uvfits");
-    let args = get_reduced_1090008640(true, false);
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let output_path = temp_dir.path().join("model.uvfits");
+    let args = get_reduced_1090008640(false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
 
     #[rustfmt::skip]
@@ -190,6 +160,7 @@ fn test_1090008640_vis_simulate() {
     let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
     let mut status = 0;
     unsafe {
+        // ffggpe = fits_read_grppar_flt
         fitsio_sys::ffggpe(
             uvfits.as_raw(),           /* I - FITS file pointer                       */
             1,                         /* I - group to read (1 = 1st group)           */
@@ -199,6 +170,7 @@ fn test_1090008640_vis_simulate() {
             &mut status,               /* IO - error status                           */
         );
         assert_eq!(status, 0, "Status wasn't 0");
+        // ffgpve = fits_read_img_flt
         fitsio_sys::ffgpve(
             uvfits.as_raw(),  /* I - FITS file pointer                       */
             1,                /* I - group to read (1 = 1st group)           */
@@ -240,6 +212,7 @@ fn test_1090008640_vis_simulate() {
     }
 
     unsafe {
+        // ffggpe = fits_read_grppar_flt
         fitsio_sys::ffggpe(
             uvfits.as_raw(),           /* I - FITS file pointer                       */
             8129,                      /* I - group to read (1 = 1st group)           */
@@ -249,6 +222,7 @@ fn test_1090008640_vis_simulate() {
             &mut status,               /* IO - error status                           */
         );
         assert_eq!(status, 0, "Status wasn't 0");
+        // ffgpve = fits_read_img_flt
         fitsio_sys::ffgpve(
             uvfits.as_raw(),  /* I - FITS file pointer                       */
             8129,             /* I - group to read (1 = 1st group)           */
@@ -297,9 +271,9 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let num_timesteps = 2;
     let num_chans = 10;
 
-    let mut output_path = TempDir::new().expect("couldn't make tmp dir").into_path();
-    output_path.push("model.uvfits");
-    let args = get_reduced_1090008640(true, false);
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let output_path = temp_dir.path().join("model.uvfits");
+    let args = get_reduced_1090008640(false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from(&[
@@ -322,6 +296,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let mut vis_cpu: Vec<f32> = vec![0.0; num_chans * 4 * 3];
     let mut status = 0;
     unsafe {
+        // ffggpe = fits_read_grppar_flt
         fitsio_sys::ffggpe(
             uvfits.as_raw(),           /* I - FITS file pointer                       */
             1,                         /* I - group to read (1 = 1st group)           */
@@ -331,6 +306,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
             &mut status,               /* IO - error status                           */
         );
         assert_eq!(status, 0, "Status wasn't 0");
+        // ffgpve = fits_read_img_flt
         fitsio_sys::ffgpve(
             uvfits.as_raw(),      /* I - FITS file pointer                       */
             1,                    /* I - group to read (1 = 1st group)           */
@@ -346,7 +322,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     drop(hdu);
     drop(uvfits);
 
-    let args = get_reduced_1090008640(true, false);
+    let args = get_reduced_1090008640(false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from(&[
@@ -368,6 +344,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
 
     let mut vis_gpu: Vec<f32> = vec![0.0; num_chans * 4 * 3];
     unsafe {
+        // ffggpe = fits_read_grppar_flt
         fitsio_sys::ffggpe(
             uvfits.as_raw(),           /* I - FITS file pointer                       */
             1,                         /* I - group to read (1 = 1st group)           */
@@ -377,6 +354,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
             &mut status,               /* IO - error status                           */
         );
         assert_eq!(status, 0, "Status wasn't 0");
+        // ffgpve = fits_read_img_flt
         fitsio_sys::ffgpve(
             uvfits.as_raw(),      /* I - FITS file pointer                       */
             1,                    /* I - group to read (1 = 1st group)           */

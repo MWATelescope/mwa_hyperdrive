@@ -24,7 +24,7 @@ use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, rayon};
 /// Convert a sky-model source list from one format to another.
 ///
 /// See for more info:
-/// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+/// <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_lists.html>
 #[derive(Parser, Debug)]
 pub struct ConvertArgs {
     #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]

@@ -165,11 +165,11 @@ impl DiJm {
 }
 
 #[derive(Error, Debug)]
-pub enum ReadDiJmFileError {
+pub(crate) enum ReadDiJmFileError {
     #[error("Couldn't parse '{text}' as a float on line {line_num}")]
     ParseFloat { text: String, line_num: usize },
 
-    #[error("Expected to find 8 floats on line {line_num}, but found {} instead")]
+    #[error("Expected to find 8 floats on line {line_num}, but found {count} instead")]
     BadFloatCount { count: usize, line_num: usize },
 
     #[error("Not enough lines in the file to define any pre-alignment matrices")]
@@ -385,7 +385,7 @@ impl BpCal {
 }
 
 #[derive(Error, Debug)]
-pub enum ReadBpCalFileError {
+pub(crate) enum ReadBpCalFileError {
     #[error("File is empty")]
     Empty,
 

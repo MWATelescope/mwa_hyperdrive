@@ -12,7 +12,7 @@ use super::rts::{RtsReadSolsError, RtsWriteSolsError};
 use mwa_hyperdrive_common::{marlu, thiserror};
 
 #[derive(Error, Debug)]
-pub enum ReadSolutionsError {
+pub(crate) enum SolutionsReadError {
     #[error("Tried to read calibration solutions file with an unsupported extension '{ext}'!")]
     UnsupportedExt { ext: String },
 
@@ -27,13 +27,6 @@ pub enum ReadSolutionsError {
     AndreBinaryVal {
         file: String,
         expected: &'static str,
-        got: String,
-    },
-
-    #[error("In file {file} key {key}, could not parse '{got}' as a number!")]
-    Parse {
-        file: String,
-        key: &'static str,
         got: String,
     },
 
@@ -61,27 +54,27 @@ pub enum ReadSolutionsError {
     #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
 
-    #[error("IO error: {0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }
 
 #[derive(Error, Debug)]
-pub enum WriteSolutionsError {
+pub(crate) enum SolutionsWriteError {
     #[error("Tried to write calibration solutions file with an unsupported extension '{ext}'!")]
     UnsupportedExt { ext: String },
 
     #[error("When interfacing with RTS calibration solutions, a metafits file is required")]
     RtsMetafitsRequired,
 
-    #[error("{0}")]
+    #[error(transparent)]
     Rts(#[from] RtsWriteSolsError),
 
-    #[error("cfitsio error: {0}")]
+    #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Fits(#[from] FitsError),
 
-    #[error("IO error: {0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

@@ -9,8 +9,8 @@
 
 mod di_calibrate;
 mod jones_test;
-mod modelling;
-mod solutions_apply;
+mod no_stderr;
+pub(crate) mod solutions_apply;
 
 use std::path::PathBuf;
 use std::process::Output;

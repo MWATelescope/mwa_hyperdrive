@@ -20,7 +20,7 @@ use mwa_hyperdrive_common::{clap, log};
 /// Verify that sky-model source lists can be read by hyperdrive.
 ///
 /// See for more info:
-/// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+/// <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_lists.html>
 #[derive(Parser, Debug)]
 pub struct VerifyArgs {
     /// Path to the source list(s) to be verified.

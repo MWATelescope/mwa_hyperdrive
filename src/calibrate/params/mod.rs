@@ -261,8 +261,7 @@ impl CalibrateParams {
         // - uvfits files.
         // If none or multiple of these possibilities are met, then we must fail.
         let input_data_types = match data {
-            Some(strings) => InputDataTypes::new(&strings)
-                .map_err(|e| InvalidArgsError::InputFile(e.to_string()))?,
+            Some(strings) => InputDataTypes::new(&strings)?,
             None => return Err(InvalidArgsError::NoInputData),
         };
         let (input_data, raw_data_corrections): (Box<dyn VisRead>, Option<RawDataCorrections>) =
@@ -372,7 +371,46 @@ impl CalibrateParams {
                     (Box::new(input_data), None)
                 }
 
-                _ => return Err(InvalidArgsError::InvalidDataInput),
+                // The following matches are for invalid combinations of input
+                // files. Make an error message for the user.
+                (Some(_), _, None, None, None) => {
+                    let msg = "Received only a metafits file; a uvfits file, a measurement set or gpubox files are required.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (Some(_), _, Some(_), None, None) => {
+                    let msg =
+                        "Received only a metafits file and mwaf files; gpubox files are required.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (None, Some(_), _, None, None) => {
+                    let msg = "Received gpuboxes without a metafits file; this is not supported.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (None, None, Some(_), None, None) => {
+                    let msg = "Received mwaf files without gpuboxes and a metafits file; this is not supported.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (_, Some(_), _, Some(_), None) => {
+                    let msg = "Received gpuboxes and measurement set files; this is not supported.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (_, Some(_), _, None, Some(_)) => {
+                    let msg = "Received gpuboxes and uvfits files; this is not supported.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (_, _, _, Some(_), Some(_)) => {
+                    let msg = "Received uvfits and measurement set files; this is not supported.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (_, _, Some(_), Some(_), _) => {
+                    let msg = "Received mwafs and measurement set files; this is not supported.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (_, _, Some(_), _, Some(_)) => {
+                    let msg = "Received mwafs and uvfits files; this is not supported.";
+                    return Err(InvalidArgsError::InvalidDataInput(msg));
+                }
+                (None, None, None, None, None) => return Err(InvalidArgsError::NoInputData),
             };
 
         let obs_context = input_data.get_obs_context();
@@ -935,6 +973,7 @@ impl CalibrateParams {
 
         // Handle output visibility arguments.
         let (output_model_time_average_factor, output_model_freq_average_factor) = match model_files
+            .as_ref()
         {
             None => {
                 // If we're not writing out model visibilities but arguments
@@ -955,7 +994,7 @@ impl CalibrateParams {
                 // are.
                 (1, 1)
             }
-            Some(_) => {
+            Some(ms) => {
                 // Parse and verify user input (specified resolutions must
                 // evenly divide the input data's resolutions).
                 let time_factor = parse_time_average_factor(
@@ -992,6 +1031,11 @@ impl CalibrateParams {
                         InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
                     }
                 })?;
+
+                // Test that we can write to the output files.
+                for m in ms {
+                    can_write_to_file(&m.0)?;
+                }
 
                 (time_factor, freq_factor)
             }

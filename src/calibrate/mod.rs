@@ -10,23 +10,35 @@ mod error;
 pub(crate) mod params;
 
 use args::CalibrateUserArgs;
-pub use error::CalibrateError;
+pub(crate) use error::CalibrateError;
 
 use std::path::Path;
 
 use log::{debug, info, trace};
 
-use crate::solutions::{self, CalSolutionType, CalibrationSolutions};
+use crate::{
+    solutions::{self, CalSolutionType, CalibrationSolutions},
+    HyperdriveError,
+};
 use mwa_hyperdrive_common::log;
 
 pub fn di_calibrate(
     cli_args: Box<CalibrateUserArgs>,
     args_file: Option<&Path>,
     dry_run: bool,
+) -> Result<Option<CalibrationSolutions>, HyperdriveError> {
+    let sols = di_calibrate_inner(cli_args, args_file, dry_run)?;
+    Ok(sols)
+}
+
+fn di_calibrate_inner(
+    cli_args: Box<CalibrateUserArgs>,
+    args_file: Option<&Path>,
+    dry_run: bool,
 ) -> Result<Option<CalibrationSolutions>, CalibrateError> {
     let args = if let Some(f) = args_file {
         trace!("Merging command-line arguments with the argument file");
-        Box::new(cli_args.merge(&f)?)
+        Box::new(cli_args.merge(f)?)
     } else {
         cli_args
     };

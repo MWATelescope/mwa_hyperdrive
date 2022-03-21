@@ -8,10 +8,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use log::info;
-use thiserror::Error;
 
-use super::{CalibrationSolutions, ReadSolutionsError, WriteSolutionsError};
-use mwa_hyperdrive_common::{clap, log, thiserror};
+use super::CalibrationSolutions;
+use crate::HyperdriveError;
+use mwa_hyperdrive_common::{clap, log};
 
 #[derive(Parser, Debug, Default)]
 pub struct SolutionsConvertArgs {
@@ -31,10 +31,10 @@ pub struct SolutionsConvertArgs {
 }
 
 impl SolutionsConvertArgs {
-    pub fn run(self) -> Result<(), SolutionsConvertError> {
+    pub fn run(self) -> Result<(), HyperdriveError> {
         let sols =
             CalibrationSolutions::read_solutions_from_ext(&self.input, self.metafits.as_ref())?;
-        sols.write_solutions_from_ext(&self.output, self.metafits)?;
+        sols.write_solutions_from_ext(&self.output, self.metafits.as_deref())?;
 
         info!(
             "Converted {} to {}",
@@ -44,13 +44,4 @@ impl SolutionsConvertArgs {
 
         Ok(())
     }
-}
-
-#[derive(Error, Debug)]
-pub enum SolutionsConvertError {
-    #[error(transparent)]
-    Read(#[from] ReadSolutionsError),
-
-    #[error(transparent)]
-    Write(#[from] WriteSolutionsError),
 }

@@ -641,8 +641,8 @@ fn test_1090008640_calibration_quality() {
 
 #[test]
 fn test_timestep_reading() {
-    let temp_dir = tempdir().expect("Couldn't make temp dir").into_path();
-    let vis_path = temp_dir.join("vis.uvfits");
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.uvfits");
     // uncomment this to write to tmp instead
     // let vis_path = PathBuf::from("/tmp/vis.uvfits");
 

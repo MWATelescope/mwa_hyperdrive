@@ -27,5 +27,8 @@ lazy_static::lazy_static! {
         format!("The 'flavour' of poly-phase filter bank corrections applied to raw MWA data. The default is '{}'. Valid flavours are: {}", DEFAULT_PFB_FLAVOUR, *PFB_FLAVOURS);
 
     pub(crate) static ref ARRAY_POSITION_HELP: String =
-        format!("The Earth longitude, latitude, and height of the instrumental array [degrees, degrees, meters]. Default (MWA): ({}°, {}°, {}m", MWA_LONG_DEG, MWA_LAT_DEG, MWA_HEIGHT_M);
+        format!("The Earth longitude, latitude, and height of the instrumental array [degrees, degrees, meters]. Default (MWA): ({}°, {}°, {}m)", MWA_LONG_DEG, MWA_LAT_DEG, MWA_HEIGHT_M);
+
+    pub(crate) static ref DIPOLE_DELAYS_HELP: String =
+        format!("If specified, use these dipole delays for the MWA pointing. e.g. 0 1 2 3 0 1 2 3 0 1 2 3 0 1 2 3");
 }

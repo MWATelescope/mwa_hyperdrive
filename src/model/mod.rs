@@ -7,20 +7,20 @@
 mod cpu;
 #[cfg(feature = "cuda")]
 mod cuda;
-mod error;
+#[cfg(test)]
+mod integration_tests;
 #[cfg(test)]
 mod tests;
 
 use cpu::SkyModellerCpu;
 #[cfg(feature = "cuda")]
 use cuda::SkyModellerCuda;
-pub use error::*;
 
 use hifitime::Epoch;
 use marlu::{Jones, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 
-use mwa_hyperdrive_beam::Beam;
+use mwa_hyperdrive_beam::{Beam, BeamError};
 use mwa_hyperdrive_common::{cfg_if, hifitime, marlu, ndarray};
 use mwa_hyperdrive_srclist::{ComponentList, SourceList};
 
@@ -46,7 +46,7 @@ pub trait SkyModeller<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError>;
+    ) -> Result<Vec<UVW>, BeamError>;
 
     /// Model only the point sources for a timestep. If other types of sources
     /// will also be modelled, it is more efficient to use `model_timestep`. The
@@ -69,7 +69,7 @@ pub trait SkyModeller<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError>;
+    ) -> Result<Vec<UVW>, BeamError>;
 
     /// Model only the Gaussian sources for a timestep. If other types of
     /// sources will also be modelled, it is more efficient to use
@@ -93,7 +93,7 @@ pub trait SkyModeller<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError>;
+    ) -> Result<Vec<UVW>, BeamError>;
 
     /// Model only the shapelet sources for a timestep. If other types of
     /// sources will also be modelled, it is more efficient to use
@@ -117,7 +117,7 @@ pub trait SkyModeller<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError>;
+    ) -> Result<Vec<UVW>, BeamError>;
 }
 
 /// Create a [SkyModeller] trait object that generates sky-model visibilities on
@@ -179,7 +179,7 @@ pub unsafe fn new_cuda_sky_modeller<'a>(
     array_longitude_rad: f64,
     array_latitude_rad: f64,
     apply_precession: bool,
-) -> Result<Box<dyn SkyModeller<'a> + 'a>, ModelError> {
+) -> Result<Box<dyn SkyModeller<'a> + 'a>, BeamError> {
     let modeller = new_cuda_sky_modeller_inner(
         beam,
         source_list,
@@ -210,7 +210,7 @@ pub unsafe fn new_cuda_sky_modeller<'a>(
 /// interfaces directly with the CUDA API. Rust errors attempt to catch problems
 /// but there are no guarantees.
 #[allow(clippy::too_many_arguments)]
-pub fn new_sky_modeller<'a>(
+pub(crate) fn new_sky_modeller<'a>(
     #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
     beam: &'a dyn Beam,
     source_list: &SourceList,
@@ -221,7 +221,7 @@ pub fn new_sky_modeller<'a>(
     array_longitude_rad: f64,
     array_latitude_rad: f64,
     apply_precession: bool,
-) -> Result<Box<dyn SkyModeller<'a> + 'a>, ModelError> {
+) -> Result<Box<dyn SkyModeller<'a> + 'a>, BeamError> {
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda")] {
             if use_cpu_for_modelling {
@@ -329,7 +329,7 @@ pub(super) unsafe fn new_cuda_sky_modeller_inner<'a>(
     array_longitude_rad: f64,
     array_latitude_rad: f64,
     apply_precession: bool,
-) -> Result<SkyModellerCuda<'a>, ModelError> {
+) -> Result<SkyModellerCuda<'a>, BeamError> {
     let modeller = SkyModellerCuda::new(
         beam,
         source_list,

@@ -13,13 +13,15 @@ use mwa_hyperdrive_common::{marlu, serde_json, thiserror};
 /// Errors associated with reading in any kind of source list.
 #[derive(Error, Debug)]
 pub enum ReadSourceListError {
-    #[error("Attempted to use RA {0}, but this is out of range (0 < RA < 360)")]
+    #[error("Source list error: Attempted to use RA {0}, but this is out of range (0 < RA < 360)")]
     InvalidRa(f64),
 
-    #[error("Attempted to use HA {0}, but this is out of range (0 < HA < 24)")]
+    #[error("Source list error: Attempted to use HA {0}, but this is out of range (0 < HA < 24)")]
     InvalidHa(f64),
 
-    #[error("Attempted to use Dec {0}, but this is out of range (-90 < Dec < 90)")]
+    #[error(
+        "Source list error: Attempted to use Dec {0}, but this is out of range (-90 < Dec < 90)"
+    )]
     InvalidDec(f64),
 
     #[error("Source {source_name}: The sum of all Stokes {stokes_comp} flux densities was negative ({sum})")]
@@ -40,7 +42,7 @@ pub enum ReadSourceListError {
         dec: f64,
     },
 
-    #[error("Source {0} has no components")]
+    #[error("Source list error: Source {0} has no components")]
     NoComponents(String),
 
     #[error("Could not interpret the contents of the source list. Specify which style source list it is, and a more specific error can be shown.")]
@@ -49,28 +51,28 @@ pub enum ReadSourceListError {
     #[error("Could not deserialise the contents as yaml or json.\n\nyaml error: {yaml_err}\n\njson error: {json_err}")]
     FailedToDeserialise { yaml_err: String, json_err: String },
 
-    #[error("{0}")]
+    #[error(transparent)]
     Common(#[from] ReadSourceListCommonError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Rts(#[from] ReadSourceListRtsError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Woden(#[from] ReadSourceListWodenError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     AO(#[from] ReadSourceListAOError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Yaml(#[from] serde_yaml::Error),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Sexagesimal(#[from] marlu::sexagesimal::SexagesimalError),
 
-    #[error("IO error: {0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }
 
@@ -90,13 +92,13 @@ pub enum ReadSourceListCommonError {
     )]
     NestedComponents(u32),
 
-    #[error("Source list line {0}: Found {keyword} outside of a SOURCE context")]
+    #[error("Source list line {line_num}: Found {keyword} outside of a SOURCE context")]
     OutsideSource {
         line_num: u32,
         keyword: &'static str,
     },
 
-    #[error("Source list line {0}: Found {keyword} outside of a COMPONENT context")]
+    #[error("Source list line {line_num}: Found {keyword} outside of a COMPONENT context")]
     OutsideComponent {
         line_num: u32,
         keyword: &'static str,
@@ -153,7 +155,7 @@ pub enum ReadSourceListCommonError {
 /// Errors associated with reading in an RTS source list.
 #[derive(Error, Debug, PartialEq)]
 pub enum ReadSourceListRtsError {
-    #[error("{0}")]
+    #[error(transparent)]
     Common(#[from] ReadSourceListCommonError),
 
     #[error("Source list line {0}: Incomplete GAUSSIAN")]
@@ -177,7 +179,7 @@ pub enum ReadSourceListRtsError {
 }
 
 /// Errors associated with reading in a WODEN source list.
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum ReadSourceListWodenError {
     #[error("Source list line {0}: Found SCOEFF, but there was no SPARAMS line above it")]
     MissingSParamsLine(u32),
@@ -235,7 +237,7 @@ pub enum ReadSourceListAOError {
     #[error("Source list line {0}: Source has no components")]
     MissingComponents(u32),
 
-    #[error("Source list line {0}: {comp_type} component at RA {ra}, Dec {dec} did not contain any flux densities")]
+    #[error("Source list line {line_num}: {comp_type} component at RA {ra}, Dec {dec} did not contain any flux densities")]
     MissingFluxes {
         line_num: u32,
         comp_type: &'static str,
@@ -301,17 +303,17 @@ pub enum WriteSourceListError {
     #[error("'{0}' is an invalid file type for a hyperdrive-style source list; must have one of the following extensions: {}", *HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED)]
     InvalidHyperdriveFormat(String),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Sexagesimal(#[from] marlu::sexagesimal::SexagesimalError),
 
     /// An IO error.
-    #[error("{0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Yaml(#[from] serde_yaml::Error),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
 
@@ -320,24 +322,24 @@ pub enum SrclistError {
     #[error("No sources were left after vetoing; nothing left to do")]
     NoSourcesAfterVeto,
 
-    #[error("Need a metafits file to perform work, but none was supplied")]
+    #[error("Source list error: Need a metafits file to perform work, but none was supplied")]
     MissingMetafits,
 
-    #[error("{0}")]
+    #[error(transparent)]
     SourceList(#[from] SourceListError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     WriteSourceList(#[from] WriteSourceListError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Veto(#[from] VetoError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Mwalib(#[from] marlu::mwalib::MwalibError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 //! Code and utilities for sky-model source lists. See for more info:
-//! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+//! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_lists.html>
 
 pub mod ao;
 pub mod constants;
@@ -33,7 +33,7 @@ use strum_macros::{Display, EnumIter, EnumString};
 use mwa_hyperdrive_common::{itertools, lazy_static};
 
 /// All of the possible sky-model sources list types.
-#[derive(Debug, Clone, Copy, PartialEq, Display, EnumIter, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, EnumIter, EnumString)]
 pub enum SourceListType {
     #[strum(serialize = "hyperdrive")]
     Hyperdrive,

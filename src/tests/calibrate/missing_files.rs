@@ -9,9 +9,8 @@ use std::io::Write;
 
 use tempfile::Builder;
 
-use crate::{
-    calibrate::params::InvalidArgsError,
-    tests::{get_cmd_output, hyperdrive_di_calibrate, reduced_obsids::get_reduced_1090008640},
+use crate::tests::{
+    get_cmd_output, hyperdrive_di_calibrate, reduced_obsids::get_reduced_1090008640,
 };
 use mwa_hyperdrive_common::toml;
 
@@ -42,7 +41,7 @@ fn arg_file_missing_metafits() {
     assert!(cmd.is_err());
     let (_, stderr) = get_cmd_output(cmd);
     assert!(
-        stderr.contains(&InvalidArgsError::InvalidDataInput.to_string()),
+        stderr.contains("Received gpuboxes without a metafits file"),
         "{}",
         stderr
     );
@@ -83,7 +82,7 @@ fn arg_file_missing_gpuboxes() {
     assert!(cmd.is_err());
     let (_, stderr) = get_cmd_output(cmd);
     assert!(
-        stderr.contains(&InvalidArgsError::InvalidDataInput.to_string()),
+        stderr.contains("Received only a metafits file and mwaf files"),
         "{}",
         stderr
     );

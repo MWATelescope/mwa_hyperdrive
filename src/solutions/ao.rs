@@ -5,7 +5,7 @@
 //! Code to read and write "André Offringa style" calibration solutions.
 //!
 //! See for more info:
-//! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
+//! <https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_ao.html>
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
@@ -22,7 +22,7 @@ use super::{error::*, CalibrationSolutions};
 use crate::math::average_epoch;
 use mwa_hyperdrive_common::{byteorder, hifitime, marlu, ndarray, rayon, vec1, Complex};
 
-pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsError> {
+pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
     let file_str = file.display().to_string();
     let mut bin_file = BufReader::new(File::open(&file)?);
     // The first 7 bytes should be ASCII "MWAOCAL".
@@ -37,7 +37,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
     ])
     .unwrap();
     if mwaocal_str.as_str() != "MWAOCAL" {
-        return Err(ReadSolutionsError::AndreBinaryStr {
+        return Err(SolutionsReadError::AndreBinaryStr {
             file: file_str,
             got: mwaocal_str,
         });
@@ -46,7 +46,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
         match bin_file.read_u8()? {
             0 => (),
             v => {
-                return Err(ReadSolutionsError::AndreBinaryVal {
+                return Err(SolutionsReadError::AndreBinaryVal {
                     file: file_str,
                     expected: "0",
                     got: v.to_string(),
@@ -135,7 +135,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
 }
 
 /// Write a "André-Offringa calibrate format" calibration solutions binary file.
-pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), WriteSolutionsError> {
+pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), SolutionsWriteError> {
     let num_polarisations = 4;
     let (num_timeblocks, total_num_tiles, total_num_chanblocks) = sols.di_jones.dim();
 

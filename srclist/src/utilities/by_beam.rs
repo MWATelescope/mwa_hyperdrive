@@ -29,7 +29,7 @@ use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, ndarray};
 /// pointing information.
 ///
 /// See for more info:
-/// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists
+/// <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_lists.html>
 #[derive(Parser, Debug)]
 pub struct ByBeamArgs {
     /// Path to the source list to be converted.

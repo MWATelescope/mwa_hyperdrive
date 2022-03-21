@@ -6,9 +6,12 @@
 //! write out the calibrated visibilities.
 
 mod error;
-pub use error::SolutionsApplyError;
+#[cfg(test)]
+mod integration_tests;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use error::SolutionsApplyError;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -44,6 +47,7 @@ use crate::{
         read::{MsReader, RawDataReader, UvfitsReader, VisInputType, VisRead},
         write::{can_write_to_file, write_vis, VisOutputType, VisTimestep},
     },
+    HyperdriveError,
 };
 use mwa_hyperdrive_common::{clap, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1};
 
@@ -150,8 +154,9 @@ pub struct SolutionsApplyArgs {
 }
 
 impl SolutionsApplyArgs {
-    pub fn run(self, dry_run: bool) -> Result<(), SolutionsApplyError> {
-        apply_solutions(self, dry_run)
+    pub fn run(self, dry_run: bool) -> Result<(), HyperdriveError> {
+        apply_solutions(self, dry_run)?;
+        Ok(())
     }
 }
 
@@ -187,7 +192,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
             if ms.len() > 1 {
                 return Err(SolutionsApplyError::MultipleMetafits(ms.clone()));
             }
-            Some(ms.first())
+            Some(ms.first().as_ref())
         } else {
             None
         }
@@ -195,7 +200,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
 
     // Read the solutions before the input data; if something is wrong with
     // them, then we can bail much faster.
-    let sols = CalibrationSolutions::read_solutions_from_ext(&solutions, metafits)?;
+    let sols = CalibrationSolutions::read_solutions_from_ext_inner(&solutions, metafits)?;
 
     messages::CalSolDetails {
         filename: &solutions,
@@ -322,7 +327,46 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
             Box::new(input_data)
         }
 
-        _ => return Err(SolutionsApplyError::InvalidDataInput),
+        // The following matches are for invalid combinations of input
+        // files. Make an error message for the user.
+        (Some(_), _, None, None, None) => {
+            let msg = "Received only a metafits file; a uvfits file, a measurement set or gpubox files are required.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (Some(_), _, Some(_), None, None) => {
+            let msg = "Received only a metafits file and mwaf files; gpubox files are required.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (None, Some(_), _, None, None) => {
+            let msg = "Received gpuboxes without a metafits file; this is not supported.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (None, None, Some(_), None, None) => {
+            let msg =
+                "Received mwaf files without gpuboxes and a metafits file; this is not supported.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (_, Some(_), _, Some(_), None) => {
+            let msg = "Received gpuboxes and measurement set files; this is not supported.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (_, Some(_), _, None, Some(_)) => {
+            let msg = "Received gpuboxes and uvfits files; this is not supported.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (_, _, _, Some(_), Some(_)) => {
+            let msg = "Received uvfits and measurement set files; this is not supported.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (_, _, Some(_), Some(_), _) => {
+            let msg = "Received mwafs and measurement set files; this is not supported.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (_, _, Some(_), _, Some(_)) => {
+            let msg = "Received mwafs and uvfits files; this is not supported.";
+            return Err(SolutionsApplyError::InvalidDataInput(msg));
+        }
+        (None, None, None, None, None) => return Err(SolutionsApplyError::NoInputData),
     };
 
     // Warn the user if we're applying solutions to raw data without corrections.

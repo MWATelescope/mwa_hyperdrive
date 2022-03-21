@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code to read in AOFlagger flags in .mwaf files.
+//! Code to read in AOFlagger flags in mwaf files.
+//!
+//! See for more info:
+//! <https://MWATelescope.github.io/mwa_hyperdrive/defs/mwa/mwaf.html>
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -81,14 +84,14 @@ pub(crate) struct AOFlags {
     pub(crate) software_version_date: Option<String>,
 
     /// Sigh. cotter has a nasty bug that can cause the start time listed in
-    /// mwaf files to be offset from data HDUs. When this [AOFlags] is created,
-    /// this is always `false`, because the raw data must be inspected before we
-    /// know if this should be `true`.
+    /// mwaf files to be offset from data HDUs. When this [`AOFlags`] is
+    /// created, this is always `false`, because the raw data must be inspected
+    /// before we know if this should be `true`.
     pub(crate) offset_bug: bool,
 }
 
 impl AOFlags {
-    /// Create a [AOFlags] struct from an mwaf file.
+    /// Create an [`AOFlags`] struct from an mwaf file.
     pub(crate) fn new_from_mwaf<T: AsRef<Path>>(file: T) -> Result<AOFlags, MwafError> {
         let m = Mwaf::unpack(&file)?;
 
@@ -135,8 +138,7 @@ impl AOFlags {
         })
     }
 
-    /// From many mwaf files, return a single [AOFlags] struct with all
-    /// flags.
+    /// From many mwaf files, return a single [`AOFlags`] struct with all flags.
     pub(crate) fn new_from_mwafs<T: AsRef<Path>>(files: &[T]) -> Result<AOFlags, MwafMergeError> {
         if files.is_empty() {
             return Err(MwafMergeError::NoFilesGiven);
@@ -164,7 +166,7 @@ impl AOFlags {
         Self::merge(unpacked)
     }
 
-    /// Merge several [AOFlags] into a single struct.
+    /// Merge several [`AOFlags`] into a single struct.
     ///
     /// This function is private so it cannot be misused outside this module. If
     /// a user wants to flatten a bunch of mwaf files together, they should use
@@ -376,6 +378,7 @@ impl Mwaf {
                 Array3::zeros((num_time_steps, num_baselines, bytes_per_row));
             let mut status = 0;
             unsafe {
+                // ffgcvb = fits_read_col_byt
                 fitsio_sys::ffgcvb(
                     fptr.as_raw(),      /* I - FITS file pointer                       */
                     1,                  /* I - number of column to read (1 = 1st col)  */

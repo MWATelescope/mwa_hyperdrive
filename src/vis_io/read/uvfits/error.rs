@@ -12,21 +12,18 @@ use thiserror::Error;
 use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
-pub enum FitsError {
+pub(crate) enum FitsError {
     /// An error associated the fitsio crate.
-    #[error("{0}")]
+    #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
 
     /// An IO error.
-    #[error("{0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }
 
 #[derive(Error, Debug)]
-pub enum UvfitsReadError {
-    #[error("No metafits file supplied - this is required when reading from uvfits files")]
-    NoMetafits,
-
+pub(crate) enum UvfitsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
     BadFile(PathBuf),
 
@@ -48,36 +45,27 @@ pub enum UvfitsReadError {
     #[error("Could not parse key {key}'s value {value} into a number")]
     Parse { key: String, value: String },
 
-    /// An error associated with ERFA.
-    #[error("{source_file}:{source_line} Call to ERFA function {function} returned status code {status}")]
-    Erfa {
-        source_file: &'static str,
-        source_line: u32,
-        status: i32,
-        function: &'static str,
-    },
-
     /// An error associated with fitsio.
-    #[error("{0}")]
+    #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
 
     /// A error from interacting with a fits file. This particular error wraps
     /// those of `rust-fitsio`.
-    #[error("{0}")]
+    #[error(transparent)]
     Fits(#[from] mwalib::FitsError),
 
     /// mwalib error.
-    #[error("{0}")]
+    #[error(transparent)]
     Mwalib(#[from] mwalib::MwalibError),
 
     /// An error when converting a Rust string to a C string.
-    #[error("{0}")]
+    #[error(transparent)]
     BadString(#[from] std::ffi::NulError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
 
     /// An IO error.
-    #[error("{0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

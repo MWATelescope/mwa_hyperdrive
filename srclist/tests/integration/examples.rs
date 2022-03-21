@@ -28,7 +28,7 @@ fn get_example_sl() -> SourceList {
             flux_type: FluxDensityType::List {
                 fds: vec1![
                     FluxDensity {
-                        freq: 180e6,
+                        freq: 150e6,
                         i: 10.0,
                         q: 0.0,
                         u: 0.0,

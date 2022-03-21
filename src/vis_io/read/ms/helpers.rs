@@ -15,13 +15,13 @@ use mwa_hyperdrive_common::{marlu, rayon};
 
 /// Open a measurement set table read only. If `table` is `None`, then open the
 /// base table.
-pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MSError> {
+pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MsReadError> {
     match Table::open(
         &format!("{}/{}", ms.display(), table.unwrap_or("")),
         TableOpenMode::Read,
     ) {
         Ok(t) => Ok(t),
-        Err(e) => Err(MSError::RubblError(e.to_string())),
+        Err(e) => Err(MsReadError::RubblError(e.to_string())),
     }
 }
 
@@ -31,9 +31,9 @@ pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MSErro
 pub(super) fn casacore_positions_to_local_xyz(
     pos: &[XyzGeocentric],
     array_pos: LatLngHeight,
-) -> Result<Vec<XyzGeodetic>, MSError> {
+) -> Result<Vec<XyzGeodetic>, MsReadError> {
     let vec = XyzGeocentric::get_geocentric_vector(array_pos)
-        .map_err(|_| MSError::Geodetic2Geocentric)?;
+        .map_err(|_| MsReadError::Geodetic2Geocentric)?;
     let (s_long, c_long) = array_pos.longitude_rad.sin_cos();
     Ok(pos
         .par_iter()

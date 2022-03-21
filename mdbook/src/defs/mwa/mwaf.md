@@ -1,0 +1,14 @@
+# mwaf flag files
+
+`mwaf` files indicate what visibilities should be flagged, and should be made
+with [`Birli`](https://github.com/MWATelescope/Birli) (which uses
+[`AOFlagger`](https://gitlab.com/aroffringa/aoflagger)). They aren't necessary,
+but may improve things by removing radio-frequency interference. An example of
+producing them is:
+
+```shell
+birli *gpubox*.fits -m *.metafits -f birli_flag_%%.mwaf
+```
+
+At the time of writing, `hyperdrive` only utilises `mwaf` files when reading
+visibilities from raw data.

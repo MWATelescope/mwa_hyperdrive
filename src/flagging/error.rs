@@ -11,7 +11,7 @@ use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 /// Error type associated with mwaf files.
-pub enum MwafError {
+pub(crate) enum MwafError {
     /// Error to describe some kind of inconsistent state within an mwaf file.
     #[error("Inconsistent mwaf file (file: {file}, expected: {expected}, found: {found})")]
     Inconsistent {
@@ -20,13 +20,13 @@ pub enum MwafError {
         found: String,
     },
 
-    #[error("{0}")]
+    #[error(transparent)]
     FitsError(#[from] FitsError),
 }
 
 #[derive(Error, Debug)]
 /// Error type associated with merging the contents of mwaf files.
-pub enum MwafMergeError {
+pub(crate) enum MwafMergeError {
     /// Error to describe some kind of inconsistent state within an mwaf file.
     #[error(
         r#"Inconsistent mwaf contents (first gpubox num: {gpubox1}, second gpubox num: {gpubox2}
@@ -44,6 +44,6 @@ expected: {expected}, found: {found})"#
     NoFilesGiven,
 
     /// Other errors associated with a single mwaf file.
-    #[error("{0}")]
+    #[error(transparent)]
     MwafError(#[from] MwafError),
 }

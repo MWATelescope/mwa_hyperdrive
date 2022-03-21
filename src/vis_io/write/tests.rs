@@ -92,10 +92,10 @@ pub fn test_vis_output_no_time_averaging_no_gaps() {
         avg_freq: 1,
         num_vis_pols: 4,
     };
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let out_vis_paths = vec1![
-        (tmp_dir.join("vis.uvfits"), VisOutputType::Uvfits),
-        (tmp_dir.join("vis.ms"), VisOutputType::MeasurementSet)
+        (tmp_dir.path().join("vis.uvfits"), VisOutputType::Uvfits),
+        (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
     let array_pos = LatLngHeight::new_mwa();
@@ -298,10 +298,10 @@ pub fn test_vis_output_no_time_averaging_with_gaps() {
         avg_freq: 1,
         num_vis_pols: 4,
     };
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let out_vis_paths = vec1![
-        (tmp_dir.join("vis.uvfits"), VisOutputType::Uvfits),
-        (tmp_dir.join("vis.ms"), VisOutputType::MeasurementSet)
+        (tmp_dir.path().join("vis.uvfits"), VisOutputType::Uvfits),
+        (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
     let array_pos = LatLngHeight::new_mwa();
@@ -514,10 +514,10 @@ pub fn test_vis_output_time_averaging() {
         avg_freq: 1,
         num_vis_pols: 4,
     };
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let out_vis_paths = vec1![
-        (tmp_dir.join("vis.uvfits"), VisOutputType::Uvfits),
-        (tmp_dir.join("vis.ms"), VisOutputType::MeasurementSet)
+        (tmp_dir.path().join("vis.uvfits"), VisOutputType::Uvfits),
+        (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
     let array_pos = LatLngHeight::new_mwa();

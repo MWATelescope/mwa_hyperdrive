@@ -240,7 +240,7 @@ impl ObsContext {
 }
 
 #[derive(Error, Debug)]
-pub enum InvalidTileFlag {
+pub(crate) enum InvalidTileFlag {
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}")]
     Index { got: usize, max: usize },
 

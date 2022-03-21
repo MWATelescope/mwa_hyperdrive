@@ -16,6 +16,7 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use crate::glob::{get_all_matches_from_glob, GlobError};
+use crate::vis_io::read::VisReadError;
 use mwa_hyperdrive_common::{lazy_static, thiserror, vec1};
 
 lazy_static::lazy_static! {
@@ -61,7 +62,7 @@ struct InputDataTypesTemp {
 impl InputDataTypes {
     /// From an input collection of filename or glob strings, disentangle the
     /// file types and populate [InputDataTypes].
-    pub(super) fn new(files: &[String]) -> Result<InputDataTypes, InputFileError> {
+    pub(super) fn new(files: &[String]) -> Result<InputDataTypes, VisReadError> {
         let mut temp = InputDataTypesTemp::default();
 
         for file in files.iter().map(|f| f.as_str()) {
@@ -153,6 +154,9 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         // Propagate all other errors.
         Err(e) => return Err(e),
     };
+    if file.contains("_metafits_ppds.fits") {
+        return Err(InputFileError::PpdMetafitsUnsupported(file.to_string()));
+    }
     match (
         file.ends_with(".metafits") || file.ends_with("_metafits.fits"),
         RE_GPUBOX.is_match(file),
@@ -174,17 +178,20 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
 }
 
 #[derive(Debug, Error)]
-pub enum InputFileError {
+pub(crate) enum InputFileError {
     #[error("Specified file does not exist: {0}")]
     DoesNotExist(String),
 
     #[error("Could not read specified file: {0}")]
     CouldNotRead(String),
 
+    #[error("The specified file '{0}' is a \"PPDs metafits\" and is not supported. Please use a newer metafits file.")]
+    PpdMetafitsUnsupported(String),
+
     #[error("The specified file '{0}' was not a recognised file type.")]
     NotRecognised(String),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Glob(#[from] GlobError),
 
     #[error("IO error when attempting to read file '{0}': {1}")]

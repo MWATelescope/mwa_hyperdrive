@@ -7,16 +7,10 @@
 use mwalib::fitsio;
 use thiserror::Error;
 
-use super::{args::CalibrateArgsFileError, params::InvalidArgsError};
-use crate::{
-    model::ModelError,
-    solutions::{ReadSolutionsError, WriteSolutionsError},
-    vis_io::read::{UvfitsReadError, VisReadError},
-};
 use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
-pub enum CalibrateError {
+pub(crate) enum CalibrateError {
     #[error("Insufficient memory available to perform calibration; need {need_gib} GiB of memory.\nYou could try using fewer timesteps and channels.")]
     InsufficientMemory { need_gib: usize },
 
@@ -25,33 +19,30 @@ pub enum CalibrateError {
     )]
     TimestepUnavailable { timestep: usize },
 
-    #[error("{0}")]
-    ArgFile(#[from] CalibrateArgsFileError),
+    #[error(transparent)]
+    ArgFile(#[from] super::args::CalibrateArgsFileError),
 
-    #[error("{0}")]
-    InvalidArgs(#[from] InvalidArgsError),
+    #[error(transparent)]
+    InvalidArgs(#[from] super::params::InvalidArgsError),
 
-    #[error("{0}")]
-    Read(#[from] VisReadError),
+    #[error(transparent)]
+    SolutionsRead(#[from] crate::solutions::SolutionsReadError),
 
-    #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions")]
-    ReadSolutions(#[from] ReadSolutionsError),
+    #[error(transparent)]
+    SolutionsWrite(#[from] crate::solutions::SolutionsWriteError),
 
-    #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions")]
-    WriteSolutions(#[from] WriteSolutionsError),
+    #[error(transparent)]
+    Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
-    #[error("{0}")]
-    Model(#[from] ModelError),
-
-    #[error("cfitsio error: {0}")]
+    #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
 
-    #[error("Error when reading uvfits: {0}")]
-    UviftsRead(#[from] UvfitsReadError),
+    #[error(transparent)]
+    VisRead(#[from] crate::vis_io::read::VisReadError),
 
     #[error(transparent)]
     VisWrite(#[from] crate::vis_io::write::VisWriteError),
 
-    #[error("IO error: {0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

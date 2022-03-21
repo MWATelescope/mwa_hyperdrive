@@ -5,7 +5,7 @@
 //! Code to read and write calibration solutions.
 //!
 //! See for more info:
-//! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
+//! <https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols.html>
 
 pub(crate) mod ao;
 pub mod apply;
@@ -31,7 +31,7 @@ use ndarray::prelude::*;
 use strum_macros::{Display, EnumIter, EnumString};
 use vec1::Vec1;
 
-use crate::vis_io::read::RawDataCorrections;
+use crate::{vis_io::read::RawDataCorrections, HyperdriveError};
 use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray, vec1};
 
 #[derive(Debug, Display, EnumIter, EnumString)]
@@ -55,7 +55,9 @@ pub struct CalibrationSolutions {
     /// calibration.
     pub di_jones: Array3<Jones<f64>>,
 
-    /// Which tiles are flagged? Zero indexed.
+    /// The indices of flagged tiles before calibration. Note that there may
+    /// appear to be more flagged tiles in the solutions; this might happen if
+    /// an unflagged has no power. The indices are zero indexed.
     pub flagged_tiles: Vec<usize>,
 
     /// Which chanblocks are flagged? Zero indexed.
@@ -142,30 +144,32 @@ impl CalibrationSolutions {
     pub fn read_solutions_from_ext<P: AsRef<Path>, P2: AsRef<Path>>(
         file: P,
         metafits: Option<P2>,
-    ) -> Result<CalibrationSolutions, ReadSolutionsError> {
-        fn inner(
-            file: &Path,
-            metafits: Option<&Path>,
-        ) -> Result<CalibrationSolutions, ReadSolutionsError> {
-            if file.is_dir() {
-                debug!(
-                    "Got a directory '{}', looking for RTS solutions...",
-                    file.display()
-                );
-                let metafits = metafits.ok_or(ReadSolutionsError::RtsMetafitsRequired)?;
-                rts::read(file, metafits).map_err(ReadSolutionsError::from)
-            } else {
-                match file.extension().and_then(|s| s.to_str()) {
-                    Some("fits") => hyperdrive::read(file),
-                    Some("bin") => ao::read(file),
-                    s => {
-                        let ext = s.unwrap_or("<no extension>").to_string();
-                        Err(ReadSolutionsError::UnsupportedExt { ext })
-                    }
+    ) -> Result<CalibrationSolutions, HyperdriveError> {
+        Self::read_solutions_from_ext_inner(file.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
+            .map_err(HyperdriveError::from)
+    }
+
+    pub(crate) fn read_solutions_from_ext_inner(
+        file: &Path,
+        metafits: Option<&Path>,
+    ) -> Result<CalibrationSolutions, SolutionsReadError> {
+        if file.is_dir() {
+            debug!(
+                "Got a directory '{}', looking for RTS solutions...",
+                file.display()
+            );
+            let metafits = metafits.ok_or(SolutionsReadError::RtsMetafitsRequired)?;
+            rts::read(file, metafits).map_err(SolutionsReadError::from)
+        } else {
+            match file.extension().and_then(|s| s.to_str()) {
+                Some("fits") => hyperdrive::read(file),
+                Some("bin") => ao::read(file),
+                s => {
+                    let ext = s.unwrap_or("<no extension>").to_string();
+                    Err(SolutionsReadError::UnsupportedExt { ext })
                 }
             }
         }
-        inner(file.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
     }
 
     /// From the target file extension, write out the appropriately-formatted
@@ -177,31 +181,35 @@ impl CalibrationSolutions {
         &self,
         file: P,
         metafits: Option<P2>,
-    ) -> Result<(), WriteSolutionsError> {
-        fn inner(
-            sols: &CalibrationSolutions,
-            file: &Path,
-            metafits: Option<&Path>,
-        ) -> Result<(), WriteSolutionsError> {
-            if file.is_dir() {
-                let metafits = metafits.ok_or(WriteSolutionsError::RtsMetafitsRequired)?;
-                rts::write(sols, file, metafits)?;
-            } else {
-                let ext = file.extension().and_then(|e| e.to_str());
-                match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
-                    // This function is deliberately kept simple so no extra
-                    // metadata can be supplied.
-                    Some(CalSolutionType::Fits) => hyperdrive::write(sols, file),
-                    Some(CalSolutionType::Bin) => ao::write(sols, file),
-                    None => Err(WriteSolutionsError::UnsupportedExt {
-                        ext: ext.unwrap_or("<no extension>").to_string(),
-                    }),
-                }?;
-            }
+    ) -> Result<(), HyperdriveError> {
+        Self::write_solutions_from_ext_inner(
+            self,
+            file.as_ref(),
+            metafits.as_ref().map(|f| f.as_ref()),
+        )
+        .map_err(HyperdriveError::from)
+    }
 
-            Ok(())
+    pub(crate) fn write_solutions_from_ext_inner(
+        sols: &CalibrationSolutions,
+        file: &Path,
+        metafits: Option<&Path>,
+    ) -> Result<(), SolutionsWriteError> {
+        if file.is_dir() {
+            let metafits = metafits.ok_or(SolutionsWriteError::RtsMetafitsRequired)?;
+            rts::write(sols, file, metafits)?;
+        } else {
+            let ext = file.extension().and_then(|e| e.to_str());
+            match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
+                Some(CalSolutionType::Fits) => hyperdrive::write(sols, file),
+                Some(CalSolutionType::Bin) => ao::write(sols, file),
+                None => Err(SolutionsWriteError::UnsupportedExt {
+                    ext: ext.unwrap_or("<no extension>").to_string(),
+                }),
+            }?;
         }
-        inner(self, file.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
+
+        Ok(())
     }
 
     /// Given a timestamp, get the timeblock of solutions that best correspond

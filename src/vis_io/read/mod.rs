@@ -10,9 +10,9 @@ mod raw;
 mod uvfits;
 
 pub(crate) use error::VisReadError;
-pub use ms::{MsReadError, MsReader};
-pub(crate) use raw::{RawDataCorrections, RawDataReader, RawReadError};
-pub use uvfits::{UvfitsReadError, UvfitsReader};
+pub(crate) use ms::MsReader;
+pub(crate) use raw::{RawDataCorrections, RawDataReader};
+pub(crate) use uvfits::UvfitsReader;
 
 use std::collections::{HashMap, HashSet};
 
@@ -31,7 +31,7 @@ pub enum VisInputType {
     Uvfits,
 }
 
-pub trait VisRead: Sync + Send {
+pub(crate) trait VisRead: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
 
     fn get_input_data_type(&self) -> VisInputType;

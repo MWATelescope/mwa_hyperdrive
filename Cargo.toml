@@ -11,7 +11,7 @@ license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
 repository = "https://github.com/MWATelescope/mwa_hyperdrive"
-homepage = "https://github.com/MWATelescope/mwa_hyperdrive"
+homepage = "https://mwatelescope.github.io/mwa_hyperdrive"
 exclude = [".github/*", "test_files/*"]
 
 [workspace]

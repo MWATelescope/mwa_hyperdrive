@@ -5,12 +5,14 @@
 //! Code to plot calibration solutions.
 
 mod error;
-pub use error::SolutionsPlotError;
+
+pub(crate) use error::SolutionsPlotError;
 
 use std::path::PathBuf;
 
 use clap::Parser;
 
+use crate::HyperdriveError;
 use mwa_hyperdrive_common::clap;
 
 #[derive(Parser, Debug, Default)]
@@ -48,26 +50,62 @@ pub struct SolutionsPlotArgs {
 
 impl SolutionsPlotArgs {
     #[cfg(not(feature = "plotting"))]
-    pub fn run(self) -> Result<(), SolutionsPlotError> {
+    pub fn run(self) -> Result<(), HyperdriveError> {
         // Plotting is an optional feature. This is because it doesn't look
         // possible to statically compile the C dependencies needed for
         // plotting. If the "plotting" feature isn't available, warn the user
         // that they'll need to compile hyperdrive from source.
-        return Err(SolutionsPlotError::NoPlottingFeature);
+        return Err(HyperdriveError::from(SolutionsPlotError::NoPlottingFeature));
     }
 
     #[cfg(feature = "plotting")]
-    pub fn run(self) -> Result<(), SolutionsPlotError> {
-        use log::{info, trace, warn};
+    pub fn run(self) -> Result<(), HyperdriveError> {
+        plotting::plot_all_sol_files(self)?;
+        Ok(())
+    }
+}
 
-        use super::*;
-        use mwa_hyperdrive_common::mwalib;
+#[cfg(feature = "plotting")]
+mod plotting {
+    use std::str::FromStr;
 
-        if self.files.is_empty() {
+    use log::{debug, info, trace, warn};
+    use marlu::Jones;
+    use ndarray::prelude::*;
+    use plotters::{
+        coord::Shift,
+        prelude::*,
+        style::{Color, RGBAColor},
+    };
+    use thiserror::Error;
+    use vec1::Vec1;
+
+    use super::*;
+    use crate::solutions::{ao, hyperdrive, CalSolutionType, CalibrationSolutions};
+    use mwa_hyperdrive_common::{lazy_static, log, marlu, mwalib, ndarray, thiserror, vec1};
+
+    /// The number of X pixels on the plots.
+    const X_PIXELS: u32 = 3200;
+    /// The number of Y pixels on the plots.
+    const Y_PIXELS: u32 = 1800;
+
+    lazy_static::lazy_static! {
+        static ref CLEAR: RGBAColor = WHITE.mix(0.0);
+
+        static ref POLS: [(&'static str, RGBAColor); 4] = [
+            ("XX", BLUE.mix(1.0)),
+            ("XY", BLUE.mix(0.2)),
+            ("YX", RED.mix(0.2)),
+            ("YY", RED.mix(1.0)),
+        ];
+    }
+
+    pub(crate) fn plot_all_sol_files(args: SolutionsPlotArgs) -> Result<(), SolutionsPlotError> {
+        if args.files.is_empty() {
             return Err(SolutionsPlotError::NoInputs);
         }
 
-        let mwalib_context = match self.metafits {
+        let mwalib_context = match args.metafits.as_deref() {
             Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
             None => None,
         };
@@ -90,7 +128,7 @@ impl SolutionsPlotArgs {
         // Have we warned the user that tile names won't be on the plots?
         let mut warned_no_tile_names = false;
 
-        for solutions_file in self.files {
+        for solutions_file in &args.files {
             debug!("Plotting solutions for '{}'", solutions_file.display());
             let solutions_file = solutions_file.canonicalize()?;
             let ext = solutions_file
@@ -134,51 +172,17 @@ impl SolutionsPlotArgs {
                 &sols,
                 base,
                 &plot_title,
-                self.ref_tile,
-                self.no_ref_tile,
+                args.ref_tile,
+                args.no_ref_tile,
                 tile_names,
-                self.ignore_cross_pols,
-                self.min_amp,
-                self.max_amp,
+                args.ignore_cross_pols,
+                args.min_amp,
+                args.max_amp,
             )?;
             info!("Wrote {:?}", plot_files);
         }
 
         Ok(())
-    }
-}
-
-#[cfg(feature = "plotting")]
-mod plotting {
-    use log::warn;
-    use marlu::Jones;
-    use ndarray::prelude::*;
-    use plotters::{
-        coord::Shift,
-        prelude::*,
-        style::{Color, RGBAColor},
-    };
-    use thiserror::Error;
-    use vec1::Vec1;
-
-    use super::*;
-    use crate::solutions::CalibrationSolutions;
-    use mwa_hyperdrive_common::{lazy_static, log, marlu, ndarray, thiserror, vec1};
-
-    /// The number of X pixels on the plots.
-    const X_PIXELS: u32 = 3200;
-    /// The number of Y pixels on the plots.
-    const Y_PIXELS: u32 = 1800;
-
-    lazy_static::lazy_static! {
-        static ref CLEAR: RGBAColor = WHITE.mix(0.0);
-
-        static ref POLS: [(&'static str, RGBAColor); 4] = [
-            ("XX", BLUE.mix(1.0)),
-            ("XY", BLUE.mix(0.2)),
-            ("YX", RED.mix(0.2)),
-            ("YY", RED.mix(1.0)),
-        ];
     }
 
     #[allow(clippy::too_many_arguments)]

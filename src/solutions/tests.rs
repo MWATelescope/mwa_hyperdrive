@@ -268,9 +268,9 @@ fn test_read_bad_hyperdrive_solutions() {
     let result = hyperdrive::read(tmp_file.path());
     assert!(result.is_err());
     let e = result.err().unwrap();
-    assert!(matches!(e, ReadSolutionsError::BadShape { .. }));
+    assert!(matches!(e, SolutionsReadError::BadShape { .. }));
     match e {
-        ReadSolutionsError::BadShape {
+        SolutionsReadError::BadShape {
             thing,
             expected,
             actual,

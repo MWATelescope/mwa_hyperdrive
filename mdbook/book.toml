@@ -1,0 +1,29 @@
+[book]
+title = "mwa_hyperdrive documentation"
+authors = ["Christopher H. Jordan", "Dev Null"]
+description = "mwa_hyperdrive documentation"
+language = "en"
+multilingual = false
+
+[output.html]
+mathjax-support = true
+git-repository-url = "https://github.com/MWATelescope/mwa_hyperdrive"
+default-theme = "ayu"
+# https://github.com/badboy/mdbook-mermaid
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+additional-css = ["././theme/css/mdbook-admonish.css"]
+
+[output.html.fold]
+enable = true
+level = 1
+
+# https://github.com/Michael-F-Bryan/mdbook-linkcheck
+[output.linkcheck]
+optional = true
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[preprocessor.admonish]
+command = "mdbook-admonish"
+assets_version = "2.0.0" # do not edit: managed by `mdbook-admonish install`

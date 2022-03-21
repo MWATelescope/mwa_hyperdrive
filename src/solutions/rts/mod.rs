@@ -5,7 +5,7 @@
 //! Code to read and write RTS calibration solutions.
 //!
 //! See for more info:
-//! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
+//! <https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_rts.html>
 
 // The RTS calls DI_JonesMatrices files "alignment files". The first two lines
 // of these files correspond to "alignment flux density" (or "flux scale") and
@@ -550,7 +550,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
 }
 
 #[derive(Error, Debug)]
-pub enum RtsReadSolsError {
+pub(crate) enum RtsReadSolsError {
     #[error("Attempted to read RTS solutions from '{0}', but this isn't a directory")]
     NotADir(PathBuf),
 
@@ -587,25 +587,22 @@ pub enum RtsReadSolsError {
         gpubox_num: u8,
     },
 
-    #[error("The DI_JonesMatrices files say that there are {got} tiles, but the metafits has {expected}. Unsure how to continue.")]
-    UnequalMetafitsTileCount { got: usize, expected: usize },
-
     #[error("Unhandled RTS frequency resolution: {0} Hz")]
     UnhandledFreqRes(f64),
 
-    #[error("Error when reading {filename}: {0}")]
+    #[error("Error when reading {filename}: {err}")]
     DiJmError {
         filename: PathBuf,
         err: ReadDiJmFileError,
     },
 
-    #[error("Error when reading {filename}: {0}")]
+    #[error("Error when reading {filename}: {err}")]
     BpCalError {
         filename: PathBuf,
         err: ReadBpCalFileError,
     },
 
-    #[error("{0}")]
+    #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
 
     #[error("Error when reading metafits: {0}")]
@@ -613,7 +610,7 @@ pub enum RtsReadSolsError {
 }
 
 #[derive(Error, Debug)]
-pub enum RtsWriteSolsError {
+pub(crate) enum RtsWriteSolsError {
     #[error("Attempted to write RTS solutions into '{0}', but this isn't a directory")]
     NotADir(PathBuf),
 
@@ -623,6 +620,6 @@ pub enum RtsWriteSolsError {
     #[error("Error when reading metafits: {0}")]
     Mwalib(#[from] mwalib::MwalibError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

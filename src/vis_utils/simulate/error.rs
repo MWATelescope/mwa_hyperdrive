@@ -12,7 +12,7 @@ use crate::help_texts::VIS_OUTPUT_EXTENSIONS;
 use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
-pub enum VisSimulateError {
+pub(crate) enum VisSimulateError {
     #[error("Right Ascension was not within 0 to 360!")]
     RaInvalid,
 
@@ -51,17 +51,14 @@ pub enum VisSimulateError {
     #[error(transparent)]
     AverageFactor(#[from] crate::averaging::AverageFactorError),
 
-    #[error("Error when trying to read source list: {0}")]
+    #[error(transparent)]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
-    #[error("Error when trying to veto the source list: {0}")]
+    #[error(transparent)]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 
     #[error(transparent)]
     Beam(#[from] mwa_hyperdrive_beam::BeamError),
-
-    #[error(transparent)]
-    Model(#[from] crate::model::ModelError),
 
     #[error(transparent)]
     VisWrite(#[from] crate::vis_io::write::VisWriteError),

@@ -74,7 +74,7 @@ impl PfbFlavour {
 
 #[derive(Error, Debug)]
 #[error("Could not parse PFB flavour '{value}'.\nSupported flavours are: {}", *crate::pfb_gains::PFB_FLAVOURS)]
-pub struct PfbParseError {
+pub(crate) struct PfbParseError {
     value: String,
 }
 

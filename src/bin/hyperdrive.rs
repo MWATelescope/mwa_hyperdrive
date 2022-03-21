@@ -15,20 +15,27 @@ use mwa_hyperdrive::{
     vis_utils::{simulate::VisSimulateArgs, subtract::VisSubtractArgs},
     HyperdriveError,
 };
-use mwa_hyperdrive_common::{clap, display_build_info, log, mwalib, setup_logging};
+use mwa_hyperdrive_common::{clap, display_build_info, log, setup_logging};
 use mwa_hyperdrive_srclist::utilities::*;
 
 #[derive(Parser)]
-#[clap(name = "hyperdrive", version, author = env!("CARGO_PKG_HOMEPAGE"), about)]
+#[clap(
+    version,
+    author,
+    about = r#"Calibration software for the Murchison Widefield Array (MWA) radio telescope
+Documentation: https://mwatelescope.github.io/mwa_hyperdrive
+Source:        https://github.com/MWATelescope/mwa_hyperdrive"#
+)]
 #[clap(global_setting(AppSettings::DeriveDisplayOrder))]
 #[clap(disable_help_subcommand = true)]
 #[clap(infer_subcommands = true)]
 #[clap(propagate_version = true)]
 enum Args {
-    /// Perform direction-independent calibration on the input MWA data. See for
-    /// more info:
-    /// https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-usage
     #[clap(alias = "calibrate")]
+    #[clap(
+        about = r#"Perform direction-independent calibration on the input MWA data.
+https://mwatelescope.github.io/mwa_hyperdrive/user/di_cal/intro.html"#
+    )]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     DiCalibrate {
@@ -52,8 +59,9 @@ enum Args {
         dry_run: bool,
     },
 
-    /// Simulate visibilities of a sky-model source list.
     #[clap(alias = "simulate-vis")]
+    #[clap(about = r#"Simulate visibilities of a sky-model source list.
+https://mwatelescope.github.io/mwa_hyperdrive/user/vis_simulate/intro.html"#)]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     VisSimulate {
@@ -71,8 +79,9 @@ enum Args {
         dry_run: bool,
     },
 
-    /// Subtract sky-model sources from supplied visibilities.
     #[clap(alias = "subtract-vis")]
+    #[clap(about = "Subtract sky-model sources from supplied visibilities.
+https://mwatelescope.github.io/mwa_hyperdrive/user/vis_subtract/intro.html")]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     VisSubtract {
@@ -90,8 +99,9 @@ enum Args {
         dry_run: bool,
     },
 
-    /// Apply calibration solutions to input data.
     #[clap(alias = "apply-solutions")]
+    #[clap(about = r#"Apply calibration solutions to input data.
+https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     SolutionsApply {
@@ -109,8 +119,8 @@ enum Args {
         dry_run: bool,
     },
 
-    /// Convert between calibration solution file formats.
     #[clap(alias = "convert-solutions")]
+    #[clap(about = "Convert between calibration solution file formats.")]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     SolutionsConvert {
@@ -123,8 +133,10 @@ enum Args {
         verbosity: u8,
     },
 
-    /// Plot calibration solutions.
     #[clap(alias = "plot-solutions")]
+    #[clap(
+        about = "Plot calibration solutions. Only available if compiled with the \"plotting\" feature."
+    )]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     SolutionsPlot {
@@ -165,12 +177,11 @@ enum Args {
         args: VerifyArgs,
     },
 
-    /// Print information on the dipole gains listed by a metafits file.
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     DipoleGains {
-        #[clap(name = "METAFITS_FILE", parse(from_os_str))]
-        metafits: PathBuf,
+        #[clap(flatten)]
+        args: mwa_hyperdrive::utilities::dipole_gains::DipoleGains,
     },
 }
 
@@ -189,39 +200,23 @@ fn try_main() -> Result<(), HyperdriveError> {
     let args = Args::parse();
 
     // Set up logging.
-    let verbosity = match &args {
-        Args::DiCalibrate { verbosity, .. } => verbosity,
-        Args::VisSimulate { verbosity, .. } => verbosity,
-        Args::VisSubtract { verbosity, .. } => verbosity,
-        Args::SolutionsApply { verbosity, .. } => verbosity,
-        Args::SolutionsConvert { verbosity, .. } => verbosity,
-        Args::SolutionsPlot { verbosity, .. } => verbosity,
-        Args::SrclistByBeam { args, .. } => &args.verbosity,
-        Args::SrclistConvert { args, .. } => &args.verbosity,
-        Args::SrclistShift { args, .. } => &args.verbosity,
-        Args::SrclistVerify { args, .. } => &args.verbosity,
-        Args::DipoleGains { .. } => &0,
+    let (verbosity, sub_command) = match &args {
+        Args::DiCalibrate { verbosity, .. } => (verbosity, "di-calibrate"),
+        Args::VisSimulate { verbosity, .. } => (verbosity, "vis-simulate"),
+        Args::VisSubtract { verbosity, .. } => (verbosity, "vis-subtract"),
+        Args::SolutionsApply { verbosity, .. } => (verbosity, "solutions-apply"),
+        Args::SolutionsConvert { verbosity, .. } => (verbosity, "solutions-convert"),
+        Args::SolutionsPlot { verbosity, .. } => (verbosity, "solutions-plot"),
+        Args::SrclistByBeam { args, .. } => (&args.verbosity, "srclist-by-beam"),
+        Args::SrclistConvert { args, .. } => (&args.verbosity, "srclist-convert"),
+        Args::SrclistShift { args, .. } => (&args.verbosity, "srclist-shift"),
+        Args::SrclistVerify { args, .. } => (&args.verbosity, "srclist-verify"),
+        Args::DipoleGains { .. } => (&0, "dipole-gains"),
     };
     setup_logging(*verbosity).expect("Failed to initialise logging.");
 
     // Print the version of hyperdrive and its build-time information.
-    info!(
-        "hyperdrive {} {}",
-        match args {
-            Args::DiCalibrate { .. } => "di-calibrate",
-            Args::VisSimulate { .. } => "vis-simulate",
-            Args::VisSubtract { .. } => "vis-subtract",
-            Args::SolutionsApply { .. } => "solutions-apply",
-            Args::SolutionsConvert { .. } => "solutions-convert",
-            Args::SolutionsPlot { .. } => "solutions-plot",
-            Args::SrclistByBeam { .. } => "srclist-by-beam",
-            Args::SrclistConvert { .. } => "srclist-convert",
-            Args::SrclistShift { .. } => "srclist-shift",
-            Args::SrclistVerify { .. } => "srclist-verify",
-            Args::DipoleGains { .. } => "dipole-gains",
-        },
-        env!("CARGO_PKG_VERSION")
-    );
+    info!("hyperdrive {} {}", sub_command, env!("CARGO_PKG_VERSION"));
     display_build_info();
 
     match Args::parse() {
@@ -232,8 +227,6 @@ fn try_main() -> Result<(), HyperdriveError> {
             dry_run,
         } => {
             di_calibrate(cli_args, args_file.as_deref(), dry_run)?;
-
-            info!("hyperdrive di-calibrate complete.");
         }
 
         Args::VisSimulate {
@@ -242,8 +235,6 @@ fn try_main() -> Result<(), HyperdriveError> {
             dry_run,
         } => {
             args.run(dry_run)?;
-
-            info!("hyperdrive vis-simulate complete.");
         }
 
         Args::VisSubtract {
@@ -252,8 +243,6 @@ fn try_main() -> Result<(), HyperdriveError> {
             dry_run,
         } => {
             args.run(dry_run)?;
-
-            info!("hyperdrive vis-subtract complete.");
         }
 
         Args::SolutionsApply {
@@ -262,78 +251,14 @@ fn try_main() -> Result<(), HyperdriveError> {
             dry_run,
         } => {
             args.run(dry_run)?;
-
-            info!("hyperdrive solutions-apply complete.");
         }
 
         Args::SolutionsConvert { args, verbosity: _ } => {
             args.run()?;
-
-            info!("hyperdrive solutions-convert complete.");
         }
 
         Args::SolutionsPlot { args, verbosity: _ } => {
             args.run()?;
-
-            info!("hyperdrive solutions-plot complete.");
-        }
-
-        Args::DipoleGains { metafits } => {
-            let meta = mwalib::MetafitsContext::new(&metafits, None).unwrap();
-            let gains = mwa_hyperdrive::metafits::get_dipole_gains(&meta);
-            let mut all_unity = vec![];
-            let mut non_unity = vec![];
-            for (i, tile_gains) in gains.outer_iter().enumerate() {
-                if tile_gains
-                    .iter()
-                    .all(|&g| g.is_finite() && (g - 1.0).abs() < f64::EPSILON)
-                {
-                    all_unity.push(i);
-                } else {
-                    non_unity.push((i, tile_gains));
-                }
-            }
-
-            if all_unity.len() == meta.num_ants {
-                info!("All dipoles on all tiles have a gain of 1.0!");
-            } else {
-                info!(
-                    "Tiles with all dipoles alive ({}): {:?}",
-                    all_unity.len(),
-                    all_unity
-                );
-                info!("Other tiles:");
-                let mut bad_x = Vec::with_capacity(16);
-                let mut bad_y = Vec::with_capacity(16);
-                let mut bad_string = String::new();
-                for (tile_num, tile_gains) in non_unity {
-                    let tile_gains = tile_gains.as_slice().unwrap();
-                    tile_gains[..16].iter().enumerate().for_each(|(i, &g)| {
-                        if (g - 1.0).abs() > f64::EPSILON {
-                            bad_x.push(i);
-                        }
-                    });
-                    tile_gains[16..].iter().enumerate().for_each(|(i, &g)| {
-                        if (g - 1.0).abs() > f64::EPSILON {
-                            bad_y.push(i);
-                        }
-                    });
-                    bad_string.push_str(&format!("    Tile {:>3}: ", tile_num));
-                    if !bad_x.is_empty() {
-                        bad_string.push_str(&format!("X {:?}", &bad_x));
-                    }
-                    if !bad_x.is_empty() && !bad_y.is_empty() {
-                        bad_string.push_str(", ");
-                    }
-                    if !bad_y.is_empty() {
-                        bad_string.push_str(&format!("Y {:?}", &bad_y));
-                    }
-                    info!("{}", bad_string);
-                    bad_x.clear();
-                    bad_y.clear();
-                    bad_string.clear();
-                }
-            }
         }
 
         // Source list utilities.
@@ -341,7 +266,11 @@ fn try_main() -> Result<(), HyperdriveError> {
         Args::SrclistConvert { args } => args.run()?,
         Args::SrclistShift { args } => args.run()?,
         Args::SrclistVerify { args } => args.run()?,
+
+        // Misc. utilities.
+        Args::DipoleGains { args } => args.run().unwrap(),
     }
 
+    info!("hyperdrive {} complete.", sub_command);
     Ok(())
 }

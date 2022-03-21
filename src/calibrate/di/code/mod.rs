@@ -491,7 +491,7 @@ pub struct IncompleteSolutions<'a> {
     /// Direction-independent calibration solutions *for only unflagged data*.
     /// The first dimension is timeblock, the second is unflagged tile, the
     /// third is unflagged chanblock.
-    pub di_jones: Array3<Jones<f64>>,
+    pub(crate) di_jones: Array3<Jones<f64>>,
 
     /// The timeblocks used in calibration.
     timeblocks: &'a Vec1<Timeblock>,

@@ -97,13 +97,13 @@ fn test_di_calibrate_help_is_correct() {
 
 #[test]
 fn test_1090008640_di_calibrate_uses_array_position() {
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
     let metafits = &data[0];
     let gpufits = &data[1];
-    let sols = tmp_dir.join("sols.fits");
-    let cal_model = tmp_dir.join("hyp_model.uvfits");
+    let sols = tmp_dir.path().join("sols.fits");
+    let cal_model = tmp_dir.path().join("hyp_model.uvfits");
 
     // with non-default array position
     let exp_lat_deg = MWA_LAT_DEG - 1.;
@@ -133,13 +133,13 @@ fn test_1090008640_di_calibrate_uses_array_position() {
 
 #[test]
 fn test_1090008640_di_calibrate_array_pos_requires_3_args() {
-    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
     let metafits = &data[0];
     let gpufits = &data[1];
-    let sols = tmp_dir.join("sols.fits");
-    let cal_model = tmp_dir.join("hyp_model.uvfits");
+    let sols = tmp_dir.path().join("sols.fits");
+    let cal_model = tmp_dir.path().join("hyp_model.uvfits");
 
     // no height specified
     let exp_lat_deg = MWA_LAT_DEG - 1.;

@@ -8,7 +8,7 @@ mod error;
 #[cfg(test)]
 mod tests;
 
-pub use error::*;
+pub(crate) use error::*;
 
 use std::collections::{HashMap, HashSet};
 use std::os::raw::c_char;
@@ -59,10 +59,10 @@ impl UvfitsReader {
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
-    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
+    pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         uvfits: P,
         metafits: Option<P2>,
-    ) -> Result<UvfitsReader, UvfitsReadError> {
+    ) -> Result<UvfitsReader, VisReadError> {
         fn inner(uvfits: &Path, metafits: Option<&Path>) -> Result<UvfitsReader, UvfitsReadError> {
             // If a metafits file was provided, get an mwalib object ready.
             // TODO: Let the user supply the MWA version.
@@ -407,7 +407,7 @@ impl UvfitsReader {
                 metafits_context: mwalib_context,
             })
         }
-        inner(uvfits.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
+        inner(uvfits.as_ref(), metafits.as_ref().map(|f| f.as_ref())).map_err(VisReadError::from)
     }
 
     fn read_inner(
@@ -969,6 +969,7 @@ fn read_cell_array(
         let mut status = 0;
         let mut col_num = -1;
         let keyword = std::ffi::CString::new(col_name).unwrap();
+        // ffgcno = fits_get_colnum
         fitsio_sys::ffgcno(
             fits_ptr.as_raw(),
             0,
@@ -983,6 +984,7 @@ fn read_cell_array(
 
         // Now get the specified row from that column.
         let mut array: Vec<f64> = vec![0.0; n_elem as usize];
+        // ffgcv = fits_read_col
         fitsio_sys::ffgcv(
             fits_ptr.as_raw(),
             82, // TDOUBLE (fitsio.h)

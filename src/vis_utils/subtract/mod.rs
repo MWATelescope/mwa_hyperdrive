@@ -6,7 +6,8 @@
 //! sources from the input data and write them out.
 
 mod error;
-pub use error::VisSubtractError;
+
+pub(crate) use error::VisSubtractError;
 #[cfg(test)]
 mod tests;
 
@@ -41,6 +42,7 @@ use crate::{
         read::{MsReader, UvfitsReader, VisInputType, VisRead},
         write::{can_write_to_file, write_vis, VisOutputType, VisTimestep},
     },
+    HyperdriveError,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{
@@ -113,17 +115,18 @@ pub struct VisSubtractArgs {
     #[clap(long, multiple_values(true), help_heading = "SKY-MODEL SOURCES")]
     sources_to_subtract: Vec<String>,
 
-    /// Invert the subtraction; sources *not* specified in the sky-model source
-    /// list will be subtracted from the input data.
+    /// Invert the subtraction; sources *not* specified in sources-to-subtract
+    /// will be subtracted from the input data.
     #[clap(short, long, help_heading = "SKY-MODEL SOURCES")]
     invert: bool,
 
     /// The number of sources to use in the source list. Only useful if
-    /// subtraction is inverted. The default is to use all sources unspecified
-    /// sources. Example: If 1000 sources are specified here, then the top 1000
-    /// sources are used *after* removing specified sources (based on their flux
-    /// densities after the beam attenuation) within the specified source
-    /// distance cutoff.
+    /// subtraction is inverted. The default is to use all sources in the source
+    /// list. Example: If 1000 sources are specified here, then the top 1000
+    /// sources *after* removing specified sources are subtracted. Standard veto
+    /// rules apply (sources are ranked based on their flux densities after the
+    /// beam attenuation, must be within the specified source distance cutoff
+    /// and above the horizon).
     #[clap(short, long, help_heading = "SKY-MODEL SOURCES")]
     num_sources: Option<usize>,
 
@@ -147,8 +150,7 @@ pub struct VisSubtractArgs {
     #[clap(long, help_heading = "MODEL PARAMETERS")]
     unity_dipole_gains: bool,
 
-    /// If specified, use these dipole delays for the MWA pointing.
-    #[clap(long, multiple_values(true), help_heading = "MODEL PARAMETERS")]
+    #[clap(long, multiple_values(true), help = DIPOLE_DELAYS_HELP.as_str(), help_heading = "MODEL PARAMETERS")]
     delays: Option<Vec<u32>>,
 
     #[clap(
@@ -176,8 +178,9 @@ pub struct VisSubtractArgs {
 }
 
 impl VisSubtractArgs {
-    pub fn run(self, dry_run: bool) -> Result<(), VisSubtractError> {
-        vis_subtract(self, dry_run)
+    pub fn run(self, dry_run: bool) -> Result<(), HyperdriveError> {
+        vis_subtract(self, dry_run)?;
+        Ok(())
     }
 }
 
@@ -330,7 +333,25 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
             Box::new(input_data)
         }
 
-        _ => return Err(VisSubtractError::InvalidDataInput),
+        // The following matches are for invalid combinations of input
+        // files. Make an error message for the user.
+        (_, Some(_), _, _, _) => {
+            let msg = "Received gpubox files, but these are not supported by vis-subtract.";
+            return Err(VisSubtractError::InvalidDataInput(msg));
+        }
+        (_, _, Some(_), _, _) => {
+            let msg = "Received mwaf files, but these are not supported by vis-subtract.";
+            return Err(VisSubtractError::InvalidDataInput(msg));
+        }
+        (Some(_), None, None, None, None) => {
+            let msg = "Received only a metafits file; a calibrated uvfits file or calibrated measurement set is required.";
+            return Err(VisSubtractError::InvalidDataInput(msg));
+        }
+        (_, _, _, Some(_), Some(_)) => {
+            let msg = "Received uvfits and measurement set files; this is not supported.";
+            return Err(VisSubtractError::InvalidDataInput(msg));
+        }
+        (None, None, None, None, None) => return Err(VisSubtractError::NoInputData),
     };
 
     let obs_context = input_data.get_obs_context();

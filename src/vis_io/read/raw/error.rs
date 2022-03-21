@@ -4,32 +4,15 @@
 
 //! Error-handling code associated with reading from raw MWA files.
 
-use std::path::PathBuf;
-
 use thiserror::Error;
 
 use crate::flagging::MwafMergeError;
 use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
-pub enum RawReadError {
-    #[error("Supplied file path {0} does not exist or is not readable!")]
-    BadFile(PathBuf),
-
-    #[error("No metafits file supplied")]
-    NoMetafits,
-
-    #[error("No gpubox files supplied")]
-    NoGpuboxes,
-
+pub(crate) enum RawReadError {
     #[error("gpubox file {0} does not have a corresponding mwaf file specified")]
     GpuboxFileMissingMwafFile(usize),
-
-    #[error("The lone gpubox entry is neither a file nor a glob pattern that matched any files")]
-    SingleGpuboxNotAFileOrGlob,
-
-    #[error("The lone mwaf entry is neither a file nor a glob pattern that matched any files")]
-    SingleMwafNotAFileOrGlob,
 
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
     InvalidTileFlag { got: usize, max: usize },
@@ -49,10 +32,10 @@ pub enum RawReadError {
     #[error("Attempted to read in MWA VCS data; this is unsupported")]
     Vcs,
 
-    #[error("{0}")]
+    #[error(transparent)]
     MwafMerge(#[from] MwafMergeError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
 
     #[error("mwalib error: {0}")]

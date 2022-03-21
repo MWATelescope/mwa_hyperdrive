@@ -9,7 +9,7 @@ mod helpers;
 #[cfg(test)]
 mod tests;
 
-pub use error::*;
+pub(crate) use error::*;
 use helpers::*;
 
 use std::collections::{BTreeSet, HashSet};
@@ -66,10 +66,10 @@ impl MsReader {
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
     // TODO: Handle multiple measurement sets.
-    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
+    pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         ms: P,
         metafits: Option<P2>,
-    ) -> Result<MsReader, MsReadError> {
+    ) -> Result<MsReader, VisReadError> {
         fn inner(ms: &Path, metafits: Option<&Path>) -> Result<MsReader, MsReadError> {
             debug!("Using measurement set: {}", ms.display());
             if !ms.exists() {
@@ -590,7 +590,7 @@ impl MsReader {
             };
             Ok(ms)
         }
-        inner(ms.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
+        inner(ms.as_ref(), metafits.as_ref().map(|f| f.as_ref())).map_err(VisReadError::from)
     }
 
     /// An internal method for reading visibilities. Cross- and/or
@@ -644,7 +644,7 @@ impl MsReader {
                         if ms_data.len_of(Axis(1)) != 4 {
                             panic!(
                                 "{}",
-                                MSError::BadArraySize {
+                                MsReadError::BadArraySize {
                                     array_type: "ms_data",
                                     row_index,
                                     expected_len: 4,
@@ -655,7 +655,7 @@ impl MsReader {
                         if ms_weights.len_of(Axis(1)) != 4 {
                             panic!(
                                 "{}",
-                                MSError::BadArraySize {
+                                MsReadError::BadArraySize {
                                     array_type: "weights",
                                     row_index,
                                     expected_len: 4,
@@ -666,7 +666,7 @@ impl MsReader {
                         if flags.len_of(Axis(1)) != 4 {
                             panic!(
                                 "{}",
-                                MSError::BadArraySize {
+                                MsReadError::BadArraySize {
                                     array_type: "flags",
                                     row_index,
                                     expected_len: 4,
@@ -739,7 +739,7 @@ impl MsReader {
                         if ms_data.len_of(Axis(1)) != 4 {
                             panic!(
                                 "{}",
-                                MSError::BadArraySize {
+                                MsReadError::BadArraySize {
                                     array_type: "ms_data",
                                     row_index,
                                     expected_len: 4,
@@ -750,7 +750,7 @@ impl MsReader {
                         if ms_weights.len_of(Axis(1)) != 4 {
                             panic!(
                                 "{}",
-                                MSError::BadArraySize {
+                                MsReadError::BadArraySize {
                                     array_type: "weights",
                                     row_index,
                                     expected_len: 4,
@@ -761,7 +761,7 @@ impl MsReader {
                         if flags.len_of(Axis(1)) != 4 {
                             panic!(
                                 "{}",
-                                MSError::BadArraySize {
+                                MsReadError::BadArraySize {
                                     array_type: "flags",
                                     row_index,
                                     expected_len: 4,

@@ -14,15 +14,12 @@ use mwa_hyperdrive_common::{thiserror, vec1};
 
 /// Errors associated with setting up [super::CalibrateParams].
 #[derive(Error, Debug)]
-pub enum InvalidArgsError {
+pub(crate) enum InvalidArgsError {
     #[error("No input data was given!")]
     NoInputData,
 
-    #[error(
-        "An invalid combination of formats was given. Supported:\n{}",
-        SUPPORTED_INPUT_FILE_COMBINATIONS
-    )]
-    InvalidDataInput,
+    #[error("{0}\n\nSupported combinations of file formats:\n{SUPPORTED_INPUT_FILE_COMBINATIONS}")]
+    InvalidDataInput(&'static str),
 
     #[error("Multiple metafits files were specified: {0:?}\nThis is unsupported.")]
     MultipleMetafits(Vec1<PathBuf>),
@@ -130,51 +127,33 @@ pub enum InvalidArgsError {
     #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
     OutputVisFreqResNotMultiple { out: f64, inp: f64 },
 
-    #[error("Output vis. time resolution cannot be 0")]
-    OutputVisTimeResZero,
-
-    #[error("Output vis. freq. resolution cannot be 0")]
-    OutputVisFreqResZero,
-
     #[error("Error when parsing minimum UVW cutoff: {0}")]
     ParseUvwMin(crate::unit_parsing::UnitParseError),
 
     #[error("Error when parsing maximum UVW cutoff: {0}")]
     ParseUvwMax(crate::unit_parsing::UnitParseError),
 
-    #[error("Cannot write to the specified file '{file}'. Do you have write permissions set?")]
-    FileNotWritable { file: String },
-
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
     BadArrayPosition { pos: Vec<f64> },
 
-    #[error("{0}")]
-    InputFile(String),
-
-    #[error("{0}")]
+    #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
 
-    #[error("{0}")]
-    RawData(#[from] crate::vis_io::read::RawReadError),
-
-    #[error("{0}")]
-    MS(#[from] crate::vis_io::read::MsReadError),
-
-    #[error("{0}")]
-    Uvfits(#[from] crate::vis_io::read::UvfitsReadError),
+    #[error(transparent)]
+    VisRead(#[from] crate::vis_io::read::VisReadError),
 
     #[error(transparent)]
     FileWrite(#[from] crate::vis_io::write::FileWriteError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 
     #[error("Error when trying to read source list: {0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

@@ -7,7 +7,7 @@ use thiserror::Error;
 use mwa_hyperdrive_common::thiserror;
 
 #[derive(Error, Debug)]
-pub enum AverageFactorError {
+pub(crate) enum AverageFactorError {
     #[error("The user input was 0; this is not permitted")]
     Zero,
 
@@ -17,6 +17,6 @@ pub enum AverageFactorError {
     #[error("The user input isn't an integer multiple of the resolution: {out} vs {inp}")]
     NotIntegerMultiple { out: f64, inp: f64 },
 
-    #[error("{0}")]
+    #[error(transparent)]
     Parse(#[from] crate::unit_parsing::UnitParseError),
 }

@@ -284,7 +284,7 @@ fn test_handle_only_metafits() {
     let result = args.into_params();
 
     assert!(result.is_err());
-    assert!(matches!(result, Err(InvalidDataInput)));
+    assert!(matches!(result, Err(InvalidDataInput(_))));
 }
 
 #[test]

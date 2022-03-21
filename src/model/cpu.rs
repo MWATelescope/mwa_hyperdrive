@@ -4,8 +4,6 @@
 
 //! Code to generate sky-model visibilities.
 
-use super::ModelError;
-
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, LN_2};
 
@@ -21,7 +19,7 @@ use crate::{
     constants::*,
     math::{cexp, exp},
 };
-use mwa_hyperdrive_beam::Beam;
+use mwa_hyperdrive_beam::{Beam, BeamError};
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray, shapelets};
 use mwa_hyperdrive_srclist::{ComponentList, GaussianParams, PerComponentParams};
 
@@ -69,7 +67,7 @@ impl<'a> SkyModellerCpu<'a> {
         uvws: &[UVW],
         lst_rad: f64,
         array_latitude_rad: f64,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), BeamError> {
         if self.components.points.radecs.is_empty() {
             return Ok(());
         }
@@ -199,7 +197,7 @@ impl<'a> SkyModellerCpu<'a> {
         uvws: &[UVW],
         lst_rad: f64,
         array_latitude_rad: f64,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), BeamError> {
         if self.components.gaussians.radecs.is_empty() {
             return Ok(());
         }
@@ -345,7 +343,7 @@ impl<'a> SkyModellerCpu<'a> {
         shapelet_uvws: ArrayView2<UVW>,
         lst_rad: f64,
         array_latitude_rad: f64,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), BeamError> {
         if self.components.shapelets.radecs.is_empty() {
             return Ok(());
         }
@@ -552,7 +550,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         &self,
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
@@ -602,7 +600,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
@@ -638,7 +636,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
@@ -674,7 +672,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         &self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, ModelError> {
+    ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,

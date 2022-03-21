@@ -5,7 +5,7 @@
 //! Code to read and write hyperdrive-style calibration solutions.
 //!
 //! See for more info:
-//! https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions
+//! <https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html>
 
 use std::{
     ffi::CString,
@@ -31,7 +31,7 @@ use super::{error::*, CalibrationSolutions};
 use crate::{pfb_gains::PfbFlavour, vis_io::read::RawDataCorrections};
 use mwa_hyperdrive_common::{hifitime, marlu, mwalib, ndarray, rayon, vec1, Complex};
 
-pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsError> {
+pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
     let mut fptr = fits_open!(&file)?;
     let hdu = fits_open_hdu!(&mut fptr, 0)?;
     let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
@@ -147,7 +147,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                 fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => {
                     (None, None, None)
                 }
-                _ => return Err(ReadSolutionsError::Fitsio(e)),
+                _ => return Err(SolutionsReadError::Fitsio(e)),
             },
             Ok(hdu) => {
                 let start = match hdu.read_col(&mut fptr, "Start") {
@@ -158,7 +158,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                         } else {
                             // Complain if the number of timeblocks isn't right.
                             if v.len() != num_timeblocks {
-                                return Err(ReadSolutionsError::BadShape {
+                                return Err(SolutionsReadError::BadShape {
                                     thing: "the start timeblocks in TIMEBLOCKS",
                                     expected: num_timeblocks,
                                     actual: v.len(),
@@ -170,9 +170,9 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                     Err(e) => match &e {
                         fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"Start\"" => None,
-                            _ => return Err(ReadSolutionsError::Fitsio(e)),
+                            _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
-                        _ => return Err(ReadSolutionsError::Fitsio(e)),
+                        _ => return Err(SolutionsReadError::Fitsio(e)),
                     },
                 };
                 let end: Option<Vec<f64>> = match hdu.read_col(&mut fptr, "End") {
@@ -183,7 +183,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                         } else {
                             // Complain if the number of timeblocks isn't right.
                             if v.len() != num_timeblocks {
-                                return Err(ReadSolutionsError::BadShape {
+                                return Err(SolutionsReadError::BadShape {
                                     thing: "the end timeblocks in TIMEBLOCKS",
                                     expected: num_timeblocks,
                                     actual: v.len(),
@@ -195,9 +195,9 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                     Err(e) => match &e {
                         fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"End\"" => None,
-                            _ => return Err(ReadSolutionsError::Fitsio(e)),
+                            _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
-                        _ => return Err(ReadSolutionsError::Fitsio(e)),
+                        _ => return Err(SolutionsReadError::Fitsio(e)),
                     },
                 };
                 let average = match hdu.read_col(&mut fptr, "Average") {
@@ -208,7 +208,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                         } else {
                             // Complain if the number of timeblocks isn't right.
                             if v.len() != num_timeblocks {
-                                return Err(ReadSolutionsError::BadShape {
+                                return Err(SolutionsReadError::BadShape {
                                     thing: "the average timeblocks in TIMEBLOCKS",
                                     expected: num_timeblocks,
                                     actual: v.len(),
@@ -220,9 +220,9 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                     Err(e) => match &e {
                         fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"Average\"" => None,
-                            _ => return Err(ReadSolutionsError::Fitsio(e)),
+                            _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
-                        _ => return Err(ReadSolutionsError::Fitsio(e)),
+                        _ => return Err(SolutionsReadError::Fitsio(e)),
                     },
                 };
                 (
@@ -246,7 +246,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                 Ok(v) => {
                     // Complain if the number of frequencies isn't right.
                     if v.len() != total_num_chanblocks {
-                        return Err(ReadSolutionsError::BadShape {
+                        return Err(SolutionsReadError::BadShape {
                             thing: "the number of chanblock frequencies in CHANBLOCKS",
                             expected: total_num_chanblocks,
                             actual: v.len(),
@@ -264,15 +264,15 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                 Err(e) => match &e {
                     fitsio::errors::Error::Message(m) => match m.as_str() {
                         "Cannot find column \"Freq\"" => None,
-                        _ => return Err(ReadSolutionsError::Fitsio(e)),
+                        _ => return Err(SolutionsReadError::Fitsio(e)),
                     },
-                    _ => return Err(ReadSolutionsError::Fitsio(e)),
+                    _ => return Err(SolutionsReadError::Fitsio(e)),
                 },
             },
             Err(e) => match e {
                 // Status code 301 means "unavailable".
                 fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => None,
-                _ => return Err(ReadSolutionsError::Fitsio(e)),
+                _ => return Err(SolutionsReadError::Fitsio(e)),
             },
         }
     };
@@ -285,14 +285,14 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                 fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => {
                     (None, None, None)
                 }
-                _ => return Err(ReadSolutionsError::Fitsio(e)),
+                _ => return Err(SolutionsReadError::Fitsio(e)),
             },
             Ok(hdu) => {
                 let tile_names = match hdu.read_col(&mut fptr, "TileName") {
                     Ok(v) => {
                         // Complain if the number of tiles isn't right.
                         if v.len() != total_num_tiles {
-                            return Err(ReadSolutionsError::BadShape {
+                            return Err(SolutionsReadError::BadShape {
                                 thing: "the number of tiles in TILES",
                                 expected: total_num_tiles,
                                 actual: v.len(),
@@ -304,9 +304,9 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                     Err(e) => match &e {
                         fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"TileName\"" => None,
-                            _ => return Err(ReadSolutionsError::Fitsio(e)),
+                            _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
-                        _ => return Err(ReadSolutionsError::Fitsio(e)),
+                        _ => return Err(SolutionsReadError::Fitsio(e)),
                     },
                 };
 
@@ -469,14 +469,14 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                 // Complain if the number of timeblocks or chanblocks isn't
                 // right.
                 if n_timeblocks != num_timeblocks {
-                    return Err(ReadSolutionsError::BadShape {
+                    return Err(SolutionsReadError::BadShape {
                         thing: "the number of timeblocks in RESULTS",
                         expected: num_timeblocks,
                         actual: n_timeblocks,
                     });
                 }
                 if n_chanblocks != total_num_chanblocks {
-                    return Err(ReadSolutionsError::BadShape {
+                    return Err(SolutionsReadError::BadShape {
                         thing: "the number of chanblocks in RESULTS",
                         expected: total_num_chanblocks,
                         actual: n_chanblocks,
@@ -489,7 +489,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
             Err(e) => match e {
                 // Status code 301 means "unavailable".
                 fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => None,
-                _ => return Err(ReadSolutionsError::Fitsio(e)),
+                _ => return Err(SolutionsReadError::Fitsio(e)),
             },
         }
     };
@@ -501,7 +501,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
                 let num_baselines: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS1")?;
                 let expected_num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
                 if num_baselines != expected_num_baselines {
-                    return Err(ReadSolutionsError::BadShape {
+                    return Err(SolutionsReadError::BadShape {
                         thing: "the number of baselines in BASELINES",
                         expected: expected_num_baselines,
                         actual: num_baselines,
@@ -513,7 +513,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
             Err(e) => match e {
                 // Status code 301 means "unavailable".
                 fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => None,
-                _ => return Err(ReadSolutionsError::Fitsio(e)),
+                _ => return Err(SolutionsReadError::Fitsio(e)),
             },
         }
     };
@@ -544,7 +544,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsErr
     })
 }
 
-pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), WriteSolutionsError> {
+pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), SolutionsWriteError> {
     if file.exists() {
         std::fs::remove_file(&file)?;
     }
@@ -579,10 +579,24 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Writ
 
     // Signal that we're using long strings.
     unsafe {
+        // ffplsw = fits_write_key_longwarn
         fitsio_sys::ffplsw(
             fptr.as_raw(), /* I - FITS file pointer  */
             &mut status,   /* IO - error status       */
         );
+        fits_check_status(status)?;
+    }
+
+    // Write the documentation URL as a comment.
+    unsafe {
+        let comm = CString::new("The contents of this file are documented at:").unwrap();
+        // ffpcom = fits_write_comment
+        fitsio_sys::ffpcom(fptr.as_raw(), comm.as_ptr(), &mut status);
+        fits_check_status(status)?;
+        let comm =
+            CString::new("https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html")
+                .unwrap();
+        fitsio_sys::ffpcom(fptr.as_raw(), comm.as_ptr(), &mut status);
         fits_check_status(status)?;
     }
 

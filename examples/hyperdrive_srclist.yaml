@@ -5,7 +5,7 @@ super_sweet_source1:
     comp_type: point
     flux_type:
       list:
-        - freq: 180000000.0
+        - freq: 150000000.0
           i: 10.0
         - freq: 170000000.0
           i: 5.0

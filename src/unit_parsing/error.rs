@@ -7,9 +7,9 @@ use thiserror::Error;
 use mwa_hyperdrive_common::thiserror;
 
 #[derive(Debug, Error)]
-pub enum UnitParseError {
+pub(crate) enum UnitParseError {
     #[error(
-        "Successfully parsed a {unit_type} unit ('{unit}'), but could not parse the numerical component of '{0}'"
+        "Successfully parsed a {unit_type} unit ('{unit}'), but could not parse the numerical component of '{input}'"
     )]
     GotUnitButCantParse {
         input: String,

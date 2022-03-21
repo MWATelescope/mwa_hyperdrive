@@ -12,12 +12,14 @@ use marlu::Jones;
 use mwalib::{fitsio_sys, *};
 use ndarray::prelude::*;
 use serial_test::serial;
+use tempfile::TempDir;
 
-use crate::*;
-use mwa_hyperdrive::{
-    calibrate::di_calibrate,
+use crate::{
+    calibrate::{args::CalibrateUserArgs, di_calibrate},
+    jones_test::TestJones,
     math::TileBaselineMaps,
     solutions::CalibrationSolutions,
+    tests::reduced_obsids::get_reduced_1090008640,
     vis_io::read::{MsReader, VisRead},
     vis_utils::simulate::VisSimulateArgs,
 };
@@ -31,10 +33,9 @@ fn test_1090008640_calibrate_model_uvfits() {
     let num_timesteps = 2;
     let num_chans = 10;
 
-    let temp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let mut model = temp_dir.clone();
-    model.push("model.uvfits");
-    let args = get_reduced_1090008640(true, false);
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let model = temp_dir.path().join("model.uvfits");
+    let args = get_reduced_1090008640(false);
     let metafits = &args.data.as_ref().unwrap()[0];
     let srclist = args.source_list.unwrap();
     #[rustfmt::skip]
@@ -53,10 +54,8 @@ fn test_1090008640_calibrate_model_uvfits() {
     let result = sim_args.run(false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
-    let mut sols = temp_dir.clone();
-    sols.push("sols.fits");
-    let mut cal_model = temp_dir;
-    cal_model.push("cal_model.uvfits");
+    let sols = temp_dir.path().join("sols.fits");
+    let cal_model = temp_dir.path().join("cal_model.uvfits");
 
     #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
@@ -122,6 +121,7 @@ fn test_1090008640_calibrate_model_uvfits() {
     let mut status = 0;
     for i_row in 0..gcount_m.parse::<i64>().unwrap() {
         unsafe {
+            // ffggpe = fits_read_grppar_flt
             fitsio_sys::ffggpe(
                 uvfits_m.as_raw(),           /* I - FITS file pointer                       */
                 1 + i_row,                   /* I - group to read (1 = 1st group)           */
@@ -132,6 +132,7 @@ fn test_1090008640_calibrate_model_uvfits() {
             );
             assert_eq!(status, 0, "Status wasn't 0");
             assert_abs_diff_ne!(group_params_m, group_params_c);
+            // ffggpe = fits_read_grppar_flt
             fitsio_sys::ffggpe(
                 uvfits_c.as_raw(),           /* I - FITS file pointer                       */
                 1 + i_row,                   /* I - group to read (1 = 1st group)           */
@@ -143,6 +144,7 @@ fn test_1090008640_calibrate_model_uvfits() {
             assert_eq!(status, 0, "Status wasn't 0");
             assert_abs_diff_eq!(group_params_m, group_params_c);
 
+            // ffgpve = fits_read_img_flt
             fitsio_sys::ffgpve(
                 uvfits_m.as_raw(),  /* I - FITS file pointer                       */
                 1 + i_row,          /* I - group to read (1 = 1st group)           */
@@ -154,6 +156,7 @@ fn test_1090008640_calibrate_model_uvfits() {
                 &mut status,        /* IO - error status                           */
             );
             assert_abs_diff_ne!(vis_m, vis_c);
+            // ffgpve = fits_read_img_flt
             fitsio_sys::ffgpve(
                 uvfits_c.as_raw(),  /* I - FITS file pointer                       */
                 1 + i_row,          /* I - group to read (1 = 1st group)           */
@@ -190,10 +193,9 @@ fn test_1090008640_calibrate_model_ms() {
     let num_timesteps = 2;
     let num_chans = 10;
 
-    let temp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let mut model = temp_dir.clone();
-    model.push("model.ms");
-    let args = get_reduced_1090008640(true, false);
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let model = temp_dir.path().join("model.ms");
+    let args = get_reduced_1090008640(false);
     let metafits = &args.data.as_ref().unwrap()[0];
     let srclist = args.source_list.unwrap();
     #[rustfmt::skip]
@@ -211,10 +213,8 @@ fn test_1090008640_calibrate_model_ms() {
     let result = sim_args.run(false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
-    let mut sols = temp_dir.clone();
-    sols.push("sols.fits");
-    let mut cal_model = temp_dir;
-    cal_model.push("cal_model.ms");
+    let sols = temp_dir.path().join("sols.fits");
+    let cal_model = temp_dir.path().join("cal_model.ms");
     #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",

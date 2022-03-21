@@ -5,9 +5,11 @@
 //! Code to handle direction-independent calibration.
 //!
 //! This code borrows heavily from Torrance Hodgson's excellent Julia code at
-//! https://github.com/torrance/MWAjl
+//! <https://github.com/torrance/MWAjl>
 
 pub(crate) mod code;
+#[cfg(test)]
+mod integration_tests;
 
 pub use code::calibrate_timeblocks;
 use code::*;

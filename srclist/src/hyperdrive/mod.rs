@@ -5,7 +5,7 @@
 //! Code to handle hyperdrive source list files.
 //!
 //! See for more info:
-//! <https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists>
+//! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_hyperdrive.html>
 
 mod read;
 mod write;

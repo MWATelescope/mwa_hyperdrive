@@ -141,9 +141,9 @@ pub enum SourceListError {
         sl_file_type: String,
     },
 
-    #[error("{0}")]
+    #[error(transparent)]
     ReadError(#[from] ReadSourceListError),
 
-    #[error("IO error: {0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

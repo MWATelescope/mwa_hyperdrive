@@ -428,8 +428,8 @@ fn test_1090008640_calibration_quality() {
 
 #[test]
 fn test_timestep_reading() {
-    let temp_dir = tempdir().expect("Couldn't make temp dir").into_path();
-    let vis_path = temp_dir.join("vis.ms");
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    let vis_path = temp_dir.path().join("vis.ms");
 
     let num_timesteps = 10;
     let num_channels = 10;

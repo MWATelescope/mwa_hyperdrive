@@ -9,3 +9,5 @@
 *.f0 binary
 *.f0i binary
 *.info binary
+# mdbook-mermaid
+mdbook/mermaid.min.js binary

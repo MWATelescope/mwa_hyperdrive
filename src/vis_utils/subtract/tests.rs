@@ -26,14 +26,12 @@ fn test_1090008640_vis_subtract() {
     let num_timesteps = 2;
     let num_chans = 5;
 
-    let temp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let mut subtracted = temp_dir.clone();
-    subtracted.push("subtracted.uvfits");
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let subtracted = temp_dir.path().join("subtracted.uvfits");
 
     let mut args = get_reduced_1090008640(false);
     args.no_beam = true;
-    let metafits = args.data.as_ref().unwrap()[0].clone();
-
+    let metafits = args.data.as_ref().unwrap()[0].as_str();
     let mut srclist = SourceList::new();
     srclist.insert(
         "src1".to_string(),
@@ -52,13 +50,11 @@ fn test_1090008640_vis_subtract() {
         },
     );
     // Write out this 1-source source list for comparison.
-    let mut source_list_1 = temp_dir.clone();
-    source_list_1.push("srclist_1.yaml");
+    let source_list_1 = temp_dir.path().join("srclist_1.yaml");
     let mut f = BufWriter::new(File::create(&source_list_1).unwrap());
     mwa_hyperdrive_srclist::hyperdrive::source_list_to_yaml(&mut f, &srclist, None).unwrap();
     f.flush().unwrap();
-    let mut model_1 = temp_dir.clone();
-    model_1.push("model_1.uvfits");
+    let model_1 = temp_dir.path().join("model_1.uvfits");
 
     srclist.insert(
         "src2".to_string(),
@@ -76,19 +72,17 @@ fn test_1090008640_vis_subtract() {
             }],
         },
     );
-    let mut source_list_2 = temp_dir.clone();
-    source_list_2.push("srclist_2.yaml");
+    let source_list_2 = temp_dir.path().join("srclist_2.yaml");
     let mut f = BufWriter::new(File::create(&source_list_2).unwrap());
     mwa_hyperdrive_srclist::hyperdrive::source_list_to_yaml(&mut f, &srclist, None).unwrap();
     f.flush().unwrap();
-    let mut model_2 = temp_dir;
-    model_2.push("model_2.uvfits");
+    let model_2 = temp_dir.path().join("model_2.uvfits");
 
     // Generate visibilities for the 1- and 2-source source lists.
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from(&[
         "vis-simulate",
-        "--metafits", &metafits,
+        "--metafits", metafits,
         "--source-list", &format!("{}", source_list_1.display()),
         "--output-model-files", &format!("{}", model_1.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
@@ -101,7 +95,7 @@ fn test_1090008640_vis_subtract() {
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from(&[
         "vis-simulate",
-        "--metafits", &metafits,
+        "--metafits", metafits,
         "--source-list", &format!("{}", source_list_2.display()),
         "--output-model-files", &format!("{}", model_2.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
@@ -117,7 +111,7 @@ fn test_1090008640_vis_subtract() {
         #[rustfmt::skip]
         let sub_args = VisSubtractArgs::parse_from(&[
             "vis-subtract",
-            "--data", &metafits, &format!("{}", model_2.display()),
+            "--data", metafits, &format!("{}", model_2.display()),
             "--outputs", &format!("{}", subtracted.display()),
             "--source-list", &format!("{}", source_list_2.display()),
             "--sources-to-subtract", "src2",
@@ -132,6 +126,7 @@ fn test_1090008640_vis_subtract() {
         let mut vis_1: Vec<f32> = vec![0.0; num_chans * 4 * 3];
         let mut status = 0;
         unsafe {
+            // ffggpe = fits_read_grppar_flt
             fitsio_sys::ffggpe(
                 uvfits_1.as_raw(),         /* I - FITS file pointer                       */
                 1,                         /* I - group to read (1 = 1st group)           */
@@ -141,6 +136,7 @@ fn test_1090008640_vis_subtract() {
                 &mut status,               /* IO - error status                           */
             );
             assert_eq!(status, 0, "Status wasn't 0");
+            // ffgpve = fits_read_img_flt
             fitsio_sys::ffgpve(
                 uvfits_1.as_raw(),  /* I - FITS file pointer                       */
                 1,                  /* I - group to read (1 = 1st group)           */
@@ -158,6 +154,7 @@ fn test_1090008640_vis_subtract() {
         fits_open_hdu!(&mut uvfits_2, 0).unwrap();
         let mut vis_2: Vec<f32> = vec![0.0; num_chans * 4 * 3];
         unsafe {
+            // ffggpe = fits_read_grppar_flt
             fitsio_sys::ffggpe(
                 uvfits_2.as_raw(),         /* I - FITS file pointer                       */
                 1,                         /* I - group to read (1 = 1st group)           */
@@ -167,6 +164,7 @@ fn test_1090008640_vis_subtract() {
                 &mut status,               /* IO - error status                           */
             );
             assert_eq!(status, 0, "Status wasn't 0");
+            // ffgpve = fits_read_img_flt
             fitsio_sys::ffgpve(
                 uvfits_2.as_raw(),  /* I - FITS file pointer                       */
                 1,                  /* I - group to read (1 = 1st group)           */
@@ -188,7 +186,7 @@ fn test_1090008640_vis_subtract() {
         #[rustfmt::skip]
         let sub_args = VisSubtractArgs::parse_from(&[
             "vis-subtract",
-            "--data", &metafits, &format!("{}", model_2.display()),
+            "--data", metafits, &format!("{}", model_2.display()),
             "--outputs", &format!("{}", subtracted.display()),
             "--source-list", &format!("{}", source_list_2.display()),
             "--sources-to-subtract", "src1", "src2",
@@ -203,6 +201,7 @@ fn test_1090008640_vis_subtract() {
         let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
         let mut status = 0;
         unsafe {
+            // ffggpe = fits_read_grppar_flt
             fitsio_sys::ffggpe(
                 uvfits.as_raw(),           /* I - FITS file pointer                       */
                 1,                         /* I - group to read (1 = 1st group)           */
@@ -212,6 +211,7 @@ fn test_1090008640_vis_subtract() {
                 &mut status,               /* IO - error status                           */
             );
             assert_eq!(status, 0, "Status wasn't 0");
+            // ffgpve = fits_read_img_flt
             fitsio_sys::ffgpve(
                 uvfits.as_raw(),  /* I - FITS file pointer                       */
                 1,                /* I - group to read (1 = 1st group)           */

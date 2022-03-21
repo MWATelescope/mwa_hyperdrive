@@ -41,17 +41,17 @@ pub(crate) fn get_single_match_from_glob(g: &str) -> Result<PathBuf, GlobError> 
 
 #[derive(Error, Debug)]
 /// Error type associated with glob helper functions.
-pub enum GlobError {
+pub(crate) enum GlobError {
     #[error("No glob matches were found for {glob}")]
     NoMatches { glob: String },
 
     #[error("More than one glob matches were found for {glob}; we require only one match")]
     MoreThanOneMatch { glob: String },
 
-    #[error("{0}")]
+    #[error(transparent)]
     GlobCrate(#[from] glob::GlobError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     PatternError(#[from] glob::PatternError),
 }
 
