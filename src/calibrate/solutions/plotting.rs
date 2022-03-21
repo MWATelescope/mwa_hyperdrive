@@ -70,12 +70,13 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
             let possibly_good = sols
                 .di_jones
                 .slice(s![0_usize, .., ..])
+                // Search only in the first timeblock
                 .outer_iter()
+                // Search by tile from the end
+                .rev()
                 .enumerate()
-                .filter(|(_, j)| {
-                    !j.iter()
-                        .all(|f| f[0].is_nan() || f[1].is_nan() || f[2].is_nan() || f[3].is_nan())
-                })
+                // Keep only those that aren't all NaN
+                .filter(|(_, j)| !j.iter().all(|f| f.any_nan()))
                 .map(|(i, _)| i)
                 .next();
             // If the search for a valid tile didn't find anything, all
@@ -268,6 +269,15 @@ pub(crate) fn plot_sols<T: AsRef<Path>, S: AsRef<str>>(
                     }
                     None => data_max,
                 };
+
+                // Failing all else, make sure the limits are sensible.
+                let min_amp = if min_amp.is_infinite() { 0.0 } else { min_amp };
+                let max_amp = if max_amp.abs() < f64::EPSILON {
+                    1.0
+                } else {
+                    max_amp
+                };
+
                 (min_amp, max_amp)
             }
         };
