@@ -7,7 +7,7 @@
 mod error;
 use birli::marlu::{LatLngHeight, UvfitsWriter, VisContext, VisWritable};
 pub use error::SimulateVisError;
-use mwa_hyperdrive_common::hifitime::Duration;
+use mwa_hyperdrive_common::hifitime::{Duration, Unit};
 use mwa_hyperdrive_common::itertools::{izip, Itertools};
 
 use std::collections::HashMap;
@@ -287,7 +287,7 @@ impl SimVisParams {
         }
 
         // Populate the timestamps.
-        let int_time = hifitime::Duration::from_f64(time_res, hifitime::Unit::Second);
+        let int_time = Duration::from_f64(time_res, Unit::Second);
         let timestamps = {
             let mut timestamps = Vec::with_capacity(num_timesteps);
             let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3);
@@ -522,7 +522,7 @@ pub fn simulate_vis(
 
     // vis output requires [timestep][chan][baseline], this is re-used.
     let mut vis_out: Array3<Jones<f32>> = Array3::from_elem(out_shape, Jones::default());
-    let weight_out = Array3::ones(out_shape);
+    let weight_out = Array3::from_elem(out_shape, vis_ctx.weight_factor() as f32);
 
     // Prepare the output visibilities file.
 
@@ -576,11 +576,10 @@ pub fn simulate_vis(
     model_progress.tick();
 
     // Generate the visibilities.
-    // XXX(dev): should this be named timestamp?
-    for &timestep in params.timestamps.iter() {
+    for &timestamp in params.timestamps.iter() {
         // Clear the visibilities before re-using the buffer.
         vis_model_timestep.fill(Jones::default());
-        modeller.model_timestep(vis_model_timestep.view_mut(), timestep)?;
+        modeller.model_timestep(vis_model_timestep.view_mut(), timestamp)?;
 
         // transpose model vis to output ordering. first axis is baseline.
         for (vis_model, mut vis_out) in izip!(
@@ -596,7 +595,7 @@ pub fn simulate_vis(
         }
 
         let chunk_vis_ctx = VisContext {
-            start_timestamp: timestep - params.int_time * 0.5_f64,
+            start_timestamp: timestamp - params.int_time * 0.5_f64,
             num_sel_timesteps: 1,
             ..vis_ctx.clone()
         };

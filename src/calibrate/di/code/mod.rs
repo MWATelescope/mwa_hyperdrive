@@ -423,6 +423,8 @@ fn model_write(
             obs_name,
         )?;
 
+        let weight_factor = vis_ctx.weight_factor() as f32;
+
         // Receiver model information from the modelling thread.
         for (vis_model_timestep, _, timestamp) in rx_model.iter() {
             let chunk_vis_ctx = VisContext {
@@ -454,8 +456,7 @@ fn model_write(
                     in_data.iter(),
                 ) {
                     *out_jones = *in_jones;
-                    // XXX(dev): should this be chunk_vis_ctx.get_weight_factor()?
-                    *out_weight = 1.;
+                    *out_weight = weight_factor;
                 }
             }
 
