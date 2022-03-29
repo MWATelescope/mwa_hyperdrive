@@ -47,7 +47,17 @@ fn test_1090008640_calibrate_model() {
     ]);
 
     // Run simulate-vis and check that it succeeds
-    assert!(matches!(simulate_vis(sim_args, false), Ok(())));
+    let result = simulate_vis(
+        sim_args,
+        #[cfg(feature = "cuda")]
+        false,
+        false,
+    );
+    assert!(
+        result.is_ok(),
+        "result={:?} is not ok",
+        result.err().unwrap()
+    );
 
     let mut sols = temp_dir.clone();
     sols.push("sols.fits");

@@ -11,7 +11,7 @@ use mwa_hyperdrive_common::clap::Parser;
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive::calibrate::{di_calibrate, solutions::CalibrationSolutions};
+use mwa_hyperdrive::calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError};
 
 /// If di-calibrate is working, it should not write anything to stderr.
 #[test]
@@ -80,18 +80,23 @@ fn test_1090008640_woden() {
 
     // Reading from a uvfits file without a metafits file should fail because
     // there's no beam information.
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data",
-            "test_files/1090008640_WODEN/output_band01.uvfits",
-            "--source-list",
-            "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-            "--outputs",
-            &format!("{}", solutions_path.display()),
-        ])
-        .ok();
-    assert!(cmd.is_err(), "{:?}", get_cmd_output(cmd));
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data",
+        "test_files/1090008640_WODEN/output_band01.uvfits",
+        "--source-list",
+        "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
+        "--outputs",
+        &format!("{}", solutions_path.display()),
+    ]);
+
+    // Run di-cal and check that it fails
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(
+        matches!(result, Err(CalibrateError::InvalidArgs(_))),
+        "result={:?} is not InvalidArgs",
+        result.err().unwrap()
+    );
 
     // This time give the metafits file.
     let cmd = hyperdrive()
@@ -153,24 +158,28 @@ fn test_1090008640_woden() {
     let mut solutions_path = tmp_dir;
     solutions_path.push("sols.fits");
 
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data",
-            "test_files/1090008640_WODEN/output_band01.uvfits",
-            "test_files/1090008640_WODEN/1090008640.metafits",
-            "--source-list",
-            "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-            #[cfg(feature = "cuda")]
-            "--cpu",
-            "--outputs",
-            &format!("{}", solutions_path.display()),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data",
+        "test_files/1090008640_WODEN/output_band01.uvfits",
+        "test_files/1090008640_WODEN/1090008640.metafits",
+        "--source-list",
+        "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
+        #[cfg(feature = "cuda")]
+        "--cpu",
+        "--outputs",
+        &format!("{}", solutions_path.display()),
+    ]);
 
-    let hyp_sols =
-        CalibrationSolutions::read_solutions_from_ext(&solutions_path, metafits).unwrap();
+    // Run di-cal and check that it fails
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(
+        result.is_ok(),
+        "result={:?} is not ok",
+        result.err().unwrap()
+    );
+
+    let hyp_sols = result.unwrap().unwrap();
     assert_eq!(hyp_sols.di_jones.dim(), bin_sols.di_jones.dim());
     assert_eq!(hyp_sols.start_timestamps.len(), 1);
     assert_eq!(hyp_sols.end_timestamps.len(), 1);

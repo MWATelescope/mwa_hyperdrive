@@ -7,11 +7,12 @@
 
 use approx::assert_abs_diff_eq;
 use marlu::{XyzGeodetic, ENH};
+use mwa_hyperdrive::simulate_vis::{simulate_vis, SimulateVisArgs};
 use mwalib::{fitsio_sys, *};
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive_common::{cfg_if, marlu, mwalib};
+use mwa_hyperdrive_common::{cfg_if, clap::Parser, marlu, mwalib};
 
 fn read_uvfits_stabxyz(
     fptr: &mut fitsio::FitsFile,
@@ -63,22 +64,32 @@ fn test_1090008640_simulate_vis() {
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
 
-    let cmd = hyperdrive()
-        .args(&[
-            "simulate-vis",
-            "--metafits",
-            &metafits,
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--output-model-file",
-            &format!("{}", output_path.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits",
+        &metafits,
+        "--source-list",
+        &args.source_list.unwrap(),
+        "--output-model-file",
+        &format!("{}", output_path.display()),
+        "--num-timesteps",
+        &format!("{}", num_timesteps),
+        "--num-fine-channels",
+        &format!("{}", num_chans),
+    ]);
+
+    // Run simulate-vis and check that it succeeds
+    let result = simulate_vis(
+        sim_args,
+        #[cfg(feature = "cuda")]
+        false,
+        false,
+    );
+    assert!(
+        result.is_ok(),
+        "result={:?} is not ok",
+        result.err().unwrap()
+    );
 
     // Test some metadata. Compare with the input metafits file.
     let metafits = MetafitsContext::new(&metafits, None).unwrap();
@@ -268,23 +279,26 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
     output_path.push("model.uvfits");
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
-    let cmd = hyperdrive()
-        .args(&[
-            "simulate-vis",
-            "--metafits",
-            &metafits,
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--output-model-file",
-            &format!("{}", output_path.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
-            "--cpu",
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits",
+        &metafits,
+        "--source-list",
+        &args.source_list.unwrap(),
+        "--output-model-file",
+        &format!("{}", output_path.display()),
+        "--num-timesteps",
+        &format!("{}", num_timesteps),
+        "--num-fine-channels",
+        &format!("{}", num_chans),
+        "--cpu",
+    ]);
+    let result = simulate_vis(sim_args, true, false);
+    assert!(
+        result.is_ok(),
+        "result={:?} is not ok",
+        result.err().unwrap()
+    );
 
     let mut uvfits = fits_open!(&output_path).unwrap();
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
@@ -319,22 +333,27 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
 
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
-    let cmd = hyperdrive()
-        .args(&[
-            "simulate-vis",
-            "--metafits",
-            &metafits,
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--output-model-file",
-            &format!("{}", output_path.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits",
+        &metafits,
+        "--source-list",
+        &args.source_list.unwrap(),
+        "--output-model-file",
+        &format!("{}", output_path.display()),
+        "--num-timesteps",
+        &format!("{}", num_timesteps),
+        "--num-fine-channels",
+        &format!("{}", num_chans),
+    ]);
+
+    // Run simulate-vis and check that it succeeds
+    let result = simulate_vis(sim_args, false, false);
+    assert!(
+        result.is_ok(),
+        "result={:?} is not ok",
+        result.err().unwrap()
+    );
 
     let mut uvfits = fits_open!(&output_path).unwrap();
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
