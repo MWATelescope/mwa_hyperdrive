@@ -10,6 +10,7 @@ pub(crate) mod tests;
 
 use std::ops::Deref;
 
+use birli::marlu::{VisContext, VisWritable};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossbeam_utils::{atomic::AtomicCell, thread};
 use hifitime::Epoch;
@@ -29,10 +30,19 @@ use crate::{
         params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError, Chanblock, Fence,
         Timeblock,
     },
-    data_formats::UvfitsWriter,
     model,
 };
-use mwa_hyperdrive_common::{cfg_if, hifitime, indicatif, log, marlu, ndarray, rayon};
+use mwa_hyperdrive_common::{
+    cfg_if,
+    hifitime::{self, Duration, Unit},
+    indicatif,
+    itertools::izip,
+    log, marlu,
+    marlu::UvfitsWriter,
+    ndarray,
+    num_traits::Zero,
+    rayon,
+};
 
 pub(crate) struct CalVis {
     /// Visibilites read from input data.
@@ -383,33 +393,78 @@ fn model_write(
     if let Some(model_pb) = &params.model_file {
         let start_epoch = params.timeblocks.first().start;
         let obs_context = params.get_obs_context();
-        let obs_name = obs_context.obsid.map(|o| format!("{}", o));
+        let ant_pairs: Vec<(usize, usize)> = params.get_ant_pairs();
+        let int_time: Duration = Duration::from_f64(obs_context.time_res.unwrap(), Unit::Second);
 
-        let mut model_writer = UvfitsWriter::new(
-            model_pb,
-            // Don't include flagged timesteps or flagged baselines.
-            params.get_num_timesteps(),
-            params.get_num_unflagged_cross_baselines(),
-            // ... but use all channels (including flagged channels).
-            // fits files expect a neat layout.
-            fence.get_total_num_chanblocks(),
-            false,
-            start_epoch,
-            fence.freq_res,
-            fence.get_centre_freq(),
+        let vis_ctx = VisContext {
+            num_sel_timesteps: params.get_num_timesteps(),
+            start_timestamp: start_epoch,
+            int_time,
+            // num_sel_chans: obs_context.fine_chan_freqs.len(),
+            num_sel_chans: fence.get_total_num_chanblocks(),
+            // start_freq_hz: obs_context.fine_chan_freqs[0] as f64,
+            start_freq_hz: fence.first_freq,
+            // freq_resolution_hz: obs_context.freq_res.unwrap(),
+            freq_resolution_hz: fence.freq_res.unwrap(),
+            sel_baselines: ant_pairs,
+            avg_time: params.output_vis_time_average_factor,
+            avg_freq: params.freq_average_factor,
+            num_vis_pols: 4,
+        };
+
+        let obs_name = obs_context.obsid.map(|o| format!("{}", o));
+        let array_pos = obs_context.get_array_pos()?;
+
+        let mut model_writer = UvfitsWriter::from_marlu(
+            &model_pb,
+            &vis_ctx,
+            Some(array_pos),
             obs_context.phase_centre,
-            obs_name.as_deref(),
-            &params.unflagged_cross_baseline_to_tile_map,
-            &params.flagged_fine_chans,
+            obs_name,
         )?;
 
         // Receiver model information from the modelling thread.
-        for (vis_model_timestep, uvws, timestamp) in rx_model.iter() {
-            model_writer.write_cross_timestep_vis(
-                vis_model_timestep.view(),
-                Array2::ones(vis_model_timestep.dim()).view(),
-                &uvws,
-                timestamp,
+        for (vis_model_timestep, _, timestamp) in rx_model.iter() {
+            let chunk_vis_ctx = VisContext {
+                start_timestamp: timestamp - int_time * 0.5_f64,
+                num_sel_timesteps: 1,
+                ..vis_ctx.clone()
+            };
+
+            let out_shape = chunk_vis_ctx.avg_dims();
+            let mut out_data = Array3::from_elem(out_shape, Jones::zero());
+            let mut out_weights = Array3::from_elem(out_shape, -0.0);
+
+            assert_eq!(vis_model_timestep.len_of(Axis(0)), out_shape.2);
+            assert_eq!(
+                vis_model_timestep.len_of(Axis(1)) + params.flagged_fine_chans.len(),
+                out_shape.1
+            );
+
+            // pad and transpose the data, baselines then channels
+            for (mut out_data, mut out_weights, in_data) in izip!(
+                out_data.axis_iter_mut(Axis(1)),
+                out_weights.axis_iter_mut(Axis(1)),
+                vis_model_timestep.axis_iter(Axis(1)),
+            ) {
+                // merge frequency axis
+                for ((_, out_jones, out_weight), in_jones) in izip!(
+                    izip!(0.., out_data.iter_mut(), out_weights.iter_mut(),)
+                        .filter(|(chan_idx, _, _)| !params.flagged_fine_chans.contains(chan_idx)),
+                    in_data.iter(),
+                ) {
+                    *out_jones = *in_jones;
+                    // XXX(dev): should this be chunk_vis_ctx.get_weight_factor()?
+                    *out_weight = 1.;
+                }
+            }
+
+            model_writer.write_vis_marlu(
+                out_data.view(),
+                out_weights.view(),
+                &chunk_vis_ctx,
+                &obs_context.tile_xyzs,
+                false,
             )?;
 
             // Should we continue?

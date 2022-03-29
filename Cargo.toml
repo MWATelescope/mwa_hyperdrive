@@ -3,7 +3,7 @@ name = "mwa_hyperdrive"
 version = "0.2.0-alpha.11"
 authors = [
     "Christopher H. Jordan <christopherjordan87@gmail.com>",
-    "Derwent McElhinney <derwent.mcelhinney@curtin.edu.au>"
+    "Dev Null <dev.null@curtin.edu.au>"
 ]
 edition = "2021"
 rust-version = "1.58"
@@ -44,7 +44,7 @@ cuda-static = ["mwa_hyperdrive_common/cuda-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.5.1", default_features = false }
+birli = { version = "0.6.0", default_features = false }
 console = "0.15.0"
 crossbeam-channel = "0.5.0"
 crossbeam-utils = "0.8.7"
@@ -74,3 +74,8 @@ tempfile = "3.3.0"
 [[bench]]
 name = "bench"
 harness = false
+
+[patch.crates-io]
+# birli = { path = "../Birli" }
+# marlu = { path = "../Marlu" }
+marlu = { git = "https://github.com/MWATelescope/Marlu.git" }

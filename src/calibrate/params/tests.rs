@@ -203,13 +203,7 @@ fn test_new_params_tile_flags() {
     assert!(params.flagged_tiles.contains(&1));
     assert!(params.flagged_tiles.contains(&2));
     assert!(params.flagged_tiles.contains(&3));
-    assert_eq!(params.unflagged_cross_baseline_to_tile_map.len(), 7750);
     assert_eq!(params.tile_to_unflagged_cross_baseline_map.len(), 7750);
-
-    assert_eq!(params.unflagged_cross_baseline_to_tile_map[&0], (0, 4));
-    assert_eq!(params.unflagged_cross_baseline_to_tile_map[&1], (0, 5));
-    assert_eq!(params.unflagged_cross_baseline_to_tile_map[&2], (0, 6));
-    assert_eq!(params.unflagged_cross_baseline_to_tile_map[&3], (0, 7));
 
     assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 4)], 0);
     assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 5)], 1);

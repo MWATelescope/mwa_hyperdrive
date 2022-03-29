@@ -148,14 +148,6 @@ pub(crate) struct CalibrateParams {
     /// flagged.
     pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
 
-    /// Given an unflagged baseline index, get the tile index pair that
-    /// contribute to it. e.g. If tile 1 (i.e. the second tile) is flagged, then
-    /// the first unflagged baseline (i.e. 0) is between tile 0 and tile 2.
-    ///
-    /// This exists because some tiles may be flagged, so some baselines may be
-    /// flagged.
-    pub(crate) unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
-
     /// Are auto-correlations being included?
     pub(crate) using_autos: bool,
 
@@ -871,6 +863,7 @@ impl CalibrateParams {
         } else {
             obs_context.autocorrelations_present
         };
+        // XXX(Dev): TileBaselineMaps logic might fit inside FlagContext
         let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
 
         let (unflagged_tile_xyzs, unflagged_tile_names): (Vec<XyzGeodetic>, Vec<String>) =
@@ -991,8 +984,6 @@ impl CalibrateParams {
             flagged_fine_chans,
             tile_to_unflagged_cross_baseline_map: tile_baseline_maps
                 .tile_to_unflagged_cross_baseline_map,
-            unflagged_cross_baseline_to_tile_map: tile_baseline_maps
-                .unflagged_cross_baseline_to_tile_map,
             using_autos,
             unflagged_tile_names,
             unflagged_tile_xyzs,
@@ -1038,6 +1029,8 @@ impl CalibrateParams {
 
     /// The number of unflagged baselines, including auto-correlation
     /// "baselines" if these are included.
+    // TODO(dev): this is only used in tests
+    #[allow(dead_code)]
     pub(crate) fn get_num_unflagged_baselines(&self) -> usize {
         let n = self.unflagged_tile_xyzs.len();
         if self.using_autos {
@@ -1051,6 +1044,15 @@ impl CalibrateParams {
     pub(crate) fn get_num_unflagged_cross_baselines(&self) -> usize {
         let n = self.unflagged_tile_xyzs.len();
         (n * (n - 1)) / 2
+    }
+
+    pub(crate) fn get_ant_pairs(&self) -> Vec<(usize, usize)> {
+        // TODO(Dev): support autos
+        self.tile_to_unflagged_cross_baseline_map
+            .keys()
+            .cloned()
+            .sorted()
+            .collect()
     }
 
     pub(crate) fn read_crosses(

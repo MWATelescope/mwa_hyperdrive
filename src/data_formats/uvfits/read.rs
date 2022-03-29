@@ -9,7 +9,7 @@ use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
-use marlu::{Jones, RADec, XyzGeodetic};
+use marlu::{io::uvfits::decode_uvfits_baseline, Jones, RADec, XyzGeodetic};
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -34,7 +34,7 @@ pub(crate) struct UvfitsReader {
     pub(crate) uvfits: PathBuf,
 
     /// The uvfits-specific metadata, like which indices contain which
-    /// parameters.    
+    /// parameters.
     metadata: UvfitsMetadata,
 
     /// The "stride" of the data, i.e. the number of rows (baselines) before the

@@ -4,12 +4,16 @@
 
 //! Metadata on an observation.
 
+use birli::marlu::LatLngHeight;
 use hifitime::Epoch;
 use marlu::{RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
+
+pub(crate) mod error;
+pub use error::ObsContextError;
 
 /// MWA observation metadata.
 ///
@@ -80,6 +84,7 @@ pub(crate) struct ObsContext {
     /// timestep, and therefore no resolution.
     pub(crate) time_res: Option<f64>,
 
+    // XXX(Dev): Array Poisition should be a mandatory LatLngHeight at this point.
     /// The Earth longitude of the instrumental array \[radians\].
     pub(crate) array_longitude_rad: Option<f64>,
 
@@ -119,4 +124,19 @@ pub(crate) struct ObsContext {
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
     pub(crate) flagged_fine_chans_per_coarse_chan: Vec<usize>,
+}
+
+impl ObsContext {
+    pub(crate) fn get_array_pos(&self) -> Result<LatLngHeight, ObsContextError> {
+        let mut array_pos = LatLngHeight::new_mwa();
+        match (self.array_latitude_rad, self.array_longitude_rad) {
+            (Some(lat), Some(lng)) => {
+                array_pos.latitude_rad = lat;
+                array_pos.longitude_rad = lng;
+            }
+            (None, None) => {}
+            (lat, lng) => return Err(ObsContextError::PartialPosition { lat, lng }),
+        }
+        Ok(array_pos)
+    }
 }

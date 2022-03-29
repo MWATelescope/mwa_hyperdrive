@@ -9,20 +9,28 @@ mod helpers;
 #[cfg(test)]
 mod tests;
 
+use birli::{
+    marlu::{
+        constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+        math::baseline_to_tiles,
+        Jones, RADec, VisSelection, XyzGeodetic,
+    },
+    mwalib::GeometricDelaysApplied,
+    PreprocessContext,
+};
 pub use error::*;
 use helpers::*;
+use mwa_hyperdrive_common::itertools::izip;
 
-use std::collections::HashSet;
-use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    ops::Range,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use hifitime::Epoch;
 use log::{debug, info, trace, warn};
-use marlu::{
-    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    math::baseline_to_tiles,
-    Jones, RADec, XyzGeodetic,
-};
 use mwalib::{CorrelatorContext, MWAVersion, Pol};
 use ndarray::prelude::*;
 use vec1::Vec1;
@@ -35,7 +43,7 @@ use crate::{
     pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray, vec1};
+use mwa_hyperdrive_common::{hifitime, log, mwalib, ndarray, vec1};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawDataReader {
@@ -46,16 +54,12 @@ pub(crate) struct RawDataReader {
     /// The interface to the raw data via mwalib.
     mwalib_context: CorrelatorContext,
 
-    /// Is this MWAX data? Store this boolean here so we don't have to do error
-    /// handling again.
-    is_mwax: bool,
-
     /// The poly-phase filter bank gains to be used to correct the bandpass
     /// shape for each coarse channel.
     pfb_gains: Option<&'static [f64]>,
 
     /// What 'flavour' are the PFB gains?
-    pfb_flavour: PfbFlavour,
+    // pfb_flavour: PfbFlavour,
 
     /// Should digital gains be applied?
     digital_gains: bool,
@@ -392,9 +396,8 @@ impl RawDataReader {
         Ok(RawDataReader {
             obs_context,
             mwalib_context,
-            is_mwax,
             pfb_gains,
-            pfb_flavour,
+            // pfb_flavour,
             digital_gains,
             cable_length_correction,
             geometric_correction,
@@ -491,8 +494,13 @@ impl RawDataReader {
         // We checked mwalib has some common good coarse channels in the new
         // method, so it is safe to unwrap `first` and `last`.
         let coarse_chan_indices = &self.mwalib_context.common_good_coarse_chan_indices;
-        let coarse_chan_range =
-            *coarse_chan_indices.first().unwrap()..*coarse_chan_indices.last().unwrap() + 1;
+        let vis_sel = VisSelection {
+            timestep_range: timestep..timestep + 1,
+            coarse_chan_range: *coarse_chan_indices.first().unwrap()
+                ..*coarse_chan_indices.last().unwrap() + 1,
+            baseline_idxs: (0..self.all_baseline_tile_pairs.len()).collect(),
+        };
+
         let gpubox_channels = self.mwalib_context.gpubox_batches[0]
             .gpubox_files
             .first()
@@ -504,78 +512,83 @@ impl RawDataReader {
                 .unwrap()
                 .channel_identifier
                 + 1;
-        let timestep_range = timestep..timestep + 1;
 
         // Read in the data via Birli.
-        let (mut vis, flags) = birli::context_to_jones_array(
+        // TODO: read autos and crosses separately?
+        let fine_chans_per_coarse = self
+            .mwalib_context
+            .metafits_context
+            .num_corr_fine_chans_per_coarse;
+        let mut jones_array = vis_sel.allocate_jones(fine_chans_per_coarse)?;
+        let mut flag_array = vis_sel.allocate_flags(fine_chans_per_coarse)?;
+        let mut weight_array = vis_sel.allocate_weights(fine_chans_per_coarse)?;
+        vis_sel.read_mwalib(
             &self.mwalib_context,
-            &timestep_range,
-            &coarse_chan_range,
-            None,
+            jones_array.view_mut(),
+            flag_array.view_mut(),
             false,
         )?;
+
         let weight_factor = birli::flags::get_weight_factor(&self.mwalib_context);
+        // populate weights
+        weight_array.fill(weight_factor as _);
+
         // Birli has a function `flag_to_weight_array`, but this just makes an
         // array the same shape as `flags` and fills it with `weight_factor`.
         // We'd like negative weights where we have flags.
-        let mut weights =
-            flags.mapv_into_any(|f| if f { -weight_factor } else { weight_factor } as f32);
+        // let mut weights =
+        //     flags.mapv_into_any(|f| if f { -weight_factor } else { weight_factor } as f32);
 
         // Correct the raw data.
         let metafits_context = &self.mwalib_context.metafits_context;
-        if !metafits_context.cable_delays_applied && self.cable_length_correction {
-            birli::corrections::correct_cable_lengths(
-                &self.mwalib_context,
-                &mut vis,
-                &coarse_chan_range,
-                false,
-            );
-        }
-        if self.digital_gains {
-            birli::corrections::correct_digital_gains(
-                &self.mwalib_context,
-                &mut vis,
-                &coarse_chan_range,
-                &self.all_baseline_tile_pairs,
-            )?;
-        }
-        if let Some(pfb_gains) = self.pfb_gains.as_ref() {
-            birli::corrections::correct_coarse_passband_gains(
-                &mut vis,
-                &mut weights,
-                pfb_gains,
-                metafits_context.num_corr_fine_chans_per_coarse,
-                self.is_mwax,
-            )
-            .map_err(|e| ReadInputDataError::PfbRefuse {
-                pfb_flavour: self.pfb_flavour.to_string(),
-                freq_res_hz: self.obs_context.freq_res.unwrap(),
-                birli_error: e,
-            })?;
-        }
-        if self.geometric_correction {
-            match metafits_context.geometric_delays_applied {
-                mwalib::GeometricDelaysApplied::No => birli::corrections::correct_geometry(
-                    &self.mwalib_context,
-                    &mut vis,
-                    &timestep_range,
-                    &coarse_chan_range,
-                    None,
-                    Some(self.obs_context.phase_centre),
-                    false,
-                ),
 
-                // Nothing to do; metafits indicates delay corrections have been
-                // applied, and this is reported to the user in the new method.
-                mwalib::GeometricDelaysApplied::AzElTracking
-                | mwalib::GeometricDelaysApplied::TilePointing
-                | mwalib::GeometricDelaysApplied::Zenith => (),
-            }
-        }
+        let prep_ctx = PreprocessContext {
+            array_pos: self.obs_context.get_array_pos()?,
+            phase_centre: self.obs_context.phase_centre,
+            correct_cable_lengths: !metafits_context.cable_delays_applied
+                && self.cable_length_correction,
+            correct_digital_gains: self.digital_gains,
+            passband_gains: self.pfb_gains.map(|g| g.to_vec()),
+            correct_geometry: self.geometric_correction
+                && matches!(
+                    metafits_context.geometric_delays_applied,
+                    GeometricDelaysApplied::No
+                ),
+            ..PreprocessContext::default()
+        };
+
+        // used to time large operations
+        // TODO(dev): pull this out of preprocess
+        let mut durations = HashMap::<String, Duration>::new();
+
+        // TODO(dev): wrap pfb gains error separately
+        // .map_err(|e| ReadInputDataError::PfbRefuse {
+        //             pfb_flavour: self.pfb_flavour.to_string(),
+        //             freq_res_hz: self.obs_context.freq_res.unwrap(),
+        //             birli_error: e,
+        //         })?
+        prep_ctx.preprocess(
+            &self.mwalib_context,
+            &mut jones_array,
+            &mut weight_array,
+            &mut flag_array,
+            &mut durations,
+            &vis_sel,
+        )?;
 
         // Remove the extraneous time dimension; there's only ever one timestep.
-        let vis = vis.remove_axis(Axis(0));
-        let mut weights = weights.remove_axis(Axis(0));
+        let vis = jones_array.remove_axis(Axis(0));
+
+        // bake flags into weights
+        for (weight, flag) in izip!(weight_array.iter_mut(), flag_array.iter()) {
+            *weight = if *flag {
+                -(*weight).abs()
+            } else {
+                (*weight).abs()
+            } as f32;
+        }
+
+        let mut weights = weight_array.remove_axis(Axis(0));
 
         self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, weights.view_mut());
 

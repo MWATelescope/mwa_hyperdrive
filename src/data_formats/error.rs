@@ -4,7 +4,7 @@
 
 //! Errors from building a `InputData` trait instance.
 
-use birli::BirliError;
+use birli::{marlu::SelectionError, BirliError};
 use thiserror::Error;
 
 use mwa_hyperdrive_common::thiserror;
@@ -28,12 +28,18 @@ pub enum ReadInputDataError {
         axis_num: usize,
     },
 
-    #[error("{0}")]
+    #[error(transparent)]
     Birli(#[from] BirliError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     MS(#[from] super::ms::MSError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Uvfits(#[from] super::uvfits::UvfitsReadError),
+
+    #[error(transparent)]
+    SelectionError(#[from] SelectionError),
+
+    #[error(transparent)]
+    ObsContext(#[from] crate::context::ObsContextError),
 }

@@ -4,6 +4,7 @@
 
 //! Error type for all calibration-related errors.
 
+use birli::marlu::io::error::{IOError as MarluIOError, UvfitsWriteError as MarluUvfitsWriteError};
 use mwalib::fitsio;
 use thiserror::Error;
 
@@ -55,6 +56,15 @@ pub enum CalibrateError {
     #[error("Error when writing uvfits: {0}")]
     UviftsWrite(#[from] UvfitsWriteError),
 
+    #[error("Error when writing uvfits using Marlu: {0}")]
+    MarluUviftsWrite(#[from] MarluUvfitsWriteError),
+
+    #[error("Error when using Marlu for IO: {0}")]
+    MarluIO(#[from] MarluIOError),
+
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
+
+    #[error("Observation Context Error:")]
+    ObsContext(#[from] crate::context::ObsContextError),
 }

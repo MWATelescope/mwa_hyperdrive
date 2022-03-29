@@ -129,17 +129,6 @@ impl Fence {
         self.chanblocks.len() + self.flagged_chanblock_indices.len()
     }
 
-    /// Get the centre frequency of this [Fence], considering all chanblocks
-    /// (flagged and unflagged) \[Hz\].
-    fn get_centre_freq(&self) -> f64 {
-        if let Some(freq_res) = self.freq_res {
-            let n = self.get_total_num_chanblocks();
-            self.first_freq + (n / 2) as f64 * freq_res
-        } else {
-            self.first_freq
-        }
-    }
-
     fn _get_freqs(&self) -> Vec<f64> {
         if let Some(freq_res) = self.freq_res {
             (0..self.get_total_num_chanblocks())

@@ -7,10 +7,11 @@
 mod cli_args;
 
 use approx::assert_abs_diff_eq;
+use mwa_hyperdrive_common::clap::Parser;
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive::calibrate::solutions::CalibrationSolutions;
+use mwa_hyperdrive::calibrate::{di_calibrate, solutions::CalibrationSolutions};
 
 /// If di-calibrate is working, it should not write anything to stderr.
 #[test]
@@ -49,24 +50,26 @@ fn test_1090008640_di_calibrate_works() {
     let mut cal_model = tmp_dir;
     cal_model.push("hyp_model.uvfits");
 
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data",
-            &data[0],
-            &data[1],
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--outputs",
-            &format!("{}", sols.display()),
-            "--model-filename",
-            &format!("{}", cal_model.display()),
-        ])
-        .ok();
-    let cmd_error = cmd.is_err();
-    let (stdout, stderr) = get_cmd_output(cmd);
-    assert!(!cmd_error, "stdout: {}\nstderr: {}", stdout, stderr);
-    assert!(stderr.is_empty(), "{}", stderr);
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data",
+        &data[0],
+        &data[1],
+        "--source-list",
+        &args.source_list.unwrap(),
+        "--outputs",
+        &format!("{}", sols.display()),
+        "--model-filename",
+        &format!("{}", cal_model.display()),
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(
+        result.is_ok(),
+        "result={:?} is not ok",
+        result.err().unwrap()
+    );
 }
 
 #[test]
