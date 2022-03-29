@@ -46,7 +46,7 @@ fn make_solutions() -> CalibrationSolutions {
         flagged_tiles: flagged_tiles.into_iter().collect(),
         flagged_chanblocks: flagged_chanblocks
             .into_iter()
-            .map(|i| i.try_into().unwrap())
+            .map(|i| i as u16)
             .collect(),
         obsid: Some(1090008640),
         start_timestamps: vec![

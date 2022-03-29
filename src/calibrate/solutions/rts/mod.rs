@@ -223,7 +223,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
         let total_num_fine_freq_chans = num_fine_chans_per_coarse_chan * num_coarse_chans;
 
         // Get the flagged tile indices from the flagged RF inputs.
-        let flagged_fine_channels: Vec<u16> = (0..total_num_fine_freq_chans)
+        let flagged_fine_channels: Vec<_> = (0..total_num_fine_freq_chans)
             .into_iter()
             .filter(|&i_chan| {
                 let i_coarse_chan = i_chan / num_fine_chans_per_coarse_chan;
@@ -237,7 +237,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
                     .unflagged_fine_channel_indices
                     .contains(&i_fine_chan_in_coarse_chan)
             })
-            .map(|i_chan| i_chan.try_into().unwrap())
+            .map(|i_chan| i_chan as u16)
             .collect();
 
         let mut di_jones = Array3::from_elem(
