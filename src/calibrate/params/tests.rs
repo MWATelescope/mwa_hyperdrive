@@ -7,16 +7,20 @@
 use approx::assert_abs_diff_eq;
 use serial_test::serial;
 
-use super::InvalidArgsError;
-use crate::tests::{full_obsids::*, reduced_obsids::*};
+use super::InvalidArgsError::{
+    BadDelays, CalFreqFactorNotInteger, CalFreqResNotMulitple, CalTimeFactorNotInteger,
+    CalTimeResNotMulitple, CalibrationOutputFile, InvalidDataInput, MultipleMeasurementSets,
+    MultipleMetafits, MultipleUvfits, NoInputData, ParsePfbFlavour,
+};
+use crate::{
+    data_formats::RawDataReader,
+    tests::{full_obsids::*, reduced_obsids::*},
+};
 
 #[test]
 fn test_new_params_defaults() {
     let args = get_reduced_1090008640(true);
-    let params = match args.into_params() {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
+    let params = args.into_params().unwrap();
     let obs_context = params.get_obs_context();
     // The default time resolution should be 2.0s, as per the metafits.
     assert_abs_diff_eq!(obs_context.time_res.unwrap(), 2.0);
@@ -39,10 +43,7 @@ fn test_new_params_no_input_flags() {
     let mut args = get_reduced_1090008640(true);
     args.ignore_input_data_tile_flags = true;
     args.ignore_input_data_fine_channel_flags = true;
-    let params = match args.into_params() {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
+    let params = args.into_params().unwrap();
     let obs_context = params.get_obs_context();
     assert_abs_diff_eq!(obs_context.time_res.unwrap(), 2.0);
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
@@ -89,39 +90,21 @@ fn test_new_params_time_averaging_fail() {
     args.time_average_factor = Some("1.5".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => unreachable!(),
-        Err(err) => err,
-    };
-    assert!(matches!(err, InvalidArgsError::CalTimeFactorNotInteger));
+    assert!(matches!(result, Err(CalTimeFactorNotInteger)));
 
     let mut args = get_reduced_1090008640(true);
     // 2.01s is not a multiple of 2.0s
     args.time_average_factor = Some("2.01s".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => unreachable!(),
-        Err(err) => err,
-    };
-    assert!(matches!(
-        err,
-        InvalidArgsError::CalTimeResNotMulitple { .. }
-    ));
+    assert!(matches!(result, Err(CalTimeResNotMulitple { .. })));
 
     let mut args = get_reduced_1090008640(true);
     // 3.0s is not a multiple of 2.0s
     args.time_average_factor = Some("3.0s".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => unreachable!(),
-        Err(err) => err,
-    };
-    assert!(matches!(
-        err,
-        InvalidArgsError::CalTimeResNotMulitple { .. }
-    ));
+    assert!(matches!(result, Err(CalTimeResNotMulitple { .. })));
 }
 
 #[test]
@@ -154,39 +137,21 @@ fn test_new_params_freq_averaging_fail() {
     args.freq_average_factor = Some("1.5".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => unreachable!(),
-        Err(err) => err,
-    };
-    assert!(matches!(err, InvalidArgsError::CalFreqFactorNotInteger));
+    assert!(matches!(result, Err(CalFreqFactorNotInteger)));
 
     let mut args = get_reduced_1090008640(true);
     // 10kHz is not a multiple of 40kHz
     args.freq_average_factor = Some("10kHz".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => unreachable!(),
-        Err(err) => err,
-    };
-    assert!(matches!(
-        err,
-        InvalidArgsError::CalFreqResNotMulitple { .. }
-    ));
+    assert!(matches!(result, Err(CalFreqResNotMulitple { .. })));
 
     let mut args = get_reduced_1090008640(true);
     // 79kHz is not a multiple of 40kHz
     args.freq_average_factor = Some("79kHz".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    let err = match result {
-        Ok(_) => unreachable!(),
-        Err(err) => err,
-    };
-    assert!(matches!(
-        err,
-        InvalidArgsError::CalFreqResNotMulitple { .. }
-    ));
+    assert!(matches!(result, Err(CalFreqResNotMulitple { .. })));
 }
 
 #[test]
@@ -215,9 +180,148 @@ fn test_new_params_tile_flags() {
 
 #[test]
 #[serial]
-#[ignore]
+#[ignore = "files not in repo"]
 fn test_new_params_real_data() {
     let args = get_1065880128();
     let result = args.into_params();
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_handle_delays() {
+    let mut args = get_reduced_1090008640(true);
+    // only 3 delays instead of 16 expected
+    args.delays = Some((0..3).collect::<Vec<u32>>());
+    let result = args.clone().into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(BadDelays)));
+
+    // delays > 32
+    args.delays = Some((20..36).collect::<Vec<u32>>());
+    let result = args.clone().into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(BadDelays)));
+
+    let delays = (0..16).collect::<Vec<u32>>();
+    args.delays = Some(delays);
+    let result = args.into_params();
+
+    assert!(result.is_ok(), "result={:?} not Ok", result.err().unwrap());
+
+    // XXX(dev): not testable yet.
+    // let fee_beam = result.unwrap().beam.downcast::<FeeBeam>().unwrap();
+    // assert_eq!(fee_beam.delays[(0, 0)], delays[0]);
+}
+
+#[test]
+fn test_handle_no_input() {
+    let mut args = get_reduced_1090008640(true);
+    args.data = None;
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(NoInputData)));
+}
+
+#[test]
+fn test_handle_multiple_metafits() {
+    // when reading raw
+    let mut args = get_reduced_1090008640(true);
+    args.data
+        .as_mut()
+        .unwrap()
+        .push("test_files/1090008640_WODEN/1090008640.metafits".into());
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(MultipleMetafits(_))));
+
+    // when reading ms
+    let mut args = get_reduced_1090008640_ms();
+    args.data
+        .as_mut()
+        .unwrap()
+        .push("test_files/1090008640_WODEN/1090008640.metafits".into());
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(MultipleMetafits(_))));
+
+    // when reading uvfits
+    let mut args = get_reduced_1090008640_uvfits();
+    args.data
+        .as_mut()
+        .unwrap()
+        .push("test_files/1090008640_WODEN/1090008640.metafits".into());
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(MultipleMetafits(_))));
+}
+
+#[test]
+fn test_handle_multiple_ms() {
+    let mut args = get_reduced_1090008640_ms();
+    args.data
+        .as_mut()
+        .unwrap()
+        .push("test_files/1090008640/1090008640.ms".into());
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(MultipleMeasurementSets(_))));
+}
+
+#[test]
+fn test_handle_multiple_uvfits() {
+    let mut args = get_reduced_1090008640_uvfits();
+    args.data
+        .as_mut()
+        .unwrap()
+        .push("test_files/1090008640/1090008640.uvfits".into());
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(MultipleUvfits(_))));
+}
+
+#[test]
+fn test_handle_only_metafits() {
+    let mut args = get_reduced_1090008640(true);
+    args.data = Some(vec!["test_files/1090008640/1090008640.metafits".into()]);
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(InvalidDataInput)));
+}
+
+#[test]
+fn test_handle_pfb() {
+    let mut args = get_reduced_1090008640(true);
+    args.pfb_flavour = Some("invalid_pfb".into());
+    let result = args.clone().into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(ParsePfbFlavour(_))));
+
+    args.pfb_flavour = Some("Cotter2014".into());
+    let result = args.into_params();
+
+    assert!(result.is_ok());
+    let input_data_ptr = Box::into_raw(result.unwrap().input_data);
+    let raw_input_data = unsafe { Box::from_raw(input_data_ptr as *mut RawDataReader) };
+    let gains = raw_input_data.pfb_gains.unwrap();
+    assert_eq!(&gains[..2], &[0.5002092286_f64, 0.5025463233]);
+}
+
+#[test]
+fn test_handle_invalid_output() {
+    let mut args = get_reduced_1090008640(true);
+    args.outputs = Some(vec!["invalid.out".into()]);
+    let result = args.into_params();
+
+    assert!(result.is_err());
+    assert!(matches!(result, Err(CalibrationOutputFile { .. })));
 }

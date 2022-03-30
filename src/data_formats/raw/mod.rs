@@ -56,7 +56,7 @@ pub(crate) struct RawDataReader {
 
     /// The poly-phase filter bank gains to be used to correct the bandpass
     /// shape for each coarse channel.
-    pfb_gains: Option<&'static [f64]>,
+    pub(crate) pfb_gains: Option<&'static [f64]>,
 
     /// What 'flavour' are the PFB gains?
     // pfb_flavour: PfbFlavour,
