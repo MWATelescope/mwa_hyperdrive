@@ -65,11 +65,7 @@ fn test_1090008640_di_calibrate_works() {
 
     // Run di-cal and check that it succeeds
     let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
-    assert!(
-        result.is_ok(),
-        "result={:?} is not ok",
-        result.err().unwrap()
-    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 }
 
 #[test]
@@ -173,11 +169,7 @@ fn test_1090008640_woden() {
 
     // Run di-cal and check that it fails
     let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
-    assert!(
-        result.is_ok(),
-        "result={:?} is not ok",
-        result.err().unwrap()
-    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let hyp_sols = result.unwrap().unwrap();
     assert_eq!(hyp_sols.di_jones.dim(), bin_sols.di_jones.dim());

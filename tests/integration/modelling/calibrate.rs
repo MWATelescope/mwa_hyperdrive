@@ -53,11 +53,7 @@ fn test_1090008640_calibrate_model() {
         false,
         false,
     );
-    assert!(
-        result.is_ok(),
-        "result={:?} is not ok",
-        result.err().unwrap()
-    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut sols = temp_dir.clone();
     sols.push("sols.fits");
@@ -80,11 +76,7 @@ fn test_1090008640_calibrate_model() {
 
     // Run di-cal and check that it succeeds
     let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
-    assert!(
-        result.is_ok(),
-        "result={:?} is not ok",
-        result.err().unwrap()
-    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut uvfits_m = fits_open!(&model).unwrap();
     let hdu_m = fits_open_hdu!(&mut uvfits_m, 0).unwrap();

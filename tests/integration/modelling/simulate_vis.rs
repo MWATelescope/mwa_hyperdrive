@@ -53,6 +53,37 @@ fn read_uvfits_stabxyz(
     }
 }
 
+/// If di-calibrate is working, it should not write anything to stderr.
+#[test]
+fn test_no_stderr() {
+    let num_timesteps = 2;
+    let num_chans = 2;
+
+    let mut output_path = TempDir::new().expect("couldn't make tmp dir").into_path();
+    output_path.push("model.uvfits");
+    let args = get_reduced_1090008640(true, false);
+    let metafits = args.data.as_ref().unwrap()[0].clone();
+
+    let cmd = hyperdrive()
+        .args(&[
+            "simulate-vis",
+            "--metafits",
+            &metafits,
+            "--source-list",
+            &args.source_list.unwrap(),
+            "--output-model-file",
+            &format!("{}", output_path.display()),
+            "--num-timesteps",
+            &format!("{}", num_timesteps),
+            "--num-fine-channels",
+            &format!("{}", num_chans),
+        ])
+        .ok();
+    assert!(cmd.is_ok(), "simulate-vis failed on simple test data!");
+    let (_, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
+}
+
 #[test]
 #[serial]
 fn test_1090008640_simulate_vis() {
@@ -85,11 +116,7 @@ fn test_1090008640_simulate_vis() {
         false,
         false,
     );
-    assert!(
-        result.is_ok(),
-        "result={:?} is not ok",
-        result.err().unwrap()
-    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     // Test some metadata. Compare with the input metafits file.
     let metafits = MetafitsContext::new(&metafits, None).unwrap();
@@ -294,11 +321,7 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
         "--cpu",
     ]);
     let result = simulate_vis(sim_args, true, false);
-    assert!(
-        result.is_ok(),
-        "result={:?} is not ok",
-        result.err().unwrap()
-    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut uvfits = fits_open!(&output_path).unwrap();
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
@@ -349,11 +372,7 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
 
     // Run simulate-vis and check that it succeeds
     let result = simulate_vis(sim_args, false, false);
-    assert!(
-        result.is_ok(),
-        "result={:?} is not ok",
-        result.err().unwrap()
-    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut uvfits = fits_open!(&output_path).unwrap();
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
