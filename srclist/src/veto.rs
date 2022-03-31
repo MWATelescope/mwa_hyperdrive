@@ -10,14 +10,14 @@
 
 use std::collections::BTreeMap;
 
-use log::{debug, trace, log_enabled, Level::Trace};
+use log::{debug, log_enabled, trace, Level::Trace};
+use marlu::{Jones, RADec};
 use rayon::{iter::Either, prelude::*};
 use thiserror::Error;
-use marlu::{RADec, Jones};
 
-use crate::{FluxDensity, SourceList, constants::*};
-use mwa_hyperdrive_beam::{BeamError, Beam};
-use mwa_hyperdrive_common::{log, rayon, thiserror, marlu};
+use crate::{constants::*, FluxDensity, SourceList};
+use mwa_hyperdrive_beam::{Beam, BeamError};
+use mwa_hyperdrive_common::{log, marlu, rayon, thiserror};
 
 /// This function mutates the input source list, removing any sources that have
 /// components below the elevation limit, components that are too far from the
@@ -91,7 +91,7 @@ pub fn veto_sources(
                 // `fd` is the sum of the source's component XX+YY flux
                 // densities at this coarse-channel frequency.
                 let mut fd = 0.0;
-                
+
                 for (comp, azel) in source.components.iter().zip(azels.iter()) {
                     // Get the beam response at this source position and
                     // frequency.
@@ -110,7 +110,7 @@ pub fn veto_sources(
                     let comp_fd = comp.estimate_at_freq(cc_freq);
                     fd += get_beam_attenuated_flux_density(&comp_fd, j);
                 }
-                
+
                 if fd < veto_threshold {
                     if log_enabled!(Trace) {
                         trace!(
@@ -143,7 +143,8 @@ pub fn veto_sources(
     source_list.par_sort_unstable_by(|a_key, _, b_key, _| {
         let a_brightness = not_vetoed_sources[a_key];
         let b_brightness = not_vetoed_sources[b_key];
-        b_brightness.partial_cmp(&a_brightness)
+        b_brightness
+            .partial_cmp(&a_brightness)
             // No NaNs should be here.
             .unwrap()
     });
@@ -153,7 +154,9 @@ pub fn veto_sources(
     if let Some(n) = num_sources {
         if source_list.len() > n {
             // Add the not-top-N sources into `vetoed_sources`.
-            source_list.drain(n..).for_each(|(name, _)| vetoed_sources.push(name));
+            source_list
+                .drain(n..)
+                .for_each(|(name, _)| vetoed_sources.push(name));
         }
     }
 
@@ -212,14 +215,16 @@ pub enum VetoError {
 mod tests {
     use std::ops::Deref;
 
-    use mwa_hyperdrive_beam::{Delays, create_fee_beam_object, create_no_beam_object};
-    use marlu::{AzEl, constants::MWA_LAT_RAD};
     use approx::assert_abs_diff_eq;
+    use marlu::{constants::MWA_LAT_RAD, AzEl};
+    use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Delays};
     use serial_test::*;
     use vec1::vec1;
 
     use super::*;
-    use crate::{ComponentType, FluxDensityType, Source, SourceComponent, read::read_source_list_file};
+    use crate::{
+        read::read_source_list_file, ComponentType, FluxDensityType, Source, SourceComponent,
+    };
     use mwa_hyperdrive_common::vec1;
 
     #[test]
@@ -249,7 +254,8 @@ mod tests {
     #[serial]
     fn test_beam_attenuated_flux_density_fee_beam() {
         let beam_file: Option<&str> = None;
-        let beam = create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam =
+            create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         let jones_pointing_centre = beam
             .calc_jones(AzEl::new_degrees(0.0, 89.0), 180e6, 0)
             .unwrap();
@@ -274,7 +280,8 @@ mod tests {
     #[serial]
     fn veto() {
         let beam_file: Option<&str> = None;
-        let beam = create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam =
+            create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         let (mut source_list, _) = read_source_list_file("../test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
         // For testing's sake, keep only the following bright sources.

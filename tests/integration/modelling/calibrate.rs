@@ -32,18 +32,14 @@ fn test_1090008640_calibrate_model() {
     let args = get_reduced_1090008640(true, false);
     let metafits = &args.data.as_ref().unwrap()[0];
     let srclist = args.source_list.unwrap();
+    #[rustfmt::skip]
     let sim_args = SimulateVisArgs::parse_from(&[
         "simulate-vis",
-        "--metafits",
-        metafits,
-        "--source-list",
-        &srclist,
-        "--output-model-file",
-        &format!("{}", model.display()),
-        "--num-timesteps",
-        &format!("{}", num_timesteps),
-        "--num-fine-channels",
-        &format!("{}", num_chans),
+        "--metafits", metafits,
+        "--source-list", &srclist,
+        "--output-model-file", &format!("{}", model.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
     ]);
 
     // Run simulate-vis and check that it succeeds
@@ -60,17 +56,13 @@ fn test_1090008640_calibrate_model() {
     let mut cal_model = temp_dir;
     cal_model.push("cal_model.uvfits");
 
+    #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",
-        "--data",
-        &format!("{}", model.display()),
-        metafits,
-        "--source-list",
-        &srclist,
-        "--outputs",
-        &format!("{}", sols.display()),
-        "--model-filename",
-        &format!("{}", cal_model.display()),
+        "--data", &format!("{}", model.display()), metafits,
+        "--source-list", &srclist,
+        "--outputs", &format!("{}", sols.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
         "--ignore-autos",
     ]);
 

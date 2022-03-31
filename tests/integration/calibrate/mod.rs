@@ -7,11 +7,7 @@
 mod cli_args;
 
 use approx::assert_abs_diff_eq;
-use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{
-    clap::Parser,
-    mwalib::{fitsio_sys, *}, hifitime::Epoch,
-};
+use mwa_hyperdrive_common::{clap::Parser, mwalib::*};
 use serial_test::serial;
 
 use crate::*;
@@ -25,16 +21,13 @@ fn test_no_stderr() {
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
 
+    #[rustfmt::skip]
     let cmd = hyperdrive()
         .args(&[
             "di-calibrate",
-            "--data",
-            &data[0],
-            &data[1],
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--outputs",
-            &format!("{}", sols.display()),
+            "--data", &data[0], &data[1],
+            "--source-list", &args.source_list.unwrap(),
+            "--outputs", &format!("{}", sols.display()),
         ])
         .ok();
     assert!(cmd.is_ok(), "di-calibrate failed on simple test data!");
@@ -53,17 +46,13 @@ fn test_1090008640_di_calibrate_writes_solutions() {
     let sols = tmp_dir.join("sols.fits");
     let cal_model = tmp_dir.join("hyp_model.uvfits");
 
+    #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",
-        "--data",
-        metafits,
-        gpufits,
-        "--source-list",
-        &args.source_list.unwrap(),
-        "--outputs",
-        &format!("{}", sols.display()),
-        "--model-filename",
-        &format!("{}", cal_model.display()),
+        "--data", metafits, gpufits,
+        "--source-list", &args.source_list.unwrap(),
+        "--outputs", &format!("{}", sols.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
     ]);
 
     // Run di-cal and check that it succeeds
@@ -83,14 +72,12 @@ fn test_1090008640_woden() {
 
     // Reading from a uvfits file without a metafits file should fail because
     // there's no beam information.
+    #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",
-        "--data",
-        "test_files/1090008640_WODEN/output_band01.uvfits",
-        "--source-list",
-        "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-        "--outputs",
-        &format!("{}", solutions_path.display()),
+        "--data", "test_files/1090008640_WODEN/output_band01.uvfits",
+        "--source-list", "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
+        "--outputs", &format!("{}", solutions_path.display()),
     ]);
 
     // Run di-cal and check that it fails
@@ -233,7 +220,10 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
     let mut out_vis = fits_open!(&out_vis_path).unwrap();
     let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
     let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
-    assert_eq!(gcount.parse::<usize>().unwrap(), exp_timesteps * exp_baselines);
+    assert_eq!(
+        gcount.parse::<usize>().unwrap(),
+        exp_timesteps * exp_baselines
+    );
     // let pcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "PCOUNT").unwrap();
     // assert_eq!(pcount.parse::<usize>().unwrap(), 5);
     // let floats_per_pol: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS2").unwrap();

@@ -64,19 +64,15 @@ fn test_no_stderr() {
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
 
+    #[rustfmt::skip]
     let cmd = hyperdrive()
         .args(&[
             "simulate-vis",
-            "--metafits",
-            &metafits,
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--output-model-file",
-            &format!("{}", output_path.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
+            "--metafits", &metafits,
+            "--source-list", &args.source_list.unwrap(),
+            "--output-model-file", &format!("{}", output_path.display()),
+            "--num-timesteps", &format!("{}", num_timesteps),
+            "--num-fine-channels", &format!("{}", num_chans),
         ])
         .ok();
     assert!(cmd.is_ok(), "simulate-vis failed on simple test data!");
@@ -95,18 +91,14 @@ fn test_1090008640_simulate_vis() {
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
 
+    #[rustfmt::skip]
     let sim_args = SimulateVisArgs::parse_from(&[
         "simulate-vis",
-        "--metafits",
-        &metafits,
-        "--source-list",
-        &args.source_list.unwrap(),
-        "--output-model-file",
-        &format!("{}", output_path.display()),
-        "--num-timesteps",
-        &format!("{}", num_timesteps),
-        "--num-fine-channels",
-        &format!("{}", num_chans),
+        "--metafits", &metafits,
+        "--source-list", &args.source_list.unwrap(),
+        "--output-model-file", &format!("{}", output_path.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
     ]);
 
     // Run simulate-vis and check that it succeeds
@@ -306,18 +298,14 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
     output_path.push("model.uvfits");
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
+    #[rustfmt::skip]
     let sim_args = SimulateVisArgs::parse_from(&[
         "simulate-vis",
-        "--metafits",
-        &metafits,
-        "--source-list",
-        &args.source_list.unwrap(),
-        "--output-model-file",
-        &format!("{}", output_path.display()),
-        "--num-timesteps",
-        &format!("{}", num_timesteps),
-        "--num-fine-channels",
-        &format!("{}", num_chans),
+        "--metafits", &metafits,
+        "--source-list", &args.source_list.unwrap(),
+        "--output-model-file", &format!("{}", output_path.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
         "--cpu",
     ]);
     let result = simulate_vis(sim_args, true, false);
@@ -356,18 +344,14 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
 
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
+    #[rustfmt::skip]
     let sim_args = SimulateVisArgs::parse_from(&[
         "simulate-vis",
-        "--metafits",
-        &metafits,
-        "--source-list",
-        &args.source_list.unwrap(),
-        "--output-model-file",
-        &format!("{}", output_path.display()),
-        "--num-timesteps",
-        &format!("{}", num_timesteps),
-        "--num-fine-channels",
-        &format!("{}", num_chans),
+        "--metafits", &metafits,
+        "--source-list", &args.source_list.unwrap(),
+        "--output-model-file", &format!("{}", output_path.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
     ]);
 
     // Run simulate-vis and check that it succeeds
