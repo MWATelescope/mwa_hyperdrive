@@ -7,7 +7,11 @@
 mod cli_args;
 
 use approx::assert_abs_diff_eq;
-use mwa_hyperdrive_common::clap::Parser;
+use mwa_hyperdrive_beam::Delays;
+use mwa_hyperdrive_common::{
+    clap::Parser,
+    mwalib::{fitsio_sys, *}, hifitime::Epoch,
+};
 use serial_test::serial;
 
 use crate::*;
@@ -17,8 +21,7 @@ use mwa_hyperdrive::calibrate::{di_calibrate, solutions::CalibrationSolutions, C
 #[test]
 fn test_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let mut sols = tmp_dir;
-    sols.push("sols.fits");
+    let sols = tmp_dir.join("sols.fits");
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
 
@@ -41,20 +44,20 @@ fn test_no_stderr() {
 
 #[test]
 #[serial]
-fn test_1090008640_di_calibrate_works() {
+fn test_1090008640_di_calibrate_writes_solutions() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
-    let mut sols = tmp_dir.clone();
-    sols.push("sols.fits");
-    let mut cal_model = tmp_dir;
-    cal_model.push("hyp_model.uvfits");
+    let metafits = &data[0];
+    let gpufits = &data[1];
+    let sols = tmp_dir.join("sols.fits");
+    let cal_model = tmp_dir.join("hyp_model.uvfits");
 
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",
         "--data",
-        &data[0],
-        &data[1],
+        metafits,
+        gpufits,
         "--source-list",
         &args.source_list.unwrap(),
         "--outputs",
@@ -66,13 +69,17 @@ fn test_1090008640_di_calibrate_works() {
     // Run di-cal and check that it succeeds
     let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // check solutions file has been created, is readable
+    assert!(sols.exists(), "sols file not written");
+    let sol_data = CalibrationSolutions::read_solutions_from_ext(sols, metafits.into()).unwrap();
+    assert_eq!(sol_data.obsid, Some(1090008640));
 }
 
 #[test]
 fn test_1090008640_woden() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let mut solutions_path = tmp_dir.clone();
-    solutions_path.push("sols.bin");
+    let solutions_path = tmp_dir.join("sols.bin");
 
     // Reading from a uvfits file without a metafits file should fail because
     // there's no beam information.
@@ -151,8 +158,7 @@ fn test_1090008640_woden() {
     assert!(!bin_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
     // Re-do calibration, but this time into the hyperdrive fits format.
-    let mut solutions_path = tmp_dir;
-    solutions_path.push("sols.fits");
+    let solutions_path = tmp_dir.join("sols.fits");
 
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",
@@ -187,4 +193,54 @@ fn test_1090008640_woden() {
     let bin_sols_di_jones = bin_sols.di_jones.mapv(TestJones::from);
     let hyp_sols_di_jones = hyp_sols.di_jones.mapv(TestJones::from);
     assert_abs_diff_eq!(bin_sols_di_jones, hyp_sols_di_jones);
+}
+
+#[test]
+#[serial]
+fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let args = get_reduced_1090008640(true, false);
+    let data = args.data.unwrap();
+    let metafits = &data[0];
+    let gpufits = &data[1];
+    let out_vis_path = tmp_dir.join("vis.uvfits");
+    let cal_model = tmp_dir.join("hyp_model.uvfits");
+
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data",
+        metafits,
+        gpufits,
+        "--source-list",
+        &args.source_list.unwrap(),
+        "--outputs",
+        &format!("{}", out_vis_path.display()),
+        "--model-filename",
+        &format!("{}", cal_model.display()),
+        "--ignore-autos",
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // check vis file has been created, is readable
+    assert!(out_vis_path.exists(), "out vis file not written");
+    let exp_timesteps = 1;
+    let exp_baselines = 8128;
+    let exp_channels = 32;
+
+    let mut out_vis = fits_open!(&out_vis_path).unwrap();
+    let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
+    let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
+    assert_eq!(gcount.parse::<usize>().unwrap(), exp_timesteps * exp_baselines);
+    // let pcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "PCOUNT").unwrap();
+    // assert_eq!(pcount.parse::<usize>().unwrap(), 5);
+    // let floats_per_pol: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS2").unwrap();
+    // assert_eq!(floats_per_pol.parse::<usize>().unwrap(), 3);
+    // let num_pols: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS3").unwrap();
+    // assert_eq!(num_pols.parse::<usize>().unwrap(), 4);
+    let num_fine_freq_chans: String =
+        get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
+    assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
 }

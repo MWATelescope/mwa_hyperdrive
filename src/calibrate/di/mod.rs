@@ -182,11 +182,14 @@ pub(crate) fn di_calibrate(
         let mut out_weights = Array3::from_elem(out_shape, -0.0);
 
         assert_eq!(vis_weights.dim(), vis_data.dim());
+        // time
         assert_eq!(vis_data.len_of(Axis(0)), out_shape.0);
-        assert_eq!(vis_data.len_of(Axis(1)), out_shape.1);
+        // baseline
+        assert_eq!(vis_data.len_of(Axis(1)), out_shape.2);
+        // freq
         assert_eq!(
-            vis_data.len_of(Axis(3)),
-            out_shape.2 + params.flagged_fine_chans.len()
+            vis_data.len_of(Axis(2)) + params.flagged_fine_chans.len(),
+            out_shape.1
         );
 
         // zip over time axis;
