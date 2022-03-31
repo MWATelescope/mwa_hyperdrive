@@ -34,8 +34,7 @@ pub(crate) enum TimeFormat {
 /// Parse a string that may have a unit of time attached to it.
 pub(crate) fn parse_time(s: &str) -> Result<(f64, TimeFormat), UnitParseError> {
     // Try to parse a naked number.
-    let maybe_number: Option<f64> = s.trim().parse().ok();
-    if let Some(number) = maybe_number {
+    if let Ok(number) = s.trim().parse() {
         return Ok((number, TimeFormat::NoUnit));
     };
 
@@ -84,8 +83,7 @@ pub(crate) enum FreqFormat {
 /// Parse a string that may have a unit of frequency attached to it.
 pub(crate) fn parse_freq(s: &str) -> Result<(f64, FreqFormat), UnitParseError> {
     // Try to parse a naked number.
-    let maybe_number: Option<f64> = s.trim().parse().ok();
-    if let Some(number) = maybe_number {
+    if let Ok(number) = s.trim().parse() {
         return Ok((number, FreqFormat::NoUnit));
     };
 

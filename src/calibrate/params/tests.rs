@@ -325,3 +325,18 @@ fn test_handle_invalid_output() {
     assert!(result.is_err());
     assert!(matches!(result, Err(CalibrationOutputFile { .. })));
 }
+
+#[test]
+/// test that it correctly stacks averaging factor.
+///
+/// TODO(dev): use test data with multiple timesteps to test time factor stacking
+fn test_handle_both_vis_avg() {
+    let mut args = get_reduced_1090008640(true);
+    args.freq_average_factor = Some("80kHz".into());
+    args.output_vis_freq_average = Some("160kHz".into());
+    args.outputs = Some(vec!["test.uvfits".into()]);
+    let result = args.into_params().unwrap();
+
+    // output averaging factor should be relative to cal averaging factor.
+    assert_eq!(result.output_vis_freq_average_factor, 2);
+}
