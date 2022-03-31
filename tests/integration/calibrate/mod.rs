@@ -193,17 +193,13 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
     let out_vis_path = tmp_dir.join("vis.uvfits");
     let cal_model = tmp_dir.join("hyp_model.uvfits");
 
+    #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",
-        "--data",
-        metafits,
-        gpufits,
-        "--source-list",
-        &args.source_list.unwrap(),
-        "--outputs",
-        &format!("{}", out_vis_path.display()),
-        "--model-filename",
-        &format!("{}", cal_model.display()),
+        "--data", metafits, gpufits,
+        "--source-list", &args.source_list.unwrap(),
+        "--outputs", &format!("{}", out_vis_path.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
         "--ignore-autos",
     ]);
 
@@ -216,6 +212,58 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
     let exp_timesteps = 1;
     let exp_baselines = 8128;
     let exp_channels = 32;
+
+    let mut out_vis = fits_open!(&out_vis_path).unwrap();
+    let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
+    let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
+    assert_eq!(
+        gcount.parse::<usize>().unwrap(),
+        exp_timesteps * exp_baselines
+    );
+    // let pcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "PCOUNT").unwrap();
+    // assert_eq!(pcount.parse::<usize>().unwrap(), 5);
+    // let floats_per_pol: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS2").unwrap();
+    // assert_eq!(floats_per_pol.parse::<usize>().unwrap(), 3);
+    // let num_pols: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS3").unwrap();
+    // assert_eq!(num_pols.parse::<usize>().unwrap(), 4);
+    let num_fine_freq_chans: String =
+        get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
+    assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
+}
+
+#[test]
+#[serial]
+fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos_avg_freq() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let args = get_reduced_1090008640(true, false);
+    let data = args.data.unwrap();
+    let metafits = &data[0];
+    let gpufits = &data[1];
+    let out_vis_path = tmp_dir.join("vis.uvfits");
+    let cal_model = tmp_dir.join("hyp_model.uvfits");
+
+    let freq_avg_factor = 2;
+
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", metafits, gpufits,
+        "--source-list", &args.source_list.unwrap(),
+        "--outputs", &format!("{}", out_vis_path.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
+        "--ignore-autos",
+        "--output-vis-freq-average", &format!("{}", freq_avg_factor)
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // check vis file has been created, is readable
+    assert!(out_vis_path.exists(), "out vis file not written");
+    let exp_timesteps = 1;
+    let exp_baselines = 8128;
+    let exp_channels = 32 / freq_avg_factor;
 
     let mut out_vis = fits_open!(&out_vis_path).unwrap();
     let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();

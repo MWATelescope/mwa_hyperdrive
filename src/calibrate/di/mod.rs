@@ -169,7 +169,7 @@ pub(crate) fn di_calibrate(
             freq_resolution_hz: obs_context.freq_res.unwrap(),
             sel_baselines: ant_pairs,
             avg_time: params.output_vis_time_average_factor,
-            avg_freq: params.freq_average_factor,
+            avg_freq: params.output_vis_freq_average_factor,
             num_vis_pols: 4,
         };
 
@@ -177,7 +177,7 @@ pub(crate) fn di_calibrate(
         // TODO(dev): unify unpacking
 
         // out data is [time, freq, baseline], in data is [time, baseline, freq]
-        let out_shape = vis_ctx.avg_dims();
+        let out_shape = vis_ctx.sel_dims();
         let mut out_data = Array3::from_elem(out_shape, Jones::zero());
         let mut out_weights = Array3::from_elem(out_shape, -0.0);
 
