@@ -8,7 +8,7 @@ Error type for all simulate-vis-related errors.
 
 use thiserror::Error;
 
-use birli::marlu::{io::error::IOError as MarluIOError, UvfitsWriteError as MarluUvfitsWriteError};
+use birli::marlu::{io::error::IOError as MarluIOError, UvfitsWriteError};
 use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
@@ -49,10 +49,7 @@ pub enum SimulateVisError {
     Model(#[from] crate::model::ModelError),
 
     #[error(transparent)]
-    Uvfits(#[from] crate::data_formats::UvfitsWriteError),
-
-    #[error(transparent)]
-    MarluUvfits(#[from] MarluUvfitsWriteError),
+    MarluUvfits(#[from] UvfitsWriteError),
 
     #[error(transparent)]
     MarluIO(#[from] MarluIOError),

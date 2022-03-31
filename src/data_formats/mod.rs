@@ -14,7 +14,7 @@ pub(crate) use error::ReadInputDataError;
 pub use metafits::*;
 pub(crate) use ms::{MsReadError, MS};
 pub(crate) use raw::{RawDataReader, RawReadError};
-pub(crate) use uvfits::{UvfitsReadError, UvfitsReader, UvfitsWriteError};
+pub(crate) use uvfits::{UvfitsReadError, UvfitsReader};
 
 use std::collections::{HashMap, HashSet};
 

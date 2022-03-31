@@ -81,33 +81,3 @@ pub enum UvfitsReadError {
     #[error("{0}")]
     IO(#[from] std::io::Error),
 }
-
-#[derive(Error, Debug)]
-pub enum UvfitsWriteError {
-    #[error("Tried to write to row number {row_num}, but only {num_rows} rows are expected")]
-    BadRowNum { row_num: usize, num_rows: usize },
-
-    #[error("Expected {total} uvfits rows to be written, but only {current} were written")]
-    NotEnoughRowsWritten { current: usize, total: usize },
-
-    /// An error associated with ERFA.
-    #[error("{source_file}:{source_line} Call to ERFA function {function} returned status code {status}")]
-    Erfa {
-        source_file: &'static str,
-        source_line: u32,
-        status: i32,
-        function: &'static str,
-    },
-
-    /// An error associated with fitsio.
-    #[error("{0}")]
-    Fitsio(#[from] fitsio::errors::Error),
-
-    /// An error when converting a Rust string to a C string.
-    #[error("{0}")]
-    BadString(#[from] std::ffi::NulError),
-
-    /// An IO error.
-    #[error("{0}")]
-    IO(#[from] std::io::Error),
-}
