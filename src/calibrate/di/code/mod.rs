@@ -746,12 +746,12 @@ pub fn calibrate_timeblocks<'a>(
             ((total_converged_count as f64 / num_chanblocks as f64) * 100.0).round()
         );
 
-        // Calibrate each timeblock individually.
-        let mut all_cal_results = vec![];
+        // Calibrate each timeblock individually. Set all solutions to be that
+        // of the averaged solutions so that the individual timeblocks have less
+        // work to do.
+        di_jones.accumulate_axis_inplace(Axis(0), |&prev, curr| *curr = prev);
+        let mut all_cal_results = Vec::with_capacity(timeblocks.len());
         for (i_timeblock, timeblock) in timeblocks.iter().enumerate() {
-            // Set all solutions to be that of the averaged solutions.
-            di_jones.accumulate_axis_inplace(Axis(1), |&prev, curr| *curr = prev);
-
             let pb = make_calibration_progress_bar(
                 num_chanblocks,
                 format!(

@@ -11,6 +11,7 @@ use std::ffi::CString;
 use std::path::Path;
 
 use hifitime::Epoch;
+use itertools::Itertools;
 use marlu::Jones;
 use mwalib::{
     fitsio::{
@@ -24,7 +25,7 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::{error::*, CalibrationSolutions};
-use mwa_hyperdrive_common::{hifitime, marlu, mwalib, ndarray, rayon, Complex};
+use mwa_hyperdrive_common::{hifitime, itertools, marlu, mwalib, ndarray, rayon, Complex};
 
 pub(super) fn read<P: AsRef<Path>>(file: P) -> Result<CalibrationSolutions, ReadSolutionsError> {
     fn inner(file: &Path) -> Result<CalibrationSolutions, ReadSolutionsError> {
@@ -33,7 +34,7 @@ pub(super) fn read<P: AsRef<Path>>(file: P) -> Result<CalibrationSolutions, Read
         let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
         let start_timestamps = {
             let timestamps: Option<String> =
-                get_optional_fits_key!(&mut fptr, &hdu, "START_TIMESTAMPS")?;
+                get_optional_fits_key_long_string!(&mut fptr, &hdu, "S_TIMES")?;
             // The retrieved string might be empty (or just have spaces for values)
             match timestamps.as_ref().map(|s| s.trim()) {
                 None | Some("") => vec![],
@@ -43,7 +44,7 @@ pub(super) fn read<P: AsRef<Path>>(file: P) -> Result<CalibrationSolutions, Read
                         Ok(float) => Ok(Epoch::from_gpst_seconds(float)),
                         Err(_) => Err(ReadSolutionsError::Parse {
                             file: file.display().to_string(),
-                            key: "START_TIMESTAMPS",
+                            key: "S_TIMES",
                             got: ss.to_string(),
                         }),
                     })
@@ -54,7 +55,7 @@ pub(super) fn read<P: AsRef<Path>>(file: P) -> Result<CalibrationSolutions, Read
         };
         let end_timestamps = {
             let timestamps: Option<String> =
-                get_optional_fits_key!(&mut fptr, &hdu, "END_TIMESTAMPS")?;
+                get_optional_fits_key_long_string!(&mut fptr, &hdu, "E_TIMES")?;
             // The retrieved string might be empty (or just have spaces for values)
             match timestamps.as_ref().map(|s| s.trim()) {
                 None | Some("") => vec![],
@@ -64,7 +65,7 @@ pub(super) fn read<P: AsRef<Path>>(file: P) -> Result<CalibrationSolutions, Read
                         Ok(float) => Ok(Epoch::from_gpst_seconds(float)),
                         Err(_) => Err(ReadSolutionsError::Parse {
                             file: file.display().to_string(),
-                            key: "END_TIMESTAMPS",
+                            key: "E_TIMES",
                             got: ss.to_string(),
                         }),
                     })
@@ -75,7 +76,7 @@ pub(super) fn read<P: AsRef<Path>>(file: P) -> Result<CalibrationSolutions, Read
         };
         let average_timestamps = {
             let timestamps: Option<String> =
-                get_optional_fits_key!(&mut fptr, &hdu, "AVERAGE_TIMESTAMPS")?;
+                get_optional_fits_key_long_string!(&mut fptr, &hdu, "A_TIMES")?;
             // The retrieved string might be empty (or just have spaces for values)
             match timestamps.as_ref().map(|s| s.trim()) {
                 None | Some("") => vec![],
@@ -85,7 +86,7 @@ pub(super) fn read<P: AsRef<Path>>(file: P) -> Result<CalibrationSolutions, Read
                         Ok(float) => Ok(Epoch::from_gpst_seconds(float)),
                         Err(_) => Err(ReadSolutionsError::Parse {
                             file: file.display().to_string(),
-                            key: "AVERAGE_TIMESTAMPS",
+                            key: "A_TIMES",
                             got: ss.to_string(),
                         }),
                     })
@@ -167,6 +168,16 @@ pub(super) fn write<P: AsRef<Path>>(
         }
         let mut fptr = FitsFile::create(&file).open()?;
         let hdu = fits_open_hdu!(&mut fptr, 0)?;
+        let mut status = 0;
+
+        // Signal that we're using long strings.
+        unsafe {
+            fitsio_sys::ffplsw(
+                fptr.as_raw(), /* I - FITS file pointer  */
+                &mut status,   /* IO - error status       */
+            );
+            fits_check_status(status)?;
+        }
 
         // Write the obsid if we can.
         if let Some(obsid) = sols.obsid {
@@ -174,7 +185,6 @@ pub(super) fn write<P: AsRef<Path>>(
                 let key_name = CString::new("OBSID").unwrap();
                 let value = CString::new(obsid.to_string()).unwrap();
                 let comment = CString::new("The MWA observation ID").unwrap();
-                let mut status = 0;
                 // ffpkys = fits_write_key_str
                 fitsio_sys::ffpkys(
                     fptr.as_raw(),     /* I - FITS file pointer        */
@@ -189,15 +199,18 @@ pub(super) fn write<P: AsRef<Path>>(
 
         // Write the timestamps as a comma separated list in a string.
         for (key_name, key_type, timestamps) in [
-            ("START_TIMESTAMPS", "Start", &sols.start_timestamps),
-            ("END_TIMESTAMPS", "End", &sols.end_timestamps),
-            ("AVERAGE_TIMESTAMPS", "Average", &sols.average_timestamps),
+            ("S_TIMES", "Start", &sols.start_timestamps),
+            ("E_TIMES", "End", &sols.end_timestamps),
+            ("A_TIMES", "Average", &sols.average_timestamps),
         ] {
+            // There's an "intersperse" in unstable Rust, so use fully-qualified
+            // syntax to appease clippy. Itertools might not be needed in this
+            // module once std's intersperse becomes stable.
             let timestamps_str = timestamps
                 .iter()
-                .map(|&t| format!("{:.3}", t.as_gpst_seconds()))
-                .collect::<Vec<_>>()
-                .join(",");
+                .map(|&t| format!("{:.3}", t.as_gpst_seconds()));
+            let timestamps_str =
+                Itertools::intersperse(timestamps_str, ",".into()).collect::<String>();
             unsafe {
                 let key_name = CString::new(key_name).unwrap();
                 let value = CString::new(timestamps_str).unwrap();
