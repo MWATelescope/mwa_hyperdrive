@@ -217,7 +217,6 @@ mod tests {
 
     use approx::assert_abs_diff_eq;
     use marlu::{constants::MWA_LAT_RAD, AzEl};
-    use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Delays};
     use serial_test::*;
     use vec1::vec1;
 
@@ -225,6 +224,7 @@ mod tests {
     use crate::{
         read::read_source_list_file, ComponentType, FluxDensityType, Source, SourceComponent,
     };
+    use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Delays};
     use mwa_hyperdrive_common::vec1;
 
     #[test]

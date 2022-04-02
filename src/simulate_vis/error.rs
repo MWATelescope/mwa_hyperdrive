@@ -6,10 +6,10 @@
 Error type for all simulate-vis-related errors.
  */
 
+use marlu::{io::error::IOError as MarluIOError, UvfitsWriteError};
 use thiserror::Error;
 
-use birli::marlu::{io::error::IOError as MarluIOError, UvfitsWriteError};
-use mwa_hyperdrive_common::{mwalib, thiserror};
+use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum SimulateVisError {

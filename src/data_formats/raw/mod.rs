@@ -9,18 +9,8 @@ mod helpers;
 #[cfg(test)]
 mod tests;
 
-use birli::{
-    marlu::{
-        constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-        math::baseline_to_tiles,
-        Jones, RADec, VisSelection, XyzGeodetic,
-    },
-    mwalib::GeometricDelaysApplied,
-    PreprocessContext,
-};
 pub use error::*;
 use helpers::*;
-use mwa_hyperdrive_common::itertools::izip;
 
 use std::{
     collections::HashSet,
@@ -29,9 +19,16 @@ use std::{
     time::Duration,
 };
 
+use birli::PreprocessContext;
 use hifitime::Epoch;
+use itertools::izip;
 use log::{debug, info, trace, warn};
-use mwalib::{CorrelatorContext, MWAVersion, Pol};
+use marlu::{
+    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+    math::baseline_to_tiles,
+    Jones, RADec, VisSelection, XyzGeodetic,
+};
+use mwalib::{CorrelatorContext, GeometricDelaysApplied, MWAVersion, Pol};
 use ndarray::prelude::*;
 use vec1::Vec1;
 
@@ -43,7 +40,7 @@ use crate::{
     pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, mwalib, ndarray, vec1};
+use mwa_hyperdrive_common::{hifitime, itertools, log, mwalib, ndarray, vec1};
 
 /// Raw MWA data, i.e. gpubox files.
 pub(crate) struct RawDataReader {

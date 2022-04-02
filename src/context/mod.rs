@@ -4,9 +4,8 @@
 
 //! Metadata on an observation.
 
-use birli::marlu::LatLngHeight;
 use hifitime::Epoch;
-use marlu::{RADec, XyzGeodetic};
+use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 

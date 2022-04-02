@@ -12,22 +12,18 @@ pub(crate) mod code;
 pub use code::calibrate_timeblocks;
 use code::*;
 
-use birli::marlu::{
+use hifitime::{Duration, Unit};
+use itertools::{izip, Itertools};
+use log::{debug, info, log_enabled, trace, Level::Debug};
+use marlu::{
     math::cross_correlation_baseline_to_tiles, Jones, UvfitsWriter, VisContext, VisWritable,
 };
-use log::{debug, info, log_enabled, trace, Level::Debug};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
 use crate::data_formats::VisOutputType;
-use mwa_hyperdrive_common::{
-    hifitime::{Duration, Unit},
-    itertools::{izip, Itertools},
-    log, ndarray,
-    num_traits::Zero,
-    rayon,
-};
+use mwa_hyperdrive_common::{hifitime, itertools, log, marlu, ndarray, rayon};
 
 /// Do all the steps required for direction-independent calibration; read the
 /// input data, generate a model against it, and write the solutions out.
@@ -178,7 +174,7 @@ pub(crate) fn di_calibrate(
 
         // out data is [time, freq, baseline], in data is [time, baseline, freq]
         let out_shape = vis_ctx.sel_dims();
-        let mut out_data = Array3::from_elem(out_shape, Jones::zero());
+        let mut out_data = Array3::zeros(out_shape);
         let mut out_weights = Array3::from_elem(out_shape, -0.0);
 
         assert_eq!(vis_weights.dim(), vis_data.dim());

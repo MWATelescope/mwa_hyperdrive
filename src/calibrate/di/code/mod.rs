@@ -10,16 +10,16 @@ pub(crate) mod tests;
 
 use std::ops::Deref;
 
-use birli::marlu::{VisContext, VisWritable};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossbeam_utils::{atomic::AtomicCell, thread};
-use hifitime::Epoch;
+use hifitime::{Duration, Epoch, Unit};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use itertools::izip;
 use log::{debug, info, trace};
 use marlu::{
     c64,
     math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_cross_correlation_baselines},
-    Jones, UVW,
+    Jones, UvfitsWriter, VisContext, VisWritable, UVW,
 };
 use ndarray::{iter::AxisIterMut, prelude::*};
 use rayon::prelude::*;
@@ -32,17 +32,7 @@ use crate::{
     },
     model,
 };
-use mwa_hyperdrive_common::{
-    cfg_if,
-    hifitime::{self, Duration, Unit},
-    indicatif,
-    itertools::izip,
-    log, marlu,
-    marlu::UvfitsWriter,
-    ndarray,
-    num_traits::Zero,
-    rayon,
-};
+use mwa_hyperdrive_common::{cfg_if, hifitime, indicatif, itertools, log, marlu, ndarray, rayon};
 
 pub(crate) struct CalVis {
     /// Visibilites read from input data.
@@ -422,16 +412,16 @@ fn model_write(
 
         let weight_factor = vis_ctx.weight_factor() as f32;
 
-        // Receiver model information from the modelling thread.
+        // Receive model information from the modelling thread.
         for (vis_model_timestep, _, timestamp) in rx_model.iter() {
             let chunk_vis_ctx = VisContext {
-                start_timestamp: timestamp - int_time * 0.5_f64,
+                start_timestamp: timestamp - int_time / 2.0,
                 num_sel_timesteps: 1,
                 ..vis_ctx.clone()
             };
 
             let out_shape = chunk_vis_ctx.avg_dims();
-            let mut out_data = Array3::from_elem(out_shape, Jones::zero());
+            let mut out_data = Array3::zeros(out_shape);
             let mut out_weights = Array3::from_elem(out_shape, -0.0);
 
             assert_eq!(vis_model_timestep.len_of(Axis(0)), out_shape.2);

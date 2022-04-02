@@ -4,10 +4,11 @@
 
 //! Errors from building a `InputData` trait instance.
 
-use birli::{marlu::SelectionError, BirliError};
+use birli::BirliError;
+use marlu::SelectionError;
 use thiserror::Error;
 
-use mwa_hyperdrive_common::thiserror;
+use mwa_hyperdrive_common::{marlu, thiserror};
 
 #[derive(Error, Debug)]
 pub enum ReadInputDataError {

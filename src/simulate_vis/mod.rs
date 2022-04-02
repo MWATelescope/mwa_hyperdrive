@@ -5,10 +5,7 @@
 //! Generate sky-model visibilities from a sky-model source list.
 
 mod error;
-use birli::marlu::{LatLngHeight, UvfitsWriter, VisContext, VisWritable};
 pub use error::SimulateVisError;
-use mwa_hyperdrive_common::hifitime::{Duration, Unit};
-use mwa_hyperdrive_common::itertools::{izip, Itertools};
 
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -16,12 +13,14 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use hifitime::Epoch;
+use hifitime::{Duration, Unit};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use itertools::{izip, Itertools};
 use log::{debug, info};
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     precession::precess_time,
-    Jones, RADec, XyzGeodetic,
+    Jones, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
@@ -33,7 +32,9 @@ use crate::{
     model,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{cfg_if, clap, hifitime, indicatif, log, marlu, mwalib, ndarray};
+use mwa_hyperdrive_common::{
+    cfg_if, clap, hifitime, indicatif, itertools, log, marlu, mwalib, ndarray,
+};
 use mwa_hyperdrive_srclist::{
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     read::read_source_list_file,
@@ -292,7 +293,7 @@ impl SimVisParams {
             let mut timestamps = Vec::with_capacity(num_timesteps);
             let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3);
             for i in 0..num_timesteps {
-                timestamps.push(start + int_time * i as f64);
+                timestamps.push(start + int_time * i as i64);
             }
             timestamps
         };
@@ -508,7 +509,7 @@ pub fn simulate_vis(
     let out_shape = (1, out_shape.1, out_shape.2);
 
     // Construct our visibilities array. This will be re-used for each timestep
-    // before it written to disk. Simulated vis is [baseline][chan]
+    // before it's written to disk. Simulated vis is [baseline][chan]
     let mut vis_model_timestep: Array2<Jones<f32>> =
         Array2::from_elem((out_shape.2, out_shape.1), Jones::default());
     debug!(
@@ -595,7 +596,7 @@ pub fn simulate_vis(
         }
 
         let chunk_vis_ctx = VisContext {
-            start_timestamp: timestamp - params.int_time * 0.5_f64,
+            start_timestamp: timestamp - params.int_time / 2.0,
             num_sel_timesteps: 1,
             ..vis_ctx.clone()
         };

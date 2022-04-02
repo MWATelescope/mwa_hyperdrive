@@ -7,11 +7,13 @@
 mod cli_args;
 
 use approx::assert_abs_diff_eq;
-use mwa_hyperdrive_common::{clap::Parser, mwalib::*};
+use clap::Parser;
+use mwalib::*;
 use serial_test::serial;
 
 use crate::*;
 use mwa_hyperdrive::calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError};
+use mwa_hyperdrive_common::{clap, mwalib};
 
 /// If di-calibrate is working, it should not write anything to stderr.
 #[test]

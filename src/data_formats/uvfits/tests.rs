@@ -5,8 +5,9 @@
 use std::collections::HashSet;
 
 use approx::assert_abs_diff_eq;
-use birli::marlu::{LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable, XyzGeodetic};
-use marlu::c32;
+use hifitime::{Duration, Unit};
+use itertools::izip;
+use marlu::{c32, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable, XyzGeodetic};
 use ndarray::prelude::*;
 use tempfile::{tempdir, NamedTempFile};
 
@@ -18,11 +19,7 @@ use crate::{
     tests::reduced_obsids::get_reduced_1090008640_uvfits,
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{
-    hifitime::{Duration, Unit},
-    itertools::izip,
-    marlu, ndarray,
-};
+use mwa_hyperdrive_common::{hifitime, itertools, marlu, ndarray};
 
 // TODO(dev): move these to Marlu
 fn write_then_read_uvfits(autos: bool) {

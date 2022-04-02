@@ -6,13 +6,14 @@
 //! subcommand of hyperdrive.
 
 use approx::assert_abs_diff_eq;
+use clap::Parser;
 use marlu::{XyzGeodetic, ENH};
-use mwa_hyperdrive::simulate_vis::{simulate_vis, SimulateVisArgs};
 use mwalib::{fitsio_sys, *};
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive_common::{cfg_if, clap::Parser, marlu, mwalib};
+use mwa_hyperdrive::simulate_vis::{simulate_vis, SimulateVisArgs};
+use mwa_hyperdrive_common::{cfg_if, clap, marlu, mwalib};
 
 fn read_uvfits_stabxyz(
     fptr: &mut fitsio::FitsFile,
@@ -229,7 +230,7 @@ fn test_1090008640_simulate_vis() {
             assert_abs_diff_eq!(vis[0..29], [36.740982, -37.80591, 64.0, 36.464863, -38.02699, 64.0, 0.12835437, -0.07698456, 64.0, 0.13591558, -0.05194349, 64.0, 36.677994, -37.85488, 64.0, 36.411633, -38.08291, 64.0, 0.13199718, -0.075266466, 64.0, 0.1395122, -0.050255615, 64.0, 36.61154, -37.901764, 64.0, 36.355083, -38.136826]);
         }
     }
-    // Every third value (a weight) should be 1.
+    // Every third value (a weight) should be 64.
     for (i, vis) in vis.iter().enumerate() {
         if i % 3 == 2 {
             assert_abs_diff_eq!(*vis, 64.0);

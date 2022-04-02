@@ -1045,6 +1045,10 @@ impl CalibrateParams {
         (n * (n - 1)) / 2
     }
 
+    /// Get the sorted *cross-correlation* pairs of antennas for all unflagged
+    /// *cross-correlation* baselines. e.g. In a 128T observation, if tiles 0
+    /// and 1 are unflagged, then the first baseline is (0,1), and the first
+    /// element here is (0,1).
     pub(crate) fn get_ant_pairs(&self) -> Vec<(usize, usize)> {
         // TODO(Dev): support autos
         self.tile_to_unflagged_cross_baseline_map
