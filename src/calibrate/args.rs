@@ -99,7 +99,10 @@ pub struct CalibrateUserArgs {
     #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
     pub source_list_type: Option<String>,
 
-    #[clap(short, long, multiple_values(true), help = DI_CALIBRATE_OUTPUT_HELP.as_str(), help_heading = "OUTPUT FILES")]
+    #[clap(
+        short, long, multiple_values(true), help = DI_CALIBRATE_OUTPUT_HELP.as_str(),
+        help_heading = "OUTPUT FILES"
+    )]
     pub outputs: Option<Vec<PathBuf>>,
 
     #[clap(short, long, help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
@@ -203,7 +206,12 @@ pub struct CalibrateUserArgs {
     #[clap(long, help = MIN_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     pub min_thresh: Option<f64>,
 
-    #[clap(long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "CALIBRATION", number_of_values=3)]
+    #[clap(
+        long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "CALIBRATION",
+        number_of_values = 3,
+        allow_hyphen_values = true,
+        value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
+    )]
     pub array_position: Option<Vec<f64>>,
 
     #[cfg(feature = "cuda")]

@@ -158,8 +158,7 @@ pub(crate) struct CalibrateParams {
     /// layout.
     pub(crate) unflagged_tile_xyzs: Vec<XyzGeodetic>,
 
-    /// The Earth latitude, longitude and height of the array. This is populated by user
-    /// input or the input data.
+    /// The Earth position of the array. This is populated by user input or the input data.
     pub(crate) array_position: LatLngHeight,
 
     /// The maximum number of times to iterate when performing "MitchCal".
