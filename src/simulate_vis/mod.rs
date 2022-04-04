@@ -18,9 +18,8 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info};
 use marlu::{
-    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    precession::precess_time,
-    Jones, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable, XyzGeodetic,
+    precession::precess_time, Jones, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable,
+    XyzGeodetic,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
@@ -190,11 +189,8 @@ struct SimVisParams {
     /// Interface to beam code.
     beam: Box<dyn Beam>,
 
-    /// The Earth latitude location of the interferometer \[radians\].
-    array_latitude: f64,
-
-    /// The Earth longitude location of the interferometer \[radians\].
-    array_longitude: f64,
+    /// The Earth position of the interferometer.
+    array_position: LatLngHeight,
 }
 
 impl SimVisParams {
@@ -394,13 +390,12 @@ impl SimVisParams {
             )?
         };
 
-        let array_latitude = MWA_LAT_RAD;
-        let array_longitude = MWA_LONG_RAD;
+        let array_position = LatLngHeight::new_mwa();
         let precession_info = precess_time(
             phase_centre,
             *timestamps.first().unwrap(),
-            array_longitude,
-            array_latitude,
+            array_position.longitude_rad,
+            array_position.latitude_rad,
         );
 
         // Get the coarse channel information out of the metafits file, but only
@@ -449,8 +444,7 @@ impl SimVisParams {
             timestamps,
             int_time,
             beam,
-            array_latitude,
-            array_longitude,
+            array_position,
         })
     }
 }
@@ -532,16 +526,10 @@ pub fn simulate_vis(
         params.metafits.obs_id
     ));
 
-    let array_pos = LatLngHeight {
-        latitude_rad: params.array_latitude,
-        longitude_rad: params.array_longitude,
-        ..LatLngHeight::new_mwa()
-    };
-
     let mut output_writer = UvfitsWriter::from_marlu(
         &params.output_model_file,
         &vis_ctx,
-        Some(array_pos),
+        Some(params.array_position),
         params.phase_centre,
         obs_name,
     )?;
@@ -556,8 +544,8 @@ pub fn simulate_vis(
         &params.fine_chan_freqs,
         &params.flagged_tiles,
         params.phase_centre,
-        params.array_longitude,
-        params.array_latitude,
+        params.array_position.longitude_rad,
+        params.array_position.latitude_rad,
         // TODO: Allow the user to turn off precession.
         true,
     )?;

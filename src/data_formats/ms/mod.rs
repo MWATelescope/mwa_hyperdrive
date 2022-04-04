@@ -561,9 +561,8 @@ impl MS {
                 autocorrelations_present,
                 dipole_gains,
                 time_res,
-                // TODO
-                array_longitude_rad: None,
-                array_latitude_rad: None,
+                // XXX(Dev): no way to get array_pos from MS AFAIK
+                array_position: None,
                 coarse_chan_nums,
                 coarse_chan_freqs,
                 num_fine_chans_per_coarse_chan,

@@ -331,8 +331,8 @@ fn model_vis<'a>(
         &params.unflagged_fine_chan_freqs,
         &params.flagged_tiles,
         obs_context.phase_centre,
-        params.array_longitude,
-        params.array_latitude,
+        params.array_position.longitude_rad,
+        params.array_position.latitude_rad,
         // TODO: Allow the user to turn off precession.
         true,
     )?;
@@ -400,12 +400,11 @@ fn model_write(
         };
 
         let obs_name = obs_context.obsid.map(|o| format!("{}", o));
-        let array_pos = obs_context.get_array_pos()?;
 
         let mut model_writer = UvfitsWriter::from_marlu(
             &model_pb,
             &vis_ctx,
-            Some(array_pos),
+            Some(params.array_position),
             obs_context.phase_centre,
             obs_name,
         )?;

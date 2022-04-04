@@ -23,11 +23,7 @@ use birli::PreprocessContext;
 use hifitime::Epoch;
 use itertools::izip;
 use log::{debug, info, trace, warn};
-use marlu::{
-    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    math::baseline_to_tiles,
-    Jones, RADec, VisSelection, XyzGeodetic,
-};
+use marlu::{math::baseline_to_tiles, Jones, LatLngHeight, RADec, VisSelection, XyzGeodetic};
 use mwalib::{CorrelatorContext, GeometricDelaysApplied, MWAVersion, Pol};
 use ndarray::prelude::*;
 use vec1::Vec1;
@@ -373,8 +369,7 @@ impl RawDataReader {
             autocorrelations_present: true,
             dipole_gains: Some(dipole_gains),
             time_res,
-            array_longitude_rad: Some(MWA_LONG_RAD),
-            array_latitude_rad: Some(MWA_LAT_RAD),
+            array_position: Some(LatLngHeight::new_mwa()),
             coarse_chan_nums,
             coarse_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
@@ -540,7 +535,10 @@ impl RawDataReader {
         let metafits_context = &self.mwalib_context.metafits_context;
 
         let prep_ctx = PreprocessContext {
-            array_pos: self.obs_context.get_array_pos()?,
+            array_pos: self
+                .obs_context
+                .array_position
+                .unwrap_or_else(LatLngHeight::new_mwa),
             phase_centre: self.obs_context.phase_centre,
             correct_cable_lengths: !metafits_context.cable_delays_applied
                 && self.cable_length_correction,

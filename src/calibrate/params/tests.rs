@@ -4,18 +4,23 @@
 
 //! Tests against calibration parameters and converting arguments to parameters.
 
-use approx::assert_abs_diff_eq;
+use approx::{assert_abs_diff_eq, AbsDiffEq};
+use marlu::{
+    constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
+    LatLngHeight,
+};
 use serial_test::serial;
 
 use super::InvalidArgsError::{
-    BadDelays, CalFreqFactorNotInteger, CalFreqResNotMulitple, CalTimeFactorNotInteger,
-    CalTimeResNotMulitple, CalibrationOutputFile, InvalidDataInput, MultipleMeasurementSets,
-    MultipleMetafits, MultipleUvfits, NoInputData, ParsePfbFlavour,
+    BadArrayPosition, BadDelays, CalFreqFactorNotInteger, CalFreqResNotMulitple,
+    CalTimeFactorNotInteger, CalTimeResNotMulitple, CalibrationOutputFile, InvalidDataInput,
+    MultipleMeasurementSets, MultipleMetafits, MultipleUvfits, NoInputData, ParsePfbFlavour,
 };
 use crate::{
     data_formats::RawDataReader,
     tests::{full_obsids::*, reduced_obsids::*},
 };
+use mwa_hyperdrive_common::marlu;
 
 #[test]
 fn test_new_params_defaults() {
@@ -324,6 +329,57 @@ fn test_handle_invalid_output() {
 
     assert!(result.is_err());
     assert!(matches!(result, Err(CalibrationOutputFile { .. })));
+}
+
+#[derive(PartialEq, Debug)]
+pub(crate) struct TestLatLngHeight(LatLngHeight);
+
+impl From<LatLngHeight> for TestLatLngHeight {
+    fn from(other: LatLngHeight) -> Self {
+        Self(other)
+    }
+}
+
+#[cfg(test)]
+impl AbsDiffEq for TestLatLngHeight {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> f64 {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: f64) -> bool {
+        f64::abs_diff_eq(&self.0.longitude_rad, &other.0.longitude_rad, epsilon)
+            && f64::abs_diff_eq(&self.0.latitude_rad, &other.0.latitude_rad, epsilon)
+            && f64::abs_diff_eq(&self.0.height_metres, &other.0.height_metres, epsilon)
+    }
+}
+
+#[test]
+fn test_handle_array_pos() {
+    let mut args = get_reduced_1090008640(true);
+    let expected = vec![MWA_LONG_DEG + 1.0, MWA_LAT_DEG + 1.0, MWA_HEIGHT_M + 1.0];
+    args.array_position = Some(expected.clone());
+    let result = args.into_params().unwrap();
+
+    assert_abs_diff_eq!(
+        TestLatLngHeight::from(result.array_position),
+        TestLatLngHeight::from(LatLngHeight {
+            longitude_rad: expected[0].to_radians(),
+            latitude_rad: expected[1].to_radians(),
+            height_metres: expected[2]
+        })
+    );
+}
+
+#[test]
+fn test_handle_bad_array_pos() {
+    let mut args = get_reduced_1090008640(true);
+    let expected = vec![MWA_LONG_DEG + 1.0, MWA_LAT_DEG + 1.0];
+    args.array_position = Some(expected);
+    let result = args.into_params();
+    assert!(result.is_err());
+    assert!(matches!(result.err().unwrap(), BadArrayPosition { .. }))
 }
 
 #[test]

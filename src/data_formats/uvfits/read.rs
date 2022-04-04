@@ -359,9 +359,8 @@ impl UvfitsReader {
                 autocorrelations_present: metadata.autocorrelations_present,
                 dipole_gains,
                 time_res,
-                // TODO: Where does this live in a uvfits?
-                array_longitude_rad: None,
-                array_latitude_rad: None,
+                // XXX(Dev): Can this be obtained from the ARRAY{X,Y,Z} keys? (geocentric, wgs84)
+                array_position: None,
                 coarse_chan_nums,
                 coarse_chan_freqs,
                 num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
