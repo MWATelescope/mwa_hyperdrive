@@ -132,9 +132,9 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
 name = "birli"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f810cf6468eb34f2acc7ba5c9d7dd66fa3615404c3a0b94541f97774ffbb6b"
+checksum = "8a34a21ac0513c275dce32f8ce9954f9987979c907ff8b74f30ea531454b5e15"
 dependencies = [
  "built",
  "byteorder",
@@ -148,7 +148,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu 0.6.0",
+ "marlu 0.6.1",
  "prettytable-rs",
  "regex",
  "thiserror",
@@ -1295,8 +1295,9 @@ dependencies = [
 
 [[package]]
 name = "marlu"
-version = "0.6.0"
-source = "git+https://github.com/MWATelescope/Marlu.git#05e2685ab65f9715043735185515a8e1b25d0098"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a64ec6379ed12090bd240dfc59aede2a6f1cb2b9777dff220f654e600918afa"
 dependencies = [
  "approx",
  "cfg-if",
@@ -1443,7 +1444,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu 0.6.0",
+ "marlu 0.6.1",
  "serde_json",
  "thiserror",
  "toml",
