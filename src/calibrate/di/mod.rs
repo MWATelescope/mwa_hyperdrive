@@ -215,8 +215,6 @@ pub(crate) fn di_calibrate(
             }
         }
 
-        let array_pos = obs_context.array_position.unwrap_or(params.array_position);
-
         let obs_name = obs_context.obsid.map(|o| format!("MWA obsid {}", o));
 
         for (vis_type, file) in &params.output_vis_filenames {
@@ -228,7 +226,7 @@ pub(crate) fn di_calibrate(
                     let mut writer = UvfitsWriter::from_marlu(
                         &file,
                         &vis_ctx,
-                        Some(array_pos),
+                        Some(params.array_position),
                         obs_context.phase_centre,
                         obs_name.clone(),
                     )?;
