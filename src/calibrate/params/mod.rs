@@ -28,12 +28,11 @@ use std::str::FromStr;
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use marlu::{
-    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::{
         precession::{precess_time, PrecessionInfo},
         xyz::xyzs_to_cross_uvws_parallel,
     },
-    Jones, XyzGeodetic,
+    Jones, LatLngHeight, XyzGeodetic,
 };
 use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
@@ -159,13 +158,9 @@ pub(crate) struct CalibrateParams {
     /// layout.
     pub(crate) unflagged_tile_xyzs: Vec<XyzGeodetic>,
 
-    /// The Earth longitude of the array \[radians\]. This is populated by user
+    /// The Earth latitude, longitude and height of the array. This is populated by user
     /// input or the input data.
-    pub(crate) array_longitude: f64,
-
-    /// The Earth latitude of the array \[radians\]. This is populated by user
-    /// input or the input data.
-    pub(crate) array_latitude: f64,
+    pub(crate) array_position: LatLngHeight,
 
     /// The maximum number of times to iterate when performing "MitchCal".
     pub(crate) max_iterations: usize,
@@ -242,8 +237,7 @@ impl CalibrateParams {
             max_iterations,
             stop_thresh,
             min_thresh,
-            array_longitude_deg,
-            array_latitude_deg,
+            array_position,
             #[cfg(feature = "cuda")]
             cpu,
             tile_flags,
@@ -527,18 +521,18 @@ impl CalibrateParams {
             }
         };
 
-        let array_longitude = match (array_longitude_deg, obs_context.array_longitude_rad) {
-            (Some(array_longitude_deg), _) => array_longitude_deg.to_radians(),
-            (None, Some(input_data_long)) => input_data_long,
-            (None, None) => {
-                warn!("Assuming that the input array is at the MWA Earth coordinates");
-                MWA_LONG_RAD
+        let array_position = match array_position {
+            None => LatLngHeight::new_mwa(),
+            Some(pos) => {
+                if pos.len() != 3 {
+                    return Err(InvalidArgsError::BadArrayPosition { pos });
+                }
+                LatLngHeight {
+                    longitude_rad: pos[0].to_radians(),
+                    latitude_rad: pos[1].to_radians(),
+                    height_metres: pos[2],
+                }
             }
-        };
-        let array_latitude = match (array_latitude_deg, obs_context.array_latitude_rad) {
-            (Some(array_latitude_deg), _) => array_latitude_deg.to_radians(),
-            (None, Some(input_data_lat)) => input_data_lat,
-            (None, None) => MWA_LAT_RAD,
         };
 
         // The length of the tile XYZ collection is the total number of tiles in
@@ -774,8 +768,8 @@ impl CalibrateParams {
         let precession_info = precess_time(
             obs_context.phase_centre,
             obs_context.timestamps[*timesteps_to_use.first()],
-            array_longitude,
-            array_latitude,
+            array_position.longitude_rad,
+            array_position.latitude_rad,
         );
         veto_sources(
             &mut source_list,
@@ -986,8 +980,7 @@ impl CalibrateParams {
             using_autos,
             unflagged_tile_names,
             unflagged_tile_xyzs,
-            array_longitude,
-            array_latitude,
+            array_position,
             max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),
             stop_threshold,
             min_threshold,
@@ -1087,11 +1080,7 @@ impl<'a> ExtraInfo<'a> {
         let params = self.params;
         let obs_context = params.input_data.get_obs_context();
 
-        info!(
-            "Array longitude, latitude:     ({:.4}°, {:.4}°)",
-            params.array_longitude.to_degrees(),
-            params.array_latitude.to_degrees()
-        );
+        info!("Array position:     ({})", params.array_position);
         info!(
             "Array latitude (J2000):                    {:.4}°",
             self.precession_info.array_latitude_j2000.to_degrees()

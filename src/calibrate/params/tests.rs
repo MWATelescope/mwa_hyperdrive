@@ -5,17 +5,19 @@
 //! Tests against calibration parameters and converting arguments to parameters.
 
 use approx::assert_abs_diff_eq;
+use marlu::constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG};
 use serial_test::serial;
 
 use super::InvalidArgsError::{
-    BadDelays, CalFreqFactorNotInteger, CalFreqResNotMulitple, CalTimeFactorNotInteger,
-    CalTimeResNotMulitple, CalibrationOutputFile, InvalidDataInput, MultipleMeasurementSets,
-    MultipleMetafits, MultipleUvfits, NoInputData, ParsePfbFlavour,
+    BadArrayPosition, BadDelays, CalFreqFactorNotInteger, CalFreqResNotMulitple,
+    CalTimeFactorNotInteger, CalTimeResNotMulitple, CalibrationOutputFile, InvalidDataInput,
+    MultipleMeasurementSets, MultipleMetafits, MultipleUvfits, NoInputData, ParsePfbFlavour,
 };
 use crate::{
     data_formats::RawDataReader,
     tests::{full_obsids::*, reduced_obsids::*},
 };
+use mwa_hyperdrive_common::marlu;
 
 #[test]
 fn test_new_params_defaults() {
@@ -324,6 +326,37 @@ fn test_handle_invalid_output() {
 
     assert!(result.is_err());
     assert!(matches!(result, Err(CalibrationOutputFile { .. })));
+}
+
+#[test]
+fn test_handle_array_pos() {
+    let mut args = get_reduced_1090008640(true);
+    let expected = vec![MWA_LONG_DEG + 1.0, MWA_LAT_DEG + 1.0, MWA_HEIGHT_M + 1.0];
+    args.array_position = Some(expected.clone());
+    let result = args.into_params().unwrap();
+
+    // TODO(dev): derive Eq for LatLngHeight
+    assert_abs_diff_eq!(
+        result.array_position.longitude_rad.to_degrees(),
+        expected[0],
+        epsilon = 1e-12
+    );
+    assert_abs_diff_eq!(
+        result.array_position.latitude_rad.to_degrees(),
+        expected[1],
+        epsilon = 1e-12
+    );
+    assert_abs_diff_eq!(result.array_position.height_metres, expected[2]);
+}
+
+#[test]
+fn test_handle_bad_array_pos() {
+    let mut args = get_reduced_1090008640(true);
+    let expected = vec![MWA_LONG_DEG + 1.0, MWA_LAT_DEG + 1.0];
+    args.array_position = Some(expected);
+    let result = args.into_params();
+    assert!(result.is_err());
+    assert!(matches!(result.err().unwrap(), BadArrayPosition { .. }))
 }
 
 #[test]

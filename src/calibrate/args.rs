@@ -76,11 +76,8 @@ lazy_static::lazy_static! {
     static ref MIN_THRESHOLD_HELP: String =
         format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Even when this threshold is exceeded, iteration will continue until max iterations or the stop threshold is reached. Default: {:e}", DEFAULT_MIN_THRESHOLD);
 
-    static ref ARRAY_LONGITUDE_HELP: String =
-        format!("The Earth longitude of the instrumental array [degrees]. Default (MWA): {}°", MWA_LONG_RAD.to_degrees());
-
-    static ref ARRAY_LATITUDE_HELP: String =
-        format!("The Earth latitude of the instrumental array [degrees]. Default (MWA): {}°", MWA_LAT_RAD.to_degrees());
+    static ref ARRAY_POSITION_HELP: String =
+        format!("The Earth longitude, latitude, and height of the instrumental array [degrees, degrees, meters]. Default (MWA): ({}°, {}°, {}m", MWA_LONG_DEG, MWA_LAT_DEG, MWA_HEIGHT_M);
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -206,11 +203,8 @@ pub struct CalibrateUserArgs {
     #[clap(long, help = MIN_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     pub min_thresh: Option<f64>,
 
-    #[clap(long = "array_longitude", help = ARRAY_LONGITUDE_HELP.as_str(), help_heading = "CALIBRATION")]
-    pub array_longitude_deg: Option<f64>,
-
-    #[clap(long = "array_latitude", help = ARRAY_LATITUDE_HELP.as_str(), help_heading = "CALIBRATION")]
-    pub array_latitude_deg: Option<f64>,
+    #[clap(long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "CALIBRATION", number_of_values=3)]
+    pub array_position: Option<Vec<f64>>,
 
     #[cfg(feature = "cuda")]
     /// Use the CPU for visibility generation. This is deliberately made
@@ -366,8 +360,7 @@ impl CalibrateUserArgs {
                 max_iterations,
                 stop_thresh,
                 min_thresh,
-                array_longitude_deg,
-                array_latitude_deg,
+                array_position,
                 #[cfg(feature = "cuda")]
                 cpu,
                 tile_flags,
@@ -410,8 +403,7 @@ impl CalibrateUserArgs {
                 max_iterations: cli_args.max_iterations.or(max_iterations),
                 stop_thresh: cli_args.stop_thresh.or(stop_thresh),
                 min_thresh: cli_args.min_thresh.or(min_thresh),
-                array_longitude_deg: cli_args.array_longitude_deg.or(array_longitude_deg),
-                array_latitude_deg: cli_args.array_latitude_deg.or(array_latitude_deg),
+                array_position: cli_args.array_position.or(array_position),
                 #[cfg(feature = "cuda")]
                 cpu: cli_args.cpu || cpu,
                 tile_flags: cli_args.tile_flags.or(tile_flags),

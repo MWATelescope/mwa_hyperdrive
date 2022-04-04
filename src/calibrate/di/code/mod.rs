@@ -331,8 +331,8 @@ fn model_vis<'a>(
         &params.unflagged_fine_chan_freqs,
         &params.flagged_tiles,
         obs_context.phase_centre,
-        params.array_longitude,
-        params.array_latitude,
+        params.array_position.longitude_rad,
+        params.array_position.latitude_rad,
         // TODO: Allow the user to turn off precession.
         true,
     )?;
