@@ -400,7 +400,7 @@ fn model_write(
         };
 
         let obs_name = obs_context.obsid.map(|o| format!("{}", o));
-        let array_pos = obs_context.get_array_pos()?;
+        let array_pos = obs_context.array_position.unwrap_or(params.array_position);
 
         let mut model_writer = UvfitsWriter::from_marlu(
             &model_pb,

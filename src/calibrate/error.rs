@@ -61,7 +61,4 @@ pub enum CalibrateError {
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
-
-    #[error("Observation Context Error:")]
-    ObsContext(#[from] crate::context::ObsContextError),
 }

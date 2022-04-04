@@ -40,7 +40,4 @@ pub enum ReadInputDataError {
 
     #[error(transparent)]
     SelectionError(#[from] SelectionError),
-
-    #[error(transparent)]
-    ObsContext(#[from] crate::context::ObsContextError),
 }

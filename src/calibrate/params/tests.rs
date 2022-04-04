@@ -4,8 +4,11 @@
 
 //! Tests against calibration parameters and converting arguments to parameters.
 
-use approx::assert_abs_diff_eq;
-use marlu::constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG};
+use approx::{assert_abs_diff_eq, AbsDiffEq};
+use marlu::{
+    constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
+    LatLngHeight,
+};
 use serial_test::serial;
 
 use super::InvalidArgsError::{
@@ -328,6 +331,30 @@ fn test_handle_invalid_output() {
     assert!(matches!(result, Err(CalibrationOutputFile { .. })));
 }
 
+#[derive(PartialEq, Debug)]
+pub(crate) struct TestLatLngHeight(LatLngHeight);
+
+impl From<LatLngHeight> for TestLatLngHeight {
+    fn from(other: LatLngHeight) -> Self {
+        Self(other)
+    }
+}
+
+#[cfg(test)]
+impl AbsDiffEq for TestLatLngHeight {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> f64 {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: f64) -> bool {
+        f64::abs_diff_eq(&self.0.longitude_rad, &other.0.longitude_rad, epsilon)
+            && f64::abs_diff_eq(&self.0.latitude_rad, &other.0.latitude_rad, epsilon)
+            && f64::abs_diff_eq(&self.0.height_metres, &other.0.height_metres, epsilon)
+    }
+}
+
 #[test]
 fn test_handle_array_pos() {
     let mut args = get_reduced_1090008640(true);
@@ -335,18 +362,14 @@ fn test_handle_array_pos() {
     args.array_position = Some(expected.clone());
     let result = args.into_params().unwrap();
 
-    // TODO(dev): derive Eq for LatLngHeight
     assert_abs_diff_eq!(
-        result.array_position.longitude_rad.to_degrees(),
-        expected[0],
-        epsilon = 1e-12
+        TestLatLngHeight::from(result.array_position),
+        TestLatLngHeight::from(LatLngHeight {
+            longitude_rad: expected[0].to_radians(),
+            latitude_rad: expected[1].to_radians(),
+            height_metres: expected[2]
+        })
     );
-    assert_abs_diff_eq!(
-        result.array_position.latitude_rad.to_degrees(),
-        expected[1],
-        epsilon = 1e-12
-    );
-    assert_abs_diff_eq!(result.array_position.height_metres, expected[2]);
 }
 
 #[test]

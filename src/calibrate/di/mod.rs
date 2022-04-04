@@ -215,7 +215,8 @@ pub(crate) fn di_calibrate(
             }
         }
 
-        let array_pos = obs_context.get_array_pos()?;
+        let array_pos = obs_context.array_position.unwrap_or(params.array_position);
+
         let obs_name = obs_context.obsid.map(|o| format!("MWA obsid {}", o));
 
         for (vis_type, file) in &params.output_vis_filenames {
