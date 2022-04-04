@@ -281,6 +281,46 @@ pub(crate) fn get_cal_vis(
         ),
     }
 
+    debug!("Multiplying visibilities by weights");
+
+    // Multiply the visibilities by the weights (and baseline weights based on
+    // UVW cuts). If a weight is negative, it means the corresponding visibility
+    // should be flagged, so that visibility is set to 0; this means it does not
+    // affect calibration. Not iterating over weights during calibration makes
+    // makes calibration run significantly faster.
+    vis_data
+        .outer_iter_mut()
+        .into_par_iter()
+        .zip(vis_model.outer_iter_mut())
+        .zip(vis_weights.outer_iter())
+        .for_each(|((mut vis_data, mut vis_model), vis_weights)| {
+            vis_data
+                .outer_iter_mut()
+                .zip(vis_model.outer_iter_mut())
+                .zip(vis_weights.outer_iter())
+                .zip(params.baseline_weights.iter())
+                .for_each(
+                    |(((mut vis_data, mut vis_model), vis_weights), &baseline_weight)| {
+                        vis_data
+                            .iter_mut()
+                            .zip(vis_model.iter_mut())
+                            .zip(vis_weights.iter())
+                            .for_each(|((vis_data, vis_model), &vis_weight)| {
+                                let weight = f64::from(vis_weight) * baseline_weight;
+                                if weight <= 0.0 {
+                                    *vis_data = Jones::default();
+                                    *vis_model = Jones::default();
+                                } else {
+                                    *vis_data =
+                                        Jones::<f32>::from(Jones::<f64>::from(*vis_data) * weight);
+                                    *vis_model =
+                                        Jones::<f32>::from(Jones::<f64>::from(*vis_model) * weight);
+                                }
+                            });
+                    },
+                );
+        });
+
     info!("Finished reading input data and sky modelling");
 
     Ok(CalVis {
@@ -634,7 +674,6 @@ impl<'a> IncompleteSolutions<'a> {
 #[allow(clippy::too_many_arguments)]
 pub fn calibrate_timeblocks<'a>(
     vis_data: ArrayView3<Jones<f32>>,
-    vis_weights: ArrayView3<f32>,
     vis_model: ArrayView3<Jones<f32>>,
     timeblocks: &'a [Timeblock],
     chanblocks: &'a [Chanblock],
@@ -645,21 +684,6 @@ pub fn calibrate_timeblocks<'a>(
     draw_progress_bar: bool,
     print_convergence_messages: bool,
 ) -> (IncompleteSolutions<'a>, Array2<CalibrationResult>) {
-    // Multiply the baseline weights against the visibility weights. Then, only
-    // the visibility weights need to be multiplied against the data and model
-    // visibilities.
-    assert_eq!(vis_weights.len_of(Axis(1)), baseline_weights.len());
-    let mut vis_weights = vis_weights.to_owned();
-    vis_weights
-        .axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .zip(baseline_weights)
-        .for_each(|(mut vis_weights, &baseline_weight)| {
-            vis_weights.iter_mut().for_each(|vis_weight| {
-                *vis_weight = (*vis_weight as f64 * baseline_weight) as f32;
-            })
-        });
-
     let num_unflagged_tiles = num_tiles_from_num_cross_correlation_baselines(vis_data.dim().1);
     let num_timeblocks = timeblocks.len();
     let num_chanblocks = chanblocks.len();
@@ -675,7 +699,6 @@ pub fn calibrate_timeblocks<'a>(
         );
         let cal_results = calibrate_timeblock(
             vis_data.view(),
-            vis_weights.view(),
             vis_model.view(),
             di_jones.view_mut(),
             timeblocks.first().unwrap(),
@@ -727,7 +750,6 @@ pub fn calibrate_timeblocks<'a>(
         );
         let cal_results = calibrate_timeblock(
             vis_data.view(),
-            vis_weights.view(),
             vis_model.view(),
             di_jones.view_mut(),
             &timeblock,
@@ -763,7 +785,6 @@ pub fn calibrate_timeblocks<'a>(
             );
             let mut cal_results = calibrate_timeblock(
                 vis_data.view(),
-                vis_weights.view(),
                 vis_model.view(),
                 di_jones.view_mut(),
                 timeblock,
@@ -831,7 +852,6 @@ fn make_calibration_progress_bar(
 #[allow(clippy::too_many_arguments)]
 fn calibrate_timeblock(
     vis_data: ArrayView3<Jones<f32>>,
-    vis_weights: ArrayView3<f32>,
     vis_model: ArrayView3<Jones<f32>>,
     mut di_jones: ArrayViewMut3<Jones<f64>>,
     timeblock: &Timeblock,
@@ -863,7 +883,6 @@ fn calibrate_timeblock(
             ];
             let mut cal_result = calibrate(
                 vis_data.slice(range),
-                vis_weights.slice(range),
                 vis_model.slice(range),
                 di_jones,
                 max_iterations,
@@ -990,7 +1009,6 @@ fn calibrate_timeblock(
                         let range = s![timeblock.range.clone(), .., i_chanblock..i_chanblock + 1];
                         let mut new_cal_result = calibrate(
                             vis_data.slice(range),
-                            vis_weights.slice(range),
                             vis_model.slice(range),
                             di_jones,
                             max_iterations,
@@ -1068,7 +1086,6 @@ pub struct CalibrationResult {
 /// parallel code is inside this function.
 pub(super) fn calibrate(
     data: ArrayView3<Jones<f32>>,
-    weights: ArrayView3<f32>,
     model: ArrayView3<Jones<f32>>,
     mut di_jones: ArrayViewMut1<Jones<f64>>,
     max_iterations: usize,
@@ -1096,14 +1113,7 @@ pub(super) fn calibrate(
         top.fill(Jones::default());
         bot.fill(Jones::default());
 
-        calibration_loop(
-            data,
-            weights,
-            model,
-            di_jones.view(),
-            top.view_mut(),
-            bot.view_mut(),
-        );
+        calibration_loop(data, model, di_jones.view(), top.view_mut(), bot.view_mut());
 
         // Obtain the new DI Jones matrices from "top" and "bot".
         // Tile/antenna axis.
@@ -1239,7 +1249,6 @@ pub(super) fn calibrate(
 /// "MitchCal".
 fn calibration_loop(
     data: ArrayView3<Jones<f32>>,
-    weights: ArrayView3<f32>,
     model: ArrayView3<Jones<f32>>,
     di_jones: ArrayView1<Jones<f64>>,
     mut top: ArrayViewMut1<Jones<f64>>,
@@ -1249,58 +1258,48 @@ fn calibration_loop(
 
     // Time axis.
     data.outer_iter()
-        .zip(weights.outer_iter())
         .zip(model.outer_iter())
-        .for_each(|((data, weights), model)| {
+        .for_each(|(data, model)| {
             // Unflagged baseline axis.
             data.outer_iter()
-                .zip(weights.outer_iter())
                 .zip(model.outer_iter())
                 .enumerate()
-                .for_each(|(i_baseline, ((data, weights), model))| {
+                .for_each(|(i_baseline, (data, model))| {
                     let (tile1, tile2) = cross_correlation_baseline_to_tiles(num_tiles, i_baseline);
 
                     // Unflagged frequency chan axis.
-                    data.iter()
-                        .zip(weights)
-                        .zip(model)
-                        // Don't do anything if the weight is flagged.
-                        .filter(|((_, weight), _)| **weight > 0.0)
-                        .for_each(|((j_data, weight), j_model)| {
-                            // Copy and promote the data and model Jones
-                            // matrices.
-                            let weight = *weight as f64;
-                            let j_data: Jones<f64> = Jones::from(j_data) * weight;
-                            let j_model: Jones<f64> = Jones::from(j_model) * weight;
+                    data.iter().zip(model).for_each(|(j_data, j_model)| {
+                        let j_data = Jones::<f64>::from(j_data);
+                        let j_model = Jones::<f64>::from(j_model);
 
-                            // Suppress boundary checks for maximum performance!
-                            unsafe {
-                                let j_t1 = di_jones.uget(tile1);
-                                let j_t2 = di_jones.uget(tile2);
+                        // Suppress boundary checks for maximum performance!
+                        unsafe {
+                            let j_t1 = di_jones.uget(tile1);
+                            let j_t2 = di_jones.uget(tile2);
 
-                                let top_t1 = top.uget_mut(tile1);
-                                let bot_t1 = bot.uget_mut(tile1);
+                            let top_t1 = top.uget_mut(tile1);
+                            let bot_t1 = bot.uget_mut(tile1);
 
-                                // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
-                                // J M^H
-                                let z = *j_t2 * j_model.h();
-                                // D (J M^H)
-                                *top_t1 += j_data * z;
-                                // (J M^H)^H (J M^H)
-                                *bot_t1 += z.h() * z;
+                            // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
+                            // J M^H
+                            let z = *j_t2 * j_model.h();
+                            // D (J M^H)
+                            *top_t1 += j_data * z;
+                            // (J M^H)^H (J M^H)
+                            *bot_t1 += z.h() * z;
 
-                                let top_t2 = top.uget_mut(tile2);
-                                let bot_t2 = bot.uget_mut(tile2);
+                            let top_t2 = top.uget_mut(tile2);
+                            let bot_t2 = bot.uget_mut(tile2);
 
-                                // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
-                                // J (M^H)^H
-                                let z = *j_t1 * j_model;
-                                // D^H (J M^H)^H
-                                *top_t2 += j_data.h() * z;
-                                // (J M^H) (J M^H)
-                                *bot_t2 += z.h() * z;
-                            }
-                        });
+                            // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
+                            // J (M^H)^H
+                            let z = *j_t1 * j_model;
+                            // D^H (J M^H)^H
+                            *top_t2 += j_data.h() * z;
+                            // (J M^H) (J M^H)
+                            *bot_t2 += z.h() * z;
+                        }
+                    });
                 })
         });
 }

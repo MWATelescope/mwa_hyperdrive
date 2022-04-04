@@ -33,7 +33,6 @@ fn test_calibrate_trivial() {
 
     let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
-    let vis_weights: Array3<f32> = Array3::ones(vis_shape);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     let mut di_jones = Array3::from_elem(
         (num_timeblocks, num_tiles, num_chanblocks),
@@ -56,11 +55,9 @@ fn test_calibrate_trivial() {
                 chanblock_index..chanblock_index + 1
             ];
             let vis_data_slice = vis_data.slice(range);
-            let vis_weight_slice = vis_weights.slice(range);
             let vis_model_slice = vis_model.slice(range);
             let result = calibrate(
                 vis_data_slice,
-                vis_weight_slice,
                 vis_model_slice,
                 di_jones_rev.view_mut(),
                 20,
@@ -112,7 +109,7 @@ fn test_calibrate_trivial_with_flags() {
     let bad_vis = vis_data.get_mut((0, 0, 0)).unwrap();
     *bad_vis = Jones::identity() * 9000.0;
     let mut vis_weights: Array3<f32> = Array3::ones(vis_shape);
-    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    let mut vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     let mut di_jones = Array3::from_elem(
         (num_timeblocks, num_tiles, num_chanblocks),
         Jones::<f64>::identity(),
@@ -134,11 +131,9 @@ fn test_calibrate_trivial_with_flags() {
                 chanblock_index..chanblock_index + 1
             ];
             let vis_data_slice = vis_data.slice(range);
-            let vis_weight_slice = vis_weights.slice(range);
             let vis_model_slice = vis_model.slice(range);
             let result = calibrate(
                 vis_data_slice,
-                vis_weight_slice,
                 vis_model_slice,
                 di_jones_rev.view_mut(),
                 20,
@@ -165,9 +160,15 @@ fn test_calibrate_trivial_with_flags() {
         }
     }
 
-    // Fix the weight and repeat.
+    // Fix the weight and repeat. We have to set the corresponding visibilities
+    // to 0 (this is normally done before the visibilities are returned via
+    // `CalVis`).
     let bad_weight = vis_weights.get_mut((0, 0, 0)).unwrap();
     *bad_weight = -1.0;
+    let bad_data = vis_data.get_mut((0, 0, 0)).unwrap();
+    *bad_data = Jones::default();
+    let bad_model = vis_model.get_mut((0, 0, 0)).unwrap();
+    *bad_model = Jones::default();
     di_jones.fill(Jones::identity());
     for timeblock in 0..num_timeblocks {
         let time_range_start = timeblock * timeblock_length;
@@ -185,11 +186,9 @@ fn test_calibrate_trivial_with_flags() {
                 chanblock_index..chanblock_index + 1
             ];
             let vis_data_slice = vis_data.slice(range);
-            let vis_weight_slice = vis_weights.slice(range);
             let vis_model_slice = vis_model.slice(range);
             let result = calibrate(
                 vis_data_slice,
-                vis_weight_slice,
                 vis_model_slice,
                 di_jones_rev.view_mut(),
                 20,
@@ -592,7 +591,6 @@ fn incomplete_to_complete_flags_complex() {
 pub(crate) fn test_1090008640_quality(params: CalibrateParams, cal_vis: CalVis) {
     let (_, cal_results) = calibrate_timeblocks(
         cal_vis.vis_data.view(),
-        cal_vis.vis_weights.view(),
         cal_vis.vis_model.view(),
         &params.timeblocks,
         &params.fences.first().chanblocks,

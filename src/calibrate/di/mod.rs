@@ -40,6 +40,7 @@ pub(crate) fn di_calibrate(
         vis_weights,
         vis_model,
     } = get_cal_vis(params, !params.no_progress_bars)?;
+    assert_eq!(vis_weights.len_of(Axis(1)), params.baseline_weights.len());
 
     let obs_context = params.input_data.get_obs_context();
 
@@ -57,14 +58,13 @@ pub(crate) fn di_calibrate(
             shape.1,
             shape.2,
             shape.0 * shape.1 * shape.2 * std::mem::size_of::<Jones<f64>>()
-        // 1024 * 1024 == 1 MiB.
-        / 1024 / 1024
+            // 1024 * 1024 == 1 MiB.
+            / 1024 / 1024
         );
     }
 
     let (sols, _) = calibrate_timeblocks(
         vis_data.view(),
-        vis_weights.view(),
         vis_model.view(),
         &params.timeblocks,
         &params.fences.first().chanblocks,
@@ -140,6 +140,28 @@ pub(crate) fn di_calibrate(
 
     // Write out calibrated visibilities.
     if !params.output_vis_filenames.is_empty() {
+        debug!("Dividing visibilities by weights");
+        // Divide the visibilities by the weights (undoing the multiplication earlier).
+        vis_data
+            .outer_iter_mut()
+            .into_par_iter()
+            .zip(vis_weights.outer_iter())
+            .for_each(|(mut vis_data, vis_weights)| {
+                vis_data
+                    .outer_iter_mut()
+                    .zip(vis_weights.outer_iter())
+                    .zip(params.baseline_weights.iter())
+                    .for_each(|((mut vis_data, vis_weights), &baseline_weight)| {
+                        vis_data.iter_mut().zip(vis_weights.iter()).for_each(
+                            |(vis_data, &vis_weight)| {
+                                let weight = f64::from(vis_weight) * baseline_weight;
+                                *vis_data =
+                                    Jones::<f32>::from(Jones::<f64>::from(*vis_data) / weight);
+                            },
+                        );
+                    });
+            });
+
         info!("Writing visibilities...");
 
         // TODO(dev): support and test autos
