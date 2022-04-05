@@ -7,30 +7,29 @@
 mod cli_args;
 
 use approx::assert_abs_diff_eq;
+use clap::Parser;
+use mwalib::*;
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive::calibrate::solutions::CalibrationSolutions;
+use mwa_hyperdrive::calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError};
+use mwa_hyperdrive_common::{clap, mwalib};
 
 /// If di-calibrate is working, it should not write anything to stderr.
 #[test]
 fn test_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let mut sols = tmp_dir;
-    sols.push("sols.fits");
+    let sols = tmp_dir.join("sols.fits");
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
 
+    #[rustfmt::skip]
     let cmd = hyperdrive()
         .args(&[
             "di-calibrate",
-            "--data",
-            &data[0],
-            &data[1],
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--outputs",
-            &format!("{}", sols.display()),
+            "--data", &data[0], &data[1],
+            "--source-list", &args.source_list.unwrap(),
+            "--outputs", &format!("{}", sols.display()),
         ])
         .ok();
     assert!(cmd.is_ok(), "di-calibrate failed on simple test data!");
@@ -40,55 +39,56 @@ fn test_no_stderr() {
 
 #[test]
 #[serial]
-fn test_1090008640_di_calibrate_works() {
+fn test_1090008640_di_calibrate_writes_solutions() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
-    let mut sols = tmp_dir.clone();
-    sols.push("sols.fits");
-    let mut cal_model = tmp_dir;
-    cal_model.push("hyp_model.uvfits");
+    let metafits = &data[0];
+    let gpufits = &data[1];
+    let sols = tmp_dir.join("sols.fits");
+    let cal_model = tmp_dir.join("hyp_model.uvfits");
 
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data",
-            &data[0],
-            &data[1],
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--outputs",
-            &format!("{}", sols.display()),
-            "--model-filename",
-            &format!("{}", cal_model.display()),
-        ])
-        .ok();
-    let cmd_error = cmd.is_err();
-    let (stdout, stderr) = get_cmd_output(cmd);
-    assert!(!cmd_error, "stdout: {}\nstderr: {}", stdout, stderr);
-    assert!(stderr.is_empty(), "{}", stderr);
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", metafits, gpufits,
+        "--source-list", &args.source_list.unwrap(),
+        "--outputs", &format!("{}", sols.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // check solutions file has been created, is readable
+    assert!(sols.exists(), "sols file not written");
+    let sol_data = CalibrationSolutions::read_solutions_from_ext(sols, metafits.into()).unwrap();
+    assert_eq!(sol_data.obsid, Some(1090008640));
 }
 
 #[test]
 fn test_1090008640_woden() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
-    let mut solutions_path = tmp_dir.clone();
-    solutions_path.push("sols.bin");
+    let solutions_path = tmp_dir.join("sols.bin");
 
     // Reading from a uvfits file without a metafits file should fail because
     // there's no beam information.
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data",
-            "test_files/1090008640_WODEN/output_band01.uvfits",
-            "--source-list",
-            "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-            "--outputs",
-            &format!("{}", solutions_path.display()),
-        ])
-        .ok();
-    assert!(cmd.is_err(), "{:?}", get_cmd_output(cmd));
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", "test_files/1090008640_WODEN/output_band01.uvfits",
+        "--source-list", "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
+        "--outputs", &format!("{}", solutions_path.display()),
+    ]);
+
+    // Run di-cal and check that it fails
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(
+        matches!(result, Err(CalibrateError::InvalidArgs(_))),
+        "result={:?} is not InvalidArgs",
+        result.err().unwrap()
+    );
 
     // This time give the metafits file.
     let cmd = hyperdrive()
@@ -147,27 +147,26 @@ fn test_1090008640_woden() {
     assert!(!bin_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
     // Re-do calibration, but this time into the hyperdrive fits format.
-    let mut solutions_path = tmp_dir;
-    solutions_path.push("sols.fits");
+    let solutions_path = tmp_dir.join("sols.fits");
 
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data",
-            "test_files/1090008640_WODEN/output_band01.uvfits",
-            "test_files/1090008640_WODEN/1090008640.metafits",
-            "--source-list",
-            "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
-            #[cfg(feature = "cuda")]
-            "--cpu",
-            "--outputs",
-            &format!("{}", solutions_path.display()),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data",
+        "test_files/1090008640_WODEN/output_band01.uvfits",
+        "test_files/1090008640_WODEN/1090008640.metafits",
+        "--source-list",
+        "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
+        #[cfg(feature = "cuda")]
+        "--cpu",
+        "--outputs",
+        &format!("{}", solutions_path.display()),
+    ]);
 
-    let hyp_sols =
-        CalibrationSolutions::read_solutions_from_ext(&solutions_path, metafits).unwrap();
+    // Run di-cal and check that it fails
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    let hyp_sols = result.unwrap().unwrap();
     assert_eq!(hyp_sols.di_jones.dim(), bin_sols.di_jones.dim());
     assert_eq!(hyp_sols.start_timestamps.len(), 1);
     assert_eq!(hyp_sols.end_timestamps.len(), 1);
@@ -183,4 +182,105 @@ fn test_1090008640_woden() {
     let bin_sols_di_jones = bin_sols.di_jones.mapv(TestJones::from);
     let hyp_sols_di_jones = hyp_sols.di_jones.mapv(TestJones::from);
     assert_abs_diff_eq!(bin_sols_di_jones, hyp_sols_di_jones);
+}
+
+#[test]
+#[serial]
+fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let args = get_reduced_1090008640(true, false);
+    let data = args.data.unwrap();
+    let metafits = &data[0];
+    let gpufits = &data[1];
+    let out_vis_path = tmp_dir.join("vis.uvfits");
+    let cal_model = tmp_dir.join("hyp_model.uvfits");
+
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", metafits, gpufits,
+        "--source-list", &args.source_list.unwrap(),
+        "--outputs", &format!("{}", out_vis_path.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
+        "--ignore-autos",
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // check vis file has been created, is readable
+    assert!(out_vis_path.exists(), "out vis file not written");
+    let exp_timesteps = 1;
+    let exp_baselines = 8128;
+    let exp_channels = 32;
+
+    let mut out_vis = fits_open!(&out_vis_path).unwrap();
+    let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
+    let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
+    assert_eq!(
+        gcount.parse::<usize>().unwrap(),
+        exp_timesteps * exp_baselines
+    );
+    // let pcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "PCOUNT").unwrap();
+    // assert_eq!(pcount.parse::<usize>().unwrap(), 5);
+    // let floats_per_pol: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS2").unwrap();
+    // assert_eq!(floats_per_pol.parse::<usize>().unwrap(), 3);
+    // let num_pols: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS3").unwrap();
+    // assert_eq!(num_pols.parse::<usize>().unwrap(), 4);
+    let num_fine_freq_chans: String =
+        get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
+    assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
+}
+
+#[test]
+#[serial]
+fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos_avg_freq() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let args = get_reduced_1090008640(true, false);
+    let data = args.data.unwrap();
+    let metafits = &data[0];
+    let gpufits = &data[1];
+    let out_vis_path = tmp_dir.join("vis.uvfits");
+    let cal_model = tmp_dir.join("hyp_model.uvfits");
+
+    let freq_avg_factor = 2;
+
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", metafits, gpufits,
+        "--source-list", &args.source_list.unwrap(),
+        "--outputs", &format!("{}", out_vis_path.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
+        "--ignore-autos",
+        "--output-vis-freq-average", &format!("{}", freq_avg_factor)
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // check vis file has been created, is readable
+    assert!(out_vis_path.exists(), "out vis file not written");
+    let exp_timesteps = 1;
+    let exp_baselines = 8128;
+    let exp_channels = 32 / freq_avg_factor;
+
+    let mut out_vis = fits_open!(&out_vis_path).unwrap();
+    let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
+    let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
+    assert_eq!(
+        gcount.parse::<usize>().unwrap(),
+        exp_timesteps * exp_baselines
+    );
+    // let pcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "PCOUNT").unwrap();
+    // assert_eq!(pcount.parse::<usize>().unwrap(), 5);
+    // let floats_per_pol: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS2").unwrap();
+    // assert_eq!(floats_per_pol.parse::<usize>().unwrap(), 3);
+    // let num_pols: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS3").unwrap();
+    // assert_eq!(num_pols.parse::<usize>().unwrap(), 4);
+    let num_fine_freq_chans: String =
+        get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
+    assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
 }

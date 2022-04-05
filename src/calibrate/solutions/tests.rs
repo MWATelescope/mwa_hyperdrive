@@ -44,10 +44,7 @@ fn make_solutions() -> CalibrationSolutions {
     CalibrationSolutions {
         di_jones,
         flagged_tiles: flagged_tiles.into_iter().collect(),
-        flagged_chanblocks: flagged_chanblocks
-            .into_iter()
-            .map(|i| i.try_into().unwrap())
-            .collect(),
+        flagged_chanblocks: flagged_chanblocks.into_iter().map(|i| i as u16).collect(),
         obsid: Some(1090008640),
         start_timestamps: vec![
             Epoch::from_gpst_seconds(1090008640.0),

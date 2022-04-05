@@ -245,11 +245,12 @@ fn try_main() -> Result<(), HyperdriveError> {
             #[cfg(feature = "cuda")]
             cpu,
         } => {
-            #[cfg(not(feature = "cuda"))]
-            simulate_vis(args, dry_run)?;
-
-            #[cfg(feature = "cuda")]
-            simulate_vis(args, cpu, dry_run)?;
+            simulate_vis(
+                args,
+                #[cfg(feature = "cuda")]
+                cpu,
+                dry_run,
+            )?;
 
             info!("hyperdrive simulate-vis complete.");
         }

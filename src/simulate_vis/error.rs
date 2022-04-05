@@ -6,9 +6,10 @@
 Error type for all simulate-vis-related errors.
  */
 
+use marlu::{io::error::IOError as MarluIOError, UvfitsWriteError};
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{mwalib, thiserror};
+use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum SimulateVisError {
@@ -41,21 +42,24 @@ pub enum SimulateVisError {
     #[error("Error when trying to veto the source list: {0}")]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Model(#[from] crate::model::ModelError),
 
-    #[error("{0}")]
-    Uvfits(#[from] crate::data_formats::UvfitsWriteError),
+    #[error(transparent)]
+    MarluUvfits(#[from] UvfitsWriteError),
 
-    #[error("{0}")]
+    #[error(transparent)]
+    MarluIO(#[from] MarluIOError),
+
+    #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Mwalib(#[from] mwalib::MwalibError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 }

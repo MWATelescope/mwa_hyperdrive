@@ -11,8 +11,11 @@ use ndarray::prelude::*;
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive::calibrate::solutions::CalibrationSolutions;
-use mwa_hyperdrive_common::{marlu, mwalib, ndarray};
+use mwa_hyperdrive::{
+    calibrate::{di_calibrate, solutions::CalibrationSolutions},
+    simulate_vis::{simulate_vis, SimulateVisArgs},
+};
+use mwa_hyperdrive_common::{clap::Parser, marlu, mwalib, ndarray};
 
 #[test]
 #[serial]
@@ -29,44 +32,43 @@ fn test_1090008640_calibrate_model() {
     let args = get_reduced_1090008640(true, false);
     let metafits = &args.data.as_ref().unwrap()[0];
     let srclist = args.source_list.unwrap();
+    #[rustfmt::skip]
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits", metafits,
+        "--source-list", &srclist,
+        "--output-model-file", &format!("{}", model.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
+    ]);
 
-    let cmd = hyperdrive()
-        .args(&[
-            "simulate-vis",
-            "--metafits",
-            metafits,
-            "--source-list",
-            &srclist,
-            "--output-model-file",
-            &format!("{}", model.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    // Run simulate-vis and check that it succeeds
+    let result = simulate_vis(
+        sim_args,
+        #[cfg(feature = "cuda")]
+        false,
+        false,
+    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut sols = temp_dir.clone();
     sols.push("sols.fits");
     let mut cal_model = temp_dir;
     cal_model.push("cal_model.uvfits");
 
-    let cmd = hyperdrive()
-        .args(&[
-            "di-calibrate",
-            "--data",
-            &format!("{}", model.display()),
-            metafits,
-            "--source-list",
-            &srclist,
-            "--outputs",
-            &format!("{}", sols.display()),
-            "--model-filename",
-            &format!("{}", cal_model.display()),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", &format!("{}", model.display()), metafits,
+        "--source-list", &srclist,
+        "--outputs", &format!("{}", sols.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
+        "--ignore-autos",
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut uvfits_m = fits_open!(&model).unwrap();
     let hdu_m = fits_open_hdu!(&mut uvfits_m, 0).unwrap();

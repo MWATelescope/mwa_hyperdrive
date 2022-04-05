@@ -4,6 +4,7 @@
 
 //! Error type for all calibration-related errors.
 
+use marlu::io::error::{IOError as MarluIOError, UvfitsWriteError};
 use mwalib::fitsio;
 use thiserror::Error;
 
@@ -13,10 +14,10 @@ use super::{
     solutions::{ReadSolutionsError, WriteSolutionsError},
 };
 use crate::{
-    data_formats::{ReadInputDataError, UvfitsReadError, UvfitsWriteError},
+    data_formats::{ReadInputDataError, UvfitsReadError},
     model::ModelError,
 };
-use mwa_hyperdrive_common::{mwalib, thiserror};
+use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {
@@ -54,6 +55,9 @@ pub enum CalibrateError {
 
     #[error("Error when writing uvfits: {0}")]
     UviftsWrite(#[from] UvfitsWriteError),
+
+    #[error("Error when using Marlu for IO: {0}")]
+    MarluIO(#[from] MarluIOError),
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),

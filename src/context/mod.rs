@@ -5,7 +5,7 @@
 //! Metadata on an observation.
 
 use hifitime::Epoch;
-use marlu::{RADec, XyzGeodetic};
+use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
@@ -80,11 +80,8 @@ pub(crate) struct ObsContext {
     /// timestep, and therefore no resolution.
     pub(crate) time_res: Option<f64>,
 
-    /// The Earth longitude of the instrumental array \[radians\].
-    pub(crate) array_longitude_rad: Option<f64>,
-
-    /// The Earth latitude of the instrumental array \[radians\].
-    pub(crate) array_latitude_rad: Option<f64>,
+    /// The Earth position of the instrumental array.
+    pub(crate) array_position: Option<LatLngHeight>,
 
     /// The coarse channel numbers (typically 1 to 24) that are present in the
     /// supplied data. This does not necessarily match the coarse channel

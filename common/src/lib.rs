@@ -16,6 +16,6 @@ pub fn is_a_tty() -> bool {
 // Re-exports.
 pub use {
     byteorder, cfg_if, chrono, clap, fern, flate2, indicatif, itertools, lazy_static, log, marlu,
-    marlu::{c32, c64, erfa_sys, hifitime, mwalib, ndarray, num_traits, rayon, Complex},
+    marlu::{c32, c64, erfa_sys, hifitime, mwalib, ndarray, num_traits, rayon, Complex, Jones},
     serde_json, thiserror, toml, vec1,
 };

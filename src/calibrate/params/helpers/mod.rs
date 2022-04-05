@@ -267,7 +267,7 @@ pub(super) fn parse_time_average_factor(
                 return Err(AverageFactorError::Zero);
             }
             // Reject non-integer floats.
-            if factor.fract().abs() > 1e-6 {
+            if (factor - factor.round()).abs() > 1e-6 {
                 return Err(AverageFactorError::NotInteger);
             }
 
@@ -334,7 +334,7 @@ pub(super) fn parse_freq_average_factor(
                 return Err(AverageFactorError::Zero);
             }
             // Reject non-integer floats.
-            if factor.fract().abs() > 1e-6 {
+            if (factor - factor.round()).abs() > 1e-6 {
                 return Err(AverageFactorError::NotInteger);
             }
 

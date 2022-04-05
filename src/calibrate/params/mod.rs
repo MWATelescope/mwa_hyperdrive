@@ -28,12 +28,11 @@ use std::str::FromStr;
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use marlu::{
-    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::{
         precession::{precess_time, PrecessionInfo},
         xyz::xyzs_to_cross_uvws_parallel,
     },
-    Jones, XyzGeodetic,
+    Jones, LatLngHeight, XyzGeodetic,
 };
 use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
@@ -148,14 +147,6 @@ pub(crate) struct CalibrateParams {
     /// flagged.
     pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
 
-    /// Given an unflagged baseline index, get the tile index pair that
-    /// contribute to it. e.g. If tile 1 (i.e. the second tile) is flagged, then
-    /// the first unflagged baseline (i.e. 0) is between tile 0 and tile 2.
-    ///
-    /// This exists because some tiles may be flagged, so some baselines may be
-    /// flagged.
-    pub(crate) unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
-
     /// Are auto-correlations being included?
     pub(crate) using_autos: bool,
 
@@ -167,13 +158,8 @@ pub(crate) struct CalibrateParams {
     /// layout.
     pub(crate) unflagged_tile_xyzs: Vec<XyzGeodetic>,
 
-    /// The Earth longitude of the array \[radians\]. This is populated by user
-    /// input or the input data.
-    pub(crate) array_longitude: f64,
-
-    /// The Earth latitude of the array \[radians\]. This is populated by user
-    /// input or the input data.
-    pub(crate) array_latitude: f64,
+    /// The Earth position of the array. This is populated by user input or the input data.
+    pub(crate) array_position: LatLngHeight,
 
     /// The maximum number of times to iterate when performing "MitchCal".
     pub(crate) max_iterations: usize,
@@ -250,8 +236,7 @@ impl CalibrateParams {
             max_iterations,
             stop_thresh,
             min_thresh,
-            array_longitude_deg,
-            array_latitude_deg,
+            array_position,
             #[cfg(feature = "cuda")]
             cpu,
             tile_flags,
@@ -535,18 +520,18 @@ impl CalibrateParams {
             }
         };
 
-        let array_longitude = match (array_longitude_deg, obs_context.array_longitude_rad) {
-            (Some(array_longitude_deg), _) => array_longitude_deg.to_radians(),
-            (None, Some(input_data_long)) => input_data_long,
-            (None, None) => {
-                warn!("Assuming that the input array is at the MWA Earth coordinates");
-                MWA_LONG_RAD
+        let array_position = match array_position {
+            None => LatLngHeight::new_mwa(),
+            Some(pos) => {
+                if pos.len() != 3 {
+                    return Err(InvalidArgsError::BadArrayPosition { pos });
+                }
+                LatLngHeight {
+                    longitude_rad: pos[0].to_radians(),
+                    latitude_rad: pos[1].to_radians(),
+                    height_metres: pos[2],
+                }
             }
-        };
-        let array_latitude = match (array_latitude_deg, obs_context.array_latitude_rad) {
-            (Some(array_latitude_deg), _) => array_latitude_deg.to_radians(),
-            (None, Some(input_data_lat)) => input_data_lat,
-            (None, None) => MWA_LAT_RAD,
         };
 
         // The length of the tile XYZ collection is the total number of tiles in
@@ -782,8 +767,8 @@ impl CalibrateParams {
         let precession_info = precess_time(
             obs_context.phase_centre,
             obs_context.timestamps[*timesteps_to_use.first()],
-            array_longitude,
-            array_latitude,
+            array_position.longitude_rad,
+            array_position.latitude_rad,
         );
         veto_sources(
             &mut source_list,
@@ -808,60 +793,59 @@ impl CalibrateParams {
                 // If we're not writing out calibrated visibilities but arguments
                 // are set for them, issue warnings.
                 match (output_vis_time_average, output_vis_freq_average) {
-                    (Some(_), Some(_)) => {
-                        warn!("Not writing out calibrated visibilities, but");
-                        warn!("    \"output_vis_time_average\" and");
-                        warn!("    \"output_vis_freq_average\" are set.");
-                    }
-
-                    (Some(_), None) => {
-                        warn!("Not writing out calibrated visibilities, but");
-                        warn!("    \"output_vis_time_average\" is set.");
-                    }
-
-                    (None, Some(_)) => {
-                        warn!("Not writing out calibrated visibilities, but");
-                        warn!("    \"output_vis_freq_average\" is set.");
-                    }
-
                     (None, None) => (),
+                    (time, freq) => {
+                        warn!("Not writing out calibrated visibilities, but");
+                        if time.is_some() {
+                            warn!("  output_vis_time_average is set");
+                        }
+                        if freq.is_some() {
+                            warn!("  output_vis_freq_average is set");
+                        }
+                    }
                 }
                 (1, 1)
             } else {
                 // Parse and verify user input (specified resolutions must
                 // evenly divide the input data's resolutions).
-                let time_factor =
-                    parse_time_average_factor(obs_context.time_res, output_vis_time_average, 1)
-                        .map_err(|e| match e {
-                            AverageFactorError::Zero => {
-                                InvalidArgsError::OutputVisTimeAverageFactorZero
-                            }
-                            AverageFactorError::NotInteger => {
-                                InvalidArgsError::OutputVisTimeFactorNotInteger
-                            }
-                            AverageFactorError::NotIntegerMultiple { out, inp } => {
-                                InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
-                            }
-                            AverageFactorError::Parse(e) => {
-                                InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
-                            }
-                        })?;
-                let freq_factor =
-                    parse_freq_average_factor(obs_context.freq_res, output_vis_freq_average, 1)
-                        .map_err(|e| match e {
-                            AverageFactorError::Zero => {
-                                InvalidArgsError::OutputVisFreqAverageFactorZero
-                            }
-                            AverageFactorError::NotInteger => {
-                                InvalidArgsError::OutputVisFreqFactorNotInteger
-                            }
-                            AverageFactorError::NotIntegerMultiple { out, inp } => {
-                                InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
-                            }
-                            AverageFactorError::Parse(e) => {
-                                InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
-                            }
-                        })?;
+                let time_factor = parse_time_average_factor(
+                    obs_context
+                        .time_res
+                        .map(|res| res * time_average_factor as f64),
+                    output_vis_time_average,
+                    1,
+                )
+                .map_err(|e| match e {
+                    AverageFactorError::Zero => InvalidArgsError::OutputVisTimeAverageFactorZero,
+                    AverageFactorError::NotInteger => {
+                        InvalidArgsError::OutputVisTimeFactorNotInteger
+                    }
+                    AverageFactorError::NotIntegerMultiple { out, inp } => {
+                        InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
+                    }
+                    AverageFactorError::Parse(e) => {
+                        InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
+                    }
+                })?;
+                let freq_factor = parse_freq_average_factor(
+                    obs_context
+                        .freq_res
+                        .map(|res| res * freq_average_factor as f64),
+                    output_vis_freq_average,
+                    1,
+                )
+                .map_err(|e| match e {
+                    AverageFactorError::Zero => InvalidArgsError::OutputVisFreqAverageFactorZero,
+                    AverageFactorError::NotInteger => {
+                        InvalidArgsError::OutputVisFreqFactorNotInteger
+                    }
+                    AverageFactorError::NotIntegerMultiple { out, inp } => {
+                        InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
+                    }
+                    AverageFactorError::Parse(e) => {
+                        InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
+                    }
+                })?;
 
                 (time_factor, freq_factor)
             };
@@ -871,6 +855,7 @@ impl CalibrateParams {
         } else {
             obs_context.autocorrelations_present
         };
+        // XXX(Dev): TileBaselineMaps logic might fit inside FlagContext
         let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
 
         let (unflagged_tile_xyzs, unflagged_tile_names): (Vec<XyzGeodetic>, Vec<String>) =
@@ -991,13 +976,10 @@ impl CalibrateParams {
             flagged_fine_chans,
             tile_to_unflagged_cross_baseline_map: tile_baseline_maps
                 .tile_to_unflagged_cross_baseline_map,
-            unflagged_cross_baseline_to_tile_map: tile_baseline_maps
-                .unflagged_cross_baseline_to_tile_map,
             using_autos,
             unflagged_tile_names,
             unflagged_tile_xyzs,
-            array_longitude,
-            array_latitude,
+            array_position,
             max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),
             stop_threshold,
             min_threshold,
@@ -1038,6 +1020,8 @@ impl CalibrateParams {
 
     /// The number of unflagged baselines, including auto-correlation
     /// "baselines" if these are included.
+    // TODO(dev): this is only used in tests
+    #[allow(dead_code)]
     pub(crate) fn get_num_unflagged_baselines(&self) -> usize {
         let n = self.unflagged_tile_xyzs.len();
         if self.using_autos {
@@ -1051,6 +1035,19 @@ impl CalibrateParams {
     pub(crate) fn get_num_unflagged_cross_baselines(&self) -> usize {
         let n = self.unflagged_tile_xyzs.len();
         (n * (n - 1)) / 2
+    }
+
+    /// Get the sorted *cross-correlation* pairs of antennas for all unflagged
+    /// *cross-correlation* baselines. e.g. In a 128T observation, if tiles 0
+    /// and 1 are unflagged, then the first baseline is (0,1), and the first
+    /// element here is (0,1).
+    pub(crate) fn get_ant_pairs(&self) -> Vec<(usize, usize)> {
+        // TODO(Dev): support autos
+        self.tile_to_unflagged_cross_baseline_map
+            .keys()
+            .cloned()
+            .sorted()
+            .collect()
     }
 
     pub(crate) fn read_crosses(
@@ -1082,11 +1079,7 @@ impl<'a> ExtraInfo<'a> {
         let params = self.params;
         let obs_context = params.input_data.get_obs_context();
 
-        info!(
-            "Array longitude, latitude:     ({:.4}°, {:.4}°)",
-            params.array_longitude.to_degrees(),
-            params.array_latitude.to_degrees()
-        );
+        info!("Array position:     ({})", params.array_position);
         info!(
             "Array latitude (J2000):                    {:.4}°",
             self.precession_info.array_latitude_j2000.to_degrees()

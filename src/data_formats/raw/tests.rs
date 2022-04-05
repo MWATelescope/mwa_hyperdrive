@@ -37,7 +37,7 @@ fn get_cross_vis(args: CalibrateUserArgs) -> CrossData {
         Err(e) => panic!("{}", e),
     };
 
-    let num_unflagged_cross_baselines = params.unflagged_cross_baseline_to_tile_map.len();
+    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut data_array = Array2::zeros(vis_shape);
@@ -95,7 +95,7 @@ fn get_cross_and_auto_vis(args: CalibrateUserArgs) -> (CrossData, AutoData) {
         Err(e) => panic!("{}", e),
     };
 
-    let num_unflagged_cross_baselines = params.unflagged_cross_baseline_to_tile_map.len();
+    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut cross_data = CrossData {
@@ -449,8 +449,8 @@ fn test_mwaf_flags() {
     let timesteps = params.timesteps;
 
     // Set up our arrays for reading.
-    let num_unflagged_cross_baselines = params.unflagged_cross_baseline_to_tile_map.len();
-    let num_unflagged_tiles = params.unflagged_cross_baseline_to_tile_map.len();
+    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
+    let num_unflagged_tiles = params.tile_to_unflagged_cross_baseline_map.len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let cross_vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut cross_data_array = Array2::from_elem(cross_vis_shape, Jones::identity());

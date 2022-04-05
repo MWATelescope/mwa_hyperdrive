@@ -6,12 +6,14 @@
 //! subcommand of hyperdrive.
 
 use approx::assert_abs_diff_eq;
+use clap::Parser;
 use marlu::{XyzGeodetic, ENH};
 use mwalib::{fitsio_sys, *};
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive_common::{cfg_if, marlu, mwalib};
+use mwa_hyperdrive::simulate_vis::{simulate_vis, SimulateVisArgs};
+use mwa_hyperdrive_common::{cfg_if, clap, marlu, mwalib};
 
 fn read_uvfits_stabxyz(
     fptr: &mut fitsio::FitsFile,
@@ -52,6 +54,33 @@ fn read_uvfits_stabxyz(
     }
 }
 
+/// If di-calibrate is working, it should not write anything to stderr.
+#[test]
+fn test_no_stderr() {
+    let num_timesteps = 2;
+    let num_chans = 2;
+
+    let mut output_path = TempDir::new().expect("couldn't make tmp dir").into_path();
+    output_path.push("model.uvfits");
+    let args = get_reduced_1090008640(true, false);
+    let metafits = args.data.as_ref().unwrap()[0].clone();
+
+    #[rustfmt::skip]
+    let cmd = hyperdrive()
+        .args(&[
+            "simulate-vis",
+            "--metafits", &metafits,
+            "--source-list", &args.source_list.unwrap(),
+            "--output-model-file", &format!("{}", output_path.display()),
+            "--num-timesteps", &format!("{}", num_timesteps),
+            "--num-fine-channels", &format!("{}", num_chans),
+        ])
+        .ok();
+    assert!(cmd.is_ok(), "simulate-vis failed on simple test data!");
+    let (_, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
+}
+
 #[test]
 #[serial]
 fn test_1090008640_simulate_vis() {
@@ -63,22 +92,24 @@ fn test_1090008640_simulate_vis() {
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
 
-    let cmd = hyperdrive()
-        .args(&[
-            "simulate-vis",
-            "--metafits",
-            &metafits,
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--output-model-file",
-            &format!("{}", output_path.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    #[rustfmt::skip]
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits", &metafits,
+        "--source-list", &args.source_list.unwrap(),
+        "--output-model-file", &format!("{}", output_path.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
+    ]);
+
+    // Run simulate-vis and check that it succeeds
+    let result = simulate_vis(
+        sim_args,
+        #[cfg(feature = "cuda")]
+        false,
+        false,
+    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     // Test some metadata. Compare with the input metafits file.
     let metafits = MetafitsContext::new(&metafits, None).unwrap();
@@ -194,15 +225,15 @@ fn test_1090008640_simulate_vis() {
     // The values of the visibilities changes slightly depending on the precision.
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0..29], [36.740772, -37.80606, 1.0, 36.464615, -38.027126, 1.0, 0.12835014, -0.07698195, 1.0, 0.13591047, -0.051941246, 1.0, 36.677788, -37.855072, 1.0, 36.411392, -38.083076, 1.0, 0.13199338, -0.07526354, 1.0, 0.13950738, -0.050253063, 1.0, 36.61131, -37.90193, 1.0, 36.354816, -38.13698]);
+            assert_abs_diff_eq!(vis[0..29], [36.740772, -37.80606, 64.0, 36.464615, -38.027126, 64.0, 0.12835014, -0.07698195, 64.0, 0.13591047, -0.051941246, 64.0, 36.677788, -37.855072, 64.0, 36.411392, -38.083076, 64.0, 0.13199338, -0.07526354, 64.0, 0.13950738, -0.050253063, 64.0, 36.61131, -37.90193, 64.0, 36.354816, -38.13698]);
         } else {
-            assert_abs_diff_eq!(vis[0..29], [36.740982, -37.80591, 1.0, 36.464863, -38.02699, 1.0, 0.12835437, -0.07698456, 1.0, 0.13591558, -0.05194349, 1.0, 36.677994, -37.85488, 1.0, 36.411633, -38.08291, 1.0, 0.13199718, -0.075266466, 1.0, 0.1395122, -0.050255615, 1.0, 36.61154, -37.901764, 1.0, 36.355083, -38.136826]);
+            assert_abs_diff_eq!(vis[0..29], [36.740982, -37.80591, 64.0, 36.464863, -38.02699, 64.0, 0.12835437, -0.07698456, 64.0, 0.13591558, -0.05194349, 64.0, 36.677994, -37.85488, 64.0, 36.411633, -38.08291, 64.0, 0.13199718, -0.075266466, 64.0, 0.1395122, -0.050255615, 64.0, 36.61154, -37.901764, 64.0, 36.355083, -38.136826]);
         }
     }
-    // Every third value (a weight) should be 1.
+    // Every third value (a weight) should be 64.
     for (i, vis) in vis.iter().enumerate() {
         if i % 3 == 2 {
-            assert_abs_diff_eq!(*vis, 1.0);
+            assert_abs_diff_eq!(*vis, 64.0);
         }
     }
 
@@ -243,14 +274,14 @@ fn test_1090008640_simulate_vis() {
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0..29], [36.799625, -37.71107, 1.0, 36.51971, -37.921703, 1.0, 0.12917347, -0.07720526, 1.0, 0.1368949, -0.052246865, 1.0, 36.734455, -37.760387, 1.0, 36.46407, -37.978012, 1.0, 0.13280584, -0.07548499, 1.0, 0.1404799, -0.050557088, 1.0, 36.665825, -37.807594, 1.0, 36.405113, -38.032326]);
+            assert_abs_diff_eq!(vis[0..29], [36.799625, -37.71107, 64.0, 36.51971, -37.921703, 64.0, 0.12917347, -0.07720526, 64.0, 0.1368949, -0.052246865, 64.0, 36.734455, -37.760387, 64.0, 36.46407, -37.978012, 64.0, 0.13280584, -0.07548499, 64.0, 0.1404799, -0.050557088, 64.0, 36.665825, -37.807594, 64.0, 36.405113, -38.032326]);
         } else {
-            assert_abs_diff_eq!(vis[0..29], [36.799675, -37.71089, 1.0, 36.519768, -37.921543, 1.0, 0.12917838, -0.07721107, 1.0, 0.13689607, -0.052250482, 1.0, 36.7345, -37.760174, 1.0, 36.464123, -37.97782, 1.0, 0.13281031, -0.07549093, 1.0, 0.14048097, -0.05056086, 1.0, 36.66584, -37.807365, 1.0, 36.405136, -38.032104]);
+            assert_abs_diff_eq!(vis[0..29], [36.799675, -37.71089, 64.0, 36.519768, -37.921543, 64.0, 0.12917838, -0.07721107, 64.0, 0.13689607, -0.052250482, 64.0, 36.7345, -37.760174, 64.0, 36.464123, -37.97782, 64.0, 0.13281031, -0.07549093, 64.0, 0.14048097, -0.05056086, 64.0, 36.66584, -37.807365, 64.0, 36.405136, -38.032104]);
         }
     }
     for (i, vis) in vis.iter().enumerate() {
         if i % 3 == 2 {
-            assert_abs_diff_eq!(*vis, 1.0);
+            assert_abs_diff_eq!(*vis, 64.0);
         }
     }
 }
@@ -268,23 +299,18 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
     output_path.push("model.uvfits");
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
-    let cmd = hyperdrive()
-        .args(&[
-            "simulate-vis",
-            "--metafits",
-            &metafits,
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--output-model-file",
-            &format!("{}", output_path.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
-            "--cpu",
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    #[rustfmt::skip]
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits", &metafits,
+        "--source-list", &args.source_list.unwrap(),
+        "--output-model-file", &format!("{}", output_path.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
+        "--cpu",
+    ]);
+    let result = simulate_vis(sim_args, true, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut uvfits = fits_open!(&output_path).unwrap();
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
@@ -319,22 +345,19 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
 
     let args = get_reduced_1090008640(true, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
-    let cmd = hyperdrive()
-        .args(&[
-            "simulate-vis",
-            "--metafits",
-            &metafits,
-            "--source-list",
-            &args.source_list.unwrap(),
-            "--output-model-file",
-            &format!("{}", output_path.display()),
-            "--num-timesteps",
-            &format!("{}", num_timesteps),
-            "--num-fine-channels",
-            &format!("{}", num_chans),
-        ])
-        .ok();
-    assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
+    #[rustfmt::skip]
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits", &metafits,
+        "--source-list", &args.source_list.unwrap(),
+        "--output-model-file", &format!("{}", output_path.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
+    ]);
+
+    // Run simulate-vis and check that it succeeds
+    let result = simulate_vis(sim_args, false, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut uvfits = fits_open!(&output_path).unwrap();
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();

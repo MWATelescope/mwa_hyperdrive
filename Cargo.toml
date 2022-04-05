@@ -3,7 +3,7 @@ name = "mwa_hyperdrive"
 version = "0.2.0-alpha.11"
 authors = [
     "Christopher H. Jordan <christopherjordan87@gmail.com>",
-    "Derwent McElhinney <derwent.mcelhinney@curtin.edu.au>"
+    "Dev Null <dev.null@curtin.edu.au>",
 ]
 edition = "2021"
 rust-version = "1.58"
@@ -15,13 +15,7 @@ homepage = "https://github.com/MWATelescope/mwa_hyperdrive"
 exclude = [".github/*", "test_files/*"]
 
 [workspace]
-members = [
-    ".",
-    "common",
-    "beam",
-    "cuda",
-    "srclist",
-]
+members = [".", "common", "beam", "cuda", "srclist"]
 
 [profile.release]
 panic = "abort"
@@ -32,19 +26,34 @@ opt-level = 2
 [features]
 default = ["plotting"]
 # Use CUDA code with double-precision floats.
-cuda = ["mwa_hyperdrive_cuda", "mwa_hyperdrive_beam/cuda", "mwa_hyperdrive_srclist/cuda"]
+cuda = [
+    "mwa_hyperdrive_cuda",
+    "mwa_hyperdrive_beam/cuda",
+    "mwa_hyperdrive_srclist/cuda",
+]
 # Use CUDA code with single-precision floats.
-cuda-single = ["cuda", "mwa_hyperdrive_cuda/cuda-single", "mwa_hyperdrive_beam/cuda-single", "mwa_hyperdrive_srclist/cuda-single"]
+cuda-single = [
+    "cuda",
+    "mwa_hyperdrive_cuda/cuda-single",
+    "mwa_hyperdrive_beam/cuda-single",
+    "mwa_hyperdrive_srclist/cuda-single",
+]
 # Enable plotting.
 plotting = ["plotters"]
-cfitsio-static = ["mwa_hyperdrive_common/cfitsio-static", "birli/cfitsio-static"]
+cfitsio-static = [
+    "mwa_hyperdrive_common/cfitsio-static",
+    "birli/cfitsio-static",
+]
 erfa-static = ["mwa_hyperdrive_common/erfa-static", "birli/erfa-static"]
-hdf5-static = ["mwa_hyperdrive_beam/hdf5-static", "mwa_hyperdrive_srclist/hdf5-static"]
+hdf5-static = [
+    "mwa_hyperdrive_beam/hdf5-static",
+    "mwa_hyperdrive_srclist/hdf5-static",
+]
 cuda-static = ["mwa_hyperdrive_common/cuda-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.5.1", default_features = false }
+birli = { version = "0.6.1", default_features = false }
 console = "0.15.0"
 crossbeam-channel = "0.5.0"
 crossbeam-utils = "0.8.7"
@@ -55,11 +64,15 @@ serde = { version = "1.0.103", features = ["derive"] }
 strum = "0.24.0"
 strum_macros = "0.24.0"
 
-plotters = { version = "0.3.1", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "point_series"], optional = true }
+plotters = { version = "0.3.1", default-features = false, features = [
+    "bitmap_backend",
+    "bitmap_encoder",
+    "point_series",
+], optional = true }
 
-mwa_hyperdrive_common =  { path = "common" }
-mwa_hyperdrive_beam =    { path = "beam" }
-mwa_hyperdrive_cuda =    { path = "cuda", optional = true }
+mwa_hyperdrive_common = { path = "common" }
+mwa_hyperdrive_beam = { path = "beam" }
+mwa_hyperdrive_cuda = { path = "cuda", optional = true }
 mwa_hyperdrive_srclist = { path = "srclist" }
 
 [dev-dependencies]
@@ -74,3 +87,8 @@ tempfile = "3.3.0"
 [[bench]]
 name = "bench"
 harness = false
+
+[patch.crates-io]
+# birli = { path = "../Birli" }
+# marlu = { path = "../Marlu" }
+# marlu = { git = "https://github.com/MWATelescope/Marlu.git" }

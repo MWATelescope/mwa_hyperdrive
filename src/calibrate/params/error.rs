@@ -150,6 +150,9 @@ pub enum InvalidArgsError {
     #[error("Cannot write to the specified file '{file}'. Do you have write permissions set?")]
     FileNotWritable { file: String },
 
+    #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
+    BadArrayPosition { pos: Vec<f64> },
+
     #[error("{0}")]
     InputFile(String),
 

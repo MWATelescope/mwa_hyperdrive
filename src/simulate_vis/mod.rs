@@ -7,30 +7,33 @@
 mod error;
 pub use error::SimulateVisError;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
 
 use clap::Parser;
 use hifitime::Epoch;
+use hifitime::{Duration, Unit};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use itertools::{izip, Itertools};
 use log::{debug, info};
 use marlu::{
-    constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    precession::precess_time,
-    Jones, RADec, XyzGeodetic,
+    precession::precess_time, Jones, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable,
+    XyzGeodetic,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    data_formats::{get_dipole_delays, get_dipole_gains, UvfitsWriter},
+    data_formats::{get_dipole_delays, get_dipole_gains},
     glob::get_single_match_from_glob,
     model,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{cfg_if, clap, hifitime, indicatif, log, marlu, mwalib, ndarray};
+use mwa_hyperdrive_common::{
+    cfg_if, clap, hifitime, indicatif, itertools, log, marlu, mwalib, ndarray,
+};
 use mwa_hyperdrive_srclist::{
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     read::read_source_list_file,
@@ -167,6 +170,8 @@ struct SimVisParams {
     /// The fine frequency channel frequencies \[Hz\].
     fine_chan_freqs: Vec<f64>,
 
+    freq_res_hz: f64,
+
     /// The [XyzGeodetic] positions of the tiles.
     xyzs: Vec<XyzGeodetic>,
 
@@ -179,14 +184,13 @@ struct SimVisParams {
     /// Timestamps to be simulated.
     timestamps: Vec<Epoch>,
 
-    /// Interface to beam code.    
+    int_time: Duration,
+
+    /// Interface to beam code.
     beam: Box<dyn Beam>,
 
-    /// The Earth latitude location of the interferometer \[radians\].
-    array_latitude: f64,
-
-    /// The Earth longitude location of the interferometer \[radians\].
-    array_longitude: f64,
+    /// The Earth position of the interferometer.
+    array_position: LatLngHeight,
 }
 
 impl SimVisParams {
@@ -280,14 +284,12 @@ impl SimVisParams {
         }
 
         // Populate the timestamps.
+        let int_time = Duration::from_f64(time_res, Unit::Second);
         let timestamps = {
             let mut timestamps = Vec::with_capacity(num_timesteps);
             let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3);
             for i in 0..num_timesteps {
-                timestamps.push(
-                    start
-                        + hifitime::Duration::from_f64(time_res * i as f64, hifitime::Unit::Second),
-                );
+                timestamps.push(start + int_time * i as i64);
             }
             timestamps
         };
@@ -388,13 +390,12 @@ impl SimVisParams {
             )?
         };
 
-        let array_latitude = MWA_LAT_RAD;
-        let array_longitude = MWA_LONG_RAD;
+        let array_position = LatLngHeight::new_mwa();
         let precession_info = precess_time(
             phase_centre,
             *timestamps.first().unwrap(),
-            array_longitude,
-            array_latitude,
+            array_position.longitude_rad,
+            array_position.latitude_rad,
         );
 
         // Get the coarse channel information out of the metafits file, but only
@@ -436,13 +437,14 @@ impl SimVisParams {
             output_model_file,
             phase_centre,
             fine_chan_freqs,
+            freq_res_hz: freq_res * 1e3_f64,
             xyzs,
             baseline_to_tile_map,
             flagged_tiles,
             timestamps,
+            int_time,
             beam,
-            array_latitude,
-            array_longitude,
+            array_position,
         })
     }
 }
@@ -479,44 +481,57 @@ pub fn simulate_vis(
         return Ok(());
     }
 
+    let vis_ctx = VisContext {
+        num_sel_timesteps: params.timestamps.len(),
+        start_timestamp: params.timestamps[0],
+        int_time: params.int_time,
+        num_sel_chans: params.fine_chan_freqs.len(),
+        start_freq_hz: params.fine_chan_freqs[0] as f64,
+        freq_resolution_hz: params.freq_res_hz,
+        sel_baselines: params
+            .baseline_to_tile_map
+            .values()
+            .cloned()
+            .sorted()
+            .collect(),
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+    let out_shape = vis_ctx.sel_dims();
+    // fix time axis to 1
+    let out_shape = (1, out_shape.1, out_shape.2);
+
     // Construct our visibilities array. This will be re-used for each timestep
-    // before it written to disk.
-    let vis_shape = (
-        params.baseline_to_tile_map.len(),
-        params.fine_chan_freqs.len(),
-    );
-    let mut vis_model: Array2<Jones<f32>> = Array2::from_elem(vis_shape, Jones::default());
+    // before it's written to disk. Simulated vis is [baseline][chan]
+    let mut vis_model_timestep: Array2<Jones<f32>> =
+        Array2::from_elem((out_shape.2, out_shape.1), Jones::default());
     debug!(
-        "Shape of model array: ({} baselines, {} channels; {} MiB)",
-        vis_shape.0,
-        vis_shape.1,
-        vis_shape.0 * vis_shape.1 * std::mem::size_of_val(&vis_model[[0, 0]])
+        "Shape of model array: ({} baselines, {} channels; {} MiB) (×2)",
+        out_shape.2,
+        out_shape.1,
+        out_shape.2 * out_shape.1 * std::mem::size_of_val(&vis_model_timestep[[0, 0]])
         // 1024 * 1024 == 1 MiB.
         / 1024 / 1024
     );
 
+    // vis output requires [timestep][chan][baseline], this is re-used.
+    let mut vis_out: Array3<Jones<f32>> = Array3::from_elem(out_shape, Jones::default());
+    let weight_out = Array3::from_elem(out_shape, vis_ctx.weight_factor() as f32);
+
     // Prepare the output visibilities file.
-    let fine_chan_flags = HashSet::new();
-    let mut output_writer = UvfitsWriter::new(
+
+    let obs_name = Some(format!(
+        "Simulated visibilities for obsid {}",
+        params.metafits.obs_id
+    ));
+
+    let mut output_writer = UvfitsWriter::from_marlu(
         &params.output_model_file,
-        params.timestamps.len(),
-        params.baseline_to_tile_map.len(),
-        params.fine_chan_freqs.len(),
-        false,
-        *params.timestamps.first().unwrap(),
-        if params.fine_chan_freqs.len() == 1 {
-            None
-        } else {
-            Some(params.fine_chan_freqs[1] - params.fine_chan_freqs[0])
-        },
-        params.fine_chan_freqs[params.fine_chan_freqs.len() / 2],
+        &vis_ctx,
+        Some(params.array_position),
         params.phase_centre,
-        Some(&format!(
-            "Simulated visibilities for obsid {}",
-            params.metafits.obs_id
-        )),
-        &params.baseline_to_tile_map,
-        &fine_chan_flags,
+        obs_name,
     )?;
 
     // Create a "modeller" object.
@@ -529,8 +544,8 @@ pub fn simulate_vis(
         &params.fine_chan_freqs,
         &params.flagged_tiles,
         params.phase_centre,
-        params.array_longitude,
-        params.array_latitude,
+        params.array_position.longitude_rad,
+        params.array_position.latitude_rad,
         // TODO: Allow the user to turn off precession.
         true,
     )?;
@@ -550,18 +565,37 @@ pub fn simulate_vis(
     model_progress.tick();
 
     // Generate the visibilities.
-    for &timestep in params.timestamps.iter() {
-        let uvws = modeller.model_timestep(vis_model.view_mut(), timestep)?;
-        // Write the visibilities out.
-        output_writer.write_cross_timestep_vis(
-            vis_model.view(),
-            Array2::ones(vis_model.dim()).view(),
-            &uvws,
-            timestep,
-        )?;
-
+    for &timestamp in params.timestamps.iter() {
         // Clear the visibilities before re-using the buffer.
-        vis_model.fill(Jones::default());
+        vis_model_timestep.fill(Jones::default());
+        modeller.model_timestep(vis_model_timestep.view_mut(), timestamp)?;
+
+        // transpose model vis to output ordering. first axis is baseline.
+        for (vis_model, mut vis_out) in izip!(
+            vis_model_timestep.outer_iter(),
+            vis_out.axis_iter_mut(Axis(2))
+        ) {
+            // second axis is channel
+            for (model_jones, mut vis_out) in
+                izip!(vis_model.iter(), vis_out.axis_iter_mut(Axis(1)))
+            {
+                vis_out.fill(*model_jones);
+            }
+        }
+
+        let chunk_vis_ctx = VisContext {
+            start_timestamp: timestamp - params.int_time / 2.0,
+            num_sel_timesteps: 1,
+            ..vis_ctx.clone()
+        };
+        // Write the visibilities out.
+        output_writer.write_vis_marlu(
+            vis_out.view(),
+            weight_out.view(),
+            &chunk_vis_ctx,
+            &params.xyzs,
+            false,
+        )?;
 
         model_progress.inc(1);
     }
