@@ -1362,7 +1362,7 @@ fn can_write_to_file(file: &Path) -> Result<(), InvalidArgsError> {
                 warn!("Will overwrite the existing file '{}'", file.display())
             } else {
                 // file didn't exist before, remove.
-                fs::remove_file(file).map_err(InvalidArgsError::IO)?;
+                std::fs::remove_file(file).map_err(InvalidArgsError::IO)?;
             }
         }
 

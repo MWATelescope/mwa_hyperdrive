@@ -32,7 +32,7 @@ use crate::{context::ObsContext, data_formats::metafits, time::round_hundredths_
 use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray};
 
-pub(crate) struct MS {
+pub struct MS {
     /// Input data metadata.
     obs_context: ObsContext,
 
@@ -59,7 +59,7 @@ impl MS {
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
     // TODO: Handle multiple measurement sets.
-    pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
+    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         ms: P,
         metafits: Option<P2>,
         dipole_delays: &mut Delays,

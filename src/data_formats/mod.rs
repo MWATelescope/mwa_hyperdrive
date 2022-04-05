@@ -12,9 +12,9 @@ mod uvfits;
 
 pub(crate) use error::ReadInputDataError;
 pub use metafits::*;
-pub(crate) use ms::{MsReadError, MS};
+pub use ms::{MsReadError, MS};
 pub(crate) use raw::{RawDataReader, RawReadError};
-pub(crate) use uvfits::{UvfitsReadError, UvfitsReader};
+pub use uvfits::{UvfitsReadError, UvfitsReader};
 
 use std::collections::{HashMap, HashSet};
 
@@ -27,7 +27,7 @@ use crate::context::ObsContext;
 use mwa_hyperdrive_common::{marlu, ndarray, vec1};
 
 #[derive(Debug)]
-pub(crate) enum VisInputType {
+pub enum VisInputType {
     Raw,
     MeasurementSet,
     Uvfits,
@@ -37,9 +37,11 @@ pub(crate) enum VisInputType {
 pub(crate) enum VisOutputType {
     #[strum(serialize = "uvfits")]
     Uvfits,
+    #[strum(serialize = "ms")]
+    MeasurementSet,
 }
 
-pub(crate) trait InputData: Sync + Send {
+pub trait InputData: Sync + Send {
     fn get_obs_context(&self) -> &ObsContext;
 
     fn get_input_data_type(&self) -> VisInputType;

@@ -10,8 +10,8 @@ mod read;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use error::*;
-pub(crate) use read::*;
+pub use error::*;
+pub use read::*;
 
 use hifitime::Epoch;
 

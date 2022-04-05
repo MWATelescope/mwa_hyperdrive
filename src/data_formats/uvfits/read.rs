@@ -25,7 +25,7 @@ use crate::{
 use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
 
-pub(crate) struct UvfitsReader {
+pub struct UvfitsReader {
     /// Observation metadata.
     pub(super) obs_context: ObsContext,
 
@@ -48,7 +48,7 @@ impl UvfitsReader {
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
-    pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
+    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         uvfits: P,
         metafits: Option<P2>,
         dipole_delays: &mut Delays,

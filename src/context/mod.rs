@@ -19,15 +19,15 @@ use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
 ///
 /// Tile information is ordered according to the "Antenna" column in HDU 1 of
 /// the observation's metafits file.
-pub(crate) struct ObsContext {
+pub struct ObsContext {
     /// The observation ID, which is also the observation's scheduled start GPS
     /// time (but shouldn't be used for this purpose).
-    pub(crate) obsid: Option<u32>,
+    pub obsid: Option<u32>,
 
     /// The unique timestamps in the observation. These are stored as `hifitime`
     /// [Epoch] structs to help keep the code flexible. These include timestamps
     /// that are deemed "flagged" by the observation.
-    pub(crate) timestamps: Vec1<Epoch>,
+    pub timestamps: Vec1<Epoch>,
 
     /// The *available* timestep indices of the input data. This does not
     /// necessarily start at 0, and is not necessarily regular (e.g. a valid
@@ -37,7 +37,7 @@ pub(crate) struct ObsContext {
     /// data that also isn't regular; naively reading in a dataset with 2
     /// timesteps that are separated by more than the time resolution of the
     /// data would give misleading results.
-    pub(crate) all_timesteps: Vec1<usize>,
+    pub all_timesteps: Vec1<usize>,
 
     /// The timestep indices of the input data that aren't totally flagged.
     ///
@@ -107,7 +107,7 @@ pub(crate) struct ObsContext {
     ///
     /// These are kept as ints to help some otherwise error-prone calculations
     /// using floats. By using ints, we assume there is no sub-Hz structure.
-    pub(crate) fine_chan_freqs: Vec1<u64>,
+    pub fine_chan_freqs: Vec1<u64>,
 
     /// The flagged fine channels for each baseline in the supplied data. Zero
     /// indexed.

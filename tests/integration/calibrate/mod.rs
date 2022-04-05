@@ -8,12 +8,16 @@ mod cli_args;
 
 use approx::assert_abs_diff_eq;
 use clap::Parser;
+use mwa_hyperdrive_beam::Delays;
 use mwalib::*;
 use serial_test::serial;
 
 use crate::*;
-use mwa_hyperdrive::calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError};
-use mwa_hyperdrive_common::{clap, mwalib};
+use mwa_hyperdrive::{
+    calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError},
+    data_formats::{InputData, UvfitsReader, MS},
+};
+use mwa_hyperdrive_common::{clap, hifitime::Epoch, mwalib};
 
 /// If di-calibrate is working, it should not write anything to stderr.
 #[test]
@@ -55,6 +59,7 @@ fn test_1090008640_di_calibrate_writes_solutions() {
         "--source-list", &args.source_list.unwrap(),
         "--outputs", &format!("{}", sols.display()),
         "--model-filename", &format!("{}", cal_model.display()),
+        "--no-progress-bars",
     ]);
 
     // Run di-cal and check that it succeeds
@@ -80,6 +85,7 @@ fn test_1090008640_woden() {
         "--data", "test_files/1090008640_WODEN/output_band01.uvfits",
         "--source-list", "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
         "--outputs", &format!("{}", solutions_path.display()),
+        "--no-progress-bars",
     ]);
 
     // Run di-cal and check that it fails
@@ -160,6 +166,7 @@ fn test_1090008640_woden() {
         "--cpu",
         "--outputs",
         &format!("{}", solutions_path.display()),
+        "--no-progress-bars",
     ]);
 
     // Run di-cal and check that it fails
@@ -202,6 +209,7 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits() {
         "--source-list", &args.source_list.unwrap(),
         "--outputs", &format!("{}", out_vis_path.display()),
         "--model-filename", &format!("{}", cal_model.display()),
+        "--no-progress-bars",
     ]);
 
     // Run di-cal and check that it succeeds
@@ -246,7 +254,8 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_avg_freq() {
         "--source-list", &args.source_list.unwrap(),
         "--outputs", &format!("{}", out_vis_path.display()),
         "--model-filename", &format!("{}", cal_model.display()),
-        "--output-vis-freq-average", &format!("{}", freq_avg_factor)
+        "--output-vis-freq-average", &format!("{}", freq_avg_factor),
+        "--no-progress-bars",
     ]);
 
     // Run di-cal and check that it succeeds
@@ -269,4 +278,68 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_avg_freq() {
     let num_fine_freq_chans: String =
         get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
     assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
+}
+
+#[test]
+#[serial]
+fn test_1090008640_di_calibrate_writes_vis_uvfits_ms() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let args = get_reduced_1090008640(true, false);
+    let data = args.data.unwrap();
+    let metafits = &data[0];
+    let gpufits = &data[1];
+    let out_uvfits_path = tmp_dir.join("vis.uvfits");
+    let out_ms_path = tmp_dir.join("vis.ms");
+    let cal_model = tmp_dir.join("hyp_model.uvfits");
+
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", metafits, gpufits,
+        "--source-list", &args.source_list.unwrap(),
+        "--outputs",
+            &format!("{}", out_uvfits_path.display()),
+            &format!("{}", out_ms_path.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
+        "--no-progress-bars",
+    ]);
+
+    if out_ms_path.exists() {
+        std::fs::remove_dir_all(&out_ms_path).unwrap();
+    }
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    let exp_timesteps = 1;
+    let exp_channels = 32;
+
+    // check uvfits file has been created, is readable
+    assert!(out_uvfits_path.exists(), "out vis file not written");
+
+    let uvfits_data =
+        UvfitsReader::new(&out_uvfits_path, Some(metafits), &mut Delays::None).unwrap();
+
+    let uvfits_ctx = uvfits_data.get_obs_context();
+
+    // check ms file has been created, is readable
+    assert!(out_ms_path.exists(), "out vis file not written");
+
+    let ms_data = MS::new(&out_ms_path, Some(metafits), &mut Delays::None).unwrap();
+
+    let ms_ctx = ms_data.get_obs_context();
+
+    // XXX(dev): Can't write obsid to ms file without MwaObsContext "MS obsid not available (no MWA_GPS_TIME in OBSERVATION table)"
+    // assert_eq!(uvfits_ctx.obsid, ms_ctx.obsid);
+    assert_eq!(uvfits_ctx.obsid, Some(1090008640));
+    assert_eq!(uvfits_ctx.timestamps, ms_ctx.timestamps);
+    assert_eq!(
+        uvfits_ctx.timestamps,
+        vec![Epoch::from_gpst_seconds(1090008659.)]
+    );
+    assert_eq!(uvfits_ctx.all_timesteps, ms_ctx.all_timesteps);
+    assert_eq!(uvfits_ctx.all_timesteps.len(), exp_timesteps);
+    assert_eq!(uvfits_ctx.fine_chan_freqs, ms_ctx.fine_chan_freqs);
+    assert_eq!(uvfits_ctx.fine_chan_freqs.len(), exp_channels);
 }

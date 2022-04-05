@@ -4,7 +4,7 @@
 
 //! Error type for all calibration-related errors.
 
-use marlu::io::error::{IOError as MarluIOError, UvfitsWriteError};
+use marlu::io::error::{IOError as MarluIOError, MeasurementSetWriteError, UvfitsWriteError};
 use mwalib::fitsio;
 use thiserror::Error;
 
@@ -55,6 +55,9 @@ pub enum CalibrateError {
 
     #[error("Error when writing uvfits: {0}")]
     UviftsWrite(#[from] UvfitsWriteError),
+
+    #[error("Error when writing measurement set: {0}")]
+    MeasurementSetWrite(#[from] MeasurementSetWriteError),
 
     #[error("Error when using Marlu for IO: {0}")]
     MarluIO(#[from] MarluIOError),

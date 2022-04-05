@@ -13,17 +13,23 @@ pub use code::calibrate_timeblocks;
 use code::*;
 
 use hifitime::{Duration, Unit};
-use itertools::{izip, Itertools};
+use itertools::izip;
 use log::{debug, info, log_enabled, trace, Level::Debug};
 use marlu::{
-    math::cross_correlation_baseline_to_tiles, Jones, UvfitsWriter, VisContext, VisWritable,
+    math::cross_correlation_baseline_to_tiles, Jones, MeasurementSetWriter,
+    ObsContext as MarluObsContext, UvfitsWriter, VisContext, VisWritable,
 };
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
 use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
 use crate::data_formats::VisOutputType;
-use mwa_hyperdrive_common::{hifitime, itertools, log, marlu, ndarray, rayon};
+use mwa_hyperdrive_common::{
+    hifitime::{self, Epoch},
+    itertools, log, marlu, ndarray,
+    num_traits::Zero,
+    rayon,
+};
 
 /// Do all the steps required for direction-independent calibration; read the
 /// input data, generate a model against it, and write the solutions out.
@@ -140,6 +146,8 @@ pub(crate) fn di_calibrate(
 
     // Write out calibrated visibilities.
     if !params.output_vis_filenames.is_empty() {
+        info!("Writing visibilities...");
+
         debug!("Dividing visibilities by weights");
         // Divide the visibilities by the weights (undoing the multiplication earlier).
         vis_data
@@ -162,20 +170,20 @@ pub(crate) fn di_calibrate(
                     });
             });
 
-        info!("Writing visibilities...");
+        // TODO(dev): support and test time averaging for calibrated vis
+        if params.output_vis_time_average_factor > 1 {
+            panic!("time averaging for calibrated vis not supported");
+        }
 
         let ant_pairs: Vec<(usize, usize)> = params.get_ant_pairs();
         let int_time: Duration = Duration::from_f64(obs_context.time_res.unwrap(), Unit::Second);
 
-        // TODO(dev): support sparse timesteps by chunking over time
-        for (&past, &future) in params.timesteps.iter().tuple_windows() {
-            assert!(future > past);
-            assert!(future - past == 1, "assuming contiguous timesteps");
-        }
+        let start_timestamp = obs_context.timestamps[params.timesteps[0]];
 
+        // XXX(Dev): VisContext does not support sparse timesteps, but in this case it doesn't matter
         let vis_ctx = VisContext {
             num_sel_timesteps: params.timesteps.len(),
-            start_timestamp: obs_context.timestamps[params.timesteps[0]],
+            start_timestamp,
             int_time,
             num_sel_chans: obs_context.fine_chan_freqs.len(),
             start_freq_hz: obs_context.fine_chan_freqs[0] as f64,
@@ -186,13 +194,10 @@ pub(crate) fn di_calibrate(
             num_vis_pols: 4,
         };
 
-        // pad and transpose the data
-        // TODO(dev): unify unpacking
+        let obs_name = obs_context.obsid.map(|o| format!("MWA obsid {}", o));
 
-        // out data is [time, freq, baseline], in data is [time, baseline, freq]
+        // shape of entire output [time, freq, baseline]. in data is [time, baseline, freq]
         let out_shape = vis_ctx.sel_dims();
-        let mut out_data = Array3::zeros(out_shape);
-        let mut out_weights = Array3::from_elem(out_shape, -0.0);
 
         assert_eq!(vis_weights.dim(), vis_data.dim());
         // time
@@ -205,23 +210,90 @@ pub(crate) fn di_calibrate(
             out_shape.1
         );
 
+        // re-use output arrays each timestep chunk
+        let out_shape_timestep = (1, out_shape.1, out_shape.2);
+        let mut tmp_out_data = Array3::from_elem(out_shape_timestep, Jones::zero());
+        let mut tmp_out_weights = Array3::from_elem(out_shape_timestep, -0.0);
+
+        // create a VisWritable for each output vis filename
+        let mut out_writers: Vec<(VisOutputType, Box<dyn VisWritable>)> = vec![];
+        for (vis_type, file) in params.output_vis_filenames.iter() {
+            match vis_type {
+                VisOutputType::Uvfits => {
+                    trace!(" - to uvfits {}", file.display());
+
+                    let writer = UvfitsWriter::from_marlu(
+                        &file,
+                        &vis_ctx,
+                        Some(params.array_position),
+                        obs_context.phase_centre,
+                        obs_name.clone(),
+                    )?;
+
+                    out_writers.push((VisOutputType::Uvfits, Box::new(writer)));
+                }
+                VisOutputType::MeasurementSet => {
+                    trace!(" - to measurement set {}", file.display());
+                    let writer = MeasurementSetWriter::new(
+                        &file,
+                        obs_context.phase_centre,
+                        Some(params.array_position),
+                    );
+
+                    let sched_start_timestamp = match obs_context.obsid {
+                        Some(gpst) => Epoch::from_gpst_seconds(gpst as f64),
+                        None => start_timestamp,
+                    };
+                    let sched_duration = *obs_context.timestamps.last() - sched_start_timestamp;
+
+                    let marlu_obs_ctx = MarluObsContext {
+                        sched_start_timestamp,
+                        sched_duration,
+                        name: obs_name.clone(),
+                        phase_centre: obs_context.phase_centre,
+                        pointing_centre: obs_context.pointing_centre,
+                        array_pos: params.array_position,
+                        ant_positions_enh: obs_context
+                            .tile_xyzs
+                            .iter()
+                            .map(|xyz| xyz.to_enh(params.array_position.latitude_rad))
+                            .collect(),
+                        ant_names: obs_context.tile_names.iter().cloned().collect(),
+                        // TODO(dev): is there any value in adding this metadata via hyperdrive obs context?
+                        field_name: None,
+                        project_id: None,
+                        observer: None,
+                    };
+
+                    writer.initialize(&vis_ctx, &marlu_obs_ctx)?;
+                    out_writers.push((VisOutputType::MeasurementSet, Box::new(writer)));
+                }
+            };
+        }
+
         // zip over time axis;
-        for (mut out_data, mut out_weights, vis_data, vis_weights) in izip!(
-            out_data.outer_iter_mut(),
-            out_weights.outer_iter_mut(),
+        for (&timestep, vis_data, vis_weights) in izip!(
+            params.timesteps.iter(),
             vis_data.outer_iter(),
             vis_weights.outer_iter(),
         ) {
+            let chunk_vis_ctx = VisContext {
+                start_timestamp: obs_context.timestamps[timestep],
+                ..vis_ctx.clone()
+            };
+            tmp_out_data.fill(Jones::zero());
+            tmp_out_weights.fill(-0.0);
+
             // zip over baseline axis
-            for (mut out_data, mut out_weights, vis_data, vis_weights) in izip!(
-                out_data.axis_iter_mut(Axis(1)),
-                out_weights.axis_iter_mut(Axis(1)),
+            for (mut tmp_out_data, mut tmp_out_weights, vis_data, vis_weights) in izip!(
+                tmp_out_data.axis_iter_mut(Axis(1)),
+                tmp_out_weights.axis_iter_mut(Axis(1)),
                 vis_data.axis_iter(Axis(0)),
                 vis_weights.axis_iter(Axis(0))
             ) {
                 // merge frequency axis
                 for ((_, out_jones, out_weight), in_jones, in_weight) in izip!(
-                    izip!(0.., out_data.iter_mut(), out_weights.iter_mut(),)
+                    izip!(0.., tmp_out_data.iter_mut(), tmp_out_weights.iter_mut(),)
                         .filter(|(chan_idx, _, _)| !params.flagged_fine_chans.contains(chan_idx)),
                     vis_data.iter(),
                     vis_weights.iter()
@@ -230,39 +302,26 @@ pub(crate) fn di_calibrate(
                     *out_weight = *in_weight;
                 }
             }
+
+            for (_, writer) in out_writers.iter_mut() {
+                writer.write_vis_marlu(
+                    tmp_out_data.view(),
+                    tmp_out_weights.view(),
+                    &chunk_vis_ctx,
+                    &obs_context.tile_xyzs,
+                    false,
+                )?;
+            }
         }
 
-        let obs_name = obs_context.obsid.map(|o| format!("MWA obsid {}", o));
-
-        for (vis_type, file) in &params.output_vis_filenames {
-            match vis_type {
-                // TODO: Make this an obs_context method?
-                VisOutputType::Uvfits => {
-                    trace!("Writing to output uvfits");
-
-                    let mut writer = UvfitsWriter::from_marlu(
-                        &file,
-                        &vis_ctx,
-                        Some(params.array_position),
-                        obs_context.phase_centre,
-                        obs_name.clone(),
-                    )?;
-
-                    writer.write_vis_marlu(
-                        out_data.view(),
-                        out_weights.view(),
-                        &vis_ctx,
-                        &obs_context.tile_xyzs,
-                        false,
-                    )?;
-
-                    writer.write_uvfits_antenna_table(
-                        &obs_context.tile_names,
-                        &obs_context.tile_xyzs,
-                    )?;
-                } // TODO(dev): Other formats
+        // finalize writing uvfits
+        for (vis_type, writer) in out_writers.into_iter() {
+            if matches!(vis_type, VisOutputType::Uvfits) {
+                let uvfits_writer =
+                    unsafe { Box::from_raw(Box::into_raw(writer) as *mut UvfitsWriter) };
+                uvfits_writer
+                    .write_uvfits_antenna_table(&obs_context.tile_names, &obs_context.tile_xyzs)?;
             }
-            info!("Calibrated visibilities written to {}", file.display());
         }
     }
 
