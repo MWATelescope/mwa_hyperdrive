@@ -4,8 +4,11 @@
 
 //! Integration tests for sky-model visibilities generated during calibration.
 
+use std::collections::HashSet;
+
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use marlu::Jones;
+use mwa_hyperdrive_beam::Delays;
 use mwalib::{fitsio_sys, *};
 use ndarray::prelude::*;
 use serial_test::serial;
@@ -13,6 +16,8 @@ use serial_test::serial;
 use crate::*;
 use mwa_hyperdrive::{
     calibrate::{di_calibrate, solutions::CalibrationSolutions},
+    data_formats::{InputData, MS},
+    math::TileBaselineMaps,
     simulate_vis::{simulate_vis, SimulateVisArgs},
 };
 use mwa_hyperdrive_common::{clap::Parser, marlu, mwalib, ndarray};
@@ -176,4 +181,107 @@ fn test_1090008640_calibrate_model() {
         Array3::from_elem(sols.di_jones.dim(), TestJones::from(Jones::identity())),
         epsilon = 1e-15
     );
+}
+
+#[test]
+#[serial]
+/// Generate a model with "simulate-vis", then feed it to "di-calibrate" and
+/// write out the model used for calibration. The visibilities should be exactly
+/// the same.
+fn test_1090008640_calibrate_model_ms() {
+    let num_timesteps = 2;
+    let num_chans = 10;
+
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+    let mut model = temp_dir.clone();
+    model.push("model.ms");
+    let args = get_reduced_1090008640(true, false);
+    let metafits = &args.data.as_ref().unwrap()[0];
+    let srclist = args.source_list.unwrap();
+    #[rustfmt::skip]
+    let sim_args = SimulateVisArgs::parse_from(&[
+        "simulate-vis",
+        "--metafits", metafits,
+        "--source-list", &srclist,
+        "--output-model-file", &format!("{}", model.display()),
+        "--num-timesteps", &format!("{}", num_timesteps),
+        "--num-fine-channels", &format!("{}", num_chans),
+    ]);
+
+    // Run simulate-vis and check that it succeeds
+    let result = simulate_vis(
+        sim_args,
+        #[cfg(feature = "cuda")]
+        false,
+        false,
+    );
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    let mut sols = temp_dir.clone();
+    sols.push("sols.fits");
+    let mut cal_model = temp_dir;
+    cal_model.push("cal_model.ms");
+
+    #[rustfmt::skip]
+    let cal_args = CalibrateUserArgs::parse_from(&[
+        "di-calibrate",
+        "--data", &format!("{}", model.display()), metafits,
+        "--source-list", &srclist,
+        "--outputs", &format!("{}", sols.display()),
+        "--model-filename", &format!("{}", cal_model.display()),
+        "--ignore-autos",
+    ]);
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    let ms_m = MS::new(&model, Some(metafits), &mut Delays::None).unwrap();
+    let ctx_m = ms_m.get_obs_context();
+    let ms_c = MS::new(&model, Some(metafits), &mut Delays::None).unwrap();
+    let ctx_c = ms_c.get_obs_context();
+
+    assert_eq!(ctx_m.all_timesteps, ctx_c.all_timesteps);
+    assert_eq!(ctx_m.all_timesteps.len(), num_timesteps);
+    assert_eq!(ctx_m.fine_chan_freqs, ctx_c.fine_chan_freqs);
+    assert_eq!(ctx_m.flagged_tiles, ctx_c.flagged_tiles);
+    assert_eq!(ctx_m.tile_xyzs, ctx_c.tile_xyzs);
+    assert_eq!(ctx_m.flagged_fine_chans, ctx_c.flagged_fine_chans);
+
+    let flagged_fine_chans_set: HashSet<usize> = ctx_m.flagged_fine_chans.iter().cloned().collect();
+    let tile_to_baseline_map = TileBaselineMaps::new(ctx_m.tile_xyzs.len(), &ctx_m.flagged_tiles)
+        .tile_to_unflagged_cross_baseline_map;
+    let max_baseline_idx = tile_to_baseline_map.values().max().unwrap();
+    let data_shape = (
+        max_baseline_idx + 1,
+        ctx_m.fine_chan_freqs.len() - ctx_m.flagged_fine_chans.len(),
+    );
+    let mut vis_m = Array2::<Jones<f32>>::zeros(data_shape);
+    let mut vis_c = Array2::<Jones<f32>>::zeros(data_shape);
+    let mut weight_m = Array2::<f32>::zeros(data_shape);
+    let mut weight_c = Array2::<f32>::zeros(data_shape);
+
+    for timestep in ctx_m.all_timesteps.clone() {
+        ms_m.read_crosses(
+            vis_m.view_mut(),
+            weight_m.view_mut(),
+            timestep,
+            &tile_to_baseline_map,
+            &flagged_fine_chans_set,
+        )
+        .unwrap();
+        ms_c.read_crosses(
+            vis_c.view_mut(),
+            weight_c.view_mut(),
+            timestep,
+            &tile_to_baseline_map,
+            &flagged_fine_chans_set,
+        )
+        .unwrap();
+
+        assert_abs_diff_eq!(vis_m.mapv(TestJones::from), vis_c.mapv(TestJones::from));
+        assert_abs_diff_eq!(weight_m, weight_c);
+    }
+
+    // let mut data_m = Array2::from_elem(())
 }

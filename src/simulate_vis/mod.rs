@@ -5,11 +5,13 @@
 //! Generate sky-model visibilities from a sky-model source list.
 
 mod error;
+use birli::marlu::MeasurementSetWriter;
 pub use error::SimulateVisError;
 
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use clap::Parser;
 use hifitime::Epoch;
@@ -18,13 +20,14 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info};
 use marlu::{
-    precession::precess_time, Jones, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable,
-    XyzGeodetic,
+    precession::precess_time, Jones, LatLngHeight, ObsContext as MarluObsContext, RADec,
+    UvfitsWriter, VisContext, VisWritable, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use serde::Deserialize;
 
+use crate::data_formats::VisOutputType;
 use crate::{
     data_formats::{get_dipole_delays, get_dipole_gains},
     glob::get_single_match_from_glob,
@@ -526,13 +529,79 @@ pub fn simulate_vis(
         params.metafits.obs_id
     ));
 
-    let mut output_writer = UvfitsWriter::from_marlu(
-        &params.output_model_file,
-        &vis_ctx,
-        Some(params.array_position),
-        params.phase_centre,
-        obs_name,
-    )?;
+    let output_type = match params
+        .output_model_file
+        .extension()
+        .and_then(|e| e.to_str())
+    {
+        Some(s) => {
+            VisOutputType::from_str(s).map_err(|e| SimulateVisError::OutputFileExtension {
+                path: format!("{}", &params.output_model_file.display()),
+                message: e.to_string(),
+            })?
+        }
+        None => {
+            return Err(SimulateVisError::OutputFileExtension {
+                path: format!("{}", &params.output_model_file.display()),
+                message: "no extension".to_string(),
+            })
+        }
+    };
+
+    let tile_names: Vec<&str> = params
+        .metafits
+        .rf_inputs
+        .iter()
+        .filter(|rf| rf.pol == mwalib::Pol::X)
+        .map(|rf| rf.tile_name.as_str())
+        .collect();
+
+    let mut output_writer: Box<dyn VisWritable> = match output_type {
+        VisOutputType::Uvfits => {
+            let writer = UvfitsWriter::from_marlu(
+                &params.output_model_file,
+                &vis_ctx,
+                Some(params.array_position),
+                params.phase_centre,
+                obs_name,
+            )?;
+            Box::new(writer)
+        }
+        VisOutputType::MeasurementSet => {
+            let writer = MeasurementSetWriter::new(
+                &params.output_model_file,
+                params.phase_centre,
+                Some(params.array_position),
+            );
+
+            let sched_start_timestamp = vis_ctx.start_timestamp;
+
+            let sched_duration =
+                *params.timestamps.last().unwrap() + params.int_time - sched_start_timestamp;
+
+            let marlu_obs_ctx = MarluObsContext {
+                sched_start_timestamp,
+                sched_duration,
+                name: obs_name,
+                phase_centre: params.phase_centre,
+                // XXX(Dev): is this right?
+                pointing_centre: None,
+                array_pos: params.array_position,
+                ant_positions_enh: params
+                    .xyzs
+                    .iter()
+                    .map(|xyz| xyz.to_enh(params.array_position.latitude_rad))
+                    .collect(),
+                ant_names: tile_names.iter().map(|&s| s.to_string()).collect(),
+                // TODO(dev): is there any value in adding this metadata via hyperdrive obs context?
+                field_name: None,
+                project_id: None,
+                observer: None,
+            };
+            writer.initialize(&vis_ctx, &marlu_obs_ctx)?;
+            Box::new(writer)
+        }
+    };
 
     // Create a "modeller" object.
     let modeller = model::new_sky_modeller(
@@ -602,14 +671,11 @@ pub fn simulate_vis(
     model_progress.finish_with_message("Finished generating sky model");
 
     // Finalise writing the model.
-    let names: Vec<&str> = params
-        .metafits
-        .rf_inputs
-        .iter()
-        .filter(|rf| rf.pol == mwalib::Pol::X)
-        .map(|rf| rf.tile_name.as_str())
-        .collect();
-    output_writer.write_uvfits_antenna_table(&names, &params.xyzs)?;
+    if matches!(output_type, VisOutputType::Uvfits) {
+        let uvfits_writer =
+            unsafe { Box::from_raw(Box::into_raw(output_writer) as *mut UvfitsWriter) };
+        uvfits_writer.write_uvfits_antenna_table(&tile_names, &params.xyzs)?;
+    }
     info!(
         "Finished writing sky model to {}",
         &params.output_model_file.display()

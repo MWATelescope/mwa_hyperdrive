@@ -240,7 +240,8 @@ pub(crate) fn di_calibrate(
                         Some(gpst) => Epoch::from_gpst_seconds(gpst as f64),
                         None => start_timestamp,
                     };
-                    let sched_duration = *obs_context.timestamps.last() - sched_start_timestamp;
+                    let sched_duration =
+                        *obs_context.timestamps.last() + int_time - sched_start_timestamp;
 
                     let marlu_obs_ctx = MarluObsContext {
                         sched_start_timestamp,

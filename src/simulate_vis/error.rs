@@ -6,7 +6,7 @@
 Error type for all simulate-vis-related errors.
  */
 
-use marlu::{io::error::IOError as MarluIOError, UvfitsWriteError};
+use marlu::io::error::{IOError as MarluIOError, MeasurementSetWriteError, UvfitsWriteError};
 use thiserror::Error;
 
 use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
@@ -62,4 +62,10 @@ pub enum SimulateVisError {
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
+
+    #[error("invalid file extension of output path {path}. {message}")]
+    OutputFileExtension { path: String, message: String },
+
+    #[error("Error when writing measurement set: {0}")]
+    MeasurementSetWrite(#[from] MeasurementSetWriteError),
 }

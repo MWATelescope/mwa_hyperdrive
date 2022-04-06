@@ -68,11 +68,11 @@ pub struct ObsContext {
     /// The [XyzGeodetic] coordinates of all tiles in the array (all coordinates
     /// are specified in \[metres\]). This includes tiles that have been flagged
     /// in the input data.
-    pub(crate) tile_xyzs: Vec1<XyzGeodetic>,
+    pub tile_xyzs: Vec1<XyzGeodetic>,
 
     /// The flagged tiles, either already missing data or suggested to be
     /// flagged. Zero indexed.
-    pub(crate) flagged_tiles: Vec<usize>,
+    pub flagged_tiles: Vec<usize>,
 
     /// Are auto-correlations present in the visibility data?
     pub(crate) _autocorrelations_present: bool,
@@ -121,7 +121,7 @@ pub struct ObsContext {
 
     /// The flagged fine channels for each baseline in the supplied data. Zero
     /// indexed.
-    pub(crate) flagged_fine_chans: Vec<usize>,
+    pub flagged_fine_chans: Vec<usize>,
 
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
