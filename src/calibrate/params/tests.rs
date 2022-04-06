@@ -383,16 +383,20 @@ fn test_handle_bad_array_pos() {
 }
 
 #[test]
-/// test that it correctly stacks averaging factor.
+/// Test that the input visibility frequency average factor stacks with the
+/// output frequency averaging factor.
 ///
-/// TODO(dev): use test data with multiple timesteps to test time factor stacking
+/// TODO(dev): use test data with multiple timesteps to test time factor
+/// stacking
 fn test_handle_both_vis_avg() {
     let mut args = get_reduced_1090008640(true);
+    // The input data is 40kHz; input is averaged 2x
     args.freq_average_factor = Some("80kHz".into());
+    // Output is averaged 2x from the averaged input; a total of 4.
     args.output_vis_freq_average = Some("160kHz".into());
     args.outputs = Some(vec!["test.uvfits".into()]);
     let result = args.into_params().unwrap();
 
-    // output averaging factor should be relative to cal averaging factor.
-    assert_eq!(result.output_vis_freq_average_factor, 2);
+    // output averaging factor is relative to the input frequency resolution.
+    assert_eq!(result.output_vis_freq_average_factor, 4);
 }

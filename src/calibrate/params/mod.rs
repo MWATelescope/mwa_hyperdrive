@@ -804,44 +804,38 @@ impl CalibrateParams {
             } else {
                 // Parse and verify user input (specified resolutions must
                 // evenly divide the input data's resolutions).
-                let time_factor = parse_time_average_factor(
-                    obs_context
-                        .time_res
-                        .map(|res| res * time_average_factor as f64),
-                    output_vis_time_average,
-                    1,
-                )
-                .map_err(|e| match e {
-                    AverageFactorError::Zero => InvalidArgsError::OutputVisTimeAverageFactorZero,
-                    AverageFactorError::NotInteger => {
-                        InvalidArgsError::OutputVisTimeFactorNotInteger
-                    }
-                    AverageFactorError::NotIntegerMultiple { out, inp } => {
-                        InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
-                    }
-                    AverageFactorError::Parse(e) => {
-                        InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
-                    }
-                })?;
-                let freq_factor = parse_freq_average_factor(
-                    obs_context
-                        .freq_res
-                        .map(|res| res * freq_average_factor as f64),
-                    output_vis_freq_average,
-                    1,
-                )
-                .map_err(|e| match e {
-                    AverageFactorError::Zero => InvalidArgsError::OutputVisFreqAverageFactorZero,
-                    AverageFactorError::NotInteger => {
-                        InvalidArgsError::OutputVisFreqFactorNotInteger
-                    }
-                    AverageFactorError::NotIntegerMultiple { out, inp } => {
-                        InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
-                    }
-                    AverageFactorError::Parse(e) => {
-                        InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
-                    }
-                })?;
+                let time_factor =
+                    parse_time_average_factor(obs_context.time_res, output_vis_time_average, 1)
+                        .map_err(|e| match e {
+                            AverageFactorError::Zero => {
+                                InvalidArgsError::OutputVisTimeAverageFactorZero
+                            }
+                            AverageFactorError::NotInteger => {
+                                InvalidArgsError::OutputVisTimeFactorNotInteger
+                            }
+                            AverageFactorError::NotIntegerMultiple { out, inp } => {
+                                InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
+                            }
+                            AverageFactorError::Parse(e) => {
+                                InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
+                            }
+                        })?;
+                let freq_factor =
+                    parse_freq_average_factor(obs_context.freq_res, output_vis_freq_average, 1)
+                        .map_err(|e| match e {
+                            AverageFactorError::Zero => {
+                                InvalidArgsError::OutputVisFreqAverageFactorZero
+                            }
+                            AverageFactorError::NotInteger => {
+                                InvalidArgsError::OutputVisFreqFactorNotInteger
+                            }
+                            AverageFactorError::NotIntegerMultiple { out, inp } => {
+                                InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
+                            }
+                            AverageFactorError::Parse(e) => {
+                                InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
+                            }
+                        })?;
 
                 (time_factor, freq_factor)
             };
