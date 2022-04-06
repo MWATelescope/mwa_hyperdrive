@@ -186,7 +186,7 @@ fn test_1090008640_woden() {
 
 #[test]
 #[serial]
-fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
+fn test_1090008640_di_calibrate_writes_vis_uvfits() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
@@ -202,7 +202,6 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
         "--source-list", &args.source_list.unwrap(),
         "--outputs", &format!("{}", out_vis_path.display()),
         "--model-filename", &format!("{}", cal_model.display()),
-        "--ignore-autos",
     ]);
 
     // Run di-cal and check that it succeeds
@@ -222,12 +221,6 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
         gcount.parse::<usize>().unwrap(),
         exp_timesteps * exp_baselines
     );
-    // let pcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "PCOUNT").unwrap();
-    // assert_eq!(pcount.parse::<usize>().unwrap(), 5);
-    // let floats_per_pol: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS2").unwrap();
-    // assert_eq!(floats_per_pol.parse::<usize>().unwrap(), 3);
-    // let num_pols: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS3").unwrap();
-    // assert_eq!(num_pols.parse::<usize>().unwrap(), 4);
     let num_fine_freq_chans: String =
         get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
     assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
@@ -235,7 +228,7 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos() {
 
 #[test]
 #[serial]
-fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos_avg_freq() {
+fn test_1090008640_di_calibrate_writes_vis_uvfits_avg_freq() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
     let args = get_reduced_1090008640(true, false);
     let data = args.data.unwrap();
@@ -253,7 +246,6 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos_avg_freq() {
         "--source-list", &args.source_list.unwrap(),
         "--outputs", &format!("{}", out_vis_path.display()),
         "--model-filename", &format!("{}", cal_model.display()),
-        "--ignore-autos",
         "--output-vis-freq-average", &format!("{}", freq_avg_factor)
     ]);
 
@@ -274,12 +266,6 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_noautos_avg_freq() {
         gcount.parse::<usize>().unwrap(),
         exp_timesteps * exp_baselines
     );
-    // let pcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "PCOUNT").unwrap();
-    // assert_eq!(pcount.parse::<usize>().unwrap(), 5);
-    // let floats_per_pol: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS2").unwrap();
-    // assert_eq!(floats_per_pol.parse::<usize>().unwrap(), 3);
-    // let num_pols: String = get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS3").unwrap();
-    // assert_eq!(num_pols.parse::<usize>().unwrap(), 4);
     let num_fine_freq_chans: String =
         get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
     assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);

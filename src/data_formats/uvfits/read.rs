@@ -356,7 +356,7 @@ impl UvfitsReader {
                 tile_names,
                 tile_xyzs,
                 flagged_tiles,
-                autocorrelations_present: metadata.autocorrelations_present,
+                _autocorrelations_present: metadata.autocorrelations_present,
                 dipole_gains,
                 time_res,
                 // XXX(Dev): Can this be obtained from the ARRAY{X,Y,Z} keys? (geocentric, wgs84)

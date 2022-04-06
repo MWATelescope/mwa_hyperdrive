@@ -517,7 +517,7 @@ fn test_mwaf_flags() {
 
     // Iterate over the arrays, where are the differences? They should be
     // primes.
-    let num_bls = params.get_num_unflagged_baselines();
+    let num_bls = params.get_num_unflagged_cross_baselines();
     let num_freqs = params.get_obs_context().fine_chan_freqs.len();
     // Unfortunately we have to conditionally select either the auto or cross
     // visibilities.

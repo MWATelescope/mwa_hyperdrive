@@ -307,7 +307,6 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
         "--output-model-file", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
-        "--cpu",
     ]);
     let result = simulate_vis(sim_args, true, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());

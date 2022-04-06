@@ -147,9 +147,6 @@ pub(crate) struct CalibrateParams {
     /// flagged.
     pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
 
-    /// Are auto-correlations being included?
-    pub(crate) using_autos: bool,
-
     /// The names of the unflagged tiles.
     pub(crate) unflagged_tile_names: Vec<String>,
 
@@ -218,7 +215,6 @@ impl CalibrateParams {
             source_list_type,
             outputs,
             model_filename,
-            ignore_autos,
             output_vis_time_average,
             output_vis_freq_average,
             num_sources,
@@ -850,11 +846,6 @@ impl CalibrateParams {
                 (time_factor, freq_factor)
             };
 
-        let using_autos = if ignore_autos {
-            false
-        } else {
-            obs_context.autocorrelations_present
-        };
         // XXX(Dev): TileBaselineMaps logic might fit inside FlagContext
         let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
 
@@ -976,7 +967,6 @@ impl CalibrateParams {
             flagged_fine_chans,
             tile_to_unflagged_cross_baseline_map: tile_baseline_maps
                 .tile_to_unflagged_cross_baseline_map,
-            using_autos,
             unflagged_tile_names,
             unflagged_tile_xyzs,
             array_position,
@@ -1018,19 +1008,6 @@ impl CalibrateParams {
             .fold(0, |acc, tb| acc + tb.range.len())
     }
 
-    /// The number of unflagged baselines, including auto-correlation
-    /// "baselines" if these are included.
-    // TODO(dev): this is only used in tests
-    #[allow(dead_code)]
-    pub(crate) fn get_num_unflagged_baselines(&self) -> usize {
-        let n = self.unflagged_tile_xyzs.len();
-        if self.using_autos {
-            (n * (n + 1)) / 2
-        } else {
-            (n * (n - 1)) / 2
-        }
-    }
-
     /// The number of unflagged cross-correlation baselines.
     pub(crate) fn get_num_unflagged_cross_baselines(&self) -> usize {
         let n = self.unflagged_tile_xyzs.len();
@@ -1042,7 +1019,6 @@ impl CalibrateParams {
     /// and 1 are unflagged, then the first baseline is (0,1), and the first
     /// element here is (0,1).
     pub(crate) fn get_ant_pairs(&self) -> Vec<(usize, usize)> {
-        // TODO(Dev): support autos
         self.tile_to_unflagged_cross_baseline_map
             .keys()
             .cloned()

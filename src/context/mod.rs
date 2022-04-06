@@ -65,7 +65,7 @@ pub(crate) struct ObsContext {
     pub(crate) flagged_tiles: Vec<usize>,
 
     /// Are auto-correlations present in the visibility data?
-    pub(crate) autocorrelations_present: bool,
+    pub(crate) _autocorrelations_present: bool,
 
     /// The dipole gains for each tile in the array. The first axis is unflagged
     /// antenna, the second dipole index. These will typically all be of value

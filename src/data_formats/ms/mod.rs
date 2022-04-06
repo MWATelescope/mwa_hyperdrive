@@ -558,7 +558,7 @@ impl MS {
                 tile_names,
                 tile_xyzs,
                 flagged_tiles,
-                autocorrelations_present,
+                _autocorrelations_present: autocorrelations_present,
                 dipole_gains,
                 time_res,
                 // XXX(Dev): no way to get array_pos from MS AFAIK

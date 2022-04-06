@@ -164,11 +164,6 @@ pub(crate) fn di_calibrate(
 
         info!("Writing visibilities...");
 
-        // TODO(dev): support and test autos
-        if params.using_autos {
-            panic!("not supperted yet... or are they?");
-        }
-
         let ant_pairs: Vec<(usize, usize)> = params.get_ant_pairs();
         let int_time: Duration = Duration::from_f64(obs_context.time_res.unwrap(), Unit::Second);
 

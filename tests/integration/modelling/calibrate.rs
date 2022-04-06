@@ -63,7 +63,6 @@ fn test_1090008640_calibrate_model() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filename", &format!("{}", cal_model.display()),
-        "--ignore-autos",
     ]);
 
     // Run di-cal and check that it succeeds

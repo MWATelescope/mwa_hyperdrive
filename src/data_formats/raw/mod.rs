@@ -366,7 +366,7 @@ impl RawDataReader {
             tile_names,
             tile_xyzs,
             flagged_tiles,
-            autocorrelations_present: true,
+            _autocorrelations_present: true,
             dipole_gains: Some(dipole_gains),
             time_res,
             array_position: Some(LatLngHeight::new_mwa()),

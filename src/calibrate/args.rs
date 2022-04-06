@@ -108,11 +108,6 @@ pub struct CalibrateUserArgs {
     #[clap(short, long, help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub model_filename: Option<PathBuf>,
 
-    /// When writing out calibrated visibilities, don't include
-    /// auto-correlations.
-    #[clap(long, help_heading = "OUTPUT FILES")]
-    pub ignore_autos: bool,
-
     /// When writing out calibrated visibilities, average this many timesteps
     /// together. Also supports a target time resolution (e.g. 8s). The value
     /// must be a multiple of the input data's time resolution. The default is
@@ -350,7 +345,6 @@ impl CalibrateUserArgs {
                 source_list_type,
                 outputs,
                 model_filename,
-                ignore_autos,
                 output_vis_time_average,
                 output_vis_freq_average,
                 num_sources,
@@ -389,7 +383,6 @@ impl CalibrateUserArgs {
                 source_list_type: cli_args.source_list_type.or(source_list_type),
                 outputs: cli_args.outputs.or(outputs),
                 model_filename: cli_args.model_filename.or(model_filename),
-                ignore_autos: cli_args.ignore_autos || ignore_autos,
                 output_vis_time_average: cli_args
                     .output_vis_time_average
                     .or(output_vis_time_average),
