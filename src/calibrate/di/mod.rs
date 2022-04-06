@@ -12,7 +12,6 @@ pub(crate) mod code;
 pub use code::calibrate_timeblocks;
 use code::*;
 
-use hifitime::{Duration, Unit};
 use itertools::izip;
 use log::{debug, info, log_enabled, trace, Level::Debug};
 use marlu::{
@@ -25,10 +24,7 @@ use rayon::prelude::*;
 use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
 use crate::data_formats::VisOutputType;
 use mwa_hyperdrive_common::{
-    hifitime::{self, Epoch},
-    itertools, log, marlu, ndarray,
-    num_traits::Zero,
-    rayon,
+    hifitime::Epoch, itertools, log, marlu, ndarray, num_traits::Zero, rayon,
 };
 
 /// Do all the steps required for direction-independent calibration; read the
@@ -176,7 +172,7 @@ pub(crate) fn di_calibrate(
         }
 
         let ant_pairs: Vec<(usize, usize)> = params.get_ant_pairs();
-        let int_time: Duration = Duration::from_f64(obs_context.time_res.unwrap(), Unit::Second);
+        let int_time = obs_context.guess_time_res();
 
         let start_timestamp = obs_context.timestamps[params.timesteps[0]];
 
@@ -187,7 +183,7 @@ pub(crate) fn di_calibrate(
             int_time,
             num_sel_chans: obs_context.fine_chan_freqs.len(),
             start_freq_hz: obs_context.fine_chan_freqs[0] as f64,
-            freq_resolution_hz: obs_context.freq_res.unwrap(),
+            freq_resolution_hz: obs_context.guess_freq_res(),
             sel_baselines: ant_pairs,
             avg_time: params.output_vis_time_average_factor,
             avg_freq: params.output_vis_freq_average_factor,

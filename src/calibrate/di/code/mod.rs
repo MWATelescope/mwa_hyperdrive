@@ -12,7 +12,7 @@ use std::ops::Deref;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossbeam_utils::{atomic::AtomicCell, thread};
-use hifitime::{Duration, Epoch, Unit};
+use hifitime::Epoch;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::izip;
 use log::{debug, info, trace};
@@ -34,7 +34,7 @@ use crate::{
 };
 use mwa_hyperdrive_common::{
     cfg_if, hifitime, indicatif, itertools,
-    log::{self, warn},
+    log::{self},
     marlu, ndarray, rayon,
 };
 
@@ -428,13 +428,7 @@ fn model_write(
         let start_epoch = params.timeblocks.first().start;
         let obs_context = params.get_obs_context();
         let ant_pairs: Vec<(usize, usize)> = params.get_ant_pairs();
-        let int_time: Duration = Duration::from_f64(
-            obs_context.time_res.unwrap_or_else(|| {
-                warn!("No integration time specified; assuming 1 second");
-                1.
-            }),
-            Unit::Second,
-        );
+        let int_time = obs_context.guess_time_res();
 
         let vis_ctx = VisContext {
             num_sel_timesteps: params.get_num_timesteps(),
@@ -442,10 +436,9 @@ fn model_write(
             int_time,
             num_sel_chans: fence.get_total_num_chanblocks(),
             start_freq_hz: fence.first_freq,
-            freq_resolution_hz: fence.freq_res.unwrap_or_else(|| {
-                warn!("No frequency resolution specified; assuming 10 kHz");
-                10_000.
-            }),
+            freq_resolution_hz: fence
+                .freq_res
+                .unwrap_or_else(|| obs_context.guess_freq_res()),
             sel_baselines: ant_pairs,
             avg_time: params.output_vis_time_average_factor,
             avg_freq: params.freq_average_factor,

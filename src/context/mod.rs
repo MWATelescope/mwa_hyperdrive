@@ -9,7 +9,17 @@ use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
+use mwa_hyperdrive_common::{
+    hifitime::{self, Duration, Unit},
+    log::warn,
+    marlu, ndarray, vec1,
+};
+
+use self::helpers::{guess_freq_res, guess_time_res};
+
+pub mod helpers;
+#[cfg(test)]
+mod tests;
 
 /// MWA observation metadata.
 ///
@@ -116,4 +126,36 @@ pub struct ObsContext {
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
     pub(crate) flagged_fine_chans_per_coarse_chan: Vec<usize>,
+}
+
+impl ObsContext {
+    /// Attempt to get time resolution using heuristics if it is not present.
+    ///
+    /// If `time_res` is `None`, then attempt to determine it from the minimum
+    /// distance between timestamps. If there is no more than 1 timestamp, then
+    /// return 1s, since the time resolution of single-timestep observations is
+    /// not imporant anyway.
+    pub fn guess_time_res(&self) -> Duration {
+        if let Some(res) = self.time_res {
+            return Duration::from_f64(res, Unit::Second);
+        }
+        if let Some(res) = guess_time_res(self.timestamps.to_vec()) {
+            return res;
+        }
+        warn!("No integration time specified; assuming 1 second");
+        Duration::from_f64(1., Unit::Second)
+    }
+
+    pub fn guess_freq_res(&self) -> f64 {
+        if let Some(res) = self.freq_res {
+            return res;
+        }
+        if let Some(res) = guess_freq_res(self.fine_chan_freqs.iter().map(|&f| f as f64).collect())
+        {
+            return res;
+        }
+        // XXX(Dev): could probably try to guess from number of coarse chans
+        warn!("No frequency resolution specified; assuming 10 kHz");
+        10_000.
+    }
 }
