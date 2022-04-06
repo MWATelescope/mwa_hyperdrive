@@ -22,7 +22,7 @@ Currently in heavy development. Major milestones are listed below:
   - [x] Reading and writing RTS, AOcal and hyperdrive style calibration
     solutions
   - [x] Writing visibilities to uvfits
-  - [ ] Writing visibilities to measurement sets
+- [x] Writing visibilities to measurement sets
   - [ ] Writing to multiple uvfits or measurement sets for each MWA coarse channel
   - [ ] Direction-dependent calibration
 
