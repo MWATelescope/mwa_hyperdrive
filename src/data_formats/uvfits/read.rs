@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use log::{debug, trace, warn};
 use marlu::{io::uvfits::decode_uvfits_baseline, Jones, RADec, XyzGeodetic};
+use mwa_hyperdrive_common::hifitime::{Duration, Unit};
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -20,7 +21,7 @@ use super::*;
 use crate::{
     context::ObsContext,
     data_formats::{metafits, InputData, ReadInputDataError},
-    time::round_hundredths_of_a_second,
+    time::round_hundredths_of_a_second_duration,
 };
 use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
@@ -201,22 +202,21 @@ impl UvfitsReader {
 
             // uvfits timestamps are in the middle of their respective integration
             // periods, so no adjustment is needed here.
+            let jd_zero = if uses_utc_time {
+                Epoch::from_jde_utc(metadata.jd_zero)
+            } else {
+                Epoch::from_jde_tai(metadata.jd_zero)
+            };
             let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
                 .jd_frac_timestamps
                 .iter()
                 .enumerate()
                 .map(|(i, &frac)| {
-                    let jd_days = metadata.jd_zero + (frac as f64);
-                    let e = if uses_utc_time {
-                        Epoch::from_jde_utc(jd_days)
-                    } else {
-                        Epoch::from_jde_tai(jd_days)
-                    };
-                    // Here's why you don't store your times in a stupid format (JD)
-                    // in a single-precision float -- they come out wrong. Check how
-                    // this epoch is represented in GPS; if it's close to an int,
-                    // round to an int.
-                    (i, round_hundredths_of_a_second(e))
+                    let jd_offset = Duration::from_f64(frac as f64, Unit::Day);
+                    (
+                        i,
+                        jd_zero + round_hundredths_of_a_second_duration(jd_offset),
+                    )
                 })
                 .unzip();
             // TODO: Determine flagging!

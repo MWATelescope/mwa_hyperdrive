@@ -411,7 +411,7 @@ fn test_timestep_reading() {
     assert_eq!(
         uvfits_ctx.timestamps,
         (0..num_timesteps)
-            .map(|t| Epoch::from_gpst_seconds((obsid + t) as f64))
+            .map(|t| Epoch::from_gpst_seconds((obsid + t) as f64 + 0.5))
             .collect::<Vec<_>>()
     );
 }

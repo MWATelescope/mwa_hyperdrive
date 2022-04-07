@@ -6,7 +6,7 @@
 
 use hifitime::Epoch;
 
-use mwa_hyperdrive_common::hifitime;
+use mwa_hyperdrive_common::hifitime::{self, Duration};
 
 /// Some timestamps may be read in ever so slightly off from their true values
 /// because of float errors. This function checks if a supplied [Epoch], when
@@ -24,9 +24,23 @@ pub(crate) fn round_hundredths_of_a_second(e: Epoch) -> Epoch {
     }
 }
 
+/// Some timestamps may be read in ever so slightly off from their true values
+/// because of float errors. This function checks if a supplied [Epoch], when
+/// represented as GPS seconds, is really close to a neat value in the
+/// hundredths. If so, the value is rounded and returned.
+///
+/// e.g. The GPS time 1090008639.999405 should be 1090008634.0. Other examples
+/// of usage are in the tests alongside this function.
+pub(crate) fn round_hundredths_of_a_second_duration(e: Duration) -> Duration {
+    let (centuries, nanos) = e.to_parts();
+    let hundredth_ns = 10_000_000;
+    Duration::from_parts(centuries, (nanos / hundredth_ns) * hundredth_ns)
+}
+
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
+    use mwa_hyperdrive_common::hifitime::Unit;
 
     use super::*;
 
@@ -55,6 +69,24 @@ mod tests {
         assert_abs_diff_eq!(
             round_hundredths_of_a_second(e).as_gpst_seconds(),
             1090008640.26
+        );
+    }
+
+    #[test]
+    fn test_round_duration() {
+        let half_day = Duration::from_f64(0.5, Unit::Day);
+        let millis = Duration::from_f64(1., Unit::Millisecond);
+        assert_eq!(
+            half_day,
+            round_hundredths_of_a_second_duration(half_day + millis)
+        );
+        assert_eq!(
+            half_day,
+            round_hundredths_of_a_second_duration(half_day + 4 * millis)
+        );
+        assert_eq!(
+            half_day + 10 * millis,
+            round_hundredths_of_a_second_duration(half_day + 11 * millis)
         );
     }
 }
