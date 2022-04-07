@@ -402,16 +402,19 @@ fn test_timestep_reading() {
         UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path.clone(), None, &mut Delays::None)
             .unwrap();
     let uvfits_ctx = uvfits_reader.get_obs_context();
-    dbg!(&uvfits_ctx
-        .timestamps
-        .iter()
-        .map(|&t| t.as_gregorian_utc())
-        .collect::<Vec<_>>());
 
+    let expected_timestamps = (0..num_timesteps)
+        .map(|t| Epoch::from_gpst_seconds((obsid + t) as f64 + 0.5))
+        .collect::<Vec<_>>();
     assert_eq!(
-        uvfits_ctx.timestamps,
-        (0..num_timesteps)
-            .map(|t| Epoch::from_gpst_seconds((obsid + t) as f64 + 0.5))
+        uvfits_ctx
+            .timestamps
+            .iter()
+            .map(|t| t.as_gpst_seconds())
+            .collect::<Vec<_>>(),
+        expected_timestamps
+            .iter()
+            .map(|t| t.as_gpst_seconds())
             .collect::<Vec<_>>()
     );
 }

@@ -21,7 +21,7 @@ use super::*;
 use crate::{
     context::ObsContext,
     data_formats::{metafits, InputData, ReadInputDataError},
-    time::round_hundredths_of_a_second_duration,
+    time::quantize_duration,
 };
 use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
@@ -207,16 +207,17 @@ impl UvfitsReader {
             } else {
                 Epoch::from_jde_tai(metadata.jd_zero)
             };
+
+            // the number of nanoseconds to quantize to.
+            let q = 10_000_000.;
+
             let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
                 .jd_frac_timestamps
                 .iter()
                 .enumerate()
                 .map(|(i, &frac)| {
                     let jd_offset = Duration::from_f64(frac as f64, Unit::Day);
-                    (
-                        i,
-                        jd_zero + round_hundredths_of_a_second_duration(jd_offset),
-                    )
+                    (i, jd_zero + quantize_duration(jd_offset, q))
                 })
                 .unzip();
             // TODO: Determine flagging!

@@ -6,7 +6,7 @@
 
 use hifitime::Epoch;
 
-use mwa_hyperdrive_common::hifitime::{self, Duration};
+use mwa_hyperdrive_common::hifitime::{self, Duration, Unit};
 
 /// Some timestamps may be read in ever so slightly off from their true values
 /// because of float errors. This function checks if a supplied [Epoch], when
@@ -24,17 +24,11 @@ pub(crate) fn round_hundredths_of_a_second(e: Epoch) -> Epoch {
     }
 }
 
-/// Some timestamps may be read in ever so slightly off from their true values
-/// because of float errors. This function checks if a supplied [Epoch], when
-/// represented as GPS seconds, is really close to a neat value in the
-/// hundredths. If so, the value is rounded and returned.
-///
-/// e.g. The GPS time 1090008639.999405 should be 1090008634.0. Other examples
-/// of usage are in the tests alongside this function.
-pub(crate) fn round_hundredths_of_a_second_duration(e: Duration) -> Duration {
-    let (centuries, nanos) = e.to_parts();
-    let hundredth_ns = 10_000_000;
-    Duration::from_parts(centuries, (nanos / hundredth_ns) * hundredth_ns)
+/// Quantize a duration to the nearest multiple of q nanoseconds
+pub(crate) fn quantize_duration(d: Duration, q_nanos: f64) -> Duration {
+    let d_nanos = d.in_unit(Unit::Nanosecond);
+    let d_nanos = (d_nanos / q_nanos).round() * q_nanos;
+    Duration::from_f64(d_nanos, Unit::Nanosecond)
 }
 
 #[cfg(test)]
@@ -76,17 +70,13 @@ mod tests {
     fn test_round_duration() {
         let half_day = Duration::from_f64(0.5, Unit::Day);
         let millis = Duration::from_f64(1., Unit::Millisecond);
-        assert_eq!(
-            half_day,
-            round_hundredths_of_a_second_duration(half_day + millis)
-        );
-        assert_eq!(
-            half_day,
-            round_hundredths_of_a_second_duration(half_day + 4 * millis)
-        );
+        let quanta = 10_000_000.;
+        assert_eq!(half_day, quantize_duration(half_day + millis, quanta));
+        assert_eq!(half_day, quantize_duration(half_day + 4 * millis, quanta));
+        assert_eq!(half_day, quantize_duration(half_day - 4 * millis, quanta));
         assert_eq!(
             half_day + 10 * millis,
-            round_hundredths_of_a_second_duration(half_day + 11 * millis)
+            quantize_duration(half_day + 11 * millis, quanta)
         );
     }
 }
