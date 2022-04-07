@@ -397,10 +397,8 @@ fn test_timestep_reading() {
         .write_uvfits_antenna_table(&tile_names, &tile_xyzs)
         .unwrap();
 
-    // deleteme
-    let mut uvfits_reader =
-        UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path.clone(), None, &mut Delays::None)
-            .unwrap();
+    let uvfits_reader =
+        UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path, None, &mut Delays::None).unwrap();
     let uvfits_ctx = uvfits_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)

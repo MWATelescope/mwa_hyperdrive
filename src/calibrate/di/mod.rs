@@ -24,7 +24,12 @@ use rayon::prelude::*;
 use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
 use crate::data_formats::VisOutputType;
 use mwa_hyperdrive_common::{
-    hifitime::Epoch, itertools, log, marlu, ndarray, num_traits::Zero, rayon,
+    hifitime::Epoch,
+    itertools::{self, Itertools},
+    log, marlu, ndarray,
+    num_traits::Zero,
+    rayon,
+    vec1::Vec1,
 };
 
 /// Do all the steps required for direction-independent calibration; read the
@@ -166,19 +171,17 @@ pub(crate) fn di_calibrate(
                     });
             });
 
-        // TODO(dev): support and test time averaging for calibrated vis
-        if params.output_vis_time_average_factor > 1 {
-            panic!("time averaging for calibrated vis not supported");
-        }
-
         let ant_pairs: Vec<(usize, usize)> = params.get_ant_pairs();
         let int_time = obs_context.guess_time_res();
 
         let start_timestamp = obs_context.timestamps[params.timesteps[0]];
 
-        // XXX(Dev): VisContext does not support sparse timesteps, but in this case it doesn't matter
+        // the range of timesteps selected in params.timesteps
+        let sel_timestep_range = *params.timesteps.first()..=*params.timesteps.last();
+        let timestep_span = sel_timestep_range.end() - sel_timestep_range.start() + 1;
+
         let vis_ctx = VisContext {
-            num_sel_timesteps: params.timesteps.len(),
+            num_sel_timesteps: timestep_span,
             start_timestamp,
             int_time,
             num_sel_chans: obs_context.fine_chan_freqs.len(),
@@ -196,8 +199,8 @@ pub(crate) fn di_calibrate(
         let out_shape = vis_ctx.sel_dims();
 
         assert_eq!(vis_weights.dim(), vis_data.dim());
-        // time
-        assert_eq!(vis_data.len_of(Axis(0)), out_shape.0);
+        // time (since vis_data could be sparse)
+        assert!(vis_data.len_of(Axis(0)) <= out_shape.0);
         // baseline
         assert_eq!(vis_data.len_of(Axis(1)), out_shape.2);
         // freq
@@ -207,9 +210,13 @@ pub(crate) fn di_calibrate(
         );
 
         // re-use output arrays each timestep chunk
-        let out_shape_timestep = (1, out_shape.1, out_shape.2);
-        let mut tmp_out_data = Array3::from_elem(out_shape_timestep, Jones::zero());
-        let mut tmp_out_weights = Array3::from_elem(out_shape_timestep, -0.0);
+        let chunk_shape = (
+            params.output_vis_time_average_factor,
+            out_shape.1,
+            out_shape.2,
+        );
+        let mut chunk_data = Array3::from_elem(chunk_shape, Jones::zero());
+        let mut chunk_weights = Array3::from_elem(chunk_shape, -0.0);
 
         // create a VisWritable for each output vis filename
         let mut out_writers: Vec<(VisOutputType, Box<dyn VisWritable>)> = vec![];
@@ -268,46 +275,73 @@ pub(crate) fn di_calibrate(
             };
         }
 
-        // zip over time axis;
-        for (&timestep, vis_data, vis_weights) in izip!(
+        // Assume input time axis is sparse (non-contiguous)
+        let mut time_axis_iter = izip!(
             params.timesteps.iter(),
             vis_data.outer_iter(),
             vis_weights.outer_iter(),
-        ) {
+        )
+        .peekable();
+
+        // write one averaged timestep at a time, starting at the first selected timestep
+        for timestep_chunk in &sel_timestep_range.chunks(params.output_vis_time_average_factor) {
+            let timestep_chunk = Vec1::try_from_vec(timestep_chunk.collect_vec()).unwrap();
             let chunk_vis_ctx = VisContext {
-                start_timestamp: obs_context.timestamps[timestep],
+                start_timestamp: obs_context.timestamps[timestep_chunk[0]],
+                num_sel_timesteps: timestep_chunk.len(),
                 ..vis_ctx.clone()
             };
-            tmp_out_data.fill(Jones::zero());
-            tmp_out_weights.fill(-0.0);
+            chunk_data.fill(Jones::zero());
+            chunk_weights.fill(-0.0);
 
-            // zip over baseline axis
-            for (mut tmp_out_data, mut tmp_out_weights, vis_data, vis_weights) in izip!(
-                tmp_out_data.axis_iter_mut(Axis(1)),
-                tmp_out_weights.axis_iter_mut(Axis(1)),
-                vis_data.axis_iter(Axis(0)),
-                vis_weights.axis_iter(Axis(0))
+            // populate chunk_data with vis_data, where time axis is sparse
+            for (&chunk_timestep, mut chunk_data, mut chunk_weights) in izip!(
+                timestep_chunk.iter(),
+                chunk_data.outer_iter_mut(),
+                chunk_weights.outer_iter_mut()
             ) {
-                // merge frequency axis
-                for ((_, out_jones, out_weight), in_jones, in_weight) in izip!(
-                    izip!(0.., tmp_out_data.iter_mut(), tmp_out_weights.iter_mut(),)
-                        .filter(|(chan_idx, _, _)| !params.flagged_fine_chans.contains(chan_idx)),
-                    vis_data.iter(),
-                    vis_weights.iter()
+                // search through time axis until we find the timestep we want
+                let (_, vis_data, vis_weights) = match time_axis_iter.peek() {
+                    Some((&timestep, _, _)) => {
+                        if chunk_timestep != timestep {
+                            continue;
+                        }
+                        time_axis_iter.next().unwrap()
+                    }
+                    None => break,
+                };
+
+                // zip over baseline axis
+                for (mut chunk_data, mut chunk_weights, vis_data, vis_weights) in izip!(
+                    chunk_data.axis_iter_mut(Axis(1)),
+                    chunk_weights.axis_iter_mut(Axis(1)),
+                    vis_data.axis_iter(Axis(0)),
+                    vis_weights.axis_iter(Axis(0))
                 ) {
-                    *out_jones = *in_jones;
-                    *out_weight = *in_weight;
+                    // merge frequency axis
+                    for ((_, out_jones, out_weight), in_jones, in_weight) in izip!(
+                        izip!(0.., chunk_data.iter_mut(), chunk_weights.iter_mut(),).filter(
+                            |(chan_idx, _, _)| !params.flagged_fine_chans.contains(chan_idx)
+                        ),
+                        vis_data.iter(),
+                        vis_weights.iter()
+                    ) {
+                        *out_jones = *in_jones;
+                        *out_weight = *in_weight;
+                    }
                 }
             }
 
             for (_, writer) in out_writers.iter_mut() {
-                writer.write_vis_marlu(
-                    tmp_out_data.view(),
-                    tmp_out_weights.view(),
-                    &chunk_vis_ctx,
-                    &obs_context.tile_xyzs,
-                    false,
-                )?;
+                writer
+                    .write_vis_marlu(
+                        chunk_data.slice(s![..timestep_chunk.len(), .., ..]),
+                        chunk_weights.slice(s![..timestep_chunk.len(), .., ..]),
+                        &chunk_vis_ctx,
+                        &obs_context.tile_xyzs,
+                        false,
+                    )
+                    .unwrap();
             }
         }
 

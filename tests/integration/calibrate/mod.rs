@@ -6,9 +6,23 @@
 
 mod cli_args;
 
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::{BufWriter, Write},
+};
+
 use approx::assert_abs_diff_eq;
+use birli::{
+    marlu::{LatLngHeight, RADec, UvfitsWriter, VisContext, VisWritable, XyzGeodetic},
+    Jones,
+};
 use clap::Parser;
 use mwa_hyperdrive_beam::Delays;
+use mwa_hyperdrive_srclist::{
+    hyperdrive::source_list_to_yaml, ComponentType, FluxDensity, FluxDensityType, Source,
+    SourceComponent, SourceList,
+};
 use mwalib::*;
 use serial_test::serial;
 
@@ -17,7 +31,15 @@ use mwa_hyperdrive::{
     calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError},
     data_formats::{InputData, UvfitsReader, MS},
 };
-use mwa_hyperdrive_common::{clap, hifitime::Epoch, mwalib};
+use mwa_hyperdrive_common::{
+    clap,
+    hifitime::{Duration, Epoch, Unit},
+    itertools::izip,
+    mwalib,
+    num_traits::Zero,
+    vec1::vec1,
+};
+use ndarray::prelude::*;
 
 /// If di-calibrate is working, it should not write anything to stderr.
 #[test]
@@ -304,10 +326,6 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_ms() {
         "--no-progress-bars",
     ]);
 
-    if out_ms_path.exists() {
-        std::fs::remove_dir_all(&out_ms_path).unwrap();
-    }
-
     // Run di-cal and check that it succeeds
     let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
@@ -342,4 +360,207 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_ms() {
     assert_eq!(uvfits_ctx.all_timesteps.len(), exp_timesteps);
     assert_eq!(uvfits_ctx.fine_chan_freqs, ms_ctx.fine_chan_freqs);
     assert_eq!(uvfits_ctx.fine_chan_freqs.len(), exp_channels);
+}
+
+pub fn synthesize_test_data(vis_ctx: &VisContext) -> (Array3<Jones<f32>>, Array3<f32>) {
+    let shape = vis_ctx.sel_dims();
+
+    let vis_data = Array3::<Jones<f32>>::from_shape_fn(shape, |(t, c, b)| {
+        let (ant1, ant2) = vis_ctx.sel_baselines[b];
+        Jones::from([t as f32, c as f32, ant1 as f32, ant2 as f32, 1., 0., 1., 0.])
+    });
+
+    let weight_data = Array3::<f32>::from_elem(shape, 1.);
+
+    (vis_data, weight_data)
+}
+
+#[test]
+pub fn test_cal_vis_output_avg_time() {
+    let num_timesteps = 10;
+    let num_channels = 10;
+    let ant_pairs = vec![(0, 1), (0, 2), (1, 2)];
+
+    let obsid = 1090000000;
+
+    let vis_ctx = VisContext {
+        num_sel_timesteps: num_timesteps,
+        start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
+        int_time: Duration::from_f64(1., Unit::Second),
+        num_sel_chans: num_channels,
+        start_freq_hz: 128_000_000.,
+        freq_resolution_hz: 10_000.,
+        sel_baselines: ant_pairs,
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+
+    let (vis_data, weight_data) = synthesize_test_data(&vis_ctx);
+
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
+
+    // XXX
+    // let in_vis_path = tmp_dir.join("vis.uvfits");
+    let in_vis_path = PathBuf::from("/tmp/vis.uvfits");
+
+    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::new_mwa();
+    #[rustfmt::skip]
+    let tile_xyzs = vec![
+        XyzGeodetic { x: 0., y: 0., z: 0., },
+        XyzGeodetic { x: 1., y: 0., z: 0., },
+        XyzGeodetic { x: 0., y: 1., z: 0., },
+    ];
+    let tile_names = vec!["tile_0_0", "tile_1_0", "tile_0_1"];
+
+    let mut writer = UvfitsWriter::from_marlu(
+        &in_vis_path,
+        &vis_ctx,
+        Some(array_pos),
+        phase_centre,
+        Some(format!("synthesized test data {}", obsid)),
+    )
+    .unwrap();
+
+    writer
+        .write_vis_marlu(
+            vis_data.view(),
+            weight_data.view(),
+            &vis_ctx,
+            &tile_xyzs,
+            false,
+        )
+        .unwrap();
+
+    writer
+        .write_uvfits_antenna_table(&tile_names, &tile_xyzs)
+        .unwrap();
+
+    let mut source_list = SourceList::new();
+    source_list.insert(
+        "source".into(),
+        Source {
+            components: vec1![SourceComponent {
+                radec: phase_centre,
+                comp_type: ComponentType::Point,
+                flux_type: FluxDensityType::PowerLaw {
+                    si: -0.7,
+                    fd: FluxDensity {
+                        freq: vis_ctx.start_freq_hz,
+                        i: 1.0,
+                        q: 0.0,
+                        u: 0.0,
+                        v: 0.0,
+                    },
+                },
+            }],
+        },
+    );
+    let srclist_path = tmp_dir.join("srclist.yaml");
+    let mut srclist_buf = BufWriter::new(File::create(&srclist_path).unwrap());
+    source_list_to_yaml(&mut srclist_buf, &source_list, None).unwrap();
+    srclist_buf.flush().unwrap();
+
+    let out_vis_path = tmp_dir.join("cal-vis.uvfits");
+
+    let cal_args = CalibrateUserArgs {
+        data: Some(vec![format!("{}", in_vis_path.display())]),
+        outputs: Some(vec![out_vis_path.clone()]),
+        source_list: Some(format!("{}", srclist_path.display())),
+        no_beam: true,
+        timesteps: Some(vec![1, 3, 9]),
+        output_vis_time_average: Some("3s".into()),
+        output_vis_freq_average: Some("20kHz".into()),
+        ..Default::default()
+    };
+
+    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // we start at timestep index 1, with averaging 4. Averaged timesteps look like this:
+    // [[1, _, 3], [_, _, _], [_, _, 9]]
+
+    let uvfits_reader =
+        UvfitsReader::new::<&PathBuf, &PathBuf>(&out_vis_path, None, &mut Delays::None).unwrap();
+
+    let uvfits_ctx = uvfits_reader.get_obs_context();
+
+    assert_eq!(
+        uvfits_ctx.timestamps,
+        vec![
+            Epoch::from_gpst_seconds((obsid + 3) as f64),
+            Epoch::from_gpst_seconds((obsid + 6) as f64),
+            Epoch::from_gpst_seconds((obsid + 9) as f64)
+        ]
+    );
+
+    assert_eq!(uvfits_ctx.guess_freq_res(), 20_000.);
+    assert_eq!(uvfits_ctx.guess_time_res().in_unit(Unit::Second), 3.);
+
+    let avg_shape = (
+        vis_ctx.sel_baselines.len(),
+        uvfits_ctx.fine_chan_freqs.len(),
+    );
+    let mut avg_data = Array2::from_elem(avg_shape, Jones::<f32>::default());
+    let mut avg_weights = Array2::from_elem(avg_shape, 0_f32);
+
+    let bl_map: HashMap<(usize, usize), usize> = vis_ctx
+        .sel_baselines
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(a, b)| (b, a))
+        .collect();
+
+    let flagged_fine_chans: HashSet<usize> =
+        uvfits_ctx.flagged_fine_chans.iter().cloned().collect();
+
+    uvfits_reader
+        .read_crosses(
+            avg_data.view_mut(),
+            avg_weights.view_mut(),
+            0,
+            &bl_map,
+            &flagged_fine_chans,
+        )
+        .unwrap();
+
+    // weight should be the number of input visibilities that went in to the averaged visibility
+    for &weight in avg_weights.iter() {
+        // 2 timesteps, 2 channels
+        assert_eq!(weight, 4_f32);
+    }
+
+    uvfits_reader
+        .read_crosses(
+            avg_data.view_mut(),
+            avg_weights.view_mut(),
+            1,
+            &bl_map,
+            &flagged_fine_chans,
+        )
+        .unwrap();
+
+    // no selected timesteps went into timestep 1.
+    for (&vis, &weight) in izip!(avg_data.iter(), avg_weights.iter()) {
+        assert_eq!(vis, Jones::zero());
+        assert_eq!(weight, 0.);
+    }
+
+    uvfits_reader
+        .read_crosses(
+            avg_data.view_mut(),
+            avg_weights.view_mut(),
+            2,
+            &bl_map,
+            &flagged_fine_chans,
+        )
+        .unwrap();
+
+    // weight should be the number of input visibilities that went in to the averaged visibility
+    for &weight in avg_weights.iter() {
+        // 1 timesteps, 2 channels
+        assert_eq!(weight, 2_f32);
+    }
 }
