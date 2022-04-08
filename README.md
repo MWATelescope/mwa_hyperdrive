@@ -15,33 +15,35 @@ Aims to provide feature parity with and exceed the MWA Real-Time System (RTS).
 
 Currently in heavy development. Major milestones are listed below:
 
-  - [x] Direction-independent calibration (on both CPUs and GPUs)
-  - [x] Reading visibilities from raw MWA data (legacy and MWAX), uvfits and
-    measurement sets
-  - [x] Reading and writing RTS, AOcal and WODEN style sky-model source lists
-  - [x] Reading and writing RTS, AOcal and hyperdrive style calibration
-    solutions
-  - [x] Writing visibilities to uvfits
+- [x] Direction-independent calibration (on both CPUs and GPUs)
+- [x] Reading visibilities from raw MWA data (legacy and MWAX), uvfits and
+      measurement sets
+- [x] Reading and writing RTS, AOcal and WODEN style sky-model source lists
+- [x] Reading and writing RTS, AOcal and hyperdrive style calibration
+      solutions
+- [x] Writing visibilities to uvfits
 - [x] Writing visibilities to measurement sets
-  - [ ] Writing to multiple uvfits or measurement sets for each MWA coarse channel
-  - [ ] Direction-dependent calibration
+- [ ] Writing to multiple uvfits or measurement sets for each MWA coarse channel
+- [ ] Direction-dependent calibration
 
 ## Usage
+
 A comprehensive use guide can be found on the [wiki](https://github.com/MWATelescope/mwa_hyperdrive/wiki), but below are some TL;DR examples.
 
 Many `hyperdrive` functions require the beam code to function. The MWA
 FEE beam HDF5 file can be obtained with:
 
-  `wget http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5`
+`wget http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5`
 
 Move the `h5` file anywhere you like, and put the file path in `MWA_BEAM_FILE`:
 
-  `export MWA_BEAM_FILE=/path/to/mwa_full_embedded_element_pattern.h5`
+`export MWA_BEAM_FILE=/path/to/mwa_full_embedded_element_pattern.h5`
 
 See the README for [`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam)
 for more info.
 
 ### DI Calibration
+
 <details>
 By default, only calibration solutions are written out (to a default filename):
 
@@ -84,6 +86,7 @@ or to a target resolution:
 </details>
 
 ### Source lists
+
 <details>
 A number of sky-model source list utilities are available. At the time of
 writing, the following subcommands are available (output edited for clarity):
@@ -115,9 +118,11 @@ pointing and target frequencies (determined by a metafits file):
                -m *.metafits \
                -n 1000 \
                srclist_1000.yaml
+
 </details>
 
 ### Visibility Simulation
+
 <details>
 
 `hyperdrive` can generate visibilities from a sky-model source list (output
@@ -137,12 +142,15 @@ also available):
                --filter-points \
                --filter-shapelets \
                -o model_gaussians.uvfits
+
 </details>
 
 ## Installation
+
 <details>
 
 ### Prerequisites
+
 <details>
 
 - An NVIDIA GPU with compute capability >=2. See this
@@ -154,6 +162,7 @@ also available):
   `https://www.rust-lang.org/tools/install`
 
 - [cfitsio](https://heasarc.gsfc.nasa.gov/docs/software/fitsio/)
+
   - Can compile statically; use the `cfitsio-static` or `all-static` features.
   - Ubuntu: `libcfitsio-dev`
   - Arch: `cfitsio`
@@ -162,6 +171,7 @@ also available):
     - If not specified, `pkg-config` is used to find the library.
 
 - [ERFA](https://github.com/liberfa/erfa)
+
   - Can compile statically; use the `erfa-static` or `all-static` features.
     - Requires a C compiler and `autoconf`.
   - Ubuntu: `liberfa-dev`
@@ -180,13 +190,14 @@ also available):
 #### Optional dependencies
 
 - [CUDA](https://developer.nvidia.com/cuda-zone)
+
   - Only needed if either the `cuda` or `cuda-single` feature is enabled
   - Can link statically; use the `cuda-static` or `all-static` features.
   - Arch: `cuda`
   - The library dir can be specified manually with `CUDA_LIB`
     - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
 
-- Calibration solutions plotting 
+- Calibration solutions plotting
   - Only needed if the `plotting` feature is enabled (which it is by default)
   - Arch: `pkg-config` `make` `cmake` `freetype2`
   - Ubuntu: `libfreetype-dev` `libexpat1-dev`
@@ -200,39 +211,39 @@ link all libraries statically, use `PKG_CONFIG_ALL_STATIC=1`.
 
 - Specify your GPU's compute capability
 
-    Export the `HYPERDRIVE_CUDA_COMPUTE` environment variable with your
-    compute-capability number, e.g.
+  Export the `HYPERDRIVE_CUDA_COMPUTE` environment variable with your
+  compute-capability number, e.g.
 
-    `export HYPERDRIVE_CUDA_COMPUTE=75`
+  `export HYPERDRIVE_CUDA_COMPUTE=75`
 
 - Compile the source
 
-    `cargo install --path . --locked`
+  `cargo install --path . --locked`
 
-    To enable CUDA functionality, add `--features=cuda` or
-    `--features=cuda-single` to the above command. If you're using a desktop
-    NVIDIA GPU, you probably want the `cuda-single` feature.
+  To enable CUDA functionality, add `--features=cuda` or
+  `--features=cuda-single` to the above command. If you're using a desktop
+  NVIDIA GPU, you probably want the `cuda-single` feature.
 
-    You may need to specify additional compiler options, depending on your
-    setup. For example, CUDA can only use certain versions of GCC, so the
-    following might be needed before running `cargo install`:
+  You may need to specify additional compiler options, depending on your
+  setup. For example, CUDA can only use certain versions of GCC, so the
+  following might be needed before running `cargo install`:
 
-    `export CXX=/usr/bin/g++-5`
+  `export CXX=/usr/bin/g++-5`
 
-    It's also possible to specify environment variables temporarily:
+  It's also possible to specify environment variables temporarily:
 
-    `CXX=/usr/bin/g++-5 HYPERDRIVE_CUDA_COMPUTE=75 cargo install --path . --locked`
+  `CXX=/usr/bin/g++-5 HYPERDRIVE_CUDA_COMPUTE=75 cargo install --path . --locked`
 
 - Run the compiled binary (you may need to include it in your `PATH`; see the
   output of `cargo install`)
 
-    `hyperdrive -h`
+  `hyperdrive -h`
 
-    A number of subcommands should present themselves, and the help text for
-    each subcommand should clarify usage.
+  A number of subcommands should present themselves, and the help text for
+  each subcommand should clarify usage.
 
-    On the same system, the `hyperdrive` binary can be copied and used
-    anywhere you like!
+  On the same system, the `hyperdrive` binary can be copied and used
+  anywhere you like!
 
 </details>
 
@@ -247,8 +258,9 @@ Report the version of the software used, your usage and the program output in a
 new GitHub issue.
 
 ## FAQ
+
 - Naming convention
 
-    This project is called `mwa_hyperdrive` so that it cannot be confused with
-    other projects involving the word `hyperdrive`, but the binary is called
-    `hyperdrive` to help users' fingers.
+  This project is called `mwa_hyperdrive` so that it cannot be confused with
+  other projects involving the word `hyperdrive`, but the binary is called
+  `hyperdrive` to help users' fingers.
