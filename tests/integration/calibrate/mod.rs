@@ -400,9 +400,7 @@ pub fn test_cal_vis_output_avg_time() {
 
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
 
-    // XXX
-    // let in_vis_path = tmp_dir.join("vis.uvfits");
-    let in_vis_path = PathBuf::from("/tmp/vis.uvfits");
+    let in_vis_path = tmp_dir.join("vis.uvfits");
 
     let phase_centre = RADec::new_degrees(0., -27.);
     let array_pos = LatLngHeight::new_mwa();
