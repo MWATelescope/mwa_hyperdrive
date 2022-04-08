@@ -45,8 +45,10 @@ pub struct MS {
 }
 
 pub(crate) enum MsFlavour {
+    // Birli before version 0.2.0
     Birli,
-
+    // Anything that writes ms with the marlu library
+    Marlu,
     Cotter,
 
     /// Generic?
@@ -93,9 +95,12 @@ impl MS {
             let flavour = {
                 let mut history_table = read_table(ms, Some("HISTORY"))?;
                 let app: String = history_table.get_cell("APPLICATION", 0).unwrap();
-                if app.starts_with("Birli") {
+                let app = app.to_uppercase();
+                if app.starts_with("BIRLI") {
                     MsFlavour::Birli
-                } else if app.starts_with("Cotter") {
+                } else if app.starts_with("MARLU") {
+                    MsFlavour::Marlu
+                } else if app.starts_with("COTTER") {
                     MsFlavour::Cotter
                 } else {
                     MsFlavour::Casa
@@ -123,7 +128,7 @@ impl MS {
                     })
                     .unwrap();
                 let array_pos = match flavour {
-                    MsFlavour::Birli => LatLngHeight::new_mwa(),
+                    MsFlavour::Birli | MsFlavour::Marlu => LatLngHeight::new_mwa(),
                     MsFlavour::Cotter => LatLngHeight {
                         longitude_rad: COTTER_MWA_LONGITUDE_RADIANS,
                         latitude_rad: COTTER_MWA_LATITUDE_RADIANS,
@@ -139,8 +144,12 @@ impl MS {
                 // they're stored as geocentric positions, but we want geodetic
                 // positions. The additional transform done for the MS means
                 // that they're slightly less accurate.
-                (MsFlavour::Birli, Some(context)) => marlu::XyzGeodetic::get_tiles_mwa(context),
-                (MsFlavour::Birli, None) => get_casacore_positions(&mut antenna_table, &flavour)?,
+                (MsFlavour::Birli | MsFlavour::Marlu, Some(context)) => {
+                    marlu::XyzGeodetic::get_tiles_mwa(context)
+                }
+                (MsFlavour::Birli | MsFlavour::Marlu, None) => {
+                    get_casacore_positions(&mut antenna_table, &flavour)?
+                }
                 (MsFlavour::Cotter, _) => get_casacore_positions(&mut antenna_table, &flavour)?,
                 (MsFlavour::Casa, Some(context)) => marlu::XyzGeodetic::get_tiles_mwa(context),
                 (MsFlavour::Casa, None) => todo!(),

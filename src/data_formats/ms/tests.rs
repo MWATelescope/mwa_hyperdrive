@@ -5,6 +5,9 @@
 use std::collections::HashSet;
 
 use approx::assert_abs_diff_eq;
+use birli::marlu::XyzGeodetic;
+use marlu::{Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWritable};
+use mwa_hyperdrive_common::hifitime::{Duration, Unit};
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
 use tempfile::tempdir;
 
@@ -101,4 +104,97 @@ fn test_1090008640_calibration_quality() {
 
     let cal_vis = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
     test_1090008640_quality(params, cal_vis);
+}
+
+#[test]
+fn test_timestep_reading() {
+    let temp_dir = tempdir().expect("Couldn't make temp dir").into_path();
+    let vis_path = temp_dir.join("vis.ms");
+
+    let num_timesteps = 10;
+    let num_channels = 10;
+    let ant_pairs = vec![(0, 1), (0, 2), (1, 2)];
+
+    let obsid = 1090000000;
+
+    let vis_ctx = VisContext {
+        num_sel_timesteps: num_timesteps,
+        start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
+        int_time: Duration::from_f64(1., Unit::Second),
+        num_sel_chans: num_channels,
+        start_freq_hz: 128_000_000.,
+        freq_resolution_hz: 10_000.,
+        sel_baselines: ant_pairs,
+        avg_time: 1,
+        avg_freq: 1,
+        num_vis_pols: 4,
+    };
+
+    let shape = vis_ctx.sel_dims();
+
+    let vis_data = Array3::<Jones<f32>>::from_shape_fn(shape, |(t, c, b)| {
+        let (ant1, ant2) = vis_ctx.sel_baselines[b];
+        Jones::from([t as f32, c as f32, ant1 as f32, ant2 as f32, 0., 0., 0., 0.])
+    });
+
+    let weight_data = Array3::<f32>::from_elem(shape, 1.);
+
+    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::new_mwa();
+    #[rustfmt::skip]
+    let tile_xyzs = vec![
+        XyzGeodetic { x: 0., y: 0., z: 0., },
+        XyzGeodetic { x: 1., y: 0., z: 0., },
+        XyzGeodetic { x: 0., y: 1., z: 0., },
+    ];
+    let tile_names = vec!["tile_0_0", "tile_1_0", "tile_0_1"];
+
+    let mut writer = MeasurementSetWriter::new(&vis_path, phase_centre, Some(array_pos));
+
+    let marlu_obs_ctx = MarluObsContext {
+        sched_start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
+        sched_duration: ((num_timesteps + 1) as f64 * vis_ctx.int_time),
+        name: Some(format!("MWA obsid {}", obsid)),
+        phase_centre,
+        pointing_centre: Some(phase_centre),
+        array_pos,
+        ant_positions_enh: tile_xyzs
+            .iter()
+            .map(|xyz| xyz.to_enh(array_pos.latitude_rad))
+            .collect(),
+        ant_names: tile_names.iter().map(|&s| String::from(s)).collect(),
+        field_name: None,
+        project_id: None,
+        observer: None,
+    };
+
+    writer.initialize(&vis_ctx, &marlu_obs_ctx).unwrap();
+
+    writer
+        .write_vis_marlu(
+            vis_data.view(),
+            weight_data.view(),
+            &vis_ctx,
+            &tile_xyzs,
+            false,
+        )
+        .unwrap();
+
+    let ms_reader = MS::new::<&PathBuf, &PathBuf>(&vis_path, None, &mut Delays::None).unwrap();
+    let ms_ctx = ms_reader.get_obs_context();
+
+    let expected_timestamps = (0..num_timesteps)
+        .map(|t| Epoch::from_gpst_seconds((obsid + t) as f64 + 0.5))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ms_ctx
+            .timestamps
+            .iter()
+            .map(|t| t.as_gpst_seconds())
+            .collect::<Vec<_>>(),
+        expected_timestamps
+            .iter()
+            .map(|t| t.as_gpst_seconds())
+            .collect::<Vec<_>>()
+    );
 }
