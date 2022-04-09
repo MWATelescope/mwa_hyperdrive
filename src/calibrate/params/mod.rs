@@ -450,10 +450,12 @@ impl CalibrateParams {
                             ext.and_then(|s| VisOutputType::from_str(s).ok()),
                         ) {
                             (Some(sol_type), None) => {
+                                trace!("{} is a solution output", file.display());
                                 can_write_to_file(&file)?;
                                 cal_sols.push((sol_type, file));
                             },
                             (None, Some(vis_type)) => {
+                                trace!("{} is a visibility output", file.display());
                                 can_write_to_file(&file)?;
                                 vis_out.push((vis_type, file));
                             },
@@ -1348,6 +1350,55 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
 /// only to be unable to write to a file at the end. This code _doesn't_ alter
 /// the file if it exists.
 fn can_write_to_file(file: &Path) -> Result<(), InvalidArgsError> {
+    trace!("Testing whether we can write to {}", file.display());
+
+    if file.is_dir() {
+        let exists = can_write_to_dir(file)?;
+        if exists {
+            warn!("Will overwrite the existing directory '{}'", file.display());
+        }
+    } else {
+        let exists = can_write_to_file_inner(file)?;
+        if exists {
+            warn!("Will overwrite the existing file '{}'", file.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Iterate over all of the files and subdirectories of a directory and test
+/// whether we can write to them. Note that testing whether directories are
+/// writable is very weak; in my testing, changing a subdirectories owner to
+/// root and running this function suggested that the file was writable, but it
+/// was not. This appears to be a limitation of operating systems, and there's
+/// not even a reliable way of checking if *your* user is able to write to a
+/// directory. Files are much more rigorously tested.
+fn can_write_to_dir(dir: &Path) -> Result<bool, InvalidArgsError> {
+    let exists = dir.exists();
+
+    let metadata = std::fs::metadata(dir)?;
+    let permissions = metadata.permissions();
+    if permissions.readonly() {
+        return Err(InvalidArgsError::FileNotWritable {
+            file: dir.display().to_string(),
+        });
+    }
+
+    // Test whether every single entry in `dir` is writable.
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?.path();
+        if entry.is_file() {
+            can_write_to_file_inner(&entry)?;
+        } else if entry.is_dir() {
+            can_write_to_dir(&entry)?;
+        }
+    }
+
+    Ok(exists)
+}
+
+fn can_write_to_file_inner(file: &Path) -> Result<bool, InvalidArgsError> {
     let file_exists = file.exists();
 
     match OpenOptions::new()
@@ -1358,10 +1409,10 @@ fn can_write_to_file(file: &Path) -> Result<(), InvalidArgsError> {
     {
         // File is writable.
         Ok(_) => {
-            if file_exists {
-                warn!("Will overwrite the existing file '{}'", file.display())
-            } else {
-                // file didn't exist before, remove.
+            // If the file in question didn't already exist, `OpenOptions::new`
+            // creates it as part of its work. We don't want to keep the 0-sized
+            // file; remove it if it didn't exist before.
+            if !file_exists {
                 std::fs::remove_file(file).map_err(InvalidArgsError::IO)?;
             }
         }
@@ -1395,5 +1446,5 @@ fn can_write_to_file(file: &Path) -> Result<(), InvalidArgsError> {
         }
     }
 
-    Ok(())
+    Ok(file_exists)
 }

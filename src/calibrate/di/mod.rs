@@ -221,6 +221,16 @@ pub(crate) fn di_calibrate(
         // create a VisWritable for each output vis filename
         let mut out_writers: Vec<(VisOutputType, Box<dyn VisWritable>)> = vec![];
         for (vis_type, file) in params.output_vis_filenames.iter() {
+            // Don't trust the user - delete `file` whether it is a file or a
+            // directory. Not doing this might make the functions below fail
+            // because they're expecting one of either a file or a directory.
+            if file.is_file() {
+                std::fs::remove_file(file)?;
+            } else if file.is_dir() {
+                std::fs::remove_dir_all(file)?;
+            }
+            // TODO: Symbolic links.
+
             match vis_type {
                 VisOutputType::Uvfits => {
                     trace!(" - to uvfits {}", file.display());
@@ -353,6 +363,10 @@ pub(crate) fn di_calibrate(
                 uvfits_writer
                     .write_uvfits_antenna_table(&obs_context.tile_names, &obs_context.tile_xyzs)?;
             }
+        }
+
+        for (_, file) in params.output_vis_filenames.iter() {
+            info!("Calibrated visibilities written to {}", file.display());
         }
     }
 

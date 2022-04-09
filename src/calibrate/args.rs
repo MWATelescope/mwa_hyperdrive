@@ -53,7 +53,7 @@ lazy_static::lazy_static! {
     static ref DI_CALIBRATE_OUTPUT_HELP: String =
         format!("Paths to the calibration output files. Supported calibrated visibility outputs: {}. Supported calibration solution formats: {}. Default: {}", *VIS_OUTPUT_EXTENSIONS, *CAL_SOLUTION_EXTENSIONS, DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
 
-    static ref MODEL_FILENAME_HELP: String = format!("The path to the file where the generated sky-model visibilities are written. If this argument isn't supplied, then no file is written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
+    static ref MODEL_FILENAME_HELP: String = format!("The path to the file where the generated sky-model visibilities are written. If this argument isn't supplied, then no file is written. Supported formats: uvfits");
 
     static ref SOURCE_LIST_TYPE_HELP: String =
         format!("The type of sky-model source list. Valid types are: {}. If not specified, all types are attempted", *mwa_hyperdrive_srclist::SOURCE_LIST_TYPES_COMMA_SEPARATED);

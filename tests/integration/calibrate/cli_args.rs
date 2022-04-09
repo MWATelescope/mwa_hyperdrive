@@ -4,31 +4,104 @@
 
 //! Tests against the command-line interface for calibration.
 
+use itertools::Itertools;
+
 use approx::assert_abs_diff_eq;
 use mwa_hyperdrive_common::{
     clap::{ErrorKind::WrongNumberOfValues, Parser},
+    itertools,
     marlu::constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
 };
 
 use crate::*;
 
 #[test]
-fn test_calibrate_help_is_correct() {
+fn test_hyperdrive_help_is_correct() {
+    let mut stdouts = vec![];
+
     // First with --help
     let cmd = hyperdrive().arg("--help").ok();
     assert!(cmd.is_ok());
     let (stdout, stderr) = get_cmd_output(cmd);
     assert!(stderr.is_empty());
-    assert!(stdout.contains("di-calibrate"));
-    assert!(stdout.contains("Perform direction-independent calibration on the input MWA data"));
+    stdouts.push(stdout);
 
-    // Second with -h
+    // Then with -h
     let cmd = hyperdrive().arg("-h").ok();
     assert!(cmd.is_ok());
     let (stdout, stderr) = get_cmd_output(cmd);
     assert!(stderr.is_empty());
-    assert!(stdout.contains("di-calibrate"));
-    assert!(stdout.contains("Perform direction-independent calibration on the input MWA data"));
+    stdouts.push(stdout);
+
+    for stdout in stdouts {
+        assert!(stdout.contains("di-calibrate"));
+        assert!(stdout.contains("Perform direction-independent calibration on the input MWA data"));
+    }
+}
+
+#[test]
+fn test_di_calibrate_help_is_correct() {
+    let mut stdouts = vec![];
+
+    // First with --help
+    let cmd = hyperdrive().args(["di-calibrate", "--help"]).ok();
+    assert!(cmd.is_ok());
+    let (stdout, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty());
+    stdouts.push(stdout);
+
+    // Then with -h
+    let cmd = hyperdrive().args(["di-calibrate", "-h"]).ok();
+    assert!(cmd.is_ok());
+    let (stdout, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty());
+    stdouts.push(stdout);
+
+    for stdout in stdouts {
+        // Output visibility formats are correctly specified.
+        let mut iter = stdout.split("\n\n").filter(|s| s.contains("--outputs "));
+        let outputs_line = iter.next();
+        assert!(
+            outputs_line.is_some(),
+            "No lines containing '--outputs ' were found in di-calibrate's help text"
+        );
+        assert!(
+            iter.next().is_none(),
+            "More than one '--outputs ' was found; this should not be possible"
+        );
+        let outputs_line = outputs_line.unwrap().split_ascii_whitespace().join(" ");
+        assert!(
+            outputs_line.contains("Supported calibrated visibility outputs: uvfits, ms"),
+            "--outputs did not list expected vis outputs. The line is: {outputs_line}"
+        );
+        assert!(
+            outputs_line.contains("Supported calibration solution formats: fits, bin"),
+            "--outputs did not list expected vis outputs. The line is: {outputs_line}"
+        );
+
+        let mut iter = stdout
+            .split("\n\n")
+            .filter(|s| s.contains("--model-filename "));
+        let model_line = iter.next();
+        assert!(
+            model_line.is_some(),
+            "No lines containing '--model-filename ' were found in di-calibrate's help text"
+        );
+        assert!(
+            iter.next().is_none(),
+            "More than one '--model-filename ' was found; this should not be possible"
+        );
+        let model_line = model_line.unwrap().split_ascii_whitespace().join(" ");
+        assert!(
+            model_line.contains("Supported formats: uvfits"),
+            "--model-filename did not list expected vis outputs. The line is: {model_line}"
+        );
+        // TODO: Fix model output to ms
+        assert!(
+            !model_line.contains("Supported formats: uvfits, ms"),
+            "--model-filename did not list expected vis outputs. The line is: {model_line}"
+        );
+    }
 }
 
 #[test]
