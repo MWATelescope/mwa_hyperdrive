@@ -166,6 +166,16 @@ impl DerefMut for SourceList {
     }
 }
 
+impl FromIterator<(String, Source)> for SourceList {
+    fn from_iter<I: IntoIterator<Item = (String, Source)>>(iter: I) -> Self {
+        let mut c = Self::new();
+        for i in iter {
+            c.insert(i.0, i.1);
+        }
+        c
+    }
+}
+
 impl IntoIterator for SourceList {
     type Item = (String, Source);
     type IntoIter = indexmap::map::IntoIter<String, Source>;

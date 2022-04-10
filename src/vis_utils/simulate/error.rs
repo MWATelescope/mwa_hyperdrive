@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/*!
-Error type for all simulate-vis-related errors.
- */
+//! Error type for all errors related to vis-simulate.
 
 use marlu::io::error::{IOError as MarluIOError, MeasurementSetWriteError, UvfitsWriteError};
 use thiserror::Error;
@@ -12,7 +10,7 @@ use thiserror::Error;
 use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
 
 #[derive(Error, Debug)]
-pub enum SimulateVisError {
+pub enum VisSimulateError {
     #[error("Right Ascension was not within 0 to 360!")]
     RaInvalid,
 

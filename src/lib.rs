@@ -10,14 +10,16 @@ pub mod constants;
 pub(crate) mod context;
 pub mod data_formats;
 pub(crate) mod error;
+pub(crate) mod filenames;
 pub(crate) mod flagging;
 pub(crate) mod glob;
+mod help_texts;
 pub mod math;
 pub mod model;
 pub(crate) mod pfb_gains;
-pub mod simulate_vis;
 pub(crate) mod time;
 pub(crate) mod unit_parsing;
+pub mod vis_utils;
 
 mwa_hyperdrive_common::cfg_if::cfg_if! {
     if #[cfg(test)] {

@@ -49,6 +49,7 @@ pub(crate) enum MsFlavour {
     Birli,
     // Anything that writes ms with the marlu library
     Marlu,
+
     Cotter,
 
     /// Generic?
@@ -96,15 +97,35 @@ impl MS {
                 let mut history_table = read_table(ms, Some("HISTORY"))?;
                 let app: String = history_table.get_cell("APPLICATION", 0).unwrap();
                 let app = app.to_uppercase();
-                if app.starts_with("BIRLI") {
-                    MsFlavour::Birli
+                let app_name = if app.starts_with("BIRLI") {
+                    Some(MsFlavour::Birli)
                 } else if app.starts_with("MARLU") {
-                    MsFlavour::Marlu
+                    Some(MsFlavour::Marlu)
                 } else if app.starts_with("COTTER") {
-                    MsFlavour::Cotter
+                    Some(MsFlavour::Cotter)
                 } else {
-                    MsFlavour::Casa
-                }
+                    None
+                };
+
+                // If there wasn't an app in the "APPLICATION" column, see if we
+                // can get more information out of the "MESSAGE" column.
+                app_name.unwrap_or_else(|| {
+                    let messages: Vec<String> = history_table.get_col_as_vec("MESSAGE").unwrap();
+                    let mut app = None;
+                    for message in messages {
+                        let upper = message.to_uppercase();
+                        if upper.contains("MARLU") {
+                            app = Some(MsFlavour::Marlu);
+                            break;
+                        } else if upper.contains("BIRLI") {
+                            app = Some(MsFlavour::Birli);
+                            break;
+                        }
+                    }
+                    // If we *still* don't know what the app is, fallback on
+                    // "Casa".
+                    app.unwrap_or(MsFlavour::Casa)
+                })
             };
 
             // Get the tile names and XYZ positions.

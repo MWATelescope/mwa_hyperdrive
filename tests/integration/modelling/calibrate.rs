@@ -14,13 +14,13 @@ use serial_test::serial;
 use crate::*;
 use mwa_hyperdrive::{
     calibrate::{di_calibrate, solutions::CalibrationSolutions},
-    simulate_vis::{simulate_vis, SimulateVisArgs},
+    vis_utils::simulate::VisSimulateArgs,
 };
 use mwa_hyperdrive_common::{clap, marlu, mwalib, ndarray};
 
 #[test]
 #[serial]
-/// Generate a model with "simulate-vis" (in uvfits), then feed it to
+/// Generate a model with "vis-simulate" (in uvfits), then feed it to
 /// "di-calibrate" and write out the model used for calibration (as uvfits). The
 /// visibilities should be exactly the same.
 fn test_1090008640_calibrate_model() {
@@ -34,8 +34,8 @@ fn test_1090008640_calibrate_model() {
     let metafits = &args.data.as_ref().unwrap()[0];
     let srclist = args.source_list.unwrap();
     #[rustfmt::skip]
-    let sim_args = SimulateVisArgs::parse_from(&[
-        "simulate-vis",
+    let sim_args = VisSimulateArgs::parse_from(&[
+        "vis-simulate",
         "--metafits", metafits,
         "--source-list", &srclist,
         "--output-model-file", &format!("{}", model.display()),
@@ -44,13 +44,8 @@ fn test_1090008640_calibrate_model() {
         "--no-progress-bars"
     ]);
 
-    // Run simulate-vis and check that it succeeds
-    let result = simulate_vis(
-        sim_args,
-        #[cfg(feature = "cuda")]
-        false,
-        false,
-    );
+    // Run vis-simulate and check that it succeeds
+    let result = sim_args.run(false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let mut sols = temp_dir.clone();
@@ -182,7 +177,7 @@ fn test_1090008640_calibrate_model() {
 
 // #[test]
 // #[serial]
-// /// Generate a model with "simulate-vis" (as a measurement set), then feed it to
+// /// Generate a model with "vis-simulate" (as a measurement set), then feed it to
 // /// "di-calibrate" and write out the model used for calibration (into a
 // /// measurement set). The visibilities should be exactly the same.
 // // TODO: Get di-calibrate writing models to ms.
@@ -197,8 +192,8 @@ fn test_1090008640_calibrate_model() {
 //     let metafits = &args.data.as_ref().unwrap()[0];
 //     let srclist = args.source_list.unwrap();
 //     #[rustfmt::skip]
-//     let sim_args = SimulateVisArgs::parse_from(&[
-//         "simulate-vis",
+//     let sim_args = VisSimulateArgs::parse_from(&[
+//         "vis-simulate",
 //         "--metafits", metafits,
 //         "--source-list", &srclist,
 //         "--output-model-file", &format!("{}", model.display()),
@@ -207,8 +202,8 @@ fn test_1090008640_calibrate_model() {
 //         "--no-progress-bars"
 //     ]);
 
-//     // Run simulate-vis and check that it succeeds
-//     let result = simulate_vis(
+//     // Run vis-simulate and check that it succeeds
+//     let result = vis_simulate(
 //         sim_args,
 //         #[cfg(feature = "cuda")]
 //         false,

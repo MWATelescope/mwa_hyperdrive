@@ -5,8 +5,7 @@
 //! Generate sky-model visibilities from a sky-model source list.
 
 mod error;
-use birli::marlu::MeasurementSetWriter;
-pub use error::SimulateVisError;
+pub use error::VisSimulateError;
 
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -20,12 +19,11 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info};
 use marlu::{
-    precession::precess_time, Jones, LatLngHeight, ObsContext as MarluObsContext, RADec,
-    UvfitsWriter, VisContext, VisWritable, XyzGeodetic,
+    precession::precess_time, Jones, LatLngHeight, MeasurementSetWriter,
+    ObsContext as MarluObsContext, RADec, UvfitsWriter, VisContext, VisWritable, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
-use serde::Deserialize;
 
 use crate::data_formats::VisOutputType;
 use crate::{
@@ -38,13 +36,12 @@ use mwa_hyperdrive_common::{
     cfg_if, clap, hifitime, indicatif, itertools, log, marlu, mwalib, ndarray,
 };
 use mwa_hyperdrive_srclist::{
-    constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
-    read::read_source_list_file,
-    veto_sources, ComponentCounts, SourceList, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
+    read::read_source_list_file, veto_sources, ComponentCounts, SourceList,
+    DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
 };
 
-#[derive(Parser, Debug, Default, Deserialize)]
-pub struct SimulateVisArgs {
+#[derive(Parser, Debug, Default)]
+pub struct VisSimulateArgs {
     /// Path to the metafits file.
     #[clap(short, long, parse(from_str), help_heading = "INPUT AND OUTPUT")]
     metafits: PathBuf,
@@ -155,13 +152,25 @@ pub struct SimulateVisArgs {
     #[clap(long, multiple_values(true), help_heading = "MODEL PARAMETERS")]
     dipole_delays: Option<Vec<u32>>,
 
+    /// Use the CPU for visibility generation. This is deliberately made
+    /// non-default because using a GPU is much faster.
+    #[cfg(feature = "cuda")]
+    #[clap(long, help_heading = "MODEL PARAMETERS")]
+    cpu: bool,
+
     /// When generating sky-model visibilities, don't draw progress bars.
     #[clap(long, help_heading = "USER INTERFACE")]
     no_progress_bars: bool,
 }
 
+impl VisSimulateArgs {
+    pub fn run(&self, dry_run: bool) -> Result<(), VisSimulateError> {
+        vis_simulate(self, dry_run)
+    }
+}
+
 /// Parameters needed to do sky-model visibility simulation.
-struct SimVisParams {
+struct VisSimParams {
     /// Sky-model source list.
     source_list: SourceList,
 
@@ -200,13 +209,13 @@ struct SimVisParams {
     array_position: LatLngHeight,
 }
 
-impl SimVisParams {
+impl VisSimParams {
     /// Convert arguments into parameters.
-    fn new(args: &SimulateVisArgs) -> Result<SimVisParams, SimulateVisError> {
+    fn new(args: &VisSimulateArgs) -> Result<VisSimParams, VisSimulateError> {
         debug!("{:#?}", &args);
 
         // Expose all the struct fields to ensure they're all used.
-        let SimulateVisArgs {
+        let VisSimulateArgs {
             metafits,
             output_model_file,
             source_list,
@@ -227,6 +236,8 @@ impl SimVisParams {
             beam_file,
             unity_dipole_gains,
             dipole_delays,
+            #[cfg(feature = "cuda")]
+                cpu: _,
             no_progress_bars: _,
         } = args;
 
@@ -239,15 +250,15 @@ impl SimVisParams {
             (Some(ra), Some(dec), _) => {
                 // Verify that the input coordinates are sensible.
                 if !(0.0..=360.0).contains(ra) {
-                    return Err(SimulateVisError::RaInvalid);
+                    return Err(VisSimulateError::RaInvalid);
                 }
                 if !(-90.0..=90.0).contains(dec) {
-                    return Err(SimulateVisError::DecInvalid);
+                    return Err(VisSimulateError::DecInvalid);
                 }
                 RADec::new_degrees(*ra, *dec)
             }
-            (Some(_), None, _) => return Err(SimulateVisError::OnlyOneRAOrDec),
-            (None, Some(_), _) => return Err(SimulateVisError::OnlyOneRAOrDec),
+            (Some(_), None, _) => return Err(VisSimulateError::OnlyOneRAOrDec),
+            (None, Some(_), _) => return Err(VisSimulateError::OnlyOneRAOrDec),
             (None, None, m) => {
                 // The phase centre in a metafits file may not be present. If not,
                 // we have to use the pointing centre.
@@ -264,10 +275,10 @@ impl SimVisParams {
 
         // Get the fine channel frequencies.
         if *num_fine_channels == 0 {
-            return Err(SimulateVisError::FineChansZero);
+            return Err(VisSimulateError::FineChansZero);
         }
         if *freq_res < f64::EPSILON {
-            return Err(SimulateVisError::FineChansWidthTooSmall);
+            return Err(VisSimulateError::FineChansWidthTooSmall);
         }
         info!("Number of fine channels: {}", num_fine_channels);
         info!("Fine-channel width:      {} kHz", freq_res);
@@ -302,7 +313,7 @@ impl SimVisParams {
             timestamps
         };
         match timestamps.as_slice() {
-            [] => return Err(SimulateVisError::ZeroTimeSteps),
+            [] => return Err(VisSimulateError::ZeroTimeSteps),
             [t] => info!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
             [t0, .., tn] => {
                 info!("First timestep (GPS): {:.2}", t0.as_gpst_seconds());
@@ -350,7 +361,7 @@ impl SimVisParams {
                 debug!("Successfully parsed {}-style source list", sl_type);
                 sl
             }
-            Err(e) => return Err(SimulateVisError::from(e)),
+            Err(e) => return Err(VisSimulateError::from(e)),
         };
         let ComponentCounts {
             num_points,
@@ -380,12 +391,12 @@ impl SimVisParams {
             create_no_beam_object(xyzs.len())
         } else {
             create_fee_beam_object(
-                beam_file.as_deref(),
+                beam_file.as_ref(),
                 metafits.num_ants,
                 match dipole_delays {
                     Some(d) => {
                         if d.len() != 16 || d.iter().any(|&v| v > 32) {
-                            return Err(SimulateVisError::BadDelays);
+                            return Err(VisSimulateError::BadDelays);
                         }
                         Delays::Partial(d.to_owned())
                     }
@@ -439,7 +450,7 @@ impl SimVisParams {
 
         info!("Writing the sky model to {}", output_model_file.display());
 
-        Ok(SimVisParams {
+        Ok(VisSimParams {
             source_list,
             metafits,
             output_model_file: output_model_file.to_owned(),
@@ -458,21 +469,17 @@ impl SimVisParams {
 }
 
 /// Simulate sky-model visibilities from a sky-model source list.
-pub fn simulate_vis(
-    args: SimulateVisArgs,
-    #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
-    dry_run: bool,
-) -> Result<(), SimulateVisError> {
+fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulateError> {
     // TODO: Display GPU info.
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda-single")] {
-            if use_cpu_for_modelling {
+            if args.cpu {
                 info!("Generating sky model visibilities on the CPU");
             } else {
                 info!("Generating sky model visibilities on the GPU (single precision)");
             }
         } else if #[cfg(feature = "cuda")] {
-            if use_cpu_for_modelling {
+            if args.cpu {
                 info!("Generating sky model visibilities on the CPU");
             } else {
                 info!("Generating sky model visibilities on the GPU (double precision)");
@@ -482,7 +489,7 @@ pub fn simulate_vis(
         }
     }
 
-    let params = SimVisParams::new(&args)?;
+    let params = VisSimParams::new(args)?;
 
     if dry_run {
         info!("Dry run -- exiting now.");
@@ -540,13 +547,13 @@ pub fn simulate_vis(
         .and_then(|e| e.to_str())
     {
         Some(s) => {
-            VisOutputType::from_str(s).map_err(|e| SimulateVisError::OutputFileExtension {
+            VisOutputType::from_str(s).map_err(|e| VisSimulateError::OutputFileExtension {
                 path: format!("{}", &params.output_model_file.display()),
                 message: e.to_string(),
             })?
         }
         None => {
-            return Err(SimulateVisError::OutputFileExtension {
+            return Err(VisSimulateError::OutputFileExtension {
                 path: format!("{}", &params.output_model_file.display()),
                 message: "no extension".to_string(),
             })
@@ -611,7 +618,7 @@ pub fn simulate_vis(
     // Create a "modeller" object.
     let modeller = model::new_sky_modeller(
         #[cfg(feature = "cuda")]
-        use_cpu_for_modelling,
+        args.cpu,
         params.beam.deref(),
         &params.source_list,
         &params.xyzs,

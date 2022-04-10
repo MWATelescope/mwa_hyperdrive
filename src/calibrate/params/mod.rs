@@ -10,13 +10,11 @@
 //! errors) can be neatly split.
 
 pub(crate) mod error;
-mod filenames;
 mod helpers;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use error::*;
-use filenames::InputDataTypes;
 use helpers::*;
 
 use std::collections::{HashMap, HashSet};
@@ -43,6 +41,7 @@ use crate::{
     constants::*,
     context::ObsContext,
     data_formats::*,
+    filenames::InputDataTypes,
     glob::*,
     math::TileBaselineMaps,
     pfb_gains::{PfbFlavour, DEFAULT_PFB_FLAVOUR},
@@ -51,7 +50,8 @@ use crate::{
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon, vec1};
 use mwa_hyperdrive_srclist::{
-    constants::*, veto_sources, ComponentCounts, SourceList, SourceListType,
+    veto_sources, ComponentCounts, SourceList, SourceListType, DEFAULT_CUTOFF_DISTANCE,
+    DEFAULT_VETO_THRESHOLD,
 };
 
 /// Parameters needed to perform calibration.

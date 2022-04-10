@@ -11,6 +11,7 @@ use marlu::RADec;
 use vec1::{vec1, Vec1};
 
 use super::*;
+use crate::constants::DEFAULT_SPEC_INDEX;
 use mwa_hyperdrive_common::vec1;
 
 fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {

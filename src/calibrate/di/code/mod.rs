@@ -133,7 +133,7 @@ pub(crate) fn get_cal_vis(
     let mut vis_model: Array3<Jones<f32>> = fallible_jones_allocator(vis_shape)?;
     let mut vis_weights: Array3<f32> = fallible_f32_allocator(vis_shape)?;
 
-    // Sky-modelling communicate channel. Used to tell the model writer when
+    // Sky-modelling communication channel. Used to tell the model writer when
     // visibilities have been generated and they're ready to be written.
     let (tx_model, rx_model) = unbounded();
 

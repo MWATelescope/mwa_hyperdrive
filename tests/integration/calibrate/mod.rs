@@ -174,18 +174,15 @@ fn test_1090008640_woden() {
     // Re-do calibration, but this time into the hyperdrive fits format.
     let solutions_path = tmp_dir.join("sols.fits");
 
+    #[rustfmt::skip]
     let cal_args = CalibrateUserArgs::parse_from(&[
         "di-calibrate",
-        "--data",
-        "test_files/1090008640_WODEN/output_band01.uvfits",
-        "test_files/1090008640_WODEN/1090008640.metafits",
-        "--source-list",
-        "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
+        "--data", "test_files/1090008640_WODEN/output_band01.uvfits", "test_files/1090008640_WODEN/1090008640.metafits",
+        "--source-list", "test_files/1090008640_WODEN/srclist_3x3_grid.txt",
+        "--outputs", &format!("{}", solutions_path.display()),
+        "--no-progress-bars",
         #[cfg(feature = "cuda")]
         "--cpu",
-        "--outputs",
-        &format!("{}", solutions_path.display()),
-        "--no-progress-bars",
     ]);
 
     // Run di-cal and check that it fails

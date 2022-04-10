@@ -128,7 +128,7 @@ pointing and target frequencies (determined by a metafits file):
 `hyperdrive` can generate visibilities from a sky-model source list (output
 visibilities are saved to a default filename):
 
-    hyperdrive simulate-vis \
+    hyperdrive vis-simulate \
                -s srclist.yaml \
                -m *.metafits
 
@@ -136,7 +136,7 @@ Many options are available, but perhaps some of the more interesting ones are
 being able to filter specific kinds of sky-model sources (`--filter-gaussians`
 also available):
 
-    hyperdrive simulate-vis \
+    hyperdrive vis-simulate \
                -s srclist.yaml \
                -m *.metafits \
                --filter-points \

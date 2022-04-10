@@ -17,9 +17,10 @@ use marlu::RADec;
 use ndarray::{Array1, Array2};
 
 use crate::{
-    ao, constants::*, hyperdrive, rts, veto_sources, woden, HyperdriveFileType, SourceList,
-    SourceListType, SrclistError, WriteSourceListError, SOURCE_DIST_CUTOFF_HELP,
-    SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP, VETO_THRESHOLD_HELP,
+    ao, hyperdrive, rts, veto_sources, woden, HyperdriveFileType, SourceList, SourceListType,
+    SrclistError, WriteSourceListError, DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD,
+    SOURCE_DIST_CUTOFF_HELP, SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP,
+    VETO_THRESHOLD_HELP,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
 use mwa_hyperdrive_common::{clap, itertools, log, marlu, mwalib, ndarray};

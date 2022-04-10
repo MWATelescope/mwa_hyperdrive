@@ -39,7 +39,7 @@ pub struct ObsContext {
     /// necessarily start at 0, and is not necessarily regular (e.g. a valid
     /// vector could be [1, 2, 4]).
     ///
-    /// Allowing the indices to non-regular means that we can represent input
+    /// Allowing the indices to be non-regular means that we can represent input
     /// data that also isn't regular; naively reading in a dataset with 2
     /// timesteps that are separated by more than the time resolution of the
     /// data would give misleading results.

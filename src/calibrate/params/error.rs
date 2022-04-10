@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use vec1::Vec1;
 
-use super::filenames::SUPPORTED_INPUT_FILE_COMBINATIONS;
+use crate::filenames::SUPPORTED_INPUT_FILE_COMBINATIONS;
 use mwa_hyperdrive_common::{thiserror, vec1};
 
 /// Errors associated with setting up [super::CalibrateParams].
@@ -77,11 +77,11 @@ pub enum InvalidArgsError {
     BadTileFlag(String),
 
     #[error(
-        "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::calibrate::args::VIS_OUTPUT_EXTENSIONS
+        "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::help_texts::VIS_OUTPUT_EXTENSIONS
     )]
     VisFileType { ext: String },
 
-    #[error("Cannot write calibration outputs to a file type '{ext}'.\nSupported formats are: {} (calibration solutions)\n                     : {} (visibility files)", *crate::calibrate::args::CAL_SOLUTION_EXTENSIONS, *crate::calibrate::args::VIS_OUTPUT_EXTENSIONS)]
+    #[error("Cannot write calibration outputs to a file type '{ext}'.\nSupported formats are: {} (calibration solutions)\n                     : {} (visibility files)", *crate::calibrate::args::CAL_SOLUTION_EXTENSIONS, *crate::help_texts::VIS_OUTPUT_EXTENSIONS)]
     CalibrationOutputFile { ext: String },
 
     #[error("Could not parse PFB flavour '{0}'.\nSupported flavours are: {}", *crate::pfb_gains::PFB_FLAVOURS)]

@@ -83,7 +83,7 @@ fn test_calibrate_trivial() {
     assert_abs_diff_eq!(di_jones, expected, epsilon = 1e-14);
 }
 
-/// As above, but make on Jones matrix much bigger than the rest. This should
+/// As above, but make one Jones matrix much "bigger" than the rest. This should
 /// make the calibration solutions not match what we expected, but when it's
 /// flagged via the weights, things go back to normal.
 #[test]

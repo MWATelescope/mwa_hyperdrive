@@ -11,7 +11,7 @@ use log::info;
 
 use mwa_hyperdrive::{
     calibrate::{args::CalibrateUserArgs, di_calibrate, solutions::CalibrationSolutions},
-    simulate_vis::{simulate_vis, SimulateVisArgs},
+    vis_utils::{simulate::VisSimulateArgs, subtract::VisSubtractArgs},
     HyperdriveError,
 };
 use mwa_hyperdrive_common::{clap, display_build_info, log, mwalib, setup_logging};
@@ -52,11 +52,12 @@ enum Args {
     },
 
     /// Simulate visibilities of a sky-model source list.
+    #[clap(alias = "simulate-vis")]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
-    SimulateVis {
+    VisSimulate {
         #[clap(flatten)]
-        args: SimulateVisArgs,
+        args: VisSimulateArgs,
 
         /// The verbosity of the program. The default is to print high-level
         /// information.
@@ -67,15 +68,29 @@ enum Args {
         /// were correctly ingested and print out high-level information.
         #[clap(long)]
         dry_run: bool,
+    },
 
-        /// Use the CPU for visibility generation. This is deliberately made
-        /// non-default because using a GPU is much faster.
-        #[cfg(feature = "cuda")]
+    /// Subtract sky-model sources from supplied visibilities.
+    #[clap(alias = "subtract-vis")]
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
+    VisSubtract {
+        #[clap(flatten)]
+        args: VisSubtractArgs,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
+
+        /// Don't actually do any work; just verify that the input arguments
+        /// were correctly ingested and print out high-level information.
         #[clap(long)]
-        cpu: bool,
+        dry_run: bool,
     },
 
     /// Convert between calibration solution file formats.
+    #[clap(alias = "convert-solutions")]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     SolutionsConvert {
@@ -101,6 +116,7 @@ enum Args {
     },
 
     /// Plot calibration solutions.
+    #[clap(alias = "plot-solutions")]
     #[cfg(feature = "plotting")]
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
@@ -195,7 +211,8 @@ fn try_main() -> Result<(), HyperdriveError> {
     // Set up logging.
     let verbosity = match &args {
         Args::DiCalibrate { verbosity, .. } => verbosity,
-        Args::SimulateVis { verbosity, .. } => verbosity,
+        Args::VisSimulate { verbosity, .. } => verbosity,
+        Args::VisSubtract { verbosity, .. } => verbosity,
         Args::SolutionsConvert { verbosity, .. } => verbosity,
         #[cfg(feature = "plotting")]
         Args::SolutionsPlot { verbosity, .. } => verbosity,
@@ -212,7 +229,8 @@ fn try_main() -> Result<(), HyperdriveError> {
         "hyperdrive {} {}",
         match args {
             Args::DiCalibrate { .. } => "di-calibrate",
-            Args::SimulateVis { .. } => "simulate-vis",
+            Args::VisSimulate { .. } => "vis-simulate",
+            Args::VisSubtract { .. } => "vis-subtract",
             Args::SolutionsConvert { .. } => "solutions-convert",
             #[cfg(feature = "plotting")]
             Args::SolutionsPlot { .. } => "solutions-plot",
@@ -238,21 +256,24 @@ fn try_main() -> Result<(), HyperdriveError> {
             info!("hyperdrive di-calibrate complete.");
         }
 
-        Args::SimulateVis {
+        Args::VisSimulate {
             args,
             verbosity: _,
             dry_run,
-            #[cfg(feature = "cuda")]
-            cpu,
         } => {
-            simulate_vis(
-                args,
-                #[cfg(feature = "cuda")]
-                cpu,
-                dry_run,
-            )?;
+            args.run(dry_run)?;
 
-            info!("hyperdrive simulate-vis complete.");
+            info!("hyperdrive vis-simulate complete.");
+        }
+
+        Args::VisSubtract {
+            args,
+            verbosity: _,
+            dry_run,
+        } => {
+            args.run(dry_run)?;
+
+            info!("hyperdrive vis-subtract complete.");
         }
 
         Args::SolutionsConvert {

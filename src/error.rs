@@ -14,17 +14,20 @@ pub enum HyperdriveError {
     #[error("Requested GPU processing, but the CUDA feature was not enabled when hyperdrive was compiled.")]
     NoGpuCompiled,
 
-    #[error("{0}")]
+    #[error(transparent)]
     InvalidArgs(#[from] crate::calibrate::params::InvalidArgsError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     ArgsFile(#[from] crate::calibrate::args::CalibrateArgsFileError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     Calibrate(#[from] crate::calibrate::CalibrateError),
 
-    #[error("{0}")]
-    SimulateVis(#[from] crate::simulate_vis::SimulateVisError),
+    #[error(transparent)]
+    VisSimulate(#[from] crate::vis_utils::simulate::VisSimulateError),
+
+    #[error(transparent)]
+    VisSubtract(#[from] crate::vis_utils::subtract::VisSubtractError),
 
     #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists")]
     Srclist(#[from] SrclistError),

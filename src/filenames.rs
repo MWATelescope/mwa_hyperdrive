@@ -34,6 +34,9 @@ lazy_static::lazy_static! {
 pub(super) const SUPPORTED_INPUT_FILE_COMBINATIONS: &str =
     "gpubox + metafits (+ mwaf)\nms (+ metafits)\nuvfits (+ metafits)";
 
+pub(super) const SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS: &str =
+    "ms (+ metafits)\nuvfits (+ metafits)";
+
 #[derive(Debug)]
 /// Supported input data types for calibration.
 pub struct InputDataTypes {
@@ -171,7 +174,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
 }
 
 #[derive(Debug, Error)]
-pub(super) enum InputFileError {
+pub enum InputFileError {
     #[error("Specified file does not exist: {0}")]
     DoesNotExist(String),
 
