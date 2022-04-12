@@ -7,10 +7,7 @@
 #[cfg(test)]
 mod tests;
 
-use marlu::{
-    constants::MWA_LAT_RAD, pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, RADec, XyzGeodetic,
-    LMN, UVW,
-};
+use marlu::{pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, RADec, XyzGeodetic, LMN, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -346,32 +343,32 @@ pub struct ShapeletComponentParams {
 
 /// A trait to abstract common behaviour on the per-component parameters.
 pub trait PerComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl>;
+    fn get_azels_mwa_parallel(&self, lst_rad: f64, array_latitude_rad: f64) -> Vec<AzEl>;
 }
 
-fn get_azels_mwa_parallel(radecs: &[RADec], lst_rad: f64) -> Vec<AzEl> {
+fn get_azels_mwa_parallel(radecs: &[RADec], lst_rad: f64, array_latitude_rad: f64) -> Vec<AzEl> {
     radecs
         .par_iter()
-        .map(|radec| radec.to_hadec(lst_rad).to_azel(MWA_LAT_RAD))
+        .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
         .collect()
 }
 
 // Make each of the component types derive the trait.
 
 impl PerComponentParams for PointComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
-        get_azels_mwa_parallel(&self.radecs, lst_rad)
+    fn get_azels_mwa_parallel(&self, lst_rad: f64, array_latitude_rad: f64) -> Vec<AzEl> {
+        get_azels_mwa_parallel(&self.radecs, lst_rad, array_latitude_rad)
     }
 }
 
 impl PerComponentParams for GaussianComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
-        get_azels_mwa_parallel(&self.radecs, lst_rad)
+    fn get_azels_mwa_parallel(&self, lst_rad: f64, array_latitude_rad: f64) -> Vec<AzEl> {
+        get_azels_mwa_parallel(&self.radecs, lst_rad, array_latitude_rad)
     }
 }
 
 impl PerComponentParams for ShapeletComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
-        get_azels_mwa_parallel(&self.radecs, lst_rad)
+    fn get_azels_mwa_parallel(&self, lst_rad: f64, array_latitude_rad: f64) -> Vec<AzEl> {
+        get_azels_mwa_parallel(&self.radecs, lst_rad, array_latitude_rad)
     }
 }

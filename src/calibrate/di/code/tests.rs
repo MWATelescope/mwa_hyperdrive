@@ -4,18 +4,28 @@
 
 //! Direction-independent calibration tests.
 
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
+
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use hifitime::Epoch;
-use marlu::Jones;
+use marlu::{Jones, LatLngHeight};
+use mwa_hyperdrive_srclist::SourceList;
 use ndarray::prelude::*;
-use vec1::vec1;
+use vec1::{vec1, Vec1};
 
 use super::{calibrate, calibrate_timeblocks, CalVis, IncompleteSolutions};
 use crate::{
-    calibrate::{params::CalibrateParams, Chanblock, Timeblock},
+    averaging::{Chanblock, Fence, Timeblock},
+    calibrate::params::CalibrateParams,
     jones_test::TestJones,
     math::is_prime,
+    solutions::CalSolutionType,
+    vis_io::read::{RawDataCorrections, RawDataReader},
 };
+use mwa_hyperdrive_beam::create_no_beam_object;
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
 
 /// Make some data "four times as bright as the model". The solutions should
@@ -230,18 +240,80 @@ fn test_calibrate_trivial_with_flags() {
     assert_abs_diff_eq!(di_jones, expected.mapv(TestJones::from), epsilon = 1e-14);
 }
 
+/// The majority of parameters don't matter for these tests.
+fn get_default_params() -> CalibrateParams {
+    let e = Epoch::from_gpst_seconds(1090008640.0);
+    CalibrateParams {
+        input_data: Box::new(
+            RawDataReader::new(
+                &"test_files/1090008640/1090008640.metafits",
+                &["test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits"],
+                None,
+                RawDataCorrections::default(),
+            )
+            .unwrap(),
+        ),
+        raw_data_corrections: None,
+        beam: create_no_beam_object(1),
+        source_list: SourceList::new(),
+        flagged_tiles: vec![],
+        uvw_min: 0.0,
+        uvw_max: f64::INFINITY,
+        freq_centroid: 150e6,
+        baseline_weights: Vec1::try_from_vec(vec![1.0; 8128]).unwrap(),
+        timeblocks: vec1![Timeblock {
+            index: 0,
+            range: 0..1,
+            timestamps: vec1![e],
+            median: e
+        }],
+        timesteps: vec1![0],
+        freq_average_factor: 1,
+        fences: vec1![Fence {
+            chanblocks: vec![Chanblock {
+                chanblock_index: 0,
+                unflagged_index: 0,
+                _freq: 10.0
+            }],
+            flagged_chanblock_indices: vec![],
+            _first_freq: 10.0,
+            _freq_res: Some(1.0)
+        }],
+        unflagged_fine_chan_freqs: vec![0.0],
+        flagged_fine_chans: HashSet::new(),
+        tile_to_unflagged_cross_baseline_map: HashMap::new(),
+        unflagged_tile_xyzs: vec![],
+        array_position: LatLngHeight {
+            longitude_rad: 0.0,
+            latitude_rad: 0.0,
+            height_metres: 0.0,
+        },
+        apply_precession: false,
+        max_iterations: 50,
+        stop_threshold: 1e-6,
+        min_threshold: 1e-3,
+        output_solutions_filenames: vec![(CalSolutionType::Fits, PathBuf::from("asdf.fits"))],
+        model_files: None,
+        output_model_time_average_factor: 1,
+        output_model_freq_average_factor: 1,
+        no_progress_bars: true,
+        #[cfg(feature = "cuda")]
+        use_cpu_for_modelling: false,
+    }
+}
+
 /// Test that converting [IncompleteSolutions] to [CalibrationSolutions] does
 /// what's expected.
 #[test]
 fn incomplete_to_complete_trivial() {
-    let timeblocks = [Timeblock {
+    let mut params = get_default_params();
+    params.timeblocks = vec1![Timeblock {
         index: 0,
         range: 0..1,
-        start: Epoch::from_gpst_seconds(1065880128.0),
-        end: Epoch::from_gpst_seconds(1065880130.0),
-        average: Epoch::from_gpst_seconds(1065880129.0),
+        timestamps: vec1![Epoch::from_gpst_seconds(1065880128.0)],
+        median: Epoch::from_gpst_seconds(1065880128.0),
     }];
-    let chanblocks = [
+    params.fences.first_mut().chanblocks = vec![
         Chanblock {
             chanblock_index: 0,
             unflagged_index: 0,
@@ -258,13 +330,11 @@ fn incomplete_to_complete_trivial() {
             _freq: 152e6,
         },
     ];
-    let flagged_tiles = [];
-    let flagged_chanblock_indices = [];
-    let num_timeblocks = timeblocks.len();
-    let num_tiles = 5;
-    let num_baselines = num_tiles * (num_tiles - 1) / 2;
-    let num_chanblocks = chanblocks.len();
-    let baseline_weights = vec![1.0; num_baselines];
+    params.fences.first_mut().flagged_chanblock_indices = vec![];
+    params.flagged_tiles = vec![];
+    let num_timeblocks = params.timeblocks.len();
+    let num_tiles = params.get_total_num_tiles();
+    let num_chanblocks = params.fences.first().chanblocks.len();
 
     let incomplete_di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
         .into_iter()
@@ -277,20 +347,14 @@ fn incomplete_to_complete_trivial() {
     .unwrap();
     let incomplete = IncompleteSolutions {
         di_jones: incomplete_di_jones.clone(),
-        timeblocks: &timeblocks,
-        chanblocks: &chanblocks,
-        _baseline_weights: &baseline_weights,
-        _max_iterations: 50,
-        _stop_threshold: 1e-8,
-        _min_threshold: 1e-4,
+        timeblocks: &params.timeblocks,
+        chanblocks: &params.fences.first().chanblocks,
+        max_iterations: 50,
+        stop_threshold: 1e-8,
+        min_threshold: 1e-4,
     };
 
-    let complete = incomplete.into_cal_sols(
-        num_tiles + flagged_tiles.len(),
-        &flagged_tiles,
-        &flagged_chanblock_indices,
-        Some(1065880128),
-    );
+    let complete = incomplete.into_cal_sols(&params, None);
 
     // The "complete" solutions should have inverted Jones matrices.
     let expected = incomplete_di_jones.mapv(|v| v.inv());
@@ -308,14 +372,14 @@ fn incomplete_to_complete_trivial() {
 // over".
 #[test]
 fn incomplete_to_complete_flags_simple() {
-    let timeblocks = [Timeblock {
+    let mut params = get_default_params();
+    params.timeblocks = vec1![Timeblock {
         index: 0,
         range: 0..1,
-        start: Epoch::from_gpst_seconds(1065880128.0),
-        end: Epoch::from_gpst_seconds(1065880130.0),
-        average: Epoch::from_gpst_seconds(1065880129.0),
+        timestamps: vec1![Epoch::from_gpst_seconds(1065880128.0)],
+        median: Epoch::from_gpst_seconds(1065880128.0)
     }];
-    let chanblocks = [
+    params.fences.first_mut().chanblocks = vec![
         Chanblock {
             chanblock_index: 1,
             unflagged_index: 0,
@@ -332,14 +396,12 @@ fn incomplete_to_complete_flags_simple() {
             _freq: 153e6,
         },
     ];
-    let flagged_tiles = [];
-    let flagged_chanblock_indices = [0];
-    let num_timeblocks = timeblocks.len();
-    let num_tiles = 5;
-    let num_baselines = num_tiles * (num_tiles - 1) / 2;
-    let num_chanblocks = chanblocks.len();
-    let baseline_weights = vec![1.0; num_baselines];
-    let total_num_tiles = num_tiles + flagged_tiles.len();
+    params.fences.first_mut().flagged_chanblock_indices = vec![0];
+    params.flagged_tiles = vec![];
+    let num_timeblocks = params.timeblocks.len();
+    let total_num_tiles = params.get_total_num_tiles();
+    let num_tiles = total_num_tiles - params.flagged_tiles.len();
+    let num_chanblocks = params.fences.first().chanblocks.len();
 
     let di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
         .into_iter()
@@ -349,20 +411,14 @@ fn incomplete_to_complete_flags_simple() {
         Array3::from_shape_vec((num_timeblocks, num_tiles, num_chanblocks), di_jones).unwrap();
     let incomplete = IncompleteSolutions {
         di_jones: incomplete_di_jones.clone(),
-        timeblocks: &timeblocks,
-        chanblocks: &chanblocks,
-        _baseline_weights: &baseline_weights,
-        _max_iterations: 50,
-        _stop_threshold: 1e-8,
-        _min_threshold: 1e-4,
+        timeblocks: &params.timeblocks,
+        chanblocks: &params.fences.first().chanblocks,
+        max_iterations: 50,
+        stop_threshold: 1e-8,
+        min_threshold: 1e-4,
     };
 
-    let complete = incomplete.into_cal_sols(
-        total_num_tiles,
-        &flagged_tiles,
-        &flagged_chanblock_indices,
-        Some(1065880128),
-    );
+    let complete = incomplete.into_cal_sols(&params, None);
 
     // The first chanblock is all flagged.
     for j in complete.di_jones.slice(s![.., .., 0]).iter() {
@@ -392,14 +448,14 @@ fn incomplete_to_complete_flags_simple() {
 // Same as above, but make the last chanblock flagged.
 #[test]
 fn incomplete_to_complete_flags_simple2() {
-    let timeblocks = [Timeblock {
+    let mut params = get_default_params();
+    params.timeblocks = vec1![Timeblock {
         index: 0,
         range: 0..1,
-        start: Epoch::from_gpst_seconds(1065880128.0),
-        end: Epoch::from_gpst_seconds(1065880130.0),
-        average: Epoch::from_gpst_seconds(1065880129.0),
+        timestamps: vec1![Epoch::from_gpst_seconds(1065880128.0)],
+        median: Epoch::from_gpst_seconds(1065880128.0)
     }];
-    let chanblocks = [
+    params.fences.first_mut().chanblocks = vec![
         Chanblock {
             chanblock_index: 0,
             unflagged_index: 0,
@@ -416,14 +472,12 @@ fn incomplete_to_complete_flags_simple2() {
             _freq: 153e6,
         },
     ];
-    let flagged_tiles = [];
-    let flagged_chanblock_indices = [3];
-    let num_timeblocks = timeblocks.len();
-    let num_tiles = 5;
-    let num_baselines = num_tiles * (num_tiles - 1) / 2;
-    let num_chanblocks = chanblocks.len();
-    let baseline_weights = vec![1.0; num_baselines];
-    let total_num_tiles = num_tiles + flagged_tiles.len();
+    params.flagged_tiles = vec![];
+    params.fences.first_mut().flagged_chanblock_indices = vec![3];
+    let num_timeblocks = params.timeblocks.len();
+    let num_chanblocks = params.fences.first().chanblocks.len();
+    let total_num_tiles = params.get_total_num_tiles();
+    let num_tiles = total_num_tiles - params.flagged_tiles.len();
 
     let incomplete_di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
         .into_iter()
@@ -436,20 +490,14 @@ fn incomplete_to_complete_flags_simple2() {
     .unwrap();
     let incomplete = IncompleteSolutions {
         di_jones: incomplete_di_jones.clone(),
-        timeblocks: &timeblocks,
-        chanblocks: &chanblocks,
-        _baseline_weights: &baseline_weights,
-        _max_iterations: 50,
-        _stop_threshold: 1e-8,
-        _min_threshold: 1e-4,
+        timeblocks: &params.timeblocks,
+        chanblocks: &params.fences.first().chanblocks,
+        max_iterations: 50,
+        stop_threshold: 1e-8,
+        min_threshold: 1e-4,
     };
 
-    let complete = incomplete.into_cal_sols(
-        total_num_tiles,
-        &flagged_tiles,
-        &flagged_chanblock_indices,
-        Some(1065880128),
-    );
+    let complete = incomplete.into_cal_sols(&params, None);
 
     // The last chanblock is all flagged.
     for j in complete.di_jones.slice(s![.., .., -1]).iter() {
@@ -478,14 +526,14 @@ fn incomplete_to_complete_flags_simple2() {
 
 #[test]
 fn incomplete_to_complete_flags_complex() {
-    let timeblocks = [Timeblock {
+    let mut params = get_default_params();
+    params.timeblocks = vec1![Timeblock {
         index: 0,
         range: 0..1,
-        start: Epoch::from_gpst_seconds(1065880128.0),
-        end: Epoch::from_gpst_seconds(1065880130.0),
-        average: Epoch::from_gpst_seconds(1065880129.0),
+        timestamps: vec1![Epoch::from_gpst_seconds(1065880128.0)],
+        median: Epoch::from_gpst_seconds(1065880128.0)
     }];
-    let chanblocks = [
+    params.fences.first_mut().chanblocks = vec![
         Chanblock {
             chanblock_index: 0,
             unflagged_index: 0,
@@ -502,15 +550,14 @@ fn incomplete_to_complete_flags_complex() {
             _freq: 153e6,
         },
     ];
-    let flagged_tiles = [2];
-    let flagged_chanblock_indices = [1];
-    let num_timeblocks = timeblocks.len();
-    let num_tiles = 5;
-    let num_baselines = num_tiles * (num_tiles - 1) / 2;
-    let num_chanblocks = chanblocks.len();
-    let baseline_weights = vec![1.0; num_baselines];
-    let total_num_tiles = num_tiles + flagged_tiles.len();
-    let total_num_chanblocks = num_chanblocks + flagged_chanblock_indices.len();
+    params.fences.first_mut().flagged_chanblock_indices = vec![1];
+    params.flagged_tiles = vec![2];
+    let num_timeblocks = params.timeblocks.len();
+    let num_chanblocks = params.fences.first().chanblocks.len();
+    let total_num_tiles = params.get_total_num_tiles();
+    let num_tiles = total_num_tiles - params.flagged_tiles.len();
+    let total_num_chanblocks =
+        num_chanblocks + params.fences.first().flagged_chanblock_indices.len();
 
     // Cower at my evil, awful code.
     let mut primes = vec1![2];
@@ -531,20 +578,14 @@ fn incomplete_to_complete_flags_complex() {
     .unwrap();
     let incomplete = IncompleteSolutions {
         di_jones: incomplete_di_jones,
-        timeblocks: &timeblocks,
-        chanblocks: &chanblocks,
-        _baseline_weights: &baseline_weights,
-        _max_iterations: 50,
-        _stop_threshold: 1e-8,
-        _min_threshold: 1e-4,
+        timeblocks: &params.timeblocks,
+        chanblocks: &params.fences.first().chanblocks,
+        max_iterations: 50,
+        stop_threshold: 1e-8,
+        min_threshold: 1e-4,
     };
 
-    let complete = incomplete.into_cal_sols(
-        total_num_tiles,
-        &flagged_tiles,
-        &flagged_chanblock_indices,
-        Some(1065880128),
-    );
+    let complete = incomplete.into_cal_sols(&params, None);
 
     // For programmer sanity, enforce here that this test only ever has one
     // timeblock.
@@ -555,11 +596,16 @@ fn incomplete_to_complete_flags_complex() {
         let sub_array = complete.di_jones.slice(s![0, i_tile, ..]);
         let mut i_unflagged_chanblock = 0;
 
-        if flagged_tiles.contains(&i_tile) {
+        if params.flagged_tiles.contains(&i_tile) {
             assert!(sub_array.iter().all(|j| j.any_nan()));
         } else {
             for i_chan in 0..total_num_chanblocks {
-                if flagged_chanblock_indices.contains(&(i_chan as u16)) {
+                if params
+                    .fences
+                    .first()
+                    .flagged_chanblock_indices
+                    .contains(&(i_chan as u16))
+                {
                     assert!(sub_array[i_chan].any_nan());
                 } else {
                     assert_abs_diff_eq!(
@@ -594,7 +640,6 @@ pub(crate) fn test_1090008640_quality(params: CalibrateParams, cal_vis: CalVis) 
         cal_vis.vis_model.view(),
         &params.timeblocks,
         &params.fences.first().chanblocks,
-        &params.baseline_weights,
         50,
         1e-8,
         1e-4,
@@ -608,7 +653,7 @@ pub(crate) fn test_1090008640_quality(params: CalibrateParams, cal_vis: CalVis) 
     let mut count_50 = 0;
     let mut count_42 = 0;
     let mut chanblocks_42 = vec![];
-    let mut fewest_iterations = usize::MAX;
+    let mut fewest_iterations = u32::MAX;
     for cal_result in cal_results {
         match cal_result.num_iterations {
             50 => {

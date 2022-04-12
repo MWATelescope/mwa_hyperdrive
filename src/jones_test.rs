@@ -8,7 +8,7 @@ use marlu::Jones;
 
 use mwa_hyperdrive_common::{
     marlu,
-    num_traits::{Float, Num},
+    num_traits::{float::FloatCore, Float, Num},
     Complex,
 };
 
@@ -139,5 +139,34 @@ where
     #[inline]
     fn abs_diff_eq(&self, other: &Self, epsilon: F::Epsilon) -> bool {
         (0..4).all(|idx| Complex::<F>::abs_diff_eq(&self[idx], &other[idx], epsilon.clone()))
+    }
+}
+
+impl<F: Float + FloatCore + approx::AbsDiffEq<Epsilon = F> + approx::RelativeEq> approx::RelativeEq
+    for TestJones<F>
+where
+    F::Epsilon: Clone,
+{
+    #[inline]
+    fn default_max_relative() -> F::Epsilon {
+        F::default_epsilon()
+    }
+
+    #[inline]
+    fn relative_eq(&self, other: &Self, epsilon: F::Epsilon, max_relative: F::Epsilon) -> bool {
+        self.iter().zip(other.iter()).all(|(s, o)| {
+            F::relative_eq(&s.re, &o.re, epsilon, max_relative)
+                && F::relative_eq(&s.im, &o.im, epsilon, max_relative)
+        })
+    }
+
+    #[inline]
+    fn relative_ne(
+        &self,
+        other: &Self,
+        epsilon: Self::Epsilon,
+        max_relative: Self::Epsilon,
+    ) -> bool {
+        !Self::relative_eq(self, other, epsilon, max_relative)
     }
 }

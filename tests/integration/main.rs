@@ -7,9 +7,10 @@
 //! Some help for laying out these tests was taken from:
 //! https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html
 
-mod calibrate;
+mod di_calibrate;
 mod jones_test;
 mod modelling;
+mod solutions_apply;
 
 use std::path::PathBuf;
 use std::process::Output;

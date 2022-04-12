@@ -29,6 +29,15 @@ pub enum HyperdriveError {
     #[error(transparent)]
     VisSubtract(#[from] crate::vis_utils::subtract::VisSubtractError),
 
+    #[error(transparent)]
+    SolutionsApply(#[from] crate::solutions::apply::SolutionsApplyError),
+
+    #[error(transparent)]
+    SolutionsConvert(#[from] crate::solutions::convert::SolutionsConvertError),
+
+    #[error(transparent)]
+    SolutionsPlot(#[from] crate::solutions::plot::SolutionsPlotError),
+
     #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Source-lists")]
     Srclist(#[from] SrclistError),
 }

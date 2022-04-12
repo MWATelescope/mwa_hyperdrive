@@ -5,6 +5,7 @@
 //! Code to generate sky-model visibilities with CUDA.
 
 use hifitime::Epoch;
+use log::debug;
 use marlu::{
     cuda_runtime_sys,
     pos::xyz::xyzs_to_cross_uvws_parallel,
@@ -19,7 +20,7 @@ use mwa_hyperdrive_beam::{
     cuda_status_to_error, Beam, BeamCUDA, BeamError, DevicePointer,
     ERROR_STR_LENGTH as CUDA_ERROR_STR_LENGTH,
 };
-use mwa_hyperdrive_common::{cfg_if, hifitime, marlu, ndarray, rayon, shapelets};
+use mwa_hyperdrive_common::{cfg_if, hifitime, log, marlu, ndarray, rayon, shapelets};
 use mwa_hyperdrive_cuda as cuda;
 use mwa_hyperdrive_srclist::{
     get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
@@ -47,9 +48,10 @@ pub(crate) struct SkyModellerCuda<'a> {
     phase_centre: RADec,
     /// The longitude of the array we're using \[radians\].
     array_longitude: f64,
-    /// The latitude of the array we're using \[radians\].
+    /// The *unprecessed* latitude of the array we're using \[radians\]. If we
+    /// are precessing, this latitude isn't used when calculating [`AzEl`]s.
     array_latitude: f64,
-    /// Shift baselines and LSTs back to J2000.
+    /// Shift baselines, LSTs and array latitudes back to J2000.
     precess: bool,
 
     freqs: Vec<CudaFloat>,
@@ -586,6 +588,7 @@ impl<'a> SkyModellerCuda<'a> {
         &self,
         d_uvws: &DevicePointer<cuda::UVW>,
         lst_rad: f64,
+        array_latitude_rad: f64,
     ) -> Result<(), BeamError> {
         if self.point_power_law_radecs.is_empty()
             && self.point_curved_power_law_radecs.is_empty()
@@ -595,15 +598,12 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         let point_beam_jones = {
-            // Can't use self.array_latitude in the par_iter chain; complains
-            // about part of self not being able to be passed between threads.
-            let array_latitude = self.array_latitude;
             let azels: Vec<AzEl> = self
                 .point_power_law_radecs
                 .par_iter()
                 .chain(self.point_curved_power_law_radecs.par_iter())
                 .chain(self.point_list_radecs.par_iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude))
+                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
                 .collect();
             self.cuda_beam.calc_jones(&azels)?
         };
@@ -650,6 +650,7 @@ impl<'a> SkyModellerCuda<'a> {
         &self,
         d_uvws: &DevicePointer<cuda::UVW>,
         lst_rad: f64,
+        array_latitude_rad: f64,
     ) -> Result<(), BeamError> {
         if self.gaussian_power_law_radecs.is_empty()
             && self.gaussian_curved_power_law_radecs.is_empty()
@@ -659,15 +660,12 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         let gaussian_beam_jones = {
-            // Can't use self.array_latitude in the par_iter chain; complains
-            // about part of self not being able to be passed between threads.
-            let array_latitude = self.array_latitude;
             let azels: Vec<AzEl> = self
                 .gaussian_power_law_radecs
                 .par_iter()
                 .chain(self.gaussian_curved_power_law_radecs.par_iter())
                 .chain(self.gaussian_list_radecs.par_iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude))
+                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
                 .collect();
             self.cuda_beam.calc_jones(&azels)?
         };
@@ -721,6 +719,7 @@ impl<'a> SkyModellerCuda<'a> {
         &self,
         d_uvws: &DevicePointer<cuda::UVW>,
         lst_rad: f64,
+        array_latitude_rad: f64,
     ) -> Result<(), BeamError> {
         if self.shapelet_power_law_radecs.is_empty()
             && self.shapelet_curved_power_law_radecs.is_empty()
@@ -730,15 +729,12 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         let shapelet_beam_jones = {
-            // Can't use self.array_latitude in the par_iter chain; complains
-            // about part of self not being able to be passed between threads.
-            let array_latitude = self.array_latitude;
             let azels: Vec<AzEl> = self
                 .shapelet_power_law_radecs
                 .par_iter()
                 .chain(self.shapelet_curved_power_law_radecs.par_iter())
                 .chain(self.shapelet_list_radecs.par_iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude))
+                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
                 .collect();
             self.cuda_beam.calc_jones(&azels)?
         };
@@ -874,7 +870,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -888,14 +884,29 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            debug!(
+                "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
+                timestamp.as_gpst_seconds(),
+                precession_info.lmst.to_degrees(),
+                precession_info.lmst_j2000.to_degrees()
+            );
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            debug!(
+                "Modelling GPS timestamp {}, LMST {}°",
+                timestamp.as_gpst_seconds(),
+                lst.to_degrees()
+            );
+            (uvws, lst, self.array_latitude)
         };
 
         let cuda_uvws: Vec<cuda::UVW> = uvws
@@ -910,9 +921,9 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         unsafe {
             let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
 
-            self.model_points_inner(&d_uvws, lst)?;
-            self.model_gaussians_inner(&d_uvws, lst)?;
-            self.model_shapelets_inner(&d_uvws, lst)?;
+            self.model_points_inner(&d_uvws, lst, latitude)?;
+            self.model_gaussians_inner(&d_uvws, lst, latitude)?;
+            self.model_shapelets_inner(&d_uvws, lst, latitude)?;
 
             self.copy_and_reset_vis(vis_model_slice);
         }
@@ -925,7 +936,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -939,14 +950,18 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            (uvws, lst, self.array_latitude)
         };
 
         let cuda_uvws: Vec<cuda::UVW> = uvws
@@ -961,7 +976,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         unsafe {
             let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
 
-            self.model_points_inner(&d_uvws, lst)?;
+            self.model_points_inner(&d_uvws, lst, latitude)?;
             self.copy_and_reset_vis(vis_model_slice);
         }
 
@@ -980,7 +995,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -994,14 +1009,18 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            (uvws, lst, self.array_latitude)
         };
 
         let cuda_uvws: Vec<cuda::UVW> = uvws
@@ -1016,7 +1035,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         unsafe {
             let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
 
-            self.model_gaussians_inner(&d_uvws, lst)?;
+            self.model_gaussians_inner(&d_uvws, lst, latitude)?;
             self.copy_and_reset_vis(vis_model_slice);
         }
 
@@ -1035,7 +1054,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -1049,14 +1068,18 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            (uvws, lst, self.array_latitude)
         };
 
         let cuda_uvws: Vec<cuda::UVW> = uvws
@@ -1071,7 +1094,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         unsafe {
             let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
 
-            self.model_shapelets_inner(&d_uvws, lst)?;
+            self.model_shapelets_inner(&d_uvws, lst, latitude)?;
             self.copy_and_reset_vis(vis_model_slice);
         }
 

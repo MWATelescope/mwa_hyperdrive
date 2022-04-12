@@ -23,13 +23,9 @@ use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
 
 use crate::{
-    calibrate::{
-        params::{CalibrateParams, InvalidArgsError},
-        solutions::CalSolutionType,
-    },
-    constants::*,
+    calibrate::params::{CalibrateParams, InvalidArgsError},
     help_texts::*,
-    pfb_gains::{DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
+    solutions::CalSolutionType,
     unit_parsing::WAVELENGTH_FORMATS,
 };
 use mwa_hyperdrive_common::{clap, itertools, lazy_static, log, serde_json, thiserror, toml};
@@ -43,18 +39,33 @@ enum ArgFileTypes {
     Json,
 }
 
+// The default minimum baseline cutoff.
+pub(crate) const DEFAULT_UVW_MIN: &str = "50λ";
+
+/// The maximum number of times to iterate when performing "MitchCal" in
+/// direction-independent calibration.
+pub(crate) const DEFAULT_MAX_ITERATIONS: u32 = 50;
+
+/// The threshold to satisfy convergence when performing "MitchCal" in
+/// direction-independent calibration.
+pub(crate) const DEFAULT_STOP_THRESHOLD: f64 = 1e-8;
+
+/// The minimum threshold to satisfy convergence when performing "MitchCal" in
+/// direction-independent calibration. Reaching this threshold counts as
+/// "converged", but it's not as good as the stop threshold.
+pub(crate) const DEFAULT_MIN_THRESHOLD: f64 = 1e-4;
+
+pub(crate) const DEFAULT_OUTPUT_SOLUTIONS_FILENAME: &str = "hyperdrive_solutions.fits";
+
 lazy_static::lazy_static! {
     static ref ARG_FILE_TYPES_COMMA_SEPARATED: String = ArgFileTypes::iter().join(", ");
 
     pub(super) static ref CAL_SOLUTION_EXTENSIONS: String = CalSolutionType::iter().join(", ");
 
-    static ref DI_CALIBRATE_OUTPUT_HELP: String =
-        format!("Paths to the calibration output files. Supported calibrated visibility outputs: {}. Supported calibration solution formats: {}. Default: {}", *VIS_OUTPUT_EXTENSIONS, *CAL_SOLUTION_EXTENSIONS, DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
+    static ref OUTPUTS_HELP: String =
+        format!("Paths to the output calibration solution files. Supported formats: {}. Default: {}", *CAL_SOLUTION_EXTENSIONS, DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
 
-    static ref MODEL_FILENAME_HELP: String = format!("The path to the file where the generated sky-model visibilities are written. If this argument isn't supplied, then no file is written. Supported formats: uvfits");
-
-    static ref PFB_FLAVOUR_HELP: String =
-        format!("The 'flavour' of poly-phase filter bank corrections applied to raw MWA data. The default is '{}'. Valid flavours are: {}", DEFAULT_PFB_FLAVOUR, *PFB_FLAVOURS);
+    static ref MODEL_FILENAME_HELP: String = format!("The path to the files where the generated sky-model visibilities are written. If this argument isn't supplied, then no file is written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
 
     static ref UVW_MIN_HELP: String =
         format!("The minimum UVW length to use. This value must have a unit annotated. Allowed units: {}. Default: {}", *WAVELENGTH_FORMATS, DEFAULT_UVW_MIN);
@@ -70,9 +81,6 @@ lazy_static::lazy_static! {
 
     static ref MIN_THRESHOLD_HELP: String =
         format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Even when this threshold is exceeded, iteration will continue until max iterations or the stop threshold is reached. Default: {:e}", DEFAULT_MIN_THRESHOLD);
-
-    static ref ARRAY_POSITION_HELP: String =
-        format!("The Earth longitude, latitude, and height of the instrumental array [degrees, degrees, meters]. Default (MWA): ({}°, {}°, {}m", MWA_LONG_DEG, MWA_LAT_DEG, MWA_HEIGHT_M);
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -95,35 +103,36 @@ pub struct CalibrateUserArgs {
     pub source_list_type: Option<String>,
 
     #[clap(
-        short, long, multiple_values(true), help = DI_CALIBRATE_OUTPUT_HELP.as_str(),
+        short, long, multiple_values(true), help = OUTPUTS_HELP.as_str(),
         help_heading = "OUTPUT FILES"
     )]
     pub outputs: Option<Vec<PathBuf>>,
 
-    #[clap(short, long, help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
-    pub model_filename: Option<PathBuf>,
+    #[clap(short, long, multiple_values(true), help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
+    pub model_filenames: Option<Vec<PathBuf>>,
 
-    /// When writing out calibrated visibilities, average this many timesteps
+    /// When writing out model visibilities, average this many timesteps
     /// together. Also supports a target time resolution (e.g. 8s). The value
     /// must be a multiple of the input data's time resolution. The default is
     /// to preserve the input data's time resolution. e.g. If the input data is
     /// in 0.5s resolution and this variable is 4, then we average 2s worth of
-    /// calibrated data together before writing the data out. If the variable is
-    /// instead 4s, then 8 calibrated timesteps are averaged together before
-    /// writing the data out.
+    /// model data together before writing the data out. If the variable is
+    /// instead 4s, then 8 model timesteps are averaged together before writing
+    /// the data out.
     #[clap(long, help_heading = "OUTPUT FILES")]
-    pub output_vis_time_average: Option<String>,
+    pub output_model_time_average: Option<String>,
 
-    /// When writing out calibrated visibilities, average this many fine freq.
+    /// When writing out model visibilities, average this many fine freq.
     /// channels together. Also supports a target freq. resolution (e.g. 80kHz).
     /// The value must be a multiple of the input data's freq. resolution. The
-    /// default is to preserve the input data's freq. resolution. e.g. If the
-    /// input data is in 40kHz resolution and this variable is 4, then we
-    /// average 160kHz worth of calibrated data together before writing the data
-    /// out. If the variable is instead 80kHz, then 2 calibrated fine freq.
+    /// default is to preserve the input data's freq. resolution multiplied by
+    /// the frequency average factor. e.g. If the input data is in 40kHz
+    /// resolution, the frequency average factor is 2 and this variable is 4,
+    /// then we average 320kHz worth of model data together before writing the
+    /// data out. If the variable is instead 80kHz, then 4 model fine freq.
     /// channels are averaged together before writing the data out.
     #[clap(long, help_heading = "OUTPUT FILES")]
-    pub output_vis_freq_average: Option<String>,
+    pub output_model_freq_average: Option<String>,
 
     /// The number of sources to use in the source list. The default is to use
     /// them all. Example: If 1000 sources are specified here, then the top 1000
@@ -157,21 +166,21 @@ pub struct CalibrateUserArgs {
     #[clap(long, help_heading = "BEAM")]
     pub no_beam: bool,
 
-    /// The number of time samples to average together during calibration. Also
+    /// The number of timesteps to average together during calibration. Also
     /// supports a target time resolution (e.g. 8s). If this is 0, then all data
     /// are averaged together. Default: 0. e.g. If this variable is 4, then we
     /// produce calibration solutions in timeblocks with up to 4 timesteps each.
     /// If the variable is instead 4s, then each timeblock contains up to 4s
     /// worth of data.
     #[clap(short, long, help_heading = "CALIBRATION")]
-    pub time_average_factor: Option<String>,
+    pub timesteps_per_timeblock: Option<String>,
 
     /// The number of fine-frequency channels to average together before
     /// calibration. If this is 0, then all data is averaged together. Default:
     /// 1. e.g. If the input data is in 20kHz resolution and this variable was
     /// 2, then we average 40kHz worth of data into a chanblock before
     /// calibration. If the variable is instead 40kHz, then each chanblock
-    /// contains upto 40kHz worth of data.
+    /// contains up to 40kHz worth of data.
     #[clap(short, long, help_heading = "CALIBRATION")]
     pub freq_average_factor: Option<String>,
 
@@ -188,7 +197,7 @@ pub struct CalibrateUserArgs {
     pub uvw_max: Option<String>,
 
     #[clap(long, help = MAX_ITERATIONS_HELP.as_str(), help_heading = "CALIBRATION")]
-    pub max_iterations: Option<usize>,
+    pub max_iterations: Option<u32>,
 
     #[clap(long, help = STOP_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     pub stop_thresh: Option<f64>,
@@ -203,6 +212,11 @@ pub struct CalibrateUserArgs {
         value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
     )]
     pub array_position: Option<Vec<f64>>,
+
+    /// If specified, don't precess the array to J2000. We assume that sky-model
+    /// sources are specified in the J2000 epoch.
+    #[clap(long, help_heading = "CALIBRATION")]
+    pub no_precession: bool,
 
     #[cfg(feature = "cuda")]
     /// Use the CPU for visibility generation. This is deliberately made
@@ -339,9 +353,9 @@ impl CalibrateUserArgs {
                 source_list,
                 source_list_type,
                 outputs,
-                model_filename,
-                output_vis_time_average,
-                output_vis_freq_average,
+                model_filenames,
+                output_model_time_average,
+                output_model_freq_average,
                 num_sources,
                 source_dist_cutoff,
                 veto_threshold,
@@ -349,7 +363,7 @@ impl CalibrateUserArgs {
                 unity_dipole_gains,
                 delays,
                 no_beam,
-                time_average_factor,
+                timesteps_per_timeblock,
                 freq_average_factor,
                 timesteps,
                 uvw_min,
@@ -358,6 +372,7 @@ impl CalibrateUserArgs {
                 stop_thresh,
                 min_thresh,
                 array_position,
+                no_precession,
                 #[cfg(feature = "cuda")]
                 cpu,
                 tile_flags,
@@ -377,13 +392,13 @@ impl CalibrateUserArgs {
                 source_list: cli_args.source_list.or(source_list),
                 source_list_type: cli_args.source_list_type.or(source_list_type),
                 outputs: cli_args.outputs.or(outputs),
-                model_filename: cli_args.model_filename.or(model_filename),
-                output_vis_time_average: cli_args
-                    .output_vis_time_average
-                    .or(output_vis_time_average),
-                output_vis_freq_average: cli_args
-                    .output_vis_freq_average
-                    .or(output_vis_freq_average),
+                model_filenames: cli_args.model_filenames.or(model_filenames),
+                output_model_time_average: cli_args
+                    .output_model_time_average
+                    .or(output_model_time_average),
+                output_model_freq_average: cli_args
+                    .output_model_freq_average
+                    .or(output_model_freq_average),
                 num_sources: cli_args.num_sources.or(num_sources),
                 source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
                 veto_threshold: cli_args.veto_threshold.or(veto_threshold),
@@ -391,7 +406,9 @@ impl CalibrateUserArgs {
                 unity_dipole_gains: cli_args.unity_dipole_gains || unity_dipole_gains,
                 delays: cli_args.delays.or(delays),
                 no_beam: cli_args.no_beam || no_beam,
-                time_average_factor: cli_args.time_average_factor.or(time_average_factor),
+                timesteps_per_timeblock: cli_args
+                    .timesteps_per_timeblock
+                    .or(timesteps_per_timeblock),
                 freq_average_factor: cli_args.freq_average_factor.or(freq_average_factor),
                 timesteps: cli_args.timesteps.or(timesteps),
                 uvw_min: cli_args.uvw_min.or(uvw_min),
@@ -400,6 +417,7 @@ impl CalibrateUserArgs {
                 stop_thresh: cli_args.stop_thresh.or(stop_thresh),
                 min_thresh: cli_args.min_thresh.or(min_thresh),
                 array_position: cli_args.array_position.or(array_position),
+                no_precession: cli_args.no_precession || no_precession,
                 #[cfg(feature = "cuda")]
                 cpu: cli_args.cpu || cpu,
                 tile_flags: cli_args.tile_flags.or(tile_flags),

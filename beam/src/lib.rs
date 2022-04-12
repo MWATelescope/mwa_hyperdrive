@@ -60,6 +60,17 @@ pub trait Beam: Sync + Send {
     /// how many delays have been provided.
     fn get_num_tiles(&self) -> usize;
 
+    /// Get the dipole delays associated with this beam.
+    fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>>;
+
+    /// Get the ideal dipole delays associated with this beam.
+    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]>;
+
+    /// Get the dipole gains used in this beam object. The rows correspond to
+    /// tiles and there are 32 columns, one for each dipole. The first 16 values
+    /// are for X dipoles, the second 16 are for Y dipoles.
+    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>>;
+
     /// Get the beam file associated with this beam, if there is one.
     fn get_beam_file(&self) -> Option<&Path>;
 
@@ -198,6 +209,18 @@ impl Beam for NoBeam {
 
     fn get_num_tiles(&self) -> usize {
         self.num_tiles
+    }
+
+    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]> {
+        None
+    }
+
+    fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>> {
+        None
+    }
+
+    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>> {
+        Array2::ones((self.num_tiles, 32)).into_shared()
     }
 
     fn get_beam_file(&self) -> Option<&Path> {

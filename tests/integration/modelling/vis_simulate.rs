@@ -54,7 +54,7 @@ fn read_uvfits_stabxyz(
     }
 }
 
-/// If di-calibrate is working, it should not write anything to stderr.
+/// If vis-simulate is working, it should not write anything to stderr.
 #[test]
 fn test_no_stderr() {
     let num_timesteps = 2;
@@ -71,7 +71,7 @@ fn test_no_stderr() {
             "vis-simulate",
             "--metafits", &metafits,
             "--source-list", &args.source_list.unwrap(),
-            "--output-model-file", &format!("{}", output_path.display()),
+            "--output-model-files", &format!("{}", output_path.display()),
             "--num-timesteps", &format!("{}", num_timesteps),
             "--num-fine-channels", &format!("{}", num_chans),
             "--no-progress-bars"
@@ -102,9 +102,10 @@ fn test_1090008640_vis_simulate() {
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
-        "--output-model-file", &format!("{}", output_path.display()),
+        "--output-model-files", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
+        "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars"
     ]);
 
@@ -214,21 +215,21 @@ fn test_1090008640_vis_simulate() {
     assert_abs_diff_eq!(
         group_params[..],
         [
-            -1.8128954e-7,
-            -1.6615635e-8,
-            -4.8240993e-9,
+            -1.812924e-7,
+            -1.6595452e-8,
+            -4.7857687e-9,
             258.0,
-            -0.15944445
+            -0.15939815
         ]
     );
-    assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3405555487);
+    assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406018466);
 
     // The values of the visibilities changes slightly depending on the precision.
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0..29], [36.740772, -37.80606, 64.0, 36.464615, -38.027126, 64.0, 0.12835014, -0.07698195, 64.0, 0.13591047, -0.051941246, 64.0, 36.677788, -37.855072, 64.0, 36.411392, -38.083076, 64.0, 0.13199338, -0.07526354, 64.0, 0.13950738, -0.050253063, 64.0, 36.61131, -37.90193, 64.0, 36.354816, -38.13698]);
+            assert_abs_diff_eq!(vis[0..29], [36.509888, -37.688183, 64.0, 36.239098, -37.919975, 64.0, 0.12929331, -0.076089844, 64.0, 0.13714178, -0.051078293, 64.0, 36.445034, -37.73954, 64.0, 36.183937, -37.978363, 64.0, 0.1329503, -0.07435742, 64.0, 0.14075077, -0.049377877, 64.0, 36.37679, -37.788902, 64.0, 36.12551, -38.03485]);
         } else {
-            assert_abs_diff_eq!(vis[0..29], [36.740982, -37.80591, 64.0, 36.464863, -38.02699, 64.0, 0.12835437, -0.07698456, 64.0, 0.13591558, -0.05194349, 64.0, 36.677994, -37.85488, 64.0, 36.411633, -38.08291, 64.0, 0.13199718, -0.075266466, 64.0, 0.1395122, -0.050255615, 64.0, 36.61154, -37.901764, 64.0, 36.355083, -38.136826]);
+            assert_abs_diff_eq!(vis[0..29], [36.50975, -37.68825, 64.0, 36.23898, -37.920006, 64.0, 0.12928975, -0.07608952, 64.0, 0.13713828, -0.05107821, 64.0, 36.44494, -37.739647, 64.0, 36.183853, -37.97843, 64.0, 0.13294694, -0.07435694, 64.0, 0.14074738, -0.049377635, 64.0, 36.37668, -37.788986, 64.0, 36.125416, -38.034897]);
         }
     }
     // Every third value (a weight) should be 64.
@@ -264,20 +265,20 @@ fn test_1090008640_vis_simulate() {
     assert_abs_diff_eq!(
         group_params[..],
         [
-            -1.8129641e-7,
-            -1.6567755e-8,
-            -4.729797e-9,
+            -1.8129924e-7,
+            -1.6547578e-8,
+            -4.691462e-9,
             258.0,
-            -0.15935186
+            -0.15930556
         ]
     );
-    assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406481445);
+    assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406944424);
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0..29], [36.799625, -37.71107, 64.0, 36.51971, -37.921703, 64.0, 0.12917347, -0.07720526, 64.0, 0.1368949, -0.052246865, 64.0, 36.734455, -37.760387, 64.0, 36.46407, -37.978012, 64.0, 0.13280584, -0.07548499, 64.0, 0.1404799, -0.050557088, 64.0, 36.665825, -37.807594, 64.0, 36.405113, -38.032326]);
+            assert_abs_diff_eq!(vis[0..29], [36.566883, -37.59448, 64.0, 36.29235, -37.81565, 64.0, 0.1300993, -0.076346256, 64.0, 0.1381079, -0.051415782, 64.0, 36.49986, -37.64617, 64.0, 36.234787, -37.874428, 64.0, 0.13374634, -0.074611336, 64.0, 0.141706, -0.049713105, 64.0, 36.429443, -37.695835, 64.0, 36.173973, -37.93128]);
         } else {
-            assert_abs_diff_eq!(vis[0..29], [36.799675, -37.71089, 64.0, 36.519768, -37.921543, 64.0, 0.12917838, -0.07721107, 64.0, 0.13689607, -0.052250482, 64.0, 36.7345, -37.760174, 64.0, 36.464123, -37.97782, 64.0, 0.13281031, -0.07549093, 64.0, 0.14048097, -0.05056086, 64.0, 36.66584, -37.807365, 64.0, 36.405136, -38.032104]);
+            assert_abs_diff_eq!(vis[0..29], [36.566708, -37.59445, 64.0, 36.29221, -37.81562, 64.0, 0.13010167, -0.07633954, 64.0, 0.13810773, -0.0514111, 64.0, 36.499706, -37.646156, 64.0, 36.234665, -37.87441, 64.0, 0.13374788, -0.07460498, 64.0, 0.14170499, -0.049708802, 64.0, 36.42923, -37.6958, 64.0, 36.173786, -37.931236]);
         }
     }
     for (i, vis) in vis.iter().enumerate() {
@@ -305,7 +306,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
-        "--output-model-file", &format!("{}", output_path.display()),
+        "--output-model-files", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
         "--no-progress-bars",
@@ -352,7 +353,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
-        "--output-model-file", &format!("{}", output_path.display()),
+        "--output-model-files", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
         "--no-progress-bars"

@@ -9,18 +9,25 @@
 //! aids calibration. The gains are the same for each coarse channel (regardless
 //! of its frequency).
 
-// TODO: Provide gains for all frequency resolutions.
-// TOOD: Get gains from Jake.
+use std::str::FromStr;
 
 use itertools::Itertools;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
+use thiserror::Error;
 
-use mwa_hyperdrive_common::{itertools, lazy_static};
+use mwa_hyperdrive_common::{itertools, lazy_static, thiserror};
+
+pub(super) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Jake;
+
+lazy_static::lazy_static! {
+    // Useful for help texts.
+    pub(super) static ref PFB_FLAVOURS: String = PfbFlavour::iter().join(", ");
+}
 
 /// All available kinds of PFB gains.
-#[derive(Debug, Display, Clone, Copy, EnumIter, EnumString)]
-pub(crate) enum PfbFlavour {
+#[derive(Debug, Display, Clone, Copy, EnumIter, EnumString, PartialEq, Eq)]
+pub enum PfbFlavour {
     /// Use the "Jake Jones" gains (200 Hz).
     #[strum(serialize = "jake")]
     Jake,
@@ -42,11 +49,33 @@ pub(crate) enum PfbFlavour {
     None,
 }
 
-pub(super) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Jake;
+impl PfbFlavour {
+    pub(crate) fn parse(value: &str) -> Result<PfbFlavour, PfbParseError> {
+        Self::from_str(&value.to_lowercase()).map_err(|_| PfbParseError {
+            value: value.to_string(),
+        })
+    }
 
-lazy_static::lazy_static! {
-    // Useful for help texts.
-    pub(super) static ref PFB_FLAVOURS: String = PfbFlavour::iter().join(", ");
+    pub(crate) fn get_gains(self) -> Option<&'static [f64]> {
+        match self {
+            // Not using any gains.
+            PfbFlavour::None => None,
+
+            PfbFlavour::Jake => Some(birli::passband_gains::PFB_JAKE_2022_200HZ),
+
+            PfbFlavour::Cotter2014 => Some(birli::passband_gains::PFB_COTTER_2014_10KHZ),
+
+            PfbFlavour::Empirical => Some(EMPIRICAL_40KHZ.as_slice()),
+
+            PfbFlavour::Levine => Some(LEVINE_40KHZ.as_slice()),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("Could not parse PFB flavour '{value}'.\nSupported flavours are: {}", *crate::pfb_gains::PFB_FLAVOURS)]
+pub struct PfbParseError {
+    value: String,
 }
 
 /// Gains from empirical averaging of RTS BP solution points using "Anish" PFB
@@ -122,3 +151,22 @@ pub(crate) const LEVINE_40KHZ: [f64; 32] = [
     0.5686988482410316,
     0.5082890508180502,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::PfbFlavour;
+
+    #[test]
+    fn test_handle_pfb() {
+        let result = PfbFlavour::parse("invalid_pfb");
+        assert!(result.is_err());
+
+        let result = PfbFlavour::parse("Cotter2014");
+        assert!(result.is_ok());
+        let flavour = result.unwrap();
+        assert!(matches!(flavour, PfbFlavour::Cotter2014));
+
+        let gains = flavour.get_gains().unwrap();
+        assert_eq!(&gains[..2], &[0.5002092286_f64, 0.5025463233]);
+    }
+}

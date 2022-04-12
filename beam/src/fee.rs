@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use log::trace;
+use log::{debug, trace};
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 
@@ -26,6 +26,7 @@ pub(super) struct FEEBeam {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
     delays: Array2<u32>,
     gains: Array2<f64>,
+    ideal_delays: [u32; 16],
     file: PathBuf,
 }
 
@@ -37,6 +38,9 @@ impl FEEBeam {
         gains: Option<Array2<f64>>,
         file: Option<&Path>,
     ) -> Result<FEEBeam, BeamError> {
+        let ideal_delays = delays.get_ideal_delays();
+        debug!("Ideal dipole delays: {:?}", ideal_delays);
+
         let delays = match delays {
             Delays::Full(d) => d,
             Delays::Partial(d) => partial_to_full(d, num_tiles),
@@ -44,8 +48,14 @@ impl FEEBeam {
 
         // If no gains were provided, assume all are alive.
         let gains = match gains {
-            Some(g) => g,
-            None => Array2::ones(delays.dim()),
+            Some(g) => {
+                debug!("Using supplied dipole gains");
+                g
+            }
+            None => {
+                debug!("No dipole gains supplied; setting all to 1");
+                Array2::ones((delays.len_of(Axis(0)), 32))
+            }
         };
 
         // Complain if the dimensions of delays and gains don't match.
@@ -62,6 +72,7 @@ impl FEEBeam {
             hyperbeam_object,
             delays,
             gains,
+            ideal_delays,
             file: match file {
                 Some(p) => p.to_path_buf(),
                 None => PathBuf::from(std::env::var("MWA_BEAM_FILE").unwrap()),
@@ -130,6 +141,18 @@ impl Beam for FEEBeam {
 
     fn get_num_tiles(&self) -> usize {
         self.delays.len_of(Axis(0))
+    }
+
+    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]> {
+        Some(self.ideal_delays)
+    }
+
+    fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>> {
+        Some(self.delays.view().to_shared())
+    }
+
+    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>> {
+        self.gains.view().to_shared()
     }
 
     fn get_beam_file(&self) -> Option<&Path> {
@@ -227,7 +250,7 @@ impl BeamCUDA for FEEBeamCUDA {
             // our `Jones`. Both come from Marlu, but the Marlu used all over
             // hyperdrive is imported differently from that of hyperbeam.
             // Testing shows that this operation takes tens of nanoseconds.
-            .map(|ptr| unsafe { std::mem::transmute(ptr) })
+            .map(|ptr| std::mem::transmute(ptr))
             .map_err(BeamError::from)
     }
 

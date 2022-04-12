@@ -68,6 +68,7 @@ impl<'a> SkyModellerCpu<'a> {
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
         uvws: &[UVW],
         lst_rad: f64,
+        array_latitude_rad: f64,
     ) -> Result<(), ModelError> {
         if self.components.points.radecs.is_empty() {
             return Ok(());
@@ -75,7 +76,10 @@ impl<'a> SkyModellerCpu<'a> {
 
         let fds = &self.components.points.flux_densities;
         let lmns = &self.components.points.lmns;
-        let azels = &self.components.points.get_azels_mwa_parallel(lst_rad);
+        let azels = &self
+            .components
+            .points
+            .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
 
         assert_eq!(
             vis_model_slice.len_of(Axis(0)),
@@ -194,6 +198,7 @@ impl<'a> SkyModellerCpu<'a> {
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
         uvws: &[UVW],
         lst_rad: f64,
+        array_latitude_rad: f64,
     ) -> Result<(), ModelError> {
         if self.components.gaussians.radecs.is_empty() {
             return Ok(());
@@ -201,7 +206,10 @@ impl<'a> SkyModellerCpu<'a> {
 
         let fds = &self.components.gaussians.flux_densities;
         let lmns = &self.components.gaussians.lmns;
-        let azels = &self.components.gaussians.get_azels_mwa_parallel(lst_rad);
+        let azels = &self
+            .components
+            .gaussians
+            .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
         let gaussian_params = &self.components.gaussians.gaussian_params;
 
         assert_eq!(
@@ -336,6 +344,7 @@ impl<'a> SkyModellerCpu<'a> {
         uvws: &[UVW],
         shapelet_uvws: ArrayView2<UVW>,
         lst_rad: f64,
+        array_latitude_rad: f64,
     ) -> Result<(), ModelError> {
         if self.components.shapelets.radecs.is_empty() {
             return Ok(());
@@ -343,7 +352,10 @@ impl<'a> SkyModellerCpu<'a> {
 
         let fds = &self.components.shapelets.flux_densities;
         let lmns = &self.components.shapelets.lmns;
-        let azels = &self.components.shapelets.get_azels_mwa_parallel(lst_rad);
+        let azels = &self
+            .components
+            .shapelets
+            .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
         let gaussian_params = &self.components.shapelets.gaussian_params;
         let shapelet_coeffs = &self.components.shapelets.shapelet_coeffs;
 
@@ -541,7 +553,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -555,23 +567,33 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            (uvws, lst, self.array_latitude)
         };
         let shapelet_uvws = self
             .components
             .shapelets
             .get_shapelet_uvws(lst, self.unflagged_tile_xyzs);
 
-        self.model_points_inner(vis_model_slice.view_mut(), &uvws, lst)?;
-        self.model_gaussians_inner(vis_model_slice.view_mut(), &uvws, lst)?;
-        self.model_shapelets_inner(vis_model_slice.view_mut(), &uvws, shapelet_uvws.view(), lst)?;
+        self.model_points_inner(vis_model_slice.view_mut(), &uvws, lst, latitude)?;
+        self.model_gaussians_inner(vis_model_slice.view_mut(), &uvws, lst, latitude)?;
+        self.model_shapelets_inner(
+            vis_model_slice.view_mut(),
+            &uvws,
+            shapelet_uvws.view(),
+            lst,
+            latitude,
+        )?;
 
         Ok(uvws)
     }
@@ -581,7 +603,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -595,16 +617,20 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            (uvws, lst, self.array_latitude)
         };
-        self.model_points_inner(vis_model_slice, &uvws, lst)?;
+        self.model_points_inner(vis_model_slice, &uvws, lst, latitude)?;
         Ok(uvws)
     }
 
@@ -613,7 +639,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -627,16 +653,20 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            (uvws, lst, self.array_latitude)
         };
-        self.model_gaussians_inner(vis_model_slice, &uvws, lst)?;
+        self.model_gaussians_inner(vis_model_slice, &uvws, lst, latitude)?;
         Ok(uvws)
     }
 
@@ -645,7 +675,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError> {
-        let (uvws, lst) = if self.precess {
+        let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.phase_centre,
                 timestamp,
@@ -659,21 +689,25 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
-            (uvws, precession_info.lmst_j2000)
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         } else {
             let lst = get_lmst(timestamp, self.array_longitude);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
             );
-            (uvws, lst)
+            (uvws, lst, self.array_latitude)
         };
 
         let shapelet_uvws = self
             .components
             .shapelets
             .get_shapelet_uvws(lst, self.unflagged_tile_xyzs);
-        self.model_shapelets_inner(vis_model_slice, &uvws, shapelet_uvws.view(), lst)?;
+        self.model_shapelets_inner(vis_model_slice, &uvws, shapelet_uvws.view(), lst, latitude)?;
 
         Ok(uvws)
     }

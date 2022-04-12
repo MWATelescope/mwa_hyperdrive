@@ -12,65 +12,101 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use crossbeam_utils::{atomic::AtomicCell, thread};
-use hifitime::{Duration, Epoch, Unit};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::{izip, Itertools};
-use log::{debug, info, trace};
-use marlu::{
-    precession::precess_time, Jones, LatLngHeight, MeasurementSetWriter,
-    ObsContext as MarluObsContext, UvfitsWriter, VisContext, VisWritable,
-};
-use ndarray::prelude::*;
+use itertools::Itertools;
+use log::{debug, info, trace, warn};
+use marlu::{precession::precess_time, Jones, LatLngHeight, MwaObsContext};
+use ndarray::{prelude::*, ArcArray2};
 use scopeguard::defer_on_unwind;
+use vec1::{vec1, Vec1};
 
 use crate::{
-    context::ObsContext, data_formats::*, filenames::InputDataTypes, glob::*, help_texts::*,
+    averaging::{
+        parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks,
+        AverageFactorError,
+    },
+    context::ObsContext,
+    filenames::InputDataTypes,
+    glob::*,
+    help_texts::*,
     math::TileBaselineMaps,
+    messages,
+    vis_io::{
+        read::{MsReader, UvfitsReader, VisInputType, VisRead},
+        write::{can_write_to_file, write_vis, VisOutputType, VisTimestep},
+    },
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{
-    clap, hifitime, indicatif, itertools, lazy_static, log, marlu, ndarray,
+    cfg_if, clap, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1,
 };
 use mwa_hyperdrive_srclist::{
     veto_sources, SourceList, SourceListType, DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD,
     SOURCE_DIST_CUTOFF_HELP as sdc_help, VETO_THRESHOLD_HELP as vt_help,
 };
 
+pub(crate) const DEFAULT_OUTPUT_VIS_FILENAME: &str = "hyp_subtracted.uvfits";
+
 lazy_static::lazy_static! {
+    static ref OUTPUTS_HELP: String =
+        format!("Paths to the output visibility files. Supported formats: {}. Default: {}", *VIS_OUTPUT_EXTENSIONS, DEFAULT_OUTPUT_VIS_FILENAME);
+
     pub static ref SOURCE_DIST_CUTOFF_HELP: String =
-    format!("{}. Only useful if subtraction is inverted.", *sdc_help);
+        format!("{}. Only useful if subtraction is inverted.", *sdc_help);
 
     pub static ref VETO_THRESHOLD_HELP: String =
-    format!("{}. Only useful if subtraction is inverted.", *vt_help);
+        format!("{}. Only useful if subtraction is inverted.", *vt_help);
 }
 #[derive(Parser, Debug, Default)]
 pub struct VisSubtractArgs {
     /// Paths to the input data files to have visibilities subtracted. These can
     /// include a metafits file, a measurement set and/or uvfits files.
-    #[clap(short, long, multiple_values(true), help_heading = "INPUT AND OUTPUT")]
+    #[clap(short, long, multiple_values(true), help_heading = "INPUT FILES")]
     data: Vec<String>,
 
-    /// Path to the output visibilities file.
+    /// Path to the sky-model source list used for simulation.
+    #[clap(short, long, help_heading = "INPUT FILES")]
+    source_list: String,
+
+    #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
+    source_list_type: Option<String>,
+
     #[clap(
         short = 'o',
         long,
-        default_value = "hyp_subtracted.uvfits",
-        help_heading = "INPUT AND OUTPUT"
+        multiple_values(true),
+        help = OUTPUTS_HELP.as_str(),
+        help_heading = "OUTPUT FILES"
     )]
-    output: PathBuf,
+    outputs: Vec<PathBuf>,
 
-    /// Path to the sky-model source list used for simulation.
-    #[clap(short, long, help_heading = "INPUT AND OUTPUT")]
-    source_list: String,
+    /// When writing out subtracted visibilities, average this many timesteps
+    /// together. Also supports a target time resolution (e.g. 8s). The value
+    /// must be a multiple of the input data's time resolution. The default is
+    /// to preserve the input data's time resolution. e.g. If the input data is
+    /// in 0.5s resolution and this variable is 4, then we average 2s worth of
+    /// subtracted data together before writing the data out. If the variable is
+    /// instead 4s, then 8 subtracted timesteps are averaged together before
+    /// writing the data out.
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    time_average: Option<String>,
 
-    #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "INPUT AND OUTPUT")]
-    source_list_type: Option<String>,
+    /// When writing out subtracted visibilities, average this many fine freq.
+    /// channels together. Also supports a target freq. resolution (e.g. 80kHz).
+    /// The value must be a multiple of the input data's freq. resolution. The
+    /// default is to preserve the input data's freq. resolution. e.g. If the
+    /// input data is in 40kHz resolution and this variable is 4, then we
+    /// average 160kHz worth of subtracted data together before writing the data
+    /// out. If the variable is instead 80kHz, then 2 subtracted fine freq.
+    /// channels are averaged together before writing the data out.
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    freq_average: Option<String>,
 
     /// The names of the sources in the sky-model source list that will be
     /// subtracted from the input data.
@@ -111,10 +147,22 @@ pub struct VisSubtractArgs {
     #[clap(long, help_heading = "MODEL PARAMETERS")]
     unity_dipole_gains: bool,
 
-    /// Specify the MWA dipoles delays, ignoring whatever is in the metafits
-    /// file.
+    /// If specified, use these dipole delays for the MWA pointing.
     #[clap(long, multiple_values(true), help_heading = "MODEL PARAMETERS")]
-    dipole_delays: Option<Vec<u32>>,
+    delays: Option<Vec<u32>>,
+
+    #[clap(
+        long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "MODEL PARAMETERS",
+        number_of_values = 3,
+        allow_hyphen_values = true,
+        value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
+    )]
+    array_position: Option<Vec<f64>>,
+
+    /// If specified, don't precess the array to J2000. We assume that sky-model
+    /// sources are specified in the J2000 epoch.
+    #[clap(long, help_heading = "MODEL PARAMETERS")]
+    no_precession: bool,
 
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
@@ -128,20 +176,22 @@ pub struct VisSubtractArgs {
 }
 
 impl VisSubtractArgs {
-    pub fn run(&self, dry_run: bool) -> Result<(), VisSubtractError> {
+    pub fn run(self, dry_run: bool) -> Result<(), VisSubtractError> {
         vis_subtract(self, dry_run)
     }
 }
 
-fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractError> {
-    debug!("{:#?}", &args);
+fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractError> {
+    debug!("{:#?}", args);
 
     // Expose all the struct fields to ensure they're all used.
     let VisSubtractArgs {
         data,
-        output,
         source_list,
         source_list_type,
+        outputs,
+        time_average,
+        freq_average,
         sources_to_subtract,
         invert,
         num_sources,
@@ -150,7 +200,9 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
         no_beam,
         beam_file,
         unity_dipole_gains,
-        dipole_delays,
+        delays,
+        array_position,
+        no_precession,
         #[cfg(feature = "cuda")]
             cpu: use_cpu_for_modelling,
         no_progress_bars,
@@ -166,11 +218,11 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
     let source_list: SourceList = {
         // If the specified source list file can't be found, treat it as a glob
         // and expand it to find a match.
-        let pb = PathBuf::from(source_list);
+        let pb = PathBuf::from(&source_list);
         let pb = if pb.exists() {
             pb
         } else {
-            get_single_match_from_glob(source_list)?
+            get_single_match_from_glob(&source_list)?
         };
 
         // Read the source list file. If the type was manually specified,
@@ -189,7 +241,7 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
     debug!("Found {} sources in the source list", source_list.len());
 
     // Ensure that all specified sources are actually in the source list.
-    for name in sources_to_subtract {
+    for name in &sources_to_subtract {
         if !source_list.contains_key(name) {
             return Err(VisSubtractError::MissingSource {
                 name: name.to_owned(),
@@ -198,8 +250,8 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
     }
 
     // Prepare an input data reader.
-    let input_data_types = InputDataTypes::new(data)?;
-    let input_data: Box<dyn InputData> = match (
+    let input_data_types = InputDataTypes::new(&data)?;
+    let input_data: Box<dyn VisRead> = match (
         input_data_types.metafits,
         input_data_types.gpuboxes,
         input_data_types.mwafs,
@@ -227,7 +279,7 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
                 }
             };
 
-            let input_data = MS::new(&ms, meta)?;
+            let input_data = MsReader::new(&ms, meta)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from measurement set {}",
@@ -282,50 +334,161 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
     };
 
     let obs_context = input_data.get_obs_context();
-    let num_tiles = obs_context.tile_xyzs.len();
-    let num_unflagged_tiles = num_tiles - obs_context.flagged_tiles.len();
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let num_unflagged_tiles = total_num_tiles - obs_context.flagged_tiles.len();
     let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
-    let tile_to_unflagged_baseline_map =
-        TileBaselineMaps::new(num_tiles, &obs_context.flagged_tiles)
-            .tile_to_unflagged_cross_baseline_map;
+    let maps = TileBaselineMaps::new(total_num_tiles, &obs_context.flagged_tiles);
     let vis_shape = (
         num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
     );
 
     // Set up the beam for modelling.
-    let dipole_delays = match dipole_delays {
+    let delays = match delays {
         // We have user-provided delays; check that they're are sensible,
         // regardless of whether we actually need them.
         Some(d) => {
             if d.len() != 16 || d.iter().any(|&v| v > 32) {
                 return Err(VisSubtractError::BadDelays);
             }
-            Some(Delays::Partial(d.clone()))
+            Some(Delays::Partial(d))
         }
 
         // No delays were provided; use whatever was in the input data.
         None => obs_context.dipole_delays.clone(),
     };
 
-    let beam: Box<dyn Beam> = if *no_beam {
+    let beam: Box<dyn Beam> = if no_beam {
         create_no_beam_object(obs_context.tile_xyzs.len())
     } else {
-        let dipole_delays = dipole_delays.ok_or(VisSubtractError::NoDelays)?;
+        let delays = delays.ok_or(VisSubtractError::NoDelays)?;
         create_fee_beam_object(
             beam_file.as_deref(),
-            obs_context.tile_xyzs.len(),
-            dipole_delays,
-            if *unity_dipole_gains {
+            total_num_tiles,
+            delays,
+            if unity_dipole_gains {
                 None
             } else {
+                // If we don't have dipole gains from the input data, then
+                // we issue a warning that we must assume no dead dipoles.
+                if obs_context.dipole_gains.is_none() {
+                    match input_data.get_input_data_type() {
+                        VisInputType::MeasurementSet => {
+                            warn!("Measurement sets cannot supply dead dipole information.");
+                            warn!("Without a metafits file, we must assume all dipoles are alive.");
+                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                        }
+                        VisInputType::Uvfits => {
+                            warn!("uvfits files cannot supply dead dipole information.");
+                            warn!("Without a metafits file, we must assume all dipoles are alive.");
+                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                        }
+                        VisInputType::Raw => unreachable!(),
+                    }
+                }
                 obs_context.dipole_gains.clone()
             },
         )?
     };
+    let beam_file = beam.get_beam_file();
+    debug!("Beam file: {beam_file:?}");
+
+    let array_pos = match array_position {
+        None => obs_context.array_position.unwrap_or_else(|| {
+            trace!("The array position was not specified in the input data; assuming MWA");
+            LatLngHeight::new_mwa()
+        }),
+        Some(pos) => {
+            if pos.len() != 3 {
+                return Err(VisSubtractError::BadArrayPosition { pos });
+            }
+            LatLngHeight {
+                longitude_rad: pos[0].to_radians(),
+                latitude_rad: pos[1].to_radians(),
+                height_metres: pos[2],
+            }
+        }
+    };
+
+    let timesteps = &obs_context.all_timesteps;
+    let precession_info = precess_time(
+        obs_context.phase_centre,
+        obs_context.timestamps[*timesteps.first()],
+        array_pos.longitude_rad,
+        array_pos.latitude_rad,
+    );
+    let (lmst, latitude) = if no_precession {
+        (precession_info.lmst, array_pos.latitude_rad)
+    } else {
+        (
+            precession_info.lmst_j2000,
+            precession_info.array_latitude_j2000,
+        )
+    };
+
+    messages::ArrayDetails {
+        array_position: Some(array_pos),
+        array_latitude_j2000: if no_precession {
+            None
+        } else {
+            Some(precession_info.array_latitude_j2000)
+        },
+        total_num_tiles,
+        num_unflagged_tiles,
+        flagged_tiles: &obs_context
+            .flagged_tiles
+            .iter()
+            .cloned()
+            .map(|i| (obs_context.tile_names[i].as_str(), i))
+            .collect::<Vec<_>>(),
+    }
+    .print();
+
+    let time_res = obs_context.guess_time_res();
+    let freq_res = obs_context.guess_freq_res();
+
+    messages::ObservationDetails {
+        dipole_delays: beam.get_ideal_dipole_delays(),
+        beam_file,
+        num_tiles_with_dead_dipoles: if unity_dipole_gains {
+            None
+        } else {
+            obs_context.dipole_gains.as_ref().map(|array| {
+                array
+                    .outer_iter()
+                    .filter(|tile_dipole_gains| {
+                        tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
+                    })
+                    .count()
+            })
+        },
+        phase_centre: obs_context.phase_centre,
+        pointing_centre: None,
+        lmst: Some(precession_info.lmst),
+        lmst_j2000: if no_precession {
+            None
+        } else {
+            Some(precession_info.lmst_j2000)
+        },
+        available_timesteps: Some(obs_context.all_timesteps.as_slice()),
+        unflagged_timesteps: Some(obs_context.unflagged_timesteps.as_slice()),
+        using_timesteps: Some(timesteps.as_slice()),
+        first_timestamp: Some(obs_context.timestamps[*timesteps.first()]),
+        last_timestamp: Some(obs_context.timestamps[*timesteps.last()]),
+        time_res: Some(time_res),
+        total_num_channels: obs_context.fine_chan_freqs.len(),
+        num_unflagged_channels: None,
+        flagged_chans_per_coarse_chan: None,
+        first_freq_hz: Some(*obs_context.fine_chan_freqs.first() as f64),
+        last_freq_hz: Some(*obs_context.fine_chan_freqs.last() as f64),
+        first_unflagged_freq_hz: None,
+        last_unflagged_freq_hz: None,
+        freq_res_hz: Some(freq_res),
+    }
+    .print();
 
     // Handle the invert option.
-    let source_list: SourceList = if *invert {
+    let source_list: SourceList = if invert {
         let mut sl: SourceList = source_list
             .into_iter()
             .filter(|(name, _)| !sources_to_subtract.contains(name))
@@ -334,23 +497,14 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
             // Nothing to do.
             return Err(VisSubtractError::AllSourcesFiltered);
         }
-        let array_position = obs_context
-            .array_position
-            .unwrap_or_else(LatLngHeight::new_mwa);
-        let precession_info = precess_time(
-            obs_context.phase_centre,
-            *obs_context.timestamps.first(),
-            array_position.longitude_rad,
-            array_position.latitude_rad,
-        );
         veto_sources(
             &mut sl,
             obs_context.phase_centre,
-            precession_info.lmst_j2000,
-            precession_info.array_latitude_j2000,
+            lmst,
+            latitude,
             &obs_context.coarse_chan_freqs,
             beam.deref(),
-            *num_sources,
+            num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
@@ -371,6 +525,100 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
         sl
     };
 
+    messages::SkyModelDetails {
+        source_list: &source_list,
+    }
+    .print();
+
+    // Handle output visibility arguments.
+    let (time_average_factor, freq_average_factor) = {
+        // Parse and verify user input (specified resolutions must
+        // evenly divide the input data's resolutions).
+        let time_factor = parse_time_average_factor(
+            obs_context.time_res,
+            time_average.as_deref(),
+            1,
+        )
+        .map_err(|e| match e {
+            AverageFactorError::Zero => VisSubtractError::OutputVisTimeAverageFactorZero,
+            AverageFactorError::NotInteger => VisSubtractError::OutputVisTimeFactorNotInteger,
+            AverageFactorError::NotIntegerMultiple { out, inp } => {
+                VisSubtractError::OutputVisTimeResNotMultiple { out, inp }
+            }
+            AverageFactorError::Parse(e) => VisSubtractError::ParseOutputVisTimeAverageFactor(e),
+        })?;
+        let freq_factor = parse_freq_average_factor(
+            obs_context.freq_res,
+            freq_average.as_deref(),
+            1,
+        )
+        .map_err(|e| match e {
+            AverageFactorError::Zero => VisSubtractError::OutputVisFreqAverageFactorZero,
+            AverageFactorError::NotInteger => VisSubtractError::OutputVisFreqFactorNotInteger,
+            AverageFactorError::NotIntegerMultiple { out, inp } => {
+                VisSubtractError::OutputVisFreqResNotMultiple { out, inp }
+            }
+            AverageFactorError::Parse(e) => VisSubtractError::ParseOutputVisFreqAverageFactor(e),
+        })?;
+
+        (time_factor, freq_factor)
+    };
+
+    let outputs = {
+        if outputs.is_empty() {
+            vec1![(
+                PathBuf::from(DEFAULT_OUTPUT_VIS_FILENAME),
+                VisOutputType::Uvfits
+            )]
+        } else {
+            let mut valid_outputs = Vec::with_capacity(outputs.len());
+            for file in outputs {
+                // Is the output file type supported?
+                let ext = file.extension().and_then(|os_str| os_str.to_str());
+                match ext.and_then(|s| VisOutputType::from_str(s).ok()) {
+                    Some(t) => {
+                        can_write_to_file(&file)?;
+                        valid_outputs.push((file.to_owned(), t));
+                    }
+                    None => return Err(VisSubtractError::InvalidOutputFormat(file.clone())),
+                }
+            }
+            Vec1::try_from_vec(valid_outputs).unwrap()
+        }
+    };
+
+    messages::OutputFileDetails {
+        output_solutions: &[],
+        vis_type: "subtracted",
+        output_vis: Some(&outputs),
+        input_vis_time_res: Some(time_res),
+        input_vis_freq_res: Some(freq_res),
+        output_vis_time_average_factor: time_average_factor,
+        output_vis_freq_average_factor: freq_average_factor,
+    }
+    .print();
+
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "cuda-single")] {
+            if use_cpu_for_modelling {
+                info!("Generating sky model visibilities on the CPU");
+            } else {
+                info!("Generating sky model visibilities on the GPU (single precision)");
+            }
+        } else if #[cfg(feature = "cuda")] {
+            if use_cpu_for_modelling {
+                info!("Generating sky model visibilities on the CPU");
+            } else {
+                info!("Generating sky model visibilities on the GPU (double precision)");
+            }
+        } else {
+            info!("Generating sky model visibilities on the CPU");
+        }
+    }
+
+    let timeblocks =
+        timesteps_to_timeblocks(&obs_context.timestamps, time_average_factor, timesteps);
+
     if dry_run {
         info!("Dry run -- exiting now.");
         return Ok(());
@@ -382,13 +630,13 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
     let (tx_write, rx_write) = bounded(5);
 
     // Progress bars.
-    let multi_progress = MultiProgress::with_draw_target(if *no_progress_bars {
+    let multi_progress = MultiProgress::with_draw_target(if no_progress_bars {
         ProgressDrawTarget::hidden()
     } else {
         ProgressDrawTarget::stdout()
     });
     let read_progress = multi_progress.add(
-    ProgressBar::new(obs_context.timestamps.len() as _)
+    ProgressBar::new(timesteps.len() as _)
         .with_style(
             ProgressStyle::default_bar()
                 .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
@@ -398,7 +646,7 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
         .with_message("Reading data"),
 );
     let model_progress = multi_progress.add(
-    ProgressBar::new(obs_context.timestamps.len() as _)
+    ProgressBar::new(timesteps.len() as _)
         .with_style(
             ProgressStyle::default_bar()
                 .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
@@ -408,19 +656,14 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
         .with_message("Sky modelling"),
 );
     let write_progress = multi_progress.add(
-        ProgressBar::new(obs_context.timestamps.len() as _)
+        ProgressBar::new(timeblocks.len() as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})")
                     .progress_chars("=> "),
             )
             .with_position(0)
-            .with_message("Model writing"),
-    );
-
-    info!(
-        "Writing the subtracted visibilities to {}",
-        output.display()
+            .with_message("Subtracted writing"),
     );
 
     // Draw the progress bars. Not doing this means that the bars aren't
@@ -446,8 +689,9 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
 
             let result = read_vis(
                 obs_context,
-                &tile_to_unflagged_baseline_map,
+                &maps.tile_to_unflagged_cross_baseline_map,
                 input_data.deref(),
+                timesteps,
                 vis_shape,
                 tx_model,
                 &error,
@@ -469,13 +713,15 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
                 beam.deref(),
                 &source_list,
                 obs_context,
+                array_pos,
                 vis_shape,
+                !no_precession,
                 rx_model,
                 tx_write,
                 &error,
                 model_progress,
                 #[cfg(feature = "cuda")]
-                *use_cpu_for_modelling,
+                use_cpu_for_modelling,
             );
             if result.is_err() {
                 error.store(true);
@@ -484,16 +730,43 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
         });
 
         // Subtracted vis writing thread.
-        let writer_handle = scope.spawn(|_| {
+        let write_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
 
-            let result = writer(
-                output,
-                obs_context,
-                tile_to_unflagged_baseline_map.keys().cloned(),
+            let marlu_mwa_obs_context = input_data.get_metafits_context().map(|c| {
+                (
+                    MwaObsContext::from_mwalib(c),
+                    0..obs_context.coarse_chan_freqs.len(),
+                )
+            });
+            let result = write_vis(
+                &outputs,
+                array_pos,
+                obs_context.phase_centre,
+                obs_context.pointing_centre,
+                &obs_context.tile_xyzs,
+                &obs_context.tile_names,
+                obs_context.obsid,
+                &obs_context.timestamps,
+                timesteps,
+                &timeblocks,
+                time_res,
+                freq_res,
+                &obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64),
+                &maps
+                    .unflagged_cross_baseline_to_tile_map
+                    .values()
+                    .copied()
+                    .sorted()
+                    .collect::<Vec<_>>(),
+                // TODO: Provide CLI options
+                &HashSet::new(),
+                time_average_factor,
+                freq_average_factor,
+                marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
                 rx_write,
                 &error,
-                write_progress,
+                Some(write_progress),
             );
             if result.is_err() {
                 error.store(true);
@@ -506,40 +779,25 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
         // Cargo.toml. (It would be nice to capture the panic information, if
         // it's possible, but I don't know how, so panics are currently
         // aborting.)
-        let result = data_handle.join();
-        let result = match result {
-            Err(_) | Ok(Err(_)) => result,     // Propagate the previous result
-            Ok(Ok(())) => model_handle.join(), // Propagate the model result
-        };
-        let result = match result {
-            Err(_) | Ok(Err(_)) => result,
-            Ok(Ok(())) => writer_handle.join(),
-        };
-        result
+        let result = data_handle.join().unwrap();
+        let result = result.and_then(|_| model_handle.join().unwrap());
+        result.and_then(|_| write_handle.join().unwrap().map_err(VisSubtractError::from))
     });
 
-    match scoped_threads_result {
-        // Propagate anything that didn't panic.
-        Ok(Ok(r)) => r?,
-        // A panic. This ideally only happens because a programmer made a
-        // mistake, but it could happen in drastic situations (e.g. hardware
-        // failure).
-        Err(_) | Ok(Err(_)) => panic!(
-            "A panic occurred; the message should be above. You may need to disable progress bars."
-        ),
-    }
-
-    info!("Subtracted visibilities written to {}", output.display());
+    // Propagate errors and print out the write message.
+    info!("{}", scoped_threads_result.unwrap()?);
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_vis(
     obs_context: &ObsContext,
     tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-    input_data: &dyn InputData,
+    input_data: &dyn VisRead,
+    timesteps: &Vec1<usize>,
     vis_shape: (usize, usize),
-    tx: Sender<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
+    tx: Sender<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
 ) -> Result<(), VisSubtractError> {
@@ -547,15 +805,15 @@ fn read_vis(
 
     // Read data to fill the buffer, pausing when the buffer is full to
     // write it all out.
-    for &timestep in obs_context.all_timesteps.iter() {
+    for &timestep in timesteps {
         let timestamp = obs_context.timestamps[timestep];
         debug!("Reading timestamp {}", timestamp.as_gpst_seconds());
 
-        let mut vis_data: Array2<Jones<f32>> = Array2::zeros(vis_shape);
-        let mut vis_weights: Array2<f32> = Array2::zeros(vis_shape);
+        let mut cross_data: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
+        let mut cross_weights: ArcArray2<f32> = ArcArray2::zeros(vis_shape);
         input_data.read_crosses(
-            vis_data.view_mut(),
-            vis_weights.view_mut(),
+            cross_data.view_mut(),
+            cross_weights.view_mut(),
             timestep,
             tile_to_unflagged_baseline_map,
             &flagged_fine_chans,
@@ -566,7 +824,12 @@ fn read_vis(
             return Ok(());
         }
 
-        match tx.send((vis_data, vis_weights, timestamp)) {
+        match tx.send(VisTimestep {
+            cross_data,
+            cross_weights,
+            autos: None,
+            timestamp,
+        }) {
             Ok(()) => (),
             // If we can't send the message, it's because the channel
             // has been closed on the other side. That should only
@@ -578,7 +841,6 @@ fn read_vis(
     }
     debug!("Finished reading");
     progress_bar.abandon_with_message("Finished reading visibilities");
-    debug!("Finished reading");
 
     Ok(())
 }
@@ -588,17 +850,15 @@ fn model_vis_and_subtract(
     beam: &dyn Beam,
     source_list: &SourceList,
     obs_context: &ObsContext,
+    array_pos: LatLngHeight,
     vis_shape: (usize, usize),
-    rx: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
-    tx: Sender<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
+    apply_precession: bool,
+    rx: Receiver<VisTimestep>,
+    tx: Sender<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
     #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
 ) -> Result<(), VisSubtractError> {
-    let array_pos = obs_context.array_position.unwrap_or_else(|| {
-        trace!("The array position was not specified in the input data; assuming MWA");
-        marlu::LatLngHeight::new_mwa()
-    });
     let unflagged_tile_xyzs = obs_context
         .tile_xyzs
         .iter()
@@ -622,15 +882,20 @@ fn model_vis_and_subtract(
         obs_context.phase_centre,
         array_pos.longitude_rad,
         array_pos.latitude_rad,
-        // TODO: Allow the user to turn off precession.
-        true,
+        apply_precession,
     )?;
 
     // Recycle an array for model visibilities.
     let mut vis_model = Array2::zeros(vis_shape);
 
     // Iterate over the incoming data.
-    for (mut vis_data, vis_weights, timestamp) in rx.iter() {
+    for VisTimestep {
+        cross_data: mut vis_data,
+        cross_weights,
+        autos,
+        timestamp,
+    } in rx.iter()
+    {
         debug!("Modelling timestamp {}", timestamp.as_gpst_seconds());
         modeller.model_timestep(vis_model.view_mut(), timestamp)?;
         vis_data
@@ -647,7 +912,12 @@ fn model_vis_and_subtract(
             return Ok(());
         }
 
-        match tx.send((vis_data, vis_weights, timestamp)) {
+        match tx.send(VisTimestep {
+            cross_data: vis_data,
+            cross_weights,
+            autos,
+            timestamp,
+        }) {
             Ok(()) => (),
             Err(_) => return Ok(()),
         }
@@ -655,165 +925,5 @@ fn model_vis_and_subtract(
     }
     debug!("Finished modelling");
     progress_bar.abandon_with_message("Finished subtracting sky model");
-    Ok(())
-}
-
-fn writer<I>(
-    output: &Path,
-    obs_context: &ObsContext,
-    unflagged_baseline_tile_pairs: I,
-    rx: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
-    error: &AtomicCell<bool>,
-    progress_bar: ProgressBar,
-) -> Result<(), VisSubtractError>
-where
-    I: Iterator<Item = (usize, usize)>,
-{
-    let start_epoch = *obs_context.timestamps.first();
-    let ant_pairs = unflagged_baseline_tile_pairs.sorted().collect();
-    let int_time: Duration = Duration::from_f64(
-        obs_context.time_res.unwrap_or_else(|| {
-            trace!("No integration time specified; assuming 1 second");
-            1.
-        }),
-        Unit::Second,
-    );
-    let freq_res = obs_context.freq_res.unwrap_or_else(|| {
-        trace!("No frequency resolution specified; assuming 10 kHz");
-        10_000.
-    });
-    let array_pos = obs_context
-        .array_position
-        .unwrap_or_else(marlu::LatLngHeight::new_mwa);
-
-    let vis_ctx = VisContext {
-        num_sel_timesteps: obs_context.timestamps.len(),
-        start_timestamp: start_epoch,
-        int_time,
-        num_sel_chans: obs_context.fine_chan_freqs.len(),
-        start_freq_hz: *obs_context.fine_chan_freqs.first() as f64,
-        freq_resolution_hz: freq_res,
-        sel_baselines: ant_pairs,
-        avg_time: 1,
-        avg_freq: 1,
-        num_vis_pols: 4,
-    };
-
-    let obs_name = obs_context.obsid.map(|o| format!("{}", o));
-
-    let ext = output.extension().and_then(|os_str| os_str.to_str());
-    let mut vis_writer: Box<dyn VisWritable> = match ext
-        .and_then(|s| VisOutputType::from_str(s).ok())
-    {
-        Some(VisOutputType::Uvfits) => {
-            let uvfits = UvfitsWriter::from_marlu(
-                output,
-                &vis_ctx,
-                Some(array_pos),
-                obs_context.phase_centre,
-                obs_name,
-            )?;
-            Box::new(uvfits)
-        }
-        Some(VisOutputType::MeasurementSet) => {
-            let ms = MeasurementSetWriter::new(output, obs_context.phase_centre, Some(array_pos));
-
-            let sched_start_timestamp = match obs_context.obsid {
-                Some(gpst) => Epoch::from_gpst_seconds(gpst as f64),
-                None => obs_context.timestamps[*obs_context.all_timesteps.first()],
-            };
-            let sched_duration = obs_context.timestamps[*obs_context.all_timesteps.last()]
-                + int_time
-                - sched_start_timestamp;
-            let marlu_obs_ctx = MarluObsContext {
-                sched_start_timestamp,
-                sched_duration,
-                name: obs_name,
-                phase_centre: obs_context.phase_centre,
-                pointing_centre: obs_context.pointing_centre,
-                array_pos,
-                ant_positions_enh: obs_context
-                    .tile_xyzs
-                    .iter()
-                    .map(|xyz| xyz.to_enh(array_pos.latitude_rad))
-                    .collect(),
-                ant_names: obs_context.tile_names.iter().cloned().collect(),
-                // TODO(dev): is there any value in adding this metadata via hyperdrive obs context?
-                field_name: None,
-                project_id: None,
-                observer: None,
-            };
-            debug!("Creating measurement set {}", output.display());
-            ms.initialize(&vis_ctx, &marlu_obs_ctx)?;
-            Box::new(ms)
-        }
-        _ => {
-            return Err(VisSubtractError::InvalidOutputFormat(
-                ext.unwrap_or("<no extension>").to_string(),
-            ))
-        }
-    };
-
-    // Receive data to write from the modelling thread.
-    for (vis_data, vis_weights, timestamp) in rx.iter() {
-        debug!("Writing timestamp {}", timestamp.as_gpst_seconds());
-
-        let chunk_vis_ctx = VisContext {
-            start_timestamp: timestamp - int_time / 2.0,
-            num_sel_timesteps: 1,
-            ..vis_ctx.clone()
-        };
-
-        let out_shape = chunk_vis_ctx.avg_dims();
-        let mut out_data = Array3::zeros(out_shape);
-        let mut out_weights = Array3::from_elem(out_shape, -0.0);
-
-        assert_eq!(vis_data.len_of(Axis(0)), out_shape.2);
-
-        // pad and transpose the data, baselines then channels
-        for (mut out_data, mut out_weights, in_data, in_weights) in izip!(
-            out_data.axis_iter_mut(Axis(1)),
-            out_weights.axis_iter_mut(Axis(1)),
-            vis_data.axis_iter(Axis(1)),
-            vis_weights.axis_iter(Axis(1)),
-        ) {
-            // merge frequency axis
-            for (out_jones, out_weight, in_jones, in_weight) in izip!(
-                out_data.iter_mut(),
-                out_weights.iter_mut(),
-                in_data.iter(),
-                in_weights.iter(),
-            ) {
-                *out_jones = *in_jones;
-                *out_weight = *in_weight;
-            }
-        }
-
-        vis_writer.write_vis_marlu(
-            out_data.view(),
-            out_weights.view(),
-            &chunk_vis_ctx,
-            &obs_context.tile_xyzs,
-            false,
-        )?;
-
-        // Should we continue?
-        if error.load() {
-            return Ok(());
-        }
-
-        progress_bar.inc(1);
-    }
-
-    // If we have to, finish the writer.
-    if let Some(VisOutputType::Uvfits) = ext.and_then(|s| VisOutputType::from_str(s).ok()) {
-        trace!("Finalising writing of model uvfits file");
-        let uvfits_writer =
-            unsafe { Box::from_raw(Box::into_raw(vis_writer) as *mut UvfitsWriter) };
-        uvfits_writer
-            .write_uvfits_antenna_table(&obs_context.tile_names, &obs_context.tile_xyzs)?;
-    }
-    debug!("Finished writing");
-    progress_bar.abandon_with_message("Finished subtracted visibilities");
     Ok(())
 }

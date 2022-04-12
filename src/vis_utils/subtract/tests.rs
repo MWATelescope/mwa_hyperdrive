@@ -90,7 +90,7 @@ fn test_1090008640_vis_subtract() {
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &format!("{}", source_list_1.display()),
-        "--output-model-file", &format!("{}", model_1.display()),
+        "--output-model-files", &format!("{}", model_1.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
         "--no-progress-bars"
@@ -103,7 +103,7 @@ fn test_1090008640_vis_subtract() {
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &format!("{}", source_list_2.display()),
-        "--output-model-file", &format!("{}", model_2.display()),
+        "--output-model-files", &format!("{}", model_2.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
         "--no-progress-bars"
@@ -118,7 +118,7 @@ fn test_1090008640_vis_subtract() {
         let sub_args = VisSubtractArgs::parse_from(&[
             "vis-subtract",
             "--data", &metafits, &format!("{}", model_2.display()),
-            "--output", &format!("{}", subtracted.display()),
+            "--outputs", &format!("{}", subtracted.display()),
             "--source-list", &format!("{}", source_list_2.display()),
             "--sources-to-subtract", "src2",
             "--no-progress-bars",
@@ -189,7 +189,7 @@ fn test_1090008640_vis_subtract() {
         let sub_args = VisSubtractArgs::parse_from(&[
             "vis-subtract",
             "--data", &metafits, &format!("{}", model_2.display()),
-            "--output", &format!("{}", subtracted.display()),
+            "--outputs", &format!("{}", subtracted.display()),
             "--source-list", &format!("{}", source_list_2.display()),
             "--sources-to-subtract", "src1", "src2",
             "--no-progress-bars",

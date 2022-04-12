@@ -4,20 +4,16 @@
 
 //! Error type for all calibration-related errors.
 
-use marlu::io::error::{IOError as MarluIOError, MeasurementSetWriteError, UvfitsWriteError};
 use mwalib::fitsio;
 use thiserror::Error;
 
-use super::{
-    args::CalibrateArgsFileError,
-    params::InvalidArgsError,
-    solutions::{ReadSolutionsError, WriteSolutionsError},
-};
+use super::{args::CalibrateArgsFileError, params::InvalidArgsError};
 use crate::{
-    data_formats::{ReadInputDataError, UvfitsReadError},
     model::ModelError,
+    solutions::{ReadSolutionsError, WriteSolutionsError},
+    vis_io::read::{UvfitsReadError, VisReadError},
 };
-use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
+use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum CalibrateError {
@@ -36,7 +32,7 @@ pub enum CalibrateError {
     InvalidArgs(#[from] InvalidArgsError),
 
     #[error("{0}")]
-    Read(#[from] ReadInputDataError),
+    Read(#[from] VisReadError),
 
     #[error("{0}\n\nSee for more info: https://github.com/MWATelescope/mwa_hyperdrive/wiki/Calibration-solutions")]
     ReadSolutions(#[from] ReadSolutionsError),
@@ -53,14 +49,8 @@ pub enum CalibrateError {
     #[error("Error when reading uvfits: {0}")]
     UviftsRead(#[from] UvfitsReadError),
 
-    #[error("Error when writing uvfits: {0}")]
-    UviftsWrite(#[from] UvfitsWriteError),
-
-    #[error("Error when writing measurement set: {0}")]
-    MeasurementSetWrite(#[from] MeasurementSetWriteError),
-
-    #[error("Error when using Marlu for IO: {0}")]
-    MarluIO(#[from] MarluIOError),
+    #[error(transparent)]
+    VisWrite(#[from] crate::vis_io::write::VisWriteError),
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),

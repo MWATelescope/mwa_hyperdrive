@@ -4,19 +4,21 @@
 
 //! Metadata on an observation.
 
-pub mod helpers;
 #[cfg(test)]
 mod tests;
 
-use hifitime::Epoch;
-use hifitime::{Duration, Unit};
-use log::warn;
+use std::collections::HashSet;
+
+use hifitime::{Duration, Epoch, Unit};
+use itertools::Itertools;
+use log::{info, warn};
 use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
+use thiserror::Error;
 use vec1::Vec1;
 
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray, vec1};
+use mwa_hyperdrive_common::{hifitime, itertools, log, marlu, ndarray, thiserror, vec1};
 
 /// MWA observation metadata.
 ///
@@ -72,7 +74,7 @@ pub struct ObsContext {
     pub flagged_tiles: Vec<usize>,
 
     /// Are auto-correlations present in the visibility data?
-    pub(crate) _autocorrelations_present: bool,
+    pub(crate) autocorrelations_present: bool,
 
     /// The dipole delays for each tile in the array. They are necessary for
     /// anything requiring beam responses. Not all input data specify the
@@ -86,12 +88,12 @@ pub struct ObsContext {
     /// assumed that all tiles are live.
     pub(crate) dipole_gains: Option<Array2<f64>>,
 
-    /// The time resolution of the supplied data \[seconds\]. This is not
-    /// necessarily the native time resolution of the original observation's
-    /// data, as it may have already been averaged. This is kept optional in
-    /// case in the input data doesn't report the resolution and has only one
-    /// timestep, and therefore no resolution.
-    pub(crate) time_res: Option<f64>,
+    /// The time resolution of the supplied data. This is not necessarily the
+    /// native time resolution of the original observation's data, as it may
+    /// have already been averaged. This is kept optional in case in the input
+    /// data doesn't report the resolution and has only one timestep, and
+    /// therefore no resolution.
+    pub(crate) time_res: Option<Duration>,
 
     /// The Earth position of the instrumental array.
     pub(crate) array_position: Option<LatLngHeight>,
@@ -132,34 +134,116 @@ pub struct ObsContext {
 }
 
 impl ObsContext {
+    /// Get the total number of tiles in the observation, i.e. flagged and
+    /// unflagged.
+    pub(crate) fn get_total_num_tiles(&self) -> usize {
+        self.tile_xyzs.len()
+    }
+
     /// Attempt to get time resolution using heuristics if it is not present.
     ///
     /// If `time_res` is `None`, then attempt to determine it from the minimum
     /// distance between timestamps. If there is no more than 1 timestamp, then
     /// return 1s, since the time resolution of single-timestep observations is
-    /// not imporant anyway.
+    /// not important anyway.
     pub fn guess_time_res(&self) -> Duration {
-        if let Some(res) = self.time_res {
-            return Duration::from_f64(res, Unit::Second);
+        match self.time_res {
+            Some(t) => t,
+            None => {
+                warn!("No integration time specified; assuming 1 second");
+                // TODO: Use Marlu defaults for weight factor once its exposed
+                Duration::from_f64(1., Unit::Second)
+            }
         }
-        if let Some(res) = helpers::guess_time_res(self.timestamps.to_vec()) {
-            return res;
-        }
-        warn!("No integration time specified; assuming 1 second");
-        Duration::from_f64(1., Unit::Second)
     }
 
     pub fn guess_freq_res(&self) -> f64 {
-        if let Some(res) = self.freq_res {
-            return res;
+        match self.freq_res {
+            Some(f) => f,
+            None => {
+                warn!("No frequency resolution specified; assuming 10 kHz");
+                // TODO: Use Marlu defaults for weight factor once its exposed
+                10e3
+            }
         }
-        if let Some(res) =
-            helpers::guess_freq_res(self.fine_chan_freqs.iter().map(|&f| f as f64).collect())
-        {
-            return res;
-        }
-        // XXX(Dev): could probably try to guess from number of coarse chans
-        warn!("No frequency resolution specified; assuming 10 kHz");
-        10_000.
     }
+
+    /// Given whether to use the [ObsContext]'s tile flags and additional tile
+    /// flags (as strings or indices), return de-duplicated and sorted tile flag
+    /// indices.
+    pub(crate) fn get_tile_flags(
+        &self,
+        ignore_input_data_tile_flags: bool,
+        additional_flags: Option<&[String]>,
+    ) -> Result<Vec<usize>, InvalidTileFlag> {
+        let mut flagged_tiles = HashSet::new();
+
+        if !ignore_input_data_tile_flags {
+            // Add tiles that have already been flagged by the input data.
+            for &obs_tile_flag in &self.flagged_tiles {
+                flagged_tiles.insert(obs_tile_flag);
+            }
+        }
+
+        if let Some(flag_strings) = additional_flags {
+            // We need to convert the strings into antenna indices. The strings
+            // are either indices themselves or antenna names.
+            for flag_string in flag_strings {
+                // Try to parse a naked number.
+                let result = match flag_string.trim().parse().ok() {
+                    Some(n) => {
+                        let total_num_tiles = self.get_total_num_tiles();
+                        if n >= total_num_tiles {
+                            Err(InvalidTileFlag::Index {
+                                got: n,
+                                max: total_num_tiles - 1,
+                            })
+                        } else {
+                            flagged_tiles.insert(n);
+                            Ok(())
+                        }
+                    }
+                    None => {
+                        // Check if this is an antenna name.
+                        match self
+                            .tile_names
+                            .iter()
+                            .enumerate()
+                            .find(|(_, name)| name.to_lowercase() == flag_string.to_lowercase())
+                        {
+                            // If there are no matches, complain that the user input
+                            // is no good.
+                            None => Err(InvalidTileFlag::BadTileFlag(flag_string.to_string())),
+                            Some((i, _)) => {
+                                flagged_tiles.insert(i);
+                                Ok(())
+                            }
+                        }
+                    }
+                };
+                if result.is_err() {
+                    // If there's a problem, show all the tile names and their
+                    // indices to help out the user.
+                    info!("All tile indices and names:");
+                    self.tile_names.iter().enumerate().for_each(|(i, name)| {
+                        info!("    {:3}: {:10}", i, name);
+                    });
+                    // Propagate the error.
+                    result?;
+                }
+            }
+        }
+
+        // Convert the set to a vector.
+        Ok(flagged_tiles.into_iter().sorted().collect())
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum InvalidTileFlag {
+    #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}")]
+    Index { got: usize, max: usize },
+
+    #[error("Bad flag value: '{0}' is neither an integer or an available antenna name. Run with extra verbosity to see all tile names.")]
+    BadTileFlag(String),
 }

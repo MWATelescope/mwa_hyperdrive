@@ -33,13 +33,8 @@ pub enum InvalidArgsError {
     #[error("Multiple uvfits files were specified: {0:?}\nThis is currently unsupported.")]
     MultipleUvfits(Vec1<PathBuf>),
 
-    #[error("No calibration output was specified. There must be at least one calibration solution file or calibrated visibility file.")]
+    #[error("No calibration output was specified. There must be at least one calibration solution file.")]
     NoOutput,
-
-    #[error(
-        "Couldn't create directory '{0}' for output files. Do you have write permissions set?"
-    )]
-    NewDirectory(PathBuf),
 
     #[error("No sky-model source list file supplied")]
     NoSourceList,
@@ -67,28 +62,25 @@ pub enum InvalidArgsError {
     #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
     NoSourcesAfterVeto,
 
-    #[error("A single timestep was supplied multiple times; this is invalid")]
+    #[error("Duplicate timesteps were specified; this is invalid")]
     DuplicateTimesteps,
 
-    #[error("Timestep {got} was requested but it isn't available; the last timestep is {last}")]
+    #[error("Timestep {got} was specified but it isn't available; the last timestep is {last}")]
     UnavailableTimestep { got: usize, last: usize },
-
-    #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}")]
-    InvalidTileFlag { got: usize, max: usize },
-
-    #[error("Bad flag value: '{0}' is neither an integer or an available antenna name. Run with extra verbosity to see all tile names.")]
-    BadTileFlag(String),
 
     #[error(
         "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::help_texts::VIS_OUTPUT_EXTENSIONS
     )]
     VisFileType { ext: String },
 
-    #[error("Cannot write calibration outputs to a file type '{ext}'.\nSupported formats are: {} (calibration solutions)\n                     : {} (visibility files)", *crate::calibrate::args::CAL_SOLUTION_EXTENSIONS, *crate::help_texts::VIS_OUTPUT_EXTENSIONS)]
+    #[error(transparent)]
+    TileFlag(#[from] crate::context::InvalidTileFlag),
+
+    #[error("Cannot write calibration solutions to a file type '{ext}'.\nSupported formats are: {}", *crate::calibrate::args::CAL_SOLUTION_EXTENSIONS)]
     CalibrationOutputFile { ext: String },
 
-    #[error("Could not parse PFB flavour '{0}'.\nSupported flavours are: {}", *crate::pfb_gains::PFB_FLAVOURS)]
-    ParsePfbFlavour(String),
+    #[error(transparent)]
+    ParsePfbFlavour(#[from] crate::pfb_gains::PfbParseError),
 
     #[error("Error when parsing time average factor: {0}")]
     ParseCalTimeAverageFactor(crate::unit_parsing::UnitParseError),
@@ -103,10 +95,10 @@ pub enum InvalidArgsError {
     CalFreqFactorNotInteger,
 
     #[error("Calibration time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
-    CalTimeResNotMulitple { out: f64, inp: f64 },
+    CalTimeResNotMultiple { out: f64, inp: f64 },
 
     #[error("Calibration freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
-    CalFreqResNotMulitple { out: f64, inp: f64 },
+    CalFreqResNotMultiple { out: f64, inp: f64 },
 
     #[error("Calibration time average factor cannot be 0")]
     CalTimeFactorZero,
@@ -133,10 +125,10 @@ pub enum InvalidArgsError {
     OutputVisFreqAverageFactorZero,
 
     #[error("Output vis. time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
-    OutputVisTimeResNotMulitple { out: f64, inp: f64 },
+    OutputVisTimeResNotMultiple { out: f64, inp: f64 },
 
     #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
-    OutputVisFreqResNotMulitple { out: f64, inp: f64 },
+    OutputVisFreqResNotMultiple { out: f64, inp: f64 },
 
     #[error("Output vis. time resolution cannot be 0")]
     OutputVisTimeResZero,
@@ -163,13 +155,16 @@ pub enum InvalidArgsError {
     Glob(#[from] crate::glob::GlobError),
 
     #[error("{0}")]
-    RawData(#[from] crate::data_formats::RawReadError),
+    RawData(#[from] crate::vis_io::read::RawReadError),
 
     #[error("{0}")]
-    MS(#[from] crate::data_formats::MsReadError),
+    MS(#[from] crate::vis_io::read::MsReadError),
 
     #[error("{0}")]
-    Uvfits(#[from] crate::data_formats::UvfitsReadError),
+    Uvfits(#[from] crate::vis_io::read::UvfitsReadError),
+
+    #[error(transparent)]
+    FileWrite(#[from] crate::vis_io::write::FileWriteError),
 
     #[error("{0}")]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),

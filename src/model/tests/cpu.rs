@@ -26,7 +26,12 @@ fn point_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view(), "Failed on flux-type list");
 
@@ -38,7 +43,12 @@ fn point_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities(visibilities.view(), "Failed on flux-type power law");
 
@@ -50,7 +60,12 @@ fn point_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_zenith_visibilities(
         visibilities.view(),
@@ -74,7 +89,12 @@ fn point_off_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view(), "Failed on flux-type list");
 
@@ -89,7 +109,12 @@ fn point_off_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities(visibilities.view(), "Failed on flux-type power law");
 
@@ -104,7 +129,12 @@ fn point_off_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_off_zenith_visibilities(
         visibilities.view(),
@@ -125,7 +155,12 @@ fn gaussian_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view(), "Failed on flux-type list");
 
@@ -137,7 +172,12 @@ fn gaussian_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities(visibilities.view(), "Failed on flux-type power law");
 
@@ -152,7 +192,12 @@ fn gaussian_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_zenith_visibilities(
         visibilities.view(),
@@ -176,7 +221,12 @@ fn gaussian_off_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view(), "Failed on flux-type list");
 
@@ -191,7 +241,12 @@ fn gaussian_off_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities(visibilities.view(), "Failed on flux-type power law");
 
@@ -206,7 +261,12 @@ fn gaussian_off_zenith_cpu() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_off_zenith_visibilities(
         visibilities.view(),
@@ -236,6 +296,7 @@ fn shapelet_zenith_cpu() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view(), "Failed on flux-type list");
@@ -257,6 +318,7 @@ fn shapelet_zenith_cpu() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities(visibilities.view(), "Failed on flux-type power law");
@@ -281,6 +343,7 @@ fn shapelet_zenith_cpu() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_curved_power_law_zenith_visibilities(
@@ -314,6 +377,7 @@ fn shapelet_off_zenith_cpu() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view(), "Failed on flux-type list");
@@ -338,6 +402,7 @@ fn shapelet_off_zenith_cpu() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities(visibilities.view(), "Failed on flux-type power law");
@@ -362,6 +427,7 @@ fn shapelet_off_zenith_cpu() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_curved_power_law_off_zenith_visibilities(
@@ -384,7 +450,12 @@ fn point_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type list");
 
@@ -396,7 +467,12 @@ fn point_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type power law");
 
@@ -408,7 +484,12 @@ fn point_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_zenith_visibilities_fee(
         visibilities.view(),
@@ -433,7 +514,12 @@ fn point_off_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type list");
 
@@ -448,7 +534,12 @@ fn point_off_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities_fee(
         visibilities.view(),
@@ -466,7 +557,12 @@ fn point_off_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_points_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_off_zenith_visibilities_fee(
         visibilities.view(),
@@ -488,7 +584,12 @@ fn gaussian_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type list");
 
@@ -500,7 +601,12 @@ fn gaussian_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type power law");
 
@@ -515,7 +621,12 @@ fn gaussian_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_zenith_visibilities_fee(
         visibilities.view(),
@@ -540,7 +651,12 @@ fn gaussian_off_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type list");
 
@@ -555,7 +671,12 @@ fn gaussian_off_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities_fee(
         visibilities.view(),
@@ -573,7 +694,12 @@ fn gaussian_off_zenith_cpu_fee() {
     );
     let modeller = obs.get_cpu_modeller(&srclist);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(visibilities.view_mut(), &obs.uvws, obs.lst);
+    let result = modeller.model_gaussians_inner(
+        visibilities.view_mut(),
+        &obs.uvws,
+        obs.lst,
+        obs.array_latitude_rad,
+    );
     assert!(result.is_ok());
     assert_curved_power_law_off_zenith_visibilities_fee(
         visibilities.view(),
@@ -604,6 +730,7 @@ fn shapelet_zenith_cpu_fee() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_list_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type list");
@@ -625,6 +752,7 @@ fn shapelet_zenith_cpu_fee() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type power law");
@@ -649,6 +777,7 @@ fn shapelet_zenith_cpu_fee() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_curved_power_law_zenith_visibilities_fee(
@@ -683,6 +812,7 @@ fn shapelet_off_zenith_cpu_fee() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities_fee(visibilities.view(), "Failed on flux-type list");
@@ -707,6 +837,7 @@ fn shapelet_off_zenith_cpu_fee() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities_fee(
@@ -734,6 +865,7 @@ fn shapelet_off_zenith_cpu_fee() {
         &obs.uvws,
         shapelet_uvws.view(),
         obs.lst,
+        obs.array_latitude_rad,
     );
     assert!(result.is_ok());
     assert_curved_power_law_off_zenith_visibilities_fee(

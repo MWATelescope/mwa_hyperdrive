@@ -4,10 +4,12 @@
 
 //! Error type for all errors related to vis-simulate.
 
-use marlu::io::error::{IOError as MarluIOError, MeasurementSetWriteError, UvfitsWriteError};
+use std::path::PathBuf;
+
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
+use crate::help_texts::VIS_OUTPUT_EXTENSIONS;
+use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub enum VisSimulateError {
@@ -34,6 +36,21 @@ pub enum VisSimulateError {
     )]
     BadDelays,
 
+    #[error(
+        "An invalid output format was specified ({0}). Supported:\n{}",
+        *VIS_OUTPUT_EXTENSIONS,
+    )]
+    InvalidOutputFormat(PathBuf),
+
+    #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
+    BadArrayPosition { pos: Vec<f64> },
+
+    #[error(transparent)]
+    FileWrite(#[from] crate::vis_io::write::FileWriteError),
+
+    #[error(transparent)]
+    AverageFactor(#[from] crate::averaging::AverageFactorError),
+
     #[error("Error when trying to read source list: {0}")]
     SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
 
@@ -47,10 +64,7 @@ pub enum VisSimulateError {
     Model(#[from] crate::model::ModelError),
 
     #[error(transparent)]
-    MarluUvfits(#[from] UvfitsWriteError),
-
-    #[error(transparent)]
-    MarluIO(#[from] MarluIOError),
+    VisWrite(#[from] crate::vis_io::write::VisWriteError),
 
     #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
@@ -60,10 +74,4 @@ pub enum VisSimulateError {
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
-
-    #[error("invalid file extension of output path {path}. {message}")]
-    OutputFileExtension { path: String, message: String },
-
-    #[error("Error when writing measurement set: {0}")]
-    MeasurementSetWrite(#[from] MeasurementSetWriteError),
 }

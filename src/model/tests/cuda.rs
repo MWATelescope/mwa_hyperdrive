@@ -51,7 +51,7 @@ fn point_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -68,7 +68,7 @@ fn point_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -85,7 +85,7 @@ fn point_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -113,7 +113,7 @@ fn point_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -133,7 +133,7 @@ fn point_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -153,7 +153,7 @@ fn point_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -188,7 +188,7 @@ fn gaussian_zenith_gpu() {
             })
             .collect::<Vec<_>>();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -214,7 +214,7 @@ fn gaussian_zenith_gpu() {
             })
             .collect::<Vec<_>>();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -243,7 +243,7 @@ fn gaussian_zenith_gpu() {
             })
             .collect::<Vec<_>>();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -272,7 +272,7 @@ fn gaussian_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -292,7 +292,7 @@ fn gaussian_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -312,7 +312,7 @@ fn gaussian_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -338,7 +338,7 @@ fn shapelet_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -355,7 +355,7 @@ fn shapelet_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -375,7 +375,7 @@ fn shapelet_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -404,7 +404,7 @@ fn shapelet_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -424,7 +424,7 @@ fn shapelet_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -444,7 +444,7 @@ fn shapelet_off_zenith_gpu() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -472,7 +472,7 @@ fn point_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -489,7 +489,7 @@ fn point_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -506,7 +506,7 @@ fn point_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -536,7 +536,7 @@ fn point_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -556,7 +556,7 @@ fn point_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -579,7 +579,7 @@ fn point_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -616,7 +616,7 @@ fn gaussian_zenith_gpu_fee() {
             })
             .collect::<Vec<_>>();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -642,7 +642,7 @@ fn gaussian_zenith_gpu_fee() {
             })
             .collect::<Vec<_>>();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -671,7 +671,7 @@ fn gaussian_zenith_gpu_fee() {
             })
             .collect::<Vec<_>>();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -702,7 +702,7 @@ fn gaussian_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -722,7 +722,7 @@ fn gaussian_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -745,7 +745,7 @@ fn gaussian_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -773,7 +773,7 @@ fn shapelet_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -790,7 +790,7 @@ fn shapelet_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -810,7 +810,7 @@ fn shapelet_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -841,7 +841,7 @@ fn shapelet_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -861,7 +861,7 @@ fn shapelet_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -884,7 +884,7 @@ fn shapelet_off_zenith_gpu_fee() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -918,7 +918,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -953,7 +953,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -983,7 +983,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -1021,7 +1021,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -1056,7 +1056,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -1086,7 +1086,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -1124,7 +1124,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -1159,7 +1159,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst);
+        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -1189,7 +1189,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
     let modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst);
+        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
         modeller.copy_and_reset_vis(visibilities.view_mut());
@@ -1231,7 +1231,7 @@ fn copy_reset_cuda_vis_works() {
             })
             .collect::<Vec<_>>();
         let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_points_inner(&d_uvws, obs.lst);
+        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
         assert!(result.is_ok());
         result.unwrap();
 

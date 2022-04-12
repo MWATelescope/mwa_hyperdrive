@@ -21,7 +21,7 @@ fn get_minimal_obs_context() -> ObsContext {
         tile_names: vec1!["Tile00".into()],
         tile_xyzs: vec1![XyzGeodetic::default()],
         flagged_tiles: vec![],
-        _autocorrelations_present: false,
+        autocorrelations_present: false,
         dipole_delays: Some(Delays::Partial(vec![0; 16])),
         dipole_gains: None,
         time_res: None,
@@ -49,21 +49,8 @@ pub fn test_guess_time_res() {
         Duration::from_f64(1., Unit::Second)
     );
 
-    // test use min delta
-    obs_ctx.time_res = None;
-    obs_ctx.timestamps = vec1![
-        Epoch::from_gpst_seconds(1090000000.0),
-        Epoch::from_gpst_seconds(1090000010.0),
-        Epoch::from_gpst_seconds(1090000013.0),
-    ];
-
-    assert_eq!(
-        obs_ctx.guess_time_res(),
-        Duration::from_f64(3., Unit::Second)
-    );
-
     // test use direct time_res over min_delta
-    obs_ctx.time_res = Some(2.);
+    obs_ctx.time_res = Some(Duration::from_f64(2., Unit::Second));
     obs_ctx.timestamps = vec1![
         Epoch::from_gpst_seconds(1090000000.0),
         Epoch::from_gpst_seconds(1090000010.0),
@@ -85,12 +72,6 @@ pub fn test_guess_freq_res() {
     obs_ctx.fine_chan_freqs = vec1![128_000_000];
 
     assert_eq!(obs_ctx.guess_freq_res(), 10_000.);
-
-    // test use min delta
-    obs_ctx.freq_res = None;
-    obs_ctx.fine_chan_freqs = vec1![128_000_000, 128_100_000, 128_120_000];
-
-    assert_eq!(obs_ctx.guess_freq_res(), 20_000.);
 
     // test use direct freq_res over min_delta
     obs_ctx.freq_res = Some(30_000.);

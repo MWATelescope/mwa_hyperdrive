@@ -7,12 +7,13 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use hifitime::Epoch;
 use log::trace;
 use mwalib::*;
 use ndarray::prelude::*;
 
 use super::error::*;
-use mwa_hyperdrive_common::{log, mwalib, ndarray};
+use mwa_hyperdrive_common::{hifitime, log, mwalib, ndarray};
 
 /// This monstrosity exists to nicely handle converting any type that can be
 /// represented as a `Path` into a string slice. This is kind of a hack, but a
@@ -35,8 +36,8 @@ pub(crate) enum MwafProducer {
 }
 
 pub(crate) struct AOFlags {
-    /// The GPS time of the first scan \[milliseconds\].
-    pub(crate) start_time_milli: u64,
+    /// The GPS time of the first scan.
+    pub(crate) start_time: Epoch,
 
     /// The number of time steps in the data (duration of observation /
     /// integration time).
@@ -120,7 +121,7 @@ impl AOFlags {
         flags.insert(m.gpubox_num, m.flags);
 
         Ok(AOFlags {
-            start_time_milli: m.start_time_milli,
+            start_time: Epoch::from_gpst_seconds(m.start_time_milli as f64 / 1e3),
             num_time_steps: m.num_time_steps,
             num_channels: m.num_channels,
             num_baselines,
@@ -148,7 +149,7 @@ impl AOFlags {
             // impossible, use a temp struct to represent the gpubox numbers as
             // a number.
             unpacked.push(AOFlagsTemp {
-                start_time_milli: n.start_time_milli,
+                start_time: n.start_time,
                 gpubox_num: n.gpubox_nums[0],
                 num_time_steps: n.num_time_steps,
                 num_channels: n.num_channels,
@@ -251,7 +252,7 @@ impl AOFlags {
         gpubox_nums.push(last.gpubox_num);
 
         Ok(AOFlags {
-            start_time_milli: last.start_time_milli,
+            start_time: last.start_time,
             num_time_steps: last.num_time_steps,
             num_channels,
             num_baselines: last.num_baselines,
@@ -420,7 +421,7 @@ impl Mwaf {
 #[derive(Debug)]
 struct AOFlagsTemp {
     /// The GPS time of the first scan.
-    start_time_milli: u64,
+    start_time: Epoch,
     /// The number of time steps in the data (duration of observation /
     /// integration time).
     num_time_steps: usize,

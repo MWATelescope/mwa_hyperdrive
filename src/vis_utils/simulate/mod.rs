@@ -7,38 +7,52 @@
 mod error;
 pub use error::VisSimulateError;
 
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::{
+    collections::{HashMap, HashSet},
+    ops::{Deref, Range},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use clap::Parser;
-use hifitime::Epoch;
-use hifitime::{Duration, Unit};
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::{izip, Itertools};
+use crossbeam_channel::{bounded, Sender};
+use crossbeam_utils::{atomic::AtomicCell, thread};
+use hifitime::{Duration, Epoch, Unit};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use itertools::Itertools;
 use log::{debug, info};
-use marlu::{
-    precession::precess_time, Jones, LatLngHeight, MeasurementSetWriter,
-    ObsContext as MarluObsContext, RADec, UvfitsWriter, VisContext, VisWritable, XyzGeodetic,
-};
+use marlu::{precession::precess_time, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic};
 use mwalib::MetafitsContext;
-use ndarray::prelude::*;
+use ndarray::ArcArray2;
+use scopeguard::defer_on_unwind;
+use vec1::Vec1;
 
-use crate::data_formats::VisOutputType;
 use crate::{
-    data_formats::{get_dipole_delays, get_dipole_gains},
+    averaging::{parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks},
     glob::get_single_match_from_glob,
+    help_texts::{ARRAY_POSITION_HELP, VIS_OUTPUT_EXTENSIONS},
+    math::TileBaselineMaps,
+    messages,
+    metafits::{get_dipole_delays, get_dipole_gains},
     model,
+    model::SkyModeller,
+    vis_io::write::{can_write_to_file, write_vis, VisOutputType, VisTimestep},
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{
-    cfg_if, clap, hifitime, indicatif, itertools, log, marlu, mwalib, ndarray,
+    cfg_if, clap, hifitime, indicatif, itertools, lazy_static, log, marlu, mwalib, ndarray, vec1,
 };
 use mwa_hyperdrive_srclist::{
     read::read_source_list_file, veto_sources, ComponentCounts, SourceList,
     DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
 };
+
+const DEFAULT_OUTPUT_VIS_FILENAME: &str = "hyp_model.uvfits";
+
+lazy_static::lazy_static! {
+    static ref OUTPUTS_HELP: String =
+        format!("Paths to the output visibility files. Supported formats: {}. Default: {}", *VIS_OUTPUT_EXTENSIONS, DEFAULT_OUTPUT_VIS_FILENAME);
+}
 
 #[derive(Parser, Debug, Default)]
 pub struct VisSimulateArgs {
@@ -46,18 +60,41 @@ pub struct VisSimulateArgs {
     #[clap(short, long, parse(from_str), help_heading = "INPUT AND OUTPUT")]
     metafits: PathBuf,
 
-    /// Path to the output visibilities file.
     #[clap(
         short = 'o',
         long,
-        default_value = "hyp_model.uvfits",
+        multiple_values(true),
+        help = OUTPUTS_HELP.as_str(),
         help_heading = "INPUT AND OUTPUT"
     )]
-    output_model_file: PathBuf,
+    output_model_files: Vec<PathBuf>,
 
     /// Path to the sky-model source list used for simulation.
     #[clap(short, long, help_heading = "INPUT AND OUTPUT")]
     source_list: String,
+
+    /// When writing out model visibilities, average this many timesteps
+    /// together. Also supports a target time resolution (e.g. 8s). The value
+    /// must be a multiple of the input data's time resolution. The default is
+    /// to preserve the input data's time resolution. e.g. If the input data is
+    /// in 0.5s resolution and this variable is 4, then we average 2s worth of
+    /// model data together before writing the data out. If the variable is
+    /// instead 4s, then 8 model timesteps are averaged together before writing
+    /// the data out.
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    output_model_time_average: Option<String>,
+
+    /// When writing out model visibilities, average this many fine freq.
+    /// channels together. Also supports a target freq. resolution (e.g. 80kHz).
+    /// The value must be a multiple of the input data's freq. resolution. The
+    /// default is to preserve the input data's freq. resolution multiplied by
+    /// the frequency average factor. e.g. If the input data is in 40kHz
+    /// resolution, the frequency average factor is 2 and this variable is 4,
+    /// then we average 320kHz worth of model data together before writing the
+    /// data out. If the variable is instead 80kHz, then 4 model fine freq.
+    /// channels are averaged together before writing the data out.
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    output_model_freq_average: Option<String>,
 
     /// The number of sources to use in the source list. The default is to use
     /// them all. Example: If 1000 sources are specified here, then the top 1000
@@ -133,6 +170,11 @@ pub struct VisSimulateArgs {
     #[clap(long, default_value = "8", help_heading = "OBSERVATION PARAMETERS")]
     time_res: f64,
 
+    /// The time offset from the start [seconds]. The default start time is the
+    /// is the obsid as GPS timestamp.
+    #[clap(long, default_value = "0", help_heading = "OBSERVATION PARAMETERS")]
+    time_offset: f64,
+
     /// Should we use a beam? Default is to use the FEE beam.
     #[clap(long, help_heading = "MODEL PARAMETERS")]
     no_beam: bool,
@@ -150,7 +192,20 @@ pub struct VisSimulateArgs {
     /// Specify the MWA dipoles delays, ignoring whatever is in the metafits
     /// file.
     #[clap(long, multiple_values(true), help_heading = "MODEL PARAMETERS")]
-    dipole_delays: Option<Vec<u32>>,
+    delays: Option<Vec<u32>>,
+
+    #[clap(
+        long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "MODEL PARAMETERS",
+        number_of_values = 3,
+        allow_hyphen_values = true,
+        value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
+    )]
+    array_position: Option<Vec<f64>>,
+
+    /// If specified, don't precess the array to J2000. We assume that sky-model
+    /// sources are specified in the J2000 epoch.
+    #[clap(long, help_heading = "MODEL PARAMETERS")]
+    no_precession: bool,
 
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
@@ -177,19 +232,37 @@ struct VisSimParams {
     /// mwalib metafits context
     metafits: MetafitsContext,
 
-    /// The output visibilities file.
-    output_model_file: PathBuf,
+    /// The output visibility files.
+    outputs: Vec1<(PathBuf, VisOutputType)>,
+
+    /// The number of model time samples to average together before writing out
+    /// model visibilities.
+    output_time_average_factor: usize,
+
+    /// The number of model frequencies samples to average together before
+    /// writing out model visibilities.
+    output_freq_average_factor: usize,
 
     /// The phase centre.
     phase_centre: RADec,
 
-    /// The fine frequency channel frequencies \[Hz\].
-    fine_chan_freqs: Vec<f64>,
+    /// The fine channel frequencies \[Hz\].
+    fine_chan_freqs: Vec1<f64>,
 
+    /// The simulated MWA coarse channel numbers. These probably don't exactly
+    /// correspond to the actual coarse channels of the observation paired with
+    /// the metafits file. Starts from 1. Only used to populate a measurement
+    /// set's MWA_SUBBAND table.
+    coarse_chan_nums: Range<usize>,
+
+    /// The frequency resolution of the fine channels.
     freq_res_hz: f64,
 
     /// The [XyzGeodetic] positions of the tiles.
-    xyzs: Vec<XyzGeodetic>,
+    tile_xyzs: Vec<XyzGeodetic>,
+
+    /// The names of the tiles.
+    tile_names: Vec<String>,
 
     /// A map from baseline index to the baseline's constituent tiles.
     baseline_to_tile_map: HashMap<usize, (usize, usize)>,
@@ -198,15 +271,18 @@ struct VisSimParams {
     flagged_tiles: Vec<usize>,
 
     /// Timestamps to be simulated.
-    timestamps: Vec<Epoch>,
+    timestamps: Vec1<Epoch>,
 
-    int_time: Duration,
+    time_res: Duration,
 
     /// Interface to beam code.
     beam: Box<dyn Beam>,
 
     /// The Earth position of the interferometer.
     array_position: LatLngHeight,
+
+    /// Should we be precessing?
+    apply_precession: bool,
 }
 
 impl VisSimParams {
@@ -217,8 +293,10 @@ impl VisSimParams {
         // Expose all the struct fields to ensure they're all used.
         let VisSimulateArgs {
             metafits,
-            output_model_file,
+            output_model_files,
             source_list,
+            output_model_time_average,
+            output_model_freq_average,
             num_sources,
             source_dist_cutoff,
             veto_threshold,
@@ -232,14 +310,39 @@ impl VisSimParams {
             middle_freq,
             num_timesteps,
             time_res,
+            time_offset,
             no_beam,
             beam_file,
             unity_dipole_gains,
-            dipole_delays,
+            delays,
+            array_position,
+            no_precession,
             #[cfg(feature = "cuda")]
                 cpu: _,
             no_progress_bars: _,
         } = args;
+
+        let output_model_files = {
+            let mut valid_model_files = Vec::with_capacity(output_model_files.len().max(1));
+            for file in output_model_files {
+                // Is the output file type supported?
+                let ext = file.extension().and_then(|os_str| os_str.to_str());
+                match ext.and_then(|s| VisOutputType::from_str(s).ok()) {
+                    Some(t) => {
+                        can_write_to_file(file)?;
+                        valid_model_files.push((file.to_owned(), t));
+                    }
+                    None => return Err(VisSimulateError::InvalidOutputFormat(file.clone())),
+                }
+            }
+            if valid_model_files.is_empty() {
+                valid_model_files.push((
+                    PathBuf::from(DEFAULT_OUTPUT_VIS_FILENAME),
+                    VisOutputType::Uvfits,
+                ));
+            }
+            Vec1::try_from_vec(valid_model_files).unwrap()
+        };
 
         // Read the metafits file with mwalib.
         // TODO: Allow the user to specify the mwa_version.
@@ -271,79 +374,66 @@ impl VisSimParams {
                 }
             }
         };
-        info!("Using phase centre {}", phase_centre);
 
         // Get the fine channel frequencies.
-        if *num_fine_channels == 0 {
-            return Err(VisSimulateError::FineChansZero);
-        }
         if *freq_res < f64::EPSILON {
             return Err(VisSimulateError::FineChansWidthTooSmall);
         }
-        info!("Number of fine channels: {}", num_fine_channels);
-        info!("Fine-channel width:      {} kHz", freq_res);
-        let middle_freq = middle_freq.unwrap_or(metafits.centre_freq_hz as _);
+        let middle_freq = middle_freq
+            .map(|f| f * 1e6) // MHz -> Hz
+            .unwrap_or(metafits.centre_freq_hz as _);
+        let freq_res = freq_res * 1e3; // kHz -> Hz
         let fine_chan_freqs = {
             let half_num_fine_chans = *num_fine_channels as f64 / 2.0;
-            let freq_res = freq_res * 1000.0; // kHz -> Hz
             let mut fine_chan_freqs = Vec::with_capacity(*num_fine_channels);
             for i in 0..*num_fine_channels {
                 fine_chan_freqs
                     .push(middle_freq - half_num_fine_chans * freq_res + freq_res * i as f64);
             }
-            fine_chan_freqs
+            Vec1::try_from_vec(fine_chan_freqs).map_err(|_| VisSimulateError::FineChansZero)?
         };
-        match fine_chan_freqs.as_slice() {
-            [] => unreachable!(), // Handled above.
-            [f] => info!("Only fine-channel freq: {} MHz", f / 1e6),
-            [f_0, .., f_n] => {
-                info!("First fine-channel freq: {} MHz", f_0 / 1e6);
-                info!("Last fine-channel freq:  {} MHz", f_n / 1e6);
-            }
-        }
 
         // Populate the timestamps.
-        let int_time = Duration::from_f64(*time_res, Unit::Second);
+        let time_res = Duration::from_f64(*time_res, Unit::Second);
         let timestamps = {
             let mut timestamps = Vec::with_capacity(*num_timesteps);
-            let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3);
+            let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3)
+                + time_res / 2
+                + Duration::from_f64(*time_offset, Unit::Second);
             for i in 0..*num_timesteps {
-                timestamps.push(start + int_time * i as i64);
+                timestamps.push(start + time_res * i as i64);
             }
-            timestamps
+            Vec1::try_from_vec(timestamps).map_err(|_| VisSimulateError::ZeroTimeSteps)?
         };
-        match timestamps.as_slice() {
-            [] => return Err(VisSimulateError::ZeroTimeSteps),
-            [t] => info!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
-            [t0, .., tn] => {
-                info!("First timestep (GPS): {:.2}", t0.as_gpst_seconds());
-                info!("Last timestep  (GPS): {:.2}", tn.as_gpst_seconds());
+
+        let array_position = match array_position {
+            None => LatLngHeight::new_mwa(),
+            Some(pos) => {
+                if pos.len() != 3 {
+                    return Err(VisSimulateError::BadArrayPosition {
+                        pos: pos.to_owned(),
+                    });
+                }
+                LatLngHeight {
+                    longitude_rad: pos[0].to_radians(),
+                    latitude_rad: pos[1].to_radians(),
+                    height_metres: pos[2],
+                }
             }
-        }
+        };
 
         // Get the geodetic XYZ coordinates of each of the MWA tiles.
-        let xyzs = XyzGeodetic::get_tiles_mwa(&metafits);
+        let tile_xyzs = XyzGeodetic::get_tiles(&metafits, array_position.latitude_rad);
+        let tile_names: Vec<String> = metafits
+            .antennas
+            .iter()
+            .map(|a| a.tile_name.clone())
+            .collect();
 
         // Prepare a map between baselines and their constituent tiles.
         // TODO: Utilise tile flags.
         let flagged_tiles: Vec<usize> = vec![];
-        let baseline_to_tile_map = {
-            let mut baseline_to_tile_map = HashMap::new();
-            let mut bl = 0;
-            for tile1 in 0..metafits.num_ants {
-                if flagged_tiles.contains(&tile1) {
-                    continue;
-                }
-                for tile2 in tile1 + 1..metafits.num_ants {
-                    if flagged_tiles.contains(&tile2) {
-                        continue;
-                    }
-                    baseline_to_tile_map.insert(bl, (tile1, tile2));
-                    bl += 1;
-                }
-            }
-            baseline_to_tile_map
-        };
+        let maps = TileBaselineMaps::new(metafits.num_ants, &flagged_tiles);
 
         // Treat the specified source list as file path. Does it exist? Then use it.
         // Otherwise, treat the specified source list as a glob and attempt to find
@@ -387,83 +477,169 @@ impl VisSimParams {
         } else {
             source_list
         };
+
+        let delays = match delays {
+            Some(d) => {
+                if d.len() != 16 || d.iter().any(|&v| v > 32) {
+                    return Err(VisSimulateError::BadDelays);
+                }
+                Delays::Partial(d.to_owned())
+            }
+            None => Delays::Full(get_dipole_delays(&metafits)),
+        };
+        let ideal_delays = delays.get_ideal_delays();
         let beam = if *no_beam {
-            create_no_beam_object(xyzs.len())
+            create_no_beam_object(tile_xyzs.len())
         } else {
             create_fee_beam_object(
                 beam_file.as_ref(),
                 metafits.num_ants,
-                match dipole_delays {
-                    Some(d) => {
-                        if d.len() != 16 || d.iter().any(|&v| v > 32) {
-                            return Err(VisSimulateError::BadDelays);
-                        }
-                        Delays::Partial(d.to_owned())
-                    }
-                    None => Delays::Full(get_dipole_delays(&metafits)),
-                },
+                delays,
                 match unity_dipole_gains {
                     true => None,
                     false => Some(get_dipole_gains(&metafits)),
                 },
             )?
         };
+        let beam_file = beam.get_beam_file();
+        debug!("Beam file: {beam_file:?}");
 
-        let array_position = LatLngHeight::new_mwa();
         let precession_info = precess_time(
             phase_centre,
-            *timestamps.first().unwrap(),
+            *timestamps.first(),
             array_position.longitude_rad,
             array_position.latitude_rad,
         );
-
-        // Get the coarse channel information out of the metafits file, but only
-        // the ones aligned with the specified frequencies here.
-        let coarse_chan_freqs: Vec<f64> = {
-            let cc_width = f64::from(metafits.coarse_chan_width_hz);
-
-            metafits
-                .metafits_coarse_chans
-                .iter()
-                .map(|cc| f64::from(cc.chan_centre_hz))
-                .filter(|cc_freq| {
-                    fine_chan_freqs
-                        .iter()
-                        .any(|f| (*f as f64 - *cc_freq).abs() < cc_width / 2.0)
-                })
-                .collect()
+        let (lmst, latitude) = if *no_precession {
+            (precession_info.lmst, array_position.latitude_rad)
+        } else {
+            (
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
         };
+
+        messages::ObservationDetails {
+            dipole_delays: Some(ideal_delays),
+            beam_file,
+            num_tiles_with_dead_dipoles: if *unity_dipole_gains {
+                None
+            } else {
+                Some(
+                    get_dipole_gains(&metafits)
+                        .outer_iter()
+                        .filter(|tile_dipole_gains| {
+                            tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
+                        })
+                        .count(),
+                )
+            },
+            phase_centre,
+            pointing_centre: None,
+            lmst: Some(precession_info.lmst),
+            lmst_j2000: if *no_precession {
+                None
+            } else {
+                Some(precession_info.lmst_j2000)
+            },
+            available_timesteps: None,
+            unflagged_timesteps: None,
+            using_timesteps: None,
+            first_timestamp: Some(*timestamps.first()),
+            last_timestamp: Some(*timestamps.last()),
+            time_res: Some(time_res),
+            total_num_channels: *num_fine_channels,
+            num_unflagged_channels: None,
+            flagged_chans_per_coarse_chan: None,
+            first_freq_hz: Some(*fine_chan_freqs.first()),
+            last_freq_hz: Some(*fine_chan_freqs.last()),
+            first_unflagged_freq_hz: None,
+            last_unflagged_freq_hz: None,
+            freq_res_hz: Some(freq_res),
+        }
+        .print();
+
+        let (coarse_chan_freqs, coarse_chan_nums) = {
+            let (mut coarse_chan_freqs, mut coarse_chan_nums): (Vec<_>, Vec<_>) = fine_chan_freqs
+                .iter()
+                .map(|&f| {
+                    // MWA coarse channel numbers are a multiple of 1.28 MHz.
+                    // This might change with MWAX, but ignore that until it
+                    // becomes an issue; vis-simulate is mostly useful for
+                    // testing.
+                    let coarse_chan_number = (f / 1.28e6).round();
+                    let cc_freq = coarse_chan_number * 1.28e6;
+                    (cc_freq, coarse_chan_number)
+                })
+                .unzip();
+            // Deduplicate. As `fine_chan_freqs` is always sorted, we don't need
+            // to sort here.
+            coarse_chan_freqs.dedup();
+            coarse_chan_nums.dedup();
+            debug!("MWA coarse channel numbers: {coarse_chan_nums:?}");
+            // Convert the coarse channel numbers to a range starting from 1.
+            // TODO: Make Marlu take a slice of coarse channel numbers, not a range.
+            (coarse_chan_freqs, 1..coarse_chan_nums.len())
+        };
+        debug!("Coarse channel numbers: {:?}", coarse_chan_nums);
+        debug!(
+            "Coarse channel centre frequencies [Hz]: {:?}",
+            coarse_chan_freqs
+        );
+
+        // Parse and verify user input (specified resolutions must evenly divide
+        // the input data's resolutions).
+        let time_factor =
+            parse_time_average_factor(Some(time_res), output_model_time_average.as_deref(), 1)?;
+        let freq_factor =
+            parse_freq_average_factor(Some(freq_res), output_model_freq_average.as_deref(), 1)?;
+
+        messages::OutputFileDetails {
+            output_solutions: &[],
+            vis_type: "simulated",
+            output_vis: Some(&output_model_files),
+            input_vis_time_res: Some(time_res),
+            input_vis_freq_res: Some(freq_res),
+            output_vis_time_average_factor: time_factor,
+            output_vis_freq_average_factor: freq_factor,
+        }
+        .print();
 
         veto_sources(
             &mut source_list,
-            precession_info
-                .hadec_j2000
-                .to_radec(precession_info.lmst_j2000),
-            precession_info.lmst_j2000,
-            precession_info.array_latitude_j2000,
+            phase_centre,
+            lmst,
+            latitude,
             &coarse_chan_freqs,
             beam.deref(),
             *num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
-
-        info!("Writing the sky model to {}", output_model_file.display());
+        messages::SkyModelDetails {
+            source_list: &source_list,
+        }
+        .print();
 
         Ok(VisSimParams {
             source_list,
             metafits,
-            output_model_file: output_model_file.to_owned(),
+            outputs: output_model_files,
+            output_time_average_factor: time_factor,
+            output_freq_average_factor: freq_factor,
             phase_centre,
             fine_chan_freqs,
-            freq_res_hz: freq_res * 1e3_f64,
-            xyzs,
-            baseline_to_tile_map,
+            coarse_chan_nums,
+            freq_res_hz: freq_res,
+            tile_xyzs,
+            tile_names,
+            baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
             flagged_tiles,
             timestamps,
-            int_time,
+            time_res,
             beam,
             array_position,
+            apply_precession: !no_precession,
         })
     }
 }
@@ -489,213 +665,211 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         }
     }
 
-    let params = VisSimParams::new(args)?;
+    let VisSimParams {
+        source_list,
+        metafits,
+        outputs,
+        output_time_average_factor,
+        output_freq_average_factor,
+        phase_centre,
+        fine_chan_freqs,
+        coarse_chan_nums,
+        freq_res_hz,
+        tile_xyzs,
+        tile_names,
+        baseline_to_tile_map,
+        flagged_tiles,
+        timestamps,
+        time_res,
+        beam,
+        array_position,
+        apply_precession,
+    } = VisSimParams::new(args)?;
+
+    let timesteps = {
+        let timesteps = (0..timestamps.len()).into_iter().collect::<Vec<_>>();
+        // unwrap is safe because `timestamps` is never empty.
+        Vec1::try_from_vec(timesteps).unwrap()
+    };
+    let timeblocks = timesteps_to_timeblocks(&timestamps, output_time_average_factor, &timesteps);
 
     if dry_run {
         info!("Dry run -- exiting now.");
         return Ok(());
     }
 
-    let vis_ctx = VisContext {
-        num_sel_timesteps: params.timestamps.len(),
-        start_timestamp: params.timestamps[0],
-        int_time: params.int_time,
-        num_sel_chans: params.fine_chan_freqs.len(),
-        start_freq_hz: params.fine_chan_freqs[0] as f64,
-        freq_resolution_hz: params.freq_res_hz,
-        sel_baselines: params
-            .baseline_to_tile_map
-            .values()
-            .cloned()
-            .sorted()
-            .collect(),
-        avg_time: 1,
-        avg_freq: 1,
-        num_vis_pols: 4,
-    };
-    let out_shape = vis_ctx.sel_dims();
-    // fix time axis to 1
-    let out_shape = (1, out_shape.1, out_shape.2);
-
-    // Construct our visibilities array. This will be re-used for each timestep
-    // before it's written to disk. Simulated vis is [baseline][chan]
-    let mut vis_model_timestep: Array2<Jones<f32>> =
-        Array2::from_elem((out_shape.2, out_shape.1), Jones::default());
-    debug!(
-        "Shape of model array: ({} baselines, {} channels; {} MiB) (×2)",
-        out_shape.2,
-        out_shape.1,
-        out_shape.2 * out_shape.1 * std::mem::size_of_val(&vis_model_timestep[[0, 0]])
-        // 1024 * 1024 == 1 MiB.
-        / 1024 / 1024
-    );
-
-    // vis output requires [timestep][chan][baseline], this is re-used.
-    let mut vis_out: Array3<Jones<f32>> = Array3::from_elem(out_shape, Jones::default());
-    let weight_out = Array3::from_elem(out_shape, vis_ctx.weight_factor() as f32);
-
-    // Prepare the output visibilities file.
-
-    let obs_name = Some(format!(
-        "Simulated visibilities for obsid {}",
-        params.metafits.obs_id
-    ));
-
-    let output_type = match params
-        .output_model_file
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        Some(s) => {
-            VisOutputType::from_str(s).map_err(|e| VisSimulateError::OutputFileExtension {
-                path: format!("{}", &params.output_model_file.display()),
-                message: e.to_string(),
-            })?
-        }
-        None => {
-            return Err(VisSimulateError::OutputFileExtension {
-                path: format!("{}", &params.output_model_file.display()),
-                message: "no extension".to_string(),
-            })
-        }
-    };
-
-    let tile_names: Vec<&str> = params
-        .metafits
-        .rf_inputs
-        .iter()
-        .filter(|rf| rf.pol == mwalib::Pol::X)
-        .map(|rf| rf.tile_name.as_str())
-        .collect();
-
-    let mut output_writer: Box<dyn VisWritable> = match output_type {
-        VisOutputType::Uvfits => {
-            let writer = UvfitsWriter::from_marlu(
-                &params.output_model_file,
-                &vis_ctx,
-                Some(params.array_position),
-                params.phase_centre,
-                obs_name,
-            )?;
-            Box::new(writer)
-        }
-        VisOutputType::MeasurementSet => {
-            let writer = MeasurementSetWriter::new(
-                &params.output_model_file,
-                params.phase_centre,
-                Some(params.array_position),
-            );
-
-            let sched_start_timestamp = vis_ctx.start_timestamp;
-
-            let sched_duration =
-                *params.timestamps.last().unwrap() + params.int_time - sched_start_timestamp;
-
-            let marlu_obs_ctx = MarluObsContext {
-                sched_start_timestamp,
-                sched_duration,
-                name: obs_name,
-                phase_centre: params.phase_centre,
-                // XXX(Dev): is this right?
-                pointing_centre: None,
-                array_pos: params.array_position,
-                ant_positions_enh: params
-                    .xyzs
-                    .iter()
-                    .map(|xyz| xyz.to_enh(params.array_position.latitude_rad))
-                    .collect(),
-                ant_names: tile_names.iter().map(|&s| s.to_string()).collect(),
-                // TODO(dev): is there any value in adding this metadata via hyperdrive obs context?
-                field_name: None,
-                project_id: None,
-                observer: None,
-            };
-            writer.initialize(&vis_ctx, &marlu_obs_ctx)?;
-            Box::new(writer)
-        }
-    };
-
-    // Create a "modeller" object.
-    let modeller = model::new_sky_modeller(
-        #[cfg(feature = "cuda")]
-        args.cpu,
-        params.beam.deref(),
-        &params.source_list,
-        &params.xyzs,
-        &params.fine_chan_freqs,
-        &params.flagged_tiles,
-        params.phase_centre,
-        params.array_position.longitude_rad,
-        params.array_position.latitude_rad,
-        // TODO: Allow the user to turn off precession.
-        true,
-    )?;
+    // Channel for writing simulated visibilities.
+    let (tx_model, rx_model) = bounded(5);
 
     // Progress bar.
-    let model_progress = ProgressBar::new(params.timestamps.len() as _)
-        .with_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "{msg}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})",
-                )
-                .progress_chars("=> "),
-        )
-        .with_position(0)
-        .with_message("Sky modelling");
-    model_progress.set_draw_target(if args.no_progress_bars {
+    let multi_progress = MultiProgress::with_draw_target(if args.no_progress_bars {
         ProgressDrawTarget::hidden()
     } else {
         ProgressDrawTarget::stdout()
     });
+    let model_progress = multi_progress.add(
+        ProgressBar::new(timestamps.len() as u64)
+            .with_style(
+                ProgressStyle::default_bar()
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                    .progress_chars("=> "),
+            )
+            .with_position(0)
+            .with_message("Sky modelling"),
+    );
+    let write_progress = multi_progress.add(
+        ProgressBar::new(timeblocks.len() as _)
+            .with_style(
+                ProgressStyle::default_bar()
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})")
+                    .progress_chars("=> "),
+            )
+            .with_position(0)
+            .with_message("Model writing"),
+    );
     model_progress.tick();
+    write_progress.tick();
 
-    // Generate the visibilities.
-    for &timestamp in params.timestamps.iter() {
-        // Clear the visibilities before re-using the buffer.
-        vis_model_timestep.fill(Jones::default());
-        modeller.model_timestep(vis_model_timestep.view_mut(), timestamp)?;
+    // Generate the visibilities and write them out asynchronously.
+    let error = AtomicCell::new(false);
+    let scoped_threads_result = thread::scope(|scope| {
+        // Spawn a thread to draw the progress bars.
+        scope.spawn(move |_| {
+            multi_progress.join().unwrap();
+        });
 
-        // transpose model vis to output ordering. first axis is baseline.
-        for (vis_model, mut vis_out) in izip!(
-            vis_model_timestep.outer_iter(),
-            vis_out.axis_iter_mut(Axis(2))
-        ) {
-            // second axis is channel
-            for (model_jones, mut vis_out) in
-                izip!(vis_model.iter(), vis_out.axis_iter_mut(Axis(1)))
-            {
-                vis_out.fill(*model_jones);
+        // Modelling thread.
+        let model_handle = scope.spawn(|_| {
+            defer_on_unwind! { error.store(true); }
+
+            // Create a "modeller" object.
+            let modeller = model::new_sky_modeller(
+                #[cfg(feature = "cuda")]
+                args.cpu,
+                beam.deref(),
+                &source_list,
+                &tile_xyzs,
+                &fine_chan_freqs,
+                &flagged_tiles,
+                phase_centre,
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                apply_precession,
+            )?;
+
+            let cross_vis_shape = (baseline_to_tile_map.len(), fine_chan_freqs.len());
+            // TODO: Introduce another way for Marlu to expose this without
+            // needing a VisContext first.
+            let weight_factor = freq_res_hz * time_res.in_seconds() / 10000.0;
+            let result = model_thread(
+                modeller.deref(),
+                &timestamps,
+                cross_vis_shape,
+                weight_factor,
+                tx_model,
+                &error,
+                model_progress,
+            );
+            if result.is_err() {
+                error.store(true);
             }
+            result
+        });
+
+        // Writing thread.
+        let write_handle = scope.spawn(|_| {
+            defer_on_unwind! { error.store(true); }
+
+            // Form (sorted) unflagged baselines from our cross- and
+            // auto-correlation baselines.
+            let unflagged_baseline_tile_pairs = baseline_to_tile_map
+                .values()
+                .copied()
+                .sorted()
+                .collect::<Vec<_>>();
+            let fine_chan_freqs = fine_chan_freqs.mapped_ref(|&f| f as f64);
+            let marlu_mwa_obs_context = MwaObsContext::from_mwalib(&metafits);
+
+            let result = write_vis(
+                &outputs,
+                array_position,
+                phase_centre,
+                None,
+                &tile_xyzs,
+                &tile_names,
+                Some(metafits.obs_id),
+                &timestamps,
+                &timesteps,
+                &timeblocks,
+                time_res,
+                freq_res_hz,
+                &fine_chan_freqs,
+                &unflagged_baseline_tile_pairs,
+                &HashSet::new(),
+                output_time_average_factor,
+                output_freq_average_factor,
+                Some((&marlu_mwa_obs_context, &coarse_chan_nums)),
+                rx_model,
+                &error,
+                Some(write_progress),
+            );
+            if result.is_err() {
+                error.store(true);
+            }
+            result
+        });
+
+        // Join all thread handles. This propagates any errors and lets us know
+        // if any threads panicked, if panics aren't aborting as per the
+        // Cargo.toml. (It would be nice to capture the panic information, if
+        // it's possible, but I don't know how, so panics are currently
+        // aborting.)
+        let result = model_handle.join().unwrap();
+        result.and_then(|_| write_handle.join().unwrap().map_err(VisSimulateError::from))
+    });
+
+    // Propagate errors and print out the write message.
+    info!("{}", scoped_threads_result.unwrap()?);
+
+    Ok(())
+}
+
+fn model_thread(
+    modeller: &dyn SkyModeller,
+    timestamps: &[Epoch],
+    vis_shape: (usize, usize),
+    weight_factor: f64,
+    tx: Sender<VisTimestep>,
+    error: &AtomicCell<bool>,
+    progress_bar: ProgressBar,
+) -> Result<(), VisSimulateError> {
+    for &timestamp in timestamps {
+        let mut cross_data: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
+
+        modeller.model_timestep(cross_data.view_mut(), timestamp)?;
+
+        // Should we continue?
+        if error.load() {
+            return Ok(());
         }
 
-        let chunk_vis_ctx = VisContext {
-            start_timestamp: timestamp - params.int_time / 2.0,
-            num_sel_timesteps: 1,
-            ..vis_ctx.clone()
-        };
-        // Write the visibilities out.
-        output_writer.write_vis_marlu(
-            vis_out.view(),
-            weight_out.view(),
-            &chunk_vis_ctx,
-            &params.xyzs,
-            false,
-        )?;
+        match tx.send(VisTimestep {
+            cross_data,
+            cross_weights: ArcArray2::from_elem(vis_shape, weight_factor as f32),
+            autos: None,
+            timestamp,
+        }) {
+            Ok(()) => (),
+            // If we can't send the message, it's because the channel
+            // has been closed on the other side. That should only
+            // happen because the writer has exited due to error; in
+            // that case, just exit this thread.
+            Err(_) => return Ok(()),
+        }
 
-        model_progress.inc(1);
+        progress_bar.inc(1);
     }
-    model_progress.finish_with_message("Finished generating sky model");
 
-    // Finalise writing the model.
-    if matches!(output_type, VisOutputType::Uvfits) {
-        let uvfits_writer =
-            unsafe { Box::from_raw(Box::into_raw(output_writer) as *mut UvfitsWriter) };
-        uvfits_writer.write_uvfits_antenna_table(&tile_names, &params.xyzs)?;
-    }
-    info!(
-        "Finished writing sky model to {}",
-        &params.output_model_file.display()
-    );
-
+    progress_bar.abandon_with_message("Finished generating sky model");
     Ok(())
 }

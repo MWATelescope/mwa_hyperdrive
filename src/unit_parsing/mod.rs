@@ -21,25 +21,26 @@ lazy_static::lazy_static! {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, EnumIter, EnumString, IntoStaticStr)]
+#[allow(non_camel_case_types)]
 pub(crate) enum TimeFormat {
     /// Seconds
-    S,
+    #[strum(serialize = "s")]
+    s,
 
     /// Milliseconds
-    Ms,
-
-    NoUnit,
+    #[strum(serialize = "ms")]
+    ms,
 }
 
 /// Parse a string that may have a unit of time attached to it.
-pub(crate) fn parse_time(s: &str) -> Result<(f64, TimeFormat), UnitParseError> {
+pub(crate) fn parse_time(s: &str) -> Result<(f64, Option<TimeFormat>), UnitParseError> {
     // Try to parse a naked number.
     if let Ok(number) = s.trim().parse() {
-        return Ok((number, TimeFormat::NoUnit));
+        return Ok((number, None));
     };
 
     // That didn't work; let's search over our supported formats.
-    for time_format in TimeFormat::iter().filter(|&tf| tf != TimeFormat::NoUnit) {
+    for time_format in TimeFormat::iter() {
         let time_format_str: &'static str = time_format.into();
         let suffix = s
             .trim()
@@ -57,7 +58,7 @@ pub(crate) fn parse_time(s: &str) -> Result<(f64, TimeFormat), UnitParseError> {
                     })
                 }
             };
-            return Ok((number, time_format));
+            return Ok((number, Some(time_format)));
         }
     }
 
@@ -72,23 +73,23 @@ pub(crate) fn parse_time(s: &str) -> Result<(f64, TimeFormat), UnitParseError> {
 #[allow(non_camel_case_types)]
 pub(crate) enum FreqFormat {
     /// Hertz
+    #[strum(serialize = "Hz")]
     Hz,
 
     /// kiloHertz
+    #[strum(serialize = "kHz")]
     kHz,
-
-    NoUnit,
 }
 
 /// Parse a string that may have a unit of frequency attached to it.
-pub(crate) fn parse_freq(s: &str) -> Result<(f64, FreqFormat), UnitParseError> {
+pub(crate) fn parse_freq(s: &str) -> Result<(f64, Option<FreqFormat>), UnitParseError> {
     // Try to parse a naked number.
     if let Ok(number) = s.trim().parse() {
-        return Ok((number, FreqFormat::NoUnit));
+        return Ok((number, None));
     };
 
     // That didn't work; let's search over our supported formats.
-    for freq_format in FreqFormat::iter().filter(|&tf| tf != FreqFormat::NoUnit) {
+    for freq_format in FreqFormat::iter() {
         let freq_format_str: &'static str = freq_format.into();
         let suffix = s
             .trim()
@@ -106,7 +107,7 @@ pub(crate) fn parse_freq(s: &str) -> Result<(f64, FreqFormat), UnitParseError> {
                     })
                 }
             };
-            return Ok((number, freq_format));
+            return Ok((number, Some(freq_format)));
         }
     }
 

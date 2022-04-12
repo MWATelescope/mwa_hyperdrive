@@ -12,7 +12,7 @@ use vec1::Vec1;
 use crate::{
     filenames::SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS, help_texts::VIS_OUTPUT_EXTENSIONS,
 };
-use mwa_hyperdrive_common::{marlu, thiserror, vec1};
+use mwa_hyperdrive_common::{thiserror, vec1};
 
 #[derive(Error, Debug)]
 pub enum VisSubtractError {
@@ -36,20 +36,44 @@ pub enum VisSubtractError {
     )]
     BadDelays,
 
-    #[error(transparent)]
-    InputFiles(#[from] crate::filenames::InputFileError),
-
     #[error(
         "An invalid combination of formats was given. Supported:\n{}",
         SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS
     )]
     InvalidDataInput,
 
+    #[error("There are no timesteps in the input data.")]
+    NoTimesteps,
+
     #[error(
         "An invalid output format was specified ({0}). Supported:\n{}",
         *VIS_OUTPUT_EXTENSIONS,
     )]
-    InvalidOutputFormat(String),
+    InvalidOutputFormat(PathBuf),
+
+    #[error("Error when parsing output vis. time average factor: {0}")]
+    ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),
+
+    #[error("Error when parsing output vis. freq. average factor: {0}")]
+    ParseOutputVisFreqAverageFactor(crate::unit_parsing::UnitParseError),
+
+    #[error("Output vis. time average factor isn't an integer")]
+    OutputVisTimeFactorNotInteger,
+
+    #[error("Output vis. freq. average factor isn't an integer")]
+    OutputVisFreqFactorNotInteger,
+
+    #[error("Output vis. time average factor cannot be 0")]
+    OutputVisTimeAverageFactorZero,
+
+    #[error("Output vis. freq. average factor cannot be 0")]
+    OutputVisFreqAverageFactorZero,
+
+    #[error("Output vis. time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
+    OutputVisTimeResNotMultiple { out: f64, inp: f64 },
+
+    #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
+    OutputVisFreqResNotMultiple { out: f64, inp: f64 },
 
     #[error("Multiple metafits files were specified: {0:?}\nThis is unsupported.")]
     MultipleMetafits(Vec1<PathBuf>),
@@ -60,38 +84,41 @@ pub enum VisSubtractError {
     #[error("Multiple uvfits files were specified: {0:?}\nThis is unsupported.")]
     MultipleUvfits(Vec1<PathBuf>),
 
+    #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
+    BadArrayPosition { pos: Vec<f64> },
+
     #[error(transparent)]
-    SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
+    InputFiles(#[from] crate::filenames::InputFileError),
 
     #[error(transparent)]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 
     #[error(transparent)]
-    MS(#[from] crate::data_formats::MsReadError),
+    MsRead(#[from] crate::vis_io::read::MsReadError),
 
     #[error(transparent)]
-    UvfitsRead(#[from] crate::data_formats::UvfitsReadError),
+    UvfitsRead(#[from] crate::vis_io::read::UvfitsReadError),
 
     #[error(transparent)]
-    MsWrite(#[from] marlu::io::MeasurementSetWriteError),
-
-    #[error(transparent)]
-    UvfitsWrite(#[from] marlu::UvfitsWriteError),
-
-    #[error(transparent)]
-    Read(#[from] crate::data_formats::ReadInputDataError),
-
-    #[error(transparent)]
-    MarluIO(#[from] marlu::io::error::IOError),
-
-    #[error(transparent)]
-    Beam(#[from] mwa_hyperdrive_beam::BeamError),
+    Read(#[from] crate::vis_io::read::VisReadError),
 
     #[error(transparent)]
     Model(#[from] crate::model::ModelError),
 
     #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
+
+    #[error(transparent)]
+    VisWrite(#[from] crate::vis_io::write::VisWriteError),
+
+    #[error(transparent)]
+    FileWrite(#[from] crate::vis_io::write::FileWriteError),
+
+    #[error(transparent)]
+    SourceList(#[from] mwa_hyperdrive_srclist::read::SourceListError),
+
+    #[error(transparent)]
+    Beam(#[from] mwa_hyperdrive_beam::BeamError),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

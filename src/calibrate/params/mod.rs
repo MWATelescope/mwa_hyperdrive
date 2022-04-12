@@ -10,21 +10,18 @@
 //! errors) can be neatly split.
 
 pub(crate) mod error;
-mod helpers;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use error::*;
-use helpers::*;
 
 use std::collections::{HashMap, HashSet};
-use std::fs::OpenOptions;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use log::{debug, info, log_enabled, trace, warn, Level::Debug};
+use log::{debug, log_enabled, trace, warn, Level::Debug};
 use marlu::{
     pos::{precession::precess_time, xyz::xyzs_to_cross_uvws_parallel},
     Jones, LatLngHeight, XyzGeodetic,
@@ -33,16 +30,26 @@ use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
 use vec1::Vec1;
 
-use super::{messages, solutions::CalSolutionType, CalibrateUserArgs, Fence, Timeblock};
+use super::CalibrateUserArgs;
 use crate::{
-    constants::*,
+    averaging::{
+        channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
+        timesteps_to_timeblocks, AverageFactorError, Fence, Timeblock,
+    },
     context::ObsContext,
-    data_formats::*,
     filenames::InputDataTypes,
     glob::*,
     math::TileBaselineMaps,
-    pfb_gains::{PfbFlavour, DEFAULT_PFB_FLAVOUR},
+    messages,
+    solutions::CalSolutionType,
     unit_parsing::{parse_wavelength, WavelengthUnit},
+    vis_io::{
+        read::{
+            MsReader, RawDataCorrections, RawDataReader, UvfitsReader, VisInputType, VisRead,
+            VisReadError,
+        },
+        write::{can_write_to_file, VisOutputType},
+    },
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon, vec1};
@@ -51,19 +58,21 @@ use mwa_hyperdrive_srclist::{
 };
 
 /// Parameters needed to perform calibration.
-pub(crate) struct CalibrateParams {
+pub struct CalibrateParams {
     /// Interface to the MWA data, and metadata on the input data.
-    pub(crate) input_data: Box<dyn InputData>,
+    pub(crate) input_data: Box<dyn VisRead>,
+
+    /// If the input data is raw MWA data, these are the corrections being
+    /// applied as the visibilities are read.
+    // TODO: Populate these if reading from a MS or uvfits - this can inform us
+    // what corrections were used when forming those visibilities.
+    pub(crate) raw_data_corrections: Option<RawDataCorrections>,
 
     /// Beam object.
     pub(crate) beam: Box<dyn Beam>,
 
     /// The sky-model source list.
     pub(crate) source_list: SourceList,
-
-    /// The optional sky-model visibilities file. If specified, it will be
-    /// written to during calibration.
-    pub(crate) model_file: Option<PathBuf>,
 
     /// Which tiles are flagged? This field contains flags that are
     /// user-specified as well as whatever was already flagged in the supplied
@@ -73,10 +82,20 @@ pub(crate) struct CalibrateParams {
     /// the metafits file. Zero indexed.
     pub(crate) flagged_tiles: Vec<usize>,
 
+    /// The minimum UVW cutoff used in calibration \[metres\].
+    pub(crate) uvw_min: f64,
+
+    /// The maximum UVW cutoff used in calibration \[metres\].
+    pub(crate) uvw_max: f64,
+
+    /// The centroid frequency of the observation used to convert UVW cutoffs
+    /// specified in lambdas to metres \[Hz\].
+    pub(crate) freq_centroid: f64,
+
     /// Multiplicative factors to apply to unflagged baselines. These are mostly
     /// all 1.0, but flagged baselines (perhaps due to a UVW cutoff) have values
     /// of 0.0.
-    pub(crate) baseline_weights: Vec<f64>,
+    pub(crate) baseline_weights: Vec1<f64>,
 
     /// Blocks of timesteps used for calibration. Each timeblock contains
     /// indices of the input data to average together during calibration. Each
@@ -99,7 +118,7 @@ pub(crate) struct CalibrateParams {
     /// contains only 15.
     pub(super) timeblocks: Vec1<Timeblock>,
 
-    /// The timestep indicies into the input data to be used for calibration.
+    /// The timestep indices into the input data to be used for calibration.
     pub(crate) timesteps: Vec1<usize>,
 
     /// The number of frequency samples to average together during calibration.
@@ -137,9 +156,6 @@ pub(crate) struct CalibrateParams {
     /// flagged.
     pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
 
-    /// The names of the unflagged tiles.
-    pub(crate) unflagged_tile_names: Vec<String>,
-
     /// The unflagged [XyzGeodetic] coordinates of each tile \[metres\]. This
     /// does not change over time; it is determined only by the telescope's tile
     /// layout.
@@ -148,8 +164,11 @@ pub(crate) struct CalibrateParams {
     /// The Earth position of the array. This is populated by user input or the input data.
     pub(crate) array_position: LatLngHeight,
 
+    /// Should the array be precessed back to J2000?
+    pub(crate) apply_precession: bool,
+
     /// The maximum number of times to iterate when performing "MitchCal".
-    pub(crate) max_iterations: usize,
+    pub(crate) max_iterations: u32,
 
     /// The threshold at which we stop convergence when performing "MitchCal".
     /// This is smaller than `min_threshold`.
@@ -166,19 +185,17 @@ pub(crate) struct CalibrateParams {
     /// detailed by [super::solutions::CalSolutionType].
     pub(crate) output_solutions_filenames: Vec<(CalSolutionType, PathBuf)>,
 
-    /// The paths to the files where calibrated visibilities are written. The
-    /// same visibilities are written to each file here, but the format may be
-    /// different (indicated by the file extension). Supported formats are
-    /// detailed by [crate::data_formats::VisOutputType].
-    pub(crate) output_vis_filenames: Vec<(VisOutputType, PathBuf)>,
+    /// The optional sky-model visibilities files. If specified, model
+    /// visibilities will be written out before calibration.
+    pub(crate) model_files: Option<Vec1<(PathBuf, VisOutputType)>>,
 
     /// The number of calibrated time samples to average together before writing
     /// out calibrated visibilities.
-    pub(crate) output_vis_time_average_factor: usize,
+    pub(crate) output_model_time_average_factor: usize,
 
     /// The number of calibrated frequencies samples to average together before
     /// writing out calibrated visibilities.
-    pub(crate) output_vis_freq_average_factor: usize,
+    pub(crate) output_model_freq_average_factor: usize,
 
     /// When reading in visibilities and generating sky-model visibilities,
     /// don't draw progress bars.
@@ -204,9 +221,9 @@ impl CalibrateParams {
             source_list,
             source_list_type,
             outputs,
-            model_filename,
-            output_vis_time_average,
-            output_vis_freq_average,
+            model_filenames,
+            output_model_time_average,
+            output_model_freq_average,
             num_sources,
             source_dist_cutoff,
             veto_threshold,
@@ -214,7 +231,7 @@ impl CalibrateParams {
             unity_dipole_gains,
             delays,
             no_beam,
-            time_average_factor,
+            timesteps_per_timeblock,
             freq_average_factor,
             timesteps,
             uvw_min,
@@ -223,6 +240,7 @@ impl CalibrateParams {
             stop_thresh,
             min_thresh,
             array_position,
+            no_precession,
             #[cfg(feature = "cuda")]
             cpu,
             tile_flags,
@@ -247,131 +265,123 @@ impl CalibrateParams {
                 .map_err(|e| InvalidArgsError::InputFile(e.to_string()))?,
             None => return Err(InvalidArgsError::NoInputData),
         };
-        let input_data: Box<dyn InputData> = match (
-            input_data_types.metafits,
-            input_data_types.gpuboxes,
-            input_data_types.mwafs,
-            input_data_types.ms,
-            input_data_types.uvfits,
-        ) {
-            // Valid input for reading raw data.
-            (Some(meta), Some(gpuboxes), mwafs, None, None) => {
-                // Ensure that there's only one metafits.
-                let meta = if meta.len() > 1 {
-                    return Err(InvalidArgsError::MultipleMetafits(meta));
-                } else {
-                    meta.first()
-                };
+        let (input_data, raw_data_corrections): (Box<dyn VisRead>, Option<RawDataCorrections>) =
+            match (
+                input_data_types.metafits,
+                input_data_types.gpuboxes,
+                input_data_types.mwafs,
+                input_data_types.ms,
+                input_data_types.uvfits,
+            ) {
+                // Valid input for reading raw data.
+                (Some(meta), Some(gpuboxes), mwafs, None, None) => {
+                    // Ensure that there's only one metafits.
+                    let meta = if meta.len() > 1 {
+                        return Err(InvalidArgsError::MultipleMetafits(meta));
+                    } else {
+                        meta.first()
+                    };
 
-                let pfb_flavour = match pfb_flavour {
-                    None => DEFAULT_PFB_FLAVOUR,
-                    Some(s) => match PfbFlavour::from_str(&s.to_lowercase()) {
-                        Err(_) => return Err(InvalidArgsError::ParsePfbFlavour(s)),
-                        Ok(p) => p,
-                    },
-                };
+                    debug!("gpubox files: {:?}", &gpuboxes);
+                    debug!("mwaf files: {:?}", &mwafs);
 
-                debug!("gpubox files: {:?}", &gpuboxes);
-                debug!("mwaf files: {:?}", &mwafs);
+                    let corrections = RawDataCorrections::new(
+                        pfb_flavour.as_deref(),
+                        !no_digital_gains,
+                        !no_cable_length_correction,
+                        !no_geometric_correction,
+                    )?;
+                    let input_data =
+                        RawDataReader::new(meta, &gpuboxes, mwafs.as_deref(), corrections)?;
 
-                let input_data = RawDataReader::new(
-                    meta,
-                    &gpuboxes,
-                    mwafs.as_deref(),
-                    pfb_flavour,
-                    !no_digital_gains,
-                    !no_cable_length_correction,
-                    !no_geometric_correction,
-                )?;
-
-                messages::InputFileDetails::Raw {
-                    obsid: input_data.get_obs_context().obsid.unwrap(),
-                    gpubox_count: gpuboxes.len(),
-                    metafits_file_name: meta.display().to_string(),
-                    mwaf: mwafs.as_ref().map(|m| m.len()),
-                    pfb: pfb_flavour,
-                    digital_gains: !no_digital_gains,
-                    cable_length: !no_cable_length_correction,
-                    geometric: !no_geometric_correction,
-                }
-                .print();
-
-                Box::new(input_data)
-            }
-
-            // Valid input for reading a measurement set.
-            (meta, None, None, Some(ms), None) => {
-                // Only one MS is supported at the moment.
-                let ms: PathBuf = if ms.len() > 1 {
-                    return Err(InvalidArgsError::MultipleMeasurementSets(ms));
-                } else {
-                    ms.first().clone()
-                };
-
-                // Ensure that there's only one metafits.
-                let meta: Option<&PathBuf> = match meta.as_ref() {
-                    None => None,
-                    Some(m) => {
-                        if m.len() > 1 {
-                            return Err(InvalidArgsError::MultipleMetafits(m.clone()));
-                        } else {
-                            Some(m.first())
-                        }
+                    messages::InputFileDetails::Raw {
+                        obsid: input_data.mwalib_context.metafits_context.obs_id,
+                        gpubox_count: gpuboxes.len(),
+                        metafits_file_name: meta.display().to_string(),
+                        mwaf: mwafs.as_ref().map(|m| m.len()),
+                        raw_data_corrections: corrections,
                     }
-                };
+                    .print("DI calibrating");
 
-                let input_data = MS::new(&ms, meta)?;
-
-                messages::InputFileDetails::MeasurementSet {
-                    obsid: input_data.get_obs_context().obsid,
-                    file_name: ms.display().to_string(),
-                    metafits_file_name: meta.map(|m| m.display().to_string()),
+                    (Box::new(input_data), Some(corrections))
                 }
-                .print();
 
-                Box::new(input_data)
-            }
+                // Valid input for reading a measurement set.
+                (meta, None, None, Some(ms), None) => {
+                    // Only one MS is supported at the moment.
+                    let ms: PathBuf = if ms.len() > 1 {
+                        return Err(InvalidArgsError::MultipleMeasurementSets(ms));
+                    } else {
+                        ms.first().clone()
+                    };
 
-            // Valid input for reading uvfits files.
-            (meta, None, None, None, Some(uvfits)) => {
-                // Only one uvfits is supported at the moment.
-                let uvfits: PathBuf = if uvfits.len() > 1 {
-                    return Err(InvalidArgsError::MultipleUvfits(uvfits));
-                } else {
-                    uvfits.first().clone()
-                };
-
-                // Ensure that there's only one metafits.
-                let meta: Option<&PathBuf> = match meta.as_ref() {
-                    None => None,
-                    Some(m) => {
-                        if m.len() > 1 {
-                            return Err(InvalidArgsError::MultipleMetafits(m.clone()));
-                        } else {
-                            Some(m.first())
+                    // Ensure that there's only one metafits.
+                    let meta: Option<&PathBuf> = match meta.as_ref() {
+                        None => None,
+                        Some(m) => {
+                            if m.len() > 1 {
+                                return Err(InvalidArgsError::MultipleMetafits(m.clone()));
+                            } else {
+                                Some(m.first())
+                            }
                         }
+                    };
+
+                    let input_data = MsReader::new(&ms, meta)?;
+
+                    messages::InputFileDetails::MeasurementSet {
+                        obsid: input_data.get_obs_context().obsid,
+                        file_name: ms.display().to_string(),
+                        metafits_file_name: meta.map(|m| m.display().to_string()),
                     }
-                };
+                    .print("DI calibrating");
 
-                let input_data = UvfitsReader::new(&uvfits, meta)?;
-
-                messages::InputFileDetails::UvfitsFile {
-                    obsid: input_data.get_obs_context().obsid,
-                    file_name: uvfits.display().to_string(),
-                    metafits_file_name: meta.map(|m| m.display().to_string()),
+                    (Box::new(input_data), None)
                 }
-                .print();
 
-                Box::new(input_data)
-            }
+                // Valid input for reading uvfits files.
+                (meta, None, None, None, Some(uvfits)) => {
+                    // Only one uvfits is supported at the moment.
+                    let uvfits: PathBuf = if uvfits.len() > 1 {
+                        return Err(InvalidArgsError::MultipleUvfits(uvfits));
+                    } else {
+                        uvfits.first().clone()
+                    };
 
-            _ => return Err(InvalidArgsError::InvalidDataInput),
-        };
+                    // Ensure that there's only one metafits.
+                    let meta: Option<&PathBuf> = match meta.as_ref() {
+                        None => None,
+                        Some(m) => {
+                            if m.len() > 1 {
+                                return Err(InvalidArgsError::MultipleMetafits(m.clone()));
+                            } else {
+                                Some(m.first())
+                            }
+                        }
+                    };
+
+                    let input_data = UvfitsReader::new(&uvfits, meta)?;
+
+                    messages::InputFileDetails::UvfitsFile {
+                        obsid: input_data.get_obs_context().obsid,
+                        file_name: uvfits.display().to_string(),
+                        metafits_file_name: meta.map(|m| m.display().to_string()),
+                    }
+                    .print("DI calibrating");
+
+                    (Box::new(input_data), None)
+                }
+
+                _ => return Err(InvalidArgsError::InvalidDataInput),
+            };
 
         let obs_context = input_data.get_obs_context();
 
         let array_position = match array_position {
-            None => LatLngHeight::new_mwa(),
+            None => obs_context.array_position.unwrap_or_else(|| {
+                trace!("The array position was not specified in the input data; assuming MWA");
+                LatLngHeight::new_mwa()
+            }),
             Some(pos) => {
                 if pos.len() != 3 {
                     return Err(InvalidArgsError::BadArrayPosition { pos });
@@ -417,75 +427,22 @@ impl CalibrateParams {
             array_position.longitude_rad,
             array_position.latitude_rad,
         );
+        let (lmst, latitude) = if no_precession {
+            (precession_info.lmst, array_position.latitude_rad)
+        } else {
+            (
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
+        };
 
         // The length of the tile XYZ collection is the total number of tiles in
         // the array, even if some tiles are flagged.
-        let total_num_tiles = obs_context.tile_xyzs.len();
+        let total_num_tiles = obs_context.get_total_num_tiles();
 
         // Assign the tile flags.
-        let mut flagged_tiles: Vec<usize> =
-            match tile_flags {
-                Some(flags) => {
-                    // We need to convert the strings into antenna indices. The
-                    // strings are either indicies themselves or antenna names.
-                    let mut flagged_tiles = HashSet::new();
-
-                    for flag in flags {
-                        // Try to parse a naked number.
-                        let result =
-                            match flag.trim().parse().ok() {
-                                Some(n) => {
-                                    if n >= total_num_tiles {
-                                        Err(InvalidArgsError::InvalidTileFlag {
-                                            got: n,
-                                            max: total_num_tiles - 1,
-                                        })
-                                    } else {
-                                        flagged_tiles.insert(n);
-                                        Ok(())
-                                    }
-                                }
-                                None => {
-                                    // Check if this is an antenna name.
-                                    match obs_context.tile_names.iter().enumerate().find(
-                                        |(_, name)| name.to_lowercase() == flag.to_lowercase(),
-                                    ) {
-                                        // If there are no matches, complain that
-                                        // the user input is no good.
-                                        None => Err(InvalidArgsError::BadTileFlag(flag)),
-                                        Some((i, _)) => {
-                                            flagged_tiles.insert(i);
-                                            Ok(())
-                                        }
-                                    }
-                                }
-                            };
-                        if result.is_err() {
-                            // If there's a problem, show all the tile names
-                            // and their indices to help out the user.
-                            info!("All tile indices and names:");
-                            obs_context
-                                .tile_names
-                                .iter()
-                                .enumerate()
-                                .for_each(|(i, name)| {
-                                    info!("    {:3}: {:10}", i, name);
-                                });
-                            // Propagate the error.
-                            result?;
-                        }
-                    }
-
-                    flagged_tiles.into_iter().sorted().collect::<Vec<_>>()
-                }
-                None => vec![],
-            };
-        if !ignore_input_data_tile_flags {
-            // Add tiles that have already been flagged by the input data.
-            for &obs_tile_flag in &obs_context.flagged_tiles {
-                flagged_tiles.push(obs_tile_flag);
-            }
-        }
+        let flagged_tiles =
+            obs_context.get_tile_flags(ignore_input_data_tile_flags, tile_flags.as_deref())?;
         let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
         if log_enabled!(Debug) {
             debug!("Tile indices, names and statuses:");
@@ -505,16 +462,19 @@ impl CalibrateParams {
             return Err(InvalidArgsError::NoTiles);
         }
         messages::ArrayDetails {
-            array_position,
-            array_latitude_j2000: Some(precession_info.array_latitude_j2000),
+            array_position: Some(array_position),
+            array_latitude_j2000: if no_precession {
+                None
+            } else {
+                Some(precession_info.array_latitude_j2000)
+            },
             total_num_tiles,
             num_unflagged_tiles,
-            flagged_tiles: flagged_tiles
+            flagged_tiles: &flagged_tiles
                 .iter()
                 .cloned()
-                .sorted()
-                .map(|i| (obs_context.tile_names[i].clone(), i))
-                .collect(),
+                .map(|i| (obs_context.tile_names[i].as_str(), i))
+                .collect::<Vec<_>>(),
         }
         .print();
 
@@ -525,21 +485,17 @@ impl CalibrateParams {
                 if d.len() != 16 || d.iter().any(|&v| v > 32) {
                     return Err(InvalidArgsError::BadDelays);
                 }
-                Delays::Partial(d)
+                Some(Delays::Partial(d))
             }
 
             // No delays were provided; use whatever was in the input data.
-            None => match obs_context.dipole_delays.as_ref() {
-                Some(d) => d.clone(),
-                None => return Err(InvalidArgsError::NoDelays),
-            },
+            None => obs_context.dipole_delays.as_ref().cloned(),
         };
-        let ideal_delays = dipole_delays.get_ideal_delays();
-        debug!("Ideal dipole delays: {:?}", ideal_delays);
 
         let beam: Box<dyn Beam> = if no_beam {
             create_no_beam_object(total_num_tiles)
         } else {
+            let dipole_delays = dipole_delays.ok_or(InvalidArgsError::NoDelays)?;
             create_fee_beam_object(
                 beam_file,
                 total_num_tiles,
@@ -629,7 +585,7 @@ impl CalibrateParams {
         }
 
         messages::ObservationDetails {
-            dipole_delays: ideal_delays,
+            dipole_delays: beam.get_ideal_dipole_delays(),
             beam_file,
             num_tiles_with_dead_dipoles: if unity_dipole_gains {
                 None
@@ -645,87 +601,84 @@ impl CalibrateParams {
             },
             phase_centre: obs_context.phase_centre,
             pointing_centre: obs_context.pointing_centre,
-            lmst: precession_info.lmst,
-            lmst_j2000: precession_info.lmst_j2000,
-            available_timesteps: &obs_context.all_timesteps,
-            unflagged_timesteps: &obs_context.unflagged_timesteps,
-            using_timesteps: &timesteps_to_use,
-            first_timestep: Some(obs_context.timestamps[*timesteps_to_use.first()]),
-            last_timestep: if timesteps_to_use.len() > 1 {
+            lmst: Some(precession_info.lmst),
+            lmst_j2000: if no_precession {
+                Some(precession_info.lmst_j2000)
+            } else {
+                None
+            },
+            available_timesteps: Some(&obs_context.all_timesteps),
+            unflagged_timesteps: Some(&obs_context.unflagged_timesteps),
+            using_timesteps: Some(&timesteps_to_use),
+            first_timestamp: Some(obs_context.timestamps[*timesteps_to_use.first()]),
+            last_timestamp: if timesteps_to_use.len() > 1 {
                 Some(obs_context.timestamps[*timesteps_to_use.last()])
             } else {
                 None
             },
-            time_res_seconds: obs_context.time_res,
+            time_res: obs_context.time_res,
             total_num_channels: obs_context.fine_chan_freqs.len(),
-            num_unflagged_channels: unflagged_fine_chan_freqs.len(),
-            flagged_chans_per_coarse_chan: &obs_context.flagged_fine_chans_per_coarse_chan,
-            first_freq_hz: Some(unflagged_fine_chan_freqs[0]),
-            last_freq_hz: if unflagged_fine_chan_freqs.len() > 1 {
-                Some(*unflagged_fine_chan_freqs.last().unwrap())
-            } else {
-                None
-            },
+            num_unflagged_channels: Some(unflagged_fine_chan_freqs.len()),
+            flagged_chans_per_coarse_chan: Some(&obs_context.flagged_fine_chans_per_coarse_chan),
+            first_freq_hz: Some(*obs_context.fine_chan_freqs.first() as f64),
+            last_freq_hz: Some(*obs_context.fine_chan_freqs.last() as f64),
+            first_unflagged_freq_hz: unflagged_fine_chan_freqs.first().copied(),
+            last_unflagged_freq_hz: unflagged_fine_chan_freqs.last().copied(),
             freq_res_hz: obs_context.freq_res,
         }
         .print();
 
-        // Designate calibration outputs.
-        let (output_solutions_filenames, output_vis_filenames) = {
+        // Validate calibration solution outputs.
+        let output_solutions_filenames = {
             match outputs {
                 // Defaults.
                 None => {
-                    let pb = PathBuf::from(DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
+                    let pb =
+                        PathBuf::from(crate::calibrate::args::DEFAULT_OUTPUT_SOLUTIONS_FILENAME);
                     let sol_type = pb
                         .extension()
                         .and_then(|os_str| os_str.to_str())
                         .and_then(|s| CalSolutionType::from_str(s).ok())
                         // Tests should pick up a bad default filename.
                         .expect("DEFAULT_OUTPUT_SOLUTIONS_FILENAME has an unhandled extension!");
-                    (vec![(sol_type, pb)], vec![])
+                    vec![(sol_type, pb)]
                 }
                 Some(outputs) => {
                     let mut cal_sols = vec![];
-                    let mut vis_out = vec![];
                     for file in outputs {
                         // Is the output file type supported?
                         let ext = file.extension().and_then(|os_str| os_str.to_str());
-                        match (
-                            ext.and_then(|s| CalSolutionType::from_str(s).ok()),
-                            ext.and_then(|s| VisOutputType::from_str(s).ok()),
-                        ) {
-                            (Some(sol_type), None) => {
+                        match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
+                            Some(sol_type) => {
                                 trace!("{} is a solution output", file.display());
                                 can_write_to_file(&file)?;
                                 cal_sols.push((sol_type, file));
-                            },
-                            (None, Some(vis_type)) => {
-                                trace!("{} is a visibility output", file.display());
-                                can_write_to_file(&file)?;
-                                vis_out.push((vis_type, file));
-                            },
-                            (None, None) => return Err(InvalidArgsError::CalibrationOutputFile { ext: ext.unwrap_or("<no extension>").to_string()}),
-                            (Some(_), Some(_)) => panic!("Programmer error: File extension '{}' is valid for both calibration solutions and visibility outputs, but this shouldn't be possible.", ext.unwrap()),
+                            }
+                            None => {
+                                return Err(InvalidArgsError::CalibrationOutputFile {
+                                    ext: ext.unwrap_or("<no extension>").to_string(),
+                                })
+                            }
                         }
                     }
-                    (cal_sols, vis_out)
+                    cal_sols
                 }
             }
         };
-        if output_solutions_filenames.is_empty() && output_vis_filenames.is_empty() {
+        if output_solutions_filenames.is_empty() {
             return Err(InvalidArgsError::NoOutput);
         }
 
-        // Handle the output model file, if specified.
-        let model_file = match model_filename {
-            None => None,
-            Some(file) => {
+        // Handle the output model files, if specified.
+        let model_files = if let Some(model_files) = model_filenames {
+            let mut valid_model_files = Vec::with_capacity(model_files.len());
+            for file in model_files {
                 // Is the output file type supported?
                 let ext = file.extension().and_then(|os_str| os_str.to_str());
                 match ext.and_then(|s| VisOutputType::from_str(s).ok()) {
-                    Some(_) => {
+                    Some(t) => {
                         can_write_to_file(&file)?;
-                        Some(file)
+                        valid_model_files.push((file, t));
                     }
                     None => {
                         return Err(InvalidArgsError::VisFileType {
@@ -734,19 +687,22 @@ impl CalibrateParams {
                     }
                 }
             }
+            Vec1::try_from_vec(valid_model_files).ok()
+        } else {
+            None
         };
 
         // Set up the timeblocks.
         let time_average_factor = parse_time_average_factor(
             obs_context.time_res,
-            time_average_factor,
+            timesteps_per_timeblock.as_deref(),
             *timesteps_to_use.last() - *timesteps_to_use.first() + 1,
         )
         .map_err(|e| match e {
             AverageFactorError::Zero => InvalidArgsError::CalTimeFactorZero,
             AverageFactorError::NotInteger => InvalidArgsError::CalTimeFactorNotInteger,
             AverageFactorError::NotIntegerMultiple { out, inp } => {
-                InvalidArgsError::CalTimeResNotMulitple { out, inp }
+                InvalidArgsError::CalTimeResNotMultiple { out, inp }
             }
             AverageFactorError::Parse(e) => InvalidArgsError::ParseCalTimeAverageFactor(e),
         })?;
@@ -767,22 +723,18 @@ impl CalibrateParams {
             time_average_factor,
             &timesteps_to_use,
         );
-        // There must be at least one timeblock for calibration.
-        let timeblocks =
-            Vec1::try_from_vec(timeblocks).map_err(|_| InvalidArgsError::NoTimesteps)?;
 
         // Set up the chanblocks.
         let freq_average_factor =
-            parse_freq_average_factor(obs_context.freq_res, freq_average_factor, 1).map_err(
-                |e| match e {
+            parse_freq_average_factor(obs_context.freq_res, freq_average_factor.as_deref(), 1)
+                .map_err(|e| match e {
                     AverageFactorError::Zero => InvalidArgsError::CalFreqFactorZero,
                     AverageFactorError::NotInteger => InvalidArgsError::CalFreqFactorNotInteger,
                     AverageFactorError::NotIntegerMultiple { out, inp } => {
-                        InvalidArgsError::CalFreqResNotMulitple { out, inp }
+                        InvalidArgsError::CalFreqResNotMultiple { out, inp }
                     }
                     AverageFactorError::Parse(e) => InvalidArgsError::ParseCalFreqAverageFactor(e),
-                },
-            )?;
+                })?;
         // Check that the factor is not too big.
         let freq_average_factor = if freq_average_factor > unflagged_fine_chan_freqs.len() {
             warn!(
@@ -819,20 +771,18 @@ impl CalibrateParams {
                 warn!("\"Picket fence\" data detected. Only the first contiguous band will be used as this is not well supported right now.");
             }
         }
-        let fences = Vec1::try_from_vec(fences).unwrap();
+        let fences = Vec1::try_from_vec(fences).map_err(|_| InvalidArgsError::NoChannels)?;
 
         // XXX(Dev): TileBaselineMaps logic might fit inside FlagContext
         let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
 
-        let (unflagged_tile_xyzs, unflagged_tile_names): (Vec<XyzGeodetic>, Vec<String>) =
-            obs_context
-                .tile_xyzs
-                .par_iter()
-                .zip(obs_context.tile_names.par_iter())
-                .enumerate()
-                .filter(|(tile_index, _)| !flagged_tiles.contains(tile_index))
-                .map(|(_, (xyz, name))| (*xyz, name.clone()))
-                .unzip();
+        let unflagged_tile_xyzs: Vec<XyzGeodetic> = obs_context
+            .tile_xyzs
+            .par_iter()
+            .enumerate()
+            .filter(|(tile_index, _)| !flagged_tiles.contains(tile_index))
+            .map(|(_, xyz)| *xyz)
+            .collect();
 
         // Set baseline weights from UVW cuts. Use a lambda from the centroid
         // frequency if UVW cutoffs are specified as wavelengths.
@@ -844,8 +794,12 @@ impl CalibrateParams {
             / obs_context.fine_chan_freqs.len() as f64;
         let lambda = marlu::constants::VEL_C / freq_centroid;
         let (uvw_min, uvw_min_metres) = {
-            let (quantity, unit) = parse_wavelength(uvw_min.as_deref().unwrap_or(DEFAULT_UVW_MIN))
-                .map_err(InvalidArgsError::ParseUvwMin)?;
+            let (quantity, unit) = parse_wavelength(
+                uvw_min
+                    .as_deref()
+                    .unwrap_or(crate::calibrate::args::DEFAULT_UVW_MIN),
+            )
+            .map_err(InvalidArgsError::ParseUvwMin)?;
             match unit {
                 WavelengthUnit::M => ((quantity, unit), quantity),
                 WavelengthUnit::L => ((quantity, unit), quantity * lambda),
@@ -864,17 +818,16 @@ impl CalibrateParams {
         };
 
         let (baseline_weights, num_flagged_baselines) = {
-            let mut baseline_weights = vec![
+            let mut baseline_weights = Vec1::try_from_vec(vec![
                 1.0;
                 tile_baseline_maps
                     .unflagged_cross_baseline_to_tile_map
                     .len()
-            ];
+            ])
+            .map_err(|_| InvalidArgsError::NoTiles)?;
             let uvws = xyzs_to_cross_uvws_parallel(
                 &unflagged_tile_xyzs,
-                obs_context
-                    .phase_centre
-                    .to_hadec(precession_info.lmst_j2000),
+                obs_context.phase_centre.to_hadec(lmst),
             );
             assert_eq!(baseline_weights.len(), uvws.len());
             let uvw_min = uvw_min_metres.powi(2);
@@ -891,13 +844,15 @@ impl CalibrateParams {
         };
 
         // Make sure the calibration thresholds are sensible.
-        let mut stop_threshold = stop_thresh.unwrap_or(DEFAULT_STOP_THRESHOLD);
-        let min_threshold = min_thresh.unwrap_or(DEFAULT_MIN_THRESHOLD);
+        let mut stop_threshold =
+            stop_thresh.unwrap_or(crate::calibrate::args::DEFAULT_STOP_THRESHOLD);
+        let min_threshold = min_thresh.unwrap_or(crate::calibrate::args::DEFAULT_MIN_THRESHOLD);
         if stop_threshold > min_threshold {
             warn!("Specified stop threshold ({}) is bigger than the min. threshold ({}); capping the stop threshold.", stop_threshold, min_threshold);
             stop_threshold = min_threshold;
         }
-        let max_iterations = max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS);
+        let max_iterations =
+            max_iterations.unwrap_or(crate::calibrate::args::DEFAULT_MAX_ITERATIONS);
 
         messages::CalibrationDetails {
             timesteps_per_timeblock: time_average_factor,
@@ -960,11 +915,9 @@ impl CalibrateParams {
         }
         veto_sources(
             &mut source_list,
-            precession_info
-                .hadec_j2000
-                .to_radec(precession_info.lmst_j2000),
-            precession_info.lmst_j2000,
-            precession_info.array_latitude_j2000,
+            obs_context.phase_centre,
+            lmst,
+            latitude,
             &obs_context.coarse_chan_freqs,
             beam.deref(),
             num_sources,
@@ -981,84 +934,93 @@ impl CalibrateParams {
         .print();
 
         // Handle output visibility arguments.
-        let (output_vis_time_average_factor, output_vis_freq_average_factor) =
-            if output_vis_filenames.is_empty() {
-                // If we're not writing out calibrated visibilities but arguments
+        let (output_model_time_average_factor, output_model_freq_average_factor) = match model_files
+        {
+            None => {
+                // If we're not writing out model visibilities but arguments
                 // are set for them, issue warnings.
-                match (output_vis_time_average, output_vis_freq_average) {
+                match (output_model_time_average, output_model_freq_average) {
                     (None, None) => (),
                     (time, freq) => {
-                        warn!("Not writing out calibrated visibilities, but");
+                        warn!("Not writing out model visibilities, but");
                         if time.is_some() {
-                            warn!("  output_vis_time_average is set");
+                            warn!("  output_model_time_average is set");
                         }
                         if freq.is_some() {
-                            warn!("  output_vis_freq_average is set");
+                            warn!("  output_model_freq_average is set");
                         }
                     }
                 }
+                // We're not writing a file; it doesn't matter what these values
+                // are.
                 (1, 1)
-            } else {
+            }
+            Some(_) => {
                 // Parse and verify user input (specified resolutions must
                 // evenly divide the input data's resolutions).
-                let time_factor =
-                    parse_time_average_factor(obs_context.time_res, output_vis_time_average, 1)
-                        .map_err(|e| match e {
-                            AverageFactorError::Zero => {
-                                InvalidArgsError::OutputVisTimeAverageFactorZero
-                            }
-                            AverageFactorError::NotInteger => {
-                                InvalidArgsError::OutputVisTimeFactorNotInteger
-                            }
-                            AverageFactorError::NotIntegerMultiple { out, inp } => {
-                                InvalidArgsError::OutputVisTimeResNotMulitple { out, inp }
-                            }
-                            AverageFactorError::Parse(e) => {
-                                InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
-                            }
-                        })?;
-                let freq_factor =
-                    parse_freq_average_factor(obs_context.freq_res, output_vis_freq_average, 1)
-                        .map_err(|e| match e {
-                            AverageFactorError::Zero => {
-                                InvalidArgsError::OutputVisFreqAverageFactorZero
-                            }
-                            AverageFactorError::NotInteger => {
-                                InvalidArgsError::OutputVisFreqFactorNotInteger
-                            }
-                            AverageFactorError::NotIntegerMultiple { out, inp } => {
-                                InvalidArgsError::OutputVisFreqResNotMulitple { out, inp }
-                            }
-                            AverageFactorError::Parse(e) => {
-                                InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
-                            }
-                        })?;
+                let time_factor = parse_time_average_factor(
+                    obs_context.time_res,
+                    output_model_time_average.as_deref(),
+                    1,
+                )
+                .map_err(|e| match e {
+                    AverageFactorError::Zero => InvalidArgsError::OutputVisTimeAverageFactorZero,
+                    AverageFactorError::NotInteger => {
+                        InvalidArgsError::OutputVisTimeFactorNotInteger
+                    }
+                    AverageFactorError::NotIntegerMultiple { out, inp } => {
+                        InvalidArgsError::OutputVisTimeResNotMultiple { out, inp }
+                    }
+                    AverageFactorError::Parse(e) => {
+                        InvalidArgsError::ParseOutputVisTimeAverageFactor(e)
+                    }
+                })?;
+                let freq_factor = parse_freq_average_factor(
+                    obs_context.freq_res.map(|f| f * freq_average_factor as f64),
+                    output_model_freq_average.as_deref(),
+                    1,
+                )
+                .map_err(|e| match e {
+                    AverageFactorError::Zero => InvalidArgsError::OutputVisFreqAverageFactorZero,
+                    AverageFactorError::NotInteger => {
+                        InvalidArgsError::OutputVisFreqFactorNotInteger
+                    }
+                    AverageFactorError::NotIntegerMultiple { out, inp } => {
+                        InvalidArgsError::OutputVisFreqResNotMultiple { out, inp }
+                    }
+                    AverageFactorError::Parse(e) => {
+                        InvalidArgsError::ParseOutputVisFreqAverageFactor(e)
+                    }
+                })?;
 
                 (time_factor, freq_factor)
-            };
-
-        messages::OutputFileDetails {
-            output_solutions: &output_solutions_filenames
-                .iter()
-                .map(|p| p.1.clone())
-                .collect::<Vec<_>>(),
-            output_vis: &output_vis_filenames
-                .iter()
-                .map(|p| p.1.clone())
-                .collect::<Vec<_>>(),
-            input_vis_time_res: obs_context.time_res,
-            input_vis_freq_res: obs_context.freq_res,
-            output_vis_time_average_factor,
-            output_vis_freq_average_factor,
+            }
+        };
+        {
+            messages::OutputFileDetails {
+                output_solutions: &output_solutions_filenames
+                    .iter()
+                    .map(|p| p.1.clone())
+                    .collect::<Vec<_>>(),
+                vis_type: "model",
+                output_vis: model_files.as_ref(),
+                input_vis_time_res: obs_context.time_res,
+                input_vis_freq_res: obs_context.freq_res,
+                output_vis_time_average_factor: output_model_time_average_factor,
+                output_vis_freq_average_factor: output_model_freq_average_factor,
+            }
+            .print();
         }
-        .print();
 
         Ok(CalibrateParams {
             input_data,
+            raw_data_corrections,
             beam,
             source_list,
-            model_file,
             flagged_tiles,
+            uvw_min: uvw_min_metres,
+            uvw_max: uvw_max_metres,
+            freq_centroid,
             baseline_weights,
             timeblocks,
             timesteps: timesteps_to_use,
@@ -1068,30 +1030,36 @@ impl CalibrateParams {
             flagged_fine_chans,
             tile_to_unflagged_cross_baseline_map: tile_baseline_maps
                 .tile_to_unflagged_cross_baseline_map,
-            unflagged_tile_names,
             unflagged_tile_xyzs,
             array_position,
+            apply_precession: !no_precession,
             max_iterations,
             stop_threshold,
             min_threshold,
             output_solutions_filenames,
-            output_vis_filenames,
-            output_vis_time_average_factor,
-            output_vis_freq_average_factor,
+            model_files,
+            output_model_time_average_factor,
+            output_model_freq_average_factor,
             no_progress_bars,
             #[cfg(feature = "cuda")]
             use_cpu_for_modelling: cpu,
         })
     }
 
+    /// Get read-only access to the [ObsContext]. This reflects the state of the
+    /// observation in the data.
     pub(crate) fn get_obs_context(&self) -> &ObsContext {
         self.input_data.get_obs_context()
     }
 
+    /// Get the total number of tiles in the observation, i.e. flagged and
+    /// unflagged.
     pub(crate) fn get_total_num_tiles(&self) -> usize {
-        self.get_obs_context().tile_xyzs.len()
+        self.get_obs_context().get_total_num_tiles()
     }
 
+    /// Get the number of unflagged tiles to be used (may not match what is in
+    /// the observation data).
     pub(crate) fn get_num_unflagged_tiles(&self) -> usize {
         self.get_total_num_tiles() - self.flagged_tiles.len()
     }
@@ -1109,24 +1077,12 @@ impl CalibrateParams {
         (n * (n - 1)) / 2
     }
 
-    /// Get the sorted *cross-correlation* pairs of antennas for all unflagged
-    /// *cross-correlation* baselines. e.g. In a 128T observation, if tiles 0
-    /// and 1 are unflagged, then the first baseline is (0,1), and the first
-    /// element here is (0,1).
-    pub(crate) fn get_ant_pairs(&self) -> Vec<(usize, usize)> {
-        self.tile_to_unflagged_cross_baseline_map
-            .keys()
-            .cloned()
-            .sorted()
-            .collect()
-    }
-
     pub(crate) fn read_crosses(
         &self,
         vis: ArrayViewMut2<Jones<f32>>,
         weights: ArrayViewMut2<f32>,
         timestep: usize,
-    ) -> Result<(), ReadInputDataError> {
+    ) -> Result<(), VisReadError> {
         self.input_data.read_crosses(
             vis,
             weights,
@@ -1135,114 +1091,4 @@ impl CalibrateParams {
             &self.flagged_fine_chans,
         )
     }
-}
-
-/// Check if we are able to write to a file path. If we aren't able to write to
-/// the file, it's either because the directory containing the file doesn't
-/// exist, or there's another issue (probably bad permissions). In the former
-/// case, create the parent directories, otherwise return an error.
-/// Additionally, if the file exists, emit a warning that it will be
-/// overwritten.
-///
-/// With this approach, we potentially avoid doing a whole run of calibration
-/// only to be unable to write to a file at the end. This code _doesn't_ alter
-/// the file if it exists.
-fn can_write_to_file(file: &Path) -> Result<(), InvalidArgsError> {
-    trace!("Testing whether we can write to {}", file.display());
-
-    if file.is_dir() {
-        let exists = can_write_to_dir(file)?;
-        if exists {
-            warn!("Will overwrite the existing directory '{}'", file.display());
-        }
-    } else {
-        let exists = can_write_to_file_inner(file)?;
-        if exists {
-            warn!("Will overwrite the existing file '{}'", file.display());
-        }
-    }
-
-    Ok(())
-}
-
-/// Iterate over all of the files and subdirectories of a directory and test
-/// whether we can write to them. Note that testing whether directories are
-/// writable is very weak; in my testing, changing a subdirectories owner to
-/// root and running this function suggested that the file was writable, but it
-/// was not. This appears to be a limitation of operating systems, and there's
-/// not even a reliable way of checking if *your* user is able to write to a
-/// directory. Files are much more rigorously tested.
-fn can_write_to_dir(dir: &Path) -> Result<bool, InvalidArgsError> {
-    let exists = dir.exists();
-
-    let metadata = std::fs::metadata(dir)?;
-    let permissions = metadata.permissions();
-    if permissions.readonly() {
-        return Err(InvalidArgsError::FileNotWritable {
-            file: dir.display().to_string(),
-        });
-    }
-
-    // Test whether every single entry in `dir` is writable.
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?.path();
-        if entry.is_file() {
-            can_write_to_file_inner(&entry)?;
-        } else if entry.is_dir() {
-            can_write_to_dir(&entry)?;
-        }
-    }
-
-    Ok(exists)
-}
-
-fn can_write_to_file_inner(file: &Path) -> Result<bool, InvalidArgsError> {
-    let file_exists = file.exists();
-
-    match OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(&file)
-        .map_err(|e| e.kind())
-    {
-        // File is writable.
-        Ok(_) => {
-            // If the file in question didn't already exist, `OpenOptions::new`
-            // creates it as part of its work. We don't want to keep the 0-sized
-            // file; remove it if it didn't exist before.
-            if !file_exists {
-                std::fs::remove_file(file).map_err(InvalidArgsError::IO)?;
-            }
-        }
-
-        // File doesn't exist. Attempt to make the directories leading up to the
-        // file; if this fails, then we can't write the file anyway.
-        Err(std::io::ErrorKind::NotFound) => {
-            if let Some(p) = file.parent() {
-                match std::fs::DirBuilder::new()
-                    .recursive(true)
-                    .create(p)
-                    .map_err(|e| e.kind())
-                {
-                    Ok(()) => (),
-                    Err(std::io::ErrorKind::PermissionDenied) => {
-                        return Err(InvalidArgsError::NewDirectory(p.to_path_buf()))
-                    }
-                    Err(e) => return Err(InvalidArgsError::IO(e.into())),
-                }
-            }
-        }
-
-        Err(std::io::ErrorKind::PermissionDenied) => {
-            return Err(InvalidArgsError::FileNotWritable {
-                file: file.display().to_string(),
-            })
-        }
-
-        Err(e) => {
-            return Err(InvalidArgsError::IO(e.into()));
-        }
-    }
-
-    Ok(file_exists)
 }

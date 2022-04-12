@@ -11,11 +11,11 @@ use marlu::{
 };
 
 use super::InvalidArgsError::{
-    BadArrayPosition, BadDelays, CalFreqFactorNotInteger, CalFreqResNotMulitple,
-    CalTimeFactorNotInteger, CalTimeResNotMulitple, CalibrationOutputFile, InvalidDataInput,
-    MultipleMeasurementSets, MultipleMetafits, MultipleUvfits, NoInputData, ParsePfbFlavour,
+    BadArrayPosition, BadDelays, CalFreqFactorNotInteger, CalFreqResNotMultiple,
+    CalTimeFactorNotInteger, CalTimeResNotMultiple, CalibrationOutputFile, InvalidDataInput,
+    MultipleMeasurementSets, MultipleMetafits, MultipleUvfits, NoInputData,
 };
-use crate::{data_formats::RawDataReader, tests::reduced_obsids::*};
+use crate::tests::reduced_obsids::*;
 use mwa_hyperdrive_common::marlu;
 
 #[test]
@@ -24,7 +24,7 @@ fn test_new_params_defaults() {
     let params = args.into_params().unwrap();
     let obs_context = params.get_obs_context();
     // The default time resolution should be 2.0s, as per the metafits.
-    assert_abs_diff_eq!(obs_context.time_res.unwrap(), 2.0);
+    assert_abs_diff_eq!(obs_context.time_res.unwrap().in_seconds(), 2.0);
     // The default freq resolution should be 40kHz, as per the metafits.
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
     // No tiles are flagged in the input data, and no additional flags were
@@ -46,7 +46,7 @@ fn test_new_params_no_input_flags() {
     args.ignore_input_data_fine_channel_flags = true;
     let params = args.into_params().unwrap();
     let obs_context = params.get_obs_context();
-    assert_abs_diff_eq!(obs_context.time_res.unwrap(), 2.0);
+    assert_abs_diff_eq!(obs_context.time_res.unwrap().in_seconds(), 2.0);
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
     assert_eq!(obs_context.flagged_tiles.len(), 0);
     assert_eq!(params.flagged_tiles.len(), 0);
@@ -60,25 +60,25 @@ fn test_new_params_time_averaging() {
     // The native time resolution is 2.0s.
     let mut args = get_reduced_1090008640(true);
     // 1 is a valid time average factor.
-    args.time_average_factor = Some("1".to_string());
+    args.timesteps_per_timeblock = Some("1".to_string());
     let result = args.into_params();
     assert!(result.is_ok());
 
     let mut args = get_reduced_1090008640(true);
     // 2 is a valid time average factor.
-    args.time_average_factor = Some("2".to_string());
+    args.timesteps_per_timeblock = Some("2".to_string());
     let result = args.into_params();
     assert!(result.is_ok());
 
     let mut args = get_reduced_1090008640(true);
     // 4.0s should be a multiple of 2.0s
-    args.time_average_factor = Some("4.0s".to_string());
+    args.timesteps_per_timeblock = Some("4.0s".to_string());
     let result = args.into_params();
     assert!(result.is_ok());
 
     let mut args = get_reduced_1090008640(true);
     // 8.0s should be a multiple of 2.0s
-    args.time_average_factor = Some("8.0s".to_string());
+    args.timesteps_per_timeblock = Some("8.0s".to_string());
     let result = args.into_params();
     assert!(result.is_ok());
 }
@@ -88,24 +88,24 @@ fn test_new_params_time_averaging_fail() {
     // The native time resolution is 2.0s.
     let mut args = get_reduced_1090008640(true);
     // 1.5 is an invalid time average factor.
-    args.time_average_factor = Some("1.5".to_string());
+    args.timesteps_per_timeblock = Some("1.5".to_string());
     let result = args.into_params();
     assert!(result.is_err());
     assert!(matches!(result, Err(CalTimeFactorNotInteger)));
 
     let mut args = get_reduced_1090008640(true);
     // 2.01s is not a multiple of 2.0s
-    args.time_average_factor = Some("2.01s".to_string());
+    args.timesteps_per_timeblock = Some("2.01s".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    assert!(matches!(result, Err(CalTimeResNotMulitple { .. })));
+    assert!(matches!(result, Err(CalTimeResNotMultiple { .. })));
 
     let mut args = get_reduced_1090008640(true);
     // 3.0s is not a multiple of 2.0s
-    args.time_average_factor = Some("3.0s".to_string());
+    args.timesteps_per_timeblock = Some("3.0s".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    assert!(matches!(result, Err(CalTimeResNotMulitple { .. })));
+    assert!(matches!(result, Err(CalTimeResNotMultiple { .. })));
 }
 
 #[test]
@@ -145,14 +145,14 @@ fn test_new_params_freq_averaging_fail() {
     args.freq_average_factor = Some("10kHz".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    assert!(matches!(result, Err(CalFreqResNotMulitple { .. })));
+    assert!(matches!(result, Err(CalFreqResNotMultiple { .. })));
 
     let mut args = get_reduced_1090008640(true);
     // 79kHz is not a multiple of 40kHz
     args.freq_average_factor = Some("79kHz".to_string());
     let result = args.into_params();
     assert!(result.is_err());
-    assert!(matches!(result, Err(CalFreqResNotMulitple { .. })));
+    assert!(matches!(result, Err(CalFreqResNotMultiple { .. })));
 }
 
 #[test]
@@ -288,25 +288,6 @@ fn test_handle_only_metafits() {
 }
 
 #[test]
-fn test_handle_pfb() {
-    let mut args = get_reduced_1090008640(true);
-    args.pfb_flavour = Some("invalid_pfb".into());
-    let result = args.clone().into_params();
-
-    assert!(result.is_err());
-    assert!(matches!(result, Err(ParsePfbFlavour(_))));
-
-    args.pfb_flavour = Some("Cotter2014".into());
-    let result = args.into_params();
-
-    assert!(result.is_ok());
-    let input_data_ptr = Box::into_raw(result.unwrap().input_data);
-    let raw_input_data = unsafe { Box::from_raw(input_data_ptr as *mut RawDataReader) };
-    let gains = raw_input_data.pfb_gains.unwrap();
-    assert_eq!(&gains[..2], &[0.5002092286_f64, 0.5025463233]);
-}
-
-#[test]
 fn test_handle_invalid_output() {
     let mut args = get_reduced_1090008640(true);
     args.outputs = Some(vec!["invalid.out".into()]);
@@ -365,23 +346,4 @@ fn test_handle_bad_array_pos() {
     let result = args.into_params();
     assert!(result.is_err());
     assert!(matches!(result.err().unwrap(), BadArrayPosition { .. }))
-}
-
-#[test]
-/// Test that the input visibility frequency average factor stacks with the
-/// output frequency averaging factor.
-///
-/// TODO(dev): use test data with multiple timesteps to test time factor
-/// stacking
-fn test_handle_both_vis_avg() {
-    let mut args = get_reduced_1090008640(true);
-    // The input data is 40kHz; input is averaged 2x
-    args.freq_average_factor = Some("80kHz".into());
-    // Output is averaged 2x from the averaged input; a total of 4.
-    args.output_vis_freq_average = Some("160kHz".into());
-    args.outputs = Some(vec!["test.uvfits".into()]);
-    let result = args.into_params().unwrap();
-
-    // output averaging factor is relative to the input frequency resolution.
-    assert_eq!(result.output_vis_freq_average_factor, 4);
 }

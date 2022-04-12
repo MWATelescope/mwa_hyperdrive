@@ -12,25 +12,13 @@ pub(crate) mod code;
 pub use code::calibrate_timeblocks;
 use code::*;
 
-use itertools::izip;
-use log::{debug, info, log_enabled, trace, Level::Debug};
-use marlu::{
-    math::cross_correlation_baseline_to_tiles, Jones, MeasurementSetWriter,
-    ObsContext as MarluObsContext, UvfitsWriter, VisContext, VisWritable,
-};
+use log::{debug, log_enabled, Level::Debug};
+use marlu::Jones;
 use ndarray::prelude::*;
-use rayon::prelude::*;
 
-use super::{params::CalibrateParams, solutions::CalibrationSolutions, CalibrateError};
-use crate::data_formats::VisOutputType;
-use mwa_hyperdrive_common::{
-    hifitime::Epoch,
-    itertools::{self, Itertools},
-    log, marlu, ndarray,
-    num_traits::Zero,
-    rayon,
-    vec1::Vec1,
-};
+use super::{params::CalibrateParams, CalibrateError};
+use crate::solutions::CalibrationSolutions;
+use mwa_hyperdrive_common::{log, marlu, ndarray};
 
 /// Do all the steps required for direction-independent calibration; read the
 /// input data, generate a model against it, and write the solutions out.
@@ -43,19 +31,16 @@ pub(crate) fn di_calibrate(
     }
 
     let CalVis {
-        mut vis_data,
+        vis_data,
         vis_weights,
         vis_model,
     } = get_cal_vis(params, !params.no_progress_bars)?;
     assert_eq!(vis_weights.len_of(Axis(1)), params.baseline_weights.len());
 
-    let obs_context = params.input_data.get_obs_context();
-
     // The shape of the array containing output Jones matrices.
     let num_timeblocks = params.timeblocks.len();
     let num_chanblocks = params.fences.first().chanblocks.len();
-    let total_num_tiles = obs_context.tile_xyzs.len();
-    let num_unflagged_tiles = total_num_tiles - params.flagged_tiles.len();
+    let num_unflagged_tiles = params.get_num_unflagged_tiles();
 
     if log_enabled!(Debug) {
         let shape = (num_timeblocks, num_unflagged_tiles, num_chanblocks);
@@ -70,12 +55,12 @@ pub(crate) fn di_calibrate(
         );
     }
 
-    let (sols, _) = calibrate_timeblocks(
+    let (sols, results) = calibrate_timeblocks(
         vis_data.view(),
         vis_model.view(),
         &params.timeblocks,
+        // TODO: Picket fences.
         &params.fences.first().chanblocks,
-        &params.baseline_weights,
         params.max_iterations,
         params.stop_threshold,
         params.min_threshold,
@@ -83,292 +68,8 @@ pub(crate) fn di_calibrate(
         true,
     );
 
-    // The model visibilities are no longer needed.
-    drop(vis_model);
-
-    // Apply the solutions to the input data.
-    trace!("Applying solutions");
-    vis_data
-        .outer_iter_mut()
-        .into_par_iter()
-        .for_each(|mut vis_data| {
-            vis_data
-                .outer_iter_mut()
-                .enumerate()
-                .for_each(|(i_baseline, mut vis_data)| {
-                    let (tile1, tile2) = cross_correlation_baseline_to_tiles(
-                        params.get_num_unflagged_tiles(),
-                        i_baseline,
-                    );
-                    // TODO: This assumes one timeblock
-                    // TODO: This assumes #freqs == #chanblocks
-                    let sols_tile1 = sols.di_jones.slice(s![0_usize, tile1, ..]);
-                    let sols_tile2 = sols.di_jones.slice(s![0_usize, tile2, ..]);
-
-                    vis_data
-                        .iter_mut()
-                        .zip(sols_tile1.iter())
-                        .zip(sols_tile2.iter())
-                        .for_each(|((vis_data, sol1), sol2)| {
-                            // Promote the data before demoting it again.
-                            let mut d: Jones<f64> = Jones::from(*vis_data);
-                            // Solutions need to be inverted, because they're
-                            // currently stored as something that goes from
-                            // model to data, not data to model.
-                            // J1 * D * J2^H
-                            d = sol1.inv() * d;
-                            d *= sol2.inv().h();
-                            *vis_data = Jones::from(d);
-                        });
-                });
-        });
-
     // "Complete" the solutions.
-    let sols = sols.into_cal_sols(
-        obs_context.tile_xyzs.len(),
-        &params.flagged_tiles,
-        &params.fences.first().flagged_chanblock_indices,
-        obs_context.obsid,
-    );
-
-    // Write out the solutions.
-    if !params.output_solutions_filenames.is_empty() {
-        info!("Writing solutions...");
-    }
-    for (_, file) in &params.output_solutions_filenames {
-        // TODO: Provide a path to the metafits file. This is kinda redundant
-        // because only RTS solutions need metafits, and hyperdrive *will not*
-        // write RTS solutions out directly from calibration; they're only
-        // written out when converting from another format.
-        let metafits: Option<&str> = None;
-        sols.write_solutions_from_ext(file, metafits)?;
-        info!("Calibration solutions written to {}", file.display());
-    }
-
-    // Write out calibrated visibilities.
-    if !params.output_vis_filenames.is_empty() {
-        info!("Writing visibilities...");
-
-        debug!("Dividing visibilities by weights");
-        // Divide the visibilities by the weights (undoing the multiplication earlier).
-        vis_data
-            .outer_iter_mut()
-            .into_par_iter()
-            .zip(vis_weights.outer_iter())
-            .for_each(|(mut vis_data, vis_weights)| {
-                vis_data
-                    .outer_iter_mut()
-                    .zip(vis_weights.outer_iter())
-                    .zip(params.baseline_weights.iter())
-                    .for_each(|((mut vis_data, vis_weights), &baseline_weight)| {
-                        vis_data.iter_mut().zip(vis_weights.iter()).for_each(
-                            |(vis_data, &vis_weight)| {
-                                let weight = f64::from(vis_weight) * baseline_weight;
-                                *vis_data =
-                                    Jones::<f32>::from(Jones::<f64>::from(*vis_data) / weight);
-                            },
-                        );
-                    });
-            });
-
-        let ant_pairs: Vec<(usize, usize)> = params.get_ant_pairs();
-        let int_time = obs_context.guess_time_res();
-
-        let start_timestamp = obs_context.timestamps[params.timesteps[0]];
-
-        // the range of timesteps selected in params.timesteps
-        let sel_timestep_range = *params.timesteps.first()..=*params.timesteps.last();
-        let timestep_span = sel_timestep_range.end() - sel_timestep_range.start() + 1;
-
-        let vis_ctx = VisContext {
-            num_sel_timesteps: timestep_span,
-            start_timestamp,
-            int_time,
-            num_sel_chans: obs_context.fine_chan_freqs.len(),
-            start_freq_hz: obs_context.fine_chan_freqs[0] as f64,
-            freq_resolution_hz: obs_context.guess_freq_res(),
-            sel_baselines: ant_pairs,
-            avg_time: params.output_vis_time_average_factor,
-            avg_freq: params.output_vis_freq_average_factor,
-            num_vis_pols: 4,
-        };
-
-        let obs_name = obs_context.obsid.map(|o| format!("MWA obsid {}", o));
-
-        // shape of entire output [time, freq, baseline]. in data is [time, baseline, freq]
-        let out_shape = vis_ctx.sel_dims();
-
-        assert_eq!(vis_weights.dim(), vis_data.dim());
-        // time (since vis_data could be sparse)
-        assert!(vis_data.len_of(Axis(0)) <= out_shape.0);
-        // baseline
-        assert_eq!(vis_data.len_of(Axis(1)), out_shape.2);
-        // freq
-        assert_eq!(
-            vis_data.len_of(Axis(2)) + params.flagged_fine_chans.len(),
-            out_shape.1
-        );
-
-        // re-use output arrays each timestep chunk
-        let chunk_shape = (
-            params.output_vis_time_average_factor,
-            out_shape.1,
-            out_shape.2,
-        );
-        let mut chunk_data = Array3::from_elem(chunk_shape, Jones::zero());
-        let mut chunk_weights = Array3::from_elem(chunk_shape, -0.0);
-
-        // create a VisWritable for each output vis filename
-        let mut out_writers: Vec<(VisOutputType, Box<dyn VisWritable>)> = vec![];
-        for (vis_type, file) in params.output_vis_filenames.iter() {
-            // Don't trust the user - delete `file` whether it is a file or a
-            // directory. Not doing this might make the functions below fail
-            // because they're expecting one of either a file or a directory.
-            if file.is_file() {
-                std::fs::remove_file(file)?;
-            } else if file.is_dir() {
-                std::fs::remove_dir_all(file)?;
-            }
-            // TODO: Symbolic links.
-
-            match vis_type {
-                VisOutputType::Uvfits => {
-                    trace!(" - to uvfits {}", file.display());
-
-                    let writer = UvfitsWriter::from_marlu(
-                        &file,
-                        &vis_ctx,
-                        Some(params.array_position),
-                        obs_context.phase_centre,
-                        obs_name.clone(),
-                    )?;
-
-                    out_writers.push((VisOutputType::Uvfits, Box::new(writer)));
-                }
-                VisOutputType::MeasurementSet => {
-                    trace!(" - to measurement set {}", file.display());
-                    let writer = MeasurementSetWriter::new(
-                        &file,
-                        obs_context.phase_centre,
-                        Some(params.array_position),
-                    );
-
-                    let sched_start_timestamp = match obs_context.obsid {
-                        Some(gpst) => Epoch::from_gpst_seconds(gpst as f64),
-                        None => start_timestamp,
-                    };
-                    let sched_duration =
-                        *obs_context.timestamps.last() + int_time - sched_start_timestamp;
-
-                    let marlu_obs_ctx = MarluObsContext {
-                        sched_start_timestamp,
-                        sched_duration,
-                        name: obs_name.clone(),
-                        phase_centre: obs_context.phase_centre,
-                        pointing_centre: obs_context.pointing_centre,
-                        array_pos: params.array_position,
-                        ant_positions_enh: obs_context
-                            .tile_xyzs
-                            .iter()
-                            .map(|xyz| xyz.to_enh(params.array_position.latitude_rad))
-                            .collect(),
-                        ant_names: obs_context.tile_names.iter().cloned().collect(),
-                        // TODO(dev): is there any value in adding this metadata via hyperdrive obs context?
-                        field_name: None,
-                        project_id: None,
-                        observer: None,
-                    };
-
-                    writer.initialize(&vis_ctx, &marlu_obs_ctx)?;
-                    out_writers.push((VisOutputType::MeasurementSet, Box::new(writer)));
-                }
-            };
-        }
-
-        // Assume input time axis is sparse (non-contiguous)
-        let mut time_axis_iter = izip!(
-            params.timesteps.iter(),
-            vis_data.outer_iter(),
-            vis_weights.outer_iter(),
-        )
-        .peekable();
-
-        // write one averaged timestep at a time, starting at the first selected timestep
-        for timestep_chunk in &sel_timestep_range.chunks(params.output_vis_time_average_factor) {
-            let timestep_chunk = Vec1::try_from_vec(timestep_chunk.collect_vec()).unwrap();
-            let chunk_vis_ctx = VisContext {
-                start_timestamp: obs_context.timestamps[timestep_chunk[0]],
-                num_sel_timesteps: timestep_chunk.len(),
-                ..vis_ctx.clone()
-            };
-            chunk_data.fill(Jones::zero());
-            chunk_weights.fill(-0.0);
-
-            // populate chunk_data with vis_data, where time axis is sparse
-            for (&chunk_timestep, mut chunk_data, mut chunk_weights) in izip!(
-                timestep_chunk.iter(),
-                chunk_data.outer_iter_mut(),
-                chunk_weights.outer_iter_mut()
-            ) {
-                // search through time axis until we find the timestep we want
-                let (_, vis_data, vis_weights) = match time_axis_iter.peek() {
-                    Some((&timestep, _, _)) => {
-                        if chunk_timestep != timestep {
-                            continue;
-                        }
-                        time_axis_iter.next().unwrap()
-                    }
-                    None => break,
-                };
-
-                // zip over baseline axis
-                for (mut chunk_data, mut chunk_weights, vis_data, vis_weights) in izip!(
-                    chunk_data.axis_iter_mut(Axis(1)),
-                    chunk_weights.axis_iter_mut(Axis(1)),
-                    vis_data.axis_iter(Axis(0)),
-                    vis_weights.axis_iter(Axis(0))
-                ) {
-                    // merge frequency axis
-                    for ((_, out_jones, out_weight), in_jones, in_weight) in izip!(
-                        izip!(0.., chunk_data.iter_mut(), chunk_weights.iter_mut(),).filter(
-                            |(chan_idx, _, _)| !params.flagged_fine_chans.contains(chan_idx)
-                        ),
-                        vis_data.iter(),
-                        vis_weights.iter()
-                    ) {
-                        *out_jones = *in_jones;
-                        *out_weight = *in_weight;
-                    }
-                }
-            }
-
-            for (_, writer) in out_writers.iter_mut() {
-                writer
-                    .write_vis_marlu(
-                        chunk_data.slice(s![..timestep_chunk.len(), .., ..]),
-                        chunk_weights.slice(s![..timestep_chunk.len(), .., ..]),
-                        &chunk_vis_ctx,
-                        &obs_context.tile_xyzs,
-                        false,
-                    )
-                    .unwrap();
-            }
-        }
-
-        // finalize writing uvfits
-        for (vis_type, writer) in out_writers.into_iter() {
-            if matches!(vis_type, VisOutputType::Uvfits) {
-                let uvfits_writer =
-                    unsafe { Box::from_raw(Box::into_raw(writer) as *mut UvfitsWriter) };
-                uvfits_writer
-                    .write_uvfits_antenna_table(&obs_context.tile_names, &obs_context.tile_xyzs)?;
-            }
-        }
-
-        for (_, file) in params.output_vis_filenames.iter() {
-            info!("Calibrated visibilities written to {}", file.display());
-        }
-    }
+    let sols = sols.into_cal_sols(params, Some(results.map(|r| r.max_precision)));
 
     Ok(sols)
 }

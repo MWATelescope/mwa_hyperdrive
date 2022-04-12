@@ -92,4 +92,8 @@ harness = false
 # birli = { path = "../Birli" }
 # birli = { git = "https://github.com/MWATelescope/Birli" }
 # marlu = { path = "../Marlu" }
-# marlu = { git = "https://github.com/MWATelescope/Marlu.git" }
+# marlu = { git = "https://github.com/MWATelescope/Marlu" }
+# mwalib = { path = "../mwalib" }
+# mwalib = { git = "https://github.com/MWATelescope/mwalib" }
+# mwa_hyperbeam = { path = "../mwa_hyperbeam" }
+# mwalib = { git = "https://github.com/MWATelescope/mwa_hyperbeam" }

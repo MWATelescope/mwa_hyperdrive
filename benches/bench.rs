@@ -11,10 +11,11 @@ use marlu::{
     Jones, RADec, XyzGeodetic,
 };
 use ndarray::prelude::*;
-use vec1::vec1;
+use vec1::{vec1, Vec1};
 
 use mwa_hyperdrive::{
-    calibrate::{di::calibrate_timeblocks, Chanblock, Timeblock},
+    averaging::{Chanblock, Timeblock},
+    calibrate::di::calibrate_timeblocks,
     model,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, Delays};
@@ -515,10 +516,21 @@ fn calibrate_benchmarks(c: &mut Criterion) {
     timeblocks.push(Timeblock {
         index: 0,
         range: 0..num_timesteps,
-        start: Epoch::from_gpst_seconds(1090008640.0),
-        end: Epoch::from_gpst_seconds(1090008660.0),
-        average: Epoch::from_gpst_seconds(1090008650.0),
+        timestamps: vec1![
+            Epoch::from_gpst_seconds(1090008640.0),
+            Epoch::from_gpst_seconds(1090008641.0),
+            Epoch::from_gpst_seconds(1090008642.0),
+            Epoch::from_gpst_seconds(1090008643.0),
+            Epoch::from_gpst_seconds(1090008644.0),
+            Epoch::from_gpst_seconds(1090008645.0),
+            Epoch::from_gpst_seconds(1090008646.0),
+            Epoch::from_gpst_seconds(1090008647.0),
+            Epoch::from_gpst_seconds(1090008648.0),
+            Epoch::from_gpst_seconds(1090008649.0),
+        ],
+        median: Epoch::from_gpst_seconds(1090008644.5),
     });
+    let timeblocks = Vec1::try_from_vec(timeblocks).unwrap();
 
     let num_chanblocks = 100;
     let mut chanblocks = Vec::with_capacity(num_chanblocks);
@@ -529,13 +541,14 @@ fn calibrate_benchmarks(c: &mut Criterion) {
             _freq: 150e6 + i_chanblock as f64,
         })
     }
+    let chanblocks = Vec1::try_from_vec(chanblocks).unwrap();
+
     let num_tiles = 128;
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
 
     let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
-    let baseline_weights = vec![1.0; num_baselines];
 
     c.bench_function(
         &format!("calibrate with {num_timesteps} timesteps, {num_baselines} baselines, {num_chanblocks} chanblocks"),
@@ -546,7 +559,6 @@ fn calibrate_benchmarks(c: &mut Criterion) {
                     vis_model.view(),
                     &timeblocks,
                     &chanblocks,
-                    &baseline_weights,
                     50,
                     1e-8,
                     1e-4,

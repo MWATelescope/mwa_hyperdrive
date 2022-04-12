@@ -101,7 +101,15 @@ pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
 }
 
 pub struct TileBaselineMaps {
+    /// Map between a pair of tile numbers and its unflagged *cross-correlation*
+    /// baseline index. This is really useful for handling flagged tiles and
+    /// baselines, e.g. if tiles 0 and 2 are flagged, (1, 3) maps to 0 (i.e. the
+    /// first cross-correlation baseline is between tiles 1 and 3).
     pub tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
+
+    /// Map an unflagged *cross-correlation* baseline index to its constituent
+    /// tile indices. e.g. If tile 0 is flagged, baseline 0 maps to tiles 1 and
+    /// 2 (i.e. the first cross-correlation baseline is between tiles 1 and 2).
     pub unflagged_cross_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 }
 

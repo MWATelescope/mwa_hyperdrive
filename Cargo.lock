@@ -235,9 +235,9 @@ dependencies = [
 
 [[package]]
 name = "cbindgen"
-version = "0.21.0"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "485ede05a56152367a6ec586a7425b475d6c3d3838581ff651d2a6e3730a62ef"
+checksum = "a6358dedf60f4d9b8db43ad187391afe959746101346fe51bb978126bec61dfb"
 dependencies = [
  "clap 3.1.8",
  "heck",
@@ -1479,9 +1479,9 @@ dependencies = [
 
 [[package]]
 name = "mwalib"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d7c4832b4c86376fed65bcc73e1c7ff801dedd7ea4794a4baf5db991531a9b5"
+checksum = "3aa75acf5c1ea5130d1ddc9ec74ddeb87807628c2b9c588c4e1df7b588bf881a"
 dependencies = [
  "built",
  "cbindgen",
