@@ -4,9 +4,9 @@
 
 //! Helper functions around time.
 
-use hifitime::Epoch;
+use hifitime::{Duration, Epoch, Unit};
 
-use mwa_hyperdrive_common::hifitime::{self, Duration, Unit};
+use mwa_hyperdrive_common::hifitime;
 
 /// Some timestamps may be read in ever so slightly off from their true values
 /// because of float errors. This function checks if a supplied [Epoch], when
@@ -34,7 +34,6 @@ pub(crate) fn quantize_duration(d: Duration, q_nanos: f64) -> Duration {
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
-    use mwa_hyperdrive_common::hifitime::Unit;
 
     use super::*;
 

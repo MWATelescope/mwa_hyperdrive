@@ -4,22 +4,18 @@
 
 //! Metadata on an observation.
 
+pub mod helpers;
+#[cfg(test)]
+mod tests;
+
 use hifitime::Epoch;
+use hifitime::{Duration, Unit};
+use log::warn;
 use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
-use mwa_hyperdrive_common::{
-    hifitime::{self, Duration, Unit},
-    log::warn,
-    marlu, ndarray, vec1,
-};
-
-use self::helpers::{guess_freq_res, guess_time_res};
-
-pub mod helpers;
-#[cfg(test)]
-mod tests;
+use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray, vec1};
 
 /// MWA observation metadata.
 ///
@@ -139,7 +135,7 @@ impl ObsContext {
         if let Some(res) = self.time_res {
             return Duration::from_f64(res, Unit::Second);
         }
-        if let Some(res) = guess_time_res(self.timestamps.to_vec()) {
+        if let Some(res) = helpers::guess_time_res(self.timestamps.to_vec()) {
             return res;
         }
         warn!("No integration time specified; assuming 1 second");
@@ -150,7 +146,8 @@ impl ObsContext {
         if let Some(res) = self.freq_res {
             return res;
         }
-        if let Some(res) = guess_freq_res(self.fine_chan_freqs.iter().map(|&f| f as f64).collect())
+        if let Some(res) =
+            helpers::guess_freq_res(self.fine_chan_freqs.iter().map(|&f| f as f64).collect())
         {
             return res;
         }

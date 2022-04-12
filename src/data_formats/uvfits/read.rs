@@ -8,9 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
+use hifitime::{Duration, Unit};
 use log::{debug, trace, warn};
 use marlu::{io::uvfits::decode_uvfits_baseline, Jones, RADec, XyzGeodetic};
-use mwa_hyperdrive_common::hifitime::{Duration, Unit};
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -24,7 +24,7 @@ use crate::{
     time::quantize_duration,
 };
 use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{log, marlu, mwalib, ndarray};
+use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray};
 
 pub struct UvfitsReader {
     /// Observation metadata.

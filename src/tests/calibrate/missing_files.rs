@@ -5,15 +5,20 @@
 //! Tests against trying to calibrate but missing required files. Mostly useful
 //! for checking that the error messages are of acceptable quality.
 
+use std::io::Write;
+
+use tempfile::Builder;
+
 use crate::{
     calibrate::params::InvalidArgsError,
-    tests::{reduced_obsids::get_reduced_1090008640, *},
+    tests::{get_cmd_output, hyperdrive_di_calibrate, reduced_obsids::get_reduced_1090008640},
 };
+use mwa_hyperdrive_common::toml;
 
 /// Try to calibrate raw MWA data without a metafits file.
 #[test]
 #[ignore = "assert_cmd_not_working_in_coverage"]
-fn param_file_missing_metafits() {
+fn arg_file_missing_metafits() {
     let args = get_reduced_1090008640(true);
     let source_list = args.source_list.unwrap();
     let data = args.data.unwrap();
@@ -27,12 +32,12 @@ fn param_file_missing_metafits() {
         .filter(|d| !d.contains("metafits"))
         .collect();
 
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg("--source-list")
         .arg(&source_list)
         .arg("--data")
         .args(&data)
+        .arg("--dry-run")
         .ok();
     assert!(cmd.is_err());
     let (_, stderr) = get_cmd_output(cmd);
@@ -43,13 +48,13 @@ fn param_file_missing_metafits() {
     );
 
     // Try again, but this time specifying the metafits file from the CLI.
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg("--source-list")
         .arg(&source_list)
         .arg("--data")
         .arg(metafits)
         .args(&data)
+        .arg("--dry-run")
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
 }
@@ -57,7 +62,7 @@ fn param_file_missing_metafits() {
 /// Try to calibrate raw MWA data without gpubox files.
 #[test]
 #[ignore = "assert_cmd_not_working_in_coverage"]
-fn param_file_missing_gpuboxes() {
+fn arg_file_missing_gpuboxes() {
     let args = get_reduced_1090008640(true);
     let source_list = args.source_list.unwrap();
     let data = args.data.unwrap();
@@ -68,12 +73,12 @@ fn param_file_missing_gpuboxes() {
         .collect();
     let data: Vec<String> = data.into_iter().filter(|d| !d.contains("gpubox")).collect();
 
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg("--source-list")
         .arg(&source_list)
         .arg("--data")
         .args(&data)
+        .arg("--dry-run")
         .ok();
     assert!(cmd.is_err());
     let (_, stderr) = get_cmd_output(cmd);
@@ -84,61 +89,95 @@ fn param_file_missing_gpuboxes() {
     );
 
     // Try again, but this time specifying the gpubox files from the CLI.
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg("--source-list")
         .arg(&source_list)
         .arg("--data")
         .args(&gpuboxes)
         .args(&data)
+        .arg("--dry-run")
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
 }
 
-/// Make a toml argument file without mwaf files.
+/// Ensure that di-calibrate issues a warning when no mwaf files are supplied.
 #[test]
 #[ignore = "assert_cmd_not_working_in_coverage"]
-fn param_file_missing_mwafs() {
+fn missing_mwafs() {
     let args = get_reduced_1090008640(true);
     let source_list = args.source_list.unwrap();
     let data = args.data.unwrap();
-    let mwafs: Vec<String> = data
-        .iter()
-        .filter(|d| d.contains("mwaf"))
-        .cloned()
-        .collect();
-    let data: Vec<String> = data.into_iter().filter(|d| !d.contains("mwaf")).collect();
+    let metafits = &data[0];
+    let gpubox = &data[1];
+    let mwaf = &data[2];
 
-    // Because the mwaf files are optional, the command should succeed but issue
-    // a warning.
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    // Don't include an mwaf file; we expect a warning to be logged for this
+    // reason.
+    let cmd = hyperdrive_di_calibrate(None)
         .arg("--source-list")
         .arg(&source_list)
         .arg("--data")
-        .args(&data)
+        .arg(metafits)
+        .arg(gpubox)
+        .arg("--dry-run")
+        .ok();
+    assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
+    let (stdout, _) = get_cmd_output(cmd);
+    assert!(stdout.contains("No mwaf flag files supplied"), "{}", stdout);
+
+    // Include an mwaf file; we don't expect a warning this time.
+    let cmd = hyperdrive_di_calibrate(None)
+        .arg("--source-list")
+        .arg(&source_list)
+        .arg("--data")
+        .arg(metafits)
+        .arg(gpubox)
+        .arg(mwaf)
+        .arg("--dry-run")
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
     let (stdout, _) = get_cmd_output(cmd);
     assert!(
-        &stdout.contains("No mwaf flag files supplied"),
+        !stdout.contains("No mwaf flag files supplied"),
         "{}",
         stdout
     );
+}
 
-    // Check that the warning isn't present when the mwafs are actually given.
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
-        .arg("--source-list")
-        .arg(&source_list)
-        .arg("--data")
-        .args(&data)
-        .args(&mwafs)
+/// Ensure that di-calibrate issues a warning when no mwaf files are supplied
+/// via argument files.
+#[test]
+#[ignore = "assert_cmd_not_working_in_coverage"]
+fn arg_file_missing_mwafs() {
+    let args = get_reduced_1090008640(false);
+    let args_str = toml::to_vec(&args).unwrap();
+    let mut args_file = Builder::new().suffix(".toml").tempfile().unwrap();
+    args_file.write_all(&args_str).unwrap();
+
+    // Don't include an mwaf file; we expect a warning to be logged for this
+    // reason.
+    let cmd = hyperdrive_di_calibrate(None)
+        .arg(args_file.path().to_str().unwrap())
+        .arg("--dry-run")
+        .ok();
+    assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
+    let (stdout, _) = get_cmd_output(cmd);
+    assert!(stdout.contains("No mwaf flag files supplied"), "{}", stdout);
+
+    // Include an mwaf file; we don't expect a warning this time.
+    let args = get_reduced_1090008640(true);
+    let args_str = toml::to_vec(&args).unwrap();
+    let mut args_file = Builder::new().suffix(".toml").tempfile().unwrap();
+    args_file.write_all(&args_str).unwrap();
+
+    let cmd = hyperdrive_di_calibrate(None)
+        .arg(args_file.path().to_str().unwrap())
+        .arg("--dry-run")
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
     let (stdout, _) = get_cmd_output(cmd);
     assert!(
-        !&stdout.contains("No mwaf flag files supplied"),
+        !stdout.contains("No mwaf flag files supplied"),
         "{}",
         stdout
     );

@@ -13,13 +13,21 @@ use crate::calibrate::args::CalibrateUserArgs;
 /// data). This observational data is inside the hyperdrive git repo, but has
 /// been reduced; there is only 1 coarse channel and 1 timestep.
 pub(crate) fn get_reduced_1090008640(include_mwaf: bool) -> CalibrateUserArgs {
+    // Use absolute paths.
+    let test_files = PathBuf::from("test_files/1090008640")
+        .canonicalize()
+        .unwrap();
+
     // Ensure that the required files are there.
     let mut data = vec![
-        "test_files/1090008640/1090008640.metafits".to_string(),
-        "test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits".to_string(),
+        format!("{}/1090008640.metafits", test_files.display()),
+        format!(
+            "{}/1090008640_20140721201027_gpubox01_00.fits",
+            test_files.display()
+        ),
     ];
     if include_mwaf {
-        data.push("test_files/1090008640/1090008640_01.mwaf".to_string());
+        data.push(format!("{}/1090008640_01.mwaf", test_files.display()));
     }
     for file in &data {
         let pb = PathBuf::from(file);
@@ -30,9 +38,10 @@ pub(crate) fn get_reduced_1090008640(include_mwaf: bool) -> CalibrateUserArgs {
         );
     }
 
-    let srclist =
-        "test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml"
-            .to_string();
+    let srclist = format!(
+        "{}/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml",
+        test_files.display()
+    );
     assert!(
         PathBuf::from(&srclist).exists(),
         "Could not find {}, which is required for this test",

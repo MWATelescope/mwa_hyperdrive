@@ -5,5 +5,4 @@
 //! Code for calibration testing.
 
 mod args_files;
-mod full_obsids;
 mod missing_files;

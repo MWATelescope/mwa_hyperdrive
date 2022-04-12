@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use tempfile::tempdir;
 
 use crate::tests::{
-    get_cmd_output, hyperdrive, make_file_in_dir, reduced_obsids::get_reduced_1090008640,
-    serialise_args_json, serialise_args_toml,
+    get_cmd_output, hyperdrive_di_calibrate, make_file_in_dir,
+    reduced_obsids::get_reduced_1090008640, serialise_args_json, serialise_args_toml,
 };
 
 #[test]
@@ -22,8 +22,7 @@ fn arg_file_absolute_paths() {
 
     let (toml, mut toml_file) = make_file_in_dir("calibrate.toml", temp_dir.path());
     serialise_args_toml(&args, &mut toml_file);
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg(toml.display().to_string())
         .arg("--dry-run")
         .ok();
@@ -31,8 +30,7 @@ fn arg_file_absolute_paths() {
 
     let (json, mut json_file) = make_file_in_dir("calibrate.json", temp_dir.path());
     serialise_args_json(&args, &mut json_file);
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg(json.display().to_string())
         .arg("--dry-run")
         .ok();
@@ -61,8 +59,7 @@ fn arg_file_absolute_globs() {
 
     let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", temp_dir.path());
     serialise_args_toml(&args, &mut toml);
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg(toml_pb.display().to_string())
         .arg("--dry-run")
         .ok();
@@ -70,8 +67,7 @@ fn arg_file_absolute_globs() {
 
     let (json_pb, mut json) = make_file_in_dir(&"calibrate.json", temp_dir.path());
     serialise_args_json(&args, &mut json);
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg(json_pb.display().to_string())
         .arg("--dry-run")
         .ok();
@@ -98,8 +94,7 @@ fn arg_file_relative_globs() {
 
     let (toml_pb, mut toml) = make_file_in_dir(&"calibrate.toml", temp_dir.path());
     serialise_args_toml(&args, &mut toml);
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg(toml_pb.display().to_string())
         .arg("--dry-run")
         .ok();
@@ -107,8 +102,7 @@ fn arg_file_relative_globs() {
 
     let (json_pb, mut json) = make_file_in_dir(&"calibrate.json", temp_dir.path());
     serialise_args_json(&args, &mut json);
-    let cmd = hyperdrive()
-        .arg("di-calibrate")
+    let cmd = hyperdrive_di_calibrate(None)
         .arg(json_pb.display().to_string())
         .arg("--dry-run")
         .ok();

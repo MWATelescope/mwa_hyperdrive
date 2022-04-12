@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use approx::assert_abs_diff_eq;
 use birli::marlu::XyzGeodetic;
+use hifitime::{Duration, Unit};
 use marlu::{Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWritable};
-use mwa_hyperdrive_common::hifitime::{Duration, Unit};
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
 use tempfile::tempdir;
 
@@ -18,6 +18,7 @@ use crate::{
     math::TileBaselineMaps,
     tests::reduced_obsids::get_reduced_1090008640_ms,
 };
+use mwa_hyperdrive_common::hifitime;
 
 #[test]
 #[serial]

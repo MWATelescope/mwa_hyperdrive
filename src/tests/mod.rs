@@ -5,7 +5,6 @@
 //! Integration tests and helpful functions.
 
 mod calibrate;
-pub(crate) mod full_obsids;
 pub(crate) mod reduced_obsids;
 
 use std::fs::File;
@@ -20,9 +19,16 @@ use tempfile::{NamedTempFile, TempPath};
 pub(crate) use crate::calibrate::args::CalibrateUserArgs;
 use mwa_hyperdrive_common::{flate2, serde_json, toml};
 
-/// Run the hyperdrive binary with `assert_cmd`.
-pub(crate) fn hyperdrive() -> Command {
-    Command::cargo_bin("hyperdrive").unwrap()
+/// Use `assert_cmd` to run the hyperdrive binary with "di-calibrate". If
+/// `current_dir` is supplied, then it is used as the working directory for the
+/// child process.
+pub(crate) fn hyperdrive_di_calibrate(current_dir: Option<&Path>) -> Command {
+    let mut cmd = Command::cargo_bin("hyperdrive").unwrap();
+    cmd.arg("di-calibrate");
+    if let Some(d) = current_dir {
+        cmd.current_dir(d);
+    }
+    cmd
 }
 
 pub(crate) fn get_cmd_output(result: Result<Output, OutputError>) -> (String, String) {
@@ -43,10 +49,6 @@ pub(crate) fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(
     let path = dir.as_ref().join(filename);
     let f = File::create(&path).expect("couldn't make file");
     (path, f)
-}
-
-pub(crate) fn path_to_string<P: AsRef<Path>>(path: P) -> String {
-    path.as_ref().to_str().map(|s| s.to_string()).unwrap()
 }
 
 pub(crate) fn deflate_gz_into_file<T: AsRef<Path>>(gz_file: T, out_file: &mut File) {

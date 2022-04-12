@@ -22,35 +22,28 @@ use log::{debug, info, trace};
 
 use mwa_hyperdrive_common::{hifitime, log};
 
-pub fn di_calibrate<P: AsRef<Path>>(
+pub fn di_calibrate(
     cli_args: Box<CalibrateUserArgs>,
-    args_file: Option<P>,
+    args_file: Option<&Path>,
     dry_run: bool,
 ) -> Result<Option<CalibrationSolutions>, CalibrateError> {
-    fn inner(
-        cli_args: Box<CalibrateUserArgs>,
-        args_file: Option<&Path>,
-        dry_run: bool,
-    ) -> Result<Option<CalibrationSolutions>, CalibrateError> {
-        let args = if let Some(f) = args_file {
-            trace!("Merging command-line arguments with the argument file");
-            Box::new(cli_args.merge(&f)?)
-        } else {
-            cli_args
-        };
-        debug!("{:#?}", &args);
-        trace!("Converting arguments into calibration parameters");
-        let parameters = args.into_params()?;
+    let args = if let Some(f) = args_file {
+        trace!("Merging command-line arguments with the argument file");
+        Box::new(cli_args.merge(&f)?)
+    } else {
+        cli_args
+    };
+    debug!("{:#?}", &args);
+    trace!("Converting arguments into calibration parameters");
+    let parameters = args.into_params()?;
 
-        if dry_run {
-            info!("Dry run -- exiting now.");
-            return Ok(None);
-        }
-
-        let sols = di::di_calibrate(&parameters)?;
-        Ok(Some(sols))
+    if dry_run {
+        info!("Dry run -- exiting now.");
+        return Ok(None);
     }
-    inner(cli_args, args_file.as_ref().map(|f| f.as_ref()), dry_run)
+
+    let sols = di::di_calibrate(&parameters)?;
+    Ok(Some(sols))
 }
 
 /// A collection of timesteps to average together *during* calibration.

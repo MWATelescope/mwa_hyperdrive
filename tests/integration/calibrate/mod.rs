@@ -18,28 +18,25 @@ use birli::{
     Jones,
 };
 use clap::Parser;
-use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_srclist::{
-    hyperdrive::source_list_to_yaml, ComponentType, FluxDensity, FluxDensityType, Source,
-    SourceComponent, SourceList,
-};
+use hifitime::{Duration, Epoch, Unit};
+use itertools::izip;
 use mwalib::*;
+use ndarray::prelude::*;
+use num_traits::Zero;
 use serial_test::serial;
+use vec1::vec1;
 
 use crate::*;
 use mwa_hyperdrive::{
     calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError},
     data_formats::{InputData, UvfitsReader, MS},
 };
-use mwa_hyperdrive_common::{
-    clap,
-    hifitime::{Duration, Epoch, Unit},
-    itertools::izip,
-    mwalib,
-    num_traits::Zero,
-    vec1::vec1,
+use mwa_hyperdrive_beam::Delays;
+use mwa_hyperdrive_common::{clap, hifitime, itertools, mwalib, num_traits, vec1};
+use mwa_hyperdrive_srclist::{
+    hyperdrive::source_list_to_yaml, ComponentType, FluxDensity, FluxDensityType, Source,
+    SourceComponent, SourceList,
 };
-use ndarray::prelude::*;
 
 /// If di-calibrate is working, it should not write anything to stderr.
 #[test]
@@ -85,7 +82,7 @@ fn test_1090008640_di_calibrate_writes_solutions() {
     ]);
 
     // Run di-cal and check that it succeeds
-    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    let result = di_calibrate(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     // check solutions file has been created, is readable
@@ -111,7 +108,7 @@ fn test_1090008640_woden() {
     ]);
 
     // Run di-cal and check that it fails
-    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    let result = di_calibrate(Box::new(cal_args), None, false);
     assert!(
         matches!(result, Err(CalibrateError::InvalidArgs(_))),
         "result={:?} is not InvalidArgs",
@@ -192,7 +189,7 @@ fn test_1090008640_woden() {
     ]);
 
     // Run di-cal and check that it fails
-    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    let result = di_calibrate(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let hyp_sols = result.unwrap().unwrap();
@@ -235,7 +232,7 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits() {
     ]);
 
     // Run di-cal and check that it succeeds
-    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    let result = di_calibrate(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     // check vis file has been created, is readable
@@ -281,7 +278,7 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_avg_freq() {
     ]);
 
     // Run di-cal and check that it succeeds
-    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    let result = di_calibrate(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     // check vis file has been created, is readable
@@ -327,7 +324,7 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_ms() {
     ]);
 
     // Run di-cal and check that it succeeds
-    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    let result = di_calibrate(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     let exp_timesteps = 1;
@@ -470,10 +467,11 @@ pub fn test_cal_vis_output_avg_time() {
         timesteps: Some(vec![1, 3, 9]),
         output_vis_time_average: Some("3s".into()),
         output_vis_freq_average: Some("20kHz".into()),
+        no_progress_bars: true,
         ..Default::default()
     };
 
-    let result = di_calibrate::<PathBuf>(Box::new(cal_args), None, false);
+    let result = di_calibrate(Box::new(cal_args), None, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
     // we start at timestep index 1, with averaging 4. Averaged timesteps look like this:

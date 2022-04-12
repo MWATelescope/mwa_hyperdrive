@@ -154,6 +154,10 @@ pub struct SimulateVisArgs {
     /// file.
     #[clap(long, multiple_values(true), help_heading = "MODEL PARAMETERS")]
     dipole_delays: Option<Vec<u32>>,
+
+    /// When generating sky-model visibilities, don't draw progress bars.
+    #[clap(long, help_heading = "USER INTERFACE")]
+    no_progress_bars: bool,
 }
 
 /// Parameters needed to do sky-model visibility simulation.
@@ -198,7 +202,7 @@ struct SimVisParams {
 
 impl SimVisParams {
     /// Convert arguments into parameters.
-    fn new(args: SimulateVisArgs) -> Result<SimVisParams, SimulateVisError> {
+    fn new(args: &SimulateVisArgs) -> Result<SimVisParams, SimulateVisError> {
         debug!("{:#?}", &args);
 
         // Expose all the struct fields to ensure they're all used.
@@ -223,6 +227,7 @@ impl SimVisParams {
             beam_file,
             unity_dipole_gains,
             dipole_delays,
+            no_progress_bars: _,
         } = args;
 
         // Read the metafits file with mwalib.
@@ -233,13 +238,13 @@ impl SimVisParams {
         let phase_centre = match (ra, dec, &metafits) {
             (Some(ra), Some(dec), _) => {
                 // Verify that the input coordinates are sensible.
-                if !(0.0..=360.0).contains(&ra) {
+                if !(0.0..=360.0).contains(ra) {
                     return Err(SimulateVisError::RaInvalid);
                 }
-                if !(-90.0..=90.0).contains(&dec) {
+                if !(-90.0..=90.0).contains(dec) {
                     return Err(SimulateVisError::DecInvalid);
                 }
-                RADec::new_degrees(ra, dec)
+                RADec::new_degrees(*ra, *dec)
             }
             (Some(_), None, _) => return Err(SimulateVisError::OnlyOneRAOrDec),
             (None, Some(_), _) => return Err(SimulateVisError::OnlyOneRAOrDec),
@@ -258,20 +263,20 @@ impl SimVisParams {
         info!("Using phase centre {}", phase_centre);
 
         // Get the fine channel frequencies.
-        if num_fine_channels == 0 {
+        if *num_fine_channels == 0 {
             return Err(SimulateVisError::FineChansZero);
         }
-        if freq_res < f64::EPSILON {
+        if *freq_res < f64::EPSILON {
             return Err(SimulateVisError::FineChansWidthTooSmall);
         }
         info!("Number of fine channels: {}", num_fine_channels);
         info!("Fine-channel width:      {} kHz", freq_res);
         let middle_freq = middle_freq.unwrap_or(metafits.centre_freq_hz as _);
         let fine_chan_freqs = {
-            let half_num_fine_chans = num_fine_channels as f64 / 2.0;
+            let half_num_fine_chans = *num_fine_channels as f64 / 2.0;
             let freq_res = freq_res * 1000.0; // kHz -> Hz
-            let mut fine_chan_freqs = Vec::with_capacity(num_fine_channels);
-            for i in 0..num_fine_channels {
+            let mut fine_chan_freqs = Vec::with_capacity(*num_fine_channels);
+            for i in 0..*num_fine_channels {
                 fine_chan_freqs
                     .push(middle_freq - half_num_fine_chans * freq_res + freq_res * i as f64);
             }
@@ -287,11 +292,11 @@ impl SimVisParams {
         }
 
         // Populate the timestamps.
-        let int_time = Duration::from_f64(time_res, Unit::Second);
+        let int_time = Duration::from_f64(*time_res, Unit::Second);
         let timestamps = {
-            let mut timestamps = Vec::with_capacity(num_timesteps);
+            let mut timestamps = Vec::with_capacity(*num_timesteps);
             let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3);
-            for i in 0..num_timesteps {
+            for i in 0..*num_timesteps {
                 timestamps.push(start + int_time * i as i64);
             }
             timestamps
@@ -336,7 +341,7 @@ impl SimVisParams {
         let sl_pb = if sl_pb.exists() {
             sl_pb
         } else {
-            get_single_match_from_glob(&source_list)?
+            get_single_match_from_glob(source_list)?
         };
         // Read the source list.
         // TODO: Allow the user to specify a source list type.
@@ -356,8 +361,8 @@ impl SimVisParams {
         debug!("Found {num_points} points, {num_gaussians} gaussians, {num_shapelets} shapelets");
 
         // Apply any filters.
-        let mut source_list = if filter_points || filter_gaussians || filter_shapelets {
-            let sl = source_list.filter(filter_points, filter_gaussians, filter_shapelets);
+        let mut source_list = if *filter_points || *filter_gaussians || *filter_shapelets {
+            let sl = source_list.filter(*filter_points, *filter_gaussians, *filter_shapelets);
             let ComponentCounts {
                 num_points,
                 num_gaussians,
@@ -371,18 +376,18 @@ impl SimVisParams {
         } else {
             source_list
         };
-        let beam = if no_beam {
+        let beam = if *no_beam {
             create_no_beam_object(xyzs.len())
         } else {
             create_fee_beam_object(
-                beam_file,
+                beam_file.as_deref(),
                 metafits.num_ants,
                 match dipole_delays {
                     Some(d) => {
                         if d.len() != 16 || d.iter().any(|&v| v > 32) {
                             return Err(SimulateVisError::BadDelays);
                         }
-                        Delays::Partial(d)
+                        Delays::Partial(d.to_owned())
                     }
                     None => Delays::Full(get_dipole_delays(&metafits)),
                 },
@@ -427,7 +432,7 @@ impl SimVisParams {
             precession_info.array_latitude_j2000,
             &coarse_chan_freqs,
             beam.deref(),
-            num_sources,
+            *num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
@@ -437,7 +442,7 @@ impl SimVisParams {
         Ok(SimVisParams {
             source_list,
             metafits,
-            output_model_file,
+            output_model_file: output_model_file.to_owned(),
             phase_centre,
             fine_chan_freqs,
             freq_res_hz: freq_res * 1e3_f64,
@@ -477,7 +482,7 @@ pub fn simulate_vis(
         }
     }
 
-    let params = SimVisParams::new(args)?;
+    let params = SimVisParams::new(&args)?;
 
     if dry_run {
         info!("Dry run -- exiting now.");
@@ -630,7 +635,11 @@ pub fn simulate_vis(
         )
         .with_position(0)
         .with_message("Sky modelling");
-    model_progress.set_draw_target(ProgressDrawTarget::stdout());
+    model_progress.set_draw_target(if args.no_progress_bars {
+        ProgressDrawTarget::hidden()
+    } else {
+        ProgressDrawTarget::stdout()
+    });
     model_progress.tick();
 
     // Generate the visibilities.

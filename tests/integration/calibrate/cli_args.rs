@@ -130,6 +130,7 @@ fn test_1090008640_di_calibrate_uses_array_position() {
             &format!("{}", exp_long_deg),
             &format!("{}", exp_lat_deg),
             &format!("{}", exp_height_m),
+        "--no-progress-bars",
     ]);
 
     let pos = cal_args.array_position.unwrap();

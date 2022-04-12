@@ -233,7 +233,7 @@ fn try_main() -> Result<(), HyperdriveError> {
             verbosity: _,
             dry_run,
         } => {
-            di_calibrate(cli_args, args_file, dry_run)?;
+            di_calibrate(cli_args, args_file.as_deref(), dry_run)?;
 
             info!("hyperdrive di-calibrate complete.");
         }

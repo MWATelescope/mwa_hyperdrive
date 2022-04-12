@@ -74,6 +74,7 @@ fn test_no_stderr() {
             "--output-model-file", &format!("{}", output_path.display()),
             "--num-timesteps", &format!("{}", num_timesteps),
             "--num-fine-channels", &format!("{}", num_chans),
+            "--no-progress-bars"
         ])
         .ok();
     assert!(cmd.is_ok(), "simulate-vis failed on simple test data!");
@@ -100,6 +101,7 @@ fn test_1090008640_simulate_vis() {
         "--output-model-file", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
+        "--no-progress-bars"
     ]);
 
     // Run simulate-vis and check that it succeeds
@@ -307,6 +309,7 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
         "--output-model-file", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
+        "--no-progress-bars"
     ]);
     let result = simulate_vis(sim_args, true, false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
@@ -352,6 +355,7 @@ fn test_1090008640_simulate_vis_cpu_gpu_match() {
         "--output-model-file", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{}", num_timesteps),
         "--num-fine-channels", &format!("{}", num_chans),
+        "--no-progress-bars"
     ]);
 
     // Run simulate-vis and check that it succeeds

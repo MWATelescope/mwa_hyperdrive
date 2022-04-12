@@ -9,17 +9,13 @@ use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     LatLngHeight,
 };
-use serial_test::serial;
 
 use super::InvalidArgsError::{
     BadArrayPosition, BadDelays, CalFreqFactorNotInteger, CalFreqResNotMulitple,
     CalTimeFactorNotInteger, CalTimeResNotMulitple, CalibrationOutputFile, InvalidDataInput,
     MultipleMeasurementSets, MultipleMetafits, MultipleUvfits, NoInputData, ParsePfbFlavour,
 };
-use crate::{
-    data_formats::RawDataReader,
-    tests::{full_obsids::*, reduced_obsids::*},
-};
+use crate::{data_formats::RawDataReader, tests::reduced_obsids::*};
 use mwa_hyperdrive_common::marlu;
 
 #[test]
@@ -179,17 +175,6 @@ fn test_new_params_tile_flags() {
     assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 5)], 1);
     assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 6)], 2);
     assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 7)], 3);
-}
-
-// The following tests use full MWA data.
-
-#[test]
-#[serial]
-#[ignore = "files not in repo"]
-fn test_new_params_real_data() {
-    let args = get_1065880128();
-    let result = args.into_params();
-    assert!(result.is_ok());
 }
 
 #[test]

@@ -1,10 +1,13 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 use std::ops::Sub;
 
-use mwa_hyperdrive_common::{
-    hifitime::{Duration, Epoch, Unit},
-    itertools::Itertools,
-    lazy_static,
-};
+use hifitime::{Duration, Epoch, Unit};
+use itertools::Itertools;
+
+use mwa_hyperdrive_common::{hifitime, itertools, lazy_static};
 
 lazy_static::lazy_static! {
     static ref DURATION_MAX: Duration = Duration::from_f64(f64::MAX, Unit::Second);
