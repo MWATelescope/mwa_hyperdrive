@@ -31,7 +31,6 @@ use mwa_hyperdrive::{
     calibrate::{di_calibrate, solutions::CalibrationSolutions, CalibrateError},
     data_formats::{InputData, UvfitsReader, MS},
 };
-use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{clap, hifitime, itertools, mwalib, num_traits, vec1};
 use mwa_hyperdrive_srclist::{
     hyperdrive::source_list_to_yaml, ComponentType, FluxDensity, FluxDensityType, Source,
@@ -330,15 +329,14 @@ fn test_1090008640_di_calibrate_writes_vis_uvfits_ms() {
     // check uvfits file has been created, is readable
     assert!(out_uvfits_path.exists(), "out vis file not written");
 
-    let uvfits_data =
-        UvfitsReader::new(&out_uvfits_path, Some(metafits), &mut Delays::None).unwrap();
+    let uvfits_data = UvfitsReader::new(&out_uvfits_path, Some(metafits)).unwrap();
 
     let uvfits_ctx = uvfits_data.get_obs_context();
 
     // check ms file has been created, is readable
     assert!(out_ms_path.exists(), "out vis file not written");
 
-    let ms_data = MS::new(&out_ms_path, Some(metafits), &mut Delays::None).unwrap();
+    let ms_data = MS::new(&out_ms_path, Some(metafits)).unwrap();
 
     let ms_ctx = ms_data.get_obs_context();
 
@@ -395,6 +393,9 @@ pub fn test_cal_vis_output_avg_time() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir").into_path();
 
     let in_vis_path = tmp_dir.join("vis.uvfits");
+    let metafits = PathBuf::from("test_files/1090008640/1090008640.metafits")
+        .canonicalize()
+        .unwrap();
 
     let phase_centre = RADec::new_degrees(0., -27.);
     let array_pos = LatLngHeight::new_mwa();
@@ -457,7 +458,10 @@ pub fn test_cal_vis_output_avg_time() {
     let out_vis_path = tmp_dir.join("cal-vis.uvfits");
 
     let cal_args = CalibrateUserArgs {
-        data: Some(vec![format!("{}", in_vis_path.display())]),
+        data: Some(vec![
+            in_vis_path.display().to_string(),
+            metafits.display().to_string(),
+        ]),
         outputs: Some(vec![out_vis_path.clone()]),
         source_list: Some(format!("{}", srclist_path.display())),
         no_beam: true,
@@ -474,8 +478,7 @@ pub fn test_cal_vis_output_avg_time() {
     // we start at timestep index 1, with averaging 4. Averaged timesteps look like this:
     // [[1, _, 3], [_, _, _], [_, _, 9]]
 
-    let uvfits_reader =
-        UvfitsReader::new::<&PathBuf, &PathBuf>(&out_vis_path, None, &mut Delays::None).unwrap();
+    let uvfits_reader = UvfitsReader::new::<&PathBuf, &PathBuf>(&out_vis_path, None).unwrap();
 
     let uvfits_ctx = uvfits_reader.get_obs_context();
 

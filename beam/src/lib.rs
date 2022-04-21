@@ -22,6 +22,8 @@ mod tests;
 pub use error::*;
 pub use fee::*;
 
+use std::path::Path;
+
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 
@@ -57,6 +59,9 @@ pub trait Beam: Sync + Send {
     /// Get the number of tiles associated with this beam. This is determined by
     /// how many delays have been provided.
     fn get_num_tiles(&self) -> usize;
+
+    /// Get the beam file associated with this beam, if there is one.
+    fn get_beam_file(&self) -> Option<&Path>;
 
     /// Calculate the beam-response Jones matrix for an [AzEl] direction. The
     /// pointing information is not needed because it was provided when `self`
@@ -132,7 +137,7 @@ pub trait BeamCUDA {
 }
 
 /// An enum to track whether MWA dipole delays are provided and/or necessary.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Delays {
     /// Delays are fully specified.
     Full(Array2<u32>),
@@ -140,12 +145,44 @@ pub enum Delays {
     /// Delays are specified for a single tile. If this can't be refined, then
     /// we must assume that these dipoles apply to all tiles.
     Partial(Vec<u32>),
+}
 
-    /// Delays have not been provided, but are necessary for calibration.
-    None,
+impl Delays {
+    /// The delays of some tiles could contain 32 (which means that that
+    /// particular dipole is "dead"). It is sometimes useful to get the "ideal"
+    /// dipole delays; i.e. what the delays for each tile would be if all
+    /// dipoles were alive.
+    pub fn get_ideal_delays(&self) -> [u32; 16] {
+        let mut ideal_delays = [32; 16];
+        match self {
+            Delays::Partial(v) => {
+                // There may be 32 elements per row - 16 for X dipoles, 16 for
+                // Y. We only want 16, take the mod of the column index.
+                v.iter().enumerate().for_each(|(i, &elem)| {
+                    ideal_delays[i % 16] = elem;
+                });
+            }
+            Delays::Full(a) => {
+                // Iterate over all rows until none of the delays are 32.
+                for row in a.outer_iter() {
+                    row.iter().enumerate().for_each(|(i, &col)| {
+                        let ideal_delay = ideal_delays.get_mut(i % 16).unwrap();
 
-    /// Delays are not necessary, probably because no beam code is being used.
-    NotNecessary,
+                        // The delays should be the same, modulo some being
+                        // 32 (i.e. that dipole's component is dead). This
+                        // code will pick the smaller delay of the two
+                        // (delays are always <=32). If both are 32, there's
+                        // nothing else that can be done.
+                        *ideal_delay = (*ideal_delay).min(col);
+                    });
+                    if ideal_delays.iter().all(|&e| e < 32) {
+                        break;
+                    }
+                }
+            }
+        }
+        ideal_delays
+    }
 }
 
 /// A beam implementation that returns only identity Jones matrices for all beam
@@ -161,6 +198,10 @@ impl Beam for NoBeam {
 
     fn get_num_tiles(&self) -> usize {
         self.num_tiles
+    }
+
+    fn get_beam_file(&self) -> Option<&Path> {
+        None
     }
 
     fn calc_jones(

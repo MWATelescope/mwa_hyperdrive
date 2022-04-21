@@ -25,7 +25,7 @@ use mwa_hyperdrive_common::hifitime;
 fn test_1090008640_ms_reads_correctly() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MS::new(ms, Some(metafits), &mut Delays::None) {
+        match MS::new(ms, Some(metafits)) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -181,7 +181,7 @@ fn test_timestep_reading() {
         )
         .unwrap();
 
-    let ms_reader = MS::new::<&PathBuf, &PathBuf>(&vis_path, None, &mut Delays::None).unwrap();
+    let ms_reader = MS::new::<&PathBuf, &PathBuf>(&vis_path, None).unwrap();
     let ms_ctx = ms_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)

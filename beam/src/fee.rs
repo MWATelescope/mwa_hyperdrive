@@ -4,7 +4,7 @@
 
 //! Code for FEE beam calculations.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use log::trace;
 use marlu::{AzEl, Jones};
@@ -26,6 +26,7 @@ pub(super) struct FEEBeam {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
     delays: Array2<u32>,
     gains: Array2<f64>,
+    file: PathBuf,
 }
 
 impl FEEBeam {
@@ -34,17 +35,17 @@ impl FEEBeam {
         num_tiles: usize,
         delays: Delays,
         gains: Option<Array2<f64>>,
+        file: Option<&Path>,
     ) -> Result<FEEBeam, BeamError> {
         let delays = match delays {
             Delays::Full(d) => d,
             Delays::Partial(d) => partial_to_full(d, num_tiles),
-            Delays::None | Delays::NotNecessary => return Err(BeamError::NoDelays),
         };
 
         // If no gains were provided, assume all are alive.
         let gains = match gains {
             Some(g) => g,
-            None => Array2::from_elem(delays.dim(), 1.0),
+            None => Array2::ones(delays.dim()),
         };
 
         // Complain if the dimensions of delays and gains don't match.
@@ -61,6 +62,10 @@ impl FEEBeam {
             hyperbeam_object,
             delays,
             gains,
+            file: match file {
+                Some(p) => p.to_path_buf(),
+                None => PathBuf::from(std::env::var("MWA_BEAM_FILE").unwrap()),
+            },
         })
     }
 
@@ -71,7 +76,7 @@ impl FEEBeam {
         gains: Option<Array2<f64>>,
     ) -> Result<FEEBeam, BeamError> {
         let hyperbeam_object = mwa_hyperbeam::fee::FEEBeam::new(file)?;
-        Self::new_inner(hyperbeam_object, num_tiles, delays, gains)
+        Self::new_inner(hyperbeam_object, num_tiles, delays, gains, Some(file))
     }
 
     pub(super) fn new_from_env(
@@ -80,7 +85,7 @@ impl FEEBeam {
         gains: Option<Array2<f64>>,
     ) -> Result<FEEBeam, BeamError> {
         let hyperbeam_object = mwa_hyperbeam::fee::FEEBeam::new_from_env()?;
-        Self::new_inner(hyperbeam_object, num_tiles, delays, gains)
+        Self::new_inner(hyperbeam_object, num_tiles, delays, gains, None)
     }
 
     fn calc_jones_inner(
@@ -125,6 +130,10 @@ impl Beam for FEEBeam {
 
     fn get_num_tiles(&self) -> usize {
         self.delays.len_of(Axis(0))
+    }
+
+    fn get_beam_file(&self) -> Option<&Path> {
+        Some(&self.file)
     }
 
     fn calc_jones(

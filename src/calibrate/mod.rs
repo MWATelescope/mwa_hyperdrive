@@ -7,6 +7,7 @@
 pub mod args;
 pub mod di;
 mod error;
+mod messages;
 pub(crate) mod params;
 pub mod solutions;
 

@@ -65,13 +65,8 @@ impl MS {
     pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         ms: P,
         metafits: Option<P2>,
-        dipole_delays: &mut Delays,
     ) -> Result<MS, MsReadError> {
-        fn inner(
-            ms: &Path,
-            metafits: Option<&Path>,
-            dipole_delays: &mut Delays,
-        ) -> Result<MS, MsReadError> {
+        fn inner(ms: &Path, metafits: Option<&Path>) -> Result<MS, MsReadError> {
             debug!("Using measurement set: {}", ms.display());
             if !ms.exists() {
                 return Err(MsReadError::BadFile(ms.to_path_buf()));
@@ -240,7 +235,7 @@ impl MS {
                 };
             trace!("MS step: {}", step);
             let unflagged_timesteps: Vec<usize> = {
-                // The first and last good timestep indicies.
+                // The first and last good timestep indices.
                 let mut first: Option<usize> = None;
                 let mut last: Option<usize> = None;
 
@@ -394,92 +389,50 @@ impl MS {
                 }
             };
 
-            // Populate the dipole delays if we need to, and get the pointing centre
-            // if we can.
-            let pointing_centre: Option<RADec> =
-                match (read_table(ms, Some("MWA_TILE_POINTING")), &mwalib_context) {
-                    (Err(_), None) => {
-                        // MWA_TILE_POINTING doesn't exist and no metafits file was
-                        // provided; no changes to the delays can be made here. We also
-                        // know nothing about the pointing centre.
-                        None
-                    }
+            // Populate the dipole delays and the pointing centre if we can.
+            let mut dipole_delays: Option<Delays> = None;
+            let mut pointing_centre: Option<RADec> = None;
 
-                    // MWA_TILE_POINTING exists - use this over the metafits
-                    // file even if it's provided.
-                    (Ok(mut mwa_tile_pointing_table), _) => {
-                        // Only use the measurement set delays if the delays struct
-                        // provided to this function was empty.
-                        match dipole_delays {
-                            Delays::Full(_) | Delays::Partial(_) | Delays::NotNecessary => (),
-                            Delays::None => {
-                                debug!("Using MWA_TILE_POINTING for dipole delays");
-                                let table_delays_signed: Vec<i32> = mwa_tile_pointing_table
-                                    .get_cell_as_vec("DELAYS", 0)
-                                    .unwrap();
-                                let delays_unsigned: Array1<u32> = Array1::from(
-                                    table_delays_signed
-                                        .into_iter()
-                                        .map(|d| d as u32)
-                                        .collect::<Vec<_>>(),
-                                );
-                                let delays = delays_unsigned
-                                    .broadcast((total_num_tiles, delays_unsigned.len()));
+            match (read_table(ms, Some("MWA_TILE_POINTING")), &mwalib_context) {
+                // MWA_TILE_POINTING doesn't exist and no metafits file was
+                // provided; we have no information on the delays. We also know
+                // nothing about the pointing centre.
+                (Err(_), None) => (),
 
-                                // TODO: Error handling, check there are 16 delays,
-                                // print a warning that only one set of delays are
-                                // given?
-                                *dipole_delays = Delays::Full(delays.unwrap().to_owned());
-                            }
-                        }
-                        let pointing_vec: Vec<f64> = mwa_tile_pointing_table
-                            .get_cell_as_vec("DIRECTION", 0)
-                            .unwrap();
-                        Some(RADec::new(pointing_vec[0], pointing_vec[1]))
-                    }
-
-                    // Use the metafits file.
-                    (Err(_), Some(context)) => {
-                        // Only use the metafits delays if none were provided to
-                        // this function.
-                        match dipole_delays {
-                            Delays::Full(_) | Delays::Partial(_) | Delays::NotNecessary => (),
-                            Delays::None => {
-                                debug!("Using metafits for dipole delays");
-                                *dipole_delays = Delays::Full(metafits::get_dipole_delays(context));
-                            }
-                        }
-                        Some(RADec::new_degrees(
-                            context.ra_tile_pointing_degrees,
-                            context.dec_tile_pointing_degrees,
-                        ))
-                    }
-                };
-            match &dipole_delays {
-                Delays::Full(d) => debug!("Dipole delays: {:?}", d),
-                Delays::Partial(d) => debug!("Dipole delays: {:?}", d),
-                Delays::NotNecessary => {
-                    debug!("Dipole delays weren't searched for in input data; not necessary")
+                // Use the metafits file.
+                (_, Some(context)) => {
+                    debug!("Using metafits for dipole delays and pointing centre");
+                    dipole_delays = Some(Delays::Full(metafits::get_dipole_delays(context)));
+                    pointing_centre = Some(RADec::new_degrees(
+                        context.ra_tile_pointing_degrees,
+                        context.dec_tile_pointing_degrees,
+                    ));
                 }
-                Delays::None => {
-                    warn!("Dipole delays not provided and not available in input data!")
+
+                // MWA_TILE_POINTING exists.
+                (Ok(mut mwa_tile_pointing_table), _) => {
+                    debug!("Using MWA_TILE_POINTING for dipole delays and pointing centre");
+                    let table_delays_signed: Vec<i32> = mwa_tile_pointing_table
+                        .get_cell_as_vec("DELAYS", 0)
+                        .unwrap();
+                    let delays_unsigned: Vec<u32> = table_delays_signed
+                        .into_iter()
+                        .map(|d| d as u32)
+                        .collect::<Vec<_>>();
+                    // TODO: Error handling, check there are 16 delays, print a
+                    // warning that only one set of delays are given?
+                    dipole_delays = Some(Delays::Partial(delays_unsigned));
+
+                    let pointing_vec: Vec<f64> = mwa_tile_pointing_table
+                        .get_cell_as_vec("DIRECTION", 0)
+                        .unwrap();
+                    pointing_centre = Some(RADec::new(pointing_vec[0], pointing_vec[1]));
                 }
             }
 
-            // Get dipole information. When interacting with beam code, use a gain
-            // of 0 for dead dipoles, and 1 for all others. cotter doesn't supply
-            // this information; if the user provided a metafits file, we can use
-            // that, otherwise we must assume all dipoles are alive.
-            let dipole_gains: Option<Array2<f64>> = match &mwalib_context {
-                None => {
-                    warn!("Measurement sets do not supply dead dipole information.");
-                    warn!("Without a metafits file, we must assume all dipoles are alive.");
-                    warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                    None
-                }
-
-                Some(context) => Some(metafits::get_dipole_gains(context)),
-            };
+            // Get dipole gain information from the metafits, if it exists.
+            // Measurement sets cannot supply dipole information.
+            let dipole_gains = mwalib_context.as_ref().map(metafits::get_dipole_gains);
 
             // Round the values in here because sometimes they have a fractional
             // component, for some reason. We're unlikely to ever have a fraction of
@@ -589,6 +542,7 @@ impl MS {
                 tile_xyzs,
                 flagged_tiles,
                 _autocorrelations_present: autocorrelations_present,
+                dipole_delays,
                 dipole_gains,
                 time_res,
                 // XXX(Dev): no way to get array_pos from MS AFAIK
@@ -609,11 +563,7 @@ impl MS {
             };
             Ok(ms)
         }
-        inner(
-            ms.as_ref(),
-            metafits.as_ref().map(|f| f.as_ref()),
-            dipole_delays,
-        )
+        inner(ms.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
     }
 }
 

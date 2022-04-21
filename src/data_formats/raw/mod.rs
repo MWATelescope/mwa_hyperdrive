@@ -22,7 +22,7 @@ use std::{
 use birli::PreprocessContext;
 use hifitime::Epoch;
 use itertools::izip;
-use log::{debug, info, trace, warn};
+use log::{debug, trace, warn};
 use marlu::{math::baseline_to_tiles, Jones, LatLngHeight, RADec, VisSelection, XyzGeodetic};
 use mwalib::{CorrelatorContext, GeometricDelaysApplied, MWAVersion, Pol};
 use ndarray::prelude::*;
@@ -78,7 +78,6 @@ impl RawDataReader {
         metadata: &T,
         gpuboxes: &[T],
         mwafs: Option<&[T]>,
-        dipole_delays: &mut Delays,
         pfb_flavour: PfbFlavour,
         digital_gains: bool,
         cable_length_correction: bool,
@@ -134,17 +133,15 @@ impl RawDataReader {
         }
 
         // All delays == 32 is an indication that this observation is "bad".
-        let listed_delays = metafits_context.delays.clone();
-        debug!("Listed observation dipole delays: {:?}", &listed_delays);
+        let listed_delays = &metafits_context.delays;
+        debug!("Listed observation dipole delays: {listed_delays:?}");
         if listed_delays.iter().all(|&d| d == 32) {
             warn!("This observation has been flagged as \"do not use\", according to the metafits delays!");
             true
         } else {
             false
         };
-        if matches!(dipole_delays, Delays::None) {
-            *dipole_delays = Delays::Full(metafits::get_dipole_delays(metafits_context));
-        }
+        let dipole_delays = Delays::Full(metafits::get_dipole_delays(metafits_context));
 
         let mut flagged_tiles: Vec<usize> = tile_flags_set.into_iter().collect();
         flagged_tiles.sort_unstable();
@@ -259,17 +256,10 @@ impl RawDataReader {
 
         let dipole_gains = get_dipole_gains(metafits_context);
 
-        match (
-            mwalib_context.metafits_context.geometric_delays_applied,
-            geometric_correction,
-        ) {
-            (mwalib::GeometricDelaysApplied::No, true) => info!("Geometric delays will be applied"),
+        match mwalib_context.metafits_context.geometric_delays_applied {
+            mwalib::GeometricDelaysApplied::No => (),
 
-            (mwalib::GeometricDelaysApplied::No, false) => {
-                info!("No geometric delays will be applied")
-            }
-
-            (g, _) => info!(
+            g => debug!(
                 "No geometric delays will be applied; metafits indicates {}",
                 g
             ),
@@ -367,6 +357,7 @@ impl RawDataReader {
             tile_xyzs,
             flagged_tiles,
             _autocorrelations_present: true,
+            dipole_delays: Some(dipole_delays),
             dipole_gains: Some(dipole_gains),
             time_res,
             array_position: Some(LatLngHeight::new_mwa()),

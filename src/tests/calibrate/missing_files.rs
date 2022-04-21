@@ -123,7 +123,7 @@ fn missing_mwafs() {
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
     let (stdout, _) = get_cmd_output(cmd);
-    assert!(stdout.contains("No mwaf flag files supplied"), "{}", stdout);
+    assert!(stdout.contains("No mwaf files supplied"), "{}", stdout);
 
     // Include an mwaf file; we don't expect a warning this time.
     let cmd = hyperdrive_di_calibrate(None)
@@ -137,11 +137,7 @@ fn missing_mwafs() {
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
     let (stdout, _) = get_cmd_output(cmd);
-    assert!(
-        !stdout.contains("No mwaf flag files supplied"),
-        "{}",
-        stdout
-    );
+    assert!(!stdout.contains("No mwaf files supplied"), "{}", stdout);
 }
 
 /// Ensure that di-calibrate issues a warning when no mwaf files are supplied
@@ -162,7 +158,7 @@ fn arg_file_missing_mwafs() {
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
     let (stdout, _) = get_cmd_output(cmd);
-    assert!(stdout.contains("No mwaf flag files supplied"), "{}", stdout);
+    assert!(stdout.contains("No mwaf files supplied"), "{}", stdout);
 
     // Include an mwaf file; we don't expect a warning this time.
     let args = get_reduced_1090008640(true);
@@ -176,9 +172,5 @@ fn arg_file_missing_mwafs() {
         .ok();
     assert!(cmd.is_ok(), "{:?}", cmd.unwrap_err());
     let (stdout, _) = get_cmd_output(cmd);
-    assert!(
-        !stdout.contains("No mwaf flag files supplied"),
-        "{}",
-        stdout
-    );
+    assert!(!stdout.contains("No mwaf files supplied"), "{}", stdout);
 }

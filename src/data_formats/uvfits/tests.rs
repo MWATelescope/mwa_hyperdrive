@@ -18,7 +18,6 @@ use crate::{
     math::TileBaselineMaps,
     tests::reduced_obsids::get_reduced_1090008640_uvfits,
 };
-use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{hifitime, itertools, marlu, ndarray};
 
 // TODO(dev): move these to Marlu
@@ -151,7 +150,7 @@ fn write_then_read_uvfits(autos: bool) {
 
     // Inspect the file for sanity's sake!
     let metafits: Option<&str> = None;
-    let result = UvfitsReader::new(&output.path(), metafits, &mut Delays::NotNecessary);
+    let result = UvfitsReader::new(&output.path(), metafits);
     assert!(
         result.is_ok(),
         "Failed to read the just-created uvfits file"
@@ -248,7 +247,7 @@ fn uvfits_io_works_for_auto_correlations() {
 fn test_1090008640_uvfits_reads_correctly() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits), &mut Delays::None) {
+        match UvfitsReader::new(uvfits, Some(metafits)) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -397,8 +396,7 @@ fn test_timestep_reading() {
         .write_uvfits_antenna_table(&tile_names, &tile_xyzs)
         .unwrap();
 
-    let uvfits_reader =
-        UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path, None, &mut Delays::None).unwrap();
+    let uvfits_reader = UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path, None).unwrap();
     let uvfits_ctx = uvfits_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)

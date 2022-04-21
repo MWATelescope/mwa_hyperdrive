@@ -26,17 +26,14 @@ use std::str::FromStr;
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use marlu::{
-    pos::{
-        precession::{precess_time, PrecessionInfo},
-        xyz::xyzs_to_cross_uvws_parallel,
-    },
+    pos::{precession::precess_time, xyz::xyzs_to_cross_uvws_parallel},
     Jones, LatLngHeight, XyzGeodetic,
 };
 use ndarray::ArrayViewMut2;
 use rayon::prelude::*;
 use vec1::Vec1;
 
-use super::{solutions::CalSolutionType, CalibrateUserArgs, Fence, Timeblock};
+use super::{messages, solutions::CalSolutionType, CalibrateUserArgs, Fence, Timeblock};
 use crate::{
     constants::*,
     context::ObsContext,
@@ -50,8 +47,7 @@ use crate::{
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon, vec1};
 use mwa_hyperdrive_srclist::{
-    veto_sources, ComponentCounts, SourceList, SourceListType, DEFAULT_CUTOFF_DISTANCE,
-    DEFAULT_VETO_THRESHOLD,
+    veto_sources, SourceList, SourceListType, DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD,
 };
 
 /// Parameters needed to perform calibration.
@@ -81,12 +77,6 @@ pub(crate) struct CalibrateParams {
     /// all 1.0, but flagged baselines (perhaps due to a UVW cutoff) have values
     /// of 0.0.
     pub(crate) baseline_weights: Vec<f64>,
-
-    /// The number of time samples to average together during calibration.
-    ///
-    /// e.g. If the input data is in 0.5s resolution and this variable was 4,
-    /// then we average 2s worth of data together during calibration.
-    pub(crate) time_average_factor: usize,
 
     /// Blocks of timesteps used for calibration. Each timeblock contains
     /// indices of the input data to average together during calibration. Each
@@ -247,25 +237,6 @@ impl CalibrateParams {
             no_progress_bars,
         }: CalibrateUserArgs,
     ) -> Result<CalibrateParams, InvalidArgsError> {
-        let mut dipole_delays = match (delays, no_beam) {
-            // Check that delays are sensible, regardless if we actually need
-            // them.
-            (Some(d), _) => {
-                if d.len() != 16 || d.iter().any(|&v| v > 32) {
-                    return Err(InvalidArgsError::BadDelays);
-                }
-                Delays::Partial(d)
-            }
-
-            // No delays were provided, but because we're not using beam code,
-            // we don't need them.
-            (None, true) => Delays::NotNecessary,
-
-            // No delays were provided, but they'll be necessary eventually.
-            // Other code should fail if no delays can be found.
-            (None, false) => Delays::None,
-        };
-
         // Handle input data. We expect one of three possibilities:
         // - gpubox files, a metafits file (and maybe mwaf files),
         // - a measurement set (and maybe a metafits file), or
@@ -300,36 +271,31 @@ impl CalibrateParams {
                     },
                 };
 
+                debug!("gpubox files: {:?}", &gpuboxes);
+                debug!("mwaf files: {:?}", &mwafs);
+
                 let input_data = RawDataReader::new(
                     meta,
                     &gpuboxes,
                     mwafs.as_deref(),
-                    &mut dipole_delays,
                     pfb_flavour,
                     !no_digital_gains,
                     !no_cable_length_correction,
                     !no_geometric_correction,
                 )?;
 
-                // Print some high-level information.
-                let obs_context = input_data.get_obs_context();
-                // obsid is always present because we must have a metafits file;
-                // unwrap is safe.
-                info!("Calibrating obsid {}", obs_context.obsid.unwrap());
-                info!("Using metafits: {}", meta.display());
-                info!("Using {} gpubox files", gpuboxes.len());
-                match pfb_flavour {
-                    PfbFlavour::None => info!("Not doing any PFB correction"),
-                    PfbFlavour::Jake => info!("Using 'Jake Jones' PFB gains"),
-                    PfbFlavour::Cotter2014 => info!("Using 'Cotter 2014' PFB gains"),
-                    PfbFlavour::Empirical => info!("Using 'RTS empirical' PFB gains"),
-                    PfbFlavour::Levine => info!("Using 'Alan Levine' PFB gains"),
+                messages::InputFileDetails::Raw {
+                    obsid: input_data.get_obs_context().obsid.unwrap(),
+                    gpubox_count: gpuboxes.len(),
+                    metafits_file_name: meta.display().to_string(),
+                    mwaf: mwafs.as_ref().map(|m| m.len()),
+                    pfb: pfb_flavour,
+                    digital_gains: !no_digital_gains,
+                    cable_length: !no_cable_length_correction,
+                    geometric: !no_geometric_correction,
                 }
-                debug!("gpubox files: {:?}", &gpuboxes);
-                match mwafs {
-                    Some(_) => info!("Using supplied mwaf flags"),
-                    None => warn!("No mwaf flag files supplied"),
-                }
+                .print();
+
                 Box::new(input_data)
             }
 
@@ -354,18 +320,15 @@ impl CalibrateParams {
                     }
                 };
 
-                let input_data = MS::new(&ms, meta, &mut dipole_delays)?;
-                match input_data.get_obs_context().obsid {
-                    Some(o) => info!(
-                        "Calibrating obsid {} from measurement set {}",
-                        o,
-                        input_data.ms.canonicalize()?.display()
-                    ),
-                    None => info!(
-                        "Calibrating measurement set {}",
-                        input_data.ms.canonicalize()?.display()
-                    ),
+                let input_data = MS::new(&ms, meta)?;
+
+                messages::InputFileDetails::MeasurementSet {
+                    obsid: input_data.get_obs_context().obsid,
+                    file_name: ms.display().to_string(),
+                    metafits_file_name: meta.map(|m| m.display().to_string()),
                 }
+                .print();
+
                 Box::new(input_data)
             }
 
@@ -390,18 +353,15 @@ impl CalibrateParams {
                     }
                 };
 
-                let input_data = UvfitsReader::new(&uvfits, meta, &mut dipole_delays)?;
-                match input_data.get_obs_context().obsid {
-                    Some(o) => info!(
-                        "Calibrating obsid {} from uvfits {}",
-                        o,
-                        input_data.uvfits.canonicalize()?.display()
-                    ),
-                    None => info!(
-                        "Calibrating uvfits {}",
-                        input_data.uvfits.canonicalize()?.display()
-                    ),
+                let input_data = UvfitsReader::new(&uvfits, meta)?;
+
+                messages::InputFileDetails::UvfitsFile {
+                    obsid: input_data.get_obs_context().obsid,
+                    file_name: uvfits.display().to_string(),
+                    metafits_file_name: meta.map(|m| m.display().to_string()),
                 }
+                .print();
+
                 Box::new(input_data)
             }
 
@@ -410,20 +370,305 @@ impl CalibrateParams {
 
         let obs_context = input_data.get_obs_context();
 
+        let array_position = match array_position {
+            None => LatLngHeight::new_mwa(),
+            Some(pos) => {
+                if pos.len() != 3 {
+                    return Err(InvalidArgsError::BadArrayPosition { pos });
+                }
+                LatLngHeight {
+                    longitude_rad: pos[0].to_radians(),
+                    latitude_rad: pos[1].to_radians(),
+                    height_metres: pos[2],
+                }
+            }
+        };
+
+        let timesteps_to_use = {
+            match timesteps {
+                None => Vec1::try_from_vec(obs_context.unflagged_timesteps.clone())
+                    .map_err(|_| InvalidArgsError::NoTimesteps)?,
+                Some(mut ts) => {
+                    // Make sure there are no duplicates.
+                    let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
+                    if timesteps_hashset.len() != ts.len() {
+                        return Err(InvalidArgsError::DuplicateTimesteps);
+                    }
+
+                    // Ensure that all specified timesteps are actually available.
+                    for t in &ts {
+                        if !(0..obs_context.timestamps.len()).contains(t) {
+                            return Err(InvalidArgsError::UnavailableTimestep {
+                                got: *t,
+                                last: obs_context.timestamps.len() - 1,
+                            });
+                        }
+                    }
+
+                    ts.sort_unstable();
+                    Vec1::try_from_vec(ts).map_err(|_| InvalidArgsError::NoTimesteps)?
+                }
+            }
+        };
+
+        let precession_info = precess_time(
+            obs_context.phase_centre,
+            obs_context.timestamps[*timesteps_to_use.first()],
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+        );
+
+        // The length of the tile XYZ collection is the total number of tiles in
+        // the array, even if some tiles are flagged.
+        let total_num_tiles = obs_context.tile_xyzs.len();
+
+        // Assign the tile flags.
+        let mut flagged_tiles: Vec<usize> =
+            match tile_flags {
+                Some(flags) => {
+                    // We need to convert the strings into antenna indices. The
+                    // strings are either indicies themselves or antenna names.
+                    let mut flagged_tiles = HashSet::new();
+
+                    for flag in flags {
+                        // Try to parse a naked number.
+                        let result =
+                            match flag.trim().parse().ok() {
+                                Some(n) => {
+                                    if n >= total_num_tiles {
+                                        Err(InvalidArgsError::InvalidTileFlag {
+                                            got: n,
+                                            max: total_num_tiles - 1,
+                                        })
+                                    } else {
+                                        flagged_tiles.insert(n);
+                                        Ok(())
+                                    }
+                                }
+                                None => {
+                                    // Check if this is an antenna name.
+                                    match obs_context.tile_names.iter().enumerate().find(
+                                        |(_, name)| name.to_lowercase() == flag.to_lowercase(),
+                                    ) {
+                                        // If there are no matches, complain that
+                                        // the user input is no good.
+                                        None => Err(InvalidArgsError::BadTileFlag(flag)),
+                                        Some((i, _)) => {
+                                            flagged_tiles.insert(i);
+                                            Ok(())
+                                        }
+                                    }
+                                }
+                            };
+                        if result.is_err() {
+                            // If there's a problem, show all the tile names
+                            // and their indices to help out the user.
+                            info!("All tile indices and names:");
+                            obs_context
+                                .tile_names
+                                .iter()
+                                .enumerate()
+                                .for_each(|(i, name)| {
+                                    info!("    {:3}: {:10}", i, name);
+                                });
+                            // Propagate the error.
+                            result?;
+                        }
+                    }
+
+                    flagged_tiles.into_iter().sorted().collect::<Vec<_>>()
+                }
+                None => vec![],
+            };
+        if !ignore_input_data_tile_flags {
+            // Add tiles that have already been flagged by the input data.
+            for &obs_tile_flag in &obs_context.flagged_tiles {
+                flagged_tiles.push(obs_tile_flag);
+            }
+        }
+        let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
+        if log_enabled!(Debug) {
+            debug!("Tile indices, names and statuses:");
+            obs_context
+                .tile_names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let flagged = flagged_tiles.contains(&i);
+                    (i, name, if flagged { "  flagged" } else { "unflagged" })
+                })
+                .for_each(|(i, name, status)| {
+                    debug!("    {:3}: {:10}: {}", i, name, status);
+                })
+        }
+        if num_unflagged_tiles == 0 {
+            return Err(InvalidArgsError::NoTiles);
+        }
+        messages::ArrayDetails {
+            array_position,
+            array_latitude_j2000: Some(precession_info.array_latitude_j2000),
+            total_num_tiles,
+            num_unflagged_tiles,
+            flagged_tiles: flagged_tiles
+                .iter()
+                .cloned()
+                .sorted()
+                .map(|i| (obs_context.tile_names[i].clone(), i))
+                .collect(),
+        }
+        .print();
+
+        let dipole_delays = match delays {
+            // We have user-provided delays; check that they're are sensible,
+            // regardless of whether we actually need them.
+            Some(d) => {
+                if d.len() != 16 || d.iter().any(|&v| v > 32) {
+                    return Err(InvalidArgsError::BadDelays);
+                }
+                Delays::Partial(d)
+            }
+
+            // No delays were provided; use whatever was in the input data.
+            None => match obs_context.dipole_delays.as_ref() {
+                Some(d) => d.clone(),
+                None => return Err(InvalidArgsError::NoDelays),
+            },
+        };
+        let ideal_delays = dipole_delays.get_ideal_delays();
+        debug!("Ideal dipole delays: {:?}", ideal_delays);
+
         let beam: Box<dyn Beam> = if no_beam {
-            create_no_beam_object(obs_context.tile_xyzs.len())
+            create_no_beam_object(total_num_tiles)
         } else {
             create_fee_beam_object(
                 beam_file,
-                obs_context.tile_xyzs.len(),
+                total_num_tiles,
                 dipole_delays,
                 if unity_dipole_gains {
                     None
                 } else {
+                    // If we don't have dipole gains from the input data, then
+                    // we issue a warning that we must assume no dead dipoles.
+                    if obs_context.dipole_gains.is_none() {
+                        match input_data.get_input_data_type() {
+                            VisInputType::MeasurementSet => {
+                                warn!("Measurement sets cannot supply dead dipole information.");
+                                warn!("Without a metafits file, we must assume all dipoles are alive.");
+                                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                            }
+                            VisInputType::Uvfits => {
+                                warn!("uvfits files cannot supply dead dipole information.");
+                                warn!("Without a metafits file, we must assume all dipoles are alive.");
+                                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                            }
+                            VisInputType::Raw => unreachable!(),
+                        }
+                    }
                     obs_context.dipole_gains.clone()
                 },
             )?
         };
+        let beam_file = beam.get_beam_file();
+        debug!("Beam file: {beam_file:?}");
+
+        // Set up frequency information. Determine all of the fine-channel flags.
+        let mut flagged_fine_chans: HashSet<usize> = match fine_chan_flags {
+            Some(flags) => flags.into_iter().collect(),
+            None => HashSet::new(),
+        };
+        if !ignore_input_data_fine_channel_flags {
+            for &f in &obs_context.flagged_fine_chans {
+                flagged_fine_chans.insert(f);
+            }
+        }
+        // Assign the per-coarse-channel fine-channel flags.
+        let fine_chan_flags_per_coarse_chan: HashSet<usize> = {
+            let mut out_flags = match fine_chan_flags_per_coarse_chan {
+                Some(flags) => flags.into_iter().collect(),
+                None => HashSet::new(),
+            };
+            if !ignore_input_data_fine_channel_flags {
+                for &obs_fine_chan_flag in &obs_context.flagged_fine_chans_per_coarse_chan {
+                    out_flags.insert(obs_fine_chan_flag);
+                }
+            }
+            out_flags
+        };
+        if !ignore_input_data_fine_channel_flags {
+            for (i, _) in obs_context.coarse_chan_nums.iter().enumerate() {
+                for f in &fine_chan_flags_per_coarse_chan {
+                    flagged_fine_chans.insert(f + obs_context.num_fine_chans_per_coarse_chan * i);
+                }
+            }
+        }
+        let mut unflagged_fine_chan_freqs = vec![];
+        for (i_chan, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
+            if !flagged_fine_chans.contains(&i_chan) {
+                unflagged_fine_chan_freqs.push(freq as f64);
+            }
+        }
+        if log_enabled!(Debug) {
+            let unflagged_fine_chans: Vec<_> = (0..obs_context.fine_chan_freqs.len())
+                .into_iter()
+                .filter(|i_chan| !flagged_fine_chans.contains(i_chan))
+                .collect();
+            match unflagged_fine_chans.as_slice() {
+                [] => (),
+                [f] => debug!("Only unflagged fine-channel: {}", f),
+                [f_0, .., f_n] => {
+                    debug!("First unflagged fine-channel: {}", f_0);
+                    debug!("Last unflagged fine-channel:  {}", f_n);
+                }
+            }
+
+            let fine_chan_flags_vec = flagged_fine_chans.iter().sorted().collect::<Vec<_>>();
+            debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
+        }
+        if unflagged_fine_chan_freqs.is_empty() {
+            return Err(InvalidArgsError::NoChannels);
+        }
+
+        messages::ObservationDetails {
+            dipole_delays: ideal_delays,
+            beam_file,
+            num_tiles_with_dead_dipoles: if unity_dipole_gains {
+                None
+            } else {
+                obs_context.dipole_gains.as_ref().map(|array| {
+                    array
+                        .outer_iter()
+                        .filter(|tile_dipole_gains| {
+                            tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
+                        })
+                        .count()
+                })
+            },
+            phase_centre: obs_context.phase_centre,
+            pointing_centre: obs_context.pointing_centre,
+            lmst: precession_info.lmst,
+            lmst_j2000: precession_info.lmst_j2000,
+            available_timesteps: &obs_context.all_timesteps,
+            unflagged_timesteps: &obs_context.unflagged_timesteps,
+            using_timesteps: &timesteps_to_use,
+            first_timestep: Some(obs_context.timestamps[*timesteps_to_use.first()]),
+            last_timestep: if timesteps_to_use.len() > 1 {
+                Some(obs_context.timestamps[*timesteps_to_use.last()])
+            } else {
+                None
+            },
+            time_res_seconds: obs_context.time_res,
+            total_num_channels: obs_context.fine_chan_freqs.len(),
+            num_unflagged_channels: unflagged_fine_chan_freqs.len(),
+            flagged_chans_per_coarse_chan: &obs_context.flagged_fine_chans_per_coarse_chan,
+            first_freq_hz: Some(unflagged_fine_chan_freqs[0]),
+            last_freq_hz: if unflagged_fine_chan_freqs.len() > 1 {
+                Some(*unflagged_fine_chan_freqs.last().unwrap())
+            } else {
+                None
+            },
+            freq_res_hz: obs_context.freq_res,
+        }
+        .print();
 
         // Designate calibration outputs.
         let (output_solutions_filenames, output_vis_filenames) = {
@@ -491,110 +736,6 @@ impl CalibrateParams {
             }
         };
 
-        let timesteps_to_use = {
-            match timesteps {
-                None => Vec1::try_from_vec(obs_context.unflagged_timesteps.clone())
-                    .map_err(|_| InvalidArgsError::NoTimesteps)?,
-                Some(mut ts) => {
-                    // Make sure there are no duplicates.
-                    let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
-                    if timesteps_hashset.len() != ts.len() {
-                        return Err(InvalidArgsError::DuplicateTimesteps);
-                    }
-
-                    // Ensure that all specified timesteps are actually available.
-                    for t in &ts {
-                        if !(0..obs_context.timestamps.len()).contains(t) {
-                            return Err(InvalidArgsError::UnavailableTimestep {
-                                got: *t,
-                                last: obs_context.timestamps.len() - 1,
-                            });
-                        }
-                    }
-
-                    ts.sort_unstable();
-                    Vec1::try_from_vec(ts).map_err(|_| InvalidArgsError::NoTimesteps)?
-                }
-            }
-        };
-
-        let array_position = match array_position {
-            None => LatLngHeight::new_mwa(),
-            Some(pos) => {
-                if pos.len() != 3 {
-                    return Err(InvalidArgsError::BadArrayPosition { pos });
-                }
-                LatLngHeight {
-                    longitude_rad: pos[0].to_radians(),
-                    latitude_rad: pos[1].to_radians(),
-                    height_metres: pos[2],
-                }
-            }
-        };
-
-        // The length of the tile XYZ collection is the total number of tiles in
-        // the array, even if some tiles are flagged.
-        let total_num_tiles = obs_context.tile_xyzs.len();
-
-        // Assign the tile flags.
-        if log_enabled!(Debug) {
-            debug!(
-                "All tile indices and names: {:?}",
-                obs_context
-                    .tile_names
-                    .iter()
-                    .enumerate()
-                    .collect::<Vec<_>>()
-            );
-        }
-        let mut flagged_tiles: Vec<usize> = match tile_flags {
-            Some(flags) => {
-                // We need to convert the strings into antenna indices. The
-                // strings are either indicies themselves or antenna names.
-                let mut flagged_tiles = HashSet::new();
-
-                for flag in flags {
-                    // Try to parse a naked number.
-                    match flag.trim().parse().ok() {
-                        Some(n) => {
-                            if n >= total_num_tiles {
-                                return Err(InvalidArgsError::InvalidTileFlag {
-                                    got: n,
-                                    max: total_num_tiles - 1,
-                                });
-                            }
-                            flagged_tiles.insert(n);
-                        }
-                        None => {
-                            // Check if this is an antenna name.
-                            match obs_context
-                                .tile_names
-                                .iter()
-                                .enumerate()
-                                .find(|(_, name)| name.to_lowercase() == flag.to_lowercase())
-                            {
-                                // If there are no matches, complain that
-                                // the user input is no good.
-                                None => return Err(InvalidArgsError::BadTileFlag(flag)),
-                                Some((i, _)) => flagged_tiles.insert(i),
-                            };
-                        }
-                    }
-                }
-
-                let mut flagged_tiles: Vec<_> = flagged_tiles.into_iter().collect();
-                flagged_tiles.sort_unstable();
-                flagged_tiles
-            }
-            None => vec![],
-        };
-        if !ignore_input_data_tile_flags {
-            // Add tiles that have already been flagged by the input data.
-            for &obs_tile_flag in &obs_context.flagged_tiles {
-                flagged_tiles.push(obs_tile_flag);
-            }
-        }
-
         // Set up the timeblocks.
         let time_average_factor = parse_time_average_factor(
             obs_context.time_res,
@@ -629,44 +770,6 @@ impl CalibrateParams {
         // There must be at least one timeblock for calibration.
         let timeblocks =
             Vec1::try_from_vec(timeblocks).map_err(|_| InvalidArgsError::NoTimesteps)?;
-
-        // Set up frequency information. Determine all of the fine-channel flags.
-        let mut flagged_fine_chans: HashSet<usize> = match fine_chan_flags {
-            Some(flags) => flags.into_iter().collect(),
-            None => HashSet::new(),
-        };
-        if !ignore_input_data_fine_channel_flags {
-            for &f in &obs_context.flagged_fine_chans {
-                flagged_fine_chans.insert(f);
-            }
-        }
-        // Assign the per-coarse-channel fine-channel flags.
-        let fine_chan_flags_per_coarse_chan: HashSet<usize> = {
-            let mut out_flags = match fine_chan_flags_per_coarse_chan {
-                Some(flags) => flags.into_iter().collect(),
-                None => HashSet::new(),
-            };
-            if !ignore_input_data_fine_channel_flags {
-                for &obs_fine_chan_flag in &obs_context.flagged_fine_chans_per_coarse_chan {
-                    out_flags.insert(obs_fine_chan_flag);
-                }
-            }
-            out_flags
-        };
-        if !ignore_input_data_fine_channel_flags {
-            for (i, _) in obs_context.coarse_chan_nums.iter().enumerate() {
-                for f in &fine_chan_flags_per_coarse_chan {
-                    flagged_fine_chans.insert(f + obs_context.num_fine_chans_per_coarse_chan * i);
-                }
-            }
-        }
-
-        let mut unflagged_fine_chan_freqs = vec![];
-        for (i_chan, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
-            if !flagged_fine_chans.contains(&i_chan) {
-                unflagged_fine_chan_freqs.push(freq as f64);
-            }
-        }
 
         // Set up the chanblocks.
         let freq_average_factor =
@@ -718,6 +821,101 @@ impl CalibrateParams {
         }
         let fences = Vec1::try_from_vec(fences).unwrap();
 
+        // XXX(Dev): TileBaselineMaps logic might fit inside FlagContext
+        let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
+
+        let (unflagged_tile_xyzs, unflagged_tile_names): (Vec<XyzGeodetic>, Vec<String>) =
+            obs_context
+                .tile_xyzs
+                .par_iter()
+                .zip(obs_context.tile_names.par_iter())
+                .enumerate()
+                .filter(|(tile_index, _)| !flagged_tiles.contains(tile_index))
+                .map(|(_, (xyz, name))| (*xyz, name.clone()))
+                .unzip();
+
+        // Set baseline weights from UVW cuts. Use a lambda from the centroid
+        // frequency if UVW cutoffs are specified as wavelengths.
+        let freq_centroid = obs_context
+            .fine_chan_freqs
+            .iter()
+            .map(|&u| u as f64)
+            .sum::<f64>()
+            / obs_context.fine_chan_freqs.len() as f64;
+        let lambda = marlu::constants::VEL_C / freq_centroid;
+        let (uvw_min, uvw_min_metres) = {
+            let (quantity, unit) = parse_wavelength(uvw_min.as_deref().unwrap_or(DEFAULT_UVW_MIN))
+                .map_err(InvalidArgsError::ParseUvwMin)?;
+            match unit {
+                WavelengthUnit::M => ((quantity, unit), quantity),
+                WavelengthUnit::L => ((quantity, unit), quantity * lambda),
+            }
+        };
+        let (uvw_max, uvw_max_metres) = match uvw_max {
+            None => ((f64::INFINITY, WavelengthUnit::M), f64::INFINITY),
+            Some(s) => {
+                let (quantity, unit) =
+                    parse_wavelength(&s).map_err(InvalidArgsError::ParseUvwMax)?;
+                match unit {
+                    WavelengthUnit::M => ((quantity, unit), quantity),
+                    WavelengthUnit::L => ((quantity, unit), quantity * lambda),
+                }
+            }
+        };
+
+        let (baseline_weights, num_flagged_baselines) = {
+            let mut baseline_weights = vec![
+                1.0;
+                tile_baseline_maps
+                    .unflagged_cross_baseline_to_tile_map
+                    .len()
+            ];
+            let uvws = xyzs_to_cross_uvws_parallel(
+                &unflagged_tile_xyzs,
+                obs_context
+                    .phase_centre
+                    .to_hadec(precession_info.lmst_j2000),
+            );
+            assert_eq!(baseline_weights.len(), uvws.len());
+            let uvw_min = uvw_min_metres.powi(2);
+            let uvw_max = uvw_max_metres.powi(2);
+            let mut num_flagged_baselines = 0;
+            for (uvw, baseline_weight) in uvws.into_iter().zip(baseline_weights.iter_mut()) {
+                let uvw_length = uvw.u.powi(2) + uvw.v.powi(2) + uvw.w.powi(2);
+                if uvw_length < uvw_min || uvw_length > uvw_max {
+                    *baseline_weight = 0.0;
+                    num_flagged_baselines += 1;
+                }
+            }
+            (baseline_weights, num_flagged_baselines)
+        };
+
+        // Make sure the calibration thresholds are sensible.
+        let mut stop_threshold = stop_thresh.unwrap_or(DEFAULT_STOP_THRESHOLD);
+        let min_threshold = min_thresh.unwrap_or(DEFAULT_MIN_THRESHOLD);
+        if stop_threshold > min_threshold {
+            warn!("Specified stop threshold ({}) is bigger than the min. threshold ({}); capping the stop threshold.", stop_threshold, min_threshold);
+            stop_threshold = min_threshold;
+        }
+        let max_iterations = max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS);
+
+        messages::CalibrationDetails {
+            timesteps_per_timeblock: time_average_factor,
+            channels_per_chanblock: freq_average_factor,
+            num_timeblocks: timeblocks.len(),
+            num_chanblocks: fences.first().chanblocks.len(),
+            uvw_min,
+            uvw_max,
+            num_calibration_baselines: baseline_weights.len() - num_flagged_baselines,
+            total_num_baselines: baseline_weights.len(),
+            lambda,
+            freq_centroid,
+            min_threshold,
+            stop_threshold,
+            max_iterations,
+        }
+        .print();
+
         let mut source_list: SourceList = {
             // Handle the source list argument.
             let sl_pb: PathBuf = match source_list {
@@ -760,14 +958,6 @@ impl CalibrateParams {
         if num_sources == Some(0) || source_list.is_empty() {
             return Err(InvalidArgsError::NoSources);
         }
-        // Print out some coordinates, including their precessed counterparts
-        // (if applicable).
-        let precession_info = precess_time(
-            obs_context.phase_centre,
-            obs_context.timestamps[*timesteps_to_use.first()],
-            array_position.longitude_rad,
-            array_position.latitude_rad,
-        );
         veto_sources(
             &mut source_list,
             precession_info
@@ -784,6 +974,11 @@ impl CalibrateParams {
         if source_list.is_empty() {
             return Err(InvalidArgsError::NoSourcesAfterVeto);
         }
+
+        messages::SkyModelDetails {
+            source_list: &source_list,
+        }
+        .print();
 
         // Handle output visibility arguments.
         let (output_vis_time_average_factor, output_vis_freq_average_factor) =
@@ -842,119 +1037,29 @@ impl CalibrateParams {
                 (time_factor, freq_factor)
             };
 
-        // XXX(Dev): TileBaselineMaps logic might fit inside FlagContext
-        let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
-
-        let (unflagged_tile_xyzs, unflagged_tile_names): (Vec<XyzGeodetic>, Vec<String>) =
-            obs_context
-                .tile_xyzs
-                .par_iter()
-                .zip(obs_context.tile_names.par_iter())
-                .enumerate()
-                .filter(|(tile_index, _)| !flagged_tiles.contains(tile_index))
-                .map(|(_, (xyz, name))| (*xyz, name.clone()))
-                .unzip();
-
-        // Set baseline weights from UVW cuts.
-        let uvw_min = uvw_min.or_else(|| Some(DEFAULT_UVW_MIN.to_string()));
-        let baseline_weights = {
-            let mut baseline_weights = vec![
-                1.0;
-                tile_baseline_maps
-                    .unflagged_cross_baseline_to_tile_map
-                    .len()
-            ];
-            if uvw_min.is_some() || uvw_max.is_some() {
-                // Parse the arguments. If a lambda was used, then we use the
-                // centroid frequency of the observation.
-                let freq_centroid = obs_context
-                    .fine_chan_freqs
-                    .iter()
-                    .map(|&u| u as f64)
-                    .sum::<f64>()
-                    / obs_context.fine_chan_freqs.len() as f64;
-                let mut lambda_used = false;
-                // Let the new uvw_min and uvw_max values be in metres.
-                let uvw_min = match uvw_min {
-                    None => 0.0,
-                    Some(uvw_min) => {
-                        let (quantity, unit) =
-                            parse_wavelength(&uvw_min).map_err(InvalidArgsError::ParseUvwMin)?;
-                        match unit {
-                            WavelengthUnit::M => {
-                                info!("Minimum UVW cutoff: {}m", quantity);
-                                quantity
-                            }
-                            WavelengthUnit::L => {
-                                if !lambda_used {
-                                    info!("Using observation centroid frequency {} MHz to convert lambdas to metres", freq_centroid/1e6);
-                                    lambda_used = true;
-                                }
-                                let metres = marlu::constants::VEL_C / freq_centroid * quantity;
-                                info!("Minimum UVW cutoff: {}λ ({:.3}m)", quantity, metres);
-                                metres
-                            }
-                        }
-                    }
-                };
-                let uvw_max = match uvw_max {
-                    None => f64::INFINITY,
-                    Some(uvw_max) => {
-                        let (quantity, unit) =
-                            parse_wavelength(&uvw_max).map_err(InvalidArgsError::ParseUvwMax)?;
-                        match unit {
-                            WavelengthUnit::M => {
-                                info!("Maximum UVW cutoff: {}m", quantity);
-                                quantity
-                            }
-                            WavelengthUnit::L => {
-                                if !lambda_used {
-                                    info!("Using observation centroid frequency {} MHz to convert lambdas to metres", freq_centroid/1e6);
-                                    // lambda_used = true;
-                                }
-                                let metres = marlu::constants::VEL_C / freq_centroid * quantity;
-                                info!("Maximum UVW cutoff: {}λ ({:.3}m)", quantity, metres);
-                                metres
-                            }
-                        }
-                    }
-                };
-
-                let uvws = xyzs_to_cross_uvws_parallel(
-                    &unflagged_tile_xyzs,
-                    obs_context
-                        .phase_centre
-                        .to_hadec(precession_info.lmst_j2000),
-                );
-                assert_eq!(baseline_weights.len(), uvws.len());
-                uvws.into_par_iter()
-                    .zip(baseline_weights.par_iter_mut())
-                    .for_each(|(uvw, baseline_weight)| {
-                        let uvw_length = uvw.u * uvw.u + uvw.v * uvw.v + uvw.w * uvw.w;
-                        if uvw_length < uvw_min * uvw_min || uvw_length > uvw_max * uvw_max {
-                            *baseline_weight = 0.0;
-                        }
-                    });
-            }
-            baseline_weights
-        };
-
-        // Make sure the thresholds are sensible.
-        let mut stop_threshold = stop_thresh.unwrap_or(DEFAULT_STOP_THRESHOLD);
-        let min_threshold = min_thresh.unwrap_or(DEFAULT_MIN_THRESHOLD);
-        if stop_threshold > min_threshold {
-            warn!("Specified stop threshold ({}) is bigger than the min. threshold ({}); capping the stop threshold.", stop_threshold, min_threshold);
-            stop_threshold = min_threshold;
+        messages::OutputFileDetails {
+            output_solutions: &output_solutions_filenames
+                .iter()
+                .map(|p| p.1.clone())
+                .collect::<Vec<_>>(),
+            output_vis: &output_vis_filenames
+                .iter()
+                .map(|p| p.1.clone())
+                .collect::<Vec<_>>(),
+            input_vis_time_res: obs_context.time_res,
+            input_vis_freq_res: obs_context.freq_res,
+            output_vis_time_average_factor,
+            output_vis_freq_average_factor,
         }
+        .print();
 
-        let params = CalibrateParams {
+        Ok(CalibrateParams {
             input_data,
             beam,
             source_list,
             model_file,
             flagged_tiles,
             baseline_weights,
-            time_average_factor,
             timeblocks,
             timesteps: timesteps_to_use,
             freq_average_factor,
@@ -966,7 +1071,7 @@ impl CalibrateParams {
             unflagged_tile_names,
             unflagged_tile_xyzs,
             array_position,
-            max_iterations: max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS),
+            max_iterations,
             stop_threshold,
             min_threshold,
             output_solutions_filenames,
@@ -976,13 +1081,7 @@ impl CalibrateParams {
             no_progress_bars,
             #[cfg(feature = "cuda")]
             use_cpu_for_modelling: cpu,
-        };
-        let extra_info = ExtraInfo {
-            precession_info,
-            params: &params,
-        };
-        extra_info.log_info()?;
-        Ok(params)
+        })
     }
 
     pub(crate) fn get_obs_context(&self) -> &ObsContext {
@@ -994,7 +1093,7 @@ impl CalibrateParams {
     }
 
     pub(crate) fn get_num_unflagged_tiles(&self) -> usize {
-        self.get_obs_context().tile_xyzs.len() - self.flagged_tiles.len()
+        self.get_total_num_tiles() - self.flagged_tiles.len()
     }
 
     /// The number of calibration timesteps.
@@ -1035,307 +1134,6 @@ impl CalibrateParams {
             &self.tile_to_unflagged_cross_baseline_map,
             &self.flagged_fine_chans,
         )
-    }
-}
-
-/// Extra metadata that is useful to report.
-struct ExtraInfo<'a> {
-    precession_info: PrecessionInfo,
-
-    /// The rest of the parameters.
-    params: &'a CalibrateParams,
-}
-
-impl<'a> ExtraInfo<'a> {
-    fn log_info(self) -> Result<(), InvalidArgsError> {
-        let params = self.params;
-        let obs_context = params.input_data.get_obs_context();
-
-        info!("Array position:     ({})", params.array_position);
-        info!(
-            "Array latitude (J2000):                    {:.4}°",
-            self.precession_info.array_latitude_j2000.to_degrees()
-        );
-        info!(
-            "Phase centre (J2000):          ({:.4}°, {:.4}°)",
-            obs_context.phase_centre.ra.to_degrees(),
-            obs_context.phase_centre.dec.to_degrees()
-        );
-        if let Some(pc) = obs_context.pointing_centre {
-            info!(
-                "Pointing centre:               ({:.4}°, {:.4}°)",
-                pc.ra.to_degrees(),
-                pc.dec.to_degrees()
-            );
-        }
-        info!(
-            "LMST of first timestep:         {:.4}°",
-            self.precession_info.lmst.to_degrees()
-        );
-        info!(
-            "LMST of first timestep (J2000): {:.4}°",
-            self.precession_info.lmst_j2000.to_degrees()
-        );
-
-        let total_num_tiles = params.get_total_num_tiles();
-        let num_unflagged_tiles = params.get_num_unflagged_tiles();
-        info!("Total number of tiles:           {}", total_num_tiles);
-        info!("Number of unflagged tiles:       {}", num_unflagged_tiles);
-        {
-            // Print out the tile flags. Use a vector to sort ascendingly.
-            let mut tile_flags = params.flagged_tiles.iter().collect::<Vec<_>>();
-            tile_flags.sort_unstable();
-            info!("Tile flags: {:?}", tile_flags);
-        }
-        if num_unflagged_tiles == 0 {
-            return Err(InvalidArgsError::NoTiles);
-        }
-        if log_enabled!(Debug) {
-            debug!("Tile indices, names and statuses:");
-            obs_context
-                .tile_names
-                .iter()
-                .enumerate()
-                .map(|(i, name)| {
-                    let flagged = params.flagged_tiles.contains(&i);
-                    (i, name, if flagged { "  flagged" } else { "unflagged" })
-                })
-                .for_each(|(i, name, status)| {
-                    debug!("    {:3}: {:10}: {}", i, name, status);
-                })
-        }
-
-        info!(
-            "{}",
-            range_or_comma_separated(&obs_context.all_timesteps, Some("Available timesteps:"))
-        );
-        info!(
-            "{}",
-            range_or_comma_separated(
-                &obs_context.unflagged_timesteps,
-                Some("Unflagged timesteps:")
-            )
-        );
-        // We don't require the timesteps to be used in calibration to be
-        // sequential. But if they are, it looks a bit neater to print them out
-        // as a range rather than individual indicies.
-        info!(
-            "{}",
-            range_or_comma_separated(&self.params.timesteps, Some("Using timesteps:    "))
-        );
-
-        match self.params.timesteps.as_slice() {
-            [] => unreachable!(),
-            [t] => info!(
-                "Only timestep (GPS): {:.2}",
-                obs_context.timestamps[*t].as_gpst_seconds()
-            ),
-            [t0, .., tn] => {
-                info!(
-                    "First timestep (GPS): {:.2}",
-                    obs_context.timestamps[*t0].as_gpst_seconds()
-                );
-                info!(
-                    "Last timestep  (GPS): {:.2}",
-                    obs_context.timestamps[*tn].as_gpst_seconds()
-                );
-            }
-        }
-
-        match obs_context.time_res {
-            Some(native) => {
-                info!("Input data time resolution:  {:.2} seconds", native);
-            }
-            None => info!("Input data time resolution unknown"),
-        }
-        match obs_context.freq_res {
-            Some(freq_res) => {
-                info!("Input data freq. resolution: {:.2} kHz", freq_res / 1e3);
-            }
-            None => info!("Input data freq. resolution unknown"),
-        }
-
-        info!(
-            "Total number of fine channels:     {}",
-            obs_context.fine_chan_freqs.len()
-        );
-        info!(
-            "Number of unflagged fine channels: {}",
-            params.unflagged_fine_chan_freqs.len()
-        );
-        if log_enabled!(Debug) {
-            let unflagged_fine_chans: Vec<_> = (0..obs_context.fine_chan_freqs.len())
-                .into_iter()
-                .filter(|i_chan| !params.flagged_fine_chans.contains(i_chan))
-                .collect();
-            match unflagged_fine_chans.as_slice() {
-                [] => unreachable!(), // Handled by data-reading code.
-                [f] => debug!("Only unflagged fine-channel: {}", f),
-                [f_0, .., f_n] => {
-                    debug!("First unflagged fine-channel: {}", f_0);
-                    debug!("Last unflagged fine-channel:  {}", f_n);
-                }
-            }
-        }
-        info!(
-            "Input data's fine-channel flags per coarse channel: {:?}",
-            obs_context.flagged_fine_chans_per_coarse_chan
-        );
-        if log_enabled!(Debug) {
-            let mut fine_chan_flags_vec = params.flagged_fine_chans.iter().collect::<Vec<_>>();
-            fine_chan_flags_vec.sort_unstable();
-            debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
-        }
-        match params.unflagged_fine_chan_freqs.as_slice() {
-            [] => return Err(InvalidArgsError::NoChannels),
-            [f] => info!("Only unflagged fine-channel frequency: {:.2} MHz", f / 1e6),
-            [f_0, .., f_n] => {
-                info!(
-                    "First unflagged fine-channel frequency: {:.2} MHz",
-                    f_0 / 1e6
-                );
-                info!(
-                    "Last unflagged fine-channel frequency:  {:.2} MHz",
-                    f_n / 1e6
-                );
-            }
-        }
-
-        info!(
-            "Averaging {} timesteps into each timeblock",
-            params.time_average_factor,
-        );
-        info!(
-            "Averaging {} fine-freq. channels into each chanblock",
-            params.freq_average_factor,
-        );
-        info!(
-            "Number of calibration timeblocks: {}",
-            params.timeblocks.len()
-        );
-        info!(
-            "Number of calibration chanblocks: {}",
-            params.fences.first().chanblocks.len()
-        );
-
-        let ComponentCounts {
-            num_points,
-            num_gaussians,
-            num_shapelets,
-            ..
-        } = params.source_list.get_counts();
-        let num_components = num_points + num_gaussians + num_shapelets;
-        info!(
-            "Using {} sources with a total of {} components",
-            params.source_list.len(),
-            num_components
-        );
-        info!("{num_points} point components");
-        info!("{num_gaussians} Gaussian components");
-        info!("{num_shapelets} shapelet components");
-        if num_components > 10000 {
-            warn!("Using more than 10,000 components!");
-        }
-        trace!("Using sources: {:?}", params.source_list.keys());
-
-        if !params.output_solutions_filenames.is_empty() {
-            info!(
-                "Writing calibration solutions to: {}",
-                params
-                    .output_solutions_filenames
-                    .iter()
-                    .map(|(_, pb)| pb.display())
-                    .join(", ")
-            );
-        }
-        if !params.output_vis_filenames.is_empty() {
-            info!(
-                "Writing calibrated visibilities to: {}",
-                params
-                    .output_vis_filenames
-                    .iter()
-                    .map(|(_, pb)| pb.display())
-                    .join(", ")
-            );
-
-            info!("Averaging output calibrated visibilities");
-            if let Some(tr) = obs_context.time_res {
-                info!(
-                    "    {}x in time  ({}s)",
-                    params.output_vis_time_average_factor,
-                    tr * params.output_vis_time_average_factor as f64
-                );
-            } else {
-                info!(
-                    "    {}x (only one timestep)",
-                    params.output_vis_time_average_factor
-                );
-            }
-
-            if let Some(fr) = obs_context.freq_res {
-                info!(
-                    "    {}x in freq. ({}kHz)",
-                    params.output_vis_freq_average_factor,
-                    fr * params.output_vis_freq_average_factor as f64 / 1000.0
-                );
-            } else {
-                info!(
-                    "    {}x (only one fine channel)",
-                    params.output_vis_freq_average_factor
-                );
-            }
-        }
-
-        Ok(())
-    }
-}
-
-// It looks a bit neater to print out a collection of numbers as a range rather
-// than individual indicies if they're sequential. This function inspects a
-// collection and returns a string to be printed.
-fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> String {
-    if collection.is_empty() {
-        return "".to_string();
-    }
-
-    let mut iter = collection.iter();
-    let mut prev = *iter.next().unwrap();
-    // Innocent until proven guilty.
-    let mut is_sequential = true;
-    for next in iter {
-        if *next == prev + 1 {
-            prev = *next;
-        } else {
-            is_sequential = false;
-            break;
-        }
-    }
-
-    if is_sequential {
-        let suffix = if collection.len() == 1 {
-            format!("[{}]", collection[0])
-        } else {
-            format!(
-                "[{:?})",
-                (*collection.first().unwrap()..*collection.last().unwrap() + 1)
-            )
-        };
-        if let Some(p) = prefix {
-            format!("{} {}", p, suffix)
-        } else {
-            suffix
-        }
-    } else {
-        let suffix = collection
-            .iter()
-            .map(|t| t.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        if let Some(p) = prefix {
-            format!("{} [{}]", p, suffix)
-        } else {
-            suffix
-        }
     }
 }
 

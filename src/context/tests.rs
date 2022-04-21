@@ -7,6 +7,7 @@ use marlu::{RADec, XyzGeodetic};
 use vec1::vec1;
 
 use crate::context::ObsContext;
+use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{hifitime, marlu, vec1};
 
 fn get_minimal_obs_context() -> ObsContext {
@@ -21,6 +22,7 @@ fn get_minimal_obs_context() -> ObsContext {
         tile_xyzs: vec1![XyzGeodetic::default()],
         flagged_tiles: vec![],
         _autocorrelations_present: false,
+        dipole_delays: Some(Delays::Partial(vec![0; 16])),
         dipole_gains: None,
         time_res: None,
         array_position: None,

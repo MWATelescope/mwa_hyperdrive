@@ -197,24 +197,6 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
         }
     }
 
-    let mut dipole_delays = match (dipole_delays, no_beam) {
-        // Check that delays are sensible, regardless if we actually need them.
-        (Some(d), _) => {
-            if d.len() != 16 || d.iter().any(|&v| v > 32) {
-                return Err(VisSubtractError::BadDelays);
-            }
-            Delays::Partial(d.clone())
-        }
-
-        // No delays were provided, but because we're not using beam code,
-        // we don't need them.
-        (None, true) => Delays::NotNecessary,
-
-        // No delays were provided, but they'll be necessary eventually.
-        // Other code should fail if no delays can be found.
-        (None, false) => Delays::None,
-    };
-
     // Prepare an input data reader.
     let input_data_types = InputDataTypes::new(data)?;
     let input_data: Box<dyn InputData> = match (
@@ -245,7 +227,7 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
                 }
             };
 
-            let input_data = MS::new(&ms, meta, &mut dipole_delays)?;
+            let input_data = MS::new(&ms, meta)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from measurement set {}",
@@ -281,7 +263,7 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
                 }
             };
 
-            let input_data = UvfitsReader::new(&uvfits, meta, &mut dipole_delays)?;
+            let input_data = UvfitsReader::new(&uvfits, meta)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from uvfits {}",
@@ -312,9 +294,24 @@ fn vis_subtract(args: &VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtract
     );
 
     // Set up the beam for modelling.
+    let dipole_delays = match dipole_delays {
+        // We have user-provided delays; check that they're are sensible,
+        // regardless of whether we actually need them.
+        Some(d) => {
+            if d.len() != 16 || d.iter().any(|&v| v > 32) {
+                return Err(VisSubtractError::BadDelays);
+            }
+            Some(Delays::Partial(d.clone()))
+        }
+
+        // No delays were provided; use whatever was in the input data.
+        None => obs_context.dipole_delays.clone(),
+    };
+
     let beam: Box<dyn Beam> = if *no_beam {
         create_no_beam_object(obs_context.tile_xyzs.len())
     } else {
+        let dipole_delays = dipole_delays.ok_or(VisSubtractError::NoDelays)?;
         create_fee_beam_object(
             beam_file.as_deref(),
             obs_context.tile_xyzs.len(),

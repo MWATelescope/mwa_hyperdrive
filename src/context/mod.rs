@@ -15,6 +15,7 @@ use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
 use vec1::Vec1;
 
+use mwa_hyperdrive_beam::Delays;
 use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray, vec1};
 
 /// MWA observation metadata.
@@ -72,6 +73,12 @@ pub struct ObsContext {
 
     /// Are auto-correlations present in the visibility data?
     pub(crate) _autocorrelations_present: bool,
+
+    /// The dipole delays for each tile in the array. They are necessary for
+    /// anything requiring beam responses. Not all input data specify the
+    /// delays, but it still possible to continue if the delays are supplied
+    /// another way (e.g. user-specified delays).
+    pub(crate) dipole_delays: Option<Delays>,
 
     /// The dipole gains for each tile in the array. The first axis is unflagged
     /// antenna, the second dipole index. These will typically all be of value

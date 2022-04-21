@@ -52,13 +52,8 @@ impl UvfitsReader {
     pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         uvfits: P,
         metafits: Option<P2>,
-        dipole_delays: &mut Delays,
     ) -> Result<UvfitsReader, UvfitsReadError> {
-        fn inner(
-            uvfits: &Path,
-            metafits: Option<&Path>,
-            dipole_delays: &mut Delays,
-        ) -> Result<UvfitsReader, UvfitsReadError> {
+        fn inner(uvfits: &Path, metafits: Option<&Path>) -> Result<UvfitsReader, UvfitsReadError> {
             // If a metafits file was provided, get an mwalib object ready.
             // TODO: Let the user supply the MWA version.
             let mwalib_context = match metafits {
@@ -134,35 +129,16 @@ impl UvfitsReader {
                 RADec::new_degrees(ra, dec)
             };
 
-            // Get the dipole delays and the pointing centre (if possible).
-            let pointing_centre: Option<RADec> = match &mwalib_context {
-                Some(context) => {
-                    // Only use the metafits delays if none were provided to
-                    // this function.
-                    match dipole_delays {
-                        Delays::Full(_) | Delays::Partial(_) | Delays::NotNecessary => (),
-                        Delays::None => {
-                            debug!("Using metafits for dipole delays");
-                            *dipole_delays = Delays::Full(metafits::get_dipole_delays(context));
-                        }
-                    }
-                    Some(RADec::new_degrees(
-                        context.ra_tile_pointing_degrees,
-                        context.dec_tile_pointing_degrees,
-                    ))
-                }
-
-                None => None,
-            };
-            match &dipole_delays {
-                Delays::Full(d) => debug!("Dipole delays: {:?}", d),
-                Delays::Partial(d) => debug!("Dipole delays: {:?}", d),
-                Delays::NotNecessary => {
-                    debug!("Dipole delays weren't searched for in input data; not necessary")
-                }
-                Delays::None => {
-                    warn!("Dipole delays not provided and not available in input data!")
-                }
+            // Populate the dipole delays and the pointing centre if we can.
+            let mut dipole_delays: Option<Delays> = None;
+            let mut pointing_centre: Option<RADec> = None;
+            if let Some(context) = &mwalib_context {
+                debug!("Using metafits for dipole delays and pointing centre");
+                dipole_delays = Some(Delays::Full(metafits::get_dipole_delays(context)));
+                pointing_centre = Some(RADec::new_degrees(
+                    context.ra_tile_pointing_degrees,
+                    context.dec_tile_pointing_degrees,
+                ));
             }
 
             // Work out the tile flags.
@@ -261,14 +237,7 @@ impl UvfitsReader {
             );
 
             // Get the dipole gains. Only available with a metafits.
-            let dipole_gains: Option<Array2<f64>> = match &mwalib_context {
-                Some(context) => Some(metafits::get_dipole_gains(context)),
-                None => {
-                    warn!("Without a metafits file, we must assume all dipoles are alive.");
-                    warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                    None
-                }
-            };
+            let dipole_gains = mwalib_context.as_ref().map(metafits::get_dipole_gains);
 
             // Get the obsid. There is an "obs. name" in the "object" filed, but
             // that's not the same thing.
@@ -358,6 +327,7 @@ impl UvfitsReader {
                 tile_xyzs,
                 flagged_tiles,
                 _autocorrelations_present: metadata.autocorrelations_present,
+                dipole_delays,
                 dipole_gains,
                 time_res,
                 // XXX(Dev): Can this be obtained from the ARRAY{X,Y,Z} keys? (geocentric, wgs84)
@@ -379,11 +349,7 @@ impl UvfitsReader {
                 step,
             })
         }
-        inner(
-            uvfits.as_ref(),
-            metafits.as_ref().map(|f| f.as_ref()),
-            dipole_delays,
-        )
+        inner(uvfits.as_ref(), metafits.as_ref().map(|f| f.as_ref()))
     }
 }
 
