@@ -24,7 +24,7 @@ use mwa_hyperdrive_common::{hifitime, thiserror};
 /// Given *all* the available timestamps in some input data, the number of
 /// timesteps to average together into a timeblock and which timesteps to use,
 /// return timeblocks to be used for calibration.
-pub(super) fn timesteps_to_timeblocks(
+pub fn timesteps_to_timeblocks(
     all_timestamps: &[Epoch],
     time_average_factor: usize,
     timesteps_to_use: &[usize],
@@ -83,7 +83,7 @@ pub(super) fn timesteps_to_timeblocks(
 /// Returns a vector of [Fence]s (potentially multiple contiguous-bands of fine
 /// channels) to use in calibration. If there's more than one [Fence], then this
 /// is a "picket fence" observation.
-pub(super) fn channels_to_chanblocks(
+pub fn channels_to_chanblocks(
     all_channel_freqs: &[u64],
     frequency_resolution: Option<f64>,
     freq_average_factor: usize,

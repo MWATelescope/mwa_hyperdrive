@@ -9,11 +9,12 @@
 #[cfg(test)]
 mod tests;
 
+use birli::Complex;
 use hifitime::Epoch;
 use std::collections::HashMap;
 
 use crate::time::round_hundredths_of_a_second;
-use mwa_hyperdrive_common::{c64, hifitime};
+use mwa_hyperdrive_common::{c64, hifitime, num_traits::Float};
 
 // Make traditional trigonometry possible.
 /// Sine.
@@ -67,9 +68,10 @@ pub(crate) fn exp(x: f64) -> f64 {
 ///
 /// `assert_abs_diff_eq!(cexp(PI), c64::new(-1.0, 0.0));`
 #[inline]
-pub(crate) fn cexp(x: f64) -> c64 {
+pub fn cexp<F>(x: F) -> Complex<F> 
+where F: Float {
     let (im, re) = x.sin_cos();
-    c64::new(re, im)
+    Complex::<F>::new(re, im)
 }
 
 /// Is the supplied number prime? This isn't necessarily efficient code; it's

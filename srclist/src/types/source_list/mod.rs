@@ -175,6 +175,54 @@ impl IntoIterator for SourceList {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct IonoSourceList(IndexMap<String, IonoSource>);
+
+impl IonoSourceList {
+    /// Create an empty [SourceList].
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl From<IndexMap<String, IonoSource>> for IonoSourceList {
+    fn from(sl: IndexMap<String, IonoSource>) -> Self {
+        Self(sl)
+    }
+}
+
+impl From<IonoSourceList> for SourceList {
+    fn from(val: IonoSourceList) -> Self {
+        SourceList::from(val.0
+            .into_iter()
+            .map(|(name, src)| (name, src.source))
+            .collect::<IndexMap<String, Source>>())
+    }
+}
+
+impl Deref for IonoSourceList {
+    type Target = IndexMap<String, IonoSource>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for IonoSourceList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl IntoIterator for IonoSourceList {
+    type Item = (String, IonoSource);
+    type IntoIter = indexmap::map::IntoIter<String, IonoSource>;
+
+    fn into_iter(self) -> indexmap::map::IntoIter<String, IonoSource> {
+        self.0.into_iter()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ComponentCounts {
     pub num_points: usize,

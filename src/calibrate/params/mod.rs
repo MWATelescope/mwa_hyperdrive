@@ -18,6 +18,7 @@ mod tests;
 pub(crate) use error::*;
 use filenames::InputDataTypes;
 use helpers::*;
+pub use helpers::{channels_to_chanblocks, timesteps_to_timeblocks};
 
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;

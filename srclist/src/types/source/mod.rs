@@ -58,3 +58,10 @@ impl Source {
             .collect()
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IonoSource {
+    /// The components associated with the source.
+    pub source: Source,
+    pub iono_consts: (f64, f64)
+}

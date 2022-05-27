@@ -14,6 +14,7 @@ pub(crate) mod flagging;
 pub(crate) mod glob;
 pub mod math;
 pub mod model;
+pub use model::new_cpu_sky_modeller;
 pub(crate) mod pfb_gains;
 pub mod simulate_vis;
 pub(crate) mod time;

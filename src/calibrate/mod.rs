@@ -10,6 +10,8 @@ mod error;
 pub(crate) mod params;
 pub mod solutions;
 
+pub use params::{channels_to_chanblocks, timesteps_to_timeblocks};
+
 use args::CalibrateUserArgs;
 pub use error::CalibrateError;
 use solutions::CalibrationSolutions;
@@ -106,15 +108,15 @@ pub struct Chanblock {
 /// allow a "picket fence" observation to be represented. Calibration is run on
 /// each independent `Fence`.
 #[derive(Debug)]
-pub(crate) struct Fence {
+pub struct Fence {
     /// The unflagged calibration [Chanblock]s in this [Fence].
-    pub(crate) chanblocks: Vec<Chanblock>,
+    pub chanblocks: Vec<Chanblock>,
 
     /// The indices of the flagged chanblocks.
     ///
     /// The type is `u16` to keep the memory usage down; these probably need to
     /// be promoted to `usize` when being used.
-    pub(crate) flagged_chanblock_indices: Vec<u16>,
+    pub flagged_chanblock_indices: Vec<u16>,
 
     /// The first chanblock's centroid frequency (may be flagged) \[Hz\].
     pub(crate) first_freq: f64,
