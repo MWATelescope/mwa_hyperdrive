@@ -1,4 +1,4 @@
-use indexmap::{indexmap, IndexMap};
+use indexmap::indexmap;
 use mwa_hyperdrive::{
     calibrate::{
         channels_to_chanblocks, di::calibrate_timeblocks, timesteps_to_timeblocks, solutions::CalibrationSolutions
@@ -6,15 +6,23 @@ use mwa_hyperdrive::{
     constants::{DEFAULT_MAX_ITERATIONS, DEFAULT_MIN_THRESHOLD, DEFAULT_STOP_THRESHOLD},
     model::new_sky_modeller,
     HyperdriveError,
-    math::cexp,
+    math::{cexp},
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{
     hifitime::{Duration, Epoch, Unit},
     itertools::{izip, Itertools},
     mwalib,
-    num_traits::{Float, Num, NumAssign, Zero},
+    num_traits::{Float, Num, NumAssign, Zero, One},
     vec1::vec1,
+    Jones, Complex,
+    marlu::{
+        constants::VEL_C,
+        precession::{get_lmst, precess_time},
+        LatLngHeight, MeasurementSetWriter, ObsContext as MarluObsContext, RADec,
+        VisContext, VisWritable, XyzGeodetic, UVW,
+    },
+    ndarray::{Array3, Axis}
 };
 use mwa_hyperdrive_srclist::{
     hyperdrive::source_list_to_yaml, ComponentType, FluxDensity, FluxDensityType,
@@ -22,23 +30,14 @@ use mwa_hyperdrive_srclist::{
 };
 use ndarray::{s, ArrayView3, ArrayViewMut3, Array2};
 use std::{
-    collections::{HashSet},
-    f64::consts::{PI, TAU},
+    collections::HashSet,
+    f64::consts::TAU,
     fs::File,
     io::{BufWriter, Write},
-    ops::{Deref},
-    path::{PathBuf},
+    ops::Deref,
+    path::PathBuf,
 };
 
-use birli::{
-    marlu::{
-        constants::VEL_C,
-        precession::{get_lmst, precess_time},
-        sexagesimal::{sexagesimal_dms_to_degrees, sexagesimal_hms_to_float},
-        LatLngHeight, MeasurementSetWriter, ObsContext as MarluObsContext, RADec,
-        VisContext, VisWritable, XyzGeodetic, UVW, LMN,
-    },
-    Array3, Axis, Jones};
 
 // apply ionospheric rotation
 fn apply_iono<F>(
@@ -95,6 +94,101 @@ fn apply_iono<F>(
             }
         }
     }
+}
+
+// Generic factorial function.
+//
+// Stolen from https://gist.github.com/derceg/9362312
+// Accepts a reference to any type
+// that implements the Int trait
+// (e.g. int, uint, BigInt, BigUint,
+// etc).
+// It is up to the caller to ensure
+// that the input is >= 0. */
+pub fn factorial<T>(num: &T) -> T
+where
+    T: Num + One + Zero + Copy,
+{
+	if *num == Zero::zero() ||
+		*num == One::one() {
+		One::one()
+	} else {
+		*num * factorial(&(*num - One::one()))
+	}
+}
+
+// apply ionospheric rotation approximation by `order` taylor expansion terms
+fn apply_iono_approx<F>(
+    mut jones: ArrayViewMut3<Jones<F>>,
+    phase_centre: RADec,
+    ant_pairs: &[(usize, usize)],
+    tile_xyzs: &[XyzGeodetic],
+    freqs_hz: &[f64],
+    centroid_timestamps: &[Epoch],
+    array_pos: LatLngHeight,
+    // constants of proportionality for ionospheric offset in l,m
+    const_lm: (f64, f64),
+    order: usize,
+) where
+    F: Float + Num + NumAssign + Default,
+{
+    let jones_dims = jones.dim();
+
+    assert_eq!(jones_dims.0, centroid_timestamps.len());
+    assert_eq!(jones_dims.1, ant_pairs.len());
+    assert_eq!(jones_dims.2, freqs_hz.len());
+
+    // pre-compute partial uvws:
+    let part_uvws = calc_part_uvws(ant_pairs, centroid_timestamps, phase_centre, array_pos, tile_xyzs);
+
+    let lambdas_2 = freqs_hz.iter().map(|freq_hz| {
+        (VEL_C * VEL_C) / (freq_hz * freq_hz)
+    }).collect::<Vec<_>>();
+
+    // debug
+    let mut max_uv_lm = 0.0;
+
+    // iterate along time axis
+    for (
+        mut jones,
+        part_uvws
+    ) in izip!(
+        jones.outer_iter_mut(),
+        part_uvws.outer_iter(),
+    ) {
+        // iterate along baseline axis
+        for (
+            mut jones,
+            &(ant1, ant2)
+        ) in izip!(
+            jones.outer_iter_mut(),
+            ant_pairs
+        ) {
+            let uvw= part_uvws[[ant1]] - part_uvws[[ant2]];
+            let uv_lm = uvw.u * const_lm.0 + uvw.v * const_lm.1;
+            if uv_lm > max_uv_lm {
+                max_uv_lm = uv_lm;
+            }
+            // iterate along frequency axis
+            for (
+                jones,
+                lambda_2,
+            ) in izip!(
+                jones.iter_mut(),
+                &lambdas_2
+            ) {
+                // first order taylor expansion, data D from rotation of model M
+                // D = M * exp(-i * phi * lambda^2 )
+                //   = M * (1 - i * phi * lambda^2 + ... )
+                let exponent = - Complex::i() * F::from(TAU * uv_lm * lambda_2).unwrap();
+                let rotation: Complex<F> = (0..=order).map(|n| {
+                    exponent.powi(n as i32) / F::from(factorial(&n)).unwrap()
+                }).sum();
+                *jones *= rotation;
+            }
+        }
+    }
+    // eprintln!("max uv_lm: {}", max_uv_lm);
 }
 
 fn calc_part_uvws(
@@ -241,7 +335,7 @@ fn rotate_accumulate<F>(
                     ) {
                         // XXX(Dev): not sure if sign is right here
                         let rotation = cexp(F::from(-TAU * arg_w_diff * (freq_hz as f64) / VEL_C).unwrap());
-                        let jones_rotated = Jones::<F>::from(*jones * rotation);
+                        let jones_rotated = *jones * rotation;
                         jones_sum += jones_rotated;
                         if weight.abs() > 0. {
                             avg_flag = false;
@@ -285,13 +379,13 @@ fn vis_rotate<F>(
     assert_eq!(jones_dims.1, ant_pairs.len());
     assert_eq!(jones_dims.2, freqs_hz.len());
 
-    // eprintln!("phase from {:?} to {:?}", phase_from, phase_to);
+    eprintln!("phase from {:?} to {:?}", phase_from, phase_to);
 
     // let lmn = phase_to.to_lmn(phase_from);
 
     // pre-compute partial uvws:
-    let part_uvws_from = calc_part_uvws(ant_pairs, &centroid_timestamps, phase_from, array_pos, tile_xyzs);
-    let part_uvws_to = calc_part_uvws(ant_pairs, &centroid_timestamps, phase_to, array_pos, tile_xyzs);
+    let part_uvws_from = calc_part_uvws(ant_pairs, centroid_timestamps, phase_from, array_pos, tile_xyzs);
+    let part_uvws_to = calc_part_uvws(ant_pairs, centroid_timestamps, phase_to, array_pos, tile_xyzs);
 
     // iterate along time axis in chunks of avg_time
     for (
@@ -327,99 +421,6 @@ fn vis_rotate<F>(
         }
     };
 }
-
-fn vis_average<F>(
-    jones: ArrayView3<Jones<F>>,
-    mut jones_avg: ArrayViewMut3<Jones<F>>,
-    weight: ArrayView3<f32>,
-    mut weight_avg: ArrayViewMut3<F>,
-    avg_time: usize,
-    avg_freq: usize,
-) where
-    F: Float + Num + Default + NumAssign,
-{
-    let jones_dims = jones.dim();
-    let weight_dims = weight.dim();
-    assert_eq!(weight_dims, jones_dims);
-
-    let avg_dims = (
-        (jones_dims.0 as f64 / avg_time as f64).ceil() as usize,
-        jones_dims.1,
-        (jones_dims.2 as f64 / avg_freq as f64).ceil() as usize,
-    );
-
-    assert_eq!(avg_dims, jones_avg.dim());
-    assert_eq!(avg_dims, weight_avg.dim());
-
-    // let mut jones_avg = Array3::<Jones<F>>::zeros(avg_dims);
-    // let mut weight_avg = Array3::<f32>::zeros(avg_dims);
-
-    // iterate through the time dimension of the arrays in chunks of size `time_factor`.
-    for (jones_chunk, weight_chunk, mut jones_avg, mut weight_avg) in izip!(
-        jones.axis_chunks_iter(Axis(0), avg_time),
-        weight.axis_chunks_iter(Axis(0), avg_time),
-        jones_avg.outer_iter_mut(),
-        weight_avg.outer_iter_mut(),
-    ) {
-        // iterate through the baseline dimension of the arrays.
-        for (jones_chunk, weight_chunk, mut jones_avg, mut weight_avg) in izip!(
-            jones_chunk.axis_iter(Axis(1)),
-            weight_chunk.axis_iter(Axis(1)),
-            jones_avg.outer_iter_mut(),
-            weight_avg.outer_iter_mut(),
-        ) {
-            // iterate through the channel dimension of the arrays in chunks of size `frequency_factor`.
-            for (jones_chunk, weight_chunk, mut jones_avg, mut weight_avg) in izip!(
-                jones_chunk.axis_chunks_iter(Axis(1), avg_freq),
-                weight_chunk.axis_chunks_iter(Axis(1), avg_freq),
-                jones_avg.outer_iter_mut(),
-                weight_avg.outer_iter_mut(),
-            ) {
-                let chunk_size = jones_chunk.len();
-
-                let mut weight_sum_f64 = 0_f64;
-                let mut jones_sum = Jones::<F>::default();
-                let mut jones_weighted_sum = Jones::<F>::default();
-                let mut avg_flag = true;
-
-                for (jones_chunk, weights_chunk) in izip!(
-                    jones_chunk.axis_iter(Axis(0)),
-                    weight_chunk.axis_iter(Axis(0)),
-                ) {
-                    for (jones, weight) in izip!(jones_chunk.iter(), weights_chunk.iter()) {
-                        jones_sum += *jones;
-                        if weight.abs() > 0. {
-                            avg_flag = false;
-                            let weight_abs_f64 = (*weight as f64).abs();
-                            weight_sum_f64 += weight_abs_f64;
-                            jones_weighted_sum += *jones * F::from(weight_abs_f64).unwrap();
-                        }
-                    }
-                }
-
-                jones_avg[()] = if !avg_flag {
-                    jones_weighted_sum / F::from(weight_sum_f64).unwrap()
-                } else {
-                    jones_sum / F::from(chunk_size).unwrap()
-                };
-
-                weight_avg[()] = F::from(weight_sum_f64).unwrap();
-            }
-        }
-    }
-
-    // (jones_avg, weight_avg)
-}
-
-// fn promote_jones(jones: Array3<Jones<f32>>) -> Array3<Jones<f64>> {
-//     // Array3::<Jones<f64>>::from_shape_fn(jones.dim(), |idx| Jones::<f64>::from(jones[idx]))
-//     jones.mapv(Jones::<f64>::from)
-// }
-
-// fn demote_jones(jones: Array3<Jones<f64>>) -> Array3<Jones<f32>> {
-//     // Array3::<Jones<f64>>::from_shape_fn(jones.dim(), |idx| Jones::<f64>::from(jones[idx]))
-//     jones.mapv(Jones::<f32>::from)
-// }
 
 fn main() {
     // Stolen from BurntSushi. We don't return Result from main because it
@@ -464,7 +465,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     // the model source list is the model we're calibrating to.
     // model has been perturbed from synth
 
-    let iono_srclist = get_source_list(&vis_ctx);
+    let iono_srclist = get_source_list(&vis_ctx, &marlu_obs_ctx);
 
     let srclist_path = out_dir.join("srclist_model.yaml");
     let mut srclist_buf = BufWriter::new(File::create(&srclist_path).unwrap());
@@ -624,13 +625,14 @@ fn try_main() -> Result<(), HyperdriveError> {
     // UNPEEL LOOP //
     // /////////// //
 
-    let mut current_phase = marlu_obs_ctx.phase_centre;
+    // let mut current_phase = marlu_obs_ctx.phase_centre;
 
-    for (source_name, source) in iono_srclist.into_iter() {
+    for (source_name, iono_source) in iono_srclist.into_iter() {
         // let source_vis_ctx = vis_ctx.clone();
 
         // XXX(dev): a source can have multiple components with different phase centres.
-        let source_phase_centre = source.source.components[0].radec;
+        let source_phase_centre = iono_source.source.components[0].radec;
+        eprintln!("unpeel loop: {} at {} (has iono {:?})", source_name, source_phase_centre, iono_source.iono_consts);
 
         let marlu_rot_obs_ctx = MarluObsContext {
             phase_centre: source_phase_centre,
@@ -638,7 +640,7 @@ fn try_main() -> Result<(), HyperdriveError> {
         };
 
         let srclist_source = SourceList::from(indexmap! {
-            source_name.clone() => source.source
+            source_name.clone() => iono_source.source
         });
 
         // /////////////////// //
@@ -697,8 +699,6 @@ fn try_main() -> Result<(), HyperdriveError> {
             Some(vis_source_path),
         );
 
-        let model_view = vis_source_avg.view();
-
         // ///////////// //
         // UNPEEL SOURCE //
         // ///////////// //
@@ -719,10 +719,10 @@ fn try_main() -> Result<(), HyperdriveError> {
 
         let avg_centroid_timestamps: Vec<Epoch> = avg_vis_ctx.timeseries(true, true).collect();
 
-        let offsets = get_offsets_dev(
+        let offsets = get_offsets_rts(
             vis_unpeeled.view(),
             weight_residual_avg.view(),
-            model_view,
+            vis_source_avg.view(),
             &avg_vis_ctx.sel_baselines,
             &tile_xyzs,
             &avg_vis_ctx.avg_frequencies_hz(),
@@ -732,24 +732,13 @@ fn try_main() -> Result<(), HyperdriveError> {
             source_name.clone(),
         );
 
-        let offsets = get_offsets_rts(
-            vis_unpeeled.view(),
-            weight_residual_avg.view(),
-            model_view,
-            &avg_vis_ctx.sel_baselines,
-            &tile_xyzs,
-            &avg_vis_ctx.avg_frequencies_hz(),
-            marlu_rot_obs_ctx.phase_centre,
-            &avg_centroid_timestamps,
-            marlu_obs_ctx.array_pos,
-            source_name.clone(),
-        );
+        println!("{}\t{}\t{}\t{}\t{}", source_name.clone(), iono_source.iono_consts.0, iono_source.iono_consts.1, offsets[0], offsets[1]);
 
         let chi_squared_path = out_dir.join(format!("chi_squared_{}.tsv", source_name.clone()));
         plot_chi_squared(
             vis_unpeeled.view(),
             weight_residual_avg.view(),
-            model_view,
+            vis_source_avg.view(),
             &avg_vis_ctx.sel_baselines,
             &tile_xyzs,
             &avg_vis_ctx.avg_frequencies_hz(),
@@ -763,16 +752,12 @@ fn try_main() -> Result<(), HyperdriveError> {
         // DI CAL //
         // ////// //
 
-        let sols = di_cal(&low_vis_ctx, &vis_unpeeled, &vis_source_avg, &marlu_obs_ctx);
+        // let sols = di_cal(&low_vis_ctx, &vis_unpeeled, &vis_source_avg, &marlu_obs_ctx);
 
-        let vis_soln_path = out_dir.join(format!("soln_{}.fits", source_name.clone()));
-        let metafits: Option<&str> = None;
-        sols.write_solutions_from_ext(vis_soln_path, metafits)
-            .unwrap();
-
-        // analyse_di_jones(sols.di_jones, &frequencies);
-
-        current_phase = source_phase_centre;
+        // let vis_soln_path = out_dir.join(format!("soln_{}.fits", source_name.clone()));
+        // let metafits: Option<&str> = None;
+        // sols.write_solutions_from_ext(vis_soln_path, metafits)
+        //     .unwrap();
     }
 
     Ok(())
@@ -843,15 +828,15 @@ fn plot_chi_squared(
 ) {
     eprintln!("Plotting chi squared to {:?}", &chi_squared_path);
     let mut srclist_buf = BufWriter::new(File::create(&chi_squared_path).unwrap());
-    srclist_buf.write("alpha\tbeta\tchisq_re\tchisq_im\tchisq_o1_re\tchisq_o1_im\tchisq_o3_re\tchisq_o3_im\n".as_bytes()).unwrap();
+    srclist_buf.write_all("alpha\tbeta\tchisq_re\tchisq_im\tchisq_o1_re\tchisq_o1_im\tchisq_o3_re\tchisq_o3_im\n".as_bytes()).unwrap();
 
     let min_freq = freqs_hz[0];
     let max_lambda_sq = (VEL_C * VEL_C) / (min_freq * min_freq);
     // number of arc seconds to step phi by
-    let iono_step_as = 20_f64;
+    let iono_step_as = 5_f64;
     let phis_as = (-20..20).map(|i| i as f64 * iono_step_as).collect::<Vec<_>>();
     for phi_as in phis_as {
-        let alpha = (phi_as/(60. * 60. * 24.)).to_radians().sin()/max_lambda_sq;
+        let alpha = (phi_as/(60. * 60.)).to_radians().sin()/max_lambda_sq/TAU;
         let const_lm = (alpha, 0.0);
         // copy unpeeled and apply ionospheric rotation
         let mut iono_rotated = Array3::from_shape_fn(model.dim(), |idx| {
@@ -881,7 +866,7 @@ fn plot_chi_squared(
             weights.view(),
             iono_rotated_order_3.view(),
         );
-        srclist_buf.write(format!(
+        srclist_buf.write_all(format!(
             "{:12.10}\t{:12.10}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             const_lm.0, const_lm.1,
             chisq_re, chisq_im,
@@ -925,13 +910,12 @@ fn di_cal(
         false,
     );
     // "Complete" the solutions.
-    let sols = sols.into_cal_sols(
+    sols.into_cal_sols(
         marlu_obs_ctx.num_ants(),
         &[],
         &fences[0].flagged_chanblock_indices,
         None,
-    );
-    sols
+    )
 }
 
 fn get_offsets_rts(
@@ -945,7 +929,7 @@ fn get_offsets_rts(
     centroid_timestamps: &[Epoch],
     array_pos: LatLngHeight,
     src_name: String,
-) -> Array3<f64> {
+) -> Vec<f64> {
 
     let jones_dims = unpeeled.dim();
 
@@ -1055,22 +1039,21 @@ fn get_offsets_rts(
             offsets[[0]] = (aa_u*a_vv - aa_v*a_uv) / delta;
             offsets[[1]] = (aa_v*a_uu - aa_u*a_uv) / delta;
 
-            println!(
-                "rts: {}, {}, {}, {}, {}, {}, {}, {}, {}",
-                src_name,
-                lambda_2,
-                a_uu,
-                a_uv,
-                a_vv,
-                aa_u,
-                aa_v,
-                offsets[[0]] * lambda_2,
-                offsets[[1]] * lambda_2
-            );
-            // eprintln!("epoch {:16} freq {:8} offsets {} {}", epoch.as_gregorian_utc_str(), freq_hz, offsets[[0]] * lambda_2, offsets[[1]] * lambda_2);
+            // println!(
+            //     "rts: {}, {}, {}, {}, {}, {}, {}, {}, {}",
+            //     src_name,
+            //     lambda_2,
+            //     a_uu,
+            //     a_uv,
+            //     a_vv,
+            //     aa_u,
+            //     aa_v,
+            //     offsets[[0]] * lambda_2,
+            //     offsets[[1]] * lambda_2
+            // );
         }
     }
-    offsets
+    offsets.axis_iter(Axis(2)).map(|x| x.mean().unwrap()).collect_vec()
 }
 
 fn get_offsets_dev(
@@ -1084,7 +1067,7 @@ fn get_offsets_dev(
     centroid_timestamps: &[Epoch],
     array_pos: LatLngHeight,
     src_name: String,
-) -> Array3<f64> {
+) -> Vec<f64> {
 
     let jones_dims = unpeeled.dim();
 
@@ -1155,7 +1138,7 @@ fn get_offsets_dev(
                 weights.iter(),
                 model.iter(),
                 ant_pairs,
-    ) {
+            ) {
                 let uvw= part_uvws[[ant1]] - part_uvws[[ant2]];
 
                 // eprintln!(
@@ -1211,39 +1194,33 @@ fn get_offsets_dev(
             offsets[[0]] = (a_vv*aa_u - a_uv*aa_v) / delta;
             offsets[[1]] = (a_uu*aa_v - a_uv*aa_u) / delta;
 
-            println!(
-                "dev: {}, {}, {}, {}, {}, {}, {}, {}, {}",
-                src_name,
-                lambda_2,
-                a_uu,
-                a_uv,
-                a_vv,
-                aa_u,
-                aa_v,
-                offsets[[0]] * lambda_2,
-                offsets[[1]] * lambda_2
-        );
-
-
-            // eprintln!("epoch {:16} freq {:8} offsets {} {}", epoch.as_gregorian_utc_str(), freq_hz, offsets[[0]] * lambda_2, offsets[[1]] * lambda_2);
+            // println!(
+            //     "dev: {}, {}, {}, {}, {}, {}, {}, {}, {}",
+            //     src_name,
+            //     lambda_2,
+            //     a_uu,
+            //     a_uv,
+            //     a_vv,
+            //     aa_u,
+            //     aa_v,
+            //     offsets[[0]] * lambda_2,
+            //     offsets[[1]] * lambda_2
+            // );
         }
     }
-    offsets
+    offsets.axis_iter(Axis(2)).map(|x| x.mean().unwrap()).collect_vec()
 }
-
-// fn analyse_di_jones(di_jones: Array3<Jones<f64>>, frequencies: &[u64]) {
-//     let lambda_squares = frequencies
-//         .iter()
-//         .map(|&freq_hz| (VEL_C / (freq_hz as f64)).powi(2));
-//     for di_jones in di_jones.outer_iter() {
-//         for di_jones in di_jones.outer_iter() {}
-//     }
-// }
 
 fn get_beam(marlu_obs_ctx: &MarluObsContext) -> Box<dyn Beam> {
     let beam_file = "/data/dev/calibration/mwa_full_embedded_element_pattern.h5".into();
     // https://github.com/MWATelescope/mwa_pb/blob/90d6fbfc11bf4fca35796e3d5bde3ab7c9833b66/mwa_pb/mwa_sweet_spots.py#L60
-    let delays = vec![0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12];
+    let delays = vec![
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+    ];
+    // let delays = vec![0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12];
 
     let beam = create_fee_beam_object(
         beam_file,
@@ -1262,12 +1239,11 @@ fn get_obs_metadata() -> (VisContext, MarluObsContext) {
     let tile_limit = 128;
     // let tile_limit = 32;
 
-    let meta_path = PathBuf::from("test_files/1090008640/1090008640.metafits");
+    let meta_path = PathBuf::from("/data/dev/1336955216/1336955216.metafits");
+    // let meta_path = PathBuf::from("test_files/1090008640/1090008640.metafits");
     let meta_ctx = mwalib::MetafitsContext::new::<PathBuf>(&meta_path, None).unwrap();
-    // when crux is at zenith
-    let zenith_time_utc = Epoch::from_gregorian_str("2022-05-05T21:53:00.00").unwrap();
-    let zenith_time = zenith_time_utc - Duration::from_f64(8., Unit::Hour);
-    let obsid = zenith_time.as_gpst_seconds().round() as i32;
+    let obsid = meta_ctx.obs_id;
+    let zenith_time = Epoch::from_gpst_seconds(obsid as _);
     let tile_names: Vec<String> = meta_ctx
         .antennas
         .iter()
@@ -1296,17 +1272,18 @@ fn get_obs_metadata() -> (VisContext, MarluObsContext) {
         avg_freq: 1,
         num_vis_pols: 4,
     };
-    let phase_centre = RADec::new_degrees(
-        // NOTE: these aren't J2000, not that it matters
-        sexagesimal_hms_to_float(12., 30., 59.),
-        sexagesimal_dms_to_degrees(-59., 22., 0.1),
-    );
     let array_pos = LatLngHeight::new_mwa();
+    dbg!(&array_pos);
+    let phase_centre = RADec::new_degrees(
+        meta_ctx.ra_phase_center_degrees.unwrap(),
+        array_pos.latitude_rad.to_degrees(),
+    );
     let lst_rad = get_lmst(zenith_time, array_pos.longitude_rad);
     dbg!(lst_rad);
     let hadec = phase_centre.to_hadec(lst_rad);
     dbg!(hadec);
     dbg!(hadec.to_azel_mwa());
+    dbg!(&phase_centre);
     dbg!(phase_centre.ra.to_degrees(), phase_centre.dec.to_degrees());
     let sched_start_timestamp = vis_ctx.start_timestamp;
     let sched_duration = vis_ctx.int_time * (vis_ctx.num_sel_timesteps + 1) as f64;
@@ -1344,8 +1321,8 @@ fn simulate_write(
     // Construct our visibilities array. This will be re-used for each timestep
     // before it's written to disk. Simulated vis is [baseline][chan] but
     // vis output requires [timestep][chan][baseline], this is re-used.
-    let mut vis_out = Array3::from_elem((1, sel_shape.1, sel_shape.2), Jones::<f32>::default());
-    let weight_out = Array3::from_elem(
+    let mut vis_tmp = Array3::from_elem((1, sel_shape.1, sel_shape.2), Jones::<f32>::default());
+    let weight_tmp = Array3::from_elem(
         (1, sel_shape.1, sel_shape.2),
         vis_ctx.weight_factor() as f32,
     );
@@ -1354,9 +1331,12 @@ fn simulate_write(
         Jones::<f32>::default(),
     );
 
+
     let tile_xyzs: Vec<XyzGeodetic> = marlu_obs_ctx.ant_positions_geodetic().collect();
+    let centroid_timestamps = vis_ctx.timeseries(false, true);
     let phase_centre = marlu_obs_ctx.phase_centre;
     let array_pos = marlu_obs_ctx.array_pos;
+    eprintln!("simulating to {:?} at phase {}", out_path.as_ref().unwrap_or(&"".into()), &phase_centre);
     // Create a "modeller" object.
     let modeller = new_sky_modeller(
         #[cfg(feature = "cuda")]
@@ -1379,10 +1359,8 @@ fn simulate_write(
         writer
     });
 
-    let timeseries = vis_ctx.timeseries(false, true).enumerate();
-    for (i, epoch) in timeseries {
-        let mut vis_result = vis_result.slice_mut(s![i, .., ..]);
-        eprintln!("modelling epoch {} {:?}", i, epoch.as_gregorian_utc_str());
+    for (epoch, mut vis_result) in izip!(centroid_timestamps, vis_result.outer_iter_mut()) {
+        eprintln!("modelling epoch {:?} {:?}", epoch.as_gregorian_utc_str(), vis_result.dim());
 
         vis_result.fill(Jones::default());
         modeller
@@ -1391,7 +1369,7 @@ fn simulate_write(
 
         // transpose model vis to output ordering. first axis is baseline.
         for (vis_model, mut vis_out) in
-            izip!(vis_result.outer_iter(), vis_out.axis_iter_mut(Axis(2)))
+            izip!(vis_result.outer_iter(), vis_tmp.axis_iter_mut(Axis(2)))
         {
             // second axis is channel
             for (model_jones, mut vis_out) in
@@ -1413,8 +1391,8 @@ fn simulate_write(
         if let Some(writer) = writer.as_mut() {
             writer
                 .write_vis_marlu(
-                    vis_out.view(),
-                    weight_out.view(),
+                    vis_tmp.view(),
+                    weight_tmp.view(),
                     &chunk_vis_ctx,
                     &tile_xyzs,
                     false,
@@ -1465,12 +1443,13 @@ fn simulate_accumulate_iono(
 
     for (epoch, mut jones) in izip!(centroid_timestamps, jones.outer_iter_mut()) {
         let mut vis_slice = vis_tmp.slice_mut(s![0, .., ..]);
+        eprintln!("modelling epoch {:?} {:?} with consts {:?}", epoch.as_gregorian_utc_str(), vis_slice.dim(), source.iono_consts);
         vis_slice.fill(Jones::default());
         modeller
             .model_timestep(vis_slice.view_mut(), epoch)
             .unwrap();
         drop(vis_slice);
-        if (source.iono_consts.0 - 0.).abs() > 1e-8 || (source.iono_consts.1 - 0.).abs() > 1e-8 {
+        if (source.iono_consts.0 - 0.).abs() > 1e-9 || (source.iono_consts.1 - 0.).abs() > 1e-9 {
             apply_iono(
                 vis_tmp.view_mut(),
                 marlu_obs_ctx.phase_centre,
@@ -1482,8 +1461,8 @@ fn simulate_accumulate_iono(
                 source.iono_consts,
             );
         }
-        let vis_slice = vis_tmp.slice(s![0, .., ..]);
-        for (vis_model, jones) in izip!(vis_slice.iter(), jones.iter_mut()) {
+        // let vis_slice = vis_tmp.slice(s![0, .., ..]);
+        for (vis_model, jones) in izip!(vis_tmp.iter(), jones.iter_mut()) {
             *jones += *vis_model;
         }
     }
@@ -1583,15 +1562,41 @@ fn write_vis(
     }
 }
 
-fn get_source_list(vis_ctx: &VisContext) -> IonoSourceList {
+fn get_source_list(vis_ctx: &VisContext, marlu_obs_ctx: &MarluObsContext) -> IonoSourceList {
+    let phase_centre = marlu_obs_ctx.phase_centre;
     let mut srclist = IonoSourceList::new();
-    for ra in (180..195).step_by(5) {
-        for neg_dec in (50..65).step_by(5) {
-            let iono_consts = if ra==180 && neg_dec==50 {(0.0008, 0.)} else {(0., 0.)};
-            srclist.insert(format!("{:.2}_{:.2}", ra, neg_dec), IonoSource {
+    // grid size in degrees
+    let quant = 1;
+    let range = quant * 2;
+    let p_ra = quant * (phase_centre.ra.to_degrees() / quant as f64).round() as i32;
+    let p_dec = quant * (phase_centre.dec.to_degrees() / quant as f64).round() as i32;
+    eprintln!("phase centre {:?} => {} {}", phase_centre, p_ra, p_dec);
+
+    let min_freq = vis_ctx.start_freq_hz;
+    let max_lambda_sq = (VEL_C * VEL_C) / (min_freq * min_freq);
+
+    // a small ionospheric deviation of 15 arcsec at lowest freq
+    let small_iono = (10_f64/60./60.).to_radians().sin()/max_lambda_sq/TAU;
+    // a big ionospheric deviation of 59 arcsec at lowest freq
+    let big_iono = (59_f64/60./60.).to_radians().sin()/max_lambda_sq/TAU;
+    eprintln!("small iono {:?}, big iono {:?}", small_iono, big_iono);
+
+    let mut i = 0;
+    for ra in (0..=range).step_by(quant as usize) {
+        for dec in (0..=range).step_by(quant as usize) {
+            i += 1;
+            // if i > 1 { break; }
+            let iono_mag = if i==5 {big_iono} else {small_iono};
+            let iono_consts = (
+                iono_mag * (TAU * (i%4) as f64 / 4.).sin(),
+                iono_mag * (TAU * (i%4) as f64 / 4.).cos()
+            );
+            let src_ra = p_ra + ra - range / 2;
+            let src_dec = p_dec + dec - range / 2;
+            srclist.insert(format!("ra{:+.2}dec_{:+.2}", src_ra, src_dec), IonoSource {
                 source: Source {components: vec1![
                     SourceComponent {
-                        radec: RADec::new_degrees(ra as f64, -neg_dec as f64),
+                        radec: RADec::new_degrees(src_ra as f64, src_dec as f64),
                         comp_type: ComponentType::Point,
                         flux_type: FluxDensityType::PowerLaw {
                             // NOTE: these aren't the real values, not that it matters
@@ -1610,104 +1615,5 @@ fn get_source_list(vis_ctx: &VisContext) -> IonoSourceList {
             });
         }
     }
-    IonoSourceList::from(srclist)
-    // SourceList::from(indexmap! {
-    // String::from("acrux") => Source {
-    //     components: vec1![SourceComponent {
-    //         radec: RADec::new_degrees(
-    //             // NOTE: these aren't J2000, not that it matters
-    //             sexagesimal_hms_to_float(12., 27., 51.9),
-    //             sexagesimal_dms_to_degrees(-63., 13., 29.9)
-    //         ),
-    //         comp_type: ComponentType::Point,
-    //         flux_type: FluxDensityType::PowerLaw {
-    //             // NOTE: these aren't the real values, not that it matters
-    //             si: 0.,
-    //             fd: FluxDensity {
-    //                 freq: vis_ctx.start_freq_hz,
-    //                 i: 5.0,
-    //                 q: 0.0,
-    //                 u: 0.0,
-    //                 v: 0.0,
-    //             },
-    //         },
-    //     }],
-    // },
-    //     String::from("becrux") => Source {
-    //         components: vec1![SourceComponent {
-    //             radec: RADec::new_degrees(
-    //                 sexagesimal_hms_to_float(12., 49., 3.0),
-    //                 sexagesimal_dms_to_degrees(-59., 48., 45.1)
-    //             ),
-    //             comp_type: ComponentType::Point,
-    //             flux_type: FluxDensityType::PowerLaw {
-    //                 si: 0.,
-    //                 fd: FluxDensity {
-    //                     freq: vis_ctx.start_freq_hz,
-    //                     i: 4.0,
-    //                     q: 0.0,
-    //                     u: 0.0,
-    //                     v: 0.0,
-    //                 },
-    //             },
-    //         }],
-    //     },
-    //     String::from("gacrux") => Source {
-    //         components: vec1![SourceComponent {
-    //             radec: RADec::new_degrees(
-    //                 sexagesimal_hms_to_float(12., 32., 25.4),
-    //                 sexagesimal_dms_to_degrees(-57., 14., 25.)
-    //             ),
-    //             comp_type: ComponentType::Point,
-    //             flux_type: FluxDensityType::PowerLaw {
-    //                 si: 0.,
-    //                 fd: FluxDensity {
-    //                     freq: vis_ctx.start_freq_hz,
-    //                     i: 3.0,
-    //                     q: 0.0,
-    //                     u: 0.0,
-    //                     v: 0.0,
-    //                 },
-    //             },
-    //         }],
-    //     },
-    //     String::from("dcrux") => Source {
-    //         components: vec1![SourceComponent {
-    //             radec: RADec::new_degrees(
-    //                 sexagesimal_hms_to_float(12., 16., 20.9),
-    //                 sexagesimal_dms_to_degrees(-58., 52., 31.3)
-    //             ),
-    //             comp_type: ComponentType::Point,
-    //             flux_type: FluxDensityType::PowerLaw {
-    //                 si: 0.,
-    //                 fd: FluxDensity {
-    //                     freq: vis_ctx.start_freq_hz,
-    //                     i: 2.0,
-    //                     q: 0.0,
-    //                     u: 0.0,
-    //                     v: 0.0,
-    //                 },
-    //             },
-    //         }],
-    //     },
-    //     String::from("ecrux") => Source {
-    //         components: vec1![SourceComponent {
-    //             radec: RADec::new_degrees(
-    //                 sexagesimal_hms_to_float(12., 22., 35.2),
-    //                 sexagesimal_dms_to_degrees(-60., 31., 35.8)
-    //             ),
-    //             comp_type: ComponentType::Point,
-    //             flux_type: FluxDensityType::PowerLaw {
-    //                 si: 0.,
-    //                 fd: FluxDensity {
-    //                     freq: vis_ctx.start_freq_hz,
-    //                     i: 1.0,
-    //                     q: 0.0,
-    //                     u: 0.0,
-    //                     v: 0.0,
-    //                 },
-    //             },
-    //         }],
-    //     },
-    // })
+    srclist
 }
