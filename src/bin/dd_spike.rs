@@ -650,7 +650,7 @@ fn try_main() -> Result<(), HyperdriveError> {
             vis_residual_avg.view_mut(),
             weight_synth.view(),
             weight_residual_avg.view_mut(),
-            current_phase,
+            marlu_obs_ctx.phase_centre,
             source_phase_centre,
             &vis_ctx.sel_baselines,
             &tile_xyzs,
