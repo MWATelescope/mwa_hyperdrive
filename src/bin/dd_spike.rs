@@ -1,3 +1,4 @@
+use birli::marlu::HADec;
 use indexmap::indexmap;
 use mwa_hyperdrive::{
     model::new_sky_modeller,
@@ -18,7 +19,7 @@ use mwa_hyperdrive_common::{
         LatLngHeight, MeasurementSetWriter, ObsContext as MarluObsContext, RADec,
         VisContext, VisWritable, XyzGeodetic, UVW,
     },
-    ndarray::{Array3, Axis}
+    ndarray::{Array3, Axis}, lazy_static
 };
 use mwa_hyperdrive_srclist::{
     hyperdrive::source_list_to_yaml, ComponentType, FluxDensity, FluxDensityType,
@@ -40,14 +41,17 @@ fn main() {
     }
 }
 
+lazy_static::lazy_static! {
+    pub static ref OUT_DIR: PathBuf = PathBuf::from("/tmp/crux");
+}
+
 fn try_main() -> Result<(), HyperdriveError> {
     env_logger::init_from_env(
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let out_dir = PathBuf::from("/tmp/crux");
-    if !out_dir.is_dir() {
-        std::fs::create_dir_all(&out_dir).unwrap();
+    if !OUT_DIR.is_dir() {
+        std::fs::create_dir_all(OUT_DIR.as_path()).unwrap();
     }
 
     // //////////////////// //
@@ -56,8 +60,7 @@ fn try_main() -> Result<(), HyperdriveError> {
 
     // vis_ctx contains the timesteps, frequencies and baselines in a visibility array.
     // obs_ctx contains the metadata for the observation, including phase centre, array position.
-    let (vis_ctx, obs_ctx) = get_obs_metadata();
-    let sel_shape = vis_ctx.sel_dims();
+    let (vis_ctx, obs_ctx) = get_obs_metadata(LatLngHeight::new_mwa());
 
     // //////////// //
     // Source lists //
@@ -69,7 +72,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     let iono_srclist = get_source_list(&vis_ctx, &obs_ctx);
 
     // write sourcelist to disk
-    let srclist_path = out_dir.join("srclist_model.yaml");
+    let srclist_path = OUT_DIR.join("srclist_model.yaml");
     let mut srclist_buf = BufWriter::new(File::create(&srclist_path).unwrap());
     source_list_to_yaml(&mut srclist_buf, &SourceList::from(iono_srclist.clone()), None).unwrap();
     srclist_buf.flush().unwrap();
@@ -84,6 +87,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     let beam = get_beam(&obs_ctx);
 
     // initialize an array to accumulate synthetic visibilities into
+    let sel_shape = vis_ctx.sel_dims();
     let mut vis_synth = Array3::from_elem(
         (sel_shape.0, sel_shape.2, sel_shape.1), Jones::<f32>::zero()
     );
@@ -126,7 +130,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     );
 
     // write out the synthetic visibilities
-    let vis_synth_path = out_dir.join("vis_synth.ms");
+    let vis_synth_path = OUT_DIR.join("vis_synth.ms");
     write_vis(
         vis_synth.view(),
         weight_synth.view(),
@@ -139,7 +143,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     // generate model vis //
     // ////////////////// //
 
-    let vis_model_path = out_dir.join("vis_model.ms");
+    let vis_model_path = OUT_DIR.join("vis_model.ms");
     let vis_model = simulate_write(
         &vis_ctx,
         #[cfg(feature = "cuda")]
@@ -160,7 +164,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     let mut vis_residual = vis_synth;
     vis_residual -= &vis_model;
 
-    let vis_residual_path = out_dir.join("vis_residual.ms");
+    let vis_residual_path = OUT_DIR.join("vis_residual.ms");
     write_vis(
         vis_residual.view(),
         weight_synth.view(),
@@ -199,7 +203,18 @@ fn try_main() -> Result<(), HyperdriveError> {
     // UNPEEL LOOP //
     // /////////// //
 
-    // let mut current_phase = obs_ctx.phase_centre;
+    // print a header
+    println!("{}", vec![
+        "source",
+        "expected ɑ",
+        "expected β",
+        "rts ɑ",
+        "rts β",
+        "ɑ expected / rts",
+        "β expected / rts",
+        "paper ɑ",
+        "paper β",
+    ].join("\t"));
 
     for (source_name, iono_source) in iono_srclist.into_iter() {
         // TODO(dev): a source can have multiple components with different phase centres.
@@ -228,7 +243,7 @@ fn try_main() -> Result<(), HyperdriveError> {
         );
 
         // write the averaged, rotated residual visibilities to disk
-        let vis_residual_avg_path = out_dir.join(format!("vis_residual_avg_{}.ms", source_name.clone()));
+        let vis_residual_avg_path = OUT_DIR.join(format!("vis_residual_avg_{}.ms", source_name.clone()));
         write_vis(
             vis_residual_avg.view(),
             weight_residual_avg.view(),
@@ -242,7 +257,7 @@ fn try_main() -> Result<(), HyperdriveError> {
         // /////////////// //
 
         // generate model again at lower resolution, phased to source
-        let vis_source_path = out_dir.join(format!("vis_model_{}.ms", source_name.clone()));
+        let vis_source_path = OUT_DIR.join(format!("vis_model_{}.ms", source_name.clone()));
         let vis_source_avg = simulate_write(
             &low_vis_ctx,
             #[cfg(feature = "cuda")]
@@ -261,7 +276,7 @@ fn try_main() -> Result<(), HyperdriveError> {
             vis_residual_avg[idx] + vis_source_avg[idx]
         });
 
-        let vis_unpeeled_path = out_dir.join(format!("vis_unpeeled_{}.ms", source_name.clone()));
+        let vis_unpeeled_path = OUT_DIR.join(format!("vis_unpeeled_{}.ms", source_name.clone()));
 
         write_vis(
             vis_unpeeled.view(),
@@ -270,6 +285,10 @@ fn try_main() -> Result<(), HyperdriveError> {
             &rot_obs_ctx,
             vis_unpeeled_path
         );
+
+        // ///////////////// //
+        // CALCULATE OFFSETS //
+        // ///////////////// //
 
         let offsets_rts = get_offsets_rts(
             vis_unpeeled.view(),
@@ -289,14 +308,25 @@ fn try_main() -> Result<(), HyperdriveError> {
             // source_name.clone(),
         );
 
-        println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}", source_name.clone(),
-            iono_source.iono_consts.0, iono_source.iono_consts.1,
-            offsets_rts[0], offsets_rts[1],
-            offsets_paper[0], offsets_paper[1]
-        );
+        let cells: Vec<String> = vec![
+            source_name.clone(),
+            // expected
+            iono_source.iono_consts.0.to_string(),
+            iono_source.iono_consts.1.to_string(),
+            // rts
+            offsets_rts[0].to_string(),
+            offsets_rts[1].to_string(),
+            // expected / rts
+            (iono_source.iono_consts.0 / offsets_rts[0]).to_string(),
+            (iono_source.iono_consts.1 / offsets_rts[1]).to_string(),
+            // paper
+            offsets_paper[0].to_string(),
+            offsets_paper[1].to_string(),
 
-        let chi_squared_path = out_dir.join(format!("chi_squared_{}.tsv", source_name.clone()));
+        ];
+        println!("{}", cells.join("\t"));
+
+        let chi_squared_path = OUT_DIR.join(format!("chi_squared_{}.tsv", source_name.clone()));
         plot_chi_squared(
             vis_unpeeled.view(),
             weight_residual_avg.view(),
@@ -312,7 +342,7 @@ fn try_main() -> Result<(), HyperdriveError> {
 
         // let sols = di_cal(&low_vis_ctx, &vis_unpeeled, &vis_source_avg, &obs_ctx);
 
-        // let vis_soln_path = out_dir.join(format!("soln_{}.fits", source_name.clone()));
+        // let vis_soln_path = OUT_DIR.join(format!("soln_{}.fits", source_name.clone()));
         // let metafits: Option<&str> = None;
         // sols.write_solutions_from_ext(vis_soln_path, metafits)
         //     .unwrap();
@@ -321,18 +351,36 @@ fn try_main() -> Result<(), HyperdriveError> {
     Ok(())
 }
 
-// create fake observation metadata from a real metafits
-fn get_obs_metadata() -> (VisContext, MarluObsContext) {
-    let num_timesteps = 4 * 4;
-    let num_channels = 24 * 16;
+// create fake observation metadata using antennas from a real metafits,
+// phase centre: hour angle = 0, declination = latitude
+// obs time is nearest time when phase centre is at zenith
+fn get_obs_metadata(array_pos: LatLngHeight) -> (VisContext, MarluObsContext) {
+    let num_timesteps = 4; // * 4;
+    let num_channels = 24; // * 16;
     let tile_limit = 128;
     // let tile_limit = 32;
 
-    let meta_path = PathBuf::from("/data/dev/1336955216/1336955216.metafits");
-    // let meta_path = PathBuf::from("test_files/1090008640/1090008640.metafits");
+    eprintln!("array position is {:?}", array_pos);
+    // let meta_path = PathBuf::from("/data/dev/1336955216/1336955216.metafits");
+    let meta_path = PathBuf::from("test_files/1090008640/1090008640.metafits");
     let meta_ctx = mwalib::MetafitsContext::new::<PathBuf>(&meta_path, None).unwrap();
     let obsid = meta_ctx.obs_id;
-    let zenith_time = Epoch::from_gpst_seconds(obsid as _);
+    let obs_time = Epoch::from_gpst_seconds(obsid as _);
+    let obs_lst_rad = get_lmst(obs_time, array_pos.longitude_rad);
+    let mut zenith_time = obs_time;
+    // shift zenith_time to the nearest time when the phase centre is at zenith
+    if obs_lst_rad.abs() > 1e-6 {
+        let sidereal2solar = 365.24/366.24;
+        zenith_time -= Duration::from_f64(sidereal2solar*obs_lst_rad/TAU, Unit::Day);
+    }
+    let zenith_lst_rad = get_lmst(zenith_time, array_pos.longitude_rad);
+    eprintln!("lst % 𝜏 should be 0: {:?}", zenith_lst_rad);
+    let phase_centre = RADec::from_hadec(HADec::new(0., array_pos.latitude_rad), zenith_lst_rad);
+    eprintln!("phase centre: {:?}", phase_centre);
+    let hadec = phase_centre.to_hadec(zenith_lst_rad);
+    eprintln!("ha % 𝜏 should be 0: {:?}", hadec);
+    let azel = hadec.to_azel(array_pos.latitude_rad);
+    eprintln!("(az, el) % 𝜏 should be 0, pi/2: {:?}", azel);
     let tile_names: Vec<String> = meta_ctx
         .antennas
         .iter()
@@ -351,7 +399,7 @@ fn get_obs_metadata() -> (VisContext, MarluObsContext) {
         .collect();
     let vis_ctx = VisContext {
         num_sel_timesteps: num_timesteps,
-        start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
+        start_timestamp: obs_time,
         int_time: Duration::from_f64(1., Unit::Second),
         num_sel_chans: num_channels,
         start_freq_hz: 140_000_000.,
@@ -361,19 +409,6 @@ fn get_obs_metadata() -> (VisContext, MarluObsContext) {
         avg_freq: 1,
         num_vis_pols: 4,
     };
-    let array_pos = LatLngHeight::new_mwa();
-    dbg!(&array_pos);
-    let phase_centre = RADec::new_degrees(
-        meta_ctx.ra_phase_center_degrees.unwrap(),
-        array_pos.latitude_rad.to_degrees(),
-    );
-    let lst_rad = get_lmst(zenith_time, array_pos.longitude_rad);
-    dbg!(lst_rad);
-    let hadec = phase_centre.to_hadec(lst_rad);
-    dbg!(hadec);
-    dbg!(hadec.to_azel_mwa());
-    dbg!(&phase_centre);
-    dbg!(phase_centre.ra.to_degrees(), phase_centre.dec.to_degrees());
     let sched_start_timestamp = vis_ctx.start_timestamp;
     let sched_duration = vis_ctx.int_time * (vis_ctx.num_sel_timesteps + 1) as f64;
     let obs_name = Some("Simulated Crux visibilities".into());
@@ -396,9 +431,43 @@ fn get_obs_metadata() -> (VisContext, MarluObsContext) {
     (vis_ctx, obs_ctx)
 }
 
-// generate a model containing several flat spectrum point sources at various positions on a grid
+// construct a pair of ionospheric offsets that would shift a source by
+// `worst_angle_offsets` at the minim
+fn get_iono_consts(
+    max_lambda_sq: f64,
+    source_pos: RADec,
+    worst_angle_offsets: (f64, f64),
+) -> (f64, f64) {
+    // dbg!(&max_lambda_sq);
+    // eprintln!(
+    //     "src radec: {:?} => {}, {}",
+    //     source_pos, source_pos.ra.to_degrees(), source_pos.dec.to_degrees()
+    // );
+
+    // the position of the worst ionospheric offset
+    let worst_iono_radec = RADec {
+        ra: source_pos.ra + worst_angle_offsets.0,
+        dec: source_pos.dec + worst_angle_offsets.1,
+    };
+    // eprintln!("worst iono radec: {:?} => {}, {}", worst_iono_radec, worst_iono_radec.ra.to_degrees(), worst_iono_radec.dec.to_degrees());
+
+    // get the lmn coordinates of the worst offset relative to source position
+    let worst_iono_lmn = worst_iono_radec.to_lmn(source_pos);
+    // eprintln!("worst iono lmn: {:?} => {}, {}", worst_iono_lmn, worst_iono_lmn.l.asin().to_degrees(), worst_iono_lmn.m.asin().to_degrees());
+
+    // iono rotation: exp[-2πi(αu+βv)λ²]
+    // normal rotation: exp[−2πi(ul+vm+w(√(1−l²−m²)−1))]
+    // so α~l/λ², β~m/λ²
+    (
+        worst_iono_lmn.l / max_lambda_sq,
+        worst_iono_lmn.m / max_lambda_sq,
+    )
+}
+
+// Generate a model containing several flat spectrum point sources at various positions on a grid
 // aligned to the nearest degree.
-// each source has a different ionospheric offset.
+// Each source has a different ionospheric offset, which is calculated from a
+// desired maximum sky coordinate offset which happens at the lowest frequency.
 fn get_source_list(vis_ctx: &VisContext, obs_ctx: &MarluObsContext) -> IonoSourceList {
     let phase_centre = obs_ctx.phase_centre;
     let mut srclist = IonoSourceList::new();
@@ -407,16 +476,15 @@ fn get_source_list(vis_ctx: &VisContext, obs_ctx: &MarluObsContext) -> IonoSourc
     let range = quant * 2;
     let p_ra = quant * (phase_centre.ra.to_degrees() / quant as f64).round() as i32;
     let p_dec = quant * (phase_centre.dec.to_degrees() / quant as f64).round() as i32;
-    eprintln!("phase centre {:?} => {} {}", phase_centre, p_ra, p_dec);
+    eprintln!("phase centre {:?} => {}, {}", phase_centre, p_ra, p_dec);
 
     let min_freq = vis_ctx.start_freq_hz;
     let max_lambda_sq = (VEL_C * VEL_C) / (min_freq * min_freq);
 
     // a small ionospheric deviation of 15 arcsec at lowest freq
-    let small_iono = (10_f64/60./60.).to_radians().sin()/max_lambda_sq/TAU;
-    // a big ionospheric deviation of 59 arcsec at lowest freq
-    let big_iono = (59_f64/60./60.).to_radians().sin()/max_lambda_sq/TAU;
-    eprintln!("small iono {:?}, big iono {:?}", small_iono, big_iono);
+    let small_iono_rad = (15_f64/60./60.).to_radians();
+    let big_iono_rad = (59_f64/60./60.).to_radians();
+    eprintln!("small iono {:?} deg, big iono {:?} deg", small_iono_rad.to_degrees(), big_iono_rad.to_degrees());
 
     let mut i = 0;
     for ra in (0..=range).step_by(quant as usize) {
@@ -424,20 +492,25 @@ fn get_source_list(vis_ctx: &VisContext, obs_ctx: &MarluObsContext) -> IonoSourc
             i += 1;
             // uncomment this to only use the source at 0,-27
             // if i != 5 { continue; }
-            let iono_mag = if i==5 {big_iono} else {small_iono};
-            let iono_consts = (
-                iono_mag * (TAU * (i%4) as f64 / 4.).sin(),
-                iono_mag * (TAU * (i%4) as f64 / 4.).cos()
-            );
+            // whether the source offset is big or small
+            let iono_rad = if i==5 {big_iono_rad} else {small_iono_rad};
+            // the source model position
             let src_ra = p_ra + ra - range / 2;
             let src_dec = p_dec + dec - range / 2;
+            let src_radec = RADec::new_degrees(src_ra as f64, src_dec as f64);
+
+            let worst_angle_offsets = (
+                iono_rad * (TAU * (i%4) as f64 / 4.).sin(),
+                iono_rad * (TAU * (i%4) as f64 / 4.).cos(),
+            );
+            let iono_consts = get_iono_consts(max_lambda_sq, src_radec, worst_angle_offsets);
+            dbg!(&iono_consts);
             srclist.insert(format!("ra{:+.2}dec_{:+.2}", src_ra, src_dec), IonoSource {
                 source: Source {components: vec1![
                     SourceComponent {
-                        radec: RADec::new_degrees(src_ra as f64, src_dec as f64),
+                        radec: src_radec,
                         comp_type: ComponentType::Point,
                         flux_type: FluxDensityType::PowerLaw {
-                            // NOTE: these aren't the real values, not that it matters
                             si: 0.,
                             fd: FluxDensity {
                                 freq: vis_ctx.start_freq_hz,
@@ -491,13 +564,17 @@ fn get_weights_rts(
     let ant_pairs = vis_ctx.sel_baselines.clone();
     let part_uvws = calc_part_uvws(&ant_pairs, &centroid_timestamps, phase_centre, array_pos, &tile_xyzs);
     let weight_factor = vis_ctx.weight_factor();
+    let freqs_hz = vis_ctx.frequencies_hz();
 
     Array3::from_shape_fn(
         (sel_shape.0, sel_shape.2, sel_shape.1),
-        |(ts, bl, _)| {
+        |(ts, bl, ch)| {
             let (ant1, ant2) = ant_pairs[bl];
             let uvw= part_uvws[[ts, ant1]] - part_uvws[[ts, ant2]];
-            let uv_sq = uvw.u * uvw.u + uvw.v * uvw.v;
+            // to convert to RTS uvw (wavelengths) from PAL uvw (meters), dividy by λ.
+            let lambda = VEL_C / freqs_hz[ch];
+            let (u, v) = (uvw.u/lambda, uvw.v/lambda);
+            let uv_sq = u * u + v * v;
             weight_factor as f32 * (1.0 - (-uv_sq/(2.0*short_sigma*short_sigma).exp() )) as f32
         },
     )
@@ -702,7 +779,7 @@ fn vis_rotate<F>(
                 jones_array.iter_mut(),
                 &freqs_hz
             ) {
-                // XXX(Dev): not sure if sign is right here
+                // in RTS, uvw is in units of λ but pal uvw is in meters, so divide by wavelength
                 let rotation = cexp(F::from(-TAU * (arg_w_diff) * (freq_hz as f64) / VEL_C).unwrap());
                 *jones *= rotation;
             }
@@ -775,7 +852,7 @@ fn simulate_accumulate_iono(
     }
 }
 
-// apply ionospheric rotation of exp(-i(αu+βv)λ^2)
+// apply ionospheric rotation of exp(-2πi(αu+βv)λ²)
 fn apply_iono<F>(
     mut jones: ArrayViewMut3<Jones<F>>,
     vis_ctx: &VisContext,
@@ -827,8 +904,10 @@ fn apply_iono<F>(
                 jones.iter_mut(),
                 &freqs_hz
             ) {
-                let lambda_2 =  (VEL_C * VEL_C) / (freq_hz * freq_hz);
-                let rotation = cexp(F::from(-TAU * uv_lm * lambda_2).unwrap());
+                // in RTS, uvw is in units of λ but pal uvw is in meters, so divide by wavelength,
+                // but we're also multiplying by λ², so just multiply by λ
+                let lambda = VEL_C / freq_hz;
+                let rotation = cexp(F::from(-TAU * uv_lm * lambda).unwrap());
                 *jones *= rotation;
             }
         }
@@ -882,12 +961,7 @@ fn apply_iono_approx<F>(
     // pre-compute partial uvws:
     let part_uvws = calc_part_uvws(&ant_pairs, &centroid_timestamps, phase_centre, array_pos, &tile_xyzs);
 
-    let lambdas_2 = freqs_hz.iter().map(|freq_hz| {
-        (VEL_C * VEL_C) / (freq_hz * freq_hz)
-    }).collect::<Vec<_>>();
-
-    // debug
-    let mut max_uv_lm = 0.0;
+    let lambdas = freqs_hz.iter().map(|freq_hz| VEL_C / freq_hz).collect::<Vec<_>>();
 
     // iterate along time axis
     for (
@@ -907,21 +981,21 @@ fn apply_iono_approx<F>(
         ) {
             let uvw= part_uvws[[ant1]] - part_uvws[[ant2]];
             let uv_lm = uvw.u * const_lm.0 + uvw.v * const_lm.1;
-            if uv_lm > max_uv_lm {
-                max_uv_lm = uv_lm;
-            }
             // iterate along frequency axis
             for (
                 jones,
-                lambda_2,
+                &lambda,
             ) in izip!(
                 jones.iter_mut(),
-                &lambdas_2
+                &lambdas
             ) {
+                // in RTS, uvw is in units of λ but pal uvw is in meters, so divide by wavelength,
+                // but we're also multiplying by λ², so just multiply by λ
+
                 // first order taylor expansion, data D from rotation of model M
                 // D = M * exp(-i * phi * lambda^2 )
                 //   = M * (1 - i * phi * lambda^2 + ... )
-                let exponent = - Complex::i() * F::from(TAU * uv_lm * lambda_2).unwrap();
+                let exponent = - Complex::i() * F::from(TAU * uv_lm * lambda).unwrap();
                 let rotation: Complex<F> = (0..=order).map(|n| {
                     exponent.powi(n as i32) / F::from(factorial(&n)).unwrap()
                 }).sum();
@@ -929,7 +1003,6 @@ fn apply_iono_approx<F>(
             }
         }
     }
-    // eprintln!("max uv_lm: {}", max_uv_lm);
 }
 
 
@@ -1032,12 +1105,13 @@ fn get_offsets_rts(
                     // s_vm += weight_f64 * (model_i.re as f64) * (unpeeled_i.re as f64);
                     // s_mm += weight_f64 * mm;
 
-                    // The sign of the fft exponent and the lambda^2 weighting is taken care of after the loop
-                    a_uu += weight_f64 * mm * uvw.u * uvw.u;
-                    a_uv += weight_f64 * mm * uvw.u * uvw.v;
-                    a_vv += weight_f64 * mm * uvw.v * uvw.v;
-                    aa_u  += weight_f64 * mr * uvw.u;
-                    aa_v  += weight_f64 * mr * uvw.v;
+                    // to convert to RTS uvw (wavelengths) from PAL uvw (meters), dividy by λ.
+                    let (u, v) = (uvw.u/lambda, uvw.v/lambda);
+                    a_uu += weight_f64 * mm * u * u;
+                    a_uv += weight_f64 * mm * u * v;
+                    a_vv += weight_f64 * mm * v * v;
+                    aa_u  += weight_f64 * mr * u;
+                    aa_v  += weight_f64 * mr * v;
                 }
             }
 
@@ -1190,13 +1264,14 @@ fn get_offsets_paper(
                     let weight_f64 = *weight as f64;
                     weight_sum_f64 += weight_f64;
 
-                    // The sign of the fft exponent and the lambda^2 weighting is taken care of after the loop
+                    // to convert to RTS uvw (wavelengths) from PAL uvw (meters), dividy by λ.
+                    let (u, v) = (uvw.u/lambda, uvw.v/lambda);
                     i_c +=  mr * weight_f64;
-                    a_uu +=  uvw.u * uvw.u * weight_f64;
-                    a_uv +=  uvw.u * uvw.v * weight_f64;
-                    a_vv +=  uvw.v * uvw.v * weight_f64;
-                    aa_u  +=  -uvw.u * di * weight_f64;
-                    aa_v  +=  -uvw.v * di * weight_f64;
+                    a_uu +=  u * u * weight_f64;
+                    a_uv +=  u * v * weight_f64;
+                    a_vv +=  v * v * weight_f64;
+                    aa_u  +=  -u * di * weight_f64;
+                    aa_v  +=  -v * di * weight_f64;
                 }
             }
 
@@ -1299,10 +1374,14 @@ fn plot_chi_squared(
     let max_lambda_sq = (VEL_C * VEL_C) / (min_freq * min_freq);
     // number of arc seconds to step phi by
     let iono_step_as = 5_f64;
+    // the range of angle offsets to try
     let phis_as = (-20..20).map(|i| i as f64 * iono_step_as).collect::<Vec<_>>();
     for phi_as in phis_as {
-        let alpha = (phi_as/(60. * 60.)).to_radians().sin()/max_lambda_sq/TAU;
-        let const_lm = (alpha, 0.0);
+        let worst_angle_offsets = (
+            (phi_as/60./60.).to_radians(),
+            0.
+        );
+        let const_lm = get_iono_consts(max_lambda_sq, obs_ctx.phase_centre, worst_angle_offsets);
         // copy unpeeled and apply ionospheric rotation
         let mut iono_rotated = Array3::from_shape_fn(model.dim(), |idx| {
             model[idx]
@@ -1564,6 +1643,95 @@ fn write_vis(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // create visibilities with an exaggerated ionospheric rotation, to validate by eye that the offsets are correct.
+    #[test]
+    fn vaidate_iono_rotation() {
+        // iono_srclist: &IonoSourceList
+
+        if !OUT_DIR.is_dir() {
+            std::fs::create_dir_all(OUT_DIR.as_path()).unwrap();
+        }
+        let array_pos = LatLngHeight::new_mwa();
+        // array_pos.latitude_rad = 0.;
+        // array_pos.longitude_rad = 0.;
+
+        let (mut vis_ctx, obs_ctx) = get_obs_metadata(array_pos);
+        vis_ctx.freq_resolution_hz=1_280_000.;
+        vis_ctx.start_freq_hz=81_920_000.;
+        vis_ctx.num_sel_chans=12;
+
+        let beam = get_beam(&obs_ctx);
+
+        let freqs_hz = vis_ctx.frequencies_hz();
+        let max_lambda_sq = (VEL_C / freqs_hz.first().unwrap()).powi(2);
+        let min_lambda_sq = (VEL_C / freqs_hz.last().unwrap()).powi(2);
+        eprintln!("min / max lambda sq: {} / {}", min_lambda_sq, max_lambda_sq);
+        // a big ionospheric rotation in RA
+        let worst_offsets_rad = (
+            (1.).to_radians(),
+            0.,
+        );
+        // position the source on the nearest degree grid
+        let source_pos = RADec::new_degrees(
+            obs_ctx.phase_centre.ra.to_degrees().round(),
+            obs_ctx.phase_centre.dec.to_degrees().round()
+        );
+        let iono_source = IonoSource {
+            source: Source {components: vec1![
+                SourceComponent {
+                    radec: source_pos,
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: 0.,
+                        fd: FluxDensity {
+                            freq: vis_ctx.start_freq_hz,
+                            i: 5.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }
+            ]},
+            iono_consts: get_iono_consts(
+                max_lambda_sq, source_pos, worst_offsets_rad
+            )
+        };
+
+        let sel_shape = vis_ctx.sel_dims();
+        let mut vis_synth = Array3::from_elem(
+            (sel_shape.0, sel_shape.2, sel_shape.1), Jones::<f32>::zero()
+        );
+        let weight_synth = Array3::from_elem(
+            (sel_shape.0, sel_shape.2, sel_shape.1), vis_ctx.weight_factor() as f32
+        );
+
+        let iono_test_path = OUT_DIR.join("vis_iono_test.ms");
+
+        simulate_accumulate_iono(
+            vis_synth.view_mut(),
+            &vis_ctx,
+            #[cfg(feature = "cuda")]
+            use_cpu_for_modelling,
+            &beam,
+            iono_source,
+            "iono_test".into(),
+            &obs_ctx,
+        );
+        write_vis(
+            vis_synth.view(),
+            weight_synth.view(),
+            &vis_ctx,
+            &obs_ctx,
+            iono_test_path,
+        );
+
+    }
+}
 // use mwa_hyperdrive::{
 //     calibrate::{
 //         channels_to_chanblocks, di::calibrate_timeblocks, timesteps_to_timeblocks, solutions::CalibrationSolutions
