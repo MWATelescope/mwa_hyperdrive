@@ -346,32 +346,36 @@ pub struct ShapeletComponentParams {
 
 /// A trait to abstract common behaviour on the per-component parameters.
 pub trait PerComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl>;
+    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
+        self.get_azels_parallel(lst_rad, MWA_LAT_RAD)
 }
 
-fn get_azels_mwa_parallel(radecs: &[RADec], lst_rad: f64) -> Vec<AzEl> {
+    fn get_azels_parallel(&self, lst_rad: f64, lattitude_rad: f64) -> Vec<AzEl>;
+}
+
+fn get_azels_parallel(radecs: &[RADec], lst_rad: f64, lattitude_rad: f64) -> Vec<AzEl> {
     radecs
         .par_iter()
-        .map(|radec| radec.to_hadec(lst_rad).to_azel(MWA_LAT_RAD))
+        .map(|radec| radec.to_hadec(lst_rad).to_azel(lattitude_rad))
         .collect()
 }
 
 // Make each of the component types derive the trait.
 
 impl PerComponentParams for PointComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
-        get_azels_mwa_parallel(&self.radecs, lst_rad)
+    fn get_azels_parallel(&self, lst_rad: f64, lattitude_rad: f64) -> Vec<AzEl> {
+        get_azels_parallel(&self.radecs, lst_rad, lattitude_rad)
     }
 }
 
 impl PerComponentParams for GaussianComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
-        get_azels_mwa_parallel(&self.radecs, lst_rad)
+    fn get_azels_parallel(&self, lst_rad: f64, lattitude_rad: f64) -> Vec<AzEl> {
+        get_azels_parallel(&self.radecs, lst_rad, lattitude_rad)
     }
 }
 
 impl PerComponentParams for ShapeletComponentParams {
-    fn get_azels_mwa_parallel(&self, lst_rad: f64) -> Vec<AzEl> {
-        get_azels_mwa_parallel(&self.radecs, lst_rad)
+    fn get_azels_parallel(&self, lst_rad: f64, lattitude_rad: f64) -> Vec<AzEl> {
+        get_azels_parallel(&self.radecs, lst_rad, lattitude_rad)
     }
 }

@@ -75,7 +75,7 @@ impl<'a> SkyModellerCpu<'a> {
 
         let fds = &self.components.points.flux_densities;
         let lmns = &self.components.points.lmns;
-        let azels = &self.components.points.get_azels_mwa_parallel(lst_rad);
+        let azels = &self.components.points.get_azels_parallel(lst_rad, self.array_latitude);
 
         assert_eq!(
             vis_model_slice.len_of(Axis(0)),
@@ -201,7 +201,7 @@ impl<'a> SkyModellerCpu<'a> {
 
         let fds = &self.components.gaussians.flux_densities;
         let lmns = &self.components.gaussians.lmns;
-        let azels = &self.components.gaussians.get_azels_mwa_parallel(lst_rad);
+        let azels = &self.components.gaussians.get_azels_parallel(lst_rad, self.array_latitude);
         let gaussian_params = &self.components.gaussians.gaussian_params;
 
         assert_eq!(
@@ -343,7 +343,7 @@ impl<'a> SkyModellerCpu<'a> {
 
         let fds = &self.components.shapelets.flux_densities;
         let lmns = &self.components.shapelets.lmns;
-        let azels = &self.components.shapelets.get_azels_mwa_parallel(lst_rad);
+        let azels = &self.components.shapelets.get_azels_parallel(lst_rad, self.array_latitude);
         let gaussian_params = &self.components.shapelets.gaussian_params;
         let shapelet_coeffs = &self.components.shapelets.shapelet_coeffs;
 
