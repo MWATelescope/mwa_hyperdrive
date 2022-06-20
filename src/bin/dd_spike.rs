@@ -1073,9 +1073,6 @@ fn get_offsets_rts(
             offsets.outer_iter_mut(),
             freqs_hz.iter(),
         ) {
-            // sum of weights
-            // let mut weight_sum_f64 = 0.;
-            // let (mut s_vm, mut s_mm) = (0., 0.);
             // a-terms used in least-squares estimator
             let (mut a_uu, mut a_uv, mut a_vv) = (0., 0., 0.);
             // A-terms used in least-squares estimator
@@ -1123,6 +1120,16 @@ fn get_offsets_rts(
                     a_vv += weight_f64 * mm * v * v;
                     aa_u  += weight_f64 * mr * u;
                     aa_v  += weight_f64 * mr * v;
+
+                    // println!("{}", vec![
+                    //     ant1.to_string(),
+                    //     ant2.to_string(),
+                    //     unpeeled_i.to_string(),
+                    //     model_i.to_string(),
+                    //     uvw.u.to_string(),
+                    //     uvw.v.to_string(),
+                    //     uvw.w.to_string(),
+                    // ].join("\t"));
                 }
             }
 
@@ -1139,20 +1146,20 @@ fn get_offsets_rts(
             offsets[[0]] = (aa_u*a_vv - aa_v*a_uv) / delta;
             offsets[[1]] = (aa_v*a_uu - aa_u*a_uv) / delta;
 
-            // println!(
-            //     "rts: {}, {}, {}, {}, {}, {}, {}, {}, {}",
-            //     src_name,
-            //     lambda_2,
-            //     a_uu,
-            //     a_uv,
-            //     a_vv,
-            //     aa_u,
-            //     aa_v,
-            //     offsets[[0]] * lambda_2,
-            //     offsets[[1]] * lambda_2
-            // );
+            // println!("{}", vec![
+            //     lambda_2.to_string(),
+            //     a_uu.to_string(),
+            //     a_uv.to_string(),
+            //     a_vv.to_string(),
+            //     aa_u.to_string(),
+            //     aa_v.to_string(),
+            //     delta.to_string(),
+            //     (offsets[[0]] * lambda_2).to_string(),
+            //     (offsets[[1]] * lambda_2).to_string(),
+            // ].join("\t"));
         }
     }
+    // println!("{:?}", offsets);
     offsets.axis_iter(Axis(2)).map(|x| x.mean().unwrap()).collect_vec()
 }
 
@@ -1244,21 +1251,13 @@ fn get_offsets_paper(
             ) {
                 let uvw= part_uvws[[ant1]] - part_uvws[[ant2]];
 
-                // eprintln!(
-                //     "> epoch {:16} bl ({:3} {:3}) freq {:8} weight {:8}",
-                //     epoch.as_gregorian_utc_str(),
-                //     ant1, ant2,
-                //     freq_hz,
-                //     *weight
-                // );
                 if *weight > 0. {
                     // unsure about this method of gettings stokes I from jones
                     let unpeeled_i = unpeeled[0] + unpeeled[3];
                     let model_i = model[0] + model[3];
 
                     // eprintln!(
-                    //     "> epoch {:16} bl ({:3} {:3}) freq {:8} unpeeled_I ({:6.4}, {:6.4}) model_I ({:6.4}, {:6.4})",
-                    //     epoch.as_gregorian_utc_str(),
+                    //     "> bl ({:3} {:3}) freq {:8} unpeeled_I ({:6.4}, {:6.4}) model_I ({:6.4}, {:6.4})",
                     //     ant1, ant2,
                     //     freq_hz,
                     //     unpeeled_i.re,
