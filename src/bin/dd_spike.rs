@@ -529,7 +529,7 @@ fn get_source_list(vis_ctx: &VisContext, obs_ctx: &MarluObsContext) -> IonoSourc
     srclist
 }
 
-fn get_beam(obs_ctx: &MarluObsContext) -> Box<dyn Beam> {
+fn get_beam(num_tiles: usize) -> Box<dyn Beam> {
     let beam_file = "/data/dev/calibration/mwa_full_embedded_element_pattern.h5".into();
     let delays = vec![
         0, 0, 0, 0,
@@ -542,7 +542,7 @@ fn get_beam(obs_ctx: &MarluObsContext) -> Box<dyn Beam> {
 
     let beam = create_fee_beam_object(
         beam_file,
-        obs_ctx.ant_positions_geodetic().count(),
+        num_tiles,
         Delays::Partial(delays),
         None,
         // Array2::from_elem((tile_xyzs.len(), 32), 1.)
@@ -1664,7 +1664,7 @@ mod tests {
         vis_ctx.start_freq_hz=81_920_000.;
         vis_ctx.num_sel_chans=12;
 
-        let beam = get_beam(&obs_ctx);
+        let beam = get_beam(obs_ctx.ant_positions_geodetic().count());
 
         let freqs_hz = vis_ctx.frequencies_hz();
         let max_lambda_sq = (VEL_C / freqs_hz.first().unwrap()).powi(2);
