@@ -84,7 +84,7 @@ fn try_main() -> Result<(), HyperdriveError> {
     #[cfg(feature = "cuda")]
     let use_cpu_for_modelling = false;
 
-    let beam = get_beam(&obs_ctx);
+    let beam = get_beam(obs_ctx.ant_positions_geodetic().count());
 
     // initialize an array to accumulate synthetic visibilities into
     let sel_shape = vis_ctx.sel_dims();
@@ -1666,9 +1666,9 @@ mod tests {
         if !OUT_DIR.is_dir() {
             std::fs::create_dir_all(OUT_DIR.as_path()).unwrap();
         }
-        let array_pos = LatLngHeight::new_mwa();
-        // array_pos.latitude_rad = 0.;
-        // array_pos.longitude_rad = 0.;
+        let mut array_pos = LatLngHeight::new_mwa();
+        array_pos.latitude_rad = 0.;
+        array_pos.longitude_rad = 0.;
 
         let (mut vis_ctx, obs_ctx) = get_obs_metadata(array_pos);
         vis_ctx.freq_resolution_hz=1_280_000.;
@@ -1740,6 +1740,155 @@ mod tests {
             &obs_ctx,
             iono_test_path,
         );
+
+    }
+
+    // simplify the problem down to 1 dimension
+    // lat/lng = 0
+    // this only works if you override the hardcoded mwa location in hyperdrive/model.
+    #[test]
+    fn one_dimension() {
+        let array_pos = LatLngHeight {
+            longitude_rad: 0.,
+            latitude_rad: 0.,
+            height_metres: 100.,
+        };
+        let mut obs_time = Epoch::from_gpst_seconds(1090008640.);
+        // shift zenith_time to the nearest time when the phase centre is at zenith
+        let obs_lst_rad = get_lmst(obs_time, array_pos.longitude_rad);
+        if obs_lst_rad.abs() > 1e-6 {
+            let sidereal2solar = 365.24/366.24;
+            obs_time -= Duration::from_f64(sidereal2solar*obs_lst_rad/TAU, Unit::Day);
+        }
+        let zenith_lst_rad = get_lmst(obs_time, array_pos.longitude_rad);
+        let phase_centre = RADec::from_hadec(HADec::new(0., array_pos.latitude_rad), zenith_lst_rad);
+        let timesteps = vec![obs_time];
+
+        let tile_names: Vec<String> = "OXYZ".chars().map(|c| c.to_string()).collect();
+        let tile_xyzs= vec![
+            XyzGeodetic {x: 0., y: 0., z: 0.},
+            XyzGeodetic {x: 1., y: 0., z: 0.},
+            XyzGeodetic {x: 0., y: 1., z: 0.},
+            XyzGeodetic {x: 0., y: 0., z: 1.},
+        ];
+        let ant_pairs = vec![
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 2),
+            (1, 3),
+            (2, 3),
+        ];
+
+        let lambda = 1.;
+        let freq_hz = VEL_C/lambda;
+        dbg!(freq_hz);
+        let freqs_hz = vec![freq_hz];
+
+        let iono_consts = (
+            (1./60.).to_radians(),
+            0.,
+        );
+        dbg!(&iono_consts);
+
+        let source_list = SourceList::from(indexmap! {
+            "One".into() => Source { components: vec1![
+                SourceComponent {
+                    radec: phase_centre,
+                    comp_type: ComponentType::Point,
+                    flux_type: FluxDensityType::PowerLaw {
+                        si: 0.,
+                        fd: FluxDensity {
+                            freq: freq_hz,
+                            i: 1.0,
+                            q: 0.0,
+                            u: 0.0,
+                            v: 0.0,
+                        },
+                    },
+                }
+            ]}
+        });
+
+        let beam = get_beam(tile_xyzs.len());
+
+        // Create a "modeller" object.
+        let modeller = new_sky_modeller(
+            #[cfg(feature = "cuda")]
+            use_cpu_for_modelling,
+            beam.deref(),
+            &source_list,
+            &tile_xyzs,
+            &freqs_hz,
+            &[],
+            phase_centre,
+            array_pos.longitude_rad,
+            array_pos.latitude_rad,
+            // TODO: Allow the user to turn off precession.
+            true,
+        )
+        .unwrap();
+
+        // let sel_shape = vis_ctx.sel_dims();
+        let mut vis_model = Array3::from_elem(
+            (1, ant_pairs.len(), 1), Jones::<f32>::zero()
+        );
+        let model_slice = vis_model.slice_mut(s![0_usize, .., ..]);
+        modeller
+            .model_timestep(model_slice, obs_time)
+            .unwrap();
+
+        // copy model slice into vis slice and iono shift
+        let mut vis_synth = Array3::from_shape_fn(vis_model.dim(), |idx| vis_model[idx]);
+        let part_uvws = calc_part_uvws(&ant_pairs, &timesteps, phase_centre, array_pos, &tile_xyzs);
+        _apply_iono(vis_synth.view_mut(), part_uvws, &ant_pairs, iono_consts, &freqs_hz);
+
+        // generate weights of 1.
+        let weights = Array3::from_elem(vis_model.dim(), 1.);
+
+        let vis_ctx = VisContext {
+            num_sel_timesteps: 1,
+            start_timestamp: obs_time,
+            int_time: Duration::from_f64(1., Unit::Second),
+            num_sel_chans: 1,
+            start_freq_hz: freq_hz,
+            freq_resolution_hz: 10_000.,
+            sel_baselines: ant_pairs,
+            avg_time: 1,
+            avg_freq: 1,
+            num_vis_pols: 4,
+        };
+
+        let sched_start_timestamp = vis_ctx.start_timestamp;
+        let sched_duration = vis_ctx.int_time * vis_ctx.num_sel_timesteps as f64;
+        let obs_name = Some("Simulated 1D visibilities".into());
+        let obs_ctx = MarluObsContext {
+            sched_start_timestamp,
+            sched_duration,
+            name: obs_name,
+            phase_centre,
+            pointing_centre: None,
+            array_pos,
+            ant_positions_enh: tile_xyzs
+                .iter()
+                .map(|xyz| xyz.to_enh(array_pos.latitude_rad))
+                .collect(),
+            ant_names: tile_names,
+            field_name: None,
+            project_id: None,
+            observer: None,
+        };
+
+        let offsets_rts = get_offsets_rts(
+            vis_synth.view(),
+            weights.view(),
+            vis_model.view(),
+            &vis_ctx,
+            &obs_ctx,
+            // source_name.clone(),
+        );
+
+        println!("retrieved offsets {:?}", offsets_rts);
 
     }
 }
