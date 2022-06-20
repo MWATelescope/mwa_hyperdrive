@@ -853,7 +853,7 @@ fn simulate_accumulate_iono(
 
 // apply ionospheric rotation of exp(-2πi(αu+βv)λ²)
 fn apply_iono<F>(
-    mut jones: ArrayViewMut3<Jones<F>>,
+    jones: ArrayViewMut3<Jones<F>>,
     vis_ctx: &VisContext,
     obs_ctx: &MarluObsContext,
     // constants of proportionality for ionospheric offset in l,m
@@ -877,6 +877,18 @@ fn apply_iono<F>(
     // pre-compute partial uvws:
     let part_uvws = calc_part_uvws(&ant_pairs, &centroid_timestamps, phase_centre, array_pos, &tile_xyzs);
 
+    _apply_iono(jones, part_uvws, &ant_pairs, const_lm, &freqs_hz);
+}
+
+fn _apply_iono<F>(
+    mut jones: ArrayViewMut3<Jones<F>>,
+    part_uvws: Array2<UVW>,
+    ant_pairs: &[(usize, usize)],
+    const_lm: (f64, f64),
+    freqs_hz: &[f64]
+) where
+F: Float + Num + NumAssign + Default,
+{
     // iterate along time axis
     for (
         mut jones,
@@ -891,7 +903,7 @@ fn apply_iono<F>(
             &(ant1, ant2)
         ) in izip!(
             jones.outer_iter_mut(),
-            &ant_pairs
+            ant_pairs
         ) {
             let uvw= part_uvws[[ant1]] - part_uvws[[ant2]];
             let uv_lm = uvw.u * const_lm.0 + uvw.v * const_lm.1;
@@ -901,7 +913,7 @@ fn apply_iono<F>(
                 &freq_hz,
             ) in izip!(
                 jones.iter_mut(),
-                &freqs_hz
+                freqs_hz
             ) {
                 // in RTS, uvw is in units of λ but pal uvw is in meters, so divide by wavelength,
                 // but we're also multiplying by λ², so just multiply by λ
