@@ -365,15 +365,14 @@ fn get_obs_metadata(array_pos: LatLngHeight) -> (VisContext, MarluObsContext) {
     let meta_path = PathBuf::from("test_files/1090008640/1090008640.metafits");
     let meta_ctx = mwalib::MetafitsContext::new::<PathBuf>(&meta_path, None).unwrap();
     let obsid = meta_ctx.obs_id;
-    let obs_time = Epoch::from_gpst_seconds(obsid as _);
+    let mut obs_time = Epoch::from_gpst_seconds(obsid as _);
     let obs_lst_rad = get_lmst(obs_time, array_pos.longitude_rad);
-    let mut zenith_time = obs_time;
-    // shift zenith_time to the nearest time when the phase centre is at zenith
+    // shift obs_time to the nearest time when the phase centre is at zenith
     if obs_lst_rad.abs() > 1e-6 {
         let sidereal2solar = 365.24/366.24;
-        zenith_time -= Duration::from_f64(sidereal2solar*obs_lst_rad/TAU, Unit::Day);
+        obs_time -= Duration::from_f64(sidereal2solar*obs_lst_rad/TAU, Unit::Day);
     }
-    let zenith_lst_rad = get_lmst(zenith_time, array_pos.longitude_rad);
+    let zenith_lst_rad = get_lmst(obs_time, array_pos.longitude_rad);
     eprintln!("lst % 𝜏 should be 0: {:?}", zenith_lst_rad);
     let phase_centre = RADec::from_hadec(HADec::new(0., array_pos.latitude_rad), zenith_lst_rad);
     eprintln!("phase centre: {:?}", phase_centre);
@@ -410,8 +409,8 @@ fn get_obs_metadata(array_pos: LatLngHeight) -> (VisContext, MarluObsContext) {
         num_vis_pols: 4,
     };
     let sched_start_timestamp = vis_ctx.start_timestamp;
-    let sched_duration = vis_ctx.int_time * (vis_ctx.num_sel_timesteps + 1) as f64;
-    let obs_name = Some("Simulated Crux visibilities".into());
+    let sched_duration = vis_ctx.int_time * vis_ctx.num_sel_timesteps as f64;
+    let obs_name = Some("Simulated Grid visibilities".into());
     let obs_ctx = MarluObsContext {
         sched_start_timestamp,
         sched_duration,
@@ -432,7 +431,7 @@ fn get_obs_metadata(array_pos: LatLngHeight) -> (VisContext, MarluObsContext) {
 }
 
 // construct a pair of ionospheric offsets that would shift a source by
-// `worst_angle_offsets` at the minim
+// `worst_angle_offsets` at maximum λ
 fn get_iono_consts(
     max_lambda_sq: f64,
     source_pos: RADec,
