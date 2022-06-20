@@ -1655,6 +1655,8 @@ fn write_vis(
 
 #[cfg(test)]
 mod tests {
+    use approx::assert_abs_diff_eq;
+
     use super::*;
 
     // create visibilities with an exaggerated ionospheric rotation, to validate by eye that the offsets are correct.
@@ -1887,7 +1889,9 @@ mod tests {
             // source_name.clone(),
         );
 
-        println!("retrieved offsets {:?}", offsets_rts);
+        // println!("retrieved offsets {:?}", offsets_rts);
+        assert_abs_diff_eq!(iono_consts.0, offsets_rts[0], epsilon=1e-7);
+        assert_abs_diff_eq!(iono_consts.1, offsets_rts[1], epsilon=1e-7);
 
     }
 }
