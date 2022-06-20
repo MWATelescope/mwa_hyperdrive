@@ -1029,7 +1029,7 @@ fn get_offsets_rts(
     assert_eq!(jones_dims, weights.dim());
     assert_eq!(jones_dims, model.dim());
 
-    let mut offsets = Array3::zeros((jones_dims.0, jones_dims.1, 2));
+    let mut offsets = Array3::zeros((jones_dims.0, jones_dims.2, 2));
 
     // pre-compute partial uvws:
     let part_uvws = calc_part_uvws(&ant_pairs, &centroid_timestamps, phase_centre, array_pos, &tile_xyzs);
@@ -1169,7 +1169,7 @@ fn get_offsets_paper(
     assert_eq!(jones_dims, weights.dim());
     assert_eq!(jones_dims, model.dim());
 
-    let mut offsets = Array3::zeros((jones_dims.0, jones_dims.1, 2));
+    let mut offsets = Array3::zeros((jones_dims.0, jones_dims.2, 2));
 
     // println!("epoch, ant1, ant2, freq, u, v, w, weight, model_I_r, model_I_th, unpeeled_I_r, unpeeled_I_th, ")
     // println!("name, epoch, lambda_2, a_uu, a_uv, a_vv, aa_u, aa_v, c_l, c_m");
