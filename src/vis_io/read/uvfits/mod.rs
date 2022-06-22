@@ -15,8 +15,8 @@ use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
 use hifitime::{Duration, Epoch, Unit};
-use log::{debug, trace};
-use marlu::{io::uvfits::decode_uvfits_baseline, Jones, RADec, XyzGeodetic};
+use log::{debug, trace, warn};
+use marlu::{io::uvfits::decode_uvfits_baseline, Jones, RADec, XyzGeocentric, XyzGeodetic};
 use mwalib::{
     fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
     *,
@@ -51,11 +51,15 @@ pub struct UvfitsReader {
 
     /// The [`mwalib::MetafitsContext`] used when [`MsReader`] was created.
     metafits_context: Option<MetafitsContext>,
+
+    /// uvfits files may number their tiles according to the antenna table, and
+    /// not necessarily from 0 to the total number of tiles. This map converts a
+    /// uvfits tile number to a 0-to-total index.
+    tile_map: HashMap<usize, usize>,
 }
 
 impl UvfitsReader {
-    /// Verify and populate metadata associated with this measurement set. TODO:
-    /// Use the metafits to get dead dipole info.
+    /// Verify and populate metadata associated with this measurement set.
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
@@ -76,11 +80,12 @@ impl UvfitsReader {
                 return Err(UvfitsReadError::BadFile(uvfits.to_path_buf()));
             }
 
-            // Get the tile names and XYZ positions.
+            // Get the tile names, XYZ positions and antenna numbers.
             let mut uvfits_fptr = fits_open!(&uvfits)?;
-            let hdu = fits_open_hdu!(&mut uvfits_fptr, 1)?;
+            let antenna_table_hdu = fits_open_hdu!(&mut uvfits_fptr, 1)?;
 
-            let tile_names: Vec<String> = get_fits_col!(&mut uvfits_fptr, &hdu, "ANNAME")?;
+            let tile_names: Vec<String> =
+                get_fits_col!(&mut uvfits_fptr, &antenna_table_hdu, "ANNAME")?;
             let tile_names =
                 Vec1::try_from_vec(tile_names).map_err(|_| UvfitsReadError::AnnameEmpty)?;
             let total_num_tiles = tile_names.len();
@@ -88,7 +93,13 @@ impl UvfitsReader {
             let tile_xyzs = {
                 let mut tile_xyzs: Vec<XyzGeodetic> = Vec::with_capacity(total_num_tiles);
                 for i in 0..total_num_tiles {
-                    let fits_xyz = read_cell_array(&mut uvfits_fptr, &hdu, "STABXYZ", i as _, 3)?;
+                    let fits_xyz = read_cell_array(
+                        &mut uvfits_fptr,
+                        &antenna_table_hdu,
+                        "STABXYZ",
+                        i as _,
+                        3,
+                    )?;
                     tile_xyzs.push(XyzGeodetic {
                         x: fits_xyz[0],
                         y: fits_xyz[1],
@@ -98,6 +109,49 @@ impl UvfitsReader {
                 tile_xyzs
             };
             let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
+
+            // Set up the tile map.
+            let tile_nums: Vec<u32> = get_fits_col!(&mut uvfits_fptr, &antenna_table_hdu, "NOSTA")?;
+            let tile_map: HashMap<usize, usize> = tile_nums
+                .into_iter()
+                .zip(0..total_num_tiles)
+                .map(|(a, b)| (a as usize, b))
+                .collect();
+
+            let array_position = {
+                let frame: Option<String> =
+                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "FRAME")?;
+                // The uvfits standard only defines one frame (ITRF). So warn
+                // the user if this isn't explicit, but we assume this is always
+                // used.
+                let itrf_frame_warning = match frame.as_ref().map(|s| s.trim()) {
+                    Some("ITRF") => None,
+                    _ => Some("Assuming that the uvfits antenna coordinate system is ITRF"),
+                };
+                let array_x: Option<f64> =
+                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYX")?;
+                let array_y: Option<f64> =
+                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYY")?;
+                let array_z: Option<f64> =
+                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYZ")?;
+                match (array_x, array_y, array_z) {
+                    (Some(x), Some(y), Some(z)) => {
+                        if let Some(itrf_frame_warning) = itrf_frame_warning {
+                            warn!("{itrf_frame_warning}");
+                        }
+                        Some(crate::math::geocentric_to_geodetic(XyzGeocentric {
+                            x,
+                            y,
+                            z,
+                        }))
+                    }
+                    (None, None, None) => None,
+                    _ => {
+                        warn!("Only a subset of uvfits ARRAYX, ARRAYY, ARRAYZ is available; ignoring present values");
+                        None
+                    }
+                }
+            };
 
             let hdu = fits_open_hdu!(&mut uvfits_fptr, 0)?;
             let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &hdu)?;
@@ -113,7 +167,10 @@ impl UvfitsReader {
             debug!("VV index:       {}", metadata.indices.v);
             debug!("WW index:       {}", metadata.indices.w);
             debug!("BASELINE index: {}", metadata.indices.baseline);
-            debug!("DATE index:     {}", metadata.indices.date);
+            debug!("DATE index:     {}", metadata.indices.date1);
+            if let Some(d2) = metadata.indices.date2 {
+                debug!("(Second) DATE index: {}", d2);
+            }
             debug!("RA index:       {}", metadata.indices.ra);
             debug!("DEC index:      {}", metadata.indices.dec);
             debug!("FREQ index:     {}", metadata.indices.freq);
@@ -155,14 +212,18 @@ impl UvfitsReader {
             let mut present_tiles_set: HashSet<usize> = HashSet::new();
             metadata.uvfits_baselines.iter().for_each(|&uvfits_bl| {
                 let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
-                // Don't forget to subtract one from the uvfits-formatted baselines.
-                present_tiles_set.insert(ant1 - 1);
-                present_tiles_set.insert(ant2 - 1);
+                present_tiles_set.insert(ant1);
+                present_tiles_set.insert(ant2);
             });
-            let flagged_tiles = (0..total_num_tiles)
-                .into_iter()
-                .filter(|i| !present_tiles_set.contains(i))
-                .collect();
+            let flagged_tiles = {
+                let mut v = tile_map
+                    .iter()
+                    .filter(|(i, _)| !present_tiles_set.contains(*i))
+                    .map(|(_, v)| *v)
+                    .collect::<Vec<_>>();
+                v.sort_unstable();
+                v
+            };
 
             // Work out the timestamp epochs. The file tells us what time standard
             // is being used (probably UTC). If this is false, then we assume TAI.
@@ -202,7 +263,7 @@ impl UvfitsReader {
                 .iter()
                 .enumerate()
                 .map(|(i, &frac)| {
-                    let jd_offset = Duration::from_f64(frac as f64, Unit::Day);
+                    let jd_offset = Duration::from_f64(frac, Unit::Day);
                     (i, jd_zero + quantize_duration(jd_offset, q))
                 })
                 .unzip();
@@ -387,8 +448,7 @@ impl UvfitsReader {
                 dipole_delays,
                 dipole_gains,
                 time_res,
-                // XXX(Dev): Can this be obtained from the ARRAY{X,Y,Z} keys? (geocentric, wgs84)
-                array_position: None,
+                array_position,
                 coarse_chan_nums,
                 coarse_chan_freqs,
                 num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
@@ -405,6 +465,7 @@ impl UvfitsReader {
                 metadata,
                 step,
                 metafits_context: mwalib_context,
+                tile_map,
             })
         }
         inner(uvfits.as_ref(), metafits.as_ref().map(|f| f.as_ref())).map_err(VisReadError::from)
@@ -441,20 +502,22 @@ impl UvfitsReader {
                     group_params.as_mut_ptr(), /* O - array of values that are returned       */
                     &mut status,               /* IO - error status                           */
                 );
-                // TODO: Handle the errors nicely; the error messages aren't helpful
-                // right now.
-                fits_check_status(status).map_err(UvfitsReadError::from)?;
+                fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
+                    row_num: row + 1,
+                    err,
+                })?;
 
                 group_params[(self.metadata.indices.baseline - 1) as usize]
             };
 
             let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl.round() as usize);
+            let (ant1, ant2) = (self.tile_map[&ant1], self.tile_map[&ant2]);
 
             if let Some(crosses) = crosses.as_mut() {
                 if let Some(i_baseline) = crosses
                     .tile_to_unflagged_baseline_map
-                    .get(&(ant1 - 1, ant2 - 1))
-                    .cloned()
+                    .get(&(ant1, ant2))
+                    .copied()
                 {
                     unsafe {
                         // ffgpve = fits_read_img_flt
@@ -469,7 +532,10 @@ impl UvfitsReader {
                             &mut status, /* IO - error status                           */
                         );
                     }
-                    fits_check_status(status).map_err(UvfitsReadError::from)?;
+                    fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
+                        row_num: row + 1,
+                        err,
+                    })?;
 
                     // Put the data and weights into the shared arrays outside this
                     // scope. Before we can do this, we need to remove any
@@ -505,9 +571,8 @@ impl UvfitsReader {
             }
 
             if let Some(autos) = autos.as_mut() {
-                if ant1 == ant2 && !autos.flagged_tiles.contains(&(ant1 - 1)) {
+                if ant1 == ant2 && !autos.flagged_tiles.contains(&(ant1)) {
                     let ant = ant1
-                        - 1
                         - (0..ant1)
                             .filter(|i_ant| autos.flagged_tiles.contains(i_ant))
                             .count();
@@ -525,7 +590,10 @@ impl UvfitsReader {
                             &mut status, /* IO - error status                           */
                         );
                     }
-                    fits_check_status(status).map_err(UvfitsReadError::from)?;
+                    fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
+                        row_num: row + 1,
+                        err,
+                    })?;
 
                     let mut out_vis = autos.data_array.slice_mut(s![ant, ..]);
                     let mut out_weights = autos.weights_array.slice_mut(s![ant, ..]);
@@ -660,7 +728,7 @@ struct UvfitsMetadata {
     uvfits_baselines: Vec<usize>,
 
     /// Unique collection of JD fractions for timestamps.
-    jd_frac_timestamps: Vec<f32>,
+    jd_frac_timestamps: Vec<f64>,
 
     /// Are auto-correlations present?
     autocorrelations_present: bool,
@@ -734,8 +802,27 @@ impl UvfitsMetadata {
 
         // "JD zero" refers to the Julian date at midnight of the first day of
         // the observation, as per the uvfits standard.
-        let jd_zero_val_str = format!("PZERO{}", indices.date);
+        let jd_zero_val_str = format!("PZERO{}", indices.date1);
         let jd_zero_str: String = get_required_fits_key!(uvfits, hdu, &jd_zero_val_str)?;
+        // We expect that the PZERO corresponding to the second date (if
+        // available) is 0.
+        if let Some(d2) = indices.date2 {
+            let pzero = format!("PZERO{}", d2);
+            let key: Option<String> = get_optional_fits_key!(uvfits, hdu, &pzero)?;
+            match key {
+                Some(key) => match key.parse::<f32>() {
+                    Ok(n) => {
+                        if n.abs() > f32::EPSILON {
+                            warn!("{pzero}, corresponding to the second DATE, was not 0; ignoring it anyway")
+                        }
+                    }
+                    Err(std::num::ParseFloatError { .. }) => {
+                        warn!("Could not parse {pzero} as a float")
+                    }
+                },
+                None => warn!("{pzero} does not exist, corresponding to the second DATE"),
+            }
+        }
         let jd_zero: f64 = match jd_zero_str.parse() {
             Ok(p) => p,
             Err(_) => {
@@ -753,41 +840,49 @@ impl UvfitsMetadata {
         let mut jd_frac_timestamp_set = HashSet::new();
         let mut jd_frac_timestamps = vec![];
 
-        let mut status = 0;
+        let mut group_params = Array2::zeros((num_rows, pcount));
         unsafe {
-            let mut group_params = vec![0.0; pcount];
-            for row_num in 0..num_rows {
-                // ffggpe = fits_read_grppar_flt
-                fitsio_sys::ffggpe(
-                    uvfits.as_raw(),           /* I - FITS file pointer                       */
-                    (row_num + 1) as _,        /* I - group to read (1 = 1st group)           */
-                    1,                         /* I - first vector element to read (1 = 1st)  */
-                    pcount as _,               /* I - number of values to read                */
-                    group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                    &mut status,               /* IO - error status                           */
-                );
-                // Check the status.
-                // TODO: Handle the errors nicely; the error messages aren't helpful
-                // right now.
-                fits_check_status(status)?;
+            let mut status = 0;
+            // ffggpe = fits_read_grppar_flt
+            fitsio_sys::ffggpe(
+                uvfits.as_raw(),           /* I - FITS file pointer                       */
+                1,                         /* I - group to read (1 = 1st group)           */
+                1,                         /* I - first vector element to read (1 = 1st)  */
+                (pcount * num_rows) as _,  /* I - number of values to read                */
+                group_params.as_mut_ptr(), /* O - array of values that are returned       */
+                &mut status,               /* IO - error status                           */
+            );
+            // Check the status.
+            fits_check_status(status).map_err(UvfitsReadError::Metadata)?;
+        }
 
-                // Floats can't be hashed. Hash the bits!
-                let uvfits_bl = group_params[indices.baseline as usize - 1] as usize;
-                let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
-                if !autocorrelations_present && (ant1 == ant2) {
-                    autocorrelations_present = true;
-                }
-                if !uvfits_baselines_set.contains(&uvfits_bl) {
-                    uvfits_baselines_set.insert(uvfits_bl);
-                    uvfits_baselines.push(uvfits_bl);
-                }
+        for params in group_params.outer_iter() {
+            let uvfits_bl = params[indices.baseline as usize - 1] as usize;
+            let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
+            if !autocorrelations_present && (ant1 == ant2) {
+                autocorrelations_present = true;
+            }
+            // Don't just push into a set; we want the order of the baselines as
+            // they come out of the uvfits file, and this isn't necessarily
+            // sorted.
+            if !uvfits_baselines_set.contains(&uvfits_bl) {
+                uvfits_baselines_set.insert(uvfits_bl);
+                uvfits_baselines.push(uvfits_bl);
+            }
 
-                let timestamp = group_params[indices.date as usize - 1];
-                let timestamp_bits = timestamp.to_bits();
-                if !jd_frac_timestamp_set.contains(&timestamp_bits) {
-                    jd_frac_timestamp_set.insert(timestamp_bits);
-                    jd_frac_timestamps.push(timestamp);
+            let jd = {
+                let mut t = params[indices.date1 as usize - 1] as f64;
+                // Use the second date, if it's there.
+                if let Some(d2) = indices.date2 {
+                    t += params[d2 as usize - 1] as f64;
                 }
+                t
+            };
+            // Floats can't be hashed. Hash the bits!
+            let jd_bits = jd.to_bits();
+            if !jd_frac_timestamp_set.contains(&jd_bits) {
+                jd_frac_timestamp_set.insert(jd_bits);
+                jd_frac_timestamps.push(jd);
             }
         }
 
@@ -817,7 +912,9 @@ struct Indices {
     /// PTYPE
     baseline: u8,
     /// PTYPE
-    date: u8,
+    date1: u8,
+    /// PTYPE
+    date2: Option<u8>,
     /// CTYPE
     ra: u8,
     /// CTYPE
@@ -834,63 +931,103 @@ impl Indices {
     /// This function assumes the correct HDU has already been opened (should be
     /// HDU 1, index 0).
     fn new(uvfits: &mut FitsFile, hdu: &FitsHdu) -> Result<Self, UvfitsReadError> {
-        let ptype1: String = get_required_fits_key!(uvfits, hdu, "PTYPE1")?;
-        let ptype2: String = get_required_fits_key!(uvfits, hdu, "PTYPE2")?;
-        let ptype3: String = get_required_fits_key!(uvfits, hdu, "PTYPE3")?;
-        let ptype4: String = get_required_fits_key!(uvfits, hdu, "PTYPE4")?;
-        let ptype5: String = get_required_fits_key!(uvfits, hdu, "PTYPE5")?;
+        // Accumulate the "PTYPE" keys.
+        let mut ptypes = Vec::with_capacity(12);
+        for i in 1.. {
+            let ptype: Option<String> =
+                get_optional_fits_key!(uvfits, hdu, &format!("PTYPE{}", i))?;
+            match ptype {
+                Some(ptype) => ptypes.push(ptype),
 
+                // We've found the last PTYPE.
+                None => break,
+            }
+        }
+
+        // We only care about UVWs, baselines and dates.
         let mut u_index = None;
         let mut v_index = None;
         let mut w_index = None;
         let mut baseline_index = None;
-        let mut date_index = None;
+        let mut date1_index = None;
+        let mut date2_index = None;
 
-        for (i, key) in [ptype1, ptype2, ptype3, ptype4, ptype5].iter().enumerate() {
+        for (i, key) in ptypes.into_iter().enumerate() {
             let ii = (i + 1) as u8;
             match key.as_ref() {
-                "UU" => u_index = Some(ii),
-                "VV" => v_index = Some(ii),
-                "WW" => w_index = Some(ii),
-                "BASELINE" => baseline_index = Some(ii),
-                "DATE" => date_index = Some(ii),
+                "UU" => {
+                    if u_index.is_none() {
+                        u_index = Some(ii)
+                    } else {
+                        warn!("Found another UU key -- only using the first");
+                    }
+                }
+                "VV" => {
+                    if v_index.is_none() {
+                        v_index = Some(ii)
+                    } else {
+                        warn!("Found another VV key -- only using the first");
+                    }
+                }
+                "WW" => {
+                    if w_index.is_none() {
+                        w_index = Some(ii)
+                    } else {
+                        warn!("Found another WW key -- only using the first");
+                    }
+                }
+                "BASELINE" => {
+                    if baseline_index.is_none() {
+                        baseline_index = Some(ii)
+                    } else {
+                        warn!("Found another BASELINE key -- only using the first");
+                    }
+                }
+                "DATE" => match (date1_index, date2_index) {
+                    (None, None) => date1_index = Some(ii),
+                    (Some(_), None) => date2_index = Some(ii),
+                    (Some(_), Some(_)) => {
+                        warn!("Found more than 2 DATE keys -- only using the first two")
+                    }
+                    (None, Some(_)) => unreachable!(),
+                },
                 _ => (),
             }
         }
 
-        let (u, v, w, baseline, date) =
-            match (u_index, v_index, w_index, baseline_index, date_index) {
-                (Some(u), Some(v), Some(w), Some(baseline), Some(date)) => {
-                    (u, v, w, baseline, date)
+        let (u, v, w, baseline, date1) =
+            match (u_index, v_index, w_index, baseline_index, date1_index) {
+                (Some(u), Some(v), Some(w), Some(baseline), Some(date1)) => {
+                    (u, v, w, baseline, date1)
                 }
                 (None, _, _, _, _) => {
                     return Err(UvfitsReadError::MissingKey {
                         key: "UU",
-                        hdu: hdu.number,
+                        hdu: hdu.number + 1,
                     })
                 }
                 (_, None, _, _, _) => {
                     return Err(UvfitsReadError::MissingKey {
                         key: "VV",
-                        hdu: hdu.number,
+                        hdu: hdu.number + 1,
                     })
                 }
                 (_, _, None, _, _) => {
                     return Err(UvfitsReadError::MissingKey {
                         key: "WW",
-                        hdu: hdu.number,
+                        hdu: hdu.number + 1,
                     })
                 }
                 (_, _, _, None, _) => {
                     return Err(UvfitsReadError::MissingKey {
                         key: "BASELINE",
-                        hdu: hdu.number,
+                        hdu: hdu.number + 1,
                     })
                 }
                 (_, _, _, _, None) => {
                     return Err(UvfitsReadError::MissingKey {
                         key: "DATE",
-                        hdu: hdu.number,
+                        hdu: hdu.number + 1,
                     })
                 }
             };
@@ -924,19 +1061,19 @@ impl Indices {
             (None, _, _) => {
                 return Err(UvfitsReadError::MissingKey {
                     key: "RA",
-                    hdu: hdu.number,
+                    hdu: hdu.number + 1,
                 })
             }
             (_, None, _) => {
                 return Err(UvfitsReadError::MissingKey {
                     key: "DEC",
-                    hdu: hdu.number,
+                    hdu: hdu.number + 1,
                 })
             }
             (_, _, None) => {
                 return Err(UvfitsReadError::MissingKey {
                     key: "FREQ",
-                    hdu: hdu.number,
+                    hdu: hdu.number + 1,
                 })
             }
         };
@@ -946,7 +1083,8 @@ impl Indices {
             v,
             w,
             baseline,
-            date,
+            date1,
+            date2: date2_index,
             ra,
             dec,
             freq,
@@ -959,8 +1097,8 @@ impl Indices {
 /// TDOUBLE, so it is not to be used generally!
 fn read_cell_array(
     fits_ptr: &mut fitsio::FitsFile,
-    _hdu: &fitsio::hdu::FitsHdu,
-    col_name: &str,
+    hdu: &fitsio::hdu::FitsHdu,
+    col_name: &'static str,
     row: i64,
     n_elem: i64,
 ) -> Result<Vec<f64>, UvfitsReadError> {
@@ -978,9 +1116,11 @@ fn read_cell_array(
             &mut status,
         );
         // Check the status.
-        // TODO: Handle the errors nicely; the error messages aren't helpful
-        // right now.
-        fits_check_status(status)?;
+        fits_check_status(status).map_err(|err| UvfitsReadError::ReadCellArray {
+            col_name,
+            hdu_num: hdu.number + 1,
+            err,
+        })?;
 
         // Now get the specified row from that column.
         let mut array: Vec<f64> = vec![0.0; n_elem as usize];
@@ -993,12 +1133,15 @@ fn read_cell_array(
             1,
             n_elem,
             std::ptr::null_mut(),
-            array.as_mut_ptr() as _,
+            array.as_mut_ptr().cast(),
             &mut 0,
             &mut status,
         );
-        // TODO: As above.
-        fits_check_status(status)?;
+        fits_check_status(status).map_err(|err| UvfitsReadError::ReadCellArray {
+            col_name,
+            hdu_num: hdu.number + 1,
+            err,
+        })?;
 
         Ok(array)
     }

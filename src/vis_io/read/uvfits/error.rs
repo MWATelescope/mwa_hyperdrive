@@ -45,7 +45,23 @@ pub(crate) enum UvfitsReadError {
     #[error("Could not parse key {key}'s value {value} into a number")]
     Parse { key: String, value: String },
 
-    /// An error associated with fitsio.
+    #[error("When attempting to read uvfits baseline metadata, cfitsio gave an error: {0}")]
+    Metadata(fitsio::errors::Error),
+
+    #[error("When attempting to read uvfits column {col_name} from HDU {hdu_num}, cfitsio gave an error: {err}")]
+    ReadCellArray {
+        col_name: &'static str,
+        hdu_num: usize,
+        err: fitsio::errors::Error,
+    },
+
+    #[error("When attempting to read uvfits row {row_num}, cfitsio gave an error: {err}")]
+    ReadVis {
+        row_num: usize,
+        err: fitsio::errors::Error,
+    },
+
+    /// A generic error associated with fitsio.
     #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
 
