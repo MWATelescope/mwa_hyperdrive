@@ -159,17 +159,9 @@ accessed from the <a href="https://asvo.mwatelescope.org/">ASVO</a>.</p>
 <pre><code class="language-shell">$ hyperdrive di-calibrate -d *gpubox*.fits *.metafits *.mwaf -s a_good_sky_model.yaml
 $ hyperdrive di-calibrate -d *ch???*.fits *.metafits *.mwaf -s a_good_sky_model.yaml
 </code></pre>
-<p>Here's an example that will match either:</p>
-<pre><code class="language-shell">$ hyperdrive di-calibrate -d (*gpubox*|*ch???*).fits *.metafits *.mwaf -s a_good_sky_model.yaml
-</code></pre>
 <h3 id="mwaf"><a class="header" href="#mwaf">mwaf</a></h3>
-<p><code>mwaf</code> files indicate what should be flagged, and should be made with
-<a href="https://github.com/MWATelescope/Birli"><code>Birli</code></a>. They aren't necessary, but may
-improve things. An example of producing them is:</p>
-<pre><code class="language-shell">$ birli *gpubox*.fits -m *.metafits -f birli_flag_%%.mwaf
-</code></pre>
-<p>At the time of writing, <code>mwaf</code> files are only utilised when reading from raw
-data.</p>
+<p><code>mwaf</code> files indicate what visibilities should be flagged. See <a href="mwa/mwaf.html">this
+page</a> for more info.</p>
 <h2 id="measurement-sets"><a class="header" href="#measurement-sets">Measurement sets</a></h2>
 <pre><code class="language-shell">$ hyperdrive di-calibrate -d *.ms *.metafits -s a_good_sky_model.yaml
 </code></pre>

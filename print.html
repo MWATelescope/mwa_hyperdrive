@@ -439,7 +439,7 @@ interference).</li>
 </ul>
 <p>A high-level overview of the steps in <code>di-calibrate</code> are below. Solid lines
 indicate actions that always happen, dashed lines are optional:</p>
-<pre><code class="language-mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
+<pre class="mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
 flowchart TD
     InputData[fa:fa-file Input data files]--&gt;Args
     SkyModel[fa:fa-file Sky-model source-list file]--&gt;Args
@@ -461,7 +461,7 @@ flowchart TD
     end
 
     cal--&gt;WriteSols[fa:fa-save Write calibration solutions]
-</code></pre>
+</pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="di-calibration-tutorial"><a class="header" href="#di-calibration-tutorial">DI calibration tutorial</a></h1>
 <p>Here, a series of steps are laid out to demonstrate how raw MWA data is
 calibrated with <code>hyperdrive</code>. We also plot calibration solutions and image
@@ -783,7 +783,7 @@ unambiguous when applying multiple timeblocks.</p>
 <p><code>apply-solutions</code> can be used instead of <code>solutions-apply</code>.</p>
 <p>A high-level overview of the steps in <code>solutions-apply</code> are below. Solid lines
 indicate actions that always happen, dashed lines are optional:</p>
-<pre><code class="language-mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
+<pre class="mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
 flowchart TD
     InputData[fa:fa-file Input data files]--&gt;Args
     CalSols[fa:fa-wrench Calibration\nsolutions]--&gt;Args
@@ -797,7 +797,7 @@ flowchart TD
         Read--&gt;Apply[&quot;fa:fa-code Apply calibration\nsolutions to timeblock&quot;]
         Apply--&gt;Write[fa:fa-save Write timeblock\nvisibilities]
     end
-</code></pre>
+</pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="simple-usage-of-solutions-apply"><a class="header" href="#simple-usage-of-solutions-apply">Simple usage of solutions apply</a></h1>
 <p>Use the <code>solutions-apply</code> subcommand, i.e.</p>
 <pre><code class="language-shell">$ hyperdrive solutions-apply
@@ -853,7 +853,7 @@ ionosphere) may be present and produce &quot;holes&quot; in the visibilities, e.
 <p><img src="user/vis_subtract/subtracted.jpg" alt="" /></p>
 <p>A high-level overview of the steps in <code>vis-subtract</code> are below. Solid lines
 indicate actions that always happen, dashed lines are optional:</p>
-<pre><code class="language-mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
+<pre class="mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
 flowchart TD
     InputData[fa:fa-file Calibrated input data]--&gt;Args
     CalSols[fa:fa-file Sky-model source-list file]--&gt;Args
@@ -867,7 +867,7 @@ flowchart TD
         Read--&gt;Apply[&quot;fa:fa-code Generate model vis\nand subtract it from input data&quot;]
         Apply--&gt;Write[fa:fa-save Write timeblock\nvisibilities]
     end
-</code></pre>
+</pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="instrumental-polarisations"><a class="header" href="#instrumental-polarisations">Instrumental polarisations</a></h1>
 <p>In <code>hyperdrive</code> (and <a href="https://github.com/MWATelescope/mwalib"><code>mwalib</code></a> and
 <a href="https://github.com/MWATelescope/mwa_hyperbeam"><code>hyperbeam</code></a>), the X
@@ -898,17 +898,9 @@ accessed from the <a href="https://asvo.mwatelescope.org/">ASVO</a>.</p>
 <pre><code class="language-shell">$ hyperdrive di-calibrate -d *gpubox*.fits *.metafits *.mwaf -s a_good_sky_model.yaml
 $ hyperdrive di-calibrate -d *ch???*.fits *.metafits *.mwaf -s a_good_sky_model.yaml
 </code></pre>
-<p>Here's an example that will match either:</p>
-<pre><code class="language-shell">$ hyperdrive di-calibrate -d (*gpubox*|*ch???*).fits *.metafits *.mwaf -s a_good_sky_model.yaml
-</code></pre>
 <h3 id="mwaf"><a class="header" href="#mwaf">mwaf</a></h3>
-<p><code>mwaf</code> files indicate what should be flagged, and should be made with
-<a href="https://github.com/MWATelescope/Birli"><code>Birli</code></a>. They aren't necessary, but may
-improve things. An example of producing them is:</p>
-<pre><code class="language-shell">$ birli *gpubox*.fits -m *.metafits -f birli_flag_%%.mwaf
-</code></pre>
-<p>At the time of writing, <code>mwaf</code> files are only utilised when reading from raw
-data.</p>
+<p><code>mwaf</code> files indicate what visibilities should be flagged. See <a href="defs/mwa/mwaf.html">this
+page</a> for more info.</p>
 <h2 id="measurement-sets-1"><a class="header" href="#measurement-sets-1">Measurement sets</a></h2>
 <pre><code class="language-shell">$ hyperdrive di-calibrate -d *.ms *.metafits -s a_good_sky_model.yaml
 </code></pre>
@@ -1058,6 +1050,13 @@ more info on dipole ordering.</p>
 other dipoles are &quot;alive&quot;.</p>
 <p><img src="defs/mwa/dead_dipoles.jpg" alt="" /></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="mwaf-flag-files"><a class="header" href="#mwaf-flag-files">mwaf flag files</a></h1>
+<p><code>mwaf</code> files indicate what visibilities should be flagged, and should be made
+with <a href="https://github.com/MWATelescope/Birli"><code>Birli</code></a>. They aren't necessary,
+but may improve things. An example of producing them is:</p>
+<pre><code class="language-shell">$ birli *gpubox*.fits -m *.metafits -f birli_flag_%%.mwaf
+</code></pre>
+<p>At the time of writing, <code>hyperdrive</code> only utilises <code>mwaf</code> files when reading
+visibilities from raw data.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="raw-data-corrections"><a class="header" href="#raw-data-corrections">Raw data corrections</a></h1>
 <p>A number of things can be done to &quot;correct&quot; or &quot;pre-process&quot; raw MWA data before
 it is ready for calibration (or other analysis). These tasks are handled by

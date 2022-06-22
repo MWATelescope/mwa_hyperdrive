@@ -148,6 +148,13 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="mwaf-flag-files"><a class="header" href="#mwaf-flag-files">mwaf flag files</a></h1>
+<p><code>mwaf</code> files indicate what visibilities should be flagged, and should be made
+with <a href="https://github.com/MWATelescope/Birli"><code>Birli</code></a>. They aren't necessary,
+but may improve things. An example of producing them is:</p>
+<pre><code class="language-shell">$ birli *gpubox*.fits -m *.metafits -f birli_flag_%%.mwaf
+</code></pre>
+<p>At the time of writing, <code>hyperdrive</code> only utilises <code>mwaf</code> files when reading
+visibilities from raw data.</p>
 
                     </main>
 
