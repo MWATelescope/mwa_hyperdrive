@@ -155,7 +155,7 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         output_path: Option<&Path>,
         input_type: Option<&str>,
         output_type: Option<&str>,
-        num_sources: usize,
+        mut num_sources: usize,
         metafits: &Path,
         source_dist_cutoff: Option<f64>,
         veto_threshold: Option<f64>,
@@ -288,11 +288,20 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
                 .to_owned();
             let mut collapsed = SourceList::new();
             let base = sl.remove_entry(&base).unwrap();
+            let mut num_collapsed_components = base.1.components.len() - 1;
             collapsed.insert(base.0, base.1);
             let base_src = collapsed.get_index_mut(0).unwrap().1;
             sl.into_iter()
+                .take(num_sources)
                 .flat_map(|(_, src)| src.components)
-                .for_each(|comp| base_src.components.push(comp));
+                .for_each(|comp| {
+                    num_collapsed_components += 1;
+                    base_src.components.push(comp);
+                });
+            info!(
+                "Collapsed {num_sources} into 1 base source with {num_collapsed_components} components"
+            );
+            num_sources = 1;
             collapsed
         } else {
             if rts_base_source.is_some() {
