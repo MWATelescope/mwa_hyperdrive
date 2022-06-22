@@ -1,0 +1,357 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js ayu">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Tutorial - mwa_hyperdrive documentation</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="mwa_hyperdrive documentation">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../../highlight.css">
+        <link rel="stylesheet" href="../../tomorrow-night.css">
+        <link rel="stylesheet" href="../../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">
+            var path_to_root = "../../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "ayu";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('ayu')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../../index.html">Introduction</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Installation</li><li class="chapter-item expanded "><a href="../../installation/intro.html"><strong aria-hidden="true">1.</strong> How do I install hyperdrive?</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../installation/pre_compiled.html"><strong aria-hidden="true">1.1.</strong> Pre-compiled</a></li><li class="chapter-item "><a href="../../installation/from_source.html"><strong aria-hidden="true">1.2.</strong> From source</a></li><li class="chapter-item "><a href="../../installation/post.html"><strong aria-hidden="true">1.3.</strong> Post installation</a></li></ol></li><li class="chapter-item expanded "><li class="part-title">User Guide</li><li class="chapter-item expanded "><a href="../../user/intro.html"><strong aria-hidden="true">2.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../../user/help.html"><strong aria-hidden="true">3.</strong> Getting started</a></li><li class="chapter-item expanded "><a href="../../user/di_cal/intro.html"><strong aria-hidden="true">4.</strong> DI calibration</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../../user/di_cal/tutorial.html" class="active"><strong aria-hidden="true">4.1.</strong> Tutorial</a></li><li class="chapter-item "><a href="../../user/di_cal/simple.html"><strong aria-hidden="true">4.2.</strong> Simple usage</a></li><li class="chapter-item "><a href="../../user/di_cal/out_calibrated.html"><strong aria-hidden="true">4.3.</strong> Getting calibrated data</a></li><li class="chapter-item "><div><strong aria-hidden="true">4.4.</strong> Advanced usage</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../user/di_cal/advanced/time_varying.html"><strong aria-hidden="true">4.4.1.</strong> Varying solutions over time</a></li></ol></li><li class="chapter-item "><a href="../../user/di_cal/garrawarla.html"><strong aria-hidden="true">4.5.</strong> Usage on garrawarla</a></li></ol></li><li class="chapter-item expanded "><a href="../../user/solutions_apply/intro.html"><strong aria-hidden="true">5.</strong> Apply solutions</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../user/solutions_apply/simple.html"><strong aria-hidden="true">5.1.</strong> Simple usage</a></li></ol></li><li class="chapter-item expanded "><a href="../../user/vis_simulate/intro.html"><strong aria-hidden="true">6.</strong> Simulate visibilities</a></li><li class="chapter-item expanded "><a href="../../user/vis_subtract/intro.html"><strong aria-hidden="true">7.</strong> Subtract visibilities</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Definitions and Concepts</li><li class="chapter-item expanded "><a href="../../defs/pols.html"><strong aria-hidden="true">8.</strong> Polarisations</a></li><li class="chapter-item expanded "><div><strong aria-hidden="true">9.</strong> Supported visibility formats</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../defs/vis_formats_read.html"><strong aria-hidden="true">9.1.</strong> Read</a></li><li class="chapter-item "><a href="../../defs/vis_formats_write.html"><strong aria-hidden="true">9.2.</strong> Write</a></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">10.</strong> MWA-specific details</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../defs/mwa/metafits.html"><strong aria-hidden="true">10.1.</strong> Metafits files</a></li><li class="chapter-item "><a href="../../defs/mwa/delays.html"><strong aria-hidden="true">10.2.</strong> Dipole delays</a></li><li class="chapter-item "><a href="../../defs/mwa/dead_dipoles.html"><strong aria-hidden="true">10.3.</strong> Dead dipoles</a></li><li class="chapter-item "><a href="../../defs/mwa/mwaf.html"><strong aria-hidden="true">10.4.</strong> mwaf flag files</a></li><li class="chapter-item "><a href="../../defs/mwa/corrections.html"><strong aria-hidden="true">10.5.</strong> Raw data corrections</a></li><li class="chapter-item "><a href="../../defs/mwa/mwalib.html"><strong aria-hidden="true">10.6.</strong> mwalib</a></li></ol></li><li class="chapter-item expanded "><a href="../../defs/beam.html"><strong aria-hidden="true">11.</strong> Beam responses</a></li><li class="chapter-item expanded "><a href="../../defs/modelling/intro.html"><strong aria-hidden="true">12.</strong> Modelling visibilities</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../defs/modelling/rime.html"><strong aria-hidden="true">12.1.</strong> Measurement equation</a></li><li class="chapter-item "><a href="../../defs/modelling/estimating.html"><strong aria-hidden="true">12.2.</strong> Estimating flux densities</a></li></ol></li><li class="chapter-item expanded "><a href="../../defs/source_lists.html"><strong aria-hidden="true">13.</strong> Sky-model source lists</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../defs/fd_types.html"><strong aria-hidden="true">13.1.</strong> Flux-density types</a></li><li class="chapter-item "><a href="../../defs/source_list_hyperdrive.html"><strong aria-hidden="true">13.2.</strong> hyperdrive format</a></li><li class="chapter-item "><a href="../../defs/source_list_ao.html"><strong aria-hidden="true">13.3.</strong> André Offringa (ao) format</a></li><li class="chapter-item "><a href="../../defs/source_list_rts.html"><strong aria-hidden="true">13.4.</strong> RTS format</a></li></ol></li><li class="chapter-item expanded "><a href="../../defs/cal_sols.html"><strong aria-hidden="true">14.</strong> Calibration solutions file formats</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../defs/cal_sols_hyperdrive.html"><strong aria-hidden="true">14.1.</strong> hyperdrive format</a></li><li class="chapter-item "><a href="../../defs/cal_sols_ao.html"><strong aria-hidden="true">14.2.</strong> André Offringa (ao) format</a></li><li class="chapter-item "><a href="../../defs/cal_sols_rts.html"><strong aria-hidden="true">14.3.</strong> RTS format</a></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">15.</strong> Terminology</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../../defs/blocks.html"><strong aria-hidden="true">15.1.</strong> Timeblocks and chanblocks</a></li><li class="spacer"></li></ol></li><li class="chapter-item expanded "><li class="part-title">Developer Guide</li><li class="chapter-item expanded "><a href="../../dev/ndarray.html"><strong aria-hidden="true">16.</strong> Multiple-dimension arrays (ndarray)</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu (default)</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">mwa_hyperdrive documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/MWATelescope/mwa_hyperdrive" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="di-calibration-tutorial"><a class="header" href="#di-calibration-tutorial">DI calibration tutorial</a></h1>
+<p>Here, a series of steps are laid out to demonstrate how raw MWA data is
+calibrated with <code>hyperdrive</code>. We also plot calibration solutions and image
+calibrated data with <code>wsclean</code>.</p>
+<p><a href="../../installation/intro.html">Install</a> <code>hyperdrive</code> if you haven't already.</p>
+<h2 id="step-1-obtain-data"><a class="header" href="#step-1-obtain-data">Step 1: Obtain data</a></h2>
+<p>Feel free to try your own data, but test data is available in the <code>hyperdrive</code>
+repo; download it with this command:</p>
+<pre><code class="language-shell">$ git clone https://github.com/MWATelescope/mwa_hyperdrive --depth 1
+$ cd mwa_hyperdrive
+</code></pre>
+<p>The files are <code>test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits</code>
+and <code>test_files/1090008640/1090008640.metafits</code>. This is tiny part of the <a href="http://ws.mwatelescope.org/observation/obs/?obs_id=1090008640">real
+1090008640
+observation</a> used
+in <code>hyperdrive</code> tests.</p>
+<h2 id="step-2-obtain-a-suitable-sky-model-source-list"><a class="header" href="#step-2-obtain-a-suitable-sky-model-source-list">Step 2: Obtain a suitable sky-model source list</a></h2>
+<p>It's very important to use a sky model that corresponds to the data you're
+using. For EoR fields, <a href="https://github.com/JLBLine/srclists">srclists</a> contains
+many suitable source lists.</p>
+<p>Here, a source list is already provided for testing:
+<code>test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml</code>.</p>
+<h2 id="step-3-run"><a class="header" href="#step-3-run">Step 3: Run</a></h2>
+<p>We're going to run the <code>di-calibrate</code> subcommand of <code>hyperdrive</code>. If you look at
+the help (with <code>hyperdrive di-calibrate --help</code>), you should see the <code>--data</code>
+(<code>-d</code> for short) and <code>--source-list</code> (<code>-s</code> for short) flags under an <code>INPUT FILES</code> header. These are the only two things needed to do calibration:</p>
+<pre><code class="language-shell">$ hyperdrive di-calibrate -d test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits test_files/1090008640/1090008640.metafits -s test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml
+</code></pre>
+<blockquote>
+<p>Note: The above command can be more neatly expressed as:</p>
+<pre><code class="language-shell">$ hyperdrive di-calibrate \
+    -d test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits \
+       test_files/1090008640/1090008640.metafits \
+    -s test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml
+</code></pre>
+<p>This isn't specific to <code>hyperdrive</code>; this is just telling your shell to use
+multiple lines separated by <code>\</code>.</p>
+</blockquote>
+<h2 id="step-4-understanding-the-output"><a class="header" href="#step-4-understanding-the-output">Step 4: Understanding the output</a></h2>
+<p>The command we ran in step 3 should give us information on the input data, the
+sky model, any output files, as well as things relating to calibration. One line reports:</p>
+<pre><code class="language-plaintext">Reading input data and sky modelling
+</code></pre>
+<p>This indicates that <code>hyperdrive</code> is reading the data from disk and generating
+model visibilities. This is usually the slowest part of the whole process, so
+depending on your inputs, this could take some time. You should also see some
+progress bars related to these two tasks.</p>
+<p>Once the progress bars are finished, calibration can begin. You should see many lines like:</p>
+<pre><code class="language-plaintext">Chanblock  11: converged (50): 1e-4 &gt; 9.57140e-7 &gt; 1e-8
+</code></pre>
+<p>This indicates three things:</p>
+<ul>
+<li>Chanblock 11 converged;</li>
+<li>50 iterations were performed; and</li>
+<li>The final error was 9.57140e-7, which is between 1e-4 and 1e-8.</li>
+</ul>
+<blockquote>
+<p><strong>What do these things mean?</strong></p>
+<p>A &quot;chanblock&quot; is a frequency unit of calibration; it may correspond to one or
+many channels of the input data.</p>
+<p>Calibration is done iteratively, and by default is allowed to continue up to
+50 times.</p>
+<p>Finally, there is a &quot;stop threshold&quot; and &quot;minimum threshold&quot; for convergence.
+If the stop threshold (1e-8 by default) is reached before the maximum number
+of iterations, we say that the chanblock has converged well enough that we can
+stop iterating. However, if we reach the maximum number of iterations, one of
+two things happens:</p>
+<ul>
+<li>The chanblock convergence has not reached the stop threshold but exceed the
+minimum threshold.
+<ul>
+<li>In this case, we say the chanblock converged and note that it didn't reach
+the stop threshold.</li>
+</ul>
+</li>
+<li>The chanblock convergence has not reached either the stop or minimum (1e-4
+by default) thresholds.
+<ul>
+<li>In this case, we say the chanblock did not converge (&quot;failed&quot;).</li>
+</ul>
+</li>
+</ul>
+<p>All of these calibration parameters (maximum iterations, stop threshold,
+minimum threshold) are allowed to be adjusted.</p>
+</blockquote>
+<h2 id="step-5-analyse"><a class="header" href="#step-5-analyse">Step 5: Analyse</a></h2>
+<p>Don't assume that things will always work! A good indicator of how calibration
+went is given toward the end of the output of <code>di-calibrate</code>:</p>
+<pre><code class="language-plaintext">All timesteps: 27/27 (100%) chanblocks converged
+</code></pre>
+<p>In this case, all chanblocks converged, giving us confidence that things went
+OK. But there are other things we can do to inspect calibration quality; good
+examples are plotting the solutions, and imaging the calibrated data.</p>
+<h3 id="plotting-solutions"><a class="header" href="#plotting-solutions">Plotting solutions</a></h3>
+<p>First, we need to know where the solutions were written; this is also reported
+toward the end of the output of <code>di-calibrate</code>:</p>
+<pre><code class="language-plaintext">Calibration solutions written to hyperdrive_solutions.fits
+</code></pre>
+<p>So the solutions are at <code>hyperdrive_solutions.fits</code>. We can make plots with <code>solutions-plot</code>; i.e.</p>
+<pre><code class="language-shell">$ hyperdrive solutions-plot hyperdrive_solutions.fits
+</code></pre>
+<p>The command should give output like this:</p>
+<pre><code class="language-plaintext">WARN  No metafits supplied; the obsid and tile names won't be on the plots
+INFO  Wrote [&quot;hyperdrive_solutions_amps.png&quot;, &quot;hyperdrive_solutions_phases.png&quot;]
+</code></pre>
+<p>This is warning us that additional information won't be on the plots because we
+didn't provide a metafits file. It isn't necessary, but we can easily fix this:</p>
+<pre><code class="language-shell">$ hyperdrive solutions-plot hyperdrive_solutions.fits -m test_files/1090008640/1090008640.metafits
+</code></pre>
+<p>Now the plots reported by the command should look something like this:</p>
+<p><img src="amps.png" alt="" />
+<img src="phases.png" alt="" /></p>
+<p>Each box corresponds to an MWA tile and each tile has dots plotted for each
+channel we calibrated. The dots are really hard to see because there are only 27
+channels with solutions. However, if we look <em>very</em> closely, we can see that,
+generally, the dot values don't change much with frequency (particularly for the
+amps), or the dot values change steadily with frequency (particularly for the
+phases). This also hints that the calibration solutions are good.</p>
+<blockquote>
+<p>The solutions plots for the full 1090008640 observation look like this:</p>
+<p><img src="amps_full.jpg" alt="" />
+<img src="phases_full.jpg" alt="" /></p>
+<p>Things are much easier to see when there are more dots! As before, changes
+with frequency are small or smooth.</p>
+</blockquote>
+<blockquote>
+<p>More information on the calibration solutions file formats can be seen
+<a href="../../defs/cal_sols.html">here</a>.</p>
+</blockquote>
+<h3 id="imaging-calibrated-data"><a class="header" href="#imaging-calibrated-data">Imaging calibrated data</a></h3>
+<p>We have calibration solutions, but not calibrated data. We need to &quot;apply&quot; the
+solutions to data to calibrate them:</p>
+<pre><code class="language-shell">$ hyperdrive solutions-apply \
+    -d test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits \
+       test_files/1090008640/1090008640.metafits \
+    -s hyperdrive_solutions.fits \
+    -o hyp_cal.ms
+</code></pre>
+<p>This will write calibrated visibilities to <code>hyp_cal.ms</code>. Now we can image the
+measurement set with <a href="https://gitlab.com/aroffringa/wsclean"><code>wsclean</code></a>:</p>
+<pre><code class="language-shell">$ wsclean -size 4096 4096 -scale 40asec -niter 1000 -auto-threshold 3 hyp_cal.ms
+</code></pre>
+<p>This writes an image file to <code>wsclean-image.fits</code>. You can use many FITS file
+viewers to inspect the image, but here's what it looks like with
+<a href="https://sites.google.com/cfa.harvard.edu/saoimageds9">DS9</a>:</p>
+<p><img src="calibrated.jpg" alt="" /></p>
+<p>Sources are visible! Generally the image quality is OK, but not great. This is
+because there was very little input data.</p>
+<p>When using the <a href="http://ws.mwatelescope.org/observation/obs/?obs_id=1090008640">full 1090008640
+observation</a>,
+this is what the same image looks like (note that unlike the above image, &quot;sqrt&quot;
+scaling is used):</p>
+<p><img src="calibrated_full.jpg" alt="" /></p>
+<p>Many more sources are visible, and the noise is much lower. Depending on your
+science case, these visibilities might be &quot;science ready&quot;.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../user/di_cal/intro.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="../../user/di_cal/simple.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../user/di_cal/intro.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="../../user/di_cal/simple.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script type="text/javascript">
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../../mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../../searcher.js" type="text/javascript" charset="utf-8"></script>
+
+        <script src="../../clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../../highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../../book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        <script type="text/javascript" src="../../mermaid.min.js"></script>
+        <script type="text/javascript" src="../../mermaid-init.js"></script>
+
+
+    </body>
+</html>
