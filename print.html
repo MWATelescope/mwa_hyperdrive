@@ -741,8 +741,7 @@ visibilities will be much slower.</p>
 #SBATCH --partition=gpuq
 #SBATCH --account=mwaeor
 #SBATCH --export=NONE
-#SBATCH --gres=tmp:50g
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1,tmp:50g
 
 module use /pawsey/mwa/software/python3/modulefiles
 module load hyperdrive
@@ -1465,17 +1464,23 @@ visibilities as part of <code>di-calibrate</code>).</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="the-hyperdrive-calibration-solutions-format"><a class="header" href="#the-hyperdrive-calibration-solutions-format">The <code>hyperdrive</code> calibration solutions format</a></h1>
 <p>Jones matrices are stored in a <code>fits</code> file as an &quot;image&quot; with 4 dimensions
-(<a href="defs/">timeblock</a><a href="defs/">tile</a><a href="defs/">chanblock</a><a href="defs/">float</a>) in HDU 2. The element of the solutions is
-a 64-bit float (a.k.a. double-precision float). The last dimension always has a
-length of 8; these correspond to the real part of XX, the imaginary part of XX,
-then XY, YX and YY (4 complex numbers to form a Jones matrix).</p>
+([timeblock][tile][chanblock][float]) in the &quot;SOLUTIONS&quot; HDU (which is the
+second HDU). An element of the solutions is a 64-bit float (a.k.a.
+double-precision float). The last dimension always has a length of 8; these
+correspond to the real part of XX, the imaginary part of XX, then XY, YX and YY
+(4 complex numbers to form a Jones matrix).</p>
 <p>Tiles are ordered by antenna number, i.e. the second column in the observation's
-corresponding metafits files labelled &quot;antenna&quot;. Times and frequencies are
+corresponding metafits files labelled &quot;Antenna&quot;. Times and frequencies are
 sorted ascendingly.</p>
+<blockquote>
+<p>Note that in the context of the MWA, &quot;antenna&quot; and &quot;tile&quot; are used
+interchangeably.</p>
+</blockquote>
 <h2 id="metadata"><a class="header" href="#metadata">Metadata</a></h2>
-<p>Metadata are stored as keys in HDU 1.</p>
-<p><code>OBSID</code> describes the MWA observation ID, which is a GPS timestamp; optional.</p>
-<p><code>SOFTWARE</code> reports the software used to write this <code>fits</code> file; optional.</p>
+<p>Many metadata keys are stored in HDU 1. All keys (in fact, all metadata) are
+optional.</p>
+<p><code>OBSID</code> describes the MWA observation ID, which is a GPS timestamp.</p>
+<p><code>SOFTWARE</code> reports the software used to write this <code>fits</code> file.</p>
 <h3 id="times"><a class="header" href="#times">Times</a></h3>
 <p>Information on the calibration timeblocks is reported by the keys <code>S_TIMES</code>
 (start times), <code>E_TIMES</code> (end times) and <code>A_TIMES</code> (average times). Each key is
@@ -1484,6 +1489,74 @@ are as many GPS times for each key as there are calibration timeblocks.</p>
 <p>While average times are likely just the values between each pair of start and
 end times, it need not be so; in this case, it helps to clarify that some
 timesteps in this calibration timeblock were not used.</p>
+<h3 id="raw-mwa-data-corrections"><a class="header" href="#raw-mwa-data-corrections">Raw MWA data corrections</a></h3>
+<p><code>PFB</code> describes the <a href="defs/mwa/corrections.html#pfb-gains">PFB gains flavour</a> applied to
+the raw MWA data. At the time of writing, this flavour is described as &quot;jake&quot;,
+&quot;cotter2014&quot;, &quot;empirical&quot;, &quot;levine&quot;, or &quot;none&quot;.</p>
+<p><code>D_GAINS</code> is &quot;Y&quot; if the <a href="defs/../defs/mwa/corrections.html#digital-gains">digital
+gains</a> were applied to the raw MWA
+data. &quot;N&quot; if they were not.</p>
+<p><code>CABLELEN</code> is &quot;Y&quot; if the <a href="defs/../defs/mwa/corrections.html#cable-lengths">cable length
+corrections</a> were applied to the raw
+MWA data. &quot;N&quot; if they were not.</p>
+<p><code>GEOMETRY</code> is &quot;Y&quot; if the <a href="defs/../defs/mwa/corrections.html#geometric-correction-aka-phase-tracking">geometric delay
+correction</a>
+was applied to the raw MWA data. &quot;N&quot; if they were not.</p>
+<h3 id="calibration-specific"><a class="header" href="#calibration-specific">Calibration-specific</a></h3>
+<p><code>MAXITER</code> is the maximum number of iterations allowed for each chanblock's
+convergence.</p>
+<p><code>S_THRESH</code> is the stop threshold of calibration; chanblock iteration ceases once
+its precision is better than this.</p>
+<p><code>M_THRESH</code> is the minimum threshold of calibration; if a chanblock reaches the
+maximum number of iterations while calibrating and this minimum threshold has
+not been reached, we say that the chanblock failed to calibrate.</p>
+<h2 id="extra-hdus"><a class="header" href="#extra-hdus">Extra HDUs</a></h2>
+<p>More metadata are contained in HDUs other than the first one (that which
+contains the metadata keys described above). Other than the first HDU and the
+&quot;SOLUTIONS&quot; HDU (HDUs 1 and 2, respectfully), all HDUs are optional.</p>
+<h3 id="tiles"><a class="header" href="#tiles">TILES</a></h3>
+<p>The &quot;TILES&quot; HDU is a FITS table with three columns:</p>
+<ol>
+<li><code>Antenna</code></li>
+<li><code>TileName</code></li>
+<li><code>Flag</code></li>
+</ol>
+<p><code>Antenna</code> is the 0-N antenna index (where N is the total number of antennas in
+the observation). These indices match the &quot;Antenna&quot; column of an <a href="defs/mwa/metafits.html">MWA
+metafits</a> file.</p>
+<p><code>TileName</code> is the... name of the tile (a.k.a. antenna). As with <code>Antenna</code>, this
+should match the contents of an MWA metafits file.</p>
+<p><code>Flag</code> indicates whether an antenna was flagged during calibration (0) or used
+(1).</p>
+<h3 id="chanblocks"><a class="header" href="#chanblocks">CHANBLOCKS</a></h3>
+<p>See <a href="defs/blocks.html">blocks</a> for an explanation of what chanblocks are.</p>
+<p>The &quot;CHANBLOCKS&quot; HDU is a FITS table with two columns:</p>
+<ol>
+<li><code>Index</code></li>
+<li><code>Flag</code></li>
+</ol>
+<p><code>Index</code> is the 0-N chanblock index (where N is the total number of chanblocks in
+the observation). Note that this is not necessarily the same as the total number
+of <em>channels</em> in the observation; channels may be averaged before calibration,
+making the number of chanblocks less than the number of channels.</p>
+<p><code>Flag</code> indicates whether calibration was attempted (1) or not (2) on a
+chanblock. These flags are needed to understand the &quot;RESULTS&quot; HDU.</p>
+<h3 id="results-calibration-results"><a class="header" href="#results-calibration-results">RESULTS (Calibration results)</a></h3>
+<p>The &quot;RESULTS&quot; HDU is a FITS image with two dimensions -- timeblock and
+chanblock, in that order -- that describe the precision to which a chanblock
+converged for that timeblock. Only the precisions of unflagged chanblocks are
+included; the indices of unflagged chanblocks can be gleaned by the <code>Flag</code>
+column of the chanblocks table (see &quot;CHANBLOCKS&quot; HDU above). NaN is listed for
+chanblocks that completely failed to calibrate.</p>
+<h3 id="baselines"><a class="header" href="#baselines">BASELINES</a></h3>
+<p>The &quot;BASELINES&quot; HDU is a FITS image with one dimension. The values of the
+&quot;image&quot; (let's call it an array) are the baseline weights used in calibration
+(controlled by UVW minimum and maximum cutoffs). The length of the array is the
+number of unflagged baselines. To determine which baseline corresponds to a
+weight, you'll need to generate antenna pairs between unflagged tiles (e.g.
+antenna 0 and 2 are flagged, baseline 0 is between antennas 1 and 3, baseline 1
+is between antennas 1 and 4, etc. Therefore the first two baseline weights would
+correspond to (1,3) and (1,4)).</p>
 <h3 id="frequencies"><a class="header" href="#frequencies">Frequencies</a></h3>
 <p>To be formalised!</p>
 <h2 id="python-code-to-plot-solutions"><a class="header" href="#python-code-to-plot-solutions">Python code to plot solutions</a></h2>
@@ -1601,7 +1674,7 @@ correspond to the timestamps of timesteps 2 and 8.</p>
 timesteps per timeblock, then the output visibilities might be 4x smaller than
 the input visibilities (depending on how the timesteps align with the
 timeblocks).</p>
-<h1 id="chanblocks"><a class="header" href="#chanblocks">Chanblocks</a></h1>
+<h1 id="chanblocks-1"><a class="header" href="#chanblocks-1">Chanblocks</a></h1>
 <p>Similar to timeblocks, chanblocks are averaged units of channels. Frequency
 averaging is currently only implemented when writing out visibilities, so there
 is not much discussion needed here, yet.</p>
