@@ -15,7 +15,6 @@
         <meta name="theme-color" content="#ffffff" />
 
         <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
         <link rel="stylesheet" href="css/variables.css">
         <link rel="stylesheet" href="css/general.css">
         <link rel="stylesheet" href="css/chrome.css">
@@ -872,7 +871,7 @@ flowchart TD
 <a href="https://github.com/MWATelescope/mwa_hyperbeam"><code>hyperbeam</code></a>), the X
 polarisation refers to the East-West dipoles and the Y refers to North-South.
 Note that this contrasts with the IAU definition of X and Y, which is opposite
-to this.</p>
+to this. However, this is consistent within the MWA.</p>
 <p>MWA visibilities are ordered XX, XY, YX, YY (using the above definitions of X
 and Y).</p>
 <h1 id="stokes-polarisations"><a class="header" href="#stokes-polarisations">Stokes polarisations</a></h1>
@@ -1464,8 +1463,8 @@ visibilities as part of <code>di-calibrate</code>).</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="the-hyperdrive-calibration-solutions-format"><a class="header" href="#the-hyperdrive-calibration-solutions-format">The <code>hyperdrive</code> calibration solutions format</a></h1>
 <p>Jones matrices are stored in a <code>fits</code> file as an &quot;image&quot; with 4 dimensions
-([timeblock][tile][chanblock][float]) in the &quot;SOLUTIONS&quot; HDU (which is the
-second HDU). An element of the solutions is a 64-bit float (a.k.a.
+(timeblock, tile, chanblock, float, in that order) in the &quot;SOLUTIONS&quot; HDU (which
+is the second HDU). An element of the solutions is a 64-bit float (a.k.a.
 double-precision float). The last dimension always has a length of 8; these
 correspond to the real part of XX, the imaginary part of XX, then XY, YX and YY
 (4 complex numbers to form a Jones matrix).</p>
@@ -1486,9 +1485,12 @@ optional.</p>
 (start times), <code>E_TIMES</code> (end times) and <code>A_TIMES</code> (average times). Each key is
 a string with comma-separated GPS times. Each key is optional but ideally there
 are as many GPS times for each key as there are calibration timeblocks.</p>
-<p>While average times are likely just the values between each pair of start and
+<p>While average times are likely just the median of its corresponding start and
 end times, it need not be so; in this case, it helps to clarify that some
-timesteps in this calibration timeblock were not used.</p>
+timesteps in this calibration timeblock were not used. e.g. a start time of 10
+and an end time of 16 probably has an average time of 13, but, if 3 of 4
+timesteps in this timeblock are used, then the average time could be 12.666 or
+13.333.</p>
 <h3 id="raw-mwa-data-corrections"><a class="header" href="#raw-mwa-data-corrections">Raw MWA data corrections</a></h3>
 <p><code>PFB</code> describes the <a href="defs/mwa/corrections.html#pfb-gains">PFB gains flavour</a> applied to
 the raw MWA data. At the time of writing, this flavour is described as &quot;jake&quot;,
