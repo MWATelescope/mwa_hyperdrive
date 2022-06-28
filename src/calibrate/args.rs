@@ -189,6 +189,11 @@ pub struct CalibrateUserArgs {
     #[clap(long, multiple_values(true), help_heading = "CALIBRATION")]
     pub timesteps: Option<Vec<usize>>,
 
+    /// Use all timesteps in the data, including flagged ones. The default is to
+    /// use all unflagged timesteps.
+    #[clap(long, conflicts_with("timesteps"), help_heading = "CALIBRATION")]
+    pub use_all_timesteps: bool,
+
     #[clap(long, help = UVW_MIN_HELP.as_str(), help_heading = "CALIBRATION")]
     pub uvw_min: Option<String>,
 
@@ -362,6 +367,7 @@ impl CalibrateUserArgs {
             timesteps_per_timeblock,
             freq_average_factor,
             timesteps,
+            use_all_timesteps,
             uvw_min,
             uvw_max,
             max_iterations,
@@ -405,6 +411,7 @@ impl CalibrateUserArgs {
             timesteps_per_timeblock: cli_args.timesteps_per_timeblock.or(timesteps_per_timeblock),
             freq_average_factor: cli_args.freq_average_factor.or(freq_average_factor),
             timesteps: cli_args.timesteps.or(timesteps),
+            use_all_timesteps: cli_args.use_all_timesteps || use_all_timesteps,
             uvw_min: cli_args.uvw_min.or(uvw_min),
             uvw_max: cli_args.uvw_max.or(uvw_max),
             max_iterations: cli_args.max_iterations.or(max_iterations),

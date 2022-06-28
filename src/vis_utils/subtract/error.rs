@@ -44,6 +44,15 @@ pub(crate) enum VisSubtractError {
     )]
     InvalidDataInput(&'static str),
 
+    #[error("The data either contains no timesteps or no timesteps are being used")]
+    NoTimesteps,
+
+    #[error("Duplicate timesteps were specified; this is invalid")]
+    DuplicateTimesteps,
+
+    #[error("Timestep {got} was specified but it isn't available; the last timestep is {last}")]
+    UnavailableTimestep { got: usize, last: usize },
+
     #[error(
         "An invalid output format was specified ({0}). Supported:\n{}",
         *VIS_OUTPUT_EXTENSIONS,

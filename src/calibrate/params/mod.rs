@@ -234,6 +234,7 @@ impl CalibrateParams {
             timesteps_per_timeblock,
             freq_average_factor,
             timesteps,
+            use_all_timesteps,
             uvw_min,
             uvw_max,
             max_iterations,
@@ -433,10 +434,11 @@ impl CalibrateParams {
         };
 
         let timesteps_to_use = {
-            match timesteps {
-                None => Vec1::try_from_vec(obs_context.unflagged_timesteps.clone())
+            match (use_all_timesteps, timesteps) {
+                (true, _) => obs_context.all_timesteps.clone(),
+                (false, None) => Vec1::try_from_vec(obs_context.unflagged_timesteps.clone())
                     .map_err(|_| InvalidArgsError::NoTimesteps)?,
-                Some(mut ts) => {
+                (false, Some(mut ts)) => {
                     // Make sure there are no duplicates.
                     let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
                     if timesteps_hashset.len() != ts.len() {

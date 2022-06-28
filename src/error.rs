@@ -230,6 +230,9 @@ impl From<VisSubtractError> for HyperdriveError {
             | VisSubtractError::NoSourcesAfterVeto
             | VisSubtractError::NoSources
             | VisSubtractError::AllSourcesFiltered
+            | VisSubtractError::NoTimesteps
+            | VisSubtractError::DuplicateTimesteps
+            | VisSubtractError::UnavailableTimestep { .. }
             | VisSubtractError::NoInputData
             | VisSubtractError::InvalidDataInput(_)
             | VisSubtractError::BadArrayPosition { .. }

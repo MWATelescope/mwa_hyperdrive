@@ -77,6 +77,11 @@ pub struct SolutionsApplyArgs {
     #[clap(long, multiple_values(true), help_heading = "INPUT FILES")]
     timesteps: Option<Vec<usize>>,
 
+    /// Use all timesteps in the data, including flagged ones. The default is to
+    /// use all unflagged timesteps.
+    #[clap(long, conflicts_with("timesteps"), help_heading = "INPUT FILES")]
+    use_all_timesteps: bool,
+
     #[clap(
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "INPUT FILES",
         number_of_values = 3,
@@ -168,6 +173,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
         data,
         solutions,
         timesteps,
+        use_all_timesteps,
         array_position,
         tile_flags,
         ignore_input_data_tile_flags,
@@ -463,9 +469,10 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
 
     let tile_to_unflagged_cross_baseline_map =
         TileBaselineMaps::new(total_num_tiles, &tile_flags).tile_to_unflagged_cross_baseline_map;
-    let timesteps = match timesteps {
-        None => Vec1::try_from(obs_context.unflagged_timesteps.as_slice()),
-        Some(mut ts) => {
+    let timesteps = match (use_all_timesteps, timesteps) {
+        (true, _) => Vec1::try_from(obs_context.all_timesteps.as_slice()),
+        (false, None) => Vec1::try_from(obs_context.unflagged_timesteps.as_slice()),
+        (false, Some(mut ts)) => {
             // Make sure there are no duplicates.
             let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
             if timesteps_hashset.len() != ts.len() {

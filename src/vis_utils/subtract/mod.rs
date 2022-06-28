@@ -79,6 +79,11 @@ pub struct VisSubtractArgs {
     #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
     source_list_type: Option<String>,
 
+    /// The timesteps to use from the input data. The default is to use all
+    /// timesteps, including flagged ones.
+    #[clap(long, multiple_values(true), help_heading = "INPUT FILES")]
+    timesteps: Option<Vec<usize>>,
+
     #[clap(
         short = 'o',
         long,
@@ -192,6 +197,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         data,
         source_list,
         source_list_type,
+        timesteps,
         outputs,
         time_average,
         freq_average,
@@ -431,7 +437,31 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         }
     };
 
-    let timesteps = &obs_context.all_timesteps;
+    let timesteps = match timesteps {
+        None => Vec1::try_from(obs_context.all_timesteps.as_slice()),
+        Some(mut ts) => {
+            // Make sure there are no duplicates.
+            let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
+            if timesteps_hashset.len() != ts.len() {
+                return Err(VisSubtractError::DuplicateTimesteps);
+            }
+
+            // Ensure that all specified timesteps are actually available.
+            for &t in &ts {
+                if obs_context.timestamps.get(t).is_none() {
+                    return Err(VisSubtractError::UnavailableTimestep {
+                        got: t,
+                        last: obs_context.timestamps.len() - 1,
+                    });
+                }
+            }
+
+            ts.sort_unstable();
+            Vec1::try_from_vec(ts)
+        }
+    }
+    .map_err(|_| VisSubtractError::NoTimesteps)?;
+
     let precession_info = precess_time(
         obs_context.phase_centre,
         obs_context.timestamps[*timesteps.first()],
@@ -638,7 +668,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     }
 
     let timeblocks =
-        timesteps_to_timeblocks(&obs_context.timestamps, time_average_factor, timesteps);
+        timesteps_to_timeblocks(&obs_context.timestamps, time_average_factor, &timesteps);
 
     if dry_run {
         info!("Dry run -- exiting now.");
@@ -712,7 +742,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 obs_context,
                 &maps.tile_to_unflagged_cross_baseline_map,
                 input_data.deref(),
-                timesteps,
+                &timesteps,
                 vis_shape,
                 tx_model,
                 &error,
@@ -769,7 +799,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 &obs_context.tile_names,
                 obs_context.obsid,
                 &obs_context.timestamps,
-                timesteps,
+                &timesteps,
                 &timeblocks,
                 time_res,
                 freq_res,
