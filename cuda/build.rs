@@ -5,18 +5,22 @@
 use std::env;
 
 const DEFAULT_CUDA_ARCHES: &[u16] = &[60, 70, 80];
-const DEFAULT_CUDA_SMS: &[u16] = &[60, 70, 75, 86];
+const DEFAULT_CUDA_SMS: &[u16] = &[60, 70, 75, 80, 86];
 
-fn parse_and_validate_compute(c: &str, var: &str) -> u16 {
-    // Check that there's only two numeric characters.
-    if c.len() != 2 {
-        panic!("{} is not a two-digit number!", var)
-    }
+fn parse_and_validate_compute(c: &str, var: &str) -> Vec<u16> {
+    let mut out = vec![];
+    for compute in c.trim().split(',') {
+        // Check that there's only two numeric characters.
+        if compute.len() != 2 {
+            panic!("When parsing {var}, found '{compute}', which is not a two-digit number!")
+        }
 
-    match c.parse::<u16>() {
-        Ok(p) => p,
-        Err(_) => panic!("{} couldn't be parsed into a number!", var),
+        match compute.parse() {
+            Ok(p) => out.push(p),
+            Err(_) => panic!("'{compute}', part of {var}, couldn't be parsed into a number!"),
+        }
     }
+    out
 }
 
 fn main() {
@@ -32,24 +36,15 @@ fn main() {
     ) {
         // When a user-supplied variable exists, use it as the CUDA arch and
         // compute level.
-        (Ok(c), _) => {
+        (Ok(c), _) | (Err(_), Ok(c)) => {
             let compute = parse_and_validate_compute(&c, "HYPERDRIVE_CUDA_COMPUTE");
-            (vec![compute], vec![compute])
-        }
-        (Err(_), Ok(c)) => {
-            let compute = parse_and_validate_compute(&c, "HYPERBEAM_CUDA_COMPUTE");
-            (vec![compute], vec![compute])
+            let sms = compute.clone();
+            (compute, sms)
         }
         (Err(_), Err(_)) => {
             // Print out all of the default arches and computes as a
             // warning.
-            let mut warn_str = String::new();
-            warn_str.push_str("cargo:warning=No HYPERDRIVE_CUDA_COMPUTE; Passing ");
-            warn_str.push_str(&format!("arch=compute_{:?}", DEFAULT_CUDA_ARCHES));
-            warn_str.push_str(" and ");
-            warn_str.push_str(&format!("code=sm_{:?}", DEFAULT_CUDA_SMS));
-            warn_str.push_str(" to nvcc");
-            println!("{}", warn_str);
+            println!("cargo:warning=No HYPERDRIVE_CUDA_COMPUTE; Passing arch=compute_{DEFAULT_CUDA_ARCHES:?} and code=sm_{DEFAULT_CUDA_SMS:?} to nvcc");
             (DEFAULT_CUDA_ARCHES.to_vec(), DEFAULT_CUDA_SMS.to_vec())
         }
     };
@@ -105,11 +100,8 @@ fn main() {
                 continue;
             }
 
-            let mut flag = String::new();
             cuda_target.flag("-gencode");
-            flag.push_str(&format!("arch=compute_{},", arch));
-            flag.push_str(&format!("code=sm_{}", sm));
-            cuda_target.flag(&flag);
+            cuda_target.flag(&format!("arch=compute_{arch},code=sm_{sm}"));
         }
     }
 
