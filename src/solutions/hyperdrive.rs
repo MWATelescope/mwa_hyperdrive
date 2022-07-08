@@ -82,7 +82,8 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
         _ => None,
     };
 
-    let modeller = get_optional_fits_key!(&mut fptr, &hdu, "MODELLER")?;
+    // MODELLER is a long string.
+    let modeller = get_optional_fits_key_long_string!(&mut fptr, &hdu, "MODELLER")?;
 
     let hdu = fptr.hdu("SOLUTIONS")?;
     let num_timeblocks: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS4")?;
@@ -712,7 +713,22 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
     }
 
     if let Some(modeller) = modeller {
-        hdu.write_key(&mut fptr, "MODELLER", modeller.as_str())?;
+        // Write this out as a long string. We assume that there is no invalid
+        // UTF-8.
+        let key_name = CString::new("MODELLER").unwrap();
+        let value = CString::new(modeller.as_str()).unwrap();
+        let mut status = 0;
+        unsafe {
+            // ffpkls = fits_write_key_longstr
+            fitsio_sys::ffpkls(
+                fptr.as_raw(),        /* I - FITS file pointer        */
+                key_name.as_ptr(),    /* I - name of keyword to write */
+                value.as_ptr(),       /* I - keyword value            */
+                std::ptr::null_mut(), /* I - keyword comment          */
+                &mut status,          /* IO - error status            */
+            );
+            fits_check_status(status)?;
+        }
     }
 
     hdu.write_key(

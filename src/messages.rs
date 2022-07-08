@@ -19,12 +19,13 @@ use ndarray::prelude::*;
 use vec1::Vec1;
 
 use crate::{
+    model::ModellerInfo,
     pfb_gains::PfbFlavour,
     solutions::CalibrationSolutions,
     unit_parsing::WavelengthUnit,
     vis_io::{read::RawDataCorrections, write::VisOutputType},
 };
-use mwa_hyperdrive_common::{hifitime, itertools, log, marlu, ndarray, vec1};
+use mwa_hyperdrive_common::{cfg_if, hifitime, itertools, log, marlu, ndarray, vec1};
 use mwa_hyperdrive_srclist::SourceList;
 
 #[must_use = "This struct must be consumed with its print() method"]
@@ -595,6 +596,44 @@ impl CalSolDetails<'_> {
             warn!("  Time information is inconsistent; solution timeblocks");
             warn!("  may not be applied properly. hyperdrive-formatted");
             warn!("  solutions should be used to prevent this issue.");
+        }
+    }
+}
+
+pub(super) fn print_modeller_info(modeller_info: &ModellerInfo) {
+    #[cfg(feature = "cuda")]
+    let using_cuda = matches!(modeller_info, crate::model::ModellerInfo::Cuda { .. });
+    #[cfg(not(feature = "cuda"))]
+    let using_cuda = false;
+
+    if using_cuda {
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "cuda-single")] {
+                info!("Generating sky model visibilities on the GPU (single precision)");
+            } else {
+                info!("Generating sky model visibilities on the GPU (double precision)");
+            }
+        }
+    } else {
+        info!("Generating sky model visibilities on the CPU (double precision)");
+    }
+
+    match modeller_info {
+        crate::model::ModellerInfo::Cpu => (),
+
+        #[cfg(feature = "cuda")]
+        crate::model::ModellerInfo::Cuda {
+            device_info,
+            driver_info,
+        } => {
+            info!(
+                "  CUDA device: {} (capability {}, {} MiB)",
+                device_info.name, device_info.capability, device_info.total_global_mem
+            );
+            info!(
+                "  CUDA driver: {}, runtime: {}",
+                driver_info.driver_version, driver_info.runtime_version
+            );
         }
     }
 }

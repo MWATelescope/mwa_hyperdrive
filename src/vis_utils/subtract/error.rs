@@ -95,6 +95,10 @@ pub(crate) enum VisSubtractError {
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
     BadArrayPosition { pos: Vec<f64> },
 
+    #[cfg(feature = "cuda")]
+    #[error("CUDA error: {0}")]
+    CudaError(String),
+
     #[error(transparent)]
     Veto(#[from] mwa_hyperdrive_srclist::VetoError),
 

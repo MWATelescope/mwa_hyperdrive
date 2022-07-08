@@ -120,5 +120,6 @@ fn main() {
 
     cuda_target
         .file("src_cuda/model.cu")
+        .file("src_cuda/utils.cu")
         .compile("hyperdrive_cu");
 }

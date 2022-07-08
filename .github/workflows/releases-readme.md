@@ -28,6 +28,9 @@ Other licenses are included from the `hdf5` (COPYING-hdf5), `erfa`
 because (as per the terms of the licenses) `hdf5`, `erfa` and `cfitsio` are
 compiled inside the `hyperdrive` binary.
 
+An NVIDIA license may also be included as, per the terms of the license,
+`hyperdrive` utilises code that was modified from an existing CUDA example.
+
 # x86-64-v3?
 
 This is a [microarchitecture

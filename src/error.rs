@@ -218,6 +218,8 @@ impl From<VisSimulateError> for HyperdriveError {
             VisSimulateError::Glob(_)
             | VisSimulateError::FileWrite(_)
             | VisSimulateError::IO(_) => Self::Generic(s),
+            #[cfg(feature = "cuda")]
+            VisSimulateError::CudaError(_) => Self::Generic(s),
         }
     }
 }
@@ -257,6 +259,8 @@ impl From<VisSubtractError> for HyperdriveError {
             VisSubtractError::Glob(_)
             | VisSubtractError::FileWrite(_)
             | VisSubtractError::IO(_) => Self::Generic(s),
+            #[cfg(feature = "cuda")]
+            VisSubtractError::CudaError(_) => Self::Generic(s),
         }
     }
 }
@@ -389,6 +393,8 @@ impl From<InvalidArgsError> for HyperdriveError {
                 Self::VisWrite(s)
             }
             InvalidArgsError::Glob(_) | InvalidArgsError::IO(_) => Self::Generic(s),
+            #[cfg(feature = "cuda")]
+            InvalidArgsError::CudaError(_) => Self::Generic(s),
         }
     }
 }

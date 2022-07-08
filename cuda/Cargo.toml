@@ -12,6 +12,10 @@ cuda-single = []
 # Link the CUDA library statically.
 static = []
 
+[dependencies]
+cuda-runtime-sys = "0.3.0-alpha.1" # This should match whatever Marlu is using
+log = "0.4.0" # This should match whatever mwa_hyperdrive_common is using
+
 [build-dependencies]
 cc = { version = "1.0.72", features = ["parallel"] }
 cfg-if = "1.0.0"

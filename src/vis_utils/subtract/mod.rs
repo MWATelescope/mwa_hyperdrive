@@ -38,6 +38,7 @@ use crate::{
     help_texts::*,
     math::TileBaselineMaps,
     messages,
+    model::ModellerInfo,
     vis_io::{
         read::{MsReader, UvfitsReader, VisInputType, VisRead},
         write::{can_write_to_file, write_vis, VisOutputType, VisTimestep},
@@ -45,9 +46,7 @@ use crate::{
     HyperdriveError,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{
-    cfg_if, clap, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1,
-};
+use mwa_hyperdrive_common::{clap, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1};
 use mwa_hyperdrive_srclist::{
     veto_sources, SourceList, SourceListType, DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD,
     SOURCE_DIST_CUTOFF_HELP as sdc_help, VETO_THRESHOLD_HELP as vt_help,
@@ -216,6 +215,23 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
             cpu: use_cpu_for_modelling,
         no_progress_bars,
     } = args;
+
+    // If we're going to use a GPU for modelling, get the device info so we
+    // can ensure a CUDA-capable device is available, and so we can report
+    // it to the user later.
+    #[cfg(feature = "cuda")]
+    let modeller_info = if use_cpu_for_modelling {
+        ModellerInfo::Cpu
+    } else {
+        let (device_info, driver_info) =
+            mwa_hyperdrive_cuda::get_device_info().map_err(VisSubtractError::CudaError)?;
+        ModellerInfo::Cuda {
+            device_info,
+            driver_info,
+        }
+    };
+    #[cfg(not(feature = "cuda"))]
+    let modeller_info = ModellerInfo::Cpu;
 
     // If we're not inverted but `sources_to_subtract` is empty, then there's
     // nothing to do.
@@ -581,6 +597,8 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     }
     .print();
 
+    messages::print_modeller_info(&modeller_info);
+
     // Handle output visibility arguments.
     let (time_average_factor, freq_average_factor) = {
         // Parse and verify user input (specified resolutions must
@@ -648,24 +666,6 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         output_vis_freq_average_factor: freq_average_factor,
     }
     .print();
-
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "cuda-single")] {
-            if use_cpu_for_modelling {
-                info!("Generating sky model visibilities on the CPU");
-            } else {
-                info!("Generating sky model visibilities on the GPU (single precision)");
-            }
-        } else if #[cfg(feature = "cuda")] {
-            if use_cpu_for_modelling {
-                info!("Generating sky model visibilities on the CPU");
-            } else {
-                info!("Generating sky model visibilities on the GPU (double precision)");
-            }
-        } else {
-            info!("Generating sky model visibilities on the CPU");
-        }
-    }
 
     let timeblocks =
         timesteps_to_timeblocks(&obs_context.timestamps, time_average_factor, &timesteps);

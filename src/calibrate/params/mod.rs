@@ -41,6 +41,7 @@ use crate::{
     glob::*,
     math::TileBaselineMaps,
     messages,
+    model::ModellerInfo,
     solutions::CalSolutionType,
     unit_parsing::{parse_wavelength, WavelengthUnit},
     vis_io::{
@@ -201,10 +202,8 @@ pub struct CalibrateParams {
     /// don't draw progress bars.
     pub(crate) no_progress_bars: bool,
 
-    #[cfg(feature = "cuda")]
-    /// If true, use the CPU to generate sky-model visibilites. Otherwise, use
-    /// the GPU.
-    pub(crate) use_cpu_for_modelling: bool,
+    /// Information on the sky-modelling device (CPU or CUDA-capable device).
+    pub(crate) modeller_info: ModellerInfo,
 }
 
 impl CalibrateParams {
@@ -256,6 +255,23 @@ impl CalibrateParams {
             no_progress_bars,
         }: CalibrateUserArgs,
     ) -> Result<CalibrateParams, InvalidArgsError> {
+        // If we're going to use a GPU for modelling, get the device info so we
+        // can ensure a CUDA-capable device is available, and so we can report
+        // it to the user later.
+        #[cfg(feature = "cuda")]
+        let modeller_info = if cpu {
+            ModellerInfo::Cpu
+        } else {
+            let (device_info, driver_info) =
+                mwa_hyperdrive_cuda::get_device_info().map_err(InvalidArgsError::CudaError)?;
+            ModellerInfo::Cuda {
+                device_info,
+                driver_info,
+            }
+        };
+        #[cfg(not(feature = "cuda"))]
+        let modeller_info = ModellerInfo::Cpu;
+
         // Handle input data. We expect one of three possibilities:
         // - gpubox files, a metafits file (and maybe mwaf files),
         // - a measurement set (and maybe a metafits file), or
@@ -973,6 +989,8 @@ impl CalibrateParams {
         }
         .print();
 
+        messages::print_modeller_info(&modeller_info);
+
         // Handle output visibility arguments.
         let (output_model_time_average_factor, output_model_freq_average_factor) = match model_files
             .as_ref()
@@ -1087,8 +1105,7 @@ impl CalibrateParams {
             output_model_time_average_factor,
             output_model_freq_average_factor,
             no_progress_bars,
-            #[cfg(feature = "cuda")]
-            use_cpu_for_modelling: cpu,
+            modeller_info,
         })
     }
 

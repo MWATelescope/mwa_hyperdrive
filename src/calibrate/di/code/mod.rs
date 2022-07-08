@@ -30,13 +30,11 @@ use crate::{
     averaging::{timesteps_to_timeblocks, Chanblock, Timeblock},
     calibrate::{params::CalibrateParams, CalibrateError},
     math::average_epoch,
-    model,
+    model::{self, ModellerInfo},
     solutions::CalibrationSolutions,
     vis_io::write::{write_vis, VisTimestep},
 };
-use mwa_hyperdrive_common::{
-    cfg_if, hifitime, indicatif, itertools, log, marlu, ndarray, rayon, vec1,
-};
+use mwa_hyperdrive_common::{hifitime, indicatif, itertools, log, marlu, ndarray, rayon, vec1};
 
 pub(crate) struct CalVis {
     /// Visibilites read from input data.
@@ -55,25 +53,6 @@ pub(crate) fn get_cal_vis(
     params: &CalibrateParams,
     draw_progress_bar: bool,
 ) -> Result<CalVis, CalibrateError> {
-    // TODO: Display GPU info.
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "cuda-single")] {
-            if params.use_cpu_for_modelling {
-                info!("Generating sky model visibilities on the CPU");
-            } else {
-                info!("Generating sky model visibilities on the GPU (single precision)");
-            }
-        } else if #[cfg(feature = "cuda")] {
-            if params.use_cpu_for_modelling {
-                info!("Generating sky model visibilities on the CPU");
-            } else {
-                info!("Generating sky model visibilities on the GPU (double precision)");
-            }
-        } else {
-            info!("Generating sky model visibilities on the CPU");
-        }
-    }
-
     // TODO: Use all fences, not just the first.
     let fence = params.fences.first();
 
@@ -242,7 +221,7 @@ pub(crate) fn get_cal_vis(
                 &error,
                 model_progress,
                 #[cfg(feature = "cuda")]
-                params.use_cpu_for_modelling,
+                matches!(params.modeller_info, ModellerInfo::Cpu),
             );
             if result.is_err() {
                 error.store(true);
@@ -692,13 +671,21 @@ impl<'a> IncompleteSolutions<'a> {
             uvw_min: Some(params.uvw_min),
             uvw_max: Some(params.uvw_max),
             freq_centroid: Some(params.freq_centroid),
-            #[cfg(not(feature = "cuda"))]
-            modeller: Some("CPU".to_string()),
-            #[cfg(feature = "cuda")]
-            modeller: if params.use_cpu_for_modelling {
-                Some("CPU".to_string())
-            } else {
-                Some("CUDA GPU".to_string())
+            modeller: match &params.modeller_info {
+                ModellerInfo::Cpu => Some("CPU".to_string()),
+
+                #[cfg(feature = "cuda")]
+                ModellerInfo::Cuda {
+                    device_info,
+                    driver_info,
+                } => Some(format!(
+                    "{} (capability {}, {} MiB), CUDA driver {}, runtime {}",
+                    device_info.name,
+                    device_info.capability,
+                    device_info.total_global_mem,
+                    driver_info.driver_version,
+                    driver_info.runtime_version
+                )),
             },
         }
     }

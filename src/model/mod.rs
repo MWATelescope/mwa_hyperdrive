@@ -24,6 +24,21 @@ use mwa_hyperdrive_beam::{Beam, BeamError};
 use mwa_hyperdrive_common::{cfg_if, hifitime, marlu, ndarray};
 use mwa_hyperdrive_srclist::{ComponentList, SourceList};
 
+#[derive(Debug, Clone)]
+pub(crate) enum ModellerInfo {
+    /// The CPU is used for modelling. This always uses double-precision floats
+    /// when modelling.
+    Cpu,
+
+    /// A CUDA-capable device is used for modelling. The precision depends on
+    /// the compile features used.
+    #[cfg(feature = "cuda")]
+    Cuda {
+        device_info: mwa_hyperdrive_cuda::CudaDeviceInfo,
+        driver_info: mwa_hyperdrive_cuda::CudaDriverInfo,
+    },
+}
+
 /// An object that simulates sky-model visibilities.
 pub trait SkyModeller<'a> {
     /// Generate sky-model visibilities for a single timestep. The [UVW]

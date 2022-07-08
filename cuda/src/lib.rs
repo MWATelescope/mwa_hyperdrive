@@ -6,9 +6,10 @@
 
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-// This is needed only because tests inside bindgen-produced files (model_*.rs
-// and memory_*.rs) trigger the warning.
-#![allow(deref_nullptr)]
+
+mod utils;
+
+pub use utils::{get_device_info, CudaDeviceInfo, CudaDriverInfo};
 
 // Import Rust bindings to the CUDA code specific to the precision we're using,
 // and set corresponding compile-time types.

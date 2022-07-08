@@ -45,6 +45,10 @@ pub(crate) enum VisSimulateError {
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
     BadArrayPosition { pos: Vec<f64> },
 
+    #[cfg(feature = "cuda")]
+    #[error("CUDA error: {0}")]
+    CudaError(String),
+
     #[error(transparent)]
     FileWrite(#[from] crate::vis_io::write::FileWriteError),
 

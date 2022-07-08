@@ -67,7 +67,9 @@ was applied to the raw MWA data. "N" if they were not.
 ### Others
 
 `MODELLER` describes what was used to generate model visibilities in
-calibration. Currently, this is either `CPU` or `CUDA GPU`.
+calibration. This is either `CPU` or details on the CUDA device used, e.g.
+`NVIDIA GeForce RTX 2070 (capability 7.5, 7979 MiB), CUDA driver 11.7, runtime
+11.7`.
 
 ## Extra HDUs
 

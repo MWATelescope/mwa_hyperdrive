@@ -35,14 +35,14 @@ use crate::{
     math::TileBaselineMaps,
     messages,
     metafits::{get_dipole_delays, get_dipole_gains},
-    model,
     model::SkyModeller,
+    model::{self, ModellerInfo},
     vis_io::write::{can_write_to_file, write_vis, VisOutputType, VisTimestep},
     HyperdriveError,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
 use mwa_hyperdrive_common::{
-    cfg_if, clap, hifitime, indicatif, itertools, lazy_static, log, marlu, mwalib, ndarray, vec1,
+    clap, hifitime, indicatif, itertools, lazy_static, log, marlu, mwalib, ndarray, vec1,
 };
 use mwa_hyperdrive_srclist::{
     read::read_source_list_file, veto_sources, ComponentCounts, SourceList,
@@ -319,9 +319,26 @@ impl VisSimParams {
             array_position,
             no_precession,
             #[cfg(feature = "cuda")]
-                cpu: _,
+            cpu,
             no_progress_bars: _,
         } = args;
+
+        // If we're going to use a GPU for modelling, get the device info so we
+        // can ensure a CUDA-capable device is available, and so we can report
+        // it to the user later.
+        #[cfg(feature = "cuda")]
+        let modeller_info = if *cpu {
+            ModellerInfo::Cpu
+        } else {
+            let (device_info, driver_info) =
+                mwa_hyperdrive_cuda::get_device_info().map_err(VisSimulateError::CudaError)?;
+            ModellerInfo::Cuda {
+                device_info,
+                driver_info,
+            }
+        };
+        #[cfg(not(feature = "cuda"))]
+        let modeller_info = ModellerInfo::Cpu;
 
         let output_model_files = {
             let mut valid_model_files = Vec::with_capacity(output_model_files.len().max(1));
@@ -622,6 +639,8 @@ impl VisSimParams {
         }
         .print();
 
+        messages::print_modeller_info(&modeller_info);
+
         Ok(VisSimParams {
             source_list,
             metafits,
@@ -647,25 +666,6 @@ impl VisSimParams {
 
 /// Simulate sky-model visibilities from a sky-model source list.
 fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulateError> {
-    // TODO: Display GPU info.
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "cuda-single")] {
-            if args.cpu {
-                info!("Generating sky model visibilities on the CPU");
-            } else {
-                info!("Generating sky model visibilities on the GPU (single precision)");
-            }
-        } else if #[cfg(feature = "cuda")] {
-            if args.cpu {
-                info!("Generating sky model visibilities on the CPU");
-            } else {
-                info!("Generating sky model visibilities on the GPU (double precision)");
-            }
-        } else {
-            info!("Generating sky model visibilities on the CPU");
-        }
-    }
-
     let VisSimParams {
         source_list,
         metafits,

@@ -46,6 +46,7 @@ jobs:
           curl https://raw.githubusercontent.com/HDFGroup/hdf5/develop/COPYING -o COPYING-hdf5
           curl https://raw.githubusercontent.com/liberfa/erfa/master/LICENSE -o LICENSE-erfa
           curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
+          cp cuda/LICENSE-NVIDIA README.md
           cp .github/workflows/releases-readme.md README.md
 
           cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static
@@ -57,13 +58,13 @@ jobs:
           cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static,cuda
           mv target/release/hyperdrive .
           tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-double.tar.gz \
-          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
+          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
           hyperdrive
 
           cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static,cuda-single
           mv target/release/hyperdrive .
           tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-single.tar.gz \
-          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
+          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
           hyperdrive
         env:
           RUSTFLAGS: "-C target-cpu=x86-64-v3"

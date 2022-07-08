@@ -136,6 +136,10 @@ pub(crate) enum InvalidArgsError {
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
     BadArrayPosition { pos: Vec<f64> },
 
+    #[cfg(feature = "cuda")]
+    #[error("CUDA error: {0}")]
+    CudaError(String),
+
     #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
 

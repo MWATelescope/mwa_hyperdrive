@@ -9,6 +9,13 @@
 # https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
 SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
 
+bindgen "${SCRIPTPATH}"/src_cuda/utils.h \
+    --allowlist-function "get_cuda_error_length" \
+    --allowlist-function "get_cuda_error" \
+    --allowlist-function "get_cuda_device_info" \
+    --size_t-is-usize \
+    > "${SCRIPTPATH}"/src/utils_bindings.rs
+
 bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --allowlist-function "model_.*" \
     --blocklist-type "Addresses" \

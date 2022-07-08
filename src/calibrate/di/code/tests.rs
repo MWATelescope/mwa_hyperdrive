@@ -297,8 +297,7 @@ fn get_default_params() -> CalibrateParams {
         output_model_time_average_factor: 1,
         output_model_freq_average_factor: 1,
         no_progress_bars: true,
-        #[cfg(feature = "cuda")]
-        use_cpu_for_modelling: false,
+        modeller_info: crate::model::ModellerInfo::Cpu,
     }
 }
 
