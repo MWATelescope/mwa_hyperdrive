@@ -16,7 +16,6 @@ use tempfile::TempDir;
 use vec1::{vec1, Vec1};
 
 use super::*;
-use crate::jones_test::TestJones;
 use crate::{
     averaging::timesteps_to_timeblocks,
     vis_io::read::{MsReader, UvfitsReader, VisRead},
@@ -153,6 +152,7 @@ pub fn test_vis_output_no_time_averaging_no_gaps() {
                 &timesteps,
                 &timeblocks,
                 time_res,
+                Duration::from_total_nanoseconds(0),
                 freq_res,
                 &fine_chan_freqs,
                 &ant_pairs,
@@ -241,10 +241,7 @@ pub fn test_vis_output_no_time_averaging_no_gaps() {
                 )
                 .unwrap();
 
-            assert_abs_diff_eq!(
-                vis_data.slice(s![i_timestep, .., ..]).mapv(TestJones::from),
-                avg_data.mapv(TestJones::from)
-            );
+            assert_abs_diff_eq!(vis_data.slice(s![i_timestep, .., ..]), avg_data);
             assert_abs_diff_eq!(
                 vis_weights.slice(s![i_timestep, .., ..]),
                 avg_weights.view()
@@ -359,6 +356,7 @@ pub fn test_vis_output_no_time_averaging_with_gaps() {
                 &timesteps,
                 &timeblocks,
                 time_res,
+                Duration::from_total_nanoseconds(0),
                 freq_res,
                 &fine_chan_freqs,
                 &ant_pairs,
@@ -455,10 +453,7 @@ pub fn test_vis_output_no_time_averaging_with_gaps() {
                 )
                 .unwrap();
 
-            assert_abs_diff_eq!(
-                vis_data.slice(s![i_timestep, .., ..]).mapv(TestJones::from),
-                avg_data.mapv(TestJones::from)
-            );
+            assert_abs_diff_eq!(vis_data.slice(s![i_timestep, .., ..]), avg_data);
             assert_abs_diff_eq!(
                 vis_weights.slice(s![i_timestep, .., ..]),
                 avg_weights.view()
@@ -578,6 +573,7 @@ pub fn test_vis_output_time_averaging() {
                 &timesteps,
                 &timeblocks,
                 time_res,
+                Duration::from_total_nanoseconds(0),
                 freq_res,
                 &fine_chan_freqs,
                 &ant_pairs,
@@ -698,10 +694,7 @@ pub fn test_vis_output_time_averaging() {
                         },
                     ) / 2.0;
 
-                    assert_abs_diff_eq!(
-                        vis_data.mapv(TestJones::from),
-                        avg_data.mapv(TestJones::from)
-                    );
+                    assert_abs_diff_eq!(vis_data, avg_data);
                     assert_abs_diff_eq!(avg_weights, Array2::ones(avg_weights.dim()) * 2.0);
                 }
                 1 => {
@@ -724,10 +717,7 @@ pub fn test_vis_output_time_averaging() {
                         },
                     );
 
-                    assert_abs_diff_eq!(
-                        vis_data.mapv(TestJones::from),
-                        avg_data.mapv(TestJones::from)
-                    );
+                    assert_abs_diff_eq!(vis_data, avg_data);
                     assert_abs_diff_eq!(avg_weights, Array2::ones(avg_weights.dim()));
                 }
                 _ => unreachable!(),

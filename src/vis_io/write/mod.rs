@@ -22,9 +22,9 @@ use indicatif::ProgressBar;
 use itertools::Itertools;
 use log::{debug, trace, warn};
 use marlu::{
-    math::num_tiles_from_num_baselines, Jones, LatLngHeight, MeasurementSetWriter,
+    math::num_tiles_from_num_baselines, History, Jones, LatLngHeight, MeasurementSetWriter,
     MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
-    VisContext, VisWritable, XyzGeodetic,
+    VisContext, VisWrite, XyzGeodetic,
 };
 use ndarray::{prelude::*, ArcArray2};
 use num_traits::Zero;
@@ -124,6 +124,7 @@ pub(crate) fn write_vis<'a>(
     timesteps: &'a Vec1<usize>,
     timeblocks: &'a Vec1<Timeblock>,
     time_res: Duration,
+    dut1: Duration,
     freq_res: f64,
     fine_chan_freqs: &'a Vec1<f64>,
     unflagged_baseline_tile_pairs: &'a [(usize, usize)],
@@ -167,16 +168,17 @@ pub(crate) fn write_vis<'a>(
         None => start_timestamp,
     };
     let sched_duration = timestamps[*timesteps.last()] + time_res - sched_start_timestamp;
+    let (s_lat, c_lat) = array_pos.latitude_rad.sin_cos();
     let marlu_obs_ctx = MarluObsContext {
         sched_start_timestamp,
         sched_duration,
-        name: obs_name.clone(),
+        name: obs_name,
         phase_centre,
         pointing_centre,
         array_pos,
         ant_positions_enh: tile_positions
             .iter()
-            .map(|xyz| xyz.to_enh(array_pos.latitude_rad))
+            .map(|xyz| xyz.to_enh_inner(s_lat, c_lat))
             .collect(),
         ant_names: tile_names.to_vec(),
         // TODO(dev): is there any value in adding this metadata via hyperdrive obs context?
@@ -185,23 +187,47 @@ pub(crate) fn write_vis<'a>(
         observer: None,
     };
 
+    // Prepare history for the output vis files. It's possible that the
+    // command-line call has invalid UTF-8. So use args_os and attempt to
+    // convert to UTF-8 strings. If there are problems on the way, don't bother
+    // trying to write the CMDLINE key.
+    let cmd_line = std::env::args_os()
+        .map(|a| a.into_string())
+        .collect::<Result<Vec<String>, _>>()
+        .map(|v| v.join(" "))
+        .ok();
+    let history = History {
+        application: Some("mwa_hyperdrive"),
+        cmd_line: cmd_line.as_deref(),
+        message: None,
+    };
     let mut writers = vec![];
     for (output, vis_type) in outputs {
         debug!("Setting up {} ({vis_type})", output.display());
-        let (vis_writer, vis_type): (Box<dyn VisWritable>, VisOutputType) = match vis_type {
+        let vis_writer: Box<dyn VisWrite> = match vis_type {
             VisOutputType::Uvfits => {
                 let uvfits = UvfitsWriter::from_marlu(
                     output,
                     &vis_ctx,
-                    Some(array_pos),
+                    array_pos,
                     phase_centre,
-                    obs_name.clone(),
+                    dut1,
+                    marlu_obs_ctx.name.as_deref(),
+                    tile_names.to_vec(),
+                    tile_positions.to_vec(),
+                    Some(&history),
                 )?;
-                (Box::new(uvfits), VisOutputType::Uvfits)
+                Box::new(uvfits)
             }
 
             VisOutputType::MeasurementSet => {
-                let ms = MeasurementSetWriter::new(output, phase_centre, Some(array_pos));
+                let ms = MeasurementSetWriter::new(
+                    output,
+                    phase_centre,
+                    array_pos,
+                    tile_positions.to_vec(),
+                    dut1,
+                );
                 if let Some((marlu_mwa_obs_context, coarse_chan_range)) =
                     marlu_mwa_obs_context.as_ref()
                 {
@@ -209,15 +235,16 @@ pub(crate) fn write_vis<'a>(
                         &vis_ctx,
                         &marlu_obs_ctx,
                         marlu_mwa_obs_context,
+                        Some(&history),
                         coarse_chan_range,
                     )?;
                 } else {
-                    ms.initialize(&vis_ctx, &marlu_obs_ctx)?;
+                    ms.initialize(&vis_ctx, &marlu_obs_ctx, None)?;
                 }
-                (Box::new(ms), VisOutputType::MeasurementSet)
+                Box::new(ms)
             }
         };
-        writers.push((vis_writer, vis_type));
+        writers.push(vis_writer);
     }
 
     // These arrays will contain the post-averaged values and are written out by
@@ -371,12 +398,11 @@ pub(crate) fn write_vis<'a>(
                 ..vis_ctx.clone()
             };
 
-            for (vis_writer, _) in writers.iter_mut() {
-                vis_writer.write_vis_marlu(
+            for vis_writer in writers.iter_mut() {
+                vis_writer.write_vis(
                     out_data.slice(s![0..this_timeblock.range.len(), .., ..]),
                     out_weights.slice(s![0..this_timeblock.range.len(), .., ..]),
                     &chunk_vis_ctx,
-                    tile_positions,
                     false,
                 )?;
                 // Should we continue?
@@ -409,14 +435,8 @@ pub(crate) fn write_vis<'a>(
         progress_bar.abandon_with_message("Finished writing visibilities");
     }
 
-    // Some writers need to be finalised.
-    for (vis_writer, vis_type) in writers.into_iter() {
-        if matches!(vis_type, VisOutputType::Uvfits) {
-            trace!("Finalising writing of uvfits file");
-            let uvfits_writer =
-                unsafe { Box::from_raw(Box::into_raw(vis_writer) as *mut UvfitsWriter) };
-            uvfits_writer.write_uvfits_antenna_table(tile_names, tile_positions)?;
-        }
+    for vis_writer in writers.iter_mut() {
+        vis_writer.finalise()?;
     }
     debug!("Finished writing");
 

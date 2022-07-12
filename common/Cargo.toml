@@ -20,10 +20,10 @@ clap = { version = "3.1.0", features = ["derive", "wrap_help"] }
 fern = { version = "0.6.0", features = ["chrono", "colored"] }
 flate2 = "1.0.13"
 itertools = "0.10.0"
-indicatif = { version = "0.16.0", features = ["rayon"] }
+indicatif = { version = "0.17.0", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
-marlu = "0.6.1"
+marlu = "0.8.0"
 serde_json = "1.0.0"
 thiserror = "1.0.7"
 toml = "0.5.2"
@@ -31,6 +31,7 @@ vec1 = "1.5.0"
 
 [dev-dependencies]
 approx = "0.5.0"
+marlu = { version = "0.8.0", features = ["approx"] }
 
 [build-dependencies]
 built = { version = "0.5.0", features = ["chrono", "git2"] }

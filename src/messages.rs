@@ -19,6 +19,7 @@ use ndarray::prelude::*;
 use vec1::Vec1;
 
 use crate::{
+    flagging::MwafFlags,
     model::ModellerInfo,
     pfb_gains::PfbFlavour,
     solutions::CalibrationSolutions,
@@ -29,12 +30,12 @@ use mwa_hyperdrive_common::{cfg_if, hifitime, itertools, log, marlu, ndarray, ve
 use mwa_hyperdrive_srclist::SourceList;
 
 #[must_use = "This struct must be consumed with its print() method"]
-pub(super) enum InputFileDetails {
+pub(super) enum InputFileDetails<'a> {
     Raw {
         obsid: u32,
         gpubox_count: usize,
         metafits_file_name: String,
-        mwaf: Option<usize>,
+        mwaf: Option<&'a MwafFlags>,
         raw_data_corrections: RawDataCorrections,
     },
     MeasurementSet {
@@ -49,7 +50,7 @@ pub(super) enum InputFileDetails {
     },
 }
 
-impl InputFileDetails {
+impl InputFileDetails<'_> {
     pub(super) fn print(self, operation: &str) {
         match self {
             InputFileDetails::Raw {
@@ -63,7 +64,23 @@ impl InputFileDetails {
                 info!("  from {gpubox_count} gpubox files");
                 info!("  with metafits {metafits_file_name}");
                 match mwaf {
-                    Some(c) => info!("  with {c} mwaf files"),
+                    Some(flags) => {
+                        let software_string = match flags.software_version.as_ref() {
+                            Some(v) => format!("{} {}", flags.software, v),
+                            None => flags.software.to_string(),
+                        };
+                        info!(
+                            "  with {} mwaf files ({})",
+                            flags.gpubox_nums.len(),
+                            software_string,
+                        );
+                        if let Some(s) = flags.aoflagger_version.as_deref() {
+                            info!("    AOFlagger version: {s}");
+                        }
+                        if let Some(s) = flags.aoflagger_strategy.as_deref() {
+                            info!("    AOFlagger strategy: {s}");
+                        }
+                    }
                     None => warn!("No mwaf files supplied"),
                 }
 
@@ -174,6 +191,8 @@ pub(super) struct ObservationDetails<'a> {
 
     pub(super) phase_centre: RADec,
     pub(super) pointing_centre: Option<RADec>,
+    /// Only printed if it's populated.
+    pub(super) dut1: Option<Duration>,
     /// The local mean sidereal time of the first timestep \[radians\]
     pub(super) lmst: Option<f64>,
     /// The local mean sidereal time of the first timestep, precessed to the
@@ -243,6 +262,9 @@ impl ObservationDetails<'_> {
             );
         }
 
+        if let Some(dut1) = self.dut1 {
+            info!("DUT1: {} seconds", dut1.in_seconds());
+        }
         match (self.lmst, self.lmst_j2000) {
             (Some(l), Some(l2)) => {
                 info!("LMST of first timestep:         {:>9.6}°", l.to_degrees());

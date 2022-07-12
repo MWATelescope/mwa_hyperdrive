@@ -7,7 +7,6 @@ use marlu::c64;
 use vec1::vec1;
 
 use super::*;
-use crate::jones_test::TestJones;
 use mwa_hyperdrive_common::vec1;
 
 #[test]
@@ -234,12 +233,12 @@ fn test_to_jones() {
     let fd2 = fd.clone();
     let result = fd.to_inst_stokes();
     assert_abs_diff_eq!(
-        TestJones::from(result),
-        TestJones::from([
-            c64::new(fd2.i + fd2.q, 0.0),
-            c64::new(fd2.u, fd2.v),
-            c64::new(fd2.u, -fd2.v),
+        result,
+        Jones::from([
             c64::new(fd2.i - fd2.q, 0.0),
+            c64::new(fd2.u, -fd2.v),
+            c64::new(fd2.u, fd2.v),
+            c64::new(fd2.i + fd2.q, 0.0),
         ])
     );
 }

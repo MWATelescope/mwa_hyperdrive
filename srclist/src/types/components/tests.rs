@@ -9,7 +9,6 @@ use marlu::{Jones, RADec};
 use vec1::vec1;
 
 use crate::{
-    jones_test::TestJones,
     marlu,
     types::{ComponentList, ComponentType, FluxDensity, FluxDensityType, SourceList},
     SourceListType,
@@ -103,7 +102,5 @@ fn test_split_components() {
     .estimate_at_freq(freqs[0]);
     let inst_fd: Jones<f64> = fd.to_inst_stokes();
 
-    let gaussian_flux_densities = gaussians.flux_densities.mapv(TestJones::from);
-    let inst_fd = TestJones::from(inst_fd);
-    assert_abs_diff_eq!(gaussian_flux_densities[[0, 1]], inst_fd);
+    assert_abs_diff_eq!(gaussians.flux_densities[[0, 1]], inst_fd);
 }

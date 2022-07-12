@@ -14,10 +14,7 @@ use tempfile::TempDir;
 use vec1::vec1;
 
 use super::*;
-use crate::{
-    jones_test::TestJones, pfb_gains::PfbFlavour, tests::reduced_obsids::*,
-    vis_io::read::RawDataCorrections,
-};
+use crate::{pfb_gains::PfbFlavour, tests::reduced_obsids::*, vis_io::read::RawDataCorrections};
 use mwa_hyperdrive_common::vec1;
 
 fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
@@ -65,6 +62,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         &sols,
         &timesteps,
         LatLngHeight::new_mwa(),
+        Duration::from_total_nanoseconds(0),
         false,
         &tile_flags,
         &maps.tile_to_unflagged_cross_baseline_map,
@@ -96,12 +94,9 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         )
         .unwrap();
 
-    assert_abs_diff_eq!(
-        crosses.mapv(TestJones::from),
-        ref_crosses.mapv(TestJones::from)
-    );
+    assert_abs_diff_eq!(crosses, ref_crosses);
     assert_abs_diff_eq!(cross_weights, ref_cross_weights);
-    assert_abs_diff_eq!(autos.mapv(TestJones::from), ref_autos.mapv(TestJones::from));
+    assert_abs_diff_eq!(autos, ref_autos);
     assert_abs_diff_eq!(auto_weights, ref_auto_weights);
 
     // Now make the solutions all "2"; the output visibilities should be 4x the
@@ -112,6 +107,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         &sols,
         &timesteps,
         LatLngHeight::new_mwa(),
+        Duration::from_total_nanoseconds(0),
         false,
         &tile_flags,
         &maps.tile_to_unflagged_cross_baseline_map,
@@ -143,15 +139,9 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         )
         .unwrap();
 
-    assert_abs_diff_eq!(
-        crosses.mapv(TestJones::from),
-        (&ref_crosses * 4.0).mapv(TestJones::from)
-    );
+    assert_abs_diff_eq!(crosses, &ref_crosses * 4.0);
     assert_abs_diff_eq!(cross_weights, ref_cross_weights);
-    assert_abs_diff_eq!(
-        autos.mapv(TestJones::from),
-        (&ref_autos * 4.0).mapv(TestJones::from)
-    );
+    assert_abs_diff_eq!(autos, &ref_autos * 4.0);
     assert_abs_diff_eq!(auto_weights, ref_auto_weights);
 
     // Now make the solutions equal to the tile index.
@@ -167,6 +157,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         &sols,
         &timesteps,
         LatLngHeight::new_mwa(),
+        Duration::from_total_nanoseconds(0),
         false,
         &tile_flags,
         &maps.tile_to_unflagged_cross_baseline_map,
@@ -209,14 +200,14 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         // Need to use a relative test because the numbers get quite big and
         // absolute epsilons get scarily big.
         assert_relative_eq!(
-            baseline.mapv(|j| TestJones::from(Jones::<f64>::from(j))),
-            ref_baseline.mapv(TestJones::from),
+            baseline.mapv(Jones::<f64>::from),
+            ref_baseline,
             max_relative = 1e-7
         );
     }
 
     assert_abs_diff_eq!(cross_weights, ref_cross_weights);
-    assert_abs_diff_eq!(autos.mapv(TestJones::from), ref_autos.mapv(TestJones::from));
+    assert_abs_diff_eq!(autos, ref_autos);
     assert_abs_diff_eq!(auto_weights, ref_auto_weights);
 
     // Use tile indices for solutions again, but now flag some tiles.
@@ -248,6 +239,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         &sols,
         &timesteps,
         LatLngHeight::new_mwa(),
+        Duration::from_total_nanoseconds(0),
         false,
         &tile_flags,
         &maps.tile_to_unflagged_cross_baseline_map,
@@ -295,8 +287,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         let ref_baseline =
             ref_baseline.mapv(Jones::<f64>::from) * (tile1 + 1) as f64 * (tile2 + 1) as f64;
         assert_relative_eq!(
-            baseline.mapv(|j| TestJones::from(Jones::<f64>::from(j))),
-            ref_baseline.mapv(TestJones::from),
+            baseline.mapv(Jones::<f64>::from),
+            ref_baseline,
             max_relative = 1e-7
         );
     }
@@ -315,11 +307,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
 
         let ref_tile =
             ref_tile.mapv(Jones::<f64>::from) * (tile_factor + 1) as f64 * (tile_factor + 1) as f64;
-        assert_relative_eq!(
-            tile.mapv(|j| TestJones::from(Jones::<f64>::from(j))),
-            ref_tile.mapv(TestJones::from),
-            max_relative = 1e-7
-        );
+        assert_relative_eq!(tile.mapv(Jones::<f64>::from), ref_tile, max_relative = 1e-7);
     }
     assert_abs_diff_eq!(cross_weights, ref_cross_weights);
     assert_abs_diff_eq!(auto_weights, ref_auto_weights);
@@ -346,6 +334,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         &sols,
         &timesteps,
         LatLngHeight::new_mwa(),
+        Duration::from_total_nanoseconds(0),
         false,
         &tile_flags,
         &maps.tile_to_unflagged_cross_baseline_map,
@@ -390,8 +379,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         let ref_baseline =
             ref_baseline.mapv(Jones::<f64>::from) * (tile1 + 1) as f64 * (tile2 + 1) as f64;
         assert_relative_eq!(
-            baseline.mapv(|j| TestJones::from(Jones::<f64>::from(j))),
-            ref_baseline.mapv(TestJones::from),
+            baseline.mapv(Jones::<f64>::from),
+            ref_baseline,
             max_relative = 1e-7
         );
     }
@@ -407,11 +396,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
 
         let ref_tile =
             ref_tile.mapv(Jones::<f64>::from) * (tile_factor + 1) as f64 * (tile_factor + 1) as f64;
-        assert_relative_eq!(
-            tile.mapv(|j| TestJones::from(Jones::<f64>::from(j))),
-            ref_tile.mapv(TestJones::from),
-            max_relative = 1e-7
-        );
+        assert_relative_eq!(tile.mapv(Jones::<f64>::from), ref_tile, max_relative = 1e-7);
     }
     // Manually negate the weights corresponding to our flagged channels.
     for c in flagged_fine_chans {

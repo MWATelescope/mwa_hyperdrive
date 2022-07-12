@@ -16,7 +16,6 @@ use tempfile::TempDir;
 
 use crate::{
     calibrate::{args::CalibrateUserArgs, di_calibrate},
-    jones_test::TestJones,
     math::TileBaselineMaps,
     solutions::CalibrationSolutions,
     tests::reduced_obsids::get_reduced_1090008640,
@@ -180,8 +179,8 @@ fn test_1090008640_calibrate_model_uvfits() {
     assert!(result.is_ok());
     let sols = result.unwrap();
     assert_abs_diff_eq!(
-        sols.di_jones.mapv(TestJones::from),
-        Array3::from_elem(sols.di_jones.dim(), TestJones::from(Jones::identity())),
+        sols.di_jones,
+        Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
         epsilon = 1e-15
     );
 }
@@ -274,7 +273,7 @@ fn test_1090008640_calibrate_model_ms() {
         )
         .unwrap();
 
-        assert_abs_diff_eq!(vis_m.mapv(TestJones::from), vis_c.mapv(TestJones::from));
+        assert_abs_diff_eq!(vis_m, vis_c);
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
@@ -284,8 +283,8 @@ fn test_1090008640_calibrate_model_ms() {
     assert!(result.is_ok());
     let sols = result.unwrap();
     assert_abs_diff_eq!(
-        sols.di_jones.mapv(TestJones::from),
-        Array3::from_elem(sols.di_jones.dim(), TestJones::from(Jones::identity())),
+        sols.di_jones,
+        Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
         epsilon = 1e-15
     );
 }

@@ -111,8 +111,8 @@ pub fn veto_sources(
                     let j = match beam.calc_jones(
                             *azel,
                             cc_freq,
-                            // Have to assume that tile 0 is sensible.
-                        0) {
+                        None,
+                        array_latitude_rad) {
                             Ok(j) => j,
                             Err(e) => {
                                 trace!("Beam error for source {}", source_name);
@@ -244,10 +244,10 @@ mod tests {
     fn test_beam_attenuated_flux_density_no_beam() {
         let beam = create_no_beam_object(1);
         let jones_pointing_centre = beam
-            .calc_jones(AzEl::new_degrees(0.0, 90.0), 180e6, 0)
+            .calc_jones(AzEl::new_degrees(0.0, 90.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let jones_null = beam
-            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, 0)
+            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let fd = FluxDensity {
             freq: 180e6,
@@ -270,10 +270,10 @@ mod tests {
         let beam =
             create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         let jones_pointing_centre = beam
-            .calc_jones(AzEl::new_degrees(0.0, 89.0), 180e6, 0)
+            .calc_jones(AzEl::new_degrees(0.0, 89.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let jones_null = beam
-            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, 0)
+            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let fd = FluxDensity {
             freq: 180e6,

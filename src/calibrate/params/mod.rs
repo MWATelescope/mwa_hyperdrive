@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use hifitime::Duration;
 use itertools::Itertools;
 use log::{debug, log_enabled, trace, warn, Level::Debug};
 use marlu::{
@@ -53,7 +54,7 @@ use crate::{
     },
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{itertools, log, marlu, ndarray, rayon, vec1};
+use mwa_hyperdrive_common::{hifitime, itertools, log, marlu, ndarray, rayon, vec1};
 use mwa_hyperdrive_srclist::{
     veto_sources, SourceList, SourceListType, DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD,
 };
@@ -165,6 +166,15 @@ pub struct CalibrateParams {
     /// The Earth position of the array. This is populated by user input or the input data.
     pub(crate) array_position: LatLngHeight,
 
+    /// The UT1 - UTC offset. If this is 0, effectively UT1 == UTC, which is a
+    /// wrong assumption by up to 0.9s. We assume the this value does not change
+    /// over the timestamps used in this `CalibrateParams`.
+    ///
+    /// Note that this need not be the same DUT1 in the input data's
+    /// [`ObsContext`]; the user may choose to suppress that DUT1 or supply
+    /// their own.
+    pub(crate) dut1: Duration,
+
     /// Should the array be precessed back to J2000?
     pub(crate) apply_precession: bool,
 
@@ -219,6 +229,7 @@ impl CalibrateParams {
             data,
             source_list,
             source_list_type,
+            ignore_dut1,
             outputs,
             model_filenames,
             output_model_time_average,
@@ -314,7 +325,7 @@ impl CalibrateParams {
                         obsid: input_data.mwalib_context.metafits_context.obs_id,
                         gpubox_count: gpuboxes.len(),
                         metafits_file_name: meta.display().to_string(),
-                        mwaf: mwafs.as_ref().map(|m| m.len()),
+                        mwaf: input_data.get_flags(),
                         raw_data_corrections: corrections,
                     }
                     .print("DI calibrating");
@@ -448,6 +459,7 @@ impl CalibrateParams {
                 }
             }
         };
+        let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
 
         let timesteps_to_use = {
             match (use_all_timesteps, timesteps) {
@@ -478,10 +490,11 @@ impl CalibrateParams {
         };
 
         let precession_info = precess_time(
-            obs_context.phase_centre,
-            obs_context.timestamps[*timesteps_to_use.first()],
             array_position.longitude_rad,
             array_position.latitude_rad,
+            obs_context.phase_centre,
+            obs_context.timestamps[*timesteps_to_use.first()],
+            dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
         );
         let (lmst, latitude) = if no_precession {
             (precession_info.lmst, array_position.latitude_rad)
@@ -670,6 +683,7 @@ impl CalibrateParams {
             },
             phase_centre: obs_context.phase_centre,
             pointing_centre: obs_context.pointing_centre,
+            dut1,
             lmst: Some(precession_info.lmst),
             lmst_j2000: if no_precession {
                 Some(precession_info.lmst_j2000)
@@ -1109,6 +1123,7 @@ impl CalibrateParams {
                 .tile_to_unflagged_cross_baseline_map,
             unflagged_tile_xyzs,
             array_position,
+            dut1: dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
             apply_precession: !no_precession,
             max_iterations,
             stop_threshold,

@@ -16,7 +16,7 @@ use cpu::SkyModellerCpu;
 #[cfg(feature = "cuda")]
 use cuda::SkyModellerCuda;
 
-use hifitime::Epoch;
+use hifitime::{Duration, Epoch};
 use marlu::{Jones, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 
@@ -151,6 +151,7 @@ pub fn new_cpu_sky_modeller<'a>(
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
+    dut1: Duration,
     apply_precession: bool,
 ) -> Box<dyn SkyModeller<'a> + 'a> {
     Box::new(new_cpu_sky_modeller_inner(
@@ -162,6 +163,7 @@ pub fn new_cpu_sky_modeller<'a>(
         phase_centre,
         array_longitude_rad,
         array_latitude_rad,
+        dut1,
         apply_precession,
     ))
 }
@@ -193,6 +195,7 @@ pub unsafe fn new_cuda_sky_modeller<'a>(
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
+    dut1: Duration,
     apply_precession: bool,
 ) -> Result<Box<dyn SkyModeller<'a> + 'a>, BeamError> {
     let modeller = new_cuda_sky_modeller_inner(
@@ -204,6 +207,7 @@ pub unsafe fn new_cuda_sky_modeller<'a>(
         phase_centre,
         array_longitude_rad,
         array_latitude_rad,
+        dut1,
         apply_precession,
     )?;
     Ok(Box::new(modeller))
@@ -235,6 +239,7 @@ pub(crate) fn new_sky_modeller<'a>(
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
+    dut1: Duration,
     apply_precession: bool,
 ) -> Result<Box<dyn SkyModeller<'a> + 'a>, BeamError> {
     cfg_if::cfg_if! {
@@ -248,6 +253,7 @@ pub(crate) fn new_sky_modeller<'a>(
                     phase_centre,
                     array_longitude_rad,
                     array_latitude_rad,
+                    dut1,
                     apply_precession,
                 ))
             } else {
@@ -261,11 +267,13 @@ pub(crate) fn new_sky_modeller<'a>(
                     phase_centre,
                     array_longitude_rad,
                     array_latitude_rad,
+                    dut1,
                     apply_precession,
                 )}
             }
         } else {
-            Ok(new_cpu_sky_modeller(beam,
+            Ok(new_cpu_sky_modeller(
+                beam,
                 source_list,
                 unflagged_tile_xyzs,
                 unflagged_fine_chan_freqs,
@@ -273,6 +281,7 @@ pub(crate) fn new_sky_modeller<'a>(
                 phase_centre,
                 array_longitude_rad,
                 array_latitude_rad,
+                dut1,
                 apply_precession,
             ))
         }
@@ -295,6 +304,7 @@ pub(super) fn new_cpu_sky_modeller_inner<'a>(
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
+    dut1: Duration,
     apply_precession: bool,
 ) -> SkyModellerCpu<'a> {
     let components = ComponentList::new(source_list, unflagged_fine_chan_freqs, phase_centre);
@@ -308,6 +318,7 @@ pub(super) fn new_cpu_sky_modeller_inner<'a>(
         phase_centre,
         array_longitude: array_longitude_rad,
         array_latitude: array_latitude_rad,
+        dut1,
         precess: apply_precession,
         unflagged_fine_chan_freqs,
         unflagged_tile_xyzs,
@@ -343,6 +354,7 @@ pub(super) unsafe fn new_cuda_sky_modeller_inner<'a>(
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
+    dut1: Duration,
     apply_precession: bool,
 ) -> Result<SkyModellerCuda<'a>, BeamError> {
     let modeller = SkyModellerCuda::new(
@@ -354,6 +366,7 @@ pub(super) unsafe fn new_cuda_sky_modeller_inner<'a>(
         phase_centre,
         array_longitude_rad,
         array_latitude_rad,
+        dut1,
         apply_precession,
     )?;
     Ok(modeller)

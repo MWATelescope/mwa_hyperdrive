@@ -18,6 +18,7 @@ use itertools::Itertools;
 use log::{debug, info};
 use marlu::{
     c64,
+    constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_cross_correlation_baselines},
     Jones, MwaObsContext,
 };
@@ -134,7 +135,7 @@ pub(crate) fn get_cal_vis(
         ProgressBar::new(vis_shape.0 as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
                     .progress_chars("=> "),
             )
             .with_position(0)
@@ -144,7 +145,7 @@ pub(crate) fn get_cal_vis(
         ProgressBar::new(vis_shape.0 as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
                     .progress_chars("=> "),
             )
             .with_position(0)
@@ -156,7 +157,7 @@ pub(crate) fn get_cal_vis(
             ProgressBar::new(vis_shape.0 as _)
                 .with_style(
                     ProgressStyle::default_bar()
-                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})")
+                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})").unwrap()
                         .progress_chars("=> "),
                 )
                 .with_position(0)
@@ -164,23 +165,10 @@ pub(crate) fn get_cal_vis(
         )
     });
 
-    // Draw the progress bars. Not doing this means that the bars aren't
-    // rendered until they've progressed.
-    read_progress.tick();
-    model_progress.tick();
-    if let Some(pb) = &model_write_progress {
-        pb.tick();
-    }
-
     // Use a variable to track whether any threads have an issue.
     let error = AtomicCell::new(false);
     info!("Reading input data and sky modelling");
     let scoped_threads_result = thread::scope(|scope| {
-        // Spawn a thread to draw the progress bars.
-        scope.spawn(move |_| {
-            multi_progress.join().unwrap();
-        });
-
         // Mutable slices of the "global" arrays. These allow threads to mutate
         // the global arrays in parallel (using the Arc<Mutex<_>> pattern would
         // kill performance here).
@@ -192,6 +180,7 @@ pub(crate) fn get_cal_vis(
         let data_handle = scope.spawn(|_| {
             // If a panic happens, update our atomic error.
             defer_on_unwind! { error.store(true); }
+            read_progress.tick();
 
             let result = read_vis_data(
                 params,
@@ -211,6 +200,7 @@ pub(crate) fn get_cal_vis(
         // Sky-model generation thread.
         let model_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
+            model_progress.tick();
 
             let result = model_vis(
                 params,
@@ -237,6 +227,10 @@ pub(crate) fn get_cal_vis(
             // If the user wants the sky model written out, `model_file` is
             // populated.
             if let Some(model_files) = &params.model_files {
+                if let Some(pb) = model_write_progress.as_ref() {
+                    pb.tick();
+                }
+
                 let fine_chan_freqs = obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64);
                 let unflagged_baseline_tile_pairs = params
                     .tile_to_unflagged_cross_baseline_map
@@ -270,6 +264,7 @@ pub(crate) fn get_cal_vis(
                     &params.timesteps,
                     &timeblocks,
                     time_res,
+                    params.dut1,
                     freq_res,
                     &fine_chan_freqs,
                     &unflagged_baseline_tile_pairs,
@@ -409,12 +404,12 @@ fn model_vis<'a>(
         obs_context.phase_centre,
         params.array_position.longitude_rad,
         params.array_position.latitude_rad,
+        params.dut1,
         params.apply_precession,
     )?;
 
-    // TODO: Introduce another way for Marlu to expose this without needing a
-    // VisContext first.
-    let weight_factor = (freq_res * time_res.in_seconds() / 10000.0) as f32;
+    let weight_factor =
+        ((freq_res / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR)) as f32;
 
     // Iterate over all calibration timesteps and write to the model slices.
     for (&timestep, mut vis_model_slice) in params.timesteps.iter().zip(vis_model_slices) {
@@ -844,7 +839,7 @@ fn make_calibration_progress_bar(
     draw: bool,
 ) -> ProgressBar {
     ProgressBar::with_draw_target(
-        num_chanblocks as _,
+        Some(num_chanblocks as _),
         if draw {
             // Use stdout, not stderr, because the messages printed by the
             // progress bar are valuable.
@@ -856,6 +851,7 @@ fn make_calibration_progress_bar(
     .with_style(
         ProgressStyle::default_bar()
             .template("{msg}: [{wide_bar:.blue}] {pos:3}/{len:3} ({elapsed_precise}<{eta_precise})")
+            .unwrap()
             .progress_chars("=> "),
     )
     .with_position(0)

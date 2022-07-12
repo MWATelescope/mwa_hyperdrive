@@ -19,6 +19,7 @@ use std::str::FromStr;
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use crossbeam_utils::{atomic::AtomicCell, thread};
+use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, trace, warn};
@@ -46,7 +47,9 @@ use crate::{
     HyperdriveError,
 };
 use mwa_hyperdrive_beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays};
-use mwa_hyperdrive_common::{clap, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1};
+use mwa_hyperdrive_common::{
+    clap, hifitime, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1,
+};
 use mwa_hyperdrive_srclist::{
     veto_sources, SourceList, SourceListType, DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD,
     SOURCE_DIST_CUTOFF_HELP as sdc_help, VETO_THRESHOLD_HELP as vt_help,
@@ -82,6 +85,10 @@ pub struct VisSubtractArgs {
     /// timesteps, including flagged ones.
     #[clap(long, multiple_values(true), help_heading = "INPUT FILES")]
     timesteps: Option<Vec<usize>>,
+
+    /// Use a DUT1 value of 0 seconds rather than what is in the input data.
+    #[clap(long, help_heading = "INPUT FILES")]
+    ignore_dut1: bool,
 
     #[clap(
         short = 'o',
@@ -197,6 +204,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         source_list,
         source_list_type,
         timesteps,
+        ignore_dut1,
         outputs,
         time_average,
         freq_average,
@@ -494,11 +502,14 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     }
     .map_err(|_| VisSubtractError::NoTimesteps)?;
 
+    let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
+
     let precession_info = precess_time(
-        obs_context.phase_centre,
-        obs_context.timestamps[*timesteps.first()],
         array_pos.longitude_rad,
         array_pos.latitude_rad,
+        obs_context.phase_centre,
+        obs_context.timestamps[*timesteps.first()],
+        dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
     );
     let (lmst, latitude) = if no_precession {
         (precession_info.lmst, array_pos.latitude_rad)
@@ -547,6 +558,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         },
         phase_centre: obs_context.phase_centre,
         pointing_centre: None,
+        dut1,
         lmst: Some(precession_info.lmst),
         lmst_j2000: if no_precession {
             None
@@ -706,7 +718,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     ProgressBar::new(timesteps.len() as _)
         .with_style(
             ProgressStyle::default_bar()
-                .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
                 .progress_chars("=> "),
         )
         .with_position(0)
@@ -716,7 +728,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     ProgressBar::new(timesteps.len() as _)
         .with_style(
             ProgressStyle::default_bar()
-                .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
                 .progress_chars("=> "),
         )
         .with_position(0)
@@ -726,33 +738,23 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         ProgressBar::new(timeblocks.len() as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})").unwrap()
                     .progress_chars("=> "),
             )
             .with_position(0)
             .with_message("Subtracted writing"),
     );
 
-    // Draw the progress bars. Not doing this means that the bars aren't
-    // rendered until they've progressed.
-    read_progress.tick();
-    model_progress.tick();
-    write_progress.tick();
-
     // Use a variable to track whether any threads have an issue.
     let error = AtomicCell::new(false);
 
     info!("Reading input data, sky modelling, and writing");
     let scoped_threads_result = thread::scope(|scope| {
-        // Spawn a thread to draw the progress bars.
-        scope.spawn(move |_| {
-            multi_progress.join().unwrap();
-        });
-
         // Input visibility-data reading thread.
         let data_handle = scope.spawn(|_| {
             // If a panic happens, update our atomic error.
             defer_on_unwind! { error.store(true); }
+            read_progress.tick();
 
             let result = read_vis(
                 obs_context,
@@ -775,6 +777,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         // Sky-model generation and subtraction thread.
         let model_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
+            model_progress.tick();
 
             let result = model_vis_and_subtract(
                 beam.deref(),
@@ -782,6 +785,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 obs_context,
                 array_pos,
                 vis_shape,
+                dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
                 !no_precession,
                 rx_model,
                 tx_write,
@@ -799,6 +803,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         // Subtracted vis writing thread.
         let write_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
+            write_progress.tick();
 
             let marlu_mwa_obs_context = input_data.get_metafits_context().map(|c| {
                 (
@@ -818,6 +823,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 &timesteps,
                 &timeblocks,
                 time_res,
+                dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
                 freq_res,
                 &obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64),
                 &maps
@@ -919,6 +925,7 @@ fn model_vis_and_subtract(
     obs_context: &ObsContext,
     array_pos: LatLngHeight,
     vis_shape: (usize, usize),
+    dut1: Duration,
     apply_precession: bool,
     rx: Receiver<VisTimestep>,
     tx: Sender<VisTimestep>,
@@ -949,6 +956,7 @@ fn model_vis_and_subtract(
         obs_context.phase_centre,
         array_pos.longitude_rad,
         array_pos.latitude_rad,
+        dut1,
         apply_precession,
     )?;
 

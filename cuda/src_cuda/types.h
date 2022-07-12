@@ -37,16 +37,17 @@ typedef struct UVW {
 } UVW;
 
 /**
- * The LMN coordinates of a sky-model component.
+ * The LMN coordinates of a sky-model component (prepared for application in the
+   RIME).
  */
-typedef struct LMN {
+typedef struct LmnRime {
     // l coordinate [dimensionless]
     FLOAT l;
     // m coordinate [dimensionless]
     FLOAT m;
     // n coordinate [dimensionless]
     FLOAT n;
-} LMN;
+} LmnRime;
 
 /**
  * Parameters describing a Gaussian (also applicable to shapelets).
@@ -131,14 +132,14 @@ typedef struct JonesF64 {
  */
 typedef struct Points {
     size_t num_power_law_points;
-    LMN *power_law_lmns;
+    LmnRime *power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
     JONES *power_law_fds;
     // Spectral indices.
     FLOAT *power_law_sis;
 
     size_t num_curved_power_law_points;
-    LMN *curved_power_law_lmns;
+    LmnRime *curved_power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
     JONES *curved_power_law_fds;
     // Spectral indices.
@@ -147,7 +148,7 @@ typedef struct Points {
     FLOAT *curved_power_law_qs;
 
     size_t num_list_points;
-    LMN *list_lmns;
+    LmnRime *list_lmns;
     // Instrumental (i.e. XX, XY, YX, XX).
     JONES *list_fds;
 } Points;
@@ -157,7 +158,7 @@ typedef struct Points {
  */
 typedef struct Gaussians {
     size_t num_power_law_gaussians;
-    LMN *power_law_lmns;
+    LmnRime *power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
     JONES *power_law_fds;
     // Spectral indices.
@@ -165,7 +166,7 @@ typedef struct Gaussians {
     GaussianParams *power_law_gps;
 
     size_t num_curved_power_law_gaussians;
-    LMN *curved_power_law_lmns;
+    LmnRime *curved_power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
     JONES *curved_power_law_fds;
     // Spectral indices.
@@ -175,7 +176,7 @@ typedef struct Gaussians {
     GaussianParams *curved_power_law_gps;
 
     size_t num_list_gaussians;
-    LMN *list_lmns;
+    LmnRime *list_lmns;
     // Instrumental (i.e. XX, XY, YX, XX).
     JONES *list_fds;
     GaussianParams *list_gps;
@@ -186,7 +187,7 @@ typedef struct Gaussians {
  */
 typedef struct Shapelets {
     size_t num_power_law_shapelets;
-    LMN *power_law_lmns;
+    LmnRime *power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
     JONES *power_law_fds;
     // Spectral indices.
@@ -197,7 +198,7 @@ typedef struct Shapelets {
     size_t *power_law_num_shapelet_coeffs;
 
     size_t num_curved_power_law_shapelets;
-    LMN *curved_power_law_lmns;
+    LmnRime *curved_power_law_lmns;
     // Instrumental flux densities calculated at 150 MHz.
     JONES *curved_power_law_fds;
     // Spectral indices.
@@ -210,7 +211,7 @@ typedef struct Shapelets {
     size_t *curved_power_law_num_shapelet_coeffs;
 
     size_t num_list_shapelets;
-    LMN *list_lmns;
+    LmnRime *list_lmns;
     // Instrumental (i.e. XX, XY, YX, XX).
     JONES *list_fds;
     GaussianParams *list_gps;

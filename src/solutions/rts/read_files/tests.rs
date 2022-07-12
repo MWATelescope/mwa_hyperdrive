@@ -11,7 +11,6 @@ use indoc::indoc;
 use marlu::c64;
 
 use super::*;
-use crate::jones_test::TestJones;
 use mwa_hyperdrive_common::marlu;
 
 #[test]
@@ -29,8 +28,8 @@ fn test_read_di_jm() {
 
     assert_abs_diff_eq!(di_jm._alignment_flux_density, 16.990089);
     assert_abs_diff_eq!(
-        TestJones::from(di_jm.post_alignment_matrix),
-        TestJones::from([
+        di_jm.post_alignment_matrix,
+        Jones::from([
             c64::new(-0.131782, -0.933494),
             c64::new(0.019562, 0.135049),
             c64::new(-0.008773, -0.134161),
@@ -40,8 +39,8 @@ fn test_read_di_jm() {
 
     assert_eq!(di_jm.pre_alignment_matrices.len(), 2);
     assert_abs_diff_eq!(
-        TestJones::from(di_jm.pre_alignment_matrices[0]),
-        TestJones::from([
+        di_jm.pre_alignment_matrices[0],
+        Jones::from([
             c64::new(0.446814, -0.203973),
             c64::new(-0.071393, 0.031377),
             c64::new(-0.027429, 0.060070),
@@ -49,8 +48,8 @@ fn test_read_di_jm() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(di_jm.pre_alignment_matrices[1]),
-        TestJones::from([
+        di_jm.pre_alignment_matrices[1],
+        Jones::from([
             c64::new(-0.629691, -0.403369),
             c64::new(0.088931, 0.060120),
             c64::new(-0.065456, -0.061017),
@@ -192,8 +191,8 @@ fn test_read_bp_cal() {
     assert_eq!(bp_cal.data.dim().2, 27); // 27 unflagged channels
 
     assert_abs_diff_eq!(
-        TestJones::from(bp_cal.data[(0, 0, 0)]),
-        TestJones::from([
+        bp_cal.data[(0, 0, 0)],
+        Jones::from([
             0.933187 * cexp(0.124900),
             0.028094 * cexp(1.938599),
             0.047613 * cexp(-0.953055),
@@ -201,8 +200,8 @@ fn test_read_bp_cal() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(bp_cal.data[(0, 1, 0)]),
-        TestJones::from([
+        bp_cal.data[(0, 1, 0)],
+        Jones::from([
             0.935630 * cexp(0.074762),
             0.066164 * cexp(1.748954),
             0.043069 * cexp(-0.456759),
@@ -211,8 +210,8 @@ fn test_read_bp_cal() {
     );
 
     assert_abs_diff_eq!(
-        TestJones::from(bp_cal.data[(0, 0, 1)]),
-        TestJones::from([
+        bp_cal.data[(0, 0, 1)],
+        Jones::from([
             0.925032 * cexp(0.051076),
             0.095979 * cexp(1.927272),
             0.049172 * cexp(-0.356952),
@@ -220,8 +219,8 @@ fn test_read_bp_cal() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(bp_cal.data[(0, 1, 1)]),
-        TestJones::from([
+        bp_cal.data[(0, 1, 1)],
+        Jones::from([
             0.939763 * cexp(0.078459),
             0.052874 * cexp(1.719049),
             0.028309 * cexp(-0.292615),
@@ -230,8 +229,8 @@ fn test_read_bp_cal() {
     );
 
     assert_abs_diff_eq!(
-        TestJones::from(bp_cal.data[(0, 0, 26)]),
-        TestJones::from([
+        bp_cal.data[(0, 0, 26)],
+        Jones::from([
             0.958020 * cexp(-0.012022),
             0.023057 * cexp(-1.619737),
             0.069914 * cexp(1.782797),
@@ -239,8 +238,8 @@ fn test_read_bp_cal() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(bp_cal.data[(0, 1, 26)]),
-        TestJones::from([
+        bp_cal.data[(0, 1, 26)],
+        Jones::from([
             0.975938 * cexp(-0.030198),
             0.014863 * cexp(3.029070),
             0.046677 * cexp(1.959530),

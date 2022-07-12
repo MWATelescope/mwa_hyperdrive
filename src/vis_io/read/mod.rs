@@ -21,7 +21,7 @@ use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use vec1::Vec1;
 
-use crate::context::ObsContext;
+use crate::{context::ObsContext, flagging::MwafFlags};
 use mwa_hyperdrive_common::{marlu, mwalib, ndarray, vec1};
 
 #[derive(Debug)]
@@ -39,6 +39,10 @@ pub(crate) trait VisRead: Sync + Send {
     /// If it's available, get a reference to the [`mwalib::MetafitsContext`]
     /// associated with this trait object.
     fn get_metafits_context(&self) -> Option<&MetafitsContext>;
+
+    /// If it's available, get a reference to the [`MwafFlags`] associated with
+    /// this trait object.
+    fn get_flags(&self) -> Option<&MwafFlags>;
 
     /// Read cross- and auto-correlation visibilities for all frequencies and
     /// baselines in a single timestep into corresponding arrays.

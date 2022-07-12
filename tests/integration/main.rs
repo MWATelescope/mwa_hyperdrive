@@ -8,7 +8,6 @@
 //! https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html
 
 mod di_calibrate;
-mod jones_test;
 mod no_stderr;
 pub(crate) mod solutions_apply;
 
@@ -17,7 +16,6 @@ use std::process::Output;
 use std::str::from_utf8;
 
 use assert_cmd::{output::OutputError, Command};
-use jones_test::*;
 use tempfile::TempDir;
 
 use mwa_hyperdrive::calibrate::args::CalibrateUserArgs;

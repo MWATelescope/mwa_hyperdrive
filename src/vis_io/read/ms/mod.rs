@@ -441,7 +441,7 @@ impl MsReader {
                 let all_widths: Vec<f64> = spectral_window_table
                     .get_cell_as_vec("CHAN_WIDTH", 0)
                     .unwrap();
-                let width = *all_widths.get(0).ok_or(MsReadError::NoChanWidths)?;
+                let width = *all_widths.first().ok_or(MsReadError::NoChanWidths)?;
                 // Make sure all the widths all the same.
                 for w in all_widths.iter().skip(1) {
                     if (w - width).abs() > f64::EPSILON {
@@ -557,6 +557,21 @@ impl MsReader {
                 .map(|(i, _)| i)
                 .collect();
 
+            // Can measurement sets supply DUT1?
+            let dut1 = match mwalib_context.as_ref() {
+                // Use the value in the metafits.
+                Some(c) => {
+                    match c.dut1 {
+                        Some(dut1) => debug!("metafits DUT1: {dut1}"),
+                        None => debug!("metafits has no DUT1"),
+                    }
+                    c.dut1.map(|dut1| Duration::from_f64(dut1, Unit::Second))
+                }
+
+                // We have no DUT1.
+                None => None,
+            };
+
             let obs_context = ObsContext {
                 obsid,
                 timestamps,
@@ -564,6 +579,9 @@ impl MsReader {
                 unflagged_timesteps,
                 phase_centre,
                 pointing_centre,
+                // XXX(Dev): no way to get array_pos from MS AFAIK
+                array_position: None,
+                dut1,
                 tile_names,
                 tile_xyzs,
                 flagged_tiles,
@@ -571,8 +589,6 @@ impl MsReader {
                 dipole_delays,
                 dipole_gains,
                 time_res,
-                // XXX(Dev): no way to get array_pos from MS AFAIK
-                array_position: None,
                 coarse_chan_nums,
                 coarse_chan_freqs,
                 num_fine_chans_per_coarse_chan,
@@ -845,6 +861,10 @@ impl VisRead for MsReader {
 
     fn get_metafits_context(&self) -> Option<&MetafitsContext> {
         self.metafits_context.as_ref()
+    }
+
+    fn get_flags(&self) -> Option<&MwafFlags> {
+        None
     }
 
     fn read_crosses_and_autos(

@@ -7,14 +7,13 @@ use std::collections::HashSet;
 use approx::assert_abs_diff_eq;
 use birli::marlu::XyzGeodetic;
 use hifitime::{Duration, Unit};
-use marlu::{Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWritable};
+use marlu::{Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWrite};
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
 use tempfile::tempdir;
 
 use super::*;
 use crate::{
     calibrate::di::code::{get_cal_vis, tests::test_1090008640_quality},
-    jones_test::TestJones,
     math::TileBaselineMaps,
     tests::reduced_obsids::get_reduced_1090008640_ms,
 };
@@ -62,8 +61,8 @@ fn test_1090008640_cross_vis() {
     // (except the PFB gains) are turned on. See the
     // read_1090008640_cross_vis_with_corrections test.
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 0)]),
-        TestJones::from([
+        vis[(0, 0)],
+        Jones::from([
             c32::new(-1.2564129e2, -1.497961e1),
             c32::new(8.207059e1, -1.4936417e2),
             c32::new(-7.306871e1, 2.36177e2),
@@ -71,8 +70,8 @@ fn test_1090008640_cross_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(10, 16)]),
-        TestJones::from([
+        vis[(10, 16)],
+        Jones::from([
             c32::new(-4.138127e1, -2.638188e2),
             c32::new(5.220332e2, -2.6055228e2),
             c32::new(4.854074e2, -1.9634505e2),
@@ -122,8 +121,8 @@ fn read_1090008640_auto_vis() {
     assert!(result.is_ok(), "{}", result.unwrap_err());
 
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 0)]),
-        TestJones::from([
+        vis[(0, 0)],
+        Jones::from([
             5.3557855e4,
             4.3092007e-7,
             -7.420802e2,
@@ -135,8 +134,8 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 2)]),
-        TestJones::from([
+        vis[(0, 2)],
+        Jones::from([
             7.1403125e4,
             -1.3957654e-6,
             -1.0667509e3,
@@ -148,8 +147,8 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 16)]),
-        TestJones::from([
+        vis[(0, 16)],
+        Jones::from([
             1.07272586e5,
             1.9233863e-8,
             -1.0756711e3,
@@ -161,8 +160,8 @@ fn read_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(vis[(10, 16)]),
-        TestJones::from([
+        vis[(10, 16)],
+        Jones::from([
             1.0766406e5,
             1.5415758e-6,
             -1.334196e3,
@@ -216,8 +215,8 @@ fn read_1090008640_auto_vis_with_flags() {
 
     // Use the same values as the test above, adjusting only the indices.
     assert_abs_diff_eq!(
-        TestJones::from(vis[(0, 0)]),
-        TestJones::from([
+        vis[(0, 0)],
+        Jones::from([
             5.3557855e4,
             4.3092007e-7,
             -7.420802e2,
@@ -230,8 +229,8 @@ fn read_1090008640_auto_vis_with_flags() {
     );
     assert_abs_diff_eq!(
         // Channel 2 -> 1
-        TestJones::from(vis[(0, 1)]),
-        TestJones::from([
+        vis[(0, 1)],
+        Jones::from([
             7.1403125e4,
             -1.3957654e-6,
             -1.0667509e3,
@@ -244,8 +243,8 @@ fn read_1090008640_auto_vis_with_flags() {
     );
     assert_abs_diff_eq!(
         // Channel 16 -> 15
-        TestJones::from(vis[(0, 15)]),
-        TestJones::from([
+        vis[(0, 15)],
+        Jones::from([
             1.07272586e5,
             1.9233863e-8,
             -1.0756711e3,
@@ -258,8 +257,8 @@ fn read_1090008640_auto_vis_with_flags() {
     );
     assert_abs_diff_eq!(
         // Two flagged tiles before tile 10; use index 8. Channel 16 -> 15.
-        TestJones::from(vis[(8, 15)]),
-        TestJones::from([
+        vis[(8, 15)],
+        Jones::from([
             1.0766406e5,
             1.5415758e-6,
             -1.334196e3,
@@ -323,8 +322,8 @@ fn read_1090008640_cross_and_auto_vis() {
     assert!(result.is_ok(), "{}", result.unwrap_err());
 
     assert_abs_diff_eq!(
-        TestJones::from(cross_vis[(0, 0)]),
-        TestJones::from([
+        cross_vis[(0, 0)],
+        Jones::from([
             c32::new(-1.2564129e2, -1.497961e1),
             c32::new(8.207059e1, -1.4936417e2),
             c32::new(-7.306871e1, 2.36177e2),
@@ -332,8 +331,8 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(cross_vis[(10, 16)]),
-        TestJones::from([
+        cross_vis[(10, 16)],
+        Jones::from([
             c32::new(-4.138127e1, -2.638188e2),
             c32::new(5.220332e2, -2.6055228e2),
             c32::new(4.854074e2, -1.9634505e2),
@@ -349,8 +348,8 @@ fn read_1090008640_cross_and_auto_vis() {
     );
 
     assert_abs_diff_eq!(
-        TestJones::from(auto_vis[(0, 0)]),
-        TestJones::from([
+        auto_vis[(0, 0)],
+        Jones::from([
             5.3557855e4,
             4.3092007e-7,
             -7.420802e2,
@@ -362,8 +361,8 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(auto_vis[(0, 2)]),
-        TestJones::from([
+        auto_vis[(0, 2)],
+        Jones::from([
             7.1403125e4,
             -1.3957654e-6,
             -1.0667509e3,
@@ -375,8 +374,8 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(auto_vis[(0, 16)]),
-        TestJones::from([
+        auto_vis[(0, 16)],
+        Jones::from([
             1.07272586e5,
             1.9233863e-8,
             -1.0756711e3,
@@ -388,8 +387,8 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        TestJones::from(auto_vis[(10, 16)]),
-        TestJones::from([
+        auto_vis[(10, 16)],
+        Jones::from([
             1.0766406e5,
             1.5415758e-6,
             -1.334196e3,
@@ -469,8 +468,6 @@ fn test_timestep_reading() {
     ];
     let tile_names = vec!["tile_0_0", "tile_1_0", "tile_0_1"];
 
-    let mut writer = MeasurementSetWriter::new(&vis_path, phase_centre, Some(array_pos));
-
     let marlu_obs_ctx = MarluObsContext {
         sched_start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
         sched_duration: ((num_timesteps + 1) as f64 * vis_ctx.int_time),
@@ -487,17 +484,23 @@ fn test_timestep_reading() {
         project_id: None,
         observer: None,
     };
-
-    writer.initialize(&vis_ctx, &marlu_obs_ctx).unwrap();
+    let (s_lat, c_lat) = array_pos.latitude_rad.sin_cos();
+    let ant_positions_xyz = marlu_obs_ctx
+        .ant_positions_enh
+        .iter()
+        .map(|enh| enh.to_xyz_inner(s_lat, c_lat))
+        .collect();
+    let mut writer = MeasurementSetWriter::new(
+        &vis_path,
+        phase_centre,
+        array_pos,
+        ant_positions_xyz,
+        Duration::from_total_nanoseconds(0),
+    );
+    writer.initialize(&vis_ctx, &marlu_obs_ctx, None).unwrap();
 
     writer
-        .write_vis_marlu(
-            vis_data.view(),
-            weight_data.view(),
-            &vis_ctx,
-            &tile_xyzs,
-            false,
-        )
+        .write_vis(vis_data.view(), weight_data.view(), &vis_ctx, false)
         .unwrap();
 
     let ms_reader = MsReader::new::<&PathBuf, &PathBuf>(&vis_path, None).unwrap();

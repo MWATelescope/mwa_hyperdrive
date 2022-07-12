@@ -14,6 +14,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   coverage:
@@ -44,29 +45,28 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
 
-      - name: Install nightly-2022-01-14 toolchain
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-01-14
+          toolchain: stable
           override: true
           components: llvm-tools-preview
 
       - name: install cargo-llvm-cov
-        run: cargo +nightly-2022-01-14 install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
 
       - name: Get the beam HDF5 file
-        run: sudo curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o /mwa_full_embedded_element_pattern.h5
+        run: curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o mwa_full_embedded_element_pattern.h5
 
       - name: Generate test lcov coverage into coverage/ dir
         run: |
-          export PATH="${HOME}/.cargo/bin:${PATH}"
+          export MWA_BEAM_FILE=$(realpath mwa_full_embedded_element_pattern.h5)
+
           mkdir -p coverage
-          cargo +nightly-2022-01-14 llvm-cov --all-targets --workspace --exclude mwa_hyperdrive_cuda --no-default-features --locked --lcov --output-path coverage/coverage.lcov
+          cargo llvm-cov --all-targets --workspace --exclude mwa_hyperdrive_cuda --no-default-features --locked --lcov --output-path coverage/coverage.lcov
           # this uses the result of the previous run to generate a text summary
-          cargo +nightly-2022-01-14 llvm-cov --no-run
-        env:
-          MWA_BEAM_FILE: /mwa_full_embedded_element_pattern.h5
+          cargo llvm-cov --no-run
 
       - name: Upload reports to codecov.io
         uses: codecov/codecov-action@v2

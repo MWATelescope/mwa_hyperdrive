@@ -22,7 +22,11 @@ use hifitime::{Duration, Epoch, Unit};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, warn};
-use marlu::{precession::precess_time, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic};
+use marlu::{
+    constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
+    precession::precess_time,
+    Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
+};
 use mwalib::MetafitsContext;
 use ndarray::ArcArray2;
 use scopeguard::defer_on_unwind;
@@ -202,6 +206,10 @@ pub struct VisSimulateArgs {
     )]
     array_position: Option<Vec<f64>>,
 
+    /// Use a DUT1 value of 0 seconds rather than what is in the metafits file.
+    #[clap(long, help_heading = "INPUT FILES")]
+    ignore_dut1: bool,
+
     /// If specified, don't precess the array to J2000. We assume that sky-model
     /// sources are specified in the J2000 epoch.
     #[clap(long, help_heading = "MODEL PARAMETERS")]
@@ -282,6 +290,9 @@ struct VisSimParams {
     /// The Earth position of the interferometer.
     array_position: LatLngHeight,
 
+    /// UT1 - UTC.
+    dut1: Duration,
+
     /// Should we be precessing?
     apply_precession: bool,
 }
@@ -317,10 +328,11 @@ impl VisSimParams {
             unity_dipole_gains,
             delays,
             array_position,
+            ignore_dut1,
             no_precession,
+            no_progress_bars: _,
             #[cfg(feature = "cuda")]
             cpu,
-            no_progress_bars: _,
         } = args;
 
         // If we're going to use a GPU for modelling, get the device info so we
@@ -532,11 +544,19 @@ impl VisSimParams {
         let beam_file = beam.get_beam_file();
         debug!("Beam file: {beam_file:?}");
 
+        let dut1 = if *ignore_dut1 {
+            None
+        } else {
+            metafits
+                .dut1
+                .map(|dut1| Duration::from_f64(dut1, Unit::Second))
+        };
         let precession_info = precess_time(
-            phase_centre,
-            *timestamps.first(),
             array_position.longitude_rad,
             array_position.latitude_rad,
+            phase_centre,
+            *timestamps.first(),
+            dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
         );
         let (lmst, latitude) = if *no_precession {
             (precession_info.lmst, array_position.latitude_rad)
@@ -564,6 +584,7 @@ impl VisSimParams {
             },
             phase_centre,
             pointing_centre: None,
+            dut1,
             lmst: Some(precession_info.lmst),
             lmst_j2000: if *no_precession {
                 None
@@ -669,6 +690,7 @@ impl VisSimParams {
             time_res,
             beam,
             array_position,
+            dut1: dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
             apply_precession: !no_precession,
         })
     }
@@ -694,6 +716,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         time_res,
         beam,
         array_position,
+        dut1,
         apply_precession,
     } = VisSimParams::new(args)?;
 
@@ -722,7 +745,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         ProgressBar::new(timestamps.len() as u64)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
                     .progress_chars("=> "),
             )
             .with_position(0)
@@ -732,26 +755,20 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         ProgressBar::new(timeblocks.len() as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})").unwrap()
                     .progress_chars("=> "),
             )
             .with_position(0)
             .with_message("Model writing"),
     );
-    model_progress.tick();
-    write_progress.tick();
 
     // Generate the visibilities and write them out asynchronously.
     let error = AtomicCell::new(false);
     let scoped_threads_result = thread::scope(|scope| {
-        // Spawn a thread to draw the progress bars.
-        scope.spawn(move |_| {
-            multi_progress.join().unwrap();
-        });
-
         // Modelling thread.
         let model_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
+            model_progress.tick();
 
             // Create a "modeller" object.
             let modeller = model::new_sky_modeller(
@@ -765,13 +782,13 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 phase_centre,
                 array_position.longitude_rad,
                 array_position.latitude_rad,
+                dut1,
                 apply_precession,
             )?;
 
             let cross_vis_shape = (baseline_to_tile_map.len(), fine_chan_freqs.len());
-            // TODO: Introduce another way for Marlu to expose this without
-            // needing a VisContext first.
-            let weight_factor = freq_res_hz * time_res.in_seconds() / 10000.0;
+            let weight_factor =
+                (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR);
             let result = model_thread(
                 modeller.deref(),
                 &timestamps,
@@ -790,6 +807,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         // Writing thread.
         let write_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
+            write_progress.tick();
 
             // Form (sorted) unflagged baselines from our cross- and
             // auto-correlation baselines.
@@ -813,6 +831,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 &timesteps,
                 &timeblocks,
                 time_res,
+                dut1,
                 freq_res_hz,
                 &fine_chan_freqs,
                 &unflagged_baseline_tile_pairs,

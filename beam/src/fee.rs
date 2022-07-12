@@ -105,14 +105,23 @@ impl FEEBeam {
         freq_hz: f64,
         delays: &[u32],
         amps: &[f64],
+        latitude_rad: f64,
     ) -> Result<Jones<f64>, mwa_hyperbeam::fee::FEEBeamError> {
-        self.hyperbeam_object
-            .calc_jones(azel.az, azel.za(), freq_hz as _, delays, amps, true)
-            // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
-            // but the Marlu used all over hyperdrive is imported differently
-            // from that of hyperbeam. Testing shows that this operation takes
-            // tens of nanoseconds.
-            .map(|j| unsafe { std::mem::transmute(j) })
+        self.hyperbeam_object.calc_jones_pair(
+            azel.az,
+            azel.za(),
+            freq_hz as _,
+            delays,
+            amps,
+            true,
+            Some(latitude_rad),
+            false,
+        )
+        // // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
+        // // but the Marlu used all over hyperdrive is imported differently
+        // // from that of hyperbeam. Testing shows that this operation takes
+        // // tens of nanoseconds.
+        // .map(|j| unsafe { std::mem::transmute(j) })
     }
 
     fn calc_jones_array_inner(
@@ -121,16 +130,22 @@ impl FEEBeam {
         freq_hz: f64,
         delays: &[u32],
         amps: &[f64],
+        latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::fee::FEEBeamError> {
-        let (azs, zas): (Vec<f64>, Vec<f64>) =
-            azels.iter().map(|azel| (azel.az, azel.za())).unzip();
-        self.hyperbeam_object
-            .calc_jones_array(&azs, &zas, freq_hz as _, delays, amps, true)
-            // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
-            // but the Marlu used all over hyperdrive is imported differently
-            // from that of hyperbeam. Testing shows that this operation takes
-            // tens of nanoseconds.
-            .map(|v| unsafe { std::mem::transmute(v) })
+        self.hyperbeam_object.calc_jones_array(
+            unsafe { std::mem::transmute(azels) },
+            freq_hz as _,
+            delays,
+            amps,
+            true,
+            Some(latitude_rad),
+            false,
+        )
+        // // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
+        // // but the Marlu used all over hyperdrive is imported differently
+        // // from that of hyperbeam. Testing shows that this operation takes
+        // // tens of nanoseconds.
+        // .map(|v| unsafe { std::mem::transmute(v) })
     }
 }
 
@@ -163,7 +178,8 @@ impl Beam for FEEBeam {
         &self,
         azel: AzEl,
         freq_hz: f64,
-        tile_index: usize,
+        tile_index: Option<usize>,
+        latitude_rad: f64,
     ) -> Result<Jones<f64>, BeamError> {
         // The FEE beam is defined only at specific frequencies. For this
         // reason, rather than making a unique hash for every single different
@@ -171,23 +187,36 @@ impl Beam for FEEBeam {
         // frequency and use that for the hash.
         let beam_freq = self.find_closest_freq(freq_hz);
 
-        // TODO: Check tile_index isn't too big.
-        let delays = self.delays.slice(s![tile_index, ..]);
-        let amps = self.gains.slice(s![tile_index, ..]);
-        let jones = self.calc_jones_inner(
-            azel,
-            beam_freq,
-            delays.as_slice().unwrap(),
-            amps.as_slice().unwrap(),
-        )?;
-        Ok(jones)
+        if let Some(tile_index) = tile_index {
+            if tile_index > self.delays.len_of(Axis(0)) {
+                return Err(BeamError::BadTileIndex {
+                    got: tile_index,
+                    max: self.delays.len_of(Axis(0)),
+                });
+            }
+            let delays = self.delays.slice(s![tile_index, ..]);
+            let amps = self.gains.slice(s![tile_index, ..]);
+            self.calc_jones_inner(
+                azel,
+                beam_freq,
+                delays.as_slice().unwrap(),
+                amps.as_slice().unwrap(),
+                latitude_rad,
+            )
+        } else {
+            let delays = &self.ideal_delays;
+            let amps = [1.0; 32];
+            self.calc_jones_inner(azel, beam_freq, delays, &amps, latitude_rad)
+        }
+        .map_err(BeamError::from)
     }
 
     fn calc_jones_array(
         &self,
         azels: &[AzEl],
         freq_hz: f64,
-        tile_index: usize,
+        tile_index: Option<usize>,
+        latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, BeamError> {
         // The FEE beam is defined only at specific frequencies. For this
         // reason, rather than making a unique hash for every single different
@@ -195,14 +224,27 @@ impl Beam for FEEBeam {
         // frequency and use that for the hash.
         let beam_freq = self.find_closest_freq(freq_hz);
 
-        let delays = self.delays.slice(s![tile_index, ..]);
-        let amps = self.gains.slice(s![tile_index, ..]);
-        self.calc_jones_array_inner(
-            azels,
-            beam_freq,
-            delays.as_slice().unwrap(),
-            amps.as_slice().unwrap(),
-        )
+        if let Some(tile_index) = tile_index {
+            if tile_index > self.delays.len_of(Axis(0)) {
+                return Err(BeamError::BadTileIndex {
+                    got: tile_index,
+                    max: self.delays.len_of(Axis(0)),
+                });
+            }
+            let delays = self.delays.slice(s![tile_index, ..]);
+            let amps = self.gains.slice(s![tile_index, ..]);
+            self.calc_jones_array_inner(
+                azels,
+                beam_freq,
+                delays.as_slice().unwrap(),
+                amps.as_slice().unwrap(),
+                latitude_rad,
+            )
+        } else {
+            let delays = &self.ideal_delays;
+            let amps = [1.0; 32];
+            self.calc_jones_array_inner(azels, beam_freq, delays, &amps, latitude_rad)
+        }
         .map_err(BeamError::from)
     }
 
@@ -236,21 +278,21 @@ pub struct FEEBeamCUDA {
 
 #[cfg(feature = "cuda")]
 impl BeamCUDA for FEEBeamCUDA {
-    unsafe fn calc_jones(
+    unsafe fn calc_jones_pair(
         &self,
-        azels: &[AzEl],
+        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] az_rad: &[f64],
+        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] za_rad: &[f64],
+        #[cfg(feature = "cuda-single")] az_rad: &[f32],
+        #[cfg(feature = "cuda-single")] za_rad: &[f32],
+        latitude_rad: f64,
     ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError> {
-        let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = azels
-            .iter()
-            .map(|&azel| (azel.az as CudaFloat, azel.za() as CudaFloat))
-            .unzip();
         self.hyperbeam_object
-            .calc_jones_device(&azs, &zas, true)
-            // This hilariously unsafe map is to convert hyperbeam's `Jones` to
-            // our `Jones`. Both come from Marlu, but the Marlu used all over
-            // hyperdrive is imported differently from that of hyperbeam.
-            // Testing shows that this operation takes tens of nanoseconds.
-            .map(|ptr| std::mem::transmute(ptr))
+            .calc_jones_device_pair(az_rad, za_rad, Some(latitude_rad), false)
+            // // This hilariously unsafe map is to convert hyperbeam's `Jones` to
+            // // our `Jones`. Both come from Marlu, but the Marlu used all over
+            // // hyperdrive is imported differently from that of hyperbeam.
+            // // Testing shows that this operation takes tens of nanoseconds.
+            // .map(|ptr| std::mem::transmute(ptr))
             .map_err(BeamError::from)
     }
 

@@ -10,11 +10,10 @@
 mod tests;
 
 use hifitime::Epoch;
-use marlu::{LatLngHeight, XyzGeocentric};
 use std::collections::HashMap;
 
 use crate::time::round_hundredths_of_a_second;
-use mwa_hyperdrive_common::{c64, erfa_sys, hifitime, marlu};
+use mwa_hyperdrive_common::{c64, hifitime};
 
 // Make traditional trigonometry possible.
 /// Sine.
@@ -138,25 +137,4 @@ impl TileBaselineMaps {
             unflagged_cross_baseline_to_tile_map,
         }
     }
-}
-
-pub(crate) fn geocentric_to_geodetic(xyz: XyzGeocentric) -> LatLngHeight {
-    let mut earth = LatLngHeight {
-        longitude_rad: 0.0,
-        latitude_rad: 0.0,
-        height_metres: 0.0,
-    };
-    unsafe {
-        let status = erfa_sys::eraGc2gd(
-            1,
-            [xyz.x, xyz.y, xyz.z].as_mut_ptr(),
-            &mut earth.longitude_rad,
-            &mut earth.latitude_rad,
-            &mut earth.height_metres,
-        );
-        if status != 0 {
-            panic!("erfa_sys::eraGc2gd");
-        }
-    }
-    earth
 }

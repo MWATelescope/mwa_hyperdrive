@@ -139,11 +139,7 @@ impl UvfitsReader {
                         if let Some(itrf_frame_warning) = itrf_frame_warning {
                             warn!("{itrf_frame_warning}");
                         }
-                        Some(crate::math::geocentric_to_geodetic(XyzGeocentric {
-                            x,
-                            y,
-                            z,
-                        }))
+                        Some(XyzGeocentric { x, y, z }.to_earth_wgs84()?)
                     }
                     (None, None, None) => None,
                     _ => {
@@ -434,6 +430,30 @@ impl UvfitsReader {
                 coarse_chan_freqs
             );
 
+            let dut1 = {
+                // TODO: Don't assume the "AIPS AN" HDU is HDU 2.
+                let antenna_table_hdu = fits_open_hdu!(&mut uvfits_fptr, 1)?;
+                let uvfits_dut1: Option<f64> =
+                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "UT1UTC")?;
+                match uvfits_dut1 {
+                    Some(dut1) => debug!("uvfits DUT1: {dut1}"),
+                    None => debug!("uvfits has no DUT1 (UT1UTC key)"),
+                }
+
+                let metafits_dut1 = mwalib_context.as_ref().and_then(|c| c.dut1);
+                match metafits_dut1 {
+                    Some(dut1) => debug!("metafits DUT1: {dut1}"),
+                    None => debug!("metafits has no DUT1"),
+                }
+
+                if metafits_dut1.is_some() && uvfits_dut1.is_some() {
+                    debug!("Preferring metafits DUT1 over uvfits DUT1");
+                }
+                metafits_dut1
+                    .or(uvfits_dut1)
+                    .map(|dut1| Duration::from_f64(dut1, Unit::Second))
+            };
+
             let obs_context = ObsContext {
                 obsid,
                 timestamps,
@@ -441,6 +461,8 @@ impl UvfitsReader {
                 unflagged_timesteps,
                 phase_centre,
                 pointing_centre,
+                array_position,
+                dut1,
                 tile_names,
                 tile_xyzs,
                 flagged_tiles,
@@ -448,7 +470,6 @@ impl UvfitsReader {
                 dipole_delays,
                 dipole_gains,
                 time_res,
-                array_position,
                 coarse_chan_nums,
                 coarse_chan_freqs,
                 num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
@@ -636,6 +657,10 @@ impl VisRead for UvfitsReader {
 
     fn get_metafits_context(&self) -> Option<&MetafitsContext> {
         self.metafits_context.as_ref()
+    }
+
+    fn get_flags(&self) -> Option<&MwafFlags> {
+        None
     }
 
     fn read_crosses_and_autos(

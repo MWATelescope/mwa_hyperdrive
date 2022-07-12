@@ -102,6 +102,10 @@ pub struct CalibrateUserArgs {
     #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
     pub source_list_type: Option<String>,
 
+    /// Use a DUT1 value of 0 seconds rather than what is in the input data.
+    #[clap(long, help_heading = "INPUT FILES")]
+    pub ignore_dut1: bool,
+
     #[clap(
         short, long, multiple_values(true), help = OUTPUTS_HELP.as_str(),
         help_heading = "OUTPUT FILES"
@@ -353,6 +357,7 @@ impl CalibrateUserArgs {
             data,
             source_list,
             source_list_type,
+            ignore_dut1,
             outputs,
             model_filenames,
             output_model_time_average,
@@ -393,6 +398,7 @@ impl CalibrateUserArgs {
             data: cli_args.data.or(data),
             source_list: cli_args.source_list.or(source_list),
             source_list_type: cli_args.source_list_type.or(source_list_type),
+            ignore_dut1: cli_args.ignore_dut1 || ignore_dut1,
             outputs: cli_args.outputs.or(outputs),
             model_filenames: cli_args.model_filenames.or(model_filenames),
             output_model_time_average: cli_args

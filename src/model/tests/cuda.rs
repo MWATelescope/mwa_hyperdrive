@@ -929,8 +929,8 @@ fn beam_responses_apply_properly_power_law_and_list() {
     // centre. The expected values are taken from
     // `assert_power_law_zenith_visibilities_fee`.
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -960,8 +960,8 @@ fn beam_responses_apply_properly_power_law_and_list() {
     }
 
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -990,8 +990,8 @@ fn beam_responses_apply_properly_power_law_and_list() {
     }
 
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1032,8 +1032,8 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
     // centre. The expected values are taken from
     // `assert_power_law_zenith_visibilities_fee`.
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1063,8 +1063,8 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
     }
 
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1093,8 +1093,8 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
     }
 
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1135,8 +1135,8 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
     // centre. The expected values are taken from
     // `assert_power_law_zenith_visibilities_fee`.
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1166,8 +1166,8 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
     }
 
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1196,8 +1196,8 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
     }
 
     assert_abs_diff_eq!(
-        TestJones::from(visibilities[(0, 0)]),
-        TestJones::from([
+        visibilities[(0, 0)],
+        Jones::from([
             Complex::new(9.995525e-1, 0.0),
             Complex::new(-5.405832e-4, -5.00542e-6),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1238,22 +1238,20 @@ fn copy_reset_cuda_vis_works() {
         // Copy the visibilities; these are not all zero.
         modeller.copy_and_reset_vis(visibilities.view_mut());
         assert_abs_diff_ne!(
-            visibilities.mapv(TestJones::from),
+            visibilities,
             Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default())
-                .mapv(TestJones::from)
         );
         // (In fact, none are zero.)
         visibilities.iter().for_each(|&v| {
-            assert_abs_diff_ne!(TestJones::from(v), TestJones::from(Jones::default()));
+            assert_abs_diff_ne!(v, Jones::default());
         });
 
         // Copy the visibilities again; because they've been reset before, these
         // are all zero.
         modeller.copy_and_reset_vis(visibilities.view_mut());
         assert_abs_diff_eq!(
-            visibilities.mapv(TestJones::from),
+            visibilities,
             Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default())
-                .mapv(TestJones::from)
         );
     }
 }

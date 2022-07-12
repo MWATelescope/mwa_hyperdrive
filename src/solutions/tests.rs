@@ -10,7 +10,7 @@ use vec1::{vec1, Vec1};
 
 use super::*;
 use crate::{
-    jones_test::TestJones, pfb_gains::PfbFlavour, tests::reduced_obsids::get_reduced_1090008640,
+    pfb_gains::PfbFlavour, tests::reduced_obsids::get_reduced_1090008640,
     vis_io::read::RawDataCorrections,
 };
 use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
@@ -118,9 +118,8 @@ fn test_write_and_read_hyperdrive_solutions() {
     // Can't use assert_abs_diff_eq on the whole array, because it rejects NaN
     // equality.
     sols.di_jones
-        .mapv(TestJones::from)
         .into_iter()
-        .zip(sols_from_disk.di_jones.mapv(TestJones::from).into_iter())
+        .zip(sols_from_disk.di_jones.into_iter())
         .for_each(|(expected, result)| {
             if expected.any_nan() {
                 assert!(result.any_nan());
@@ -222,9 +221,8 @@ fn test_write_and_read_hyperdrive_solutions_no_metadata() {
     // Can't use assert_abs_diff_eq on the whole array, because it rejects NaN
     // equality.
     sols.di_jones
-        .mapv(TestJones::from)
         .into_iter()
-        .zip(sols_from_disk.di_jones.mapv(TestJones::from).into_iter())
+        .zip(sols_from_disk.di_jones.into_iter())
         .for_each(|(expected, result)| {
             if expected.any_nan() {
                 assert!(result.any_nan());
@@ -299,9 +297,8 @@ fn test_write_and_read_ao_solutions() {
     // Can't use assert_abs_diff_eq on the whole array, because it rejects NaN
     // equality.
     sols.di_jones
-        .mapv(TestJones::from)
         .into_iter()
-        .zip(sols_from_disk.di_jones.mapv(TestJones::from).into_iter())
+        .zip(sols_from_disk.di_jones.into_iter())
         .for_each(|(expected, result)| {
             if expected.any_nan() {
                 assert!(result.any_nan());
@@ -352,9 +349,8 @@ fn test_write_and_read_rts_solutions() {
     // Can't use assert_abs_diff_eq on the whole array, because it rejects NaN
     // equality.
     sols.di_jones
-        .mapv(TestJones::from)
         .into_iter()
-        .zip(sols_from_disk.di_jones.mapv(TestJones::from).into_iter())
+        .zip(sols_from_disk.di_jones.into_iter())
         .for_each(|(expected, result)| {
             if expected.any_nan() {
                 assert!(result.any_nan());

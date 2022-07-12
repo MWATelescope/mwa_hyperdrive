@@ -41,12 +41,19 @@ jobs:
         with:
           cuda: '11.2.0'
 
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
       - name: Build and Tar
         run: |
           curl https://raw.githubusercontent.com/HDFGroup/hdf5/develop/COPYING -o COPYING-hdf5
           curl https://raw.githubusercontent.com/liberfa/erfa/master/LICENSE -o LICENSE-erfa
           curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
-          cp cuda/LICENSE-NVIDIA README.md
+          cp cuda/LICENSE-NVIDIA .
           cp .github/workflows/releases-readme.md README.md
 
           cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static

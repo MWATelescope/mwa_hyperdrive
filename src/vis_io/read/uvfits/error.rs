@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use mwalib::*;
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{mwalib, thiserror};
+use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub(crate) enum FitsError {
@@ -60,6 +60,10 @@ pub(crate) enum UvfitsReadError {
         row_num: usize,
         err: fitsio::errors::Error,
     },
+
+    /// A generic error associated with ERFA.
+    #[error(transparent)]
+    Erfa(#[from] marlu::pos::ErfaError),
 
     /// A generic error associated with fitsio.
     #[error(transparent)]

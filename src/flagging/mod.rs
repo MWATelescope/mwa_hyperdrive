@@ -6,4 +6,4 @@ mod error;
 mod mwaf;
 
 pub(crate) use error::*;
-pub(crate) use mwaf::{AOFlags, MwafProducer};
+pub(crate) use mwaf::{MwafFlags, MwafProducer};

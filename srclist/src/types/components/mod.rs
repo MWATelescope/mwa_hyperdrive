@@ -7,7 +7,7 @@
 #[cfg(test)]
 mod tests;
 
-use marlu::{pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, RADec, XyzGeodetic, LMN, UVW};
+use marlu::{pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -311,7 +311,7 @@ pub fn get_instrumental_flux_densities(
 #[derive(Clone, Debug, Default)]
 pub struct PointComponentParams {
     pub radecs: Vec<RADec>,
-    pub lmns: Vec<LMN>,
+    pub lmns: Vec<LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     pub flux_densities: Array2<Jones<f64>>,
 }
@@ -322,7 +322,7 @@ pub struct PointComponentParams {
 #[derive(Clone, Debug, Default)]
 pub struct GaussianComponentParams {
     pub radecs: Vec<RADec>,
-    pub lmns: Vec<LMN>,
+    pub lmns: Vec<LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     pub flux_densities: Array2<Jones<f64>>,
     pub gaussian_params: Vec<GaussianParams>,
@@ -334,7 +334,7 @@ pub struct GaussianComponentParams {
 #[derive(Clone, Debug, Default)]
 pub struct ShapeletComponentParams {
     pub radecs: Vec<RADec>,
-    pub lmns: Vec<LMN>,
+    pub lmns: Vec<LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     pub flux_densities: Array2<Jones<f64>>,
     pub gaussian_params: Vec<GaussianParams>,

@@ -10,7 +10,7 @@ use std::{
 };
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
-use hifitime::Epoch;
+use hifitime::{Duration, Epoch};
 use marlu::{Jones, LatLngHeight};
 use mwa_hyperdrive_srclist::SourceList;
 use ndarray::prelude::*;
@@ -20,7 +20,6 @@ use super::{calibrate, calibrate_timeblocks, CalVis, IncompleteSolutions};
 use crate::{
     averaging::{Chanblock, Fence, Timeblock},
     calibrate::params::CalibrateParams,
-    jones_test::TestJones,
     math::is_prime,
     solutions::CalSolutionType,
     vis_io::read::{RawDataCorrections, RawDataReader},
@@ -82,14 +81,11 @@ fn test_calibrate_trivial() {
             // The solutions should be 2 * identity.
             let expected = Array1::from_elem(di_jones_rev.len(), Jones::identity() * 2.0);
 
-            let di_jones_rev = di_jones_rev.mapv(TestJones::from);
-            let expected = expected.mapv(TestJones::from);
             assert_abs_diff_eq!(di_jones_rev, expected, epsilon = 1e-14);
         }
     }
 
-    let di_jones = di_jones.mapv(TestJones::from);
-    let expected = Array3::from_elem(di_jones.dim(), Jones::identity() * 2.0).mapv(TestJones::from);
+    let expected = Array3::from_elem(di_jones.dim(), Jones::identity() * 2.0);
     assert_abs_diff_eq!(di_jones, expected, epsilon = 1e-14);
 }
 
@@ -160,8 +156,6 @@ fn test_calibrate_trivial_with_flags() {
                 // The solutions should be 3 * identity.
                 Array1::from_elem(di_jones_rev.len(), Jones::identity() * 3.0)
             };
-            let di_jones_rev = di_jones_rev.mapv(TestJones::from);
-            let expected = expected.mapv(TestJones::from);
             if timeblock == 0 && chanblock_index == 0 {
                 assert_abs_diff_ne!(di_jones_rev, expected);
             } else {
@@ -222,13 +216,10 @@ fn test_calibrate_trivial_with_flags() {
                 Array1::from_elem(di_jones_rev.len(), Jones::identity() * 3.0)
             };
 
-            let di_jones_rev = di_jones_rev.mapv(TestJones::from);
-            let expected = expected.mapv(TestJones::from);
             assert_abs_diff_eq!(di_jones_rev, expected, epsilon = 1e-14);
         }
     }
 
-    let di_jones = di_jones.mapv(TestJones::from);
     let mut expected = Array3::from_elem(di_jones.dim(), Jones::identity());
     expected
         .slice_mut(s![.., .., 0])
@@ -237,7 +228,7 @@ fn test_calibrate_trivial_with_flags() {
     expected
         .slice_mut(s![.., .., 1])
         .fill(Jones::identity() * 3.0);
-    assert_abs_diff_eq!(di_jones, expected.mapv(TestJones::from), epsilon = 1e-14);
+    assert_abs_diff_eq!(di_jones, expected, epsilon = 1e-14);
 }
 
 /// The majority of parameters don't matter for these tests.
@@ -288,6 +279,7 @@ fn get_default_params() -> CalibrateParams {
             latitude_rad: 0.0,
             height_metres: 0.0,
         },
+        dut1: Duration::from_total_nanoseconds(0),
         apply_precession: false,
         max_iterations: 50,
         stop_threshold: 1e-6,
@@ -358,10 +350,7 @@ fn incomplete_to_complete_trivial() {
     // The "complete" solutions should have inverted Jones matrices.
     let expected = incomplete_di_jones.mapv(|v| v.inv());
 
-    assert_abs_diff_eq!(
-        complete.di_jones.mapv(TestJones::from),
-        expected.mapv(TestJones::from)
-    );
+    assert_abs_diff_eq!(complete.di_jones, expected);
 
     assert!(complete.flagged_tiles.is_empty());
     assert!(complete.flagged_chanblocks.is_empty());
@@ -432,11 +421,8 @@ fn incomplete_to_complete_flags_simple() {
         incomplete_di_jones.dim()
     );
     assert_abs_diff_eq!(
-        complete
-            .di_jones
-            .slice(s![.., .., 1..])
-            .mapv(TestJones::from),
-        incomplete_di_jones.mapv(|v| TestJones::from(v.inv()))
+        complete.di_jones.slice(s![.., .., 1..]),
+        incomplete_di_jones.mapv(|v| v.inv())
     );
 
     assert!(complete.flagged_tiles.is_empty());
@@ -511,11 +497,8 @@ fn incomplete_to_complete_flags_simple2() {
         incomplete_di_jones.dim()
     );
     assert_abs_diff_eq!(
-        complete
-            .di_jones
-            .slice(s![.., .., ..-1])
-            .mapv(TestJones::from),
-        incomplete_di_jones.mapv(|v| TestJones::from(v.inv()))
+        complete.di_jones.slice(s![.., .., ..-1]),
+        incomplete_di_jones.mapv(|v| v.inv())
     );
 
     assert!(complete.flagged_tiles.is_empty());
@@ -608,12 +591,10 @@ fn incomplete_to_complete_flags_complex() {
                     assert!(sub_array[i_chan].any_nan());
                 } else {
                     assert_abs_diff_eq!(
-                        TestJones::from(sub_array[i_chan]),
-                        TestJones::from(
-                            Jones::identity()
-                                / primes[i_unflagged_tile * num_chanblocks + i_unflagged_chanblock]
-                                    as f64
-                        )
+                        sub_array[i_chan],
+                        Jones::identity()
+                            / primes[i_unflagged_tile * num_chanblocks + i_unflagged_chanblock]
+                                as f64
                     );
 
                     i_unflagged_chanblock += 1;

@@ -13,6 +13,9 @@ pub enum BeamError {
     #[error("The number of delays per tile ({delays}) didn't match the number of gains per tile ({gains})")]
     DelayGainsDimensionMismatch { delays: usize, gains: usize },
 
+    #[error("Got tile index {got}, but the biggest tile index is {max}")]
+    BadTileIndex { got: usize, max: usize },
+
     #[error("hyperbeam error: {0}")]
     Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
 

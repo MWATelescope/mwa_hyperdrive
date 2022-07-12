@@ -4,6 +4,8 @@
 
 //! Errors associated with reading AOFlagger flag files.
 
+use std::path::PathBuf;
+
 use mwalib::FitsError;
 use thiserror::Error;
 
@@ -12,13 +14,11 @@ use mwa_hyperdrive_common::{mwalib, thiserror};
 #[derive(Error, Debug)]
 /// Error type associated with mwaf files.
 pub(crate) enum MwafError {
-    /// Error to describe some kind of inconsistent state within an mwaf file.
-    #[error("Inconsistent mwaf file (file: {file}, expected: {expected}, found: {found})")]
-    Inconsistent {
-        file: String,
-        expected: String,
-        found: String,
-    },
+    #[error("mwaf file '{file:?}' has an unhandled version '{version}'")]
+    UnhandledVersion { file: PathBuf, version: String },
+
+    #[error("mwaf file '{file:?}' was written by Birli, but the SOFTWARE key didn't report the Birli version")]
+    BirliVersion { file: PathBuf },
 
     #[error(transparent)]
     FitsError(#[from] FitsError),

@@ -5,7 +5,7 @@
 use std::ops::Deref;
 
 use criterion::*;
-use hifitime::Epoch;
+use hifitime::{Duration, Epoch};
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     Jones, RADec, XyzGeodetic,
@@ -29,6 +29,7 @@ fn model_benchmarks(c: &mut Criterion) {
     let num_tiles = 128;
     let num_bls = (num_tiles * (num_tiles - 1)) / 2;
     let phase_centre = RADec::new_degrees(0.0, -27.0);
+    let dut1 = Duration::from_total_nanoseconds(0);
     let apply_precession = true;
     let timestamp = Epoch::from_gpst_seconds(1065880128.0);
     let xyzs = vec![XyzGeodetic::default(); num_tiles];
@@ -74,6 +75,7 @@ fn model_benchmarks(c: &mut Criterion) {
             phase_centre,
             MWA_LONG_RAD,
             MWA_LAT_RAD,
+            dut1,
             apply_precession,
         );
 
@@ -120,6 +122,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 phase_centre,
                 MWA_LONG_RAD,
                 MWA_LAT_RAD,
+                dut1,
                 apply_precession,
             )
             .unwrap()
@@ -166,6 +169,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 phase_centre,
                 MWA_LONG_RAD,
                 MWA_LAT_RAD,
+                dut1,
                 apply_precession,
             )
             .unwrap()
@@ -216,6 +220,7 @@ fn model_benchmarks(c: &mut Criterion) {
             phase_centre,
             MWA_LONG_RAD,
             MWA_LAT_RAD,
+            dut1,
             apply_precession,
         );
 
@@ -266,6 +271,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 phase_centre,
                 MWA_LONG_RAD,
                 MWA_LAT_RAD,
+                dut1,
                 apply_precession,
             )
             .unwrap()
@@ -316,6 +322,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 phase_centre,
                 MWA_LONG_RAD,
                 MWA_LAT_RAD,
+                dut1,
                 apply_precession,
             )
             .unwrap()
@@ -376,6 +383,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 phase_centre,
                 MWA_LONG_RAD,
                 MWA_LAT_RAD,
+                dut1,
                 apply_precession,
             );
 
@@ -437,6 +445,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     phase_centre,
                     MWA_LONG_RAD,
                     MWA_LAT_RAD,
+                    dut1,
                     apply_precession,
                 )
                 .unwrap()
@@ -498,6 +507,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     phase_centre,
                     MWA_LONG_RAD,
                     MWA_LAT_RAD,
+                    dut1,
                     apply_precession,
                 )
                 .unwrap()

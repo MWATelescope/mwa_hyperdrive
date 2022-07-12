@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, LN_2};
 
-use hifitime::Epoch;
+use hifitime::{Duration, Epoch};
 use marlu::{
     pos::xyz::xyzs_to_cross_uvws_parallel,
     precession::{get_lmst, precess_time},
@@ -34,6 +34,10 @@ pub(crate) struct SkyModellerCpu<'a> {
     pub(super) array_longitude: f64,
     /// The latitude of the array we're using \[radians\].
     pub(super) array_latitude: f64,
+    /// The UT1 - UTC offset. If this is 0, effectively UT1 == UTC, which is a
+    /// wrong assumption by up to 0.9s. We assume the this value does not change
+    /// over the timestamps given to this `SkyModellerCpu`.
+    pub(super) dut1: Duration,
     /// Shift baselines and LSTs back to J2000.
     pub(super) precess: bool,
 
@@ -118,7 +122,7 @@ impl<'a> SkyModellerCpu<'a> {
             for (i_freq, freq) in self.unflagged_fine_chan_freqs.iter().enumerate() {
                 let responses = self
                     .beam
-                    .calc_jones_array(azels, *freq, i_tile)
+                    .calc_jones_array(azels, *freq, Some(i_tile), array_latitude_rad)
                     .expect("Couldn't get beam responses");
                 beam_responses
                     .slice_mut(s![i_tile, i_freq, ..])
@@ -247,7 +251,9 @@ impl<'a> SkyModellerCpu<'a> {
             Array3::zeros((num_tiles, self.unflagged_fine_chan_freqs.len(), azels.len()));
         for i_tile in 0..num_tiles {
             for (i_freq, freq) in self.unflagged_fine_chan_freqs.iter().enumerate() {
-                let responses = self.beam.calc_jones_array(azels, *freq, i_tile)?;
+                let responses =
+                    self.beam
+                        .calc_jones_array(azels, *freq, Some(i_tile), array_latitude_rad)?;
                 beam_responses
                     .slice_mut(s![i_tile, i_freq, ..])
                     .assign(&Array1::from(responses));
@@ -404,7 +410,9 @@ impl<'a> SkyModellerCpu<'a> {
             Array3::zeros((num_tiles, self.unflagged_fine_chan_freqs.len(), azels.len()));
         for i_tile in 0..num_tiles {
             for (i_freq, freq) in self.unflagged_fine_chan_freqs.iter().enumerate() {
-                let responses = self.beam.calc_jones_array(azels, *freq, i_tile)?;
+                let responses =
+                    self.beam
+                        .calc_jones_array(azels, *freq, Some(i_tile), array_latitude_rad)?;
                 beam_responses
                     .slice_mut(s![i_tile, i_freq, ..])
                     .assign(&Array1::from(responses));
@@ -553,10 +561,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -571,7 +580,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
@@ -603,10 +612,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -621,7 +631,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
@@ -639,10 +649,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -657,7 +668,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
@@ -675,10 +686,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -693,7 +705,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),

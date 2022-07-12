@@ -50,12 +50,18 @@ impl FluxDensity {
 
     /// Convert a `FluxDensity` into a [Jones] matrix representing instrumental
     /// Stokes (i.e. XX, XY, YX, YY).
+    ///
+    /// The IAU convention and TMS define X as North-South and Y as East-West.
+    /// However, hyperdrive (and many MWA definitions, softwares) use X as EW
+    /// and Y as NS. For this reason, this conversion looks like the opposite of
+    /// what is expected (equation 4.55). In other words, hyperdrive orders its
+    /// Jones matrices [XX XY YX YY], where X is East-West and Y is North-South.
     pub fn to_inst_stokes(&self) -> Jones<f64> {
         Jones::from([
-            Complex::new(self.i + self.q, 0.0),
-            Complex::new(self.u, self.v),
-            Complex::new(self.u, -self.v),
             Complex::new(self.i - self.q, 0.0),
+            Complex::new(self.u, -self.v),
+            Complex::new(self.u, self.v),
+            Complex::new(self.i + self.q, 0.0),
         ])
     }
 }

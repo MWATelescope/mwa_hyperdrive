@@ -4,13 +4,13 @@
 
 //! Code to generate sky-model visibilities with CUDA.
 
-use hifitime::Epoch;
+use hifitime::{Duration, Epoch};
 use log::debug;
 use marlu::{
     cuda_runtime_sys,
     pos::xyz::xyzs_to_cross_uvws_parallel,
     precession::{get_lmst, precess_time},
-    AzEl, Jones, RADec, XyzGeodetic, LMN, UVW,
+    Jones, LmnRime, RADec, XyzGeodetic, UVW,
 };
 use ndarray::prelude::*;
 use rayon::prelude::*;
@@ -50,6 +50,10 @@ pub(crate) struct SkyModellerCuda<'a> {
     /// The *unprecessed* latitude of the array we're using \[radians\]. If we
     /// are precessing, this latitude isn't used when calculating [`AzEl`]s.
     array_latitude: f64,
+    /// The UT1 - UTC offset. If this is 0, effectively UT1 == UTC, which is a
+    /// wrong assumption by up to 0.9s. We assume the this value does not change
+    /// over the timestamps given to this `SkyModellerCuda`.
+    dut1: Duration,
     /// Shift baselines, LSTs and array latitudes back to J2000.
     precess: bool,
 
@@ -80,25 +84,25 @@ pub(crate) struct SkyModellerCuda<'a> {
     d_shapelet_basis_values: DevicePointer<CudaFloat>,
 
     point_power_law_radecs: Vec<RADec>,
-    point_power_law_lmns: DevicePointer<cuda::LMN>,
+    point_power_law_lmns: DevicePointer<cuda::LmnRime>,
     /// Instrumental flux densities calculated at 150 MHz.
     point_power_law_fds: DevicePointer<CudaJones>,
     /// Spectral indices.
     point_power_law_sis: DevicePointer<CudaFloat>,
 
     point_curved_power_law_radecs: Vec<RADec>,
-    point_curved_power_law_lmns: DevicePointer<cuda::LMN>,
+    point_curved_power_law_lmns: DevicePointer<cuda::LmnRime>,
     point_curved_power_law_fds: DevicePointer<CudaJones>,
     point_curved_power_law_sis: DevicePointer<CudaFloat>,
     point_curved_power_law_qs: DevicePointer<CudaFloat>,
 
     point_list_radecs: Vec<RADec>,
-    point_list_lmns: DevicePointer<cuda::LMN>,
+    point_list_lmns: DevicePointer<cuda::LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     point_list_fds: DevicePointer<CudaJones>,
 
     gaussian_power_law_radecs: Vec<RADec>,
-    gaussian_power_law_lmns: DevicePointer<cuda::LMN>,
+    gaussian_power_law_lmns: DevicePointer<cuda::LmnRime>,
     /// Instrumental flux densities calculated at 150 MHz.
     gaussian_power_law_fds: DevicePointer<CudaJones>,
     /// Spectral indices.
@@ -106,20 +110,20 @@ pub(crate) struct SkyModellerCuda<'a> {
     gaussian_power_law_gps: DevicePointer<cuda::GaussianParams>,
 
     gaussian_curved_power_law_radecs: Vec<RADec>,
-    gaussian_curved_power_law_lmns: DevicePointer<cuda::LMN>,
+    gaussian_curved_power_law_lmns: DevicePointer<cuda::LmnRime>,
     gaussian_curved_power_law_fds: DevicePointer<CudaJones>,
     gaussian_curved_power_law_sis: DevicePointer<CudaFloat>,
     gaussian_curved_power_law_qs: DevicePointer<CudaFloat>,
     gaussian_curved_power_law_gps: DevicePointer<cuda::GaussianParams>,
 
     gaussian_list_radecs: Vec<RADec>,
-    gaussian_list_lmns: DevicePointer<cuda::LMN>,
+    gaussian_list_lmns: DevicePointer<cuda::LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     gaussian_list_fds: DevicePointer<CudaJones>,
     gaussian_list_gps: DevicePointer<cuda::GaussianParams>,
 
     shapelet_power_law_radecs: Vec<RADec>,
-    shapelet_power_law_lmns: DevicePointer<cuda::LMN>,
+    shapelet_power_law_lmns: DevicePointer<cuda::LmnRime>,
     /// Instrumental flux densities calculated at 150 MHz.
     shapelet_power_law_fds: DevicePointer<CudaJones>,
     /// Spectral indices.
@@ -129,7 +133,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_power_law_coeff_lens: DevicePointer<usize>,
 
     shapelet_curved_power_law_radecs: Vec<RADec>,
-    shapelet_curved_power_law_lmns: DevicePointer<cuda::LMN>,
+    shapelet_curved_power_law_lmns: DevicePointer<cuda::LmnRime>,
     shapelet_curved_power_law_fds: DevicePointer<CudaJones>,
     shapelet_curved_power_law_sis: DevicePointer<CudaFloat>,
     shapelet_curved_power_law_qs: DevicePointer<CudaFloat>,
@@ -138,7 +142,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_curved_power_law_coeff_lens: DevicePointer<usize>,
 
     shapelet_list_radecs: Vec<RADec>,
-    shapelet_list_lmns: DevicePointer<cuda::LMN>,
+    shapelet_list_lmns: DevicePointer<cuda::LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
     shapelet_list_fds: DevicePointer<CudaJones>,
     shapelet_list_gps: DevicePointer<cuda::GaussianParams>,
@@ -168,50 +172,51 @@ impl<'a> SkyModellerCuda<'a> {
         phase_centre: RADec,
         array_longitude_rad: f64,
         array_latitude_rad: f64,
+        dut1: Duration,
         apply_precession: bool,
     ) -> Result<SkyModellerCuda<'a>, BeamError> {
         let mut point_power_law_radecs: Vec<RADec> = vec![];
-        let mut point_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut point_power_law_lmns: Vec<cuda::LmnRime> = vec![];
         let mut point_power_law_fds: Vec<_> = vec![];
         let mut point_power_law_sis: Vec<_> = vec![];
 
         let mut point_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut point_curved_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut point_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
         let mut point_curved_power_law_fds: Vec<_> = vec![];
         let mut point_curved_power_law_sis: Vec<_> = vec![];
         let mut point_curved_power_law_qs: Vec<_> = vec![];
 
         let mut point_list_radecs: Vec<RADec> = vec![];
-        let mut point_list_lmns: Vec<cuda::LMN> = vec![];
+        let mut point_list_lmns: Vec<cuda::LmnRime> = vec![];
         let mut point_list_fds: Vec<FluxDensityType> = vec![];
 
         let mut gaussian_power_law_radecs: Vec<RADec> = vec![];
-        let mut gaussian_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut gaussian_power_law_lmns: Vec<cuda::LmnRime> = vec![];
         let mut gaussian_power_law_fds: Vec<_> = vec![];
         let mut gaussian_power_law_sis: Vec<_> = vec![];
         let mut gaussian_power_law_gps: Vec<cuda::GaussianParams> = vec![];
 
         let mut gaussian_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut gaussian_curved_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut gaussian_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
         let mut gaussian_curved_power_law_fds: Vec<_> = vec![];
         let mut gaussian_curved_power_law_sis: Vec<_> = vec![];
         let mut gaussian_curved_power_law_qs: Vec<_> = vec![];
         let mut gaussian_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
 
         let mut gaussian_list_radecs: Vec<RADec> = vec![];
-        let mut gaussian_list_lmns: Vec<cuda::LMN> = vec![];
+        let mut gaussian_list_lmns: Vec<cuda::LmnRime> = vec![];
         let mut gaussian_list_fds: Vec<FluxDensityType> = vec![];
         let mut gaussian_list_gps: Vec<cuda::GaussianParams> = vec![];
 
         let mut shapelet_power_law_radecs: Vec<RADec> = vec![];
-        let mut shapelet_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut shapelet_power_law_lmns: Vec<cuda::LmnRime> = vec![];
         let mut shapelet_power_law_fds: Vec<_> = vec![];
         let mut shapelet_power_law_sis: Vec<_> = vec![];
         let mut shapelet_power_law_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_power_law_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
         let mut shapelet_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut shapelet_curved_power_law_lmns: Vec<cuda::LMN> = vec![];
+        let mut shapelet_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
         let mut shapelet_curved_power_law_fds: Vec<_> = vec![];
         let mut shapelet_curved_power_law_sis: Vec<_> = vec![];
         let mut shapelet_curved_power_law_qs: Vec<_> = vec![];
@@ -219,7 +224,7 @@ impl<'a> SkyModellerCuda<'a> {
         let mut shapelet_curved_power_law_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
         let mut shapelet_list_radecs: Vec<RADec> = vec![];
-        let mut shapelet_list_lmns: Vec<cuda::LMN> = vec![];
+        let mut shapelet_list_lmns: Vec<cuda::LmnRime> = vec![];
         let mut shapelet_list_fds: Vec<FluxDensityType> = vec![];
         let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_list_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
@@ -267,8 +272,8 @@ impl<'a> SkyModellerCuda<'a> {
             .flat_map(|(_, src)| &src.components)
         {
             let radec = comp.radec;
-            let LMN { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
-            let lmn = cuda::LMN {
+            let LmnRime { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
+            let lmn = cuda::LmnRime {
                 l: l as CudaFloat,
                 m: m as CudaFloat,
                 n: n as CudaFloat,
@@ -462,6 +467,7 @@ impl<'a> SkyModellerCuda<'a> {
             phase_centre,
             array_longitude: array_longitude_rad,
             array_latitude: array_latitude_rad,
+            dut1,
             precess: apply_precession,
 
             freqs: unflagged_fine_chan_freqs_floats,
@@ -597,14 +603,18 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         let point_beam_jones = {
-            let azels: Vec<AzEl> = self
+            let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
                 .point_power_law_radecs
                 .par_iter()
                 .chain(self.point_curved_power_law_radecs.par_iter())
                 .chain(self.point_list_radecs.par_iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
-                .collect();
-            self.cuda_beam.calc_jones(&azels)?
+                .map(|radec| {
+                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
+                    (azel.az as CudaFloat, azel.za() as CudaFloat)
+                })
+                .unzip();
+            self.cuda_beam
+                .calc_jones_pair(&azs, &zas, array_latitude_rad)?
         };
 
         let cuda_status = cuda::model_points(
@@ -659,14 +669,18 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         let gaussian_beam_jones = {
-            let azels: Vec<AzEl> = self
+            let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
                 .gaussian_power_law_radecs
                 .par_iter()
                 .chain(self.gaussian_curved_power_law_radecs.par_iter())
                 .chain(self.gaussian_list_radecs.par_iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
-                .collect();
-            self.cuda_beam.calc_jones(&azels)?
+                .map(|radec| {
+                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
+                    (azel.az as CudaFloat, azel.za() as CudaFloat)
+                })
+                .unzip();
+            self.cuda_beam
+                .calc_jones_pair(&azs, &zas, array_latitude_rad)?
         };
 
         let cuda_status = cuda::model_gaussians(
@@ -728,14 +742,18 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         let shapelet_beam_jones = {
-            let azels: Vec<AzEl> = self
+            let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
                 .shapelet_power_law_radecs
                 .par_iter()
                 .chain(self.shapelet_curved_power_law_radecs.par_iter())
                 .chain(self.shapelet_list_radecs.par_iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad))
-                .collect();
-            self.cuda_beam.calc_jones(&azels)?
+                .map(|radec| {
+                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
+                    (azel.az as CudaFloat, azel.za() as CudaFloat)
+                })
+                .unzip();
+            self.cuda_beam
+                .calc_jones_pair(&azs, &zas, array_latitude_rad)?
         };
 
         let uvs = self.get_shapelet_uvs(lst_rad);
@@ -871,10 +889,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -895,7 +914,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
@@ -937,10 +956,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -955,7 +975,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
@@ -996,10 +1016,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -1014,7 +1035,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),
@@ -1055,10 +1076,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
-                self.phase_centre,
-                timestamp,
                 self.array_longitude,
                 self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
             );
             // Apply precession to the tile XYZ positions.
             let precessed_tile_xyzs =
@@ -1073,7 +1095,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 precession_info.array_latitude_j2000,
             )
         } else {
-            let lst = get_lmst(timestamp, self.array_longitude);
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             let uvws = xyzs_to_cross_uvws_parallel(
                 self.unflagged_tile_xyzs,
                 self.phase_centre.to_hadec(lst),

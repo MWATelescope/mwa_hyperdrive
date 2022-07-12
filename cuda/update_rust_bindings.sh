@@ -22,7 +22,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --blocklist-type "__int8_t" \
     --allowlist-type "RADec" \
     --allowlist-type "UVW" \
-    --allowlist-type "LMN" \
+    --allowlist-type "LmnRime" \
     --allowlist-type "ShapeletCoeff" \
     --allowlist-type "ShapeletUV" \
     --allowlist-type "Jones.*" \
@@ -39,7 +39,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/model.h \
     --blocklist-type "__int8_t" \
     --allowlist-type "RADec" \
     --allowlist-type "UVW" \
-    --allowlist-type "LMN" \
+    --allowlist-type "LmnRime" \
     --allowlist-type "ShapeletCoeff" \
     --allowlist-type "ShapeletUV" \
     --allowlist-type "Jones.*" \
@@ -55,7 +55,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-function "model_.*" \
     --blocklist-type "__uint64_t" \
     --blocklist-type "UVW" \
-    --blocklist-type "LMN" \
+    --blocklist-type "LmnRime" \
     --blocklist-type "JonesF.*" \
     --allowlist-type "Addresses" \
     --size_t-is-usize \
@@ -65,7 +65,7 @@ bindgen "${SCRIPTPATH}"/src_cuda/memory.h \
     --blocklist-function "model_.*" \
     --blocklist-type "__uint64_t" \
     --blocklist-type "UVW" \
-    --blocklist-type "LMN" \
+    --blocklist-type "LmnRime" \
     --blocklist-type "JonesF.*" \
     --allowlist-type "Addresses" \
     --size_t-is-usize \

@@ -57,59 +57,75 @@ fn bindgen_test_layout_UVW() {
     }
     test_field_w();
 }
-#[doc = " The LMN coordinates of a sky-model component."]
+#[doc = " The LMN coordinates of a sky-model component (prepared for application in the"]
+#[doc = "RIME)."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct LMN {
+pub struct LmnRime {
     pub l: f32,
     pub m: f32,
     pub n: f32,
 }
 #[test]
-fn bindgen_test_layout_LMN() {
+fn bindgen_test_layout_LmnRime() {
     assert_eq!(
-        ::std::mem::size_of::<LMN>(),
+        ::std::mem::size_of::<LmnRime>(),
         12usize,
-        concat!("Size of: ", stringify!(LMN))
+        concat!("Size of: ", stringify!(LmnRime))
     );
     assert_eq!(
-        ::std::mem::align_of::<LMN>(),
+        ::std::mem::align_of::<LmnRime>(),
         4usize,
-        concat!("Alignment of ", stringify!(LMN))
+        concat!("Alignment of ", stringify!(LmnRime))
     );
     fn test_field_l() {
         assert_eq!(
             unsafe {
-                let uninit = ::std::mem::MaybeUninit::<LMN>::uninit();
+                let uninit = ::std::mem::MaybeUninit::<LmnRime>::uninit();
                 let ptr = uninit.as_ptr();
                 ::std::ptr::addr_of!((*ptr).l) as usize - ptr as usize
             },
             0usize,
-            concat!("Offset of field: ", stringify!(LMN), "::", stringify!(l))
+            concat!(
+                "Offset of field: ",
+                stringify!(LmnRime),
+                "::",
+                stringify!(l)
+            )
         );
     }
     test_field_l();
     fn test_field_m() {
         assert_eq!(
             unsafe {
-                let uninit = ::std::mem::MaybeUninit::<LMN>::uninit();
+                let uninit = ::std::mem::MaybeUninit::<LmnRime>::uninit();
                 let ptr = uninit.as_ptr();
                 ::std::ptr::addr_of!((*ptr).m) as usize - ptr as usize
             },
             4usize,
-            concat!("Offset of field: ", stringify!(LMN), "::", stringify!(m))
+            concat!(
+                "Offset of field: ",
+                stringify!(LmnRime),
+                "::",
+                stringify!(m)
+            )
         );
     }
     test_field_m();
     fn test_field_n() {
         assert_eq!(
             unsafe {
-                let uninit = ::std::mem::MaybeUninit::<LMN>::uninit();
+                let uninit = ::std::mem::MaybeUninit::<LmnRime>::uninit();
                 let ptr = uninit.as_ptr();
                 ::std::ptr::addr_of!((*ptr).n) as usize - ptr as usize
             },
             8usize,
-            concat!("Offset of field: ", stringify!(LMN), "::", stringify!(n))
+            concat!(
+                "Offset of field: ",
+                stringify!(LmnRime),
+                "::",
+                stringify!(n)
+            )
         );
     }
     test_field_n();
@@ -644,16 +660,16 @@ fn bindgen_test_layout_JonesF64() {
 #[derive(Debug, Copy, Clone)]
 pub struct Points {
     pub num_power_law_points: usize,
-    pub power_law_lmns: *mut LMN,
+    pub power_law_lmns: *mut LmnRime,
     pub power_law_fds: *mut JonesF32,
     pub power_law_sis: *mut f32,
     pub num_curved_power_law_points: usize,
-    pub curved_power_law_lmns: *mut LMN,
+    pub curved_power_law_lmns: *mut LmnRime,
     pub curved_power_law_fds: *mut JonesF32,
     pub curved_power_law_sis: *mut f32,
     pub curved_power_law_qs: *mut f32,
     pub num_list_points: usize,
-    pub list_lmns: *mut LMN,
+    pub list_lmns: *mut LmnRime,
     pub list_fds: *mut JonesF32,
 }
 #[test]
@@ -878,18 +894,18 @@ fn bindgen_test_layout_Points() {
 #[derive(Debug, Copy, Clone)]
 pub struct Gaussians {
     pub num_power_law_gaussians: usize,
-    pub power_law_lmns: *mut LMN,
+    pub power_law_lmns: *mut LmnRime,
     pub power_law_fds: *mut JonesF32,
     pub power_law_sis: *mut f32,
     pub power_law_gps: *mut GaussianParams,
     pub num_curved_power_law_gaussians: usize,
-    pub curved_power_law_lmns: *mut LMN,
+    pub curved_power_law_lmns: *mut LmnRime,
     pub curved_power_law_fds: *mut JonesF32,
     pub curved_power_law_sis: *mut f32,
     pub curved_power_law_qs: *mut f32,
     pub curved_power_law_gps: *mut GaussianParams,
     pub num_list_gaussians: usize,
-    pub list_lmns: *mut LMN,
+    pub list_lmns: *mut LmnRime,
     pub list_fds: *mut JonesF32,
     pub list_gps: *mut GaussianParams,
 }
@@ -1166,7 +1182,7 @@ fn bindgen_test_layout_Gaussians() {
 #[derive(Debug, Copy, Clone)]
 pub struct Shapelets {
     pub num_power_law_shapelets: usize,
-    pub power_law_lmns: *mut LMN,
+    pub power_law_lmns: *mut LmnRime,
     pub power_law_fds: *mut JonesF32,
     pub power_law_sis: *mut f32,
     pub power_law_gps: *mut GaussianParams,
@@ -1174,7 +1190,7 @@ pub struct Shapelets {
     pub power_law_shapelet_coeffs: *mut ShapeletCoeff,
     pub power_law_num_shapelet_coeffs: *mut usize,
     pub num_curved_power_law_shapelets: usize,
-    pub curved_power_law_lmns: *mut LMN,
+    pub curved_power_law_lmns: *mut LmnRime,
     pub curved_power_law_fds: *mut JonesF32,
     pub curved_power_law_sis: *mut f32,
     pub curved_power_law_qs: *mut f32,
@@ -1183,7 +1199,7 @@ pub struct Shapelets {
     pub curved_power_law_shapelet_coeffs: *mut ShapeletCoeff,
     pub curved_power_law_num_shapelet_coeffs: *mut usize,
     pub num_list_shapelets: usize,
-    pub list_lmns: *mut LMN,
+    pub list_lmns: *mut LmnRime,
     pub list_fds: *mut JonesF32,
     pub list_gps: *mut GaussianParams,
     pub list_shapelet_uvs: *mut ShapeletUV,

@@ -6,7 +6,7 @@ authors = [
     "Dev Null <dev.null@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.58"
+rust-version = "1.63"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -53,7 +53,7 @@ cuda-static = ["mwa_hyperdrive_common/cuda-static"]
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.6.1", default_features = false }
+birli = { version = "0.8.0", default_features = false }
 console = "0.15.0"
 crossbeam-channel = "0.5.0"
 crossbeam-utils = "0.8.7"
@@ -80,8 +80,9 @@ approx = "0.5.0"
 assert_cmd = "2.0.0"
 criterion = "0.3.5"
 indoc = "1.0.0"
-ndarray = { version = ">=0.15.4,<0.16", features = ["approx-0_5"] }
-serial_test = "0.5.0"
+marlu = { version = "0.8.0", features = ["approx"] }
+ndarray = { version = "0.15.4", features = ["approx-0_5"] }
+serial_test = "0.9.0"
 tempfile = "3.3.0"
 
 [[bench]]
@@ -92,8 +93,8 @@ harness = false
 # birli = { path = "../Birli" }
 # birli = { git = "https://github.com/MWATelescope/Birli" }
 # marlu = { path = "../Marlu" }
-# marlu = { git = "https://github.com/MWATelescope/Marlu" }
+# marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "DUT1" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }
-# mwalib = { git = "https://github.com/MWATelescope/mwa_hyperbeam" }
+# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "DUT1" }

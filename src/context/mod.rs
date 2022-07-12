@@ -12,7 +12,10 @@ use std::collections::HashSet;
 use hifitime::{Duration, Epoch, Unit};
 use itertools::Itertools;
 use log::{info, warn};
-use marlu::{LatLngHeight, RADec, XyzGeodetic};
+use marlu::{
+    constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
+    LatLngHeight, RADec, XyzGeodetic,
+};
 use ndarray::Array2;
 use thiserror::Error;
 use vec1::Vec1;
@@ -61,6 +64,17 @@ pub struct ObsContext {
     /// This is typically not used, but if available is nice to report.
     pub(super) pointing_centre: Option<RADec>,
 
+    /// The Earth position of the instrumental array.
+    pub(crate) array_position: Option<LatLngHeight>,
+
+    /// The difference between UT1 and UTC. If this is 0 seconds, then LSTs are
+    /// wrong by up to 0.9 seconds. The code will assume that 0 seconds means
+    /// that DUT1 wasn't provided and may warn the user.
+    ///
+    /// This is *probably* defined off of the obsid, but we don't expect DUT1 to
+    /// change significantly across the course of an observation.
+    pub(crate) dut1: Option<Duration>,
+
     /// The names of each of the tiles used in the array.
     pub(crate) tile_names: Vec1<String>,
 
@@ -94,9 +108,6 @@ pub struct ObsContext {
     /// data doesn't report the resolution and has only one timestep, and
     /// therefore no resolution.
     pub(crate) time_res: Option<Duration>,
-
-    /// The Earth position of the instrumental array.
-    pub(crate) array_position: Option<LatLngHeight>,
 
     /// The coarse channel numbers (typically 1 to 24) that are present in the
     /// supplied data. This does not necessarily match the coarse channel
@@ -150,9 +161,8 @@ impl ObsContext {
         match self.time_res {
             Some(t) => t,
             None => {
-                warn!("No integration time specified; assuming 1 second");
-                // TODO: Use Marlu defaults for weight factor once its exposed
-                Duration::from_f64(1., Unit::Second)
+                warn!("No integration time specified; assuming {TIME_WEIGHT_FACTOR} second");
+                Duration::from_f64(TIME_WEIGHT_FACTOR, Unit::Second)
             }
         }
     }
@@ -161,9 +171,11 @@ impl ObsContext {
         match self.freq_res {
             Some(f) => f,
             None => {
-                warn!("No frequency resolution specified; assuming 10 kHz");
-                // TODO: Use Marlu defaults for weight factor once its exposed
-                10e3
+                warn!(
+                    "No frequency resolution specified; assuming {} kHz",
+                    FREQ_WEIGHT_FACTOR / 1e3
+                );
+                FREQ_WEIGHT_FACTOR
             }
         }
     }

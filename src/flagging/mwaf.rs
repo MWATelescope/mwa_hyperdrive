@@ -18,19 +18,6 @@ use ndarray::prelude::*;
 use super::error::*;
 use mwa_hyperdrive_common::{hifitime, log, mwalib, ndarray};
 
-/// This monstrosity exists to nicely handle converting any type that can be
-/// represented as a `Path` into a string slice. This is kind of a hack, but a
-/// necessary one, because cfitsio can't handle UTF-8 characters.
-// TODO: Use a result type, you animal.
-fn cfitsio_path_to_str<T: AsRef<Path>>(filename: &T) -> &str {
-    match filename.as_ref().to_str() {
-        None => {
-            panic!("An mwaf filename contained invalid UTF-8 and cannot be used.");
-        }
-        Some(s) => s,
-    }
-}
-
 #[derive(Debug)]
 pub(crate) enum MwafProducer {
     Birli,
@@ -38,8 +25,25 @@ pub(crate) enum MwafProducer {
     Unknown,
 }
 
-pub(crate) struct AOFlags {
-    /// The GPS time of the first scan.
+impl std::fmt::Display for MwafProducer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                MwafProducer::Birli => "Birli",
+                MwafProducer::Cotter => "cotter",
+                MwafProducer::Unknown => "<unknown software>",
+            }
+        )
+    }
+}
+
+pub(crate) struct MwafFlags {
+    /// The MWA observation ID associated with these these flags.
+    pub(crate) obsid: Option<u32>,
+
+    /// The centroid GPS time corresponding to the first scan of flags.
     pub(crate) start_time: Epoch,
 
     /// The number of time steps in the data (duration of observation /
@@ -80,39 +84,29 @@ pub(crate) struct AOFlags {
     /// The version of software used to write the flags.
     pub(crate) software_version: Option<String>,
 
-    /// The date on which this software version was created.
-    pub(crate) software_version_date: Option<String>,
+    /// The version of the mwaf file.
+    pub(crate) mwaf_version: String,
+
+    /// The version of aoflagger used to make these flags.
+    pub(crate) aoflagger_version: Option<String>,
+
+    /// The strategy file used by aoflagger when making these flags.
+    pub(crate) aoflagger_strategy: Option<String>,
 
     /// Sigh. cotter has a nasty bug that can cause the start time listed in
-    /// mwaf files to be offset from data HDUs. When this [`AOFlags`] is
+    /// mwaf files to be offset from data HDUs. When this [`MwafFlags`] is
     /// created, this is always `false`, because the raw data must be inspected
     /// before we know if this should be `true`.
     pub(crate) offset_bug: bool,
 }
 
-impl AOFlags {
-    /// Create an [`AOFlags`] struct from an mwaf file.
-    pub(crate) fn new_from_mwaf<T: AsRef<Path>>(file: T) -> Result<AOFlags, MwafError> {
+impl MwafFlags {
+    /// Create an [`MwafFlags`] struct from an mwaf file.
+    pub(crate) fn new_from_mwaf<P: AsRef<Path>>(file: P) -> Result<MwafFlags, MwafError> {
         let m = Mwaf::unpack(&file)?;
 
         // Check that things are consistent.
         let num_baselines = m.num_antennas * (m.num_antennas + 1) / 2;
-
-        if m.num_rows != m.num_time_steps * num_baselines {
-            return Err(MwafError::Inconsistent {
-                file: cfitsio_path_to_str(&file).to_string(),
-                expected: "NSCANS * NANTENNA * (NANTENNA+1) / 2 = NAXIS2".to_string(),
-                found: format!("{} * {} = {}", m.num_time_steps, num_baselines, m.num_rows),
-            });
-        }
-
-        if m.bytes_per_row * m.num_rows != m.flags.len() {
-            return Err(MwafError::Inconsistent {
-                file: cfitsio_path_to_str(&file).to_string(),
-                expected: "NAXIS1 * NAXIS2 = number of flags read".to_string(),
-                found: format!("{} * {} = {}", m.bytes_per_row, m.num_rows, m.flags.len()),
-            });
-        }
 
         let mut occupancy = BTreeMap::new();
         occupancy.insert(
@@ -123,8 +117,9 @@ impl AOFlags {
         let mut flags = BTreeMap::new();
         flags.insert(m.gpubox_num, m.flags);
 
-        Ok(AOFlags {
-            start_time: Epoch::from_gpst_seconds(m.start_time_milli as f64 / 1e3),
+        Ok(MwafFlags {
+            obsid: m.obsid,
+            start_time: m.start_time,
             num_time_steps: m.num_time_steps,
             num_channels: m.num_channels,
             num_baselines,
@@ -133,45 +128,51 @@ impl AOFlags {
             gpubox_nums: vec![m.gpubox_num],
             software: m.software,
             software_version: m.software_version,
-            software_version_date: m.software_version_date,
+            mwaf_version: m.mwaf_version,
+            aoflagger_version: m.aoflagger_version,
+            aoflagger_strategy: m.aoflagger_strategy,
             offset_bug: false,
         })
     }
 
-    /// From many mwaf files, return a single [`AOFlags`] struct with all flags.
-    pub(crate) fn new_from_mwafs<T: AsRef<Path>>(files: &[T]) -> Result<AOFlags, MwafMergeError> {
+    /// From many mwaf files, return a single [`MwafFlags`] struct with all
+    /// flags.
+    pub(crate) fn new_from_mwafs<T: AsRef<Path>>(files: &[T]) -> Result<MwafFlags, MwafMergeError> {
         if files.is_empty() {
             return Err(MwafMergeError::NoFilesGiven);
         }
 
-        let mut unpacked: Vec<AOFlagsTemp> = Vec::with_capacity(files.len());
+        let mut unpacked: Vec<MwafFlagsTemp> = Vec::with_capacity(files.len());
         for f in files {
             let n = Self::new_from_mwaf(f)?;
             // In an effort to keep things simple and make bad states
             // impossible, use a temp struct to represent the gpubox numbers as
             // a number.
-            unpacked.push(AOFlagsTemp {
+            unpacked.push(MwafFlagsTemp {
+                obsid: n.obsid,
                 start_time: n.start_time,
-                gpubox_num: n.gpubox_nums[0],
                 num_time_steps: n.num_time_steps,
                 num_channels: n.num_channels,
                 num_baselines: n.num_baselines,
                 flags: n.flags,
                 occupancy: n.occupancy,
+                gpubox_num: n.gpubox_nums[0],
                 software: n.software,
                 software_version: n.software_version,
-                software_version_date: n.software_version_date,
+                aoflagger_version: n.aoflagger_version,
+                aoflagger_strategy: n.aoflagger_strategy,
+                mwaf_version: n.mwaf_version,
             })
         }
         Self::merge(unpacked)
     }
 
-    /// Merge several [`AOFlags`] into a single struct.
+    /// Merge several [`MwafFlags`] into a single struct.
     ///
     /// This function is private so it cannot be misused outside this module. If
     /// a user wants to flatten a bunch of mwaf files together, they should use
-    /// `AOFlags::new_from_mwafs`.
-    fn merge(mut flags: Vec<AOFlagsTemp>) -> Result<AOFlags, MwafMergeError> {
+    /// `MwafFlags::new_from_mwafs`.
+    fn merge(mut flags: Vec<MwafFlagsTemp>) -> Result<MwafFlags, MwafMergeError> {
         // Sort by the gpubox number. Because this function is private and only
         // called by `Self::new_from_mwafs`, we can be sure that each of these
         // gpubox_num vectors contains only a single number.
@@ -186,6 +187,15 @@ impl AOFlags {
         let mut gpubox_nums = Vec::with_capacity(flags.len());
 
         for f in flags.into_iter() {
+            if f.obsid != last.obsid {
+                return Err(MwafMergeError::Inconsistent {
+                    gpubox1: f.gpubox_num,
+                    gpubox2: last.gpubox_num,
+                    expected: format!("obsid = {:?}", f.obsid),
+                    found: format!("obsid = {:?}", last.obsid),
+                });
+            }
+
             if f.num_time_steps != last.num_time_steps {
                 return Err(MwafMergeError::Inconsistent {
                     gpubox1: f.gpubox_num,
@@ -222,12 +232,12 @@ impl AOFlags {
                 });
             }
 
-            if f.software_version_date != last.software_version_date {
+            if f.mwaf_version != last.mwaf_version {
                 return Err(MwafMergeError::Inconsistent {
                     gpubox1: f.gpubox_num,
                     gpubox2: last.gpubox_num,
-                    expected: format!("software version date = {:?}", f.software_version_date),
-                    found: format!("software version date = {:?}", last.software_version_date),
+                    expected: format!("mwaf version = {:?}", f.mwaf_version),
+                    found: format!("mwaf version = {:?}", last.mwaf_version),
                 });
             }
 
@@ -253,7 +263,8 @@ impl AOFlags {
         num_channels += last.num_channels;
         gpubox_nums.push(last.gpubox_num);
 
-        Ok(AOFlags {
+        Ok(MwafFlags {
+            obsid: last.obsid,
             start_time: last.start_time,
             num_time_steps: last.num_time_steps,
             num_channels,
@@ -263,17 +274,19 @@ impl AOFlags {
             gpubox_nums,
             software: last.software,
             software_version: last.software_version,
-            software_version_date: last.software_version_date,
+            mwaf_version: last.mwaf_version,
+            aoflagger_version: last.aoflagger_version,
+            aoflagger_strategy: last.aoflagger_strategy,
             offset_bug: false,
         })
     }
 }
 
-impl std::fmt::Debug for AOFlags {
+impl std::fmt::Debug for MwafFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            r#"AOFlags {{
+            r#"MwafFlags {{
     num_time_steps: {nts},
     num_channels: {nc},
     num_baselines: {nb},
@@ -281,7 +294,6 @@ impl std::fmt::Debug for AOFlags {
     gpubox_nums: {gn:?},
     software: {s:?},
     software_version: {sv:?},
-    software_version_date: {svd:?},
     occupancy: {occ:?}
 }}
 "#,
@@ -292,26 +304,22 @@ impl std::fmt::Debug for AOFlags {
             gn = self.gpubox_nums,
             s = self.software,
             sv = self.software_version,
-            svd = self.software_version_date,
             occ = self.occupancy,
         )
     }
 }
 
 struct Mwaf {
-    /// The start time of the observation as described by the mwaf file (GPSTIME).
-    start_time_milli: u64,
+    /// The MWA observation ID associated with these these flags.
+    obsid: Option<u32>,
+    /// The centroid timestamp corresponding to the first timestep in the flags.
+    start_time: Epoch,
     /// The number of fine channels as described by the mwaf file (NCHANS).
     num_channels: usize,
     /// The number of antennas as described by the mwaf file (NANTENNA).
     num_antennas: usize,
     /// The number of time steps as described by the mwaf file (NSCANS).
     num_time_steps: usize,
-    /// The number of bytes per row in the binary table containing AOF flags
-    /// (NAXIS1).
-    bytes_per_row: usize,
-    /// The number of rows in the binary table containing AOF flags (NAXIS2).
-    num_rows: usize,
     /// The AOFlagger flags. The bits are *not* unpacked into individual bytes.
     ///
     /// Example: Given a value of 192 (0b11000000), the first and second
@@ -327,64 +335,125 @@ struct Mwaf {
     software: MwafProducer,
     /// The version of the software used to write the flags.
     software_version: Option<String>,
-    /// The date on which this software version was created.
-    software_version_date: Option<String>,
+    /// The version of aoflagger used to make these flags.
+    aoflagger_version: Option<String>,
+    /// The strategy file used by aoflagger when making these flags.
+    aoflagger_strategy: Option<String>,
+    /// The version of the mwaf file.
+    mwaf_version: String,
 }
 
 impl Mwaf {
     /// A helper function to unpack and parse the contents of an mwaf file. It is
-    /// not exposed publicly; use `AOFlags::new_from_mwaf` to perform additional
+    /// not exposed publicly; use `MwafFlags::new_from_mwaf` to perform additional
     /// checks on the contents before returning to the caller.
-    fn unpack<T: AsRef<Path>>(file: &T) -> Result<Mwaf, FitsError> {
+    fn unpack<P: AsRef<Path>>(file: P) -> Result<Mwaf, MwafError> {
         // Get the metadata written with the flags.
-        let s = cfitsio_path_to_str(file);
-        trace!("Reading in {}", s);
-        let mut fptr = fits_open!(file)?;
+        trace!("Reading in {}", file.as_ref().display());
+        let mut fptr = fits_open!(&file)?;
         let hdu = fits_open_hdu!(&mut fptr, 0)?;
 
-        // We assume that GPSTIME is the scheduled start time of the
-        // observation, and that this is when the flags start.
-        let start_time_milli = {
-            let start_time: u64 = get_required_fits_key!(&mut fptr, &hdu, "GPSTIME")?;
-            start_time * 1000
-        };
+        // Handle versions 1.0 and 2.0.
+        let mwaf_version: String = get_required_fits_key!(&mut fptr, &hdu, "VERSION")?;
+        let (obsid, start_time, software, aoflagger_version, aoflagger_strategy) =
+            match mwaf_version.as_ref() {
+                "1.0" => {
+                    // We assume that GPSTIME is the scheduled start time of the
+                    // observation, and that this is when the flags start.
+                    let start_time = {
+                        let start_time: f64 = get_required_fits_key!(&mut fptr, &hdu, "GPSTIME")?;
+                        Epoch::from_gpst_seconds(start_time)
+                    };
+                    let software: Option<String> =
+                        get_optional_fits_key!(&mut fptr, &hdu, "COTVER")?;
+
+                    (None, start_time, software, None, None)
+                }
+                "2.0" => {
+                    let obsid = get_required_fits_key!(&mut fptr, &hdu, "OBSID")?;
+                    let start_time = {
+                        let gps_start: f64 = get_required_fits_key!(&mut fptr, &hdu, "GPSSTART")?;
+                        Epoch::from_gpst_seconds(gps_start)
+                    };
+                    let software: Option<String> =
+                        get_optional_fits_key!(&mut fptr, &hdu, "SOFTWARE")?;
+                    let aoflagger_version: Option<String> =
+                        get_optional_fits_key!(&mut fptr, &hdu, "AO_VER")?;
+                    let aoflagger_strategy: Option<String> =
+                        get_optional_fits_key!(&mut fptr, &hdu, "AO_STRAT")?;
+
+                    (
+                        Some(obsid),
+                        start_time,
+                        software,
+                        aoflagger_version,
+                        aoflagger_strategy,
+                    )
+                }
+                _ => {
+                    return Err(MwafError::UnhandledVersion {
+                        file: file.as_ref().to_path_buf(),
+                        version: mwaf_version,
+                    })
+                }
+            };
+
         let num_channels = get_required_fits_key!(&mut fptr, &hdu, "NCHANS")?;
         let num_antennas = get_required_fits_key!(&mut fptr, &hdu, "NANTENNA")?;
         let num_time_steps = get_required_fits_key!(&mut fptr, &hdu, "NSCANS")?;
         let num_baselines = (num_antennas * (num_antennas + 1)) / 2;
         let gpubox_num = get_required_fits_key!(&mut fptr, &hdu, "GPUBOXNO")?;
-        let software_version: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "COTVER")?;
-        let software = match &software_version {
+        let (software, software_version) = match software.as_deref() {
             Some(ver) => {
                 if ver.contains("Birli") {
-                    MwafProducer::Birli
+                    // Birli writes its version into the software key, separated
+                    // by a dash.
+                    let birli_version = ver.split('-').nth(1).ok_or(MwafError::BirliVersion {
+                        file: file.as_ref().to_path_buf(),
+                    })?;
+                    (MwafProducer::Birli, Some(birli_version.to_string()))
                 } else {
-                    MwafProducer::Cotter
+                    (MwafProducer::Cotter, software)
                 }
             }
-            None => MwafProducer::Unknown,
+            None => (MwafProducer::Unknown, None),
         };
-        let software_version_date = get_optional_fits_key!(&mut fptr, &hdu, "COTVDATE")?;
 
         let hdu = fits_open_hdu!(&mut fptr, 1)?;
         let bytes_per_row = get_required_fits_key!(&mut fptr, &hdu, "NAXIS1")?;
-        let num_rows = get_required_fits_key!(&mut fptr, &hdu, "NAXIS2")?;
+        let num_rows: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS2")?;
+        // cotter can *lie* about how many rows it writes out. Unbelievable. The
+        // actual number of written timesteps is num_rows / num_baselines. If
+        // cotter has lied, assume that the missing timesteps are at the start
+        // of the obs.
+        let true_num_time_steps = if matches!(mwaf_version.as_ref(), "1.0") {
+            num_rows / num_baselines
+        } else {
+            num_time_steps
+        };
 
         // Visibility flags are encoded as bits. rust-fitsio currently doesn't
         // read this data in correctly, so use cfitsio via fitsio-sys.
-        trace!("Reading the FLAGS column in {}", s);
+        trace!("Reading the FLAGS column in {}", file.as_ref().display());
         let flags = {
             let mut flags: Array3<u8> =
                 Array3::zeros((num_time_steps, num_baselines, bytes_per_row));
+            if true_num_time_steps != num_time_steps {
+                // Fill with ones.
+                flags
+                    .slice_mut(s![0..num_time_steps.abs_diff(true_num_time_steps), .., ..])
+                    .fill(0xFF);
+            }
+
             let mut status = 0;
             unsafe {
                 // ffgcvb = fits_read_col_byt
                 fitsio_sys::ffgcvb(
-                    fptr.as_raw(),      /* I - FITS file pointer                       */
-                    1,                  /* I - number of column to read (1 = 1st col)  */
-                    1,                  /* I - first row to read (1 = 1st row)         */
-                    1,                  /* I - first vector element to read (1 = 1st)  */
-                    flags.len() as i64, /* I - number of values to read                */
+                    fptr.as_raw(), /* I - FITS file pointer                       */
+                    1,             /* I - number of column to read (1 = 1st col)  */
+                    1,             /* I - first row to read (1 = 1st row)         */
+                    1,             /* I - first vector element to read (1 = 1st)  */
+                    (true_num_time_steps * num_baselines * bytes_per_row) as i64, /* I - number of values to read                */
                     0,                  /* I - value for null pixels                   */
                     flags.as_mut_ptr(), /* O - array of values that are read           */
                     &mut 0,             /* O - set to 1 if any values are null; else 0 */
@@ -393,7 +462,7 @@ impl Mwaf {
             }
             fitsio::errors::check_status(status).map_err(|e| FitsError::Fitsio {
                 fits_error: e,
-                fits_filename: s.to_string(),
+                fits_filename: file.as_ref().to_str().unwrap().to_string(),
                 hdu_num: 1,
                 source_file: file!(),
                 source_line: line!(),
@@ -403,27 +472,30 @@ impl Mwaf {
         };
 
         Ok(Mwaf {
-            start_time_milli,
+            obsid,
+            start_time,
             num_channels,
             num_antennas,
             num_time_steps,
-            bytes_per_row,
-            num_rows,
             flags,
             gpubox_num,
             software,
             software_version,
-            software_version_date,
+            aoflagger_version,
+            aoflagger_strategy,
+            mwaf_version,
         })
     }
 }
 
 /// In an effort to keep things simple and make bad states impossible, use a
-/// temp struct instead of `AOFlags`, so we can represent a single mwaf file
+/// temp struct instead of `MwafFlags`, so we can represent a single mwaf file
 /// instead of possibly many.
 #[derive(Debug)]
-struct AOFlagsTemp {
-    /// The GPS time of the first scan.
+struct MwafFlagsTemp {
+    /// The MWA observation ID associated with these these flags.
+    obsid: Option<u32>,
+    /// The centroid GPS time of the first scan.
     start_time: Epoch,
     /// The number of time steps in the data (duration of observation /
     /// integration time).
@@ -450,8 +522,12 @@ struct AOFlagsTemp {
     software: MwafProducer,
     /// The version of software used to write the flags.
     software_version: Option<String>,
-    /// The date on which this software version was created.
-    software_version_date: Option<String>,
+    /// The version of aoflagger used to make these flags.
+    aoflagger_version: Option<String>,
+    /// The strategy file used by aoflagger when making these flags.
+    aoflagger_strategy: Option<String>,
+    /// The version of the mwaf file.
+    mwaf_version: String,
 }
 
 /// Calculate the fraction that each channel is flagged. `num_channels` is the
@@ -502,7 +578,7 @@ mod tests {
         // temporary spot.
         let mwaf =
             crate::tests::deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_01.mwaf.gz");
-        let result = AOFlags::new_from_mwaf(&mwaf);
+        let result = MwafFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();
 
@@ -569,7 +645,7 @@ mod tests {
     fn test_1065880128_02_mwaf() {
         let mwaf =
             crate::tests::deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_02.mwaf.gz");
-        let result = AOFlags::new_from_mwaf(&mwaf);
+        let result = MwafFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();
 
@@ -632,7 +708,7 @@ mod tests {
 
     #[test]
     fn test_merging_1065880128_mwafs() {
-        let result = AOFlags::new_from_mwafs(&[
+        let result = MwafFlags::new_from_mwafs(&[
             deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_01.mwaf.gz"),
             deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_02.mwaf.gz"),
         ]);

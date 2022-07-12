@@ -23,6 +23,7 @@ use std::{
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use crossbeam_utils::{atomic::AtomicCell, thread};
+use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
@@ -49,7 +50,9 @@ use crate::{
     },
     HyperdriveError,
 };
-use mwa_hyperdrive_common::{clap, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1};
+use mwa_hyperdrive_common::{
+    clap, hifitime, indicatif, itertools, lazy_static, log, marlu, ndarray, vec1,
+};
 
 pub(crate) const DEFAULT_OUTPUT_VIS_FILENAME: &str = "hyperdrive_calibrated.uvfits";
 
@@ -89,6 +92,10 @@ pub struct SolutionsApplyArgs {
         value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
     )]
     array_position: Option<Vec<f64>>,
+
+    /// Use a DUT1 value of 0 seconds rather than what is in the input data.
+    #[clap(long, help_heading = "INPUT FILES")]
+    ignore_dut1: bool,
 
     /// Additional tiles to be flagged. These values correspond to either the
     /// values in the "Antenna" column of HDU 2 in the metafits file (e.g. 0 3
@@ -175,6 +182,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
         timesteps,
         use_all_timesteps,
         array_position,
+        ignore_dut1,
         tile_flags,
         ignore_input_data_tile_flags,
         outputs,
@@ -252,19 +260,23 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
             debug!("gpubox files: {:?}", &gpuboxes);
             debug!("mwaf files: {:?}", &mwafs);
 
-            let input_data =
-                RawDataReader::new(meta, &gpuboxes, mwafs.as_deref(), raw_data_corrections)?;
+            let input_data = Box::new(RawDataReader::new(
+                meta,
+                &gpuboxes,
+                mwafs.as_deref(),
+                raw_data_corrections,
+            )?);
 
             messages::InputFileDetails::Raw {
                 obsid: input_data.get_obs_context().obsid.unwrap(),
                 gpubox_count: gpuboxes.len(),
                 metafits_file_name: meta.display().to_string(),
-                mwaf: mwafs.as_ref().map(|m| m.len()),
+                mwaf: input_data.get_flags(),
                 raw_data_corrections,
             }
             .print("Applying solutions to"); // Print some high-level information.
 
-            Box::new(input_data)
+            input_data
         }
 
         // Valid input for reading a measurement set.
@@ -495,12 +507,15 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
     }
     .map_err(|_| SolutionsApplyError::NoTimesteps)?;
 
+    let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
+
     messages::ObservationDetails {
         dipole_delays: None,
         beam_file: None,
         num_tiles_with_dead_dipoles: None,
         phase_centre: obs_context.phase_centre,
         pointing_centre: obs_context.pointing_centre,
+        dut1,
         lmst: None,
         lmst_j2000: None,
         available_timesteps: Some(&obs_context.all_timesteps),
@@ -602,6 +617,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
         &sols,
         &timesteps,
         array_position,
+        dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
         no_autos,
         &tile_flags,
         &tile_to_unflagged_cross_baseline_map,
@@ -621,6 +637,7 @@ pub(super) fn apply_solutions_inner(
     sols: &CalibrationSolutions,
     timesteps: &Vec1<usize>,
     array_position: LatLngHeight,
+    dut1: Duration,
     no_autos: bool,
     tile_flags: &[usize],
     tile_to_unflagged_cross_baseline_map: &HashMap<(usize, usize), usize>,
@@ -661,7 +678,7 @@ pub(super) fn apply_solutions_inner(
     ProgressBar::new(timesteps.len() as _)
         .with_style(
             ProgressStyle::default_bar()
-                .template("{msg:18}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                .template("{msg:18}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
                 .progress_chars("=> "),
         )
         .with_position(0)
@@ -671,7 +688,7 @@ pub(super) fn apply_solutions_inner(
     ProgressBar::new(timesteps.len() as _)
         .with_style(
             ProgressStyle::default_bar()
-                .template("{msg:18}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})")
+                .template("{msg:18}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
                 .progress_chars("=> "),
         )
         .with_position(0)
@@ -681,33 +698,23 @@ pub(super) fn apply_solutions_inner(
         ProgressBar::new(timeblocks.len() as _)
             .with_style(
                 ProgressStyle::default_bar()
-                    .template("{msg:18}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})")
+                    .template("{msg:18}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})").unwrap()
                     .progress_chars("=> "),
             )
             .with_position(0)
             .with_message("Writing data"),
     );
 
-    // Draw the progress bars. Not doing this means that the bars aren't
-    // rendered until they've progressed.
-    read_progress.tick();
-    apply_progress.tick();
-    write_progress.tick();
-
     // Use a variable to track whether any threads have an issue.
     let error = AtomicCell::new(false);
 
     info!("Reading input data, applying, and writing");
     let scoped_threads_result = thread::scope(|scope| {
-        // Spawn a thread to draw the progress bars.
-        scope.spawn(move |_| {
-            multi_progress.join().unwrap();
-        });
-
         // Input visibility-data reading thread.
         let data_handle = scope.spawn(|_| {
             // If a panic happens, update our atomic error.
             defer_on_unwind! { error.store(true); }
+            read_progress.tick();
 
             let result = read_vis(
                 obs_context,
@@ -731,6 +738,7 @@ pub(super) fn apply_solutions_inner(
         // Solutions applying thread.
         let apply_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
+            apply_progress.tick();
 
             let result = apply_solutions_thread(
                 obs_context,
@@ -751,6 +759,7 @@ pub(super) fn apply_solutions_inner(
         // Calibrated vis writing thread.
         let write_handle = scope.spawn(|_| {
             defer_on_unwind! { error.store(true); }
+            write_progress.tick();
 
             // If we're not using autos, "disable" the `unflagged_tiles_iter` by
             // making it not iterate over anything.
@@ -790,6 +799,7 @@ pub(super) fn apply_solutions_inner(
                 timesteps,
                 &timeblocks,
                 obs_context.guess_time_res(),
+                dut1,
                 obs_context.guess_freq_res(),
                 &fine_chan_freqs,
                 &unflagged_cross_and_auto_baseline_tile_pairs,

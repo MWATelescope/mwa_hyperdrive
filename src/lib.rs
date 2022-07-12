@@ -28,12 +28,8 @@ pub mod utilities;
 pub mod vis_io;
 pub mod vis_utils;
 
-mwa_hyperdrive_common::cfg_if::cfg_if! {
-    if #[cfg(test)] {
-        mod jones_test;
-        mod tests;
-    }
-}
+#[cfg(test)]
+mod tests;
 
 // Re-exports.
 pub use error::HyperdriveError;

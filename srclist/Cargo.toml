@@ -33,6 +33,7 @@ mwa_hyperdrive_beam =   { path = "../beam" }
 [dev-dependencies]
 approx = "0.5.0"
 indoc = "1.0.0"
-ndarray = { version = ">=0.15.4,<0.16", features = ["approx-0_5"] }
-serial_test = "0.5.0"
+marlu = { version = "0.8.0", features = ["approx"] }
+ndarray = { version = "0.15.4", features = ["approx-0_5"] }
+serial_test = "0.9.0"
 tempfile = "3.3.0"

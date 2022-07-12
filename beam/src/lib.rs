@@ -15,8 +15,6 @@
 mod error;
 mod fee;
 #[cfg(test)]
-mod jones_test;
-#[cfg(test)]
 mod tests;
 
 pub use error::*;
@@ -82,7 +80,8 @@ pub trait Beam: Sync + Send {
         &self,
         azel: AzEl,
         freq_hz: f64,
-        tile_index: usize,
+        tile_index: Option<usize>,
+        latitude_rad: f64,
     ) -> Result<Jones<f64>, BeamError>;
 
     /// Calculate the beam-response Jones matrices for multiple [AzEl]
@@ -92,7 +91,8 @@ pub trait Beam: Sync + Send {
         &self,
         azels: &[AzEl],
         freq_hz: f64,
-        tile_index: usize,
+        tile_index: Option<usize>,
+        latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, BeamError>;
 
     /// Given a frequency in Hz, find the closest frequency that the beam code
@@ -127,9 +127,13 @@ pub trait BeamCUDA {
     ///
     /// This function interfaces directly with the CUDA API. Rust errors attempt
     /// to catch problems but there are no guarantees.
-    unsafe fn calc_jones(
+    unsafe fn calc_jones_pair(
         &self,
-        azels: &[AzEl],
+        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] az_rad: &[f64],
+        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] za_rad: &[f64],
+        #[cfg(feature = "cuda-single")] az_rad: &[f32],
+        #[cfg(feature = "cuda-single")] za_rad: &[f32],
+        latitude_rad: f64,
     ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError>;
 
     /// Get the type of beam.
@@ -249,7 +253,8 @@ impl Beam for NoBeam {
         &self,
         _azel: AzEl,
         _freq_hz: f64,
-        _tile_index: usize,
+        _tile_index: Option<usize>,
+        _latitude_rad: f64,
     ) -> Result<Jones<f64>, BeamError> {
         Ok(Jones::identity())
     }
@@ -258,7 +263,8 @@ impl Beam for NoBeam {
         &self,
         azels: &[AzEl],
         _freq_hz: f64,
-        _tile_index: usize,
+        _tile_index: Option<usize>,
+        _latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, BeamError> {
         Ok(vec![Jones::identity(); azels.len()])
     }
@@ -289,11 +295,15 @@ pub struct NoBeamCUDA {
 
 #[cfg(feature = "cuda")]
 impl BeamCUDA for NoBeamCUDA {
-    unsafe fn calc_jones(
+    unsafe fn calc_jones_pair(
         &self,
-        azels: &[AzEl],
+        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] az_rad: &[f64],
+        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] _za_rad: &[f64],
+        #[cfg(feature = "cuda-single")] az_rad: &[f32],
+        #[cfg(feature = "cuda-single")] _za_rad: &[f32],
+        _latitude_rad: f64,
     ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError> {
-        let identities: Vec<Jones<CudaFloat>> = vec![Jones::identity(); azels.len()];
+        let identities: Vec<Jones<CudaFloat>> = vec![Jones::identity(); az_rad.len()];
         DevicePointer::copy_to_device(&identities).map_err(BeamError::from)
     }
 

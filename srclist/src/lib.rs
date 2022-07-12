@@ -17,8 +17,6 @@ pub mod woden;
 mod error;
 #[cfg(test)]
 mod general_tests;
-#[cfg(test)]
-mod jones_test;
 mod veto;
 
 pub use error::*;

@@ -30,7 +30,7 @@ use vec1::Vec1;
 use super::*;
 use crate::{
     context::ObsContext,
-    flagging::{AOFlags, MwafProducer},
+    flagging::{MwafFlags, MwafProducer},
     metafits,
     pfb_gains::{PfbFlavour, PfbParseError},
 };
@@ -98,7 +98,7 @@ pub(crate) struct RawDataReader {
 
     /// The poly-phase filter bank gains to be used to correct the bandpass
     /// shape for each coarse channel.
-    pfb_gains: Option<Vec<f64>>,
+    pfb_gains: Option<&'static [f64]>,
 
     /// The corrections to be applied.
     corrections: RawDataCorrections,
@@ -107,8 +107,8 @@ pub(crate) struct RawDataReader {
     /// ignoring all flags). e.g. The first element is (0, 0).
     all_baseline_tile_pairs: Vec<(usize, usize)>,
 
-    /// AOFlagger flags.
-    aoflags: Option<AOFlags>,
+    /// Mwaf flags.
+    mwaf_flags: Option<MwafFlags>,
 }
 
 impl RawDataReader {
@@ -319,15 +319,11 @@ impl RawDataReader {
             ),
         }
 
-        // TODO: Allow borrowed slices in Birli.
-        let pfb_gains = corrections
-            .pfb_flavour
-            .get_gains()
-            .map(|slice| slice.to_vec());
+        let pfb_gains = corrections.pfb_flavour.get_gains();
 
-        let aoflags = if let Some(m) = mwafs {
+        let mwaf_flags = if let Some(m) = mwafs {
             trace!("Reading mwaf files");
-            let mut f = AOFlags::new_from_mwafs(m)?;
+            let mut f = MwafFlags::new_from_mwafs(m)?;
 
             // Ensure that there is a mwaf file for each specified gpubox file.
             for gpubox_file in &mwalib_context.gpubox_batches[0].gpubox_files {
@@ -344,14 +340,22 @@ impl RawDataReader {
             // cotter has a nasty bug that can cause the start time listed in
             // mwaf files to be offset from data HDUs. Warn the user if this is
             // noticed.
-            let time_res = mwalib_context.metafits_context.corr_int_time_ms as f64;
+            let time_res = Duration::from_f64(
+                mwalib_context.metafits_context.corr_int_time_ms as f64,
+                Unit::Millisecond,
+            );
             let data_start =
-                Epoch::from_gpst_seconds(mwalib_context.common_start_gps_time_ms as f64 / 1e3);
+                Epoch::from_gpst_seconds(mwalib_context.common_start_gps_time_ms as f64 / 1e3)
+                    + time_res / 2.0;
             let data_end =
-                Epoch::from_gpst_seconds(mwalib_context.common_end_gps_time_ms as f64 / 1e3);
+                Epoch::from_gpst_seconds(mwalib_context.common_end_gps_time_ms as f64 / 1e3)
+                    + time_res / 2.0;
             let flags_start = f.start_time;
             let flags_end = flags_start + f.num_time_steps as f64 * time_res;
-            let diff = (flags_start - data_start).in_seconds() / time_res;
+            let diff = (flags_start - data_start).in_seconds() / time_res.in_seconds();
+            debug!("Data start time (GPS): {}", data_start.as_gpst_seconds());
+            debug!("Flag start time (GPS): {}", flags_start.as_gpst_seconds());
+            debug!("(flags_start - data_start).in_seconds() / time_res.in_seconds(): {diff}");
             if diff.fract().abs() > 0.0 {
                 warn!("These mwaf files do not have times corresponding to the data they were created from.");
                 match f.software {
@@ -362,12 +366,14 @@ impl RawDataReader {
                 f.offset_bug = true;
             }
 
-            // Warn the user if there are fewer timesteps in the aoflags than
+            // Warn the user if there are fewer timesteps in the mwaf flags than
             // there are in the raw data. This is good for signalling to the
             // user that attempting to use data timesteps without flag timesteps
             // will be a problem.
-            let mut start_offset = ((data_start - flags_start).in_seconds() / time_res).ceil();
-            let mut end_offset = ((data_end - flags_end).in_seconds() / time_res).ceil();
+            let mut start_offset =
+                ((data_start - flags_start).in_seconds() / time_res.in_seconds()).ceil();
+            let mut end_offset =
+                ((data_end - flags_end).in_seconds() / time_res.in_seconds()).ceil();
             if f.offset_bug {
                 start_offset -= 1.0;
                 end_offset -= 1.0;
@@ -402,6 +408,10 @@ impl RawDataReader {
             unflagged_timesteps: mwalib_context.common_good_timestep_indices.clone(),
             phase_centre,
             pointing_centre,
+            array_position: Some(LatLngHeight::new_mwa()),
+            dut1: metafits_context
+                .dut1
+                .map(|dut1| Duration::from_f64(dut1, Unit::Second)),
             tile_names,
             tile_xyzs,
             flagged_tiles,
@@ -409,7 +419,6 @@ impl RawDataReader {
             dipole_delays: Some(dipole_delays),
             dipole_gains: Some(dipole_gains),
             time_res,
-            array_position: Some(LatLngHeight::new_mwa()),
             coarse_chan_nums,
             coarse_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
@@ -431,7 +440,7 @@ impl RawDataReader {
             pfb_gains,
             corrections,
             all_baseline_tile_pairs,
-            aoflags,
+            mwaf_flags,
         })
     }
 
@@ -445,7 +454,7 @@ impl RawDataReader {
     ) {
         if let Some(timestep) = mwaf_timestep {
             for (i_gpubox_chan, gpubox_channel) in gpubox_channels.into_iter().enumerate() {
-                let flags = self.aoflags.as_ref().unwrap().flags[&(gpubox_channel as u8)]
+                let flags = self.mwaf_flags.as_ref().unwrap().flags[&(gpubox_channel as u8)]
                     .slice(s![timestep, .., ..,]);
                 // Select only the applicable frequencies.
                 let n = self.obs_context.num_fine_chans_per_coarse_chan;
@@ -493,15 +502,12 @@ impl RawDataReader {
         // TODO: Handle non-contiguous coarse channels.
 
         // Check that mwaf flags are available for this timestep.
-        let mwaf_timestep = match &self.aoflags {
-            Some(aoflags) => {
-                // The time resolution is always specified for raw MWA data. Use
-                // units of milliseconds with the flags.
+        let mwaf_timestep = match &self.mwaf_flags {
+            Some(mwaf_flags) => {
+                // The time resolution is always specified for raw MWA data.
                 let time_res = self.obs_context.time_res.unwrap();
-                // The start and end times need to be adjusted to be centroids.
-                let flags_start = aoflags.start_time + time_res / 2.0;
-                let flags_end =
-                    flags_start + aoflags.num_time_steps as f64 * time_res + time_res / 2.0;
+                let flags_start = mwaf_flags.start_time;
+                let flags_end = flags_start + mwaf_flags.num_time_steps as f64 * time_res;
                 let timestamp = self.obs_context.timestamps[timestep];
                 if !(flags_start..flags_end).contains(&timestamp) {
                     return Err(VisReadError::MwafFlagsMissingForTimestep {
@@ -512,12 +518,13 @@ impl RawDataReader {
                 // Find the flags timestep index corresponding to the data
                 // timestep index.
                 let offset = (timestamp - flags_start).in_seconds() / time_res.in_seconds();
-                let offset = if aoflags.offset_bug {
+                let offset = if mwaf_flags.offset_bug {
                     offset.floor() as usize
                 } else {
                     offset.round() as usize
                 };
 
+                debug!("timestep {timestep}, mwaf timestep {offset}");
                 Some(offset)
             }
             None => None,
@@ -546,7 +553,6 @@ impl RawDataReader {
                 + 1;
 
         // Read in the data via Birli.
-        // TODO: read autos and crosses separately?
         let fine_chans_per_coarse = self
             .mwalib_context
             .metafits_context
@@ -565,12 +571,6 @@ impl RawDataReader {
         // populate weights
         weight_array.fill(weight_factor as _);
 
-        // Birli has a function `flag_to_weight_array`, but this just makes an
-        // array the same shape as `flags` and fills it with `weight_factor`.
-        // We'd like negative weights where we have flags.
-        // let mut weights =
-        //     flags.mapv_into_any(|f| if f { -weight_factor } else { weight_factor } as f32);
-
         // Correct the raw data.
         let metafits_context = &self.mwalib_context.metafits_context;
 
@@ -580,10 +580,16 @@ impl RawDataReader {
                 .array_position
                 .unwrap_or_else(LatLngHeight::new_mwa),
             phase_centre: self.obs_context.phase_centre,
-            correct_cable_lengths: !metafits_context.cable_delays_applied
-                && self.corrections.cable_length,
+            correct_cable_lengths: self.corrections.cable_length
+                && match metafits_context.cable_delays_applied {
+                    mwalib::CableDelaysApplied::NoCableDelaysApplied => true,
+                    mwalib::CableDelaysApplied::CableAndRecClock
+                    | mwalib::CableDelaysApplied::CableAndRecClockAndBeamformerDipoleDelays => {
+                        false
+                    }
+                },
             correct_digital_gains: self.corrections.digital_gains,
-            passband_gains: self.pfb_gains.clone(),
+            passband_gains: self.pfb_gains,
             correct_geometry: self.corrections.geometric
                 && matches!(
                     metafits_context.geometric_delays_applied,
@@ -592,16 +598,11 @@ impl RawDataReader {
             ..PreprocessContext::default()
         };
 
-        // used to time large operations
-        // TODO(dev): pull this out of preprocess
-        let mut durations = HashMap::<String, std::time::Duration>::new();
-
         prep_ctx.preprocess(
             &self.mwalib_context,
-            &mut jones_array,
-            &mut weight_array,
-            &mut flag_array,
-            &mut durations,
+            jones_array.view_mut(),
+            weight_array.view_mut(),
+            flag_array.view_mut(),
             &vis_sel,
         )?;
 
@@ -714,6 +715,10 @@ impl VisRead for RawDataReader {
 
     fn get_metafits_context(&self) -> Option<&MetafitsContext> {
         Some(&self.mwalib_context.metafits_context)
+    }
+
+    fn get_flags(&self) -> Option<&MwafFlags> {
+        self.mwaf_flags.as_ref()
     }
 
     fn read_crosses_and_autos(

@@ -259,7 +259,7 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
     };
 
     for (int i_comp = 0; i_comp < d_comps.num_power_law_points; i_comp++) {
-        const LMN lmn = d_comps.power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         extrap_power_law_fd(i_comp, freq, d_comps.power_law_fds, d_comps.power_law_sis, &fd);
@@ -267,7 +267,7 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
     }
 
     for (int i_comp = 0; i_comp < d_comps.num_curved_power_law_points; i_comp++) {
-        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.curved_power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         extrap_curved_power_law_fd(i_comp, freq, d_comps.curved_power_law_fds, d_comps.curved_power_law_sis,
@@ -276,7 +276,7 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
     }
 
     for (int i_comp = 0; i_comp < d_comps.num_list_points; i_comp++) {
-        const LMN lmn = d_comps.list_lmns[i_comp];
+        const LmnRime lmn = d_comps.list_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const JONES *fd = &d_comps.list_fds[i_fd + i_comp];
@@ -324,7 +324,7 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
     };
 
     for (size_t i_comp = 0; i_comp < d_comps.num_power_law_gaussians; i_comp++) {
-        const LMN lmn = d_comps.power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps.power_law_gps[i_comp];
@@ -344,7 +344,7 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
     }
 
     for (size_t i_comp = 0; i_comp < d_comps.num_curved_power_law_gaussians; i_comp++) {
-        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.curved_power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps.curved_power_law_gps[i_comp];
@@ -365,7 +365,7 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
     }
 
     for (size_t i_comp = 0; i_comp < d_comps.num_list_gaussians; i_comp++) {
-        const LMN lmn = d_comps.list_lmns[i_comp];
+        const LmnRime lmn = d_comps.list_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps.list_gps[i_comp];
@@ -436,7 +436,7 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
     int coeff_depth = 0;
     int i_uv = i_bl * d_comps.num_power_law_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_power_law_shapelets; i_comp++) {
-        const LMN lmn = d_comps.power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps.power_law_shapelet_uvs[i_uv + i_comp];
@@ -500,7 +500,7 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
     coeff_depth = 0;
     i_uv = i_bl * d_comps.num_curved_power_law_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_curved_power_law_shapelets; i_comp++) {
-        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.curved_power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps.curved_power_law_shapelet_uvs[i_uv + i_comp];
@@ -565,7 +565,7 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
     coeff_depth = 0;
     i_uv = i_bl * d_comps.num_list_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_list_shapelets; i_comp++) {
-        const LMN lmn = d_comps.list_lmns[i_comp];
+        const LmnRime lmn = d_comps.list_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps.list_shapelet_uvs[i_uv + i_comp];
@@ -691,7 +691,7 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
         JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp];
         apply_beam(&j1, &fd, &j2);
 
-        const LMN lmn = d_comps.power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
         complex_multiply(&fd, real, imag, &delta_vis);
     }
@@ -705,7 +705,7 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
                                   d_comps.num_power_law_points];
         apply_beam(&j1, &fd, &j2);
 
-        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.curved_power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
         complex_multiply(&fd, real, imag, &delta_vis);
     }
@@ -719,7 +719,7 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
                                   (d_comps.num_power_law_points + d_comps.num_curved_power_law_points)];
         apply_beam(&j1, &fd, &j2);
 
-        const LMN lmn = d_comps.list_lmns[i_comp];
+        const LmnRime lmn = d_comps.list_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
         complex_multiply(&fd, real, imag, &delta_vis);
     }
@@ -790,7 +790,7 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
         JONES_C j2 = d_beam_jones[((num_directions * num_fee_freqs * i_j2_row) + num_directions * i_col) + i_comp];
         apply_beam(&j1, &fd, &j2);
 
-        const LMN lmn = d_comps.power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps.power_law_gps[i_comp];
@@ -817,7 +817,7 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
                                   d_comps.num_power_law_gaussians];
         apply_beam(&j1, &fd, &j2);
 
-        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.curved_power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps.curved_power_law_gps[i_comp];
@@ -844,7 +844,7 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
                                   (d_comps.num_power_law_gaussians + d_comps.num_curved_power_law_gaussians)];
         apply_beam(&j1, &fd, &j2);
 
-        const LMN lmn = d_comps.list_lmns[i_comp];
+        const LmnRime lmn = d_comps.list_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         const GaussianParams g_params = d_comps.list_gps[i_comp];
@@ -934,7 +934,7 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     int coeff_depth = 0;
     int i_uv = i_bl * d_comps.num_power_law_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_power_law_shapelets; i_comp++) {
-        const LMN lmn = d_comps.power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps.power_law_shapelet_uvs[i_uv + i_comp];
@@ -1001,7 +1001,7 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     coeff_depth = 0;
     i_uv = i_bl * d_comps.num_curved_power_law_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_curved_power_law_shapelets; i_comp++) {
-        const LMN lmn = d_comps.curved_power_law_lmns[i_comp];
+        const LmnRime lmn = d_comps.curved_power_law_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps.curved_power_law_shapelet_uvs[i_uv + i_comp];
@@ -1072,7 +1072,7 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
     i_uv = i_bl * d_comps.num_list_shapelets;
     const int i_fd = i_freq * d_comps.num_list_shapelets;
     for (int i_comp = 0; i_comp < d_comps.num_list_shapelets; i_comp++) {
-        const LMN lmn = d_comps.list_lmns[i_comp];
+        const LmnRime lmn = d_comps.list_lmns[i_comp];
         SINCOS(uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n, &imag, &real);
 
         ShapeletUV s_uv = d_comps.list_shapelet_uvs[i_uv + i_comp];
