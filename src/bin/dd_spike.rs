@@ -1040,7 +1040,7 @@ fn get_offsets_rts(
     assert_eq!(jones_dims, weights.dim());
     assert_eq!(jones_dims, model.dim());
 
-    let mut offsets = Array3::zeros((jones_dims.0, jones_dims.2, 2));
+    let mut offsets = Array::zeros((jones_dims.0, 2));
 
     // pre-compute partial uvws:
     let part_uvws = calc_part_uvws(&ant_pairs, &centroid_timestamps, phase_centre, array_pos, &tile_xyzs);
@@ -1059,24 +1059,23 @@ fn get_offsets_rts(
         offsets.outer_iter_mut(),
         part_uvws.outer_iter(),
     ) {
+        // a-terms used in least-squares estimator
+        let (mut a_uu, mut a_uv, mut a_vv) = (0., 0., 0.);
+        // A-terms used in least-squares estimator
+        let (mut aa_u, mut aa_v) = (0., 0.);
+
         // iterate over frequency
         for (
             unpeeled,
             weights,
             model,
-            mut offsets,
             freq_hz,
         ) in izip!(
             unpeeled.axis_iter(Axis(1)),
             weights.axis_iter(Axis(1)),
             model.axis_iter(Axis(1)),
-            offsets.outer_iter_mut(),
             freqs_hz.iter(),
         ) {
-            // a-terms used in least-squares estimator
-            let (mut a_uu, mut a_uv, mut a_vv) = (0., 0., 0.);
-            // A-terms used in least-squares estimator
-            let (mut aa_u, mut aa_v) = (0., 0.);
             let lambda = VEL_C / freq_hz;
             // lambda^2
             let lambda_2 = lambda * lambda;
@@ -1107,211 +1106,24 @@ fn get_offsets_rts(
                     let mm = (model_i.re as f64) * model_i.re as f64;
 
                     let weight_f64 = *weight as f64;
-                    // weight_sum_f64 += weight_f64;
-
-                    // should really only accumulate these if rts_options->update_cal_amplitudes is true
-                    // s_vm += weight_f64 * (model_i.re as f64) * (unpeeled_i.re as f64);
-                    // s_mm += weight_f64 * mm;
 
                     // to convert to RTS uvw (wavelengths) from PAL uvw (meters), dividy by λ.
                     let (u, v) = (uvw.u/lambda, uvw.v/lambda);
-                    a_uu += weight_f64 * mm * u * u;
-                    a_uv += weight_f64 * mm * u * v;
-                    a_vv += weight_f64 * mm * v * v;
-                    aa_u  += weight_f64 * mr * u;
-                    aa_v  += weight_f64 * mr * v;
-
-                    // println!("{}", vec![
-                    //     ant1.to_string(),
-                    //     ant2.to_string(),
-                    //     unpeeled_i.to_string(),
-                    //     model_i.to_string(),
-                    //     uvw.u.to_string(),
-                    //     uvw.v.to_string(),
-                    //     uvw.w.to_string(),
-                    // ].join("\t"));
+                    a_uu += weight_f64 * mm * u * u * lambda_4;
+                    a_uv += weight_f64 * mm * u * v * lambda_4;
+                    a_vv += weight_f64 * mm * v * v * lambda_4;
+                    aa_u  += weight_f64 * mr * u * -lambda_2;
+                    aa_v  += weight_f64 * mr * v * -lambda_2;
                 }
             }
-
-            a_uu *= lambda_4;
-            a_uv *= lambda_4;
-            a_vv *= lambda_4;
-            aa_u *= -lambda_2;
-            aa_v *= -lambda_2;
-            // s_vm /= weight_sum_f64;
-            // s_mm /= weight_sum_f64;
-
-            let delta = TAU * ( a_uu*a_vv - a_uv*a_uv );
-
-            offsets[[0]] = (aa_u*a_vv - aa_v*a_uv) / delta;
-            offsets[[1]] = (aa_v*a_uu - aa_u*a_uv) / delta;
-
-            // println!("{}", vec![
-            //     lambda_2.to_string(),
-            //     a_uu.to_string(),
-            //     a_uv.to_string(),
-            //     a_vv.to_string(),
-            //     aa_u.to_string(),
-            //     aa_v.to_string(),
-            //     delta.to_string(),
-            //     (offsets[[0]] * lambda_2).to_string(),
-            //     (offsets[[1]] * lambda_2).to_string(),
-            // ].join("\t"));
         }
+        let delta = TAU * ( a_uu*a_vv - a_uv*a_uv );
+
+        offsets[[0]] = (aa_u*a_vv - aa_v*a_uv) / delta;
+        offsets[[1]] = (aa_v*a_uu - aa_u*a_uv) / delta;
     }
-    // println!("{:?}", offsets);
-    offsets.axis_iter(Axis(2)).map(|x| x.mean().unwrap()).collect_vec()
-}
-
-// the offsets as defined by the RTS paper, Mitchel 2008
-// it's equivalent to get_offsets_rts()
-fn get_offsets_paper(
-    unpeeled: ArrayView3<Jones<f32>>,
-    weights: ArrayView3<f32>,
-    model: ArrayView3<Jones<f32>>,
-    vis_ctx: &VisContext,
-    obs_ctx: &MarluObsContext
-    // src_name: String,
-) -> Vec<f64> {
-    let freqs_hz = vis_ctx.frequencies_hz();
-    let tile_xyzs: Vec<XyzGeodetic> = obs_ctx.ant_positions_geodetic().collect();
-    let centroid_timestamps: Vec<Epoch> = vis_ctx.timeseries(false, true).collect();
-    let phase_centre = obs_ctx.phase_centre;
-    let array_pos = obs_ctx.array_pos;
-    let ant_pairs = vis_ctx.sel_baselines.clone();
-    let jones_dims = unpeeled.dim();
-
-    assert_eq!(jones_dims.0, centroid_timestamps.len());
-    assert_eq!(jones_dims.1, ant_pairs.len());
-    assert_eq!(jones_dims.2, freqs_hz.len());
-    assert_eq!(jones_dims, weights.dim());
-    assert_eq!(jones_dims, model.dim());
-
-    let mut offsets = Array3::zeros((jones_dims.0, jones_dims.2, 2));
-
-    // println!("epoch, ant1, ant2, freq, u, v, w, weight, model_I_r, model_I_th, unpeeled_I_r, unpeeled_I_th, ")
-    // println!("name, epoch, lambda_2, a_uu, a_uv, a_vv, aa_u, aa_v, c_l, c_m");
-
-    // pre-compute partial uvws:
-    let part_uvws = calc_part_uvws(&ant_pairs, &centroid_timestamps, phase_centre, array_pos, &tile_xyzs);
-
-    // iterate over time
-    for (
-        unpeeled,
-        weights,
-        model,
-        mut offsets,
-        part_uvws
-    ) in izip!(
-        unpeeled.outer_iter(),
-        weights.outer_iter(),
-        model.outer_iter(),
-        offsets.outer_iter_mut(),
-        part_uvws.outer_iter(),
-    ) {
-        // iterate over frequency
-        for (
-            unpeeled,
-            weights,
-            model,
-            mut offsets,
-            freq_hz,
-        ) in izip!(
-            unpeeled.axis_iter(Axis(1)),
-            weights.axis_iter(Axis(1)),
-            model.axis_iter(Axis(1)),
-            offsets.outer_iter_mut(),
-            freqs_hz.iter(),
-        ) {
-
-            let mut weight_sum_f64 = 0.;
-            // real of stokes I for the calibrator model
-            let mut i_c = 0.0;
-            // a-terms used in least-squares estimator
-            let (mut a_uu, mut a_uv, mut a_vv) = (0., 0., 0.);
-            // A-terms used in least-squares estimator
-            let (mut aa_u, mut aa_v) = (0., 0.);
-            let lambda = VEL_C / freq_hz;
-            // lambda^2
-            let lambda_2 = lambda * lambda;
-            // lambda^4
-            let lambda_4 = lambda_2 * lambda_2;
-
-            // iterate over baseline
-            for (
-                unpeeled,
-                weight,
-                model,
-                &(ant1, ant2)
-            ) in izip!(
-                unpeeled.iter(),
-                weights.iter(),
-                model.iter(),
-                &ant_pairs,
-            ) {
-                let uvw= part_uvws[[ant1]] - part_uvws[[ant2]];
-
-                if *weight > 0. {
-                    // unsure about this method of gettings stokes I from jones
-                    let unpeeled_i = unpeeled[0] + unpeeled[3];
-                    let model_i = model[0] + model[3];
-
-                    // eprintln!(
-                    //     "> bl ({:3} {:3}) freq {:8} unpeeled_I ({:6.4}, {:6.4}) model_I ({:6.4}, {:6.4})",
-                    //     ant1, ant2,
-                    //     freq_hz,
-                    //     unpeeled_i.re,
-                    //     unpeeled_i.im,
-                    //     model_i.re,
-                    //     model_i.im,
-                    // );
-
-                    let di = unpeeled_i.im as f64;
-                    let mr = model_i.re as f64;
-                    // let mr = (model_i.re as f64) * (unpeeled_i - model_i).im as f64;
-                    // let mm = (model_i.re as f64) * model_i.re as f64;
-
-                    let weight_f64 = *weight as f64;
-                    weight_sum_f64 += weight_f64;
-
-                    // to convert to RTS uvw (wavelengths) from PAL uvw (meters), dividy by λ.
-                    let (u, v) = (uvw.u/lambda, uvw.v/lambda);
-                    i_c +=  mr * weight_f64;
-                    a_uu +=  u * u * weight_f64;
-                    a_uv +=  u * v * weight_f64;
-                    a_vv +=  v * v * weight_f64;
-                    aa_u  +=  -u * di * weight_f64;
-                    aa_v  +=  -v * di * weight_f64;
-                }
-            }
-
-            a_uu *= lambda_4;
-            a_uv *= lambda_4;
-            a_vv *= lambda_4;
-            aa_u *= lambda_2;
-            aa_v *= lambda_2;
-            i_c /= weight_sum_f64;
-
-            let delta = TAU * i_c * ( a_uu*a_vv - a_uv*a_uv );
-
-            offsets[[0]] = (a_vv*aa_u - a_uv*aa_v) / delta;
-            offsets[[1]] = (a_uu*aa_v - a_uv*aa_u) / delta;
-
-            // println!(
-            //     "dev: {}, {}, {}, {}, {}, {}, {}, {}, {}",
-            //     src_name,
-            //     lambda_2,
-            //     a_uu,
-            //     a_uv,
-            //     a_vv,
-            //     aa_u,
-            //     aa_v,
-            //     offsets[[0]] * lambda_2,
-            //     offsets[[1]] * lambda_2
-            // );
-        }
-    }
-    offsets.axis_iter(Axis(2)).map(|x| x.mean().unwrap()).collect_vec()
+    eprintln!("{:?}", offsets);
+    offsets.axis_iter(Axis(1)).map(|x| x.mean().unwrap()).collect_vec()
 }
 
 fn calculate_chi_squared(
