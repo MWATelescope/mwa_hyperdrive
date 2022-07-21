@@ -1735,7 +1735,8 @@ was applied to the raw MWA data. &quot;N&quot; if they were not.</p>
 <h2 id="extra-hdus"><a class="header" href="#extra-hdus">Extra HDUs</a></h2>
 <p>More metadata are contained in HDUs other than the first one (that which
 contains the metadata keys described above). Other than the first HDU and the
-&quot;SOLUTIONS&quot; HDU (HDUs 1 and 2, respectfully), all HDUs are optional.</p>
+&quot;SOLUTIONS&quot; HDU (HDUs 1 and 2, respectfully), <em>all HDUs and their contents are
+optional</em>.</p>
 <h3 id="timeblocks"><a class="header" href="#timeblocks">TIMEBLOCKS</a></h3>
 <p>The &quot;TIMEBLOCKS&quot; HDU is a FITS table with three columns:</p>
 <ol>
@@ -1755,36 +1756,40 @@ and an end time of 16 probably has an average time of 13, but, if 3 of 4
 timesteps in this timeblock are used, then the average time could be 12.666 or
 13.333.</p>
 <h3 id="tiles"><a class="header" href="#tiles">TILES</a></h3>
-<p>The &quot;TILES&quot; HDU is a FITS table with three columns:</p>
+<p>The &quot;TILES&quot; HDU is a FITS table with up to four columns:</p>
 <ol>
 <li><code>Antenna</code></li>
-<li><code>TileName</code></li>
 <li><code>Flag</code></li>
+<li><code>TileName</code></li>
+<li><code>DipoleGains</code></li>
 </ol>
 <p><code>Antenna</code> is the 0-N antenna index (where N is the total number of antennas in
 the observation). These indices match the &quot;Antenna&quot; column of an <a href="defs/mwa/metafits.html">MWA
 metafits</a> file.</p>
-<p><code>TileName</code> is the... name of the tile. As with <code>Antenna</code>, this should match the
-contents of an MWA metafits file.</p>
 <p><code>Flag</code> is a boolean indicating whether an antenna was flagged during calibration
 (1) or not (0).</p>
+<p><code>TileName</code> is the... name of the tile. As with <code>Antenna</code>, this should match the
+contents of an MWA metafits file.</p>
+<p><code>DipoleGains</code> contains the dipole gains used for each tile in calibration. There
+are 32 values; the first 16 are for the X dipoles and the second 16 are for the
+Y dipoles. Typically, the values are either 0 (dead dipole) or 1.</p>
 <h3 id="chanblocks"><a class="header" href="#chanblocks">CHANBLOCKS</a></h3>
 <p>See <a href="defs/blocks.html">blocks</a> for an explanation of what chanblocks are.</p>
-<p>The &quot;CHANBLOCKS&quot; HDU is a FITS table with two columns:</p>
+<p>The &quot;CHANBLOCKS&quot; HDU is a FITS table with up to three columns:</p>
 <ol>
 <li><code>Index</code></li>
-<li><code>Freq</code></li>
 <li><code>Flag</code></li>
+<li><code>Freq</code></li>
 </ol>
 <p><code>Index</code> is the 0-N chanblock index (where N is the total number of chanblocks in
 the observation). Note that this is not necessarily the same as the total number
 of <em>channels</em> in the observation; channels may be averaged before calibration,
 making the number of chanblocks less than the number of channels.</p>
+<p><code>Flag</code> indicates whether calibration was attempted (1) or not (0) on a chanblock
+(boolean).</p>
 <p><code>Freq</code> is the centroid frequency of the chanblock (as a double-precision float).
 If <em>any</em> of the frequencies is an NaN, then <code>hyperdrive</code> will not use the <code>Freq</code>
 column.</p>
-<p><code>Flag</code> indicates whether calibration was attempted (1) or not (0) on a chanblock
-(boolean).</p>
 <h3 id="results-calibration-results"><a class="header" href="#results-calibration-results">RESULTS (Calibration results)</a></h3>
 <p>The &quot;RESULTS&quot; HDU is a FITS image with two dimensions -- timeblock and
 chanblock, in that order -- that describe the precision to which a chanblock
