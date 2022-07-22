@@ -290,21 +290,24 @@ installation of CUDA is required.</p>
 </div>
 <div>
 <ul>
-<li>Only needed if the <code>plotting</code> feature is enabled (which it is by default)</li>
+<li>Only required if the <code>plotting</code> feature is enabled (which it is by default)</li>
+<li>Version must be <code>&gt;=2.11.1</code></li>
 <li>Arch: <code>pkg-config</code> <code>make</code> <code>cmake</code> <code>freetype2</code></li>
 <li>Ubuntu: <code>libfreetype-dev</code> <code>libexpat1-dev</code></li>
 </ul>
 </div>
 </div>
-<div id="admonition-cudahttpsdevelopernvidiacomcuda-zone-for-accelerated-sky-modelling" class="admonition tip">
+<div id="admonition-cuda-for-accelerated-sky-modelling" class="admonition tip">
 <div class="admonition-title">
-<p><a href="https://developer.nvidia.com/cuda-zone">CUDA</a> (for accelerated sky modelling)</p>
-<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-cudahttpsdevelopernvidiacomcuda-zone-for-accelerated-sky-modelling"></a></p>
+<p>CUDA (for accelerated sky modelling)</p>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-cuda-for-accelerated-sky-modelling"></a></p>
 </div>
 <div>
 <ul>
-<li>Only needed if either the <code>cuda</code> or <code>cuda-single</code> feature is enabled</li>
+<li>Only required if either the <code>cuda</code> or <code>cuda-single</code> feature is enabled</li>
+<li>Requires a <a href="https://developer.nvidia.com/cuda-gpus">CUDA-capable device</a></li>
 <li>Arch: <code>cuda</code></li>
+<li>Ubuntu and others: <a href="https://developer.nvidia.com/cuda-zone">Download link</a></li>
 <li>The library dir can be specified manually with <code>CUDA_LIB</code>
 <ul>
 <li>If not specified, <code>/usr/local/cuda</code> and <code>/opt/cuda</code> are searched.</li>
@@ -1732,6 +1735,10 @@ MWA data. &quot;N&quot; if they were not.</p>
 <p><code>GEOMETRY</code> is &quot;Y&quot; if the <a href="defs/../defs/mwa/corrections.html#geometric-correction-aka-phase-tracking">geometric delay
 correction</a>
 was applied to the raw MWA data. &quot;N&quot; if they were not.</p>
+<h3 id="others-1"><a class="header" href="#others-1">Others</a></h3>
+<p><code>MODELLER</code> describes what was used to generate model visibilities in
+calibration. This is either <code>CPU</code> or details on the CUDA device used, e.g.
+<code>NVIDIA GeForce RTX 2070 (capability 7.5, 7979 MiB), CUDA driver 11.7, runtime 11.7</code>.</p>
 <h2 id="extra-hdus"><a class="header" href="#extra-hdus">Extra HDUs</a></h2>
 <p>More metadata are contained in HDUs other than the first one (that which
 contains the metadata keys described above). Other than the first HDU and the

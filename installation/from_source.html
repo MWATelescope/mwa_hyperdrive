@@ -225,21 +225,24 @@
 </div>
 <div>
 <ul>
-<li>Only needed if the <code>plotting</code> feature is enabled (which it is by default)</li>
+<li>Only required if the <code>plotting</code> feature is enabled (which it is by default)</li>
+<li>Version must be <code>&gt;=2.11.1</code></li>
 <li>Arch: <code>pkg-config</code> <code>make</code> <code>cmake</code> <code>freetype2</code></li>
 <li>Ubuntu: <code>libfreetype-dev</code> <code>libexpat1-dev</code></li>
 </ul>
 </div>
 </div>
-<div id="admonition-cudahttpsdevelopernvidiacomcuda-zone-for-accelerated-sky-modelling" class="admonition tip">
+<div id="admonition-cuda-for-accelerated-sky-modelling" class="admonition tip">
 <div class="admonition-title">
-<p><a href="https://developer.nvidia.com/cuda-zone">CUDA</a> (for accelerated sky modelling)</p>
-<p><a class="admonition-anchor-link" href="#admonition-cudahttpsdevelopernvidiacomcuda-zone-for-accelerated-sky-modelling"></a></p>
+<p>CUDA (for accelerated sky modelling)</p>
+<p><a class="admonition-anchor-link" href="#admonition-cuda-for-accelerated-sky-modelling"></a></p>
 </div>
 <div>
 <ul>
-<li>Only needed if either the <code>cuda</code> or <code>cuda-single</code> feature is enabled</li>
+<li>Only required if either the <code>cuda</code> or <code>cuda-single</code> feature is enabled</li>
+<li>Requires a <a href="https://developer.nvidia.com/cuda-gpus">CUDA-capable device</a></li>
 <li>Arch: <code>cuda</code></li>
+<li>Ubuntu and others: <a href="https://developer.nvidia.com/cuda-zone">Download link</a></li>
 <li>The library dir can be specified manually with <code>CUDA_LIB</code>
 <ul>
 <li>If not specified, <code>/usr/local/cuda</code> and <code>/opt/cuda</code> are searched.</li>
