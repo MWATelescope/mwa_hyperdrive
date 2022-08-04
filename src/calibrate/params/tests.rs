@@ -9,6 +9,7 @@ use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     LatLngHeight,
 };
+use mwa_hyperdrive_beam::BeamType;
 
 use super::InvalidArgsError::{
     BadArrayPosition, BadDelays, CalFreqFactorNotInteger, CalFreqResNotMultiple,
@@ -180,6 +181,7 @@ fn test_new_params_tile_flags() {
 #[test]
 fn test_handle_delays() {
     let mut args = get_reduced_1090008640(true);
+    args.no_beam = false;
     // only 3 delays instead of 16 expected
     args.delays = Some((0..3).collect::<Vec<u32>>());
     let result = args.clone().into_params();
@@ -195,14 +197,52 @@ fn test_handle_delays() {
     assert!(matches!(result, Err(BadDelays)));
 
     let delays = (0..16).collect::<Vec<u32>>();
-    args.delays = Some(delays);
+    args.delays = Some(delays.clone());
     let result = args.into_params();
 
     assert!(result.is_ok(), "result={:?} not Ok", result.err().unwrap());
 
-    // XXX(dev): not testable yet.
-    // let fee_beam = result.unwrap().beam.downcast::<FeeBeam>().unwrap();
-    // assert_eq!(fee_beam.delays[(0, 0)], delays[0]);
+    let fee_beam = result.unwrap().beam;
+    assert_eq!(fee_beam.get_beam_type(), BeamType::FEE);
+    let beam_delays = fee_beam
+        .get_dipole_delays()
+        .expect("expected some delays to be provided from the FEE beam!");
+    // Each row of the delays should be the same as the 16 input values.
+    for row in beam_delays.outer_iter() {
+        assert_eq!(row.as_slice().unwrap(), delays);
+    }
+}
+
+#[test]
+fn test_unity_dipole_gains() {
+    let mut args = get_reduced_1090008640(true);
+    args.no_beam = false;
+    let params = args.clone().into_params().unwrap();
+
+    let fee_beam = params.beam;
+    assert_eq!(fee_beam.get_beam_type(), BeamType::FEE);
+    let beam_gains = fee_beam.get_dipole_gains();
+
+    // Because there are dead dipoles in the metafits, we expect some of the
+    // gains to not be 1.
+    assert!(!beam_gains.iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
+
+    // Now ignore dead dipoles.
+    args.unity_dipole_gains = true;
+    let params = args.into_params().unwrap();
+
+    let fee_beam = params.beam;
+    assert_eq!(fee_beam.get_beam_type(), BeamType::FEE);
+    let beam_gains = fee_beam.get_dipole_gains();
+
+    // Now we expect all gains to be 1s, as we're ignoring dead dipoles.
+    assert!(beam_gains.iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
+    // Verify that there are no dead dipoles in the delays.
+    assert!(fee_beam
+        .get_dipole_delays()
+        .unwrap()
+        .iter()
+        .all(|d| *d != 32));
 }
 
 #[test]

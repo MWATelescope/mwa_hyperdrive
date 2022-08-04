@@ -551,34 +551,47 @@ impl CalibrateParams {
         let beam: Box<dyn Beam> = if no_beam {
             create_no_beam_object(total_num_tiles)
         } else {
-            let dipole_delays = dipole_delays.ok_or(InvalidArgsError::NoDelays)?;
-            create_fee_beam_object(
-                beam_file,
-                total_num_tiles,
-                dipole_delays,
-                if unity_dipole_gains {
-                    None
-                } else {
-                    // If we don't have dipole gains from the input data, then
-                    // we issue a warning that we must assume no dead dipoles.
-                    if obs_context.dipole_gains.is_none() {
-                        match input_data.get_input_data_type() {
-                            VisInputType::MeasurementSet => {
-                                warn!("Measurement sets cannot supply dead dipole information.");
-                                warn!("Without a metafits file, we must assume all dipoles are alive.");
-                                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                            }
-                            VisInputType::Uvfits => {
-                                warn!("uvfits files cannot supply dead dipole information.");
-                                warn!("Without a metafits file, we must assume all dipoles are alive.");
-                                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                            }
-                            VisInputType::Raw => unreachable!(),
+            let mut dipole_delays = dipole_delays.ok_or(InvalidArgsError::NoDelays)?;
+            let dipole_gains = if unity_dipole_gains {
+                None
+            } else {
+                // If we don't have dipole gains from the input data, then
+                // we issue a warning that we must assume no dead dipoles.
+                if obs_context.dipole_gains.is_none() {
+                    match input_data.get_input_data_type() {
+                        VisInputType::MeasurementSet => {
+                            warn!("Measurement sets cannot supply dead dipole information.");
+                            warn!("Without a metafits file, we must assume all dipoles are alive.");
+                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
                         }
+                        VisInputType::Uvfits => {
+                            warn!("uvfits files cannot supply dead dipole information.");
+                            warn!("Without a metafits file, we must assume all dipoles are alive.");
+                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                        }
+                        VisInputType::Raw => unreachable!(),
                     }
-                    obs_context.dipole_gains.clone()
-                },
-            )?
+                }
+                obs_context.dipole_gains.clone()
+            };
+            if dipole_gains.is_none() {
+                // If we don't have dipole gains, we must assume all dipoles are
+                // "alive". But, if any dipole delays are 32, then the beam code
+                // will still ignore those dipoles. So use ideal dipole delays
+                // for all tiles.
+                let ideal_delays = dipole_delays.get_ideal_delays();
+
+                // Warn the user if they wanted unity dipole gains but the ideal
+                // dipole delays contain 32.
+                if unity_dipole_gains && ideal_delays.iter().any(|&v| v == 32) {
+                    warn!(
+                        "Some ideal dipole delays are 32; these dipoles will not have unity gains"
+                    );
+                }
+                dipole_delays.set_to_ideal_delays();
+            }
+
+            create_fee_beam_object(beam_file, total_num_tiles, dipole_delays, dipole_gains)?
         };
         let beam_file = beam.get_beam_file();
         debug!("Beam file: {beam_file:?}");

@@ -43,6 +43,7 @@ cfg_if::cfg_if! {
 }
 
 /// Supported beam types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BeamType {
     /// Fully-embedded element beam.
     FEE,
@@ -193,6 +194,23 @@ impl Delays {
             }
         }
         ideal_delays
+    }
+
+    /// Some tiles' delays might contain 32s (i.e. dead dipoles), and we might
+    /// want to ignore that. Take the ideal delays and replace all tiles' delays
+    /// with them.
+    pub fn set_to_ideal_delays(&mut self) {
+        let ideal_delays = self.get_ideal_delays();
+        match self {
+            // In this case, the delays are the ideal delays.
+            Delays::Full(a) => {
+                let ideal_delays = ArrayView1::from(&ideal_delays);
+                a.outer_iter_mut().for_each(|mut r| r.assign(&ideal_delays));
+            }
+
+            // In this case, no meaningful change can be made.
+            Delays::Partial { .. } => (),
+        }
     }
 }
 

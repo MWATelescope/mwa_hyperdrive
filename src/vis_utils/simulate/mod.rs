@@ -21,7 +21,7 @@ use crossbeam_utils::{atomic::AtomicCell, thread};
 use hifitime::{Duration, Epoch, Unit};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, info, warn};
 use marlu::{precession::precess_time, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic};
 use mwalib::MetafitsContext;
 use ndarray::ArcArray2;
@@ -496,7 +496,7 @@ impl VisSimParams {
             source_list
         };
 
-        let delays = match delays {
+        let mut delays = match delays {
             Some(d) => {
                 if d.len() != 16 || d.iter().any(|&v| v > 32) {
                     return Err(VisSimulateError::BadDelays);
@@ -509,15 +509,25 @@ impl VisSimParams {
         let beam = if *no_beam {
             create_no_beam_object(tile_xyzs.len())
         } else {
-            create_fee_beam_object(
-                beam_file.as_ref(),
-                metafits.num_ants,
-                delays,
-                match unity_dipole_gains {
-                    true => None,
-                    false => Some(get_dipole_gains(&metafits)),
-                },
-            )?
+            let dipole_gains = if *unity_dipole_gains {
+                // We are treating all dipoles as "alive". But, if any dipole
+                // delays are 32, then the beam code will still ignore those
+                // dipoles. So use ideal dipole delays for all tiles.
+
+                // Warn the user if they wanted unity dipole gains but the ideal
+                // dipole delays contain 32.
+                if *unity_dipole_gains && ideal_delays.iter().any(|&v| v == 32) {
+                    warn!(
+                        "Some ideal dipole delays are 32; these dipoles will not have unity gains"
+                    );
+                }
+                delays.set_to_ideal_delays();
+                None
+            } else {
+                Some(get_dipole_gains(&metafits))
+            };
+
+            create_fee_beam_object(beam_file.as_ref(), metafits.num_ants, delays, dipole_gains)?
         };
         let beam_file = beam.get_beam_file();
         debug!("Beam file: {beam_file:?}");

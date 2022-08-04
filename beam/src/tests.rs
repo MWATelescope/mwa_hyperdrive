@@ -99,3 +99,58 @@ fn fee_cuda_beam_values_are_sensible() {
     let hyperbeam_values = hyperbeam_values.mapv(|j| TestJones::from([j[0], j[1], j[2], j[3]]));
     assert_abs_diff_eq!(hyperdrive_values, hyperbeam_values);
 }
+
+#[test]
+fn set_delays_to_ideal() {
+    let v = vec![0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 32, 3];
+    let d = Delays::Partial(v);
+    let mut d2 = d.clone();
+    d2.set_to_ideal_delays();
+    // Despite having a 32, the values are the same, because there's no
+    // information on what 32 should be replaced with.
+    match (d, d2) {
+        (Delays::Partial(d), Delays::Partial(d2)) => assert_eq!(d, d2),
+        _ => unreachable!(),
+    }
+
+    let v = vec![0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3];
+    let d = Delays::Partial(v);
+    let mut d2 = d.clone();
+    d2.set_to_ideal_delays();
+    // Already-ideal delays are left as is too.
+    match (d, d2) {
+        (Delays::Partial(d), Delays::Partial(d2)) => assert_eq!(d, d2),
+        _ => unreachable!(),
+    }
+
+    let mut a = Array2::ones((2, 16));
+    a[(0, 15)] = 32;
+    let d = Delays::Full(a);
+    let mut d2 = d.clone();
+    d2.set_to_ideal_delays();
+    match (d, d2) {
+        (Delays::Full(d), Delays::Full(d2)) => {
+            // The delays are not equal, because the 32 has been replaced.
+            assert_ne!(d, d2);
+            for i in 0..2 {
+                for j in 0..15 {
+                    assert_eq!(d[(i, j)], d2[(i, j)]);
+                }
+            }
+            assert_ne!(d[(0, 15)], d2[(0, 15)]);
+        }
+        _ => unreachable!(),
+    }
+
+    let a = Array2::ones((2, 16));
+    let d = Delays::Full(a);
+    let mut d2 = d.clone();
+    d2.set_to_ideal_delays();
+    match (d, d2) {
+        (Delays::Full(d), Delays::Full(d2)) => {
+            // The delays are equal because nothing needs to be done.
+            assert_eq!(d, d2);
+        }
+        _ => unreachable!(),
+    }
+}

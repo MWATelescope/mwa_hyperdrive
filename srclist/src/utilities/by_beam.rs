@@ -246,10 +246,11 @@ pub fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
                 .join(", ")
         );
 
-        // Set up the beam.
-        // TODO: Use ideal dipole delays.
-        let beam =
-            create_fee_beam_object(beam_file, 1, Delays::Full(get_dipole_delays(&meta)), None)?;
+        // Set up the beam. We use the ideal delays for all tiles because we
+        // don't want to use any dead dipoles.
+        let mut dipole_delays = Delays::Full(get_dipole_delays(&meta));
+        dipole_delays.set_to_ideal_delays();
+        let beam = create_fee_beam_object(beam_file, 1, dipole_delays, None)?;
 
         // Apply any filters.
         let mut sl = if filter_points || filter_gaussians || filter_shapelets {
