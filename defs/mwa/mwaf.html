@@ -157,6 +157,20 @@ producing them is:</p>
 </code></pre>
 <p>At the time of writing, <code>hyperdrive</code> only utilises <code>mwaf</code> files when reading
 visibilities from raw data.</p>
+<div id="admonition-cotter-produced-mwaf-files" class="admonition danger">
+<div class="admonition-title">
+<p>cotter-produced mwaf files</p>
+<p><a class="admonition-anchor-link" href="#admonition-cotter-produced-mwaf-files"></a></p>
+</div>
+<div>
+<p><code>cotter</code>-produced <code>mwaf</code> files are unreliable because</p>
+<ol>
+<li>The start time of the flags is not written; and</li>
+<li>The number of timesteps per mwaf file can vary, further confusing things.</li>
+</ol>
+<p>Many MWA observations have pre-generated <code>mwaf</code> files that are stored in the archive. These should be ignored and <code>mwaf</code> files should be made with <code>Birli</code>.</p>
+</div>
+</div>
 
                     </main>
 

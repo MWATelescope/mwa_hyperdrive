@@ -180,6 +180,8 @@ metres. Any UVWs below or above these thresholds have baseline weights of 0
 during calibration (meaning they effectively aren't used in calibration).
 <code>UVW_MIN_L</code> and <code>UVW_MAX_L</code> correspond to <code>UVW_MIN</code> and <code>UVW_MAX</code>, but are in
 wavelength units (the <code>L</code> stands for lambda).</p>
+<p>Some MWA beam codes require a file for their calculations. <code>BEAMFILE</code> is the
+path to this file.</p>
 <h3 id="raw-mwa-data-corrections"><a class="header" href="#raw-mwa-data-corrections">Raw MWA data corrections</a></h3>
 <p><code>PFB</code> describes the <a href="mwa/corrections.html#pfb-gains">PFB gains flavour</a> applied to
 the raw MWA data. At the time of writing, this flavour is described as &quot;jake&quot;,
@@ -203,41 +205,45 @@ contains the metadata keys described above). Other than the first HDU and the
 &quot;SOLUTIONS&quot; HDU (HDUs 1 and 2, respectfully), <em>all HDUs and their contents are
 optional</em>.</p>
 <h3 id="timeblocks"><a class="header" href="#timeblocks">TIMEBLOCKS</a></h3>
+<p>See <a href="blocks.html">blocks</a> for an explanation of what timeblocks are.</p>
 <p>The &quot;TIMEBLOCKS&quot; HDU is a FITS table with three columns:</p>
 <ol>
 <li><code>Start</code></li>
 <li><code>End</code></li>
 <li><code>Average</code></li>
 </ol>
-<p>Each row represents a timeblock, and there must be the same number of rows as
-there are timeblocks in the calibration solutions (in the &quot;SOLUTIONS&quot; HDU). Each
-of these times is a centroid GPS timestamp.</p>
+<p>Each row represents a calibration timeblock, and there must be the same number
+of rows as there are timeblocks in the calibration solutions (in the &quot;SOLUTIONS&quot;
+HDU). Each of these times is a centroid GPS timestamp.</p>
 <p>It is possible to have one or multiple columns without data; <code>cfitsio</code> will
 write zeros for values, but <code>hyperdrive</code> will ignore columns with all zeros.</p>
 <p>While average times are likely just the median of its corresponding start and
 end times, it need not be so; in this case, it helps to clarify that some
-timesteps in this calibration timeblock were not used. e.g. a start time of 10
+timesteps in that calibration timeblock were not used. e.g. a start time of 10
 and an end time of 16 probably has an average time of 13, but, if 3 of 4
-timesteps in this timeblock are used, then the average time could be 12.666 or
+timesteps in that timeblock are used, then the average time could be 12.666 or
 13.333.</p>
 <h3 id="tiles"><a class="header" href="#tiles">TILES</a></h3>
-<p>The &quot;TILES&quot; HDU is a FITS table with up to four columns:</p>
+<p>The &quot;TILES&quot; HDU is a FITS table with up to five columns:</p>
 <ol>
 <li><code>Antenna</code></li>
 <li><code>Flag</code></li>
 <li><code>TileName</code></li>
 <li><code>DipoleGains</code></li>
+<li><code>DipoleDelays</code></li>
 </ol>
 <p><code>Antenna</code> is the 0-N antenna index (where N is the total number of antennas in
 the observation). These indices match the &quot;Antenna&quot; column of an <a href="mwa/metafits.html">MWA
 metafits</a> file.</p>
-<p><code>Flag</code> is a boolean indicating whether an antenna was flagged during calibration
+<p><code>Flag</code> is a boolean indicating whether an antenna was flagged for calibration
 (1) or not (0).</p>
 <p><code>TileName</code> is the... name of the tile. As with <code>Antenna</code>, this should match the
 contents of an MWA metafits file.</p>
 <p><code>DipoleGains</code> contains the dipole gains used for each tile in calibration. There
-are 32 values; the first 16 are for the X dipoles and the second 16 are for the
-Y dipoles. Typically, the values are either 0 (dead dipole) or 1.</p>
+are 32 values per tile; the first 16 are for the X dipoles and the second 16 are
+for the Y dipoles. Typically, the values are either 0 (dead dipole) or 1.</p>
+<p><code>DipoleDelays</code> contains the dipole delays used for each tile in calibration.
+There are 16 values per tile.</p>
 <h3 id="chanblocks"><a class="header" href="#chanblocks">CHANBLOCKS</a></h3>
 <p>See <a href="blocks.html">blocks</a> for an explanation of what chanblocks are.</p>
 <p>The &quot;CHANBLOCKS&quot; HDU is a FITS table with up to three columns:</p>
