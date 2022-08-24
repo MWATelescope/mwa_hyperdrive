@@ -39,6 +39,9 @@
 - Version must be `>=2.11.1`
 - Arch: `pkg-config` `make` `cmake` `freetype2`
 - Ubuntu: `libfreetype-dev` `libexpat1-dev`
+- Installation may be eased by using the `fontconfig-dlopen` feature. This means
+  that `libfontconfig` is used at runtime, and not found and linked at link
+  time.
 ```
 
 ```admonish tip title="CUDA (for accelerated sky modelling)"
