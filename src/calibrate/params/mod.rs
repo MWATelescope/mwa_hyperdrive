@@ -830,7 +830,7 @@ impl CalibrateParams {
             freq_average_factor
         };
 
-        let fences = channels_to_chanblocks(
+        let mut fences = channels_to_chanblocks(
             &obs_context.fine_chan_freqs,
             obs_context.freq_res,
             freq_average_factor,
@@ -846,12 +846,39 @@ impl CalibrateParams {
                     return Err(InvalidArgsError::NoChannels);
                 }
             }
-            [f, ..] => {
+            [f, others @ ..] => {
                 // Check that the chanblocks aren't all flagged.
                 if f.chanblocks.is_empty() {
                     return Err(InvalidArgsError::NoChannels);
                 }
                 warn!("\"Picket fence\" data detected. Only the first contiguous band will be used as this is not well supported right now.");
+                // flag all channels not in first contiguous band
+                for other in others {
+                    let mut new_flagged_fine_chans = HashSet::<usize>::new();
+                    let mut min_new_flagged_fine_chan_freq: Option<f64> = None;
+                    for cb in &other.chanblocks {
+                        new_flagged_fine_chans.insert(cb.chanblock_index.into());
+                        match (cb._freq, min_new_flagged_fine_chan_freq) {
+                            (cb_freq, Some(min_freq)) if min_freq < cb_freq => (),
+                            (cb_freq, _) => min_new_flagged_fine_chan_freq = Some(cb_freq),
+                        }
+                    }
+                    if !new_flagged_fine_chans.is_empty() {
+                        flagged_fine_chans.extend(new_flagged_fine_chans);
+                    }
+                    if let Some(min) = min_new_flagged_fine_chan_freq {
+                        warn!("flagging freqs above {} outside first contiguous band", min);
+                        // unflagged_fine_chan_freqs.drain_filter(|f| f >= &min);
+                        (_, unflagged_fine_chan_freqs) =
+                            unflagged_fine_chan_freqs.iter().partition(|&f| f >= &min);
+                    }
+                }
+                fences = channels_to_chanblocks(
+                    &obs_context.fine_chan_freqs,
+                    obs_context.freq_res,
+                    freq_average_factor,
+                    &flagged_fine_chans,
+                );
             }
         }
         let fences = Vec1::try_from_vec(fences).map_err(|_| InvalidArgsError::NoChannels)?;
