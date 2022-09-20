@@ -12,7 +12,7 @@ use serial_test::serial;
 
 use crate::*;
 use mwa_hyperdrive::{calibrate::di_calibrate, solutions::CalibrationSolutions};
-use mwa_hyperdrive_common::clap;
+use mwa_hyperdrive_common::{clap, setup_logging};
 
 #[test]
 #[serial]
@@ -171,4 +171,62 @@ fn test_1090008640_woden() {
     assert!(!hyp_sols.di_jones.iter().any(|jones| jones.any_nan()));
 
     assert_abs_diff_eq!(bin_sols.di_jones, hyp_sols.di_jones);
+}
+
+/// Get the calibration arguments associated with the obsid 1233282520. This
+/// observational data is inside the hyperdrive git repo, but has been reduced;
+/// there is only 1 coarse channel and 1 timestep.
+///
+/// data generated with <https://github.com/MWATelescope/Birli/blob/main/tests/data/adjust_gpufits.py> `--timestep-limit=1`
+fn get_reduced_1233282520() -> CalibrateUserArgs {
+    // Ensure that the required files are there.
+    let data = vec![
+        "test_files/1233282520/1233282520_noquack.metafits".to_string(),
+        "test_files/1233282520/1233282520_20190204022824_gpubox12_00.fits".to_string(),
+        "test_files/1233282520/1233282520_20190204022824_gpubox13_00.fits".to_string(),
+    ];
+    for file in &data {
+        let pb = PathBuf::from(file);
+        assert!(
+            pb.exists(),
+            "Could not find {}, which is required for this test",
+            pb.display()
+        );
+    }
+
+    let srclist = "test_files/1233282520/1233282520_121-132_model.txt".to_string();
+    assert!(
+        PathBuf::from(&srclist).exists(),
+        "Could not find {}, which is required for this test",
+        srclist
+    );
+
+    CalibrateUserArgs {
+        data: Some(data),
+        source_list: Some(srclist),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_1233282520_picket() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+
+    setup_logging(3).unwrap();
+
+    let mut args = get_reduced_1233282520();
+    let data = args.data.clone().unwrap();
+    let metafits = &data[0];
+    let sols = tmp_dir.path().join("sols.fits");
+    args.outputs = Some(vec![sols.clone()]);
+    args.no_progress_bars = true;
+
+    // Run di-cal and check that it succeeds
+    let result = di_calibrate(Box::new(args), None, false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+
+    // check solutions file has been created, is readable
+    assert!(sols.exists(), "sols file not written");
+    let sol_data = CalibrationSolutions::read_solutions_from_ext(sols, metafits.into()).unwrap();
+    assert_eq!(sol_data.obsid, Some(1233282520));
 }

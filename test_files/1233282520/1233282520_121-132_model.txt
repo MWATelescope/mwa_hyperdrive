@@ -1,0 +1,2659 @@
+skymodel fileformat 1.1
+source {
+  name "GLEAM J190249-232949"
+  component {
+    type point
+    position 19h02m49.3799s -23d29m49.6797s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.3867779 0 0 0
+      spectral-index { -0.94 -0.06 }
+    }
+  }
+}
+source {
+  name "GLEAM J193207-193147"
+  component {
+    type point
+    position 19h32m07.5366s -19d31m47.2266s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.2635200 0 0 0
+      spectral-index { -0.77 0.03 }
+    }
+  }
+}
+source {
+  name "GLEAM J192559-183648"
+  component {
+    type gaussian
+    position 19h25m59.0186s -18d36m48.8287s
+    shape 160.4 124.1 76.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.3351841 0 0 0
+      spectral-index { -0.83 -0.03 }
+    }
+  }
+}
+source {
+  name "GLEAM J192115-182603"
+  component {
+    type point
+    position 19h21m15.6812s -18d26m03.7802s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2689365 0 0 0
+      spectral-index { -1.09 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J194115-152428"
+  component {
+    type point
+    position 19h41m15.3809s -15d24m28.6214s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 9.2182880 0 0 0
+      spectral-index { -0.63 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J191140-171204"
+  component {
+    type point
+    position 19h11m40.9204s -17d12m04.5483s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.7262322 0 0 0
+      spectral-index { 0.06 0.30 }
+    }
+  }
+}
+source {
+  name "GLEAM J192412-154859"
+  component {
+    type point
+    position 19h24m12.1655s -15d48m59.2548s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.7499082 0 0 0
+      spectral-index { -0.51 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J193001-150907"
+  component {
+    type gaussian
+    position 19h30m01.4209s -15d09m07.8092s
+    shape 160.7 129.1 76.4
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 4.8489927 0 0 0
+      spectral-index { -1.00 0.13 }
+    }
+  }
+}
+source {
+  name "GLEAM J192739-145521"
+  component {
+    type point
+    position 19h27m39.2432s -14d55m21.5412s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.3615563 0 0 0
+      spectral-index { -0.78 0.07 }
+    }
+  }
+}
+source {
+  name "GLEAM J192605-144112"
+  component {
+    type point
+    position 19h26m05.8301s -14d41m12.8817s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.1009132 0 0 0
+      spectral-index { -0.58 0.23 }
+    }
+  }
+}
+source {
+  name "GLEAM J192344-145014"
+  component {
+    type point
+    position 19h23m44.2017s -14d50m14.1884s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5441415 0 0 0
+      spectral-index { -0.76 0.06 }
+    }
+  }
+}
+source {
+  name "GLEAM J193135-140558"
+  component {
+    type point
+    position 19h31m35.5957s -14d05m58.3397s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.3410603 0 0 0
+      spectral-index { -0.81 0.08 }
+    }
+  }
+}
+source {
+  name "GLEAM J192213-143823"
+  component {
+    type point
+    position 19h22m13.2056s -14d38m23.3901s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0672998 0 0 0
+      spectral-index { -0.98 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J200756-101636"
+  component {
+    type point
+    position 20h07m56.9238s -10d16m36.6316s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1321983 0 0 0
+      spectral-index { -0.82 -0.20 }
+    }
+  }
+}
+source {
+  name "GLEAM J191946-131902"
+  component {
+    type point
+    position 19h19m46.6553s -13d19m02.1593s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6170618 0 0 0
+      spectral-index { -0.76 0.14 }
+    }
+  }
+}
+source {
+  name "GLEAM J191754-120433"
+  component {
+    type point
+    position 19h17m54.5361s -12d04m33.4669s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 5.5254859 0 0 0
+      spectral-index { -0.71 0.11 }
+    }
+  }
+}
+source {
+  name "GLEAM J195133-095534"
+  component {
+    type point
+    position 19h51m33.2227s -9d55m34.5463s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1115276 0 0 0
+      spectral-index { -0.95 -0.19 }
+    }
+  }
+}
+source {
+  name "GLEAM J193624-105150"
+  component {
+    type point
+    position 19h36m24.9683s -10d51m50.3668s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6947122 0 0 0
+      spectral-index { -0.88 0.13 }
+    }
+  }
+}
+source {
+  name "GLEAM J191659-114507"
+  component {
+    type point
+    position 19h16m59.1138s -11d45m07.8072s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.4889329 0 0 0
+      spectral-index { -0.92 -0.05 }
+    }
+  }
+}
+source {
+  name "GLEAM J194800-092013"
+  component {
+    type point
+    position 19h48m00.1758s -9d20m13.155s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.3625841 0 0 0
+      spectral-index { -0.58 -0.31 }
+    }
+  }
+}
+source {
+  name "GLEAM J191742-111710"
+  component {
+    type point
+    position 19h17m42.1655s -11d17m10.9708s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5251359 0 0 0
+      spectral-index { -1.05 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J192150-110104"
+  component {
+    type point
+    position 19h21m50.3979s -11d01m04.785s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6139891 0 0 0
+      spectral-index { -0.90 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J193843-094932"
+  component {
+    type point
+    position 19h38m43.5864s -9d49m32.2618s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0320443 0 0 0
+      spectral-index { -1.01 -0.29 }
+    }
+  }
+}
+source {
+  name "GLEAM J194421-091700"
+  component {
+    type point
+    position 19h44m21.0718s -9d17m00.0737s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.6591197 0 0 0
+      spectral-index { -1.17 -0.13 }
+    }
+  }
+}
+source {
+  name "GLEAM J191606-110203"
+  component {
+    type gaussian
+    position 19h16m06.0425s -11d02m03.8159s
+    shape 183.8 129.7 83.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.1342260 0 0 0
+      spectral-index { -0.96 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J195611-073651"
+  component {
+    type point
+    position 19h56m11.3452s -7d36m51.7504s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.7493086 0 0 0
+      spectral-index { -1.07 -0.22 }
+    }
+  }
+}
+source {
+  name "GLEAM J192531-090129"
+  component {
+    type point
+    position 19h25m31.1279s -9d01m29.4356s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0506082 0 0 0
+      spectral-index { -0.08 -0.27 }
+    }
+  }
+}
+source {
+  name "GLEAM J192320-090822"
+  component {
+    type point
+    position 19h23m20.7275s -9d08m22.1198s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6651833 0 0 0
+      spectral-index { -1.08 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J193252-081739"
+  component {
+    type point
+    position 19h32m52.2363s -8d17m39.4116s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 5.0490375 0 0 0
+      spectral-index { -0.91 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J194407-072322"
+  component {
+    type point
+    position 19h44m07.5073s -7d23m22.1782s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.6271857 0 0 0
+      spectral-index { -1.14 -0.12 }
+    }
+  }
+}
+source {
+  name "GLEAM J192022-080520"
+  component {
+    type point
+    position 19h20m22.7197s -8d05m20.3167s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6039869 0 0 0
+      spectral-index { -0.85 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J192331-074138"
+  component {
+    type point
+    position 19h23m31.0693s -7d41m38.1932s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 7.5056329 0 0 0
+      spectral-index { -0.92 -0.11 }
+    }
+  }
+}
+source {
+  name "GLEAM J200824-041828"
+  component {
+    type point
+    position 20h08m24.9683s -4d18m28.2338s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0089252 0 0 0
+      spectral-index { -0.97 -0.17 }
+    }
+  }
+}
+source {
+  name "GLEAM J192928-063650"
+  component {
+    type point
+    position 19h29m28.6304s -6d36m50.7994s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.1402294 0 0 0
+      spectral-index { -0.95 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J192458-064328"
+  component {
+    type point
+    position 19h24m58.8647s -6d43m28.3071s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3849163 0 0 0
+      spectral-index { -1.11 -0.10 }
+    }
+  }
+}
+source {
+  name "GLEAM J194517-051642"
+  component {
+    type point
+    position 19h45m17.5562s -5d16m42.1368s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6472889 0 0 0
+      spectral-index { -0.84 -0.21 }
+    }
+  }
+}
+source {
+  name "GLEAM J192822-045623"
+  component {
+    type point
+    position 19h28m22.5439s -4d56m23.0544s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1519757 0 0 0
+      spectral-index { -1.12 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J200608-022332"
+  component {
+    type point
+    position 20h06m08.8477s -2d23m32.6624s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1749365 0 0 0
+      spectral-index { -0.63 -0.48 }
+    }
+  }
+}
+source {
+  name "GLEAM J193548-040734"
+  component {
+    type point
+    position 19h35m48.0103s -4d07m34.1353s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4469244 0 0 0
+      spectral-index { -0.76 -0.42 }
+    }
+  }
+}
+source {
+  name "GLEAM J192901-042105"
+  component {
+    type point
+    position 19h29m01.5015s -4d21m05.8911s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0479505 0 0 0
+      spectral-index { -1.16 -0.11 }
+    }
+  }
+}
+source {
+  name "GLEAM J194019-032719"
+  component {
+    type point
+    position 19h40m19.2334s -3d27m19.7799s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.4606304 0 0 0
+      spectral-index { -1.06 -0.24 }
+    }
+  }
+}
+source {
+  name "GLEAM J195232-011729"
+  component {
+    type gaussian
+    position 19h52m32.4756s -1d17m29.0338s
+    shape 201.6 173.7 -12.0
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6047267 0 0 0
+      spectral-index { -1.08 -0.23 }
+    }
+  }
+}
+source {
+  name "GLEAM J194127-010459"
+  component {
+    type point
+    position 19h41m27.1069s -1d04m59.7023s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.7834086 0 0 0
+      spectral-index { -1.07 -0.34 }
+    }
+  }
+}
+source {
+  name "GLEAM J200335+002800"
+  component {
+    type point
+    position 20h03m35.3613s 0d28m00.3277s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0307181 0 0 0
+      spectral-index { -1.20 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J193654-002156"
+  component {
+    type point
+    position 19h36m54.1626s -0d21m56.5979s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.6540926 0 0 0
+      spectral-index { -1.13 -0.36 }
+    }
+  }
+}
+source {
+  name "GLEAM J194619+002021"
+  component {
+    type point
+    position 19h46m19.1895s 0d20m21.823s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4565532 0 0 0
+      spectral-index { -0.81 -0.13 }
+    }
+  }
+}
+source {
+  name "GLEAM J195513+015418"
+  component {
+    type point
+    position 19h55m13.8574s 1d54m18.5269s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1730232 0 0 0
+      spectral-index { -0.88 -0.09 }
+    }
+  }
+}
+source {
+  name "GLEAM J195215+023032"
+  component {
+    type gaussian
+    position 19h52m15.4688s 2d30m32.9495s
+    shape 164.7 150.9 86.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 6.4201004 0 0 0
+      spectral-index { -0.88 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J194907+023706"
+  component {
+    type point
+    position 19h49m07.9248s 2d37m06.0412s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2384773 0 0 0
+      spectral-index { -0.83 -0.32 }
+    }
+  }
+}
+source {
+  name "GLEAM J172031-005845"
+  component {
+    type gaussian
+    position 17h20m31.2012s -0d58m45.284s
+    shape 241.0 153.2 88.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2751992 0 0 0
+      spectral-index { -0.55 0.11 }
+    }
+  }
+}
+source {
+  name "GLEAM J181129-192540"
+  component {
+    type gaussian
+    position 18h11m29.6851s -19d25m40.0429s
+    shape 252.9 233.2 -73.1
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.8794671 0 0 0
+      spectral-index { -0.73 -0.40 }
+    }
+  }
+}
+source {
+  name "GLEAM J185052-165549"
+  component {
+    type gaussian
+    position 18h50m52.1191s -16d55m49.3881s
+    shape 193.8 162.4 54.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0925625 0 0 0
+      spectral-index { -0.88 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J181415-171145"
+  component {
+    type gaussian
+    position 18h14m15.3442s -17d11m45.13s
+    shape 282.5 260.7 -70.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.0537828 0 0 0
+      spectral-index { -0.89 -0.60 }
+    }
+  }
+}
+source {
+  name "GLEAM J184328-153435"
+  component {
+    type point
+    position 18h43m28.894s -15d34m35.4066s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0022017 0 0 0
+      spectral-index { -0.81 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J185304-144359"
+  component {
+    type point
+    position 18h53m04.7534s -14d43m59.3658s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6785906 0 0 0
+      spectral-index { -1.04 -0.11 }
+    }
+  }
+}
+source {
+  name "GLEAM J190333-135755"
+  component {
+    type point
+    position 19h03m33.1348s -13d57m55.7755s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2854342 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190402-135453"
+  component {
+    type point
+    position 19h04m02.168s -13d54m53.1896s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2355425 0 0 0
+      spectral-index { -0.82 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J175841-161653"
+  component {
+    type point
+    position 17h58m41.7261s -16d16m53.1248s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0644013 0 0 0
+      spectral-index { -0.80 -0.06 }
+    }
+  }
+}
+source {
+  name "GLEAM J183109-145617"
+  component {
+    type gaussian
+    position 18h31m09.5142s -14d56m17.1389s
+    shape 837.3 244.0 40.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0110014 0 0 0
+      spectral-index { -1.34 -0.54 }
+    }
+  }
+}
+source {
+  name "GLEAM J184756-141241"
+  component {
+    type point
+    position 18h47m56.7188s -14d12m41.2015s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2705773 0 0 0
+      spectral-index { -0.89 -0.22 }
+    }
+  }
+}
+source {
+  name "GLEAM J181858-150119"
+  component {
+    type gaussian
+    position 18h18m58.2202s -15d01m19.2252s
+    shape 240.8 220.6 -69.4
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.8689203 0 0 0
+      spectral-index { -0.98 -0.30 }
+    }
+  }
+}
+source {
+  name "GLEAM J182058-142036"
+  component {
+    type gaussian
+    position 18h20m58.3301s -14d20m36.2606s
+    shape 221.3 212.2 -56.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3484366 0 0 0
+      spectral-index { -0.73 -0.40 }
+    }
+  }
+}
+source {
+  name "GLEAM J190933-114017"
+  component {
+    type gaussian
+    position 19h09m33.4424s -11d40m17.2806s
+    shape 353.8 185.9 79.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1769923 0 0 0
+      spectral-index { -1.61 -0.31 }
+    }
+  }
+}
+source {
+  name "GLEAM J190430-115245"
+  component {
+    type point
+    position 19h04m30.6665s -11d52m45.2023s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0911132 0 0 0
+      spectral-index { -1.08 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183807-124539"
+  component {
+    type gaussian
+    position 18h38m07.4487s -12d45m39.2281s
+    shape 200.6 196.5 48.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0067590 0 0 0
+      spectral-index { -0.90 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182436-131115"
+  component {
+    type gaussian
+    position 18h24m36.7529s -13d11m15.5527s
+    shape 363.4 300.8 41.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.9389869 0 0 0
+      spectral-index { -0.94 -0.79 }
+    }
+  }
+}
+source {
+  name "GLEAM J182516-131022"
+  component {
+    type gaussian
+    position 18h25m16.9849s -13d10m22.1283s
+    shape 384.2 313.6 44.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5407353 0 0 0
+      spectral-index { 0.82 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190645-111430"
+  component {
+    type point
+    position 19h06m45.3589s -11d14m30.3403s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4754427 0 0 0
+      spectral-index { -0.85 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182844-125945"
+  component {
+    type gaussian
+    position 18h28m44.5605s -12d59m45.4534s
+    shape 368.5 264.4 -33.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2512243 0 0 0
+      spectral-index { -1.34 -0.53 }
+    }
+  }
+}
+source {
+  name "GLEAM J182846-125421"
+  component {
+    type gaussian
+    position 18h28m46.8018s -12d54m21.7344s
+    shape 409.2 321.6 -23.5
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.7604780 0 0 0
+      spectral-index { -1.71 -0.74 }
+    }
+  }
+}
+source {
+  name "GLEAM J183930-123057"
+  component {
+    type point
+    position 18h39m30.8643s -12d30m57.795s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.8533299 0 0 0
+      spectral-index { -1.10 -0.17 }
+    }
+  }
+}
+source {
+  name "GLEAM J184606-115808"
+  component {
+    type point
+    position 18h46m06.4453s -11d58m08.8733s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.5357010 0 0 0
+      spectral-index { -0.80 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182409-122535"
+  component {
+    type gaussian
+    position 18h24m09.3457s -12d25m35.5728s
+    shape 254.4 149.9 38.8
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6240028 0 0 0
+      spectral-index { -0.44 -0.67 }
+    }
+  }
+}
+source {
+  name "GLEAM J182407-122142"
+  component {
+    type gaussian
+    position 18h24m07.4121s -12d21m42.9716s
+    shape 320.8 212.0 46.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.2157504 0 0 0
+      spectral-index { -0.85 -0.42 }
+    }
+  }
+}
+source {
+  name "GLEAM J182353-122846"
+  component {
+    type gaussian
+    position 18h23m53.4814s -12d28m46.8242s
+    shape 488.6 334.5 46.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 9.3919612 0 0 0
+      spectral-index { -0.83 -0.26 }
+    }
+  }
+}
+source {
+  name "GLEAM J182401-121823"
+  component {
+    type gaussian
+    position 18h24m01.6113s -12d18m23.5046s
+    shape 348.6 266.5 -56.4
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 5.2250581 0 0 0
+      spectral-index { -0.99 -0.54 }
+    }
+  }
+}
+source {
+  name "GLEAM J190557-102958"
+  component {
+    type point
+    position 19h05m57.3193s -10d29m58.2868s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2993179 0 0 0
+      spectral-index { -1.20 -0.19 }
+    }
+  }
+}
+source {
+  name "GLEAM J190601-102550"
+  component {
+    type point
+    position 19h06m01.5161s -10d25m50.2808s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5325051 0 0 0
+      spectral-index { -1.15 -0.16 }
+    }
+  }
+}
+source {
+  name "GLEAM J185129-111113"
+  component {
+    type point
+    position 18h51m29.2676s -11d11m13.8876s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0147894 0 0 0
+      spectral-index { -0.56 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190714-101729"
+  component {
+    type point
+    position 19h07m14.7729s -10d17m29.4209s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.7673506 0 0 0
+      spectral-index { -0.94 -0.15 }
+    }
+  }
+}
+source {
+  name "GLEAM J191230-094857"
+  component {
+    type point
+    position 19h12m30.2563s -9d48m57.7338s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6103877 0 0 0
+      spectral-index { -0.78 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182715-115328"
+  component {
+    type gaussian
+    position 18h27m15.7837s -11d53m28.5674s
+    shape 363.4 263.1 45.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1083845 0 0 0
+      spectral-index { 0.81 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J191502-091346"
+  component {
+    type point
+    position 19h15m02.9443s -9d13m46.8173s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.1752346 0 0 0
+      spectral-index { -0.93 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190322-094827"
+  component {
+    type point
+    position 19h03m22.8003s -9d48m27.7961s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0085959 0 0 0
+      spectral-index { -0.24 0.22 }
+    }
+  }
+}
+source {
+  name "GLEAM J185238-101326"
+  component {
+    type gaussian
+    position 18h52m38.6572s -10d13m26.2077s
+    shape 189.3 153.3 74.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4118852 0 0 0
+      spectral-index { -0.89 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182751-105949"
+  component {
+    type gaussian
+    position 18h27m51.6797s -10d59m49.5836s
+    shape 513.5 425.2 36.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6609020 0 0 0
+      spectral-index { -1.08 -1.16 }
+    }
+  }
+}
+source {
+  name "GLEAM J191750-082504"
+  component {
+    type point
+    position 19h17m50.0684s -8d25m04.5536s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.2157617 0 0 0
+      spectral-index { -1.12 -0.23 }
+    }
+  }
+}
+source {
+  name "GLEAM J183333-103407"
+  component {
+    type point
+    position 18h33m33.9551s -10d34m07.0619s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.2344702 0 0 0
+      spectral-index { -0.11 0.19 }
+    }
+  }
+}
+source {
+  name "GLEAM J181812-110705"
+  component {
+    type point
+    position 18h18m12.4365s -11d07m05.6035s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2544131 0 0 0
+      spectral-index { -0.97 -0.22 }
+    }
+  }
+}
+source {
+  name "GLEAM J185800-092618"
+  component {
+    type point
+    position 18h58m00.1172s -9d26m18.7079s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0988731 0 0 0
+      spectral-index { -0.80 -0.15 }
+    }
+  }
+}
+source {
+  name "GLEAM J185901-092023"
+  component {
+    type point
+    position 18h59m01.853s -9d20m23.5233s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.7584868 0 0 0
+      spectral-index { -0.76 -0.06 }
+    }
+  }
+}
+source {
+  name "GLEAM J183245-095811"
+  component {
+    type gaussian
+    position 18h32m45.1831s -9d58m11.6405s
+    shape 331.9 246.1 70.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.7339845 0 0 0
+      spectral-index { -1.15 -0.38 }
+    }
+  }
+}
+source {
+  name "GLEAM J183224-095850"
+  component {
+    type gaussian
+    position 18h32m24.4556s -9d58m50.9681s
+    shape 347.5 206.3 58.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.3085375 0 0 0
+      spectral-index { -1.27 -1.57 }
+    }
+  }
+}
+source {
+  name "GLEAM J191939-074243"
+  component {
+    type point
+    position 19h19m39.5947s -7d42m43.1824s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.9229630 0 0 0
+      spectral-index { -1.08 -0.17 }
+    }
+  }
+}
+source {
+  name "GLEAM J185027-091038"
+  component {
+    type point
+    position 18h50m27.9932s -9d10m38.1271s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4923173 0 0 0
+      spectral-index { -0.88 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J185031-090701"
+  component {
+    type point
+    position 18h50m31.626s -9d07m01.4939s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1493050 0 0 0
+      spectral-index { -0.87 -0.28 }
+    }
+  }
+}
+source {
+  name "GLEAM J182229-093901"
+  component {
+    type point
+    position 18h22m29.1504s -9d39m01.523s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 4.2340953 0 0 0
+      spectral-index { -0.14 -0.44 }
+    }
+  }
+}
+source {
+  name "GLEAM J191155-072011"
+  component {
+    type point
+    position 19h11m55.415s -7d20m11.6341s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0159661 0 0 0
+      spectral-index { -0.99 -0.12 }
+    }
+  }
+}
+source {
+  name "GLEAM J191226-070606"
+  component {
+    type point
+    position 19h12m26.4404s -7d06m06.7253s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.2227452 0 0 0
+      spectral-index { -0.94 -0.14 }
+    }
+  }
+}
+source {
+  name "GLEAM J183405-084215"
+  component {
+    type gaussian
+    position 18h34m05.9106s -8d42m15.1845s
+    shape 422.0 230.3 64.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 5.4523818 0 0 0
+      spectral-index { -1.63 -0.80 }
+    }
+  }
+}
+source {
+  name "GLEAM J183440-083350"
+  component {
+    type gaussian
+    position 18h34m40.5688s -8d33m50.1121s
+    shape 492.5 292.7 64.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 6.5350336 0 0 0
+      spectral-index { -0.44 -0.65 }
+    }
+  }
+}
+source {
+  name "GLEAM J183444-084221"
+  component {
+    type gaussian
+    position 18h34m44.9194s -8d42m21.5703s
+    shape 402.4 301.1 -38.1
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 4.9640819 0 0 0
+      spectral-index { -1.43 -1.86 }
+    }
+  }
+}
+source {
+  name "GLEAM J183512-083417"
+  component {
+    type gaussian
+    position 18h35m12.3193s -8d34m17.8697s
+    shape 328.3 286.5 -28.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.9101854 0 0 0
+      spectral-index { -1.52 -1.20 }
+    }
+  }
+}
+source {
+  name "GLEAM J192341-061059"
+  component {
+    type point
+    position 19h23m41.9531s -6d10m59.5865s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.8721922 0 0 0
+      spectral-index { -1.26 -0.06 }
+    }
+  }
+}
+source {
+  name "GLEAM J191219-064025"
+  component {
+    type point
+    position 19h12m19.7607s -6d40m25.8242s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.8260749 0 0 0
+      spectral-index { -0.76 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J184403-075954"
+  component {
+    type point
+    position 18h44m03.3618s -7d59m54.6974s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1073940 0 0 0
+      spectral-index { -1.03 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190605-065006"
+  component {
+    type point
+    position 19h06m05.918s -6d50m06.8859s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4100808 0 0 0
+      spectral-index { -0.99 -0.34 }
+    }
+  }
+}
+source {
+  name "GLEAM J184249-075610"
+  component {
+    type point
+    position 18h42m49.1016s -7d56m10.1712s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.8303720 0 0 0
+      spectral-index { -0.65 -0.15 }
+    }
+  }
+}
+source {
+  name "GLEAM J192016-055206"
+  component {
+    type gaussian
+    position 19h20m16.6333s -5d52m06.3107s
+    shape 192.5 158.2 -84.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.4015253 0 0 0
+      spectral-index { -0.99 -0.12 }
+    }
+  }
+}
+source {
+  name "GLEAM J183824-073418"
+  component {
+    type gaussian
+    position 18h38m24.1626s -7d34m18.819s
+    shape 316.9 163.6 -22.4
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6933312 0 0 0
+      spectral-index { -0.82 -0.68 }
+    }
+  }
+}
+source {
+  name "GLEAM J183848-073732"
+  component {
+    type gaussian
+    position 18h38m48.2446s -7d37m32.4136s
+    shape 391.2 244.3 80.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.2497836 0 0 0
+      spectral-index { -1.30 -0.79 }
+    }
+  }
+}
+source {
+  name "GLEAM J191157-054820"
+  component {
+    type point
+    position 19h11m57.8027s -5d48m20.3099s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.0336511 0 0 0
+      spectral-index { -0.66 -0.22 }
+    }
+  }
+}
+source {
+  name "GLEAM J190504-060745"
+  component {
+    type point
+    position 19h05m04.9438s -6d07m45.5834s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2376426 0 0 0
+      spectral-index { -0.90 -0.39 }
+    }
+  }
+}
+source {
+  name "GLEAM J184131-071420"
+  component {
+    type point
+    position 18h41m31.4355s -7d14m20.2329s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.1622910 0 0 0
+      spectral-index { -1.09 -0.20 }
+    }
+  }
+}
+source {
+  name "GLEAM J185739-062455"
+  component {
+    type point
+    position 18h57m39.1553s -6d24m55.5053s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5374617 0 0 0
+      spectral-index { -1.14 -0.34 }
+    }
+  }
+}
+source {
+  name "GLEAM J183341-071950"
+  component {
+    type gaussian
+    position 18h33m41.9165s -7d19m50.6364s
+    shape 287.1 222.4 65.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2060304 0 0 0
+      spectral-index { -1.53 -0.42 }
+    }
+  }
+}
+source {
+  name "GLEAM J183313-071804"
+  component {
+    type gaussian
+    position 18h33m13.6377s -7d18m04.6407s
+    shape 539.5 280.1 -30.0
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4290376 0 0 0
+      spectral-index { -1.95 -0.66 }
+    }
+  }
+}
+source {
+  name "GLEAM J191007-053416"
+  component {
+    type point
+    position 19h10m07.4121s -5d34m16.275s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6239346 0 0 0
+      spectral-index { -1.04 -0.32 }
+    }
+  }
+}
+source {
+  name "GLEAM J183753-065406"
+  component {
+    type gaussian
+    position 18h37m53.8623s -6d54m06.0857s
+    shape 176.2 167.7 69.1
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 4.1875543 0 0 0
+      spectral-index { -1.02 -0.50 }
+    }
+  }
+}
+source {
+  name "GLEAM J190526-043754"
+  component {
+    type point
+    position 19h05m26.5869s -4d37m54.3605s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.0503038 0 0 0
+      spectral-index { -1.13 -0.19 }
+    }
+  }
+}
+source {
+  name "GLEAM J184046-051842"
+  component {
+    type gaussian
+    position 18h40m46.311s -5d18m42.4113s
+    shape 286.2 199.1 -16.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1399222 0 0 0
+      spectral-index { -1.06 -0.93 }
+    }
+  }
+}
+source {
+  name "GLEAM J184144-050634"
+  component {
+    type gaussian
+    position 18h41m44.9414s -5d06m34.0727s
+    shape 472.1 286.4 -13.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.7364754 0 0 0
+      spectral-index { -0.97 -1.72 }
+    }
+  }
+}
+source {
+  name "GLEAM J184129-050955"
+  component {
+    type gaussian
+    position 18h41m29.4946s -5d09m55.5362s
+    shape 455.6 348.5 -10.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.9462223 0 0 0
+      spectral-index { -1.39 -1.59 }
+    }
+  }
+}
+source {
+  name "GLEAM J184049-050919"
+  component {
+    type gaussian
+    position 18h40m49.3506s -5d09m19.8101s
+    shape 379.6 241.6 -16.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.0258384 0 0 0
+      spectral-index { -1.49 -1.56 }
+    }
+  }
+}
+source {
+  name "GLEAM J190720-034353"
+  component {
+    type point
+    position 19h07m20.7568s -3d43m53.8657s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2226640 0 0 0
+      spectral-index { -1.10 -0.34 }
+    }
+  }
+}
+source {
+  name "GLEAM J184118-045635"
+  component {
+    type gaussian
+    position 18h41m18.1934s -4d56m35.1599s
+    shape 241.0 207.5 -78.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 7.8323554 0 0 0
+      spectral-index { -1.12 -0.88 }
+    }
+  }
+}
+source {
+  name "GLEAM J184049-044523"
+  component {
+    type gaussian
+    position 18h40m49.5776s -4d45m23.0593s
+    shape 264.2 179.4 -7.8
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1847332 0 0 0
+      spectral-index { 0.22 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J191742-025658"
+  component {
+    type gaussian
+    position 19h17m42.6123s -2d56m58.0501s
+    shape 186.9 146.9 85.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3491176 0 0 0
+      spectral-index { -1.06 -0.16 }
+    }
+  }
+}
+source {
+  name "GLEAM J190638-030757"
+  component {
+    type point
+    position 19h06m38.1152s -3d07m57.271s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0836047 0 0 0
+      spectral-index { -1.18 -0.19 }
+    }
+  }
+}
+source {
+  name "GLEAM J183706-042420"
+  component {
+    type point
+    position 18h37m06.6431s -4d24m20.4847s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2752995 0 0 0
+      spectral-index { -1.21 -0.53 }
+    }
+  }
+}
+source {
+  name "GLEAM J183510-042216"
+  component {
+    type point
+    position 18h35m10.8545s -4d22m16.2053s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.9310310 0 0 0
+      spectral-index { -1.36 -0.63 }
+    }
+  }
+}
+source {
+  name "GLEAM J184537-035352"
+  component {
+    type gaussian
+    position 18h45m37.5732s -3d53m52.8781s
+    shape 496.7 242.8 -2.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3229646 0 0 0
+      spectral-index { -1.49 -0.44 }
+    }
+  }
+}
+source {
+  name "GLEAM J184400-035450"
+  component {
+    type gaussian
+    position 18h44m00.3369s -3d54m50.71s
+    shape 190.5 165.4 86.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.8596003 0 0 0
+      spectral-index { -1.14 -0.52 }
+    }
+  }
+}
+source {
+  name "GLEAM J184400-035030"
+  component {
+    type gaussian
+    position 18h44m00.9888s -3d50m30.7039s
+    shape 202.2 158.2 85.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.2346220 0 0 0
+      spectral-index { -1.16 -0.35 }
+    }
+  }
+}
+source {
+  name "GLEAM J184347-035523"
+  component {
+    type gaussian
+    position 18h43m47.3071s -3d55m23.1883s
+    shape 294.1 163.8 -7.0
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.3560447 0 0 0
+      spectral-index { -1.53 -0.71 }
+    }
+  }
+}
+source {
+  name "GLEAM J191920-020754"
+  component {
+    type point
+    position 19h19m20.083s -2d07m54.9784s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1326639 0 0 0
+      spectral-index { -0.73 -0.39 }
+    }
+  }
+}
+source {
+  name "GLEAM J183847-040044"
+  component {
+    type point
+    position 18h38m47.7466s -4d00m44.0071s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2316475 0 0 0
+      spectral-index { -0.83 -0.21 }
+    }
+  }
+}
+source {
+  name "GLEAM J191811-015358"
+  component {
+    type point
+    position 19h18m11.3232s -1d53m58.3086s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.6025600 0 0 0
+      spectral-index { -1.29 -0.28 }
+    }
+  }
+}
+source {
+  name "GLEAM J182013-042544"
+  component {
+    type point
+    position 18h20m13.8867s -4d25m44.6829s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1738125 0 0 0
+      spectral-index { -1.00 -0.15 }
+    }
+  }
+}
+source {
+  name "GLEAM J191108-020532"
+  component {
+    type point
+    position 19h11m08.3423s -2d05m32.6617s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1741893 0 0 0
+      spectral-index { -0.83 -0.50 }
+    }
+  }
+}
+source {
+  name "GLEAM J192828-010652"
+  component {
+    type point
+    position 19h28m28.7109s -1d06m52.3714s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.0824926 0 0 0
+      spectral-index { -0.58 -0.26 }
+    }
+  }
+}
+source {
+  name "GLEAM J184626-025921"
+  component {
+    type gaussian
+    position 18h46m26.228s -2d59m21.1745s
+    shape 200.7 167.3 85.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 17.5686745 0 0 0
+      spectral-index { -1.10 -0.42 }
+    }
+  }
+}
+source {
+  name "GLEAM J184437-030639"
+  component {
+    type gaussian
+    position 18h44m37.8735s -3d06m39.65s
+    shape 350.9 202.8 85.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5042985 0 0 0
+      spectral-index { -1.48 -1.82 }
+    }
+  }
+}
+source {
+  name "GLEAM J184236-031111"
+  component {
+    type point
+    position 18h42m36.3794s -3d11m11.5608s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1243568 0 0 0
+      spectral-index { -0.47 -0.16 }
+    }
+  }
+}
+source {
+  name "GLEAM J184258-031032"
+  component {
+    type gaussian
+    position 18h42m58.894s -3d10m32.3945s
+    shape 348.3 253.4 84.8
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0326165 0 0 0
+      spectral-index { -0.47 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183910-031826"
+  component {
+    type point
+    position 18h39m10.1147s -3d18m26.476s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1286385 0 0 0
+      spectral-index { -1.37 -0.70 }
+    }
+  }
+}
+source {
+  name "GLEAM J181918-032913"
+  component {
+    type point
+    position 18h19m18.9038s -3d29m13.2094s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3310616 0 0 0
+      spectral-index { -1.22 -0.20 }
+    }
+  }
+}
+source {
+  name "GLEAM J184936-021644"
+  component {
+    type gaussian
+    position 18h49m36.2842s -2d16m44.6722s
+    shape 173.3 159.8 -10.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4089554 0 0 0
+      spectral-index { -0.42 -0.47 }
+    }
+  }
+}
+source {
+  name "GLEAM J184125-015252"
+  component {
+    type point
+    position 18h41m25.2246s -1d52m52.9352s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 7.2862306 0 0 0
+      spectral-index { -1.11 -0.16 }
+    }
+  }
+}
+source {
+  name "GLEAM J184141-015249"
+  component {
+    type point
+    position 18h41m41.3745s -1d52m49.1261s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 6.3250770 0 0 0
+      spectral-index { -1.23 -0.35 }
+    }
+  }
+}
+source {
+  name "GLEAM J184959-013255"
+  component {
+    type point
+    position 18h49m59.5386s -1d32m55.6963s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.2681888 0 0 0
+      spectral-index { -1.10 -0.59 }
+    }
+  }
+}
+source {
+  name "GLEAM J183717-015037"
+  component {
+    type point
+    position 18h37m17.8198s -1d50m37.9712s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6639659 0 0 0
+      spectral-index { -1.13 -0.35 }
+    }
+  }
+}
+source {
+  name "GLEAM J182203-022252"
+  component {
+    type point
+    position 18h22m03.2739s -2d22m52.7486s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.8367517 0 0 0
+      spectral-index { -1.04 -0.21 }
+    }
+  }
+}
+source {
+  name "GLEAM J192606+003442"
+  component {
+    type point
+    position 19h26m06.8408s 0d34m42.4632s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.3108462 0 0 0
+      spectral-index { -0.88 -0.25 }
+    }
+  }
+}
+source {
+  name "GLEAM J184351-012909"
+  component {
+    type point
+    position 18h43m51.8042s -1d29m09.8478s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3678240 0 0 0
+      spectral-index { -0.81 0.50 }
+    }
+  }
+}
+source {
+  name "GLEAM J185751-004817"
+  component {
+    type point
+    position 18h57m51.7236s -0d48m17.3271s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6131834 0 0 0
+      spectral-index { -1.25 -0.35 }
+    }
+  }
+}
+source {
+  name "GLEAM J184922-005514"
+  component {
+    type gaussian
+    position 18h49m22.2217s -0d55m14.5497s
+    shape 246.5 236.0 -80.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 21.3672688 0 0 0
+      spectral-index { -0.98 -0.78 }
+    }
+  }
+}
+source {
+  name "GLEAM J183151-013206"
+  component {
+    type point
+    position 18h31m51.2695s -1d32m06.8436s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2056358 0 0 0
+      spectral-index { -1.14 -0.13 }
+    }
+  }
+}
+source {
+  name "GLEAM J185116+000013"
+  component {
+    type gaussian
+    position 18h51m16.8164s 0d00m13.1585s
+    shape 250.0 194.2 85.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.8989055 0 0 0
+      spectral-index { -1.64 -0.77 }
+    }
+  }
+}
+source {
+  name "GLEAM J185135-001756"
+  component {
+    type gaussian
+    position 18h51m35.8301s -0d17m56.6827s
+    shape 299.9 215.4 -16.5
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.1894853 0 0 0
+      spectral-index { -1.86 -0.90 }
+    }
+  }
+}
+source {
+  name "GLEAM J185133-000221"
+  component {
+    type gaussian
+    position 18h51m33.3838s -0d02m21.7778s
+    shape 417.2 247.9 -14.1
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.4709490 0 0 0
+      spectral-index { -1.80 -0.95 }
+    }
+  }
+}
+source {
+  name "GLEAM J185147-001049"
+  component {
+    type gaussian
+    position 18h51m47.2778s -0d10m49.4149s
+    shape 893.6 231.0 -5.4
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.1035701 0 0 0
+      spectral-index { -1.76 -0.95 }
+    }
+  }
+}
+source {
+  name "GLEAM J185115-001116"
+  component {
+    type gaussian
+    position 18h51m15.5127s -0d11m16.7161s
+    shape 630.6 240.8 -6.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.9648510 0 0 0
+      spectral-index { -1.63 -0.58 }
+    }
+  }
+}
+source {
+  name "GLEAM J192212+011516"
+  component {
+    type point
+    position 19h22m12.6123s 1d15m16.119s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1744765 0 0 0
+      spectral-index { -1.08 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J185857+000727"
+  component {
+    type point
+    position 18h58m57.2534s 0d07m27.1922s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2029869 0 0 0
+      spectral-index { -1.26 -0.29 }
+    }
+  }
+}
+source {
+  name "GLEAM J185146+003533"
+  component {
+    type point
+    position 18h51m46.8164s 0d35m33.4833s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6361049 0 0 0
+      spectral-index { -1.42 -0.79 }
+    }
+  }
+}
+source {
+  name "GLEAM J185232+003946"
+  component {
+    type gaussian
+    position 18h52m32.3145s 0d39m46.9564s
+    shape 406.7 279.6 -21.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 11.6690069 0 0 0
+      spectral-index { -1.61 -0.68 }
+    }
+  }
+}
+source {
+  name "GLEAM J185252+004059"
+  component {
+    type gaussian
+    position 18h52m52.3389s 0d40m59.7842s
+    shape 541.2 213.5 -5.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 4.1401009 0 0 0
+      spectral-index { -1.86 -0.99 }
+    }
+  }
+}
+source {
+  name "GLEAM J185631+011021"
+  component {
+    type gaussian
+    position 18h56m31.3257s 1d10m21.6266s
+    shape 549.0 306.5 85.8
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 23.5801973 0 0 0
+      spectral-index { -2.02 -0.89 }
+    }
+  }
+}
+source {
+  name "GLEAM J185545+013523"
+  component {
+    type gaussian
+    position 18h55m45.3442s 1d35m23.2015s
+    shape 340.6 188.2 -84.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 7.1990897 0 0 0
+      spectral-index { -1.51 -0.50 }
+    }
+  }
+}
+source {
+  name "GLEAM J194435+035641"
+  component {
+    type point
+    position 19h44m35.0098s 3d56m41.2856s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1507218 0 0 0
+      spectral-index { -0.89 0.04 }
+    }
+  }
+}
+source {
+  name "GLEAM J181457+000252"
+  component {
+    type point
+    position 18h14m57.5244s 0d02m52.6738s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0675753 0 0 0
+      spectral-index { -1.12 -0.28 }
+    }
+  }
+}
+source {
+  name "GLEAM J191849+030447"
+  component {
+    type point
+    position 19h18m49.7314s 3d04m47.3363s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2849921 0 0 0
+      spectral-index { -1.09 -0.16 }
+    }
+  }
+}
+source {
+  name "GLEAM J183513+014622"
+  component {
+    type point
+    position 18h35m13.3887s 1d46m22.1855s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.6084752 0 0 0
+      spectral-index { -1.19 -0.28 }
+    }
+  }
+}
+source {
+  name "GLEAM J191327+034253"
+  component {
+    type point
+    position 19h13m27.3779s 3d42m53.3388s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2104583 0 0 0
+      spectral-index { -1.29 -0.24 }
+    }
+  }
+}
+source {
+  name "GLEAM J185552+025644"
+  component {
+    type point
+    position 18h55m52.1484s 2d56m44.4176s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2527992 0 0 0
+      spectral-index { -1.13 -0.30 }
+    }
+  }
+}
+source {
+  name "GLEAM J182708+021449"
+  component {
+    type point
+    position 18h27m08.1592s 2d14m49.4626s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0597937 0 0 0
+      spectral-index { -0.88 -0.09 }
+    }
+  }
+}
+source {
+  name "GLEAM J192244+045125"
+  component {
+    type point
+    position 19h22m44.0479s 4d51m25.4673s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5114652 0 0 0
+      spectral-index { -0.85 -0.25 }
+    }
+  }
+}
+source {
+  name "GLEAM J193545+055627"
+  component {
+    type point
+    position 19h35m45.0879s 5d56m27.5141s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1785962 0 0 0
+      spectral-index { -1.00 -0.10 }
+    }
+  }
+}
+source {
+  name "GLEAM J190146+041550"
+  component {
+    type gaussian
+    position 19h01m46.4868s 4d15m50.5697s
+    shape 489.6 224.9 -6.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0459272 0 0 0
+      spectral-index { -0.09 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190127+041157"
+  component {
+    type gaussian
+    position 19h01m27.0703s 4d11m57.9256s
+    shape 530.4 273.0 86.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2729602 0 0 0
+      spectral-index { -0.44 -0.45 }
+    }
+  }
+}
+source {
+  name "GLEAM J191934+051827"
+  component {
+    type point
+    position 19h19m34.2041s 5d18m27.2004s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2418403 0 0 0
+      spectral-index { -1.08 -0.27 }
+    }
+  }
+}
+source {
+  name "GLEAM J190404+052700"
+  component {
+    type gaussian
+    position 19h04m04.2188s 5d27m00.0319s
+    shape 326.2 254.3 -5.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 11.5827104 0 0 0
+      spectral-index { -0.99 -0.33 }
+    }
+  }
+}
+source {
+  name "GLEAM J191748+062123"
+  component {
+    type point
+    position 19h17m48.8745s 6d21m23.1568s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.9611015 0 0 0
+      spectral-index { -1.12 -0.20 }
+    }
+  }
+}
+source {
+  name "GLEAM J190733+070830"
+  component {
+    type gaussian
+    position 19h07m33.4204s 7d08m30.9484s
+    shape 217.9 209.1 89.8
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 10.3932791 0 0 0
+      spectral-index { -0.86 -0.32 }
+    }
+  }
+}
+source {
+  name "GLEAM J190557+074737"
+  component {
+    type gaussian
+    position 19h05m57.2754s 7d47m37.9679s
+    shape 464.0 226.7 -10.8
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3773988 0 0 0
+      spectral-index { -1.04 -0.21 }
+    }
+  }
+}
+source {
+  name "GLEAM J194156+102650"
+  component {
+    type point
+    position 19h41m56.4185s 10d26m50.0636s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.2687480 0 0 0
+      spectral-index { -1.12 -0.18 }
+    }
+  }
+}
+source {
+  name "GLEAM J192922+095812"
+  component {
+    type point
+    position 19h29m22.6831s 9d58m12.7837s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0378524 0 0 0
+      spectral-index { -0.97 -0.09 }
+    }
+  }
+}
+source {
+  name "GLEAM J191107+090555"
+  component {
+    type gaussian
+    position 19h11m07.4487s 9d05m55.7751s
+    shape 247.9 220.9 -88.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 13.2091137 0 0 0
+      spectral-index { -0.35 -0.35 }
+    }
+  }
+}
+source {
+  name "GLEAM J191019+090557"
+  component {
+    type gaussian
+    position 19h10m19.4971s 9d05m57.6977s
+    shape 345.7 253.2 89.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.9864303 0 0 0
+      spectral-index { 0.87 -0.46 }
+    }
+  }
+}
+source {
+  name "GLEAM J184537+095344"
+  component {
+    type point
+    position 18h45m37.8003s 9d53m44.398s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.5569784 0 0 0
+      spectral-index { -0.88 -0.07 }
+    }
+  }
+}
+source {
+  name "GLEAM J191756+121509"
+  component {
+    type gaussian
+    position 19h17m56.7261s 12d15m09.2182s
+    shape 545.3 293.2 86.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3195174 0 0 0
+      spectral-index { -0.63 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J191759+120442"
+  component {
+    type gaussian
+    position 19h17m59.0479s 12d04m42.4928s
+    shape 424.3 359.4 -77.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0726801 0 0 0
+      spectral-index { -0.70 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J191820+120814"
+  component {
+    type gaussian
+    position 19h18m20.6982s 12d08m14.2474s
+    shape 486.7 447.4 -9.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.3416647 0 0 0
+      spectral-index { -0.82 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J185923+125910"
+  component {
+    type point
+    position 18h59m23.584s 12d59m10.9701s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5367535 0 0 0
+      spectral-index { -0.88 -0.10 }
+    }
+  }
+}
+source {
+  name "GLEAM J182038-161600"
+  component {
+    type gaussian
+    position 18h20m38.291s -16d16m00.569s
+    shape 380.6 377.6 -77.5
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.7883447 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182030-160147"
+  component {
+    type gaussian
+    position 18h20m30.4834s -16d01m47.3639s
+    shape 368.3 185.8 -77.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1273626 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182531-131643"
+  component {
+    type gaussian
+    position 18h25m31.4941s -13d16m43.3642s
+    shape 292.5 284.5 -28.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0957679 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J181753-114411"
+  component {
+    type gaussian
+    position 18h17m53.9282s -11d44m11.4336s
+    shape 237.3 213.3 -51.1
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1008741 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J182915-105217"
+  component {
+    type gaussian
+    position 18h29m15.9082s -10d52m17.4722s
+    shape 368.9 330.3 47.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.0722002 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183124-082834"
+  component {
+    type gaussian
+    position 18h31m24.1553s -8d28m34.6671s
+    shape 380.3 292.6 -25.7
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0176239 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183503-072513"
+  component {
+    type gaussian
+    position 18h35m03.7793s -7d25m13.7564s
+    shape 262.4 250.7 -26.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.0215821 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183614-071046"
+  component {
+    type gaussian
+    position 18h36m13.9966s -7d10m46.9522s
+    shape 342.9 286.5 -28.0
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.8586647 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183815-064753"
+  component {
+    type gaussian
+    position 18h38m15.3076s -6d47m53.4999s
+    shape 277.0 249.7 -21.5
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.3384155 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183734-061507"
+  component {
+    type gaussian
+    position 18h37m34.8999s -6d15m07.3334s
+    shape 609.0 260.6 -15.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.0638055 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183913-060618"
+  component {
+    type gaussian
+    position 18h39m13.4985s -6d06m18.4069s
+    shape 295.9 288.4 69.2
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.8937228 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J184606-024137"
+  component {
+    type gaussian
+    position 18h46m06.2915s -2d41m37.3314s
+    shape 341.1 278.7  6.0
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 3.2057979 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J184700-022854"
+  component {
+    type gaussian
+    position 18h47m00.9375s -2d28m54.8022s
+    shape 339.9 219.3 -9.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5040031 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J184710-014748"
+  component {
+    type gaussian
+    position 18h47m10.7446s -1d47m48.8719s
+    shape 252.7 221.8 -12.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0388120 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J184743-013758"
+  component {
+    type gaussian
+    position 18h47m43.2642s -1d37m58.2602s
+    shape 279.6 239.8 -87.6
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.4642891 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J183128-020515"
+  component {
+    type gaussian
+    position 18h31m28.4619s -2d05m15.2553s
+    shape 399.3 383.8 -21.3
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 7.0183425 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J185204+000921"
+  component {
+    type point
+    position 18h52m04.1895s 0d09m21.347s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.0362258 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190149+011243"
+  component {
+    type gaussian
+    position 19h01m49.3213s 1d12m43.5562s
+    shape 183.2 160.8 -10.9
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.1863680 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
+source {
+  name "GLEAM J190707+071005"
+  component {
+    type gaussian
+    position 19h07m07.3169s 7d10m05.6763s
+    shape 510.7 284.1 86.4
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.5464796 0 0 0
+      spectral-index { -0.83 0.00 }
+    }
+  }
+}
