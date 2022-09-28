@@ -17,7 +17,6 @@ use vec1::Vec1;
 
 use crate::glob::{get_all_matches_from_glob, GlobError};
 use crate::vis_io::read::VisReadError;
-use mwa_hyperdrive_common::{lazy_static, thiserror, vec1};
 
 lazy_static::lazy_static! {
     // gpubox files should not be renamed in any way! This includes the case of
@@ -40,12 +39,12 @@ pub(super) const SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS: &str =
 
 #[derive(Debug)]
 /// Supported input data types for calibration.
-pub struct InputDataTypes {
-    pub metafits: Option<Vec1<PathBuf>>,
-    pub gpuboxes: Option<Vec1<PathBuf>>,
-    pub mwafs: Option<Vec1<PathBuf>>,
-    pub ms: Option<Vec1<PathBuf>>,
-    pub uvfits: Option<Vec1<PathBuf>>,
+pub(crate) struct InputDataTypes {
+    pub(crate) metafits: Option<Vec1<PathBuf>>,
+    pub(crate) gpuboxes: Option<Vec1<PathBuf>>,
+    pub(crate) mwafs: Option<Vec1<PathBuf>>,
+    pub(crate) ms: Option<Vec1<PathBuf>>,
+    pub(crate) uvfits: Option<Vec1<PathBuf>>,
 }
 
 // The same as `InputDataTypes`, but all types are allowed to be multiples. This

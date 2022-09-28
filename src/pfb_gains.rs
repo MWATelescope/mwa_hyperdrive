@@ -16,8 +16,6 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{itertools, lazy_static, thiserror};
-
 pub(super) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Jake;
 
 lazy_static::lazy_static! {
@@ -27,7 +25,7 @@ lazy_static::lazy_static! {
 
 /// All available kinds of PFB gains.
 #[derive(Debug, Display, Clone, Copy, EnumIter, EnumString, PartialEq, Eq)]
-pub enum PfbFlavour {
+pub(crate) enum PfbFlavour {
     /// Use the "Jake Jones" gains (200 Hz).
     #[strum(serialize = "jake")]
     Jake,

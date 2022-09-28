@@ -7,6 +7,7 @@
 use hifitime::{Duration, Epoch};
 use log::debug;
 use marlu::{
+    cuda::{cuda_status_to_error, DevicePointer, ERROR_STR_LENGTH as CUDA_ERROR_STR_LENGTH},
     cuda_runtime_sys,
     pos::xyz::xyzs_to_cross_uvws_parallel,
     precession::{get_lmst, precess_time},
@@ -15,27 +16,14 @@ use marlu::{
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
-use mwa_hyperdrive_beam::{
-    cuda_status_to_error, Beam, BeamCUDA, BeamError, DevicePointer,
-    ERROR_STR_LENGTH as CUDA_ERROR_STR_LENGTH,
+use crate::{
+    beam::{Beam, BeamCUDA, BeamError},
+    cuda::{self, CudaFloat, CudaJones},
+    shapelets,
+    srclist::{
+        get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
+    },
 };
-use mwa_hyperdrive_common::{cfg_if, hifitime, log, marlu, ndarray, rayon, shapelets};
-use mwa_hyperdrive_cuda as cuda;
-use mwa_hyperdrive_srclist::{
-    get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
-};
-
-// Import Rust bindings to the CUDA code specific to the precision we're using,
-// and set corresponding compile-time types.
-mwa_hyperdrive_common::cfg_if::cfg_if! {
-    if #[cfg(feature = "cuda-single")] {
-        pub(crate) type CudaFloat = f32;
-        pub(crate) type CudaJones = cuda::JonesF32;
-    } else {
-        pub(crate) type CudaFloat = f64;
-        pub(crate) type CudaJones = cuda::JonesF64;
-    }
-}
 
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
 /// second is the source component. The length of `hadecs`, `lmns`,

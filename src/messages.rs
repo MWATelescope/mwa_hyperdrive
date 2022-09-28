@@ -23,11 +23,10 @@ use crate::{
     model::ModellerInfo,
     pfb_gains::PfbFlavour,
     solutions::CalibrationSolutions,
+    srclist::{ComponentCounts, SourceList},
     unit_parsing::WavelengthUnit,
     vis_io::{read::RawDataCorrections, write::VisOutputType},
 };
-use mwa_hyperdrive_common::{cfg_if, hifitime, itertools, log, marlu, ndarray, vec1};
-use mwa_hyperdrive_srclist::SourceList;
 
 #[must_use = "This struct must be consumed with its print() method"]
 pub(super) enum InputFileDetails<'a> {
@@ -466,7 +465,7 @@ pub(super) struct SkyModelDetails<'a> {
 
 impl SkyModelDetails<'_> {
     pub(super) fn print(self) {
-        let mwa_hyperdrive_srclist::ComponentCounts {
+        let ComponentCounts {
             num_points,
             num_gaussians,
             num_shapelets,

@@ -2,32 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::f64::consts::*;
-
 use approx::assert_abs_diff_eq;
 
 use super::*;
-
-#[test]
-fn test_sin() {
-    assert_abs_diff_eq!(sin(FRAC_PI_6), 0.5);
-}
-
-#[test]
-fn test_cos() {
-    assert_abs_diff_eq!(cos(FRAC_PI_3), 0.5);
-}
-
-#[test]
-fn atan2_is_correct() {
-    assert_abs_diff_eq!(atan2(-2.0, 1.0), -1.1071487177940904);
-    assert_abs_diff_eq!(atan2(1.0, -1.0), 3.0 * FRAC_PI_4);
-}
-
-#[test]
-fn test_cexp() {
-    assert_abs_diff_eq!(cexp(PI), c64::new(-1.0, 0.0));
-}
 
 #[test]
 fn test_average_epoch() {

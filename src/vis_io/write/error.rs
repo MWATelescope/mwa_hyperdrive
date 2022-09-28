@@ -6,17 +6,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::help_texts::VIS_OUTPUT_EXTENSIONS;
-use mwa_hyperdrive_common::{marlu, thiserror};
-
 #[derive(Error, Debug)]
-pub enum VisWriteError {
-    #[error(
-        "An invalid output format was specified ({0}). Supported:\n{}",
-        *VIS_OUTPUT_EXTENSIONS,
-    )]
-    InvalidOutputFormat(String),
-
+pub(crate) enum VisWriteError {
     #[error("Irregular timestamps; first timestamp (GPS) is {first}, but timestamp {bad} is not a multiple of the time resolution ({time_res}s) from the first")]
     IrregularTimestamps { first: f64, bad: f64, time_res: f64 },
 
@@ -37,7 +28,7 @@ pub enum VisWriteError {
 }
 
 #[derive(Error, Debug)]
-pub enum FileWriteError {
+pub(crate) enum FileWriteError {
     #[error("Cannot write to the specified file '{file}'. Do you have write permissions set?")]
     FileNotWritable { file: String },
 

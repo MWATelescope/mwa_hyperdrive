@@ -9,7 +9,6 @@ use vec1::vec1;
 
 use super::*;
 use crate::math::average_epoch;
-use mwa_hyperdrive_common::vec1;
 
 #[test]
 fn test_timesteps_to_timeblocks() {

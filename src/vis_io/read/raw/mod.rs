@@ -29,13 +29,12 @@ use vec1::Vec1;
 
 use super::*;
 use crate::{
+    beam::Delays,
     context::ObsContext,
     flagging::{MwafFlags, MwafProducer},
     metafits,
     pfb_gains::{PfbFlavour, PfbParseError},
 };
-use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, itertools, log, mwalib, ndarray, vec1};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawDataCorrections {

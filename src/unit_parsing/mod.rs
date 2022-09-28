@@ -14,10 +14,8 @@ use itertools::Itertools;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 
-use mwa_hyperdrive_common::{itertools, lazy_static};
-
 lazy_static::lazy_static! {
-    pub static ref WAVELENGTH_FORMATS: String = InputWavelengthFormat::iter().join(", ");
+    pub(crate) static ref WAVELENGTH_FORMATS: String = InputWavelengthFormat::iter().join(", ");
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, EnumIter, EnumString, IntoStaticStr)]

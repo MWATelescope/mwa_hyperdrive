@@ -9,8 +9,6 @@
 use mwalib::{MetafitsContext, Pol};
 use ndarray::prelude::*;
 
-use mwa_hyperdrive_common::{mwalib, ndarray};
-
 /// Get the delays for each tile's dipoles.
 pub(crate) fn get_dipole_delays(context: &MetafitsContext) -> Array2<u32> {
     let mut all_tile_delays = Array2::zeros((context.num_ants, 16));
@@ -36,7 +34,7 @@ pub(crate) fn get_dipole_delays(context: &MetafitsContext) -> Array2<u32> {
 
 /// Get the gains for each tile's dipoles. If a dipole is "alive", its gain is
 /// one, otherwise it is "dead" and has a gain of zero.
-pub fn get_dipole_gains(context: &MetafitsContext) -> Array2<f64> {
+pub(crate) fn get_dipole_gains(context: &MetafitsContext) -> Array2<f64> {
     let mut dipole_gains = Array2::zeros((
         context.num_ants,
         context.rf_inputs[0].dipole_gains.len() * 2,

@@ -16,7 +16,6 @@ use mwalib::*;
 use ndarray::prelude::*;
 
 use super::error::*;
-use mwa_hyperdrive_common::{hifitime, log, mwalib, ndarray};
 
 #[derive(Debug)]
 pub(crate) enum MwafProducer {
@@ -577,7 +576,7 @@ mod tests {
         // The mwaf file is gzipped to save space in git. gunzip it to a
         // temporary spot.
         let mwaf =
-            crate::tests::deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_01.mwaf.gz");
+            crate::tests::deflate_gz_into_tempfile("test_files/1065880128/1065880128_01.mwaf.gz");
         let result = MwafFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();
@@ -644,7 +643,7 @@ mod tests {
     #[test]
     fn test_1065880128_02_mwaf() {
         let mwaf =
-            crate::tests::deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_02.mwaf.gz");
+            crate::tests::deflate_gz_into_tempfile("test_files/1065880128/1065880128_02.mwaf.gz");
         let result = MwafFlags::new_from_mwaf(&mwaf);
         assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();
@@ -709,8 +708,8 @@ mod tests {
     #[test]
     fn test_merging_1065880128_mwafs() {
         let result = MwafFlags::new_from_mwafs(&[
-            deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_01.mwaf.gz"),
-            deflate_gz_into_tempfile(&"test_files/1065880128/1065880128_02.mwaf.gz"),
+            deflate_gz_into_tempfile("test_files/1065880128/1065880128_01.mwaf.gz"),
+            deflate_gz_into_tempfile("test_files/1065880128/1065880128_02.mwaf.gz"),
         ]);
         assert!(result.is_ok(), "{}", result.unwrap_err());
         let m = result.unwrap();

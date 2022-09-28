@@ -7,7 +7,6 @@
 use thiserror::Error;
 
 use crate::flagging::MwafMergeError;
-use mwa_hyperdrive_common::{mwalib, thiserror};
 
 #[derive(Error, Debug)]
 pub(crate) enum RawReadError {

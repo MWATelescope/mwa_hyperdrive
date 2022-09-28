@@ -6,9 +6,7 @@ use hifitime::{Duration, Epoch, Unit};
 use marlu::{RADec, XyzGeodetic};
 use vec1::vec1;
 
-use crate::context::ObsContext;
-use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, marlu, vec1};
+use crate::{beam::Delays, context::ObsContext};
 
 fn get_minimal_obs_context() -> ObsContext {
     ObsContext {
@@ -38,7 +36,7 @@ fn get_minimal_obs_context() -> ObsContext {
 }
 
 #[test]
-pub fn test_guess_time_res() {
+fn test_guess_time_res() {
     let mut obs_ctx = get_minimal_obs_context();
 
     // test fallback to 1s
@@ -65,7 +63,7 @@ pub fn test_guess_time_res() {
 }
 
 #[test]
-pub fn test_guess_freq_res() {
+fn test_guess_freq_res() {
     let mut obs_ctx = get_minimal_obs_context();
 
     // test fallback to 1s

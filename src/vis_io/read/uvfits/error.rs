@@ -9,8 +9,6 @@ use std::path::PathBuf;
 use mwalib::*;
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{marlu, mwalib, thiserror};
-
 #[derive(Error, Debug)]
 pub(crate) enum FitsError {
     /// An error associated the fitsio crate.

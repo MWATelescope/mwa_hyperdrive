@@ -16,10 +16,10 @@ use serial_test::serial;
 use vec1::vec1;
 
 use super::*;
-use crate::model::cuda::CudaFloat;
-use mwa_hyperdrive_common::{marlu, ndarray, vec1};
-use mwa_hyperdrive_cuda as cuda;
-use mwa_hyperdrive_srclist::Source;
+use crate::{
+    cuda::{self, CudaFloat},
+    srclist::Source,
+};
 
 /// Helper function to copy [UVW]s to the device.
 fn copy_uvws(uvws: &[UVW]) -> DevicePointer<cuda::UVW> {

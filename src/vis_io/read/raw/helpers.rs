@@ -9,7 +9,7 @@ use console::Term;
 use crossbeam_channel::bounded;
 use mwalib::{CorrelatorContext, MwalibError};
 
-use mwa_hyperdrive_common::{is_a_tty, mwalib};
+use crate::misc::is_a_tty;
 
 /// Wait this many seconds before printing a message that we're still waiting to
 /// read gpubox files.

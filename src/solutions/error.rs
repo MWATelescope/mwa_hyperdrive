@@ -9,7 +9,6 @@ use mwalib::{fitsio, FitsError};
 use thiserror::Error;
 
 use super::rts::{RtsReadSolsError, RtsWriteSolsError};
-use mwa_hyperdrive_common::{marlu, thiserror};
 
 #[derive(Error, Debug)]
 pub(crate) enum SolutionsReadError {

@@ -8,31 +8,33 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols.html>
 
 pub(crate) mod ao;
-pub mod apply;
-pub mod convert;
 mod error;
 pub(crate) mod hyperdrive;
-pub mod plot;
 mod rts;
 #[cfg(test)]
 mod tests;
 
-pub use apply::SolutionsApplyArgs;
 pub(crate) use error::*;
-pub use plot::SolutionsPlotArgs;
 
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use hifitime::Epoch;
+use itertools::Itertools;
 use log::debug;
 use marlu::Jones;
 use ndarray::prelude::*;
+use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use vec1::Vec1;
 
 use crate::{vis_io::read::RawDataCorrections, HyperdriveError};
-use mwa_hyperdrive_common::{hifitime, log, marlu, ndarray, vec1};
+
+lazy_static::lazy_static! {
+    pub(crate) static ref CAL_SOLUTION_EXTENSIONS: String = CalSolutionType::iter().join(", ");
+}
 
 #[derive(Debug, Display, EnumIter, EnumString)]
 pub(crate) enum CalSolutionType {

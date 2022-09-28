@@ -13,7 +13,6 @@ use crate::{
     pfb_gains::PfbFlavour, tests::reduced_obsids::get_reduced_1090008640,
     vis_io::read::RawDataCorrections,
 };
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray, vec1};
 
 fn make_solutions() -> CalibrationSolutions {
     let num_timeblocks = 2;
@@ -328,7 +327,7 @@ fn test_write_and_read_ao_solutions() {
 #[test]
 fn test_write_and_read_rts_solutions() {
     let sols = make_solutions();
-    let args = get_reduced_1090008640(false);
+    let args = get_reduced_1090008640(false, false);
     let metafits = &args.data.unwrap()[0];
     let tmp_dir = tempfile::tempdir().expect("Couldn't make tmp dir");
 

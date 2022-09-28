@@ -17,14 +17,13 @@ use hifitime::{Duration, Epoch, Unit};
 use vec1::Vec1;
 
 use crate::unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat};
-use mwa_hyperdrive_common::{hifitime, vec1};
 
 /// A collection of timesteps.
 #[derive(Debug, Clone)]
-pub struct Timeblock {
+pub(crate) struct Timeblock {
     /// The timeblock index. e.g. If all observation timesteps are being used in
     /// a single calibration timeblock, then its index is 0.
-    pub index: usize,
+    pub(crate) index: usize,
 
     /// The range of indices into an *unflagged* array of visibilities.
     ///
@@ -38,11 +37,11 @@ pub struct Timeblock {
     ///
     /// We can use a range because the timesteps belonging to a timeblock are
     /// always contiguous.
-    pub range: Range<usize>,
+    pub(crate) range: Range<usize>,
 
     /// The timestamps comprising this timeblock. These are determined by the
     /// timesteps into all available timestamps.
-    pub timestamps: Vec1<Epoch>,
+    pub(crate) timestamps: Vec1<Epoch>,
 
     /// The median timestamp of the *ideal* timeblock.
     ///
@@ -58,25 +57,25 @@ pub struct Timeblock {
     ///
     /// In the first case, this `median` is [1, 4, 7] for each timeblock, [2, 5,
     /// 8] for the second. Note how missing timestamps don't affect it.
-    pub median: Epoch,
+    pub(crate) median: Epoch,
 }
 
 /// A collection of fine-frequency channels.
 #[derive(Debug, Clone)]
-pub struct Chanblock {
+pub(crate) struct Chanblock {
     /// The chanblock index, regardless of flagging. e.g. If the first two
     /// calibration chanblocks are flagged, then the first unflagged chanblock
     /// has a chanblock_index of 2 but an unflagged_index of 0.
-    pub chanblock_index: u16,
+    pub(crate) chanblock_index: u16,
 
     /// The index into an *unflagged* array of visibilities. Regardless of the
     /// first unflagged chanblock's index, its unflagged index is 0.
-    pub unflagged_index: u16,
+    pub(crate) unflagged_index: u16,
 
     // TODO: Use frequency information. May become important for calibration
     // solutions and what frequencies they apply to.
     /// The centroid frequency for this chanblock \[Hz\].
-    pub _freq: f64,
+    pub(crate) _freq: f64,
 }
 
 /// A spectral windows, a.k.a. a contiguous-band of fine-frequency channels

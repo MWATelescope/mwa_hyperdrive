@@ -11,7 +11,6 @@ use indoc::indoc;
 use marlu::c64;
 
 use super::*;
-use mwa_hyperdrive_common::marlu;
 
 #[test]
 fn test_read_di_jm() {
@@ -193,57 +192,57 @@ fn test_read_bp_cal() {
     assert_abs_diff_eq!(
         bp_cal.data[(0, 0, 0)],
         Jones::from([
-            0.933187 * cexp(0.124900),
-            0.028094 * cexp(1.938599),
-            0.047613 * cexp(-0.953055),
-            0.965535 * cexp(0.056896)
+            Complex::from_polar(0.933187, 0.124900),
+            Complex::from_polar(0.028094, 1.938599),
+            Complex::from_polar(0.047613, -0.953055),
+            Complex::from_polar(0.965535, 0.056896)
         ])
     );
     assert_abs_diff_eq!(
         bp_cal.data[(0, 1, 0)],
         Jones::from([
-            0.935630 * cexp(0.074762),
-            0.066164 * cexp(1.748954),
-            0.043069 * cexp(-0.456759),
-            0.930994 * cexp(0.042934)
+            Complex::from_polar(0.935630, 0.074762),
+            Complex::from_polar(0.066164, 1.748954),
+            Complex::from_polar(0.043069, -0.456759),
+            Complex::from_polar(0.930994, 0.042934)
         ])
     );
 
     assert_abs_diff_eq!(
         bp_cal.data[(0, 0, 1)],
         Jones::from([
-            0.925032 * cexp(0.051076),
-            0.095979 * cexp(1.927272),
-            0.049172 * cexp(-0.356952),
-            0.961423 * cexp(0.031604)
+            Complex::from_polar(0.925032, 0.051076),
+            Complex::from_polar(0.095979, 1.927272),
+            Complex::from_polar(0.049172, -0.356952),
+            Complex::from_polar(0.961423, 0.031604)
         ])
     );
     assert_abs_diff_eq!(
         bp_cal.data[(0, 1, 1)],
         Jones::from([
-            0.939763 * cexp(0.078459),
-            0.052874 * cexp(1.719049),
-            0.028309 * cexp(-0.292615),
-            0.944591 * cexp(0.055716)
+            Complex::from_polar(0.939763, 0.078459),
+            Complex::from_polar(0.052874, 1.719049),
+            Complex::from_polar(0.028309, -0.292615),
+            Complex::from_polar(0.944591, 0.055716)
         ])
     );
 
     assert_abs_diff_eq!(
         bp_cal.data[(0, 0, 26)],
         Jones::from([
-            0.958020 * cexp(-0.012022),
-            0.023057 * cexp(-1.619737),
-            0.069914 * cexp(1.782797),
-            1.071203 * cexp(-0.062889)
+            Complex::from_polar(0.958020, -0.012022),
+            Complex::from_polar(0.023057, -1.619737),
+            Complex::from_polar(0.069914, 1.782797),
+            Complex::from_polar(1.071203, -0.062889)
         ])
     );
     assert_abs_diff_eq!(
         bp_cal.data[(0, 1, 26)],
         Jones::from([
-            0.975938 * cexp(-0.030198),
-            0.014863 * cexp(3.029070),
-            0.046677 * cexp(1.959530),
-            1.025759 * cexp(-0.047216)
+            Complex::from_polar(0.975938, -0.030198),
+            Complex::from_polar(0.014863, 3.029070),
+            Complex::from_polar(0.046677, 1.959530),
+            Complex::from_polar(1.025759, -0.047216)
         ])
     );
 }

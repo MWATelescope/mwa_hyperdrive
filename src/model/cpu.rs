@@ -9,19 +9,20 @@ use std::f64::consts::{FRAC_PI_2, LN_2};
 
 use hifitime::{Duration, Epoch};
 use marlu::{
+    c64,
     pos::xyz::xyzs_to_cross_uvws_parallel,
     precession::{get_lmst, precess_time},
-    Complex, Jones, RADec, XyzGeodetic, UVW,
+    Jones, RADec, XyzGeodetic, UVW,
 };
 use ndarray::{parallel::prelude::*, prelude::*};
+use num_complex::Complex;
 
 use crate::{
+    beam::{Beam, BeamError},
     constants::*,
-    math::{cexp, exp},
+    shapelets,
+    srclist::{ComponentList, GaussianParams, PerComponentParams},
 };
-use mwa_hyperdrive_beam::{Beam, BeamError};
-use mwa_hyperdrive_common::{hifitime, marlu, ndarray, shapelets};
-use mwa_hyperdrive_srclist::{ComponentList, GaussianParams, PerComponentParams};
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 
@@ -163,7 +164,7 @@ impl<'a> SkyModellerCpu<'a> {
                                 .zip(lmns.iter())
                                 .for_each(|(((comp_fd, beam_1), beam_2), lmn)| {
                                     let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
-                                    let phase = cexp(arg);
+                                    let phase = Complex::cis(arg);
 
                                     let mut fd = *beam_1 * *comp_fd;
                                     fd *= beam_2.h();
@@ -288,9 +289,10 @@ impl<'a> SkyModellerCpu<'a> {
                                 // Temporary variables for clarity.
                                 let k_x = uvw.u * s_pa + uvw.v * c_pa;
                                 let k_y = uvw.u * c_pa - uvw.v * s_pa;
-                                exp(GAUSSIAN_EXP_CONST
+                                (GAUSSIAN_EXP_CONST
                                     * (g_params.maj.powi(2) * k_x.powi(2)
                                         + g_params.min.powi(2) * k_y.powi(2)))
+                                .exp()
                             });
 
                             // Accumulate the double-precision visibilities into a
@@ -306,7 +308,7 @@ impl<'a> SkyModellerCpu<'a> {
                                 .zip(envelopes)
                                 .for_each(|((((comp_fd, beam_1), beam_2), lmn), envelope)| {
                                     let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
-                                    let phase = cexp(arg) * envelope;
+                                    let phase = Complex::cis(arg) * envelope;
 
                                     let mut fd = *beam_1 * *comp_fd;
                                     fd *= beam_2.h();
@@ -403,6 +405,13 @@ impl<'a> SkyModellerCpu<'a> {
             shapelet_uvws.len_of(Axis(1)),
             "fds.len_of(Axis(1)) != shapelet_uvws.len_of(Axis(1))"
         );
+
+        const I_POWER_TABLE: [c64; 4] = [
+            c64::new(1.0, 0.0),
+            c64::new(0.0, 1.0),
+            c64::new(-1.0, 0.0),
+            c64::new(0.0, -1.0),
+        ];
 
         // Get beam-attenuated flux densities.
         let num_tiles = self.beam.get_num_tiles();
@@ -510,7 +519,7 @@ impl<'a> SkyModellerCpu<'a> {
                                                             * (y_pos - y_pos.floor());
 
                                                     envelope_acc
-                                                        + shapelets::I_POWER_TABLE.get_unchecked(
+                                                        + I_POWER_TABLE.get_unchecked(
                                                             (coeff.n1 + coeff.n2) % 4,
                                                         ) * f_hat
                                                             * u_value
@@ -533,7 +542,7 @@ impl<'a> SkyModellerCpu<'a> {
                                     .zip(envelopes.iter())
                                     .for_each(|((((comp_fd, beam_1), beam_2), lmn), envelope)| {
                                         let arg = uvw.u * lmn.l + uvw.v * lmn.m + uvw.w * lmn.n;
-                                        let phase = cexp(arg) * envelope;
+                                        let phase = Complex::cis(arg) * envelope;
 
                                         let mut fd = *beam_1 * *comp_fd;
                                         fd *= beam_2.h();

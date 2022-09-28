@@ -22,10 +22,9 @@ use ndarray::prelude::*;
 use vec1::Vec1;
 
 use crate::{context::ObsContext, flagging::MwafFlags};
-use mwa_hyperdrive_common::{marlu, mwalib, ndarray, vec1};
 
 #[derive(Debug)]
-pub enum VisInputType {
+pub(crate) enum VisInputType {
     Raw,
     MeasurementSet,
     Uvfits,

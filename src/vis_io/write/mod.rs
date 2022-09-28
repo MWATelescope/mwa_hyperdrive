@@ -7,7 +7,7 @@
 mod error;
 #[cfg(test)]
 mod tests;
-pub use error::{FileWriteError, VisWriteError};
+pub(crate) use error::{FileWriteError, VisWriteError};
 
 use std::{
     collections::HashSet,
@@ -27,13 +27,9 @@ use marlu::{
     VisContext, VisWrite, XyzGeodetic,
 };
 use ndarray::{prelude::*, ArcArray2};
-use num_traits::Zero;
+use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use vec1::Vec1;
-
-use mwa_hyperdrive_common::{
-    hifitime, indicatif, itertools, log, marlu, ndarray, num_traits, vec1,
-};
 
 use crate::averaging::Timeblock;
 
@@ -44,6 +40,10 @@ pub(crate) enum VisOutputType {
     Uvfits,
     #[strum(serialize = "ms")]
     MeasurementSet,
+}
+
+lazy_static::lazy_static! {
+    pub(crate) static ref VIS_OUTPUT_EXTENSIONS: String = VisOutputType::iter().join(", ");
 }
 
 /// A struct to carry all of the visibilities of a timestep.
@@ -416,7 +416,7 @@ pub(crate) fn write_vis<'a>(
             }
 
             // Clear the output buffers.
-            out_data.fill(Jones::zero());
+            out_data.fill(Jones::default());
             out_weights.fill(-0.0);
 
             i_timeblock += 1;
@@ -516,7 +516,7 @@ fn can_write_to_file_inner(file: &Path) -> Result<bool, FileWriteError> {
     match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .open(&file)
+        .open(file)
         .map_err(|e| e.kind())
     {
         // File is writable.

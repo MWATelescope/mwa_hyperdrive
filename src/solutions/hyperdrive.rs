@@ -29,9 +29,8 @@ use vec1::Vec1;
 
 use super::{error::*, CalibrationSolutions};
 use crate::{pfb_gains::PfbFlavour, vis_io::read::RawDataCorrections};
-use mwa_hyperdrive_common::{hifitime, marlu, mwalib, ndarray, rayon, vec1, Complex};
 
-pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
+pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
     let mut fptr = fits_open!(&file)?;
     let hdu = fits_open_hdu!(&mut fptr, 0)?;
     let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
@@ -109,10 +108,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
     .unwrap();
     let di_jones = di_jones_a4.map_axis(Axis(3), |view| {
         Jones::from([
-            Complex::new(view[0], view[1]),
-            Complex::new(view[2], view[3]),
-            Complex::new(view[4], view[5]),
-            Complex::new(view[6], view[7]),
+            view[0], view[1], view[2], view[3], view[4], view[5], view[6], view[7],
         ])
     });
 
@@ -547,7 +543,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
 
 pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), SolutionsWriteError> {
     if file.exists() {
-        std::fs::remove_file(&file)?;
+        std::fs::remove_file(file)?;
     }
     let mut fptr = FitsFile::create(&file).open()?;
     let hdu = fits_open_hdu!(&mut fptr, 0)?;

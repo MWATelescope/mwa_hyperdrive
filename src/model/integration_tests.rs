@@ -12,8 +12,9 @@ use mwalib::{fitsio_sys, *};
 use serial_test::serial;
 use tempfile::TempDir;
 
-use crate::{tests::reduced_obsids::get_reduced_1090008640, vis_utils::simulate::VisSimulateArgs};
-use mwa_hyperdrive_common::{cfg_if, clap, marlu, mwalib};
+use crate::{
+    cli::vis_utils::simulate::VisSimulateArgs, tests::reduced_obsids::get_reduced_1090008640,
+};
 
 fn read_uvfits_stabxyz(
     fptr: &mut fitsio::FitsFile,
@@ -64,11 +65,11 @@ fn test_1090008640_vis_simulate() {
 
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output_path = temp_dir.path().join("model.uvfits");
-    let args = get_reduced_1090008640(false);
+    let args = get_reduced_1090008640(false, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
 
     #[rustfmt::skip]
-    let sim_args = VisSimulateArgs::parse_from(&[
+    let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
@@ -273,7 +274,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
 
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output_path = temp_dir.path().join("model.uvfits");
-    let args = get_reduced_1090008640(false);
+    let args = get_reduced_1090008640(false, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from(&[
@@ -322,7 +323,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     drop(hdu);
     drop(uvfits);
 
-    let args = get_reduced_1090008640(false);
+    let args = get_reduced_1090008640(false, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from(&[

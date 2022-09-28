@@ -4,19 +4,24 @@
 
 //! The main hyperdrive binary.
 
-use std::path::PathBuf;
-
 use clap::{AppSettings, Parser};
+use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 
-use mwa_hyperdrive::{
-    calibrate::{args::CalibrateUserArgs, di_calibrate},
-    solutions::{apply::SolutionsApplyArgs, convert::SolutionsConvertArgs, SolutionsPlotArgs},
-    vis_utils::{simulate::VisSimulateArgs, subtract::VisSubtractArgs},
-    HyperdriveError,
-};
-use mwa_hyperdrive_common::{clap, display_build_info, log, setup_logging};
-use mwa_hyperdrive_srclist::utilities::*;
+use mwa_hyperdrive::HyperdriveError;
+
+// Add build-time information from the "built" crate.
+include!(concat!(env!("OUT_DIR"), "/built.rs"));
+
+fn main() {
+    // Stolen from BurntSushi. We don't return Result from main because it
+    // prints the debug representation of the error. The code below prints the
+    // "display" or human readable representation of the error.
+    if let Err(e) = cli() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
 
 #[derive(Parser)]
 #[clap(
@@ -41,12 +46,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/di_cal/intro.html"#
     DiCalibrate {
         // Share the arguments that could be passed in via a parameter file.
         #[clap(flatten)]
-        cli_args: Box<CalibrateUserArgs>,
-
-        /// All of the arguments to di-calibrate may be specified in a toml or
-        /// json file. Any CLI arguments override parameters set in the file.
-        #[clap(name = "ARGUMENTS_FILE", parse(from_os_str))]
-        args_file: Option<PathBuf>,
+        cli_args: Box<mwa_hyperdrive::DiCalArgs>,
 
         /// The verbosity of the program. Increase by specifying multiple times
         /// (e.g. -vv). The default is to print only high-level information.
@@ -66,7 +66,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/vis_simulate/intro.html"#)]
     #[clap(infer_long_args = true)]
     VisSimulate {
         #[clap(flatten)]
-        args: VisSimulateArgs,
+        args: mwa_hyperdrive::VisSimulateArgs,
 
         /// The verbosity of the program. The default is to print high-level
         /// information.
@@ -86,7 +86,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/vis_subtract/intro.html")]
     #[clap(infer_long_args = true)]
     VisSubtract {
         #[clap(flatten)]
-        args: VisSubtractArgs,
+        args: mwa_hyperdrive::VisSubtractArgs,
 
         /// The verbosity of the program. The default is to print high-level
         /// information.
@@ -106,7 +106,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)
     #[clap(infer_long_args = true)]
     SolutionsApply {
         #[clap(flatten)]
-        args: SolutionsApplyArgs,
+        args: mwa_hyperdrive::SolutionsApplyArgs,
 
         /// The verbosity of the program. The default is to print high-level
         /// information.
@@ -125,7 +125,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)
     #[clap(infer_long_args = true)]
     SolutionsConvert {
         #[clap(flatten)]
-        args: SolutionsConvertArgs,
+        args: mwa_hyperdrive::SolutionsConvertArgs,
 
         /// The verbosity of the program. Increase by specifying multiple times
         /// (e.g. -vv). The default is to print only high-level information.
@@ -141,7 +141,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)
     #[clap(infer_long_args = true)]
     SolutionsPlot {
         #[clap(flatten)]
-        args: SolutionsPlotArgs,
+        args: mwa_hyperdrive::SolutionsPlotArgs,
 
         /// The verbosity of the program. Increase by specifying multiple times
         /// (e.g. -vv). The default is to print only high-level information.
@@ -153,49 +153,60 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)
     #[clap(infer_long_args = true)]
     SrclistByBeam {
         #[clap(flatten)]
-        args: ByBeamArgs,
+        args: mwa_hyperdrive::SrclistByBeamArgs,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
     },
 
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     SrclistConvert {
         #[clap(flatten)]
-        args: ConvertArgs,
+        args: mwa_hyperdrive::SrclistConvertArgs,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
     },
 
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     SrclistShift {
         #[clap(flatten)]
-        args: ShiftArgs,
+        args: mwa_hyperdrive::SrclistShiftArgs,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
     },
 
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     SrclistVerify {
         #[clap(flatten)]
-        args: VerifyArgs,
+        args: mwa_hyperdrive::SrclistVerifyArgs,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
     },
 
     #[clap(arg_required_else_help = true)]
     #[clap(infer_long_args = true)]
     DipoleGains {
         #[clap(flatten)]
-        args: mwa_hyperdrive::utilities::dipole_gains::DipoleGains,
+        args: mwa_hyperdrive::DipoleGainsArgs,
     },
 }
 
-fn main() {
-    // Stolen from BurntSushi. We don't return Result from main because it
-    // prints the debug representation of the error. The code below prints the
-    // "display" or human readable representation of the error.
-    if let Err(e) = try_main() {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
-}
-
-fn try_main() -> Result<(), HyperdriveError> {
+/// Run `hyperdrive`.
+fn cli() -> Result<(), HyperdriveError> {
     // Get the command-line arguments.
     let args = Args::parse();
 
@@ -207,10 +218,10 @@ fn try_main() -> Result<(), HyperdriveError> {
         Args::SolutionsApply { verbosity, .. } => (verbosity, "solutions-apply"),
         Args::SolutionsConvert { verbosity, .. } => (verbosity, "solutions-convert"),
         Args::SolutionsPlot { verbosity, .. } => (verbosity, "solutions-plot"),
-        Args::SrclistByBeam { args, .. } => (&args.verbosity, "srclist-by-beam"),
-        Args::SrclistConvert { args, .. } => (&args.verbosity, "srclist-convert"),
-        Args::SrclistShift { args, .. } => (&args.verbosity, "srclist-shift"),
-        Args::SrclistVerify { args, .. } => (&args.verbosity, "srclist-verify"),
+        Args::SrclistByBeam { verbosity, .. } => (verbosity, "srclist-by-beam"),
+        Args::SrclistConvert { verbosity, .. } => (verbosity, "srclist-convert"),
+        Args::SrclistShift { verbosity, .. } => (verbosity, "srclist-shift"),
+        Args::SrclistVerify { verbosity, .. } => (verbosity, "srclist-verify"),
         Args::DipoleGains { .. } => (&0, "dipole-gains"),
     };
     setup_logging(*verbosity).expect("Failed to initialise logging.");
@@ -222,11 +233,10 @@ fn try_main() -> Result<(), HyperdriveError> {
     match Args::parse() {
         Args::DiCalibrate {
             cli_args,
-            args_file,
             verbosity: _,
             dry_run,
         } => {
-            di_calibrate(cli_args, args_file.as_deref(), dry_run)?;
+            cli_args.run(dry_run)?;
         }
 
         Args::VisSimulate {
@@ -262,10 +272,10 @@ fn try_main() -> Result<(), HyperdriveError> {
         }
 
         // Source list utilities.
-        Args::SrclistByBeam { args } => args.run()?,
-        Args::SrclistConvert { args } => args.run()?,
-        Args::SrclistShift { args } => args.run()?,
-        Args::SrclistVerify { args } => args.run()?,
+        Args::SrclistByBeam { args, .. } => args.run()?,
+        Args::SrclistConvert { args, .. } => args.run()?,
+        Args::SrclistShift { args, .. } => args.run()?,
+        Args::SrclistVerify { args, .. } => args.run()?,
 
         // Misc. utilities.
         Args::DipoleGains { args } => args.run().unwrap(),
@@ -273,4 +283,93 @@ fn try_main() -> Result<(), HyperdriveError> {
 
     info!("hyperdrive {} complete.", sub_command);
     Ok(())
+}
+
+/// Activate a logger. Use colours only if we're on a tty (e.g. a terminal) and
+/// display source lines in log messages with verbosity >= 3.
+// This is pretty dirty code. Can it be cleaned up?
+fn setup_logging(verbosity: u8) -> Result<(), log::SetLoggerError> {
+    let is_a_tty = is_a_tty();
+
+    let (high_level_messages, low_level_messages) = if is_a_tty {
+        let colours = ColoredLevelConfig::new()
+            .warn(Color::Red)
+            .info(Color::Green)
+            .debug(Color::Blue)
+            .trace(Color::Yellow);
+        let colours2 = colours;
+
+        (
+            fern::Dispatch::new().format(move |out, message, record| {
+                out.finish(format_args!(
+                    "{} {:<5} {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    colours.color(record.level()),
+                    message
+                ))
+            }),
+            fern::Dispatch::new().format(move |out, message, record| {
+                out.finish(format_args!(
+                    "{} {} line {:<3} {:<5} {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    record.target(),
+                    record.line().unwrap_or(0),
+                    colours2.color(record.level()),
+                    message
+                ))
+            }),
+        )
+    } else {
+        (
+            fern::Dispatch::new().format(move |out, message, record| {
+                out.finish(format_args!(
+                    "{} {:<5} {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    record.level(),
+                    message
+                ))
+            }),
+            fern::Dispatch::new().format(move |out, message, record| {
+                out.finish(format_args!(
+                    "{} {} line {:<3} {:<5} {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    record.target(),
+                    record.line().unwrap_or(0),
+                    record.level(),
+                    message
+                ))
+            }),
+        )
+    };
+
+    let logger = match verbosity {
+        0 => high_level_messages.level(log::LevelFilter::Info),
+        1 => high_level_messages.level(log::LevelFilter::Debug),
+        2 => high_level_messages.level(log::LevelFilter::Trace),
+        _ => low_level_messages.level(log::LevelFilter::Trace),
+    };
+    logger.chain(std::io::stdout()).apply()
+}
+
+/// Write many info-level log lines of how this executable was compiled.
+fn display_build_info() {
+    match GIT_HEAD_REF {
+        Some(hr) => {
+            let dirty = GIT_DIRTY.unwrap_or(false);
+            info!(
+                "Compiled on git commit hash: {}{}",
+                GIT_COMMIT_HASH.unwrap(),
+                if dirty { " (dirty)" } else { "" }
+            );
+            info!("            git head ref: {}", hr);
+        }
+        None => info!("Compiled on git commit hash: <no git info>"),
+    }
+    info!("            {}", BUILT_TIME_UTC);
+    info!("         with compiler {}", RUSTC_VERSION);
+    info!("");
+}
+
+fn is_a_tty() -> bool {
+    atty::is(atty::Stream::Stdout) || atty::is(atty::Stream::Stderr)
 }

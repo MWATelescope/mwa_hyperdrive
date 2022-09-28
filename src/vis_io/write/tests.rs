@@ -20,7 +20,6 @@ use crate::{
     averaging::timesteps_to_timeblocks,
     vis_io::read::{MsReader, UvfitsReader, VisRead},
 };
-use mwa_hyperdrive_common::hifitime;
 
 fn synthesize_test_data(
     shape: (usize, usize, usize),
@@ -48,7 +47,7 @@ fn synthesize_test_data(
 
 #[test]
 #[serial]
-pub fn test_vis_output_no_time_averaging_no_gaps() {
+fn test_vis_output_no_time_averaging_no_gaps() {
     let vis_time_average_factor = 1;
     let vis_freq_average_factor = 1;
 
@@ -252,7 +251,7 @@ pub fn test_vis_output_no_time_averaging_no_gaps() {
 
 #[test]
 #[serial]
-pub fn test_vis_output_no_time_averaging_with_gaps() {
+fn test_vis_output_no_time_averaging_with_gaps() {
     let vis_time_average_factor = 1;
     let vis_freq_average_factor = 1;
 
@@ -464,7 +463,7 @@ pub fn test_vis_output_no_time_averaging_with_gaps() {
 
 #[test]
 #[serial]
-pub fn test_vis_output_time_averaging() {
+fn test_vis_output_time_averaging() {
     let vis_time_average_factor = 3;
     let vis_freq_average_factor = 1;
 

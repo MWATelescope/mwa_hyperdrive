@@ -4,5 +4,5 @@
 
 //! Visibilities input/output (reading and writing).
 
-pub mod read;
-pub mod write;
+pub(crate) mod read;
+pub(crate) mod write;

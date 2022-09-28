@@ -9,8 +9,6 @@ use std::path::PathBuf;
 use mwalib::FitsError;
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{mwalib, thiserror};
-
 #[derive(Error, Debug)]
 /// Error type associated with mwaf files.
 pub(crate) enum MwafError {

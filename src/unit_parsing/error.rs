@@ -4,8 +4,6 @@
 
 use thiserror::Error;
 
-use mwa_hyperdrive_common::thiserror;
-
 #[derive(Debug, Error)]
 pub(crate) enum UnitParseError {
     #[error(

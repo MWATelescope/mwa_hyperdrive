@@ -13,11 +13,10 @@ use tempfile::{tempdir, NamedTempFile};
 
 use super::*;
 use crate::{
-    calibrate::di::code::{get_cal_vis, tests::test_1090008640_quality},
+    di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
     math::TileBaselineMaps,
     tests::reduced_obsids::get_reduced_1090008640_uvfits,
 };
-use mwa_hyperdrive_common::{hifitime, itertools, marlu, ndarray};
 
 // TODO(dev): move these to Marlu
 fn write_then_read_uvfits(autos: bool) {
@@ -157,7 +156,7 @@ fn write_then_read_uvfits(autos: bool) {
 
     // Inspect the file for sanity's sake!
     let metafits: Option<&str> = None;
-    let result = UvfitsReader::new(&output.path(), metafits);
+    let result = UvfitsReader::new(output.path(), metafits);
     assert!(
         result.is_ok(),
         "Failed to read the just-created uvfits file"

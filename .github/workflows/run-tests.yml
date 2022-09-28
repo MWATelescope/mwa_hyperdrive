@@ -69,20 +69,10 @@ jobs:
 
       # Can't test with CUDA, no GPUs available in CI
       - name: Run tests
-        run: |
-          cargo test
-          cd common  && cargo test --locked && cd ..
-          cd beam    && cargo test --locked && cd ..
-          # cd cuda    && cargo test --locked && cd ..
-          cd srclist && cargo test --locked && cd ..
+        run: cargo test --locked
 
       - name: Run ignored tests
-        run: |
-          cargo test -- --ignored
-          cd common  && cargo test --locked -- --ignored && cd ..
-          cd beam    && cargo test --locked -- --ignored && cd ..
-          # cd cuda    && cargo test --locked -- --ignored && cd ..
-          cd srclist && cargo test --locked -- --ignored && cd ..
+        run: cargo test --locked -- --ignored
 
       - name: Minimum-specified Rust version works
         run: |

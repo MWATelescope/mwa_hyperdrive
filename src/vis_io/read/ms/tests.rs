@@ -13,11 +13,10 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::{
-    calibrate::di::code::{get_cal_vis, tests::test_1090008640_quality},
+    di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
     math::TileBaselineMaps,
     tests::reduced_obsids::get_reduced_1090008640_ms,
 };
-use mwa_hyperdrive_common::hifitime;
 
 #[test]
 #[serial]

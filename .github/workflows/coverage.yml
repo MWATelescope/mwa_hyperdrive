@@ -1,16 +1,13 @@
 ---
 name: Generate Coverage report
 
-# Based on https://github.com/actions-rs/meta/blob/master/recipes/quickstart.md
-
-# Do this on every push, but don't double up on tags
 on:
   push:
     tags-ignore:
       - '**'
     pull_request:
     branches:
-    - '**'
+      - '**'
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -53,8 +50,9 @@ jobs:
           override: true
           components: llvm-tools-preview
 
-      - name: install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
+      # https://lib.rs/crates/cargo-llvm-cov#readme-continuous-integration
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Get the beam HDF5 file
         run: curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o mwa_full_embedded_element_pattern.h5
@@ -62,13 +60,10 @@ jobs:
       - name: Generate test lcov coverage into coverage/ dir
         run: |
           export MWA_BEAM_FILE=$(realpath mwa_full_embedded_element_pattern.h5)
-
-          mkdir -p coverage
-          cargo llvm-cov --all-targets --workspace --exclude mwa_hyperdrive_cuda --no-default-features --locked --lcov --output-path coverage/coverage.lcov
-          # this uses the result of the previous run to generate a text summary
-          cargo llvm-cov --no-run
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
 
       - name: Upload reports to codecov.io
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v3
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: true

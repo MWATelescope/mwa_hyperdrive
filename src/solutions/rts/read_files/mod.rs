@@ -24,11 +24,9 @@ use std::path::Path;
 
 use marlu::Jones;
 use ndarray::prelude::*;
+use num_complex::Complex;
 use thiserror::Error;
 use vec1::Vec1;
-
-use crate::math::cexp;
-use mwa_hyperdrive_common::{marlu, ndarray, thiserror, vec1};
 
 // DI_JonesMatrices_node???.dat files are structured by lines as follows:
 // 1) A single float for the "alignment flux density",
@@ -337,7 +335,8 @@ impl BpCal {
                     pair.1 = float;
                     first = true;
 
-                    data[(i_tile, lsq_or_fit, i_float / 2)][px_py_qx_qy] = pair.0 * cexp(pair.1);
+                    data[(i_tile, lsq_or_fit, i_float / 2)][px_py_qx_qy] =
+                        Complex::from_polar(pair.0, pair.1);
                 }
             }
         }

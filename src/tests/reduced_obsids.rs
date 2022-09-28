@@ -7,12 +7,12 @@
 //! perform units tests without requiring MWA data for a full observation.
 
 use super::*;
-use crate::calibrate::args::CalibrateUserArgs;
+use crate::cli::di_calibrate::DiCalArgs;
 
 /// Get the calibration arguments associated with the obsid 1090008640 (raw MWA
 /// data). This observational data is inside the hyperdrive git repo, but has
 /// been reduced; there is only 1 coarse channel and 1 timestep.
-pub(crate) fn get_reduced_1090008640(include_mwaf: bool) -> CalibrateUserArgs {
+pub(crate) fn get_reduced_1090008640(use_fee_beam: bool, include_mwaf: bool) -> DiCalArgs {
     // Use absolute paths.
     let test_files = PathBuf::from("test_files/1090008640")
         .canonicalize()
@@ -48,10 +48,10 @@ pub(crate) fn get_reduced_1090008640(include_mwaf: bool) -> CalibrateUserArgs {
         srclist
     );
 
-    CalibrateUserArgs {
+    DiCalArgs {
         data: Some(data),
         source_list: Some(srclist),
-        no_beam: true,
+        no_beam: !use_fee_beam,
         ..Default::default()
     }
 }
@@ -59,7 +59,7 @@ pub(crate) fn get_reduced_1090008640(include_mwaf: bool) -> CalibrateUserArgs {
 /// Get the calibration arguments associated with the obsid 1090008640
 /// (measurement set). This observational data is inside the hyperdrive git
 /// repo, but has been reduced; there is only 1 coarse channel and 1 timestep.
-pub(crate) fn get_reduced_1090008640_ms() -> CalibrateUserArgs {
+pub(crate) fn get_reduced_1090008640_ms() -> DiCalArgs {
     // Ensure that the required files are there.
     let data = vec![
         "test_files/1090008640/1090008640.metafits".to_string(),
@@ -83,7 +83,7 @@ pub(crate) fn get_reduced_1090008640_ms() -> CalibrateUserArgs {
         srclist
     );
 
-    CalibrateUserArgs {
+    DiCalArgs {
         data: Some(data),
         source_list: Some(srclist),
         no_beam: true,
@@ -94,7 +94,7 @@ pub(crate) fn get_reduced_1090008640_ms() -> CalibrateUserArgs {
 /// Get the calibration arguments associated with the obsid 1090008640 (uvfits).
 /// This observational data is inside the hyperdrive git repo, but has been
 /// reduced; there is only 1 coarse channel and 1 timestep.
-pub(crate) fn get_reduced_1090008640_uvfits() -> CalibrateUserArgs {
+pub(crate) fn get_reduced_1090008640_uvfits() -> DiCalArgs {
     // Ensure that the required files are there.
     let data = vec![
         "test_files/1090008640/1090008640.metafits".to_string(),
@@ -118,7 +118,7 @@ pub(crate) fn get_reduced_1090008640_uvfits() -> CalibrateUserArgs {
         srclist
     );
 
-    CalibrateUserArgs {
+    DiCalArgs {
         data: Some(data),
         source_list: Some(srclist),
         no_beam: true,

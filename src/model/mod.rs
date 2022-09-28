@@ -20,9 +20,10 @@ use hifitime::{Duration, Epoch};
 use marlu::{Jones, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 
-use mwa_hyperdrive_beam::{Beam, BeamError};
-use mwa_hyperdrive_common::{cfg_if, hifitime, marlu, ndarray};
-use mwa_hyperdrive_srclist::{ComponentList, SourceList};
+use crate::{
+    beam::{Beam, BeamError},
+    srclist::{ComponentList, SourceList},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ModellerInfo {
@@ -34,13 +35,13 @@ pub(crate) enum ModellerInfo {
     /// the compile features used.
     #[cfg(feature = "cuda")]
     Cuda {
-        device_info: mwa_hyperdrive_cuda::CudaDeviceInfo,
-        driver_info: mwa_hyperdrive_cuda::CudaDriverInfo,
+        device_info: crate::cuda::CudaDeviceInfo,
+        driver_info: crate::cuda::CudaDriverInfo,
     },
 }
 
 /// An object that simulates sky-model visibilities.
-pub trait SkyModeller<'a> {
+pub(crate) trait SkyModeller<'a> {
     /// Generate sky-model visibilities for a single timestep. The [UVW]
     /// coordinates used in generating the visibilities are returned.
     ///
@@ -142,7 +143,7 @@ pub trait SkyModeller<'a> {
 /// flagged tiles is the total number of tiles in the observation. The
 /// frequencies should have units of \[Hz\].
 #[allow(clippy::too_many_arguments)]
-pub fn new_cpu_sky_modeller<'a>(
+pub(crate) fn new_cpu_sky_modeller<'a>(
     beam: &'a dyn Beam,
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
@@ -186,7 +187,7 @@ pub fn new_cpu_sky_modeller<'a>(
 /// catch problems but there are no guarantees.
 #[cfg(feature = "cuda")]
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn new_cuda_sky_modeller<'a>(
+pub(crate) unsafe fn new_cuda_sky_modeller<'a>(
     beam: &'a dyn Beam,
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],

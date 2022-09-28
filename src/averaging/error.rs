@@ -4,8 +4,6 @@
 
 use thiserror::Error;
 
-use mwa_hyperdrive_common::thiserror;
-
 #[derive(Error, Debug)]
 pub(crate) enum AverageFactorError {
     #[error("The user input was 0; this is not permitted")]

@@ -7,18 +7,17 @@
 
 use thiserror::Error;
 
-use mwa_hyperdrive_common::thiserror;
-use mwa_hyperdrive_srclist::SrclistError;
-
 use crate::{
-    calibrate::{params::InvalidArgsError, CalibrateError},
-    filenames::InputFileError,
-    solutions::{
-        apply::SolutionsApplyError, plot::SolutionsPlotError, SolutionsReadError,
-        SolutionsWriteError,
+    cli::{
+        di_calibrate::DiCalArgsError,
+        solutions::{apply::SolutionsApplyError, plot::SolutionsPlotError},
+        vis_utils::{simulate::VisSimulateError, subtract::VisSubtractError},
     },
+    di_calibrate::DiCalibrateError,
+    filenames::InputFileError,
+    solutions::{SolutionsReadError, SolutionsWriteError},
+    srclist::SrclistError,
     vis_io::read::VisReadError,
-    vis_utils::{simulate::VisSimulateError, subtract::VisSubtractError},
 };
 
 const URL: &str = "https://MWATelescope.github.io/mwa_hyperdrive";
@@ -119,21 +118,20 @@ pub enum HyperdriveError {
 
 // Binary sub-command errors.
 
-impl From<CalibrateError> for HyperdriveError {
-    fn from(e: CalibrateError) -> Self {
+impl From<DiCalibrateError> for HyperdriveError {
+    fn from(e: DiCalibrateError) -> Self {
         let s = e.to_string();
         match e {
-            CalibrateError::InsufficientMemory { .. }
-            | CalibrateError::TimestepUnavailable { .. }
-            | CalibrateError::ArgFile(_) => Self::DiCalibrate(s),
-            CalibrateError::InvalidArgs(e) => Self::from(e),
-            CalibrateError::SolutionsRead(_) | CalibrateError::SolutionsWrite(_) => {
+            DiCalibrateError::InsufficientMemory { .. }
+            | DiCalibrateError::TimestepUnavailable { .. } => Self::DiCalibrate(s),
+            DiCalibrateError::DiCalArgs(e) => Self::from(e),
+            DiCalibrateError::SolutionsRead(_) | DiCalibrateError::SolutionsWrite(_) => {
                 Self::Solutions(s)
             }
-            CalibrateError::Fitsio(_) => Self::Cfitsio(s),
-            CalibrateError::VisRead(e) => Self::from(e),
-            CalibrateError::VisWrite(_) => Self::VisWrite(s),
-            CalibrateError::Beam(_) | CalibrateError::IO(_) => Self::Generic(s),
+            DiCalibrateError::Fitsio(_) => Self::Cfitsio(s),
+            DiCalibrateError::VisRead(e) => Self::from(e),
+            DiCalibrateError::VisWrite(_) => Self::VisWrite(s),
+            DiCalibrateError::Beam(_) | DiCalibrateError::IO(_) => Self::Generic(s),
         }
     }
 }
@@ -272,7 +270,7 @@ impl From<SrclistError> for HyperdriveError {
         let s = e.to_string();
         match e {
             SrclistError::NoSourcesAfterVeto
-            | SrclistError::SourceList(_)
+            | SrclistError::ReadSourceList(_)
             | SrclistError::WriteSourceList(_)
             | SrclistError::Veto(_) => Self::Srclist(s),
             SrclistError::MissingMetafits => Self::Metafits(s),
@@ -344,57 +342,59 @@ impl From<VisReadError> for HyperdriveError {
     }
 }
 
-impl From<InvalidArgsError> for HyperdriveError {
-    fn from(e: InvalidArgsError) -> Self {
+impl From<DiCalArgsError> for HyperdriveError {
+    fn from(e: DiCalArgsError) -> Self {
         let s = e.to_string();
         match e {
-            InvalidArgsError::NoInputData
-            | InvalidArgsError::NoOutput
-            | InvalidArgsError::NoTiles
-            | InvalidArgsError::NoChannels
-            | InvalidArgsError::NoTimesteps
-            | InvalidArgsError::UnavailableTimestep { .. }
-            | InvalidArgsError::DuplicateTimesteps
-            | InvalidArgsError::TileFlag(_)
-            | InvalidArgsError::NoSources
-            | InvalidArgsError::BadArrayPosition { .. }
-            | InvalidArgsError::ParseUvwMin(_)
-            | InvalidArgsError::ParseUvwMax(_) => Self::DiCalibrate(s),
-            InvalidArgsError::NoSourceList
-            | InvalidArgsError::NoSourcesAfterVeto
-            | InvalidArgsError::Veto(_)
-            | InvalidArgsError::SourceList(_) => Self::Srclist(s),
-            InvalidArgsError::NoDelays | InvalidArgsError::BadDelays => Self::Delays(s),
-            InvalidArgsError::CalibrationOutputFile { .. } => Self::Solutions(s),
-            InvalidArgsError::ParsePfbFlavour(_) => Self::RawDataCorrections(s),
-            InvalidArgsError::Beam(_) => Self::Beam(s),
-            InvalidArgsError::ParseCalTimeAverageFactor(_)
-            | InvalidArgsError::ParseCalFreqAverageFactor(_)
-            | InvalidArgsError::CalTimeFactorNotInteger
-            | InvalidArgsError::CalFreqFactorNotInteger
-            | InvalidArgsError::CalTimeResNotMultiple { .. }
-            | InvalidArgsError::CalFreqResNotMultiple { .. }
-            | InvalidArgsError::CalTimeFactorZero
-            | InvalidArgsError::CalFreqFactorZero
-            | InvalidArgsError::ParseOutputVisTimeAverageFactor(_)
-            | InvalidArgsError::ParseOutputVisFreqAverageFactor(_)
-            | InvalidArgsError::OutputVisTimeFactorNotInteger
-            | InvalidArgsError::OutputVisFreqFactorNotInteger
-            | InvalidArgsError::OutputVisTimeAverageFactorZero
-            | InvalidArgsError::OutputVisFreqAverageFactorZero
-            | InvalidArgsError::OutputVisTimeResNotMultiple { .. }
-            | InvalidArgsError::OutputVisFreqResNotMultiple { .. } => Self::Averaging(s),
-            InvalidArgsError::InvalidDataInput(_)
-            | InvalidArgsError::MultipleMetafits(_)
-            | InvalidArgsError::MultipleMeasurementSets(_)
-            | InvalidArgsError::MultipleUvfits(_) => Self::VisRead(s),
-            InvalidArgsError::VisRead(e) => Self::from(e),
-            InvalidArgsError::VisFileType { .. } | InvalidArgsError::FileWrite(_) => {
-                Self::VisWrite(s)
-            }
-            InvalidArgsError::Glob(_) | InvalidArgsError::IO(_) => Self::Generic(s),
+            DiCalArgsError::NoInputData
+            | DiCalArgsError::NoOutput
+            | DiCalArgsError::NoTiles
+            | DiCalArgsError::NoChannels
+            | DiCalArgsError::NoTimesteps
+            | DiCalArgsError::UnavailableTimestep { .. }
+            | DiCalArgsError::DuplicateTimesteps
+            | DiCalArgsError::TileFlag(_)
+            | DiCalArgsError::NoSources
+            | DiCalArgsError::BadArrayPosition { .. }
+            | DiCalArgsError::ParseUvwMin(_)
+            | DiCalArgsError::ParseUvwMax(_) => Self::DiCalibrate(s),
+            DiCalArgsError::NoSourceList
+            | DiCalArgsError::NoSourcesAfterVeto
+            | DiCalArgsError::Veto(_)
+            | DiCalArgsError::SourceList(_) => Self::Srclist(s),
+            DiCalArgsError::NoDelays | DiCalArgsError::BadDelays => Self::Delays(s),
+            DiCalArgsError::CalibrationOutputFile { .. } => Self::Solutions(s),
+            DiCalArgsError::ParsePfbFlavour(_) => Self::RawDataCorrections(s),
+            DiCalArgsError::Beam(_) => Self::Beam(s),
+            DiCalArgsError::ParseCalTimeAverageFactor(_)
+            | DiCalArgsError::ParseCalFreqAverageFactor(_)
+            | DiCalArgsError::CalTimeFactorNotInteger
+            | DiCalArgsError::CalFreqFactorNotInteger
+            | DiCalArgsError::CalTimeResNotMultiple { .. }
+            | DiCalArgsError::CalFreqResNotMultiple { .. }
+            | DiCalArgsError::CalTimeFactorZero
+            | DiCalArgsError::CalFreqFactorZero
+            | DiCalArgsError::ParseOutputVisTimeAverageFactor(_)
+            | DiCalArgsError::ParseOutputVisFreqAverageFactor(_)
+            | DiCalArgsError::OutputVisTimeFactorNotInteger
+            | DiCalArgsError::OutputVisFreqFactorNotInteger
+            | DiCalArgsError::OutputVisTimeAverageFactorZero
+            | DiCalArgsError::OutputVisFreqAverageFactorZero
+            | DiCalArgsError::OutputVisTimeResNotMultiple { .. }
+            | DiCalArgsError::OutputVisFreqResNotMultiple { .. } => Self::Averaging(s),
+            DiCalArgsError::InvalidDataInput(_)
+            | DiCalArgsError::MultipleMetafits(_)
+            | DiCalArgsError::MultipleMeasurementSets(_)
+            | DiCalArgsError::MultipleUvfits(_) => Self::VisRead(s),
+            DiCalArgsError::VisRead(e) => Self::from(e),
+            DiCalArgsError::VisFileType { .. } | DiCalArgsError::FileWrite(_) => Self::VisWrite(s),
+            DiCalArgsError::UnrecognisedArgFileExt(_)
+            | DiCalArgsError::TomlDecode { .. }
+            | DiCalArgsError::JsonDecode { .. }
+            | DiCalArgsError::Glob(_)
+            | DiCalArgsError::IO(_) => Self::Generic(s),
             #[cfg(feature = "cuda")]
-            InvalidArgsError::CudaError(_) => Self::Generic(s),
+            DiCalArgsError::CudaError(_) => Self::Generic(s),
         }
     }
 }

@@ -25,15 +25,14 @@ use ndarray::prelude::*;
 
 use super::*;
 use crate::{
+    beam::Delays,
     context::ObsContext,
     metafits,
-    time::quantize_duration,
+    misc::quantize_duration,
     vis_io::read::{VisRead, VisReadError},
 };
-use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray};
 
-pub struct UvfitsReader {
+pub(crate) struct UvfitsReader {
     /// Observation metadata.
     pub(super) obs_context: ObsContext,
 
@@ -72,7 +71,7 @@ impl UvfitsReader {
             // TODO: Let the user supply the MWA version.
             let mwalib_context = match metafits {
                 None => None,
-                Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
+                Some(m) => Some(mwalib::MetafitsContext::new(m, None)?),
             };
 
             debug!("Using uvfits file: {}", uvfits.display());

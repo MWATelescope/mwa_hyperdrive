@@ -7,29 +7,47 @@
 //!
 //! <https://mwatelescope.github.io/mwa_hyperdrive/index.html>
 
-pub mod averaging;
-pub mod calibrate;
-pub mod constants;
+pub(crate) mod averaging;
+pub(crate) mod beam;
+mod cli;
+pub(crate) mod constants;
 pub(crate) mod context;
+pub(crate) mod di_calibrate;
 pub(crate) mod error;
 pub(crate) mod filenames;
 pub(crate) mod flagging;
 pub(crate) mod glob;
 mod help_texts;
-pub mod math;
+pub(crate) mod math;
 pub(crate) mod messages;
-pub mod metafits;
-pub mod model;
+pub(crate) mod metafits;
+pub(crate) mod misc;
+pub(crate) mod model;
 pub(crate) mod pfb_gains;
-pub mod solutions;
-pub(crate) mod time;
+pub(crate) mod shapelets;
+pub(crate) mod solutions;
+pub(crate) mod srclist;
 pub(crate) mod unit_parsing;
-pub mod utilities;
-pub mod vis_io;
-pub mod vis_utils;
+pub(crate) mod vis_io;
+
+#[cfg(feature = "cuda")]
+pub(crate) mod cuda;
 
 #[cfg(test)]
 mod tests;
 
 // Re-exports.
+pub use cli::{
+    di_calibrate::DiCalArgs,
+    dipole_gains::DipoleGainsArgs,
+    solutions::{
+        apply::SolutionsApplyArgs, convert::SolutionsConvertArgs, plot::SolutionsPlotArgs,
+    },
+    srclist::{
+        by_beam::SrclistByBeamArgs, convert::SrclistConvertArgs, shift::SrclistShiftArgs,
+        verify::SrclistVerifyArgs,
+    },
+    vis_utils::{simulate::VisSimulateArgs, subtract::VisSubtractArgs},
+};
 pub use error::HyperdriveError;
+pub use solutions::CalibrationSolutions;

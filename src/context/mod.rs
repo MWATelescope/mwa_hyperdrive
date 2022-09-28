@@ -20,8 +20,7 @@ use ndarray::Array2;
 use thiserror::Error;
 use vec1::Vec1;
 
-use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, itertools, log, marlu, ndarray, thiserror, vec1};
+use crate::beam::Delays;
 
 /// MWA observation metadata.
 ///
@@ -31,15 +30,15 @@ use mwa_hyperdrive_common::{hifitime, itertools, log, marlu, ndarray, thiserror,
 ///
 /// Tile information is ordered according to the "Antenna" column in HDU 1 of
 /// the observation's metafits file.
-pub struct ObsContext {
+pub(crate) struct ObsContext {
     /// The observation ID, which is also the observation's scheduled start GPS
     /// time (but shouldn't be used for this purpose).
-    pub obsid: Option<u32>,
+    pub(crate) obsid: Option<u32>,
 
     /// The unique timestamps in the observation. These are stored as `hifitime`
     /// [Epoch] structs to help keep the code flexible. These include timestamps
     /// that are deemed "flagged" by the observation.
-    pub timestamps: Vec1<Epoch>,
+    pub(crate) timestamps: Vec1<Epoch>,
 
     /// The *available* timestep indices of the input data. This does not
     /// necessarily start at 0, and is not necessarily regular (e.g. a valid
@@ -49,7 +48,7 @@ pub struct ObsContext {
     /// data that also isn't regular; naively reading in a dataset with 2
     /// timesteps that are separated by more than the time resolution of the
     /// data would give misleading results.
-    pub all_timesteps: Vec1<usize>,
+    pub(crate) all_timesteps: Vec1<usize>,
 
     /// The timestep indices of the input data that aren't totally flagged.
     ///
@@ -81,11 +80,11 @@ pub struct ObsContext {
     /// The [XyzGeodetic] coordinates of all tiles in the array (all coordinates
     /// are specified in \[metres\]). This includes tiles that have been flagged
     /// in the input data.
-    pub tile_xyzs: Vec1<XyzGeodetic>,
+    pub(crate) tile_xyzs: Vec1<XyzGeodetic>,
 
     /// The flagged tiles, either already missing data or suggested to be
     /// flagged. Zero indexed.
-    pub flagged_tiles: Vec<usize>,
+    pub(crate) flagged_tiles: Vec<usize>,
 
     /// Are auto-correlations present in the visibility data?
     pub(crate) autocorrelations_present: bool,
@@ -133,11 +132,11 @@ pub struct ObsContext {
     ///
     /// These are kept as ints to help some otherwise error-prone calculations
     /// using floats. By using ints, we assume there is no sub-Hz structure.
-    pub fine_chan_freqs: Vec1<u64>,
+    pub(crate) fine_chan_freqs: Vec1<u64>,
 
     /// The flagged fine channels for each baseline in the supplied data. Zero
     /// indexed.
-    pub flagged_fine_chans: Vec<usize>,
+    pub(crate) flagged_fine_chans: Vec<usize>,
 
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
@@ -157,7 +156,7 @@ impl ObsContext {
     /// distance between timestamps. If there is no more than 1 timestamp, then
     /// return 1s, since the time resolution of single-timestep observations is
     /// not important anyway.
-    pub fn guess_time_res(&self) -> Duration {
+    pub(crate) fn guess_time_res(&self) -> Duration {
         match self.time_res {
             Some(t) => t,
             None => {
@@ -167,7 +166,7 @@ impl ObsContext {
         }
     }
 
-    pub fn guess_freq_res(&self) -> f64 {
+    pub(crate) fn guess_freq_res(&self) -> f64 {
         match self.freq_res {
             Some(f) => f,
             None => {

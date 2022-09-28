@@ -33,7 +33,6 @@ use vec1::Vec1;
 
 use super::CalibrationSolutions;
 use crate::glob::get_all_matches_from_glob;
-use mwa_hyperdrive_common::{lazy_static, log, marlu, mwalib, ndarray, thiserror, vec1};
 
 lazy_static::lazy_static! {
     static ref NODE_NUM: Regex = Regex::new(r"node(\d{3})\.dat$").unwrap();
@@ -49,7 +48,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
             return Err(RtsReadSolsError::NotADir(dir.to_path_buf()));
         }
 
-        let context = mwalib::MetafitsContext::new(&metafits, None)?;
+        let context = mwalib::MetafitsContext::new(metafits, None)?;
 
         // Search `dir` for DI_JonesMatrices_node???.dat and
         // BandpassCalibration_node???.dat files.
@@ -389,7 +388,7 @@ pub(super) fn write<P: AsRef<Path>, P2: AsRef<Path>>(
             })?;
         }
 
-        let context = mwalib::MetafitsContext::new(&metafits, None)?;
+        let context = mwalib::MetafitsContext::new(metafits, None)?;
         let num_fine_chans_per_coarse_chan = context.num_corr_fine_chans_per_coarse;
         let freq_res = context.corr_fine_chan_width_hz as f64;
 

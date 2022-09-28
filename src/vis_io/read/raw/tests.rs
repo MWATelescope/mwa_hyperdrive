@@ -11,10 +11,8 @@ use tempfile::{tempdir, TempDir};
 
 use super::*;
 use crate::{
-    calibrate::{
-        args::CalibrateUserArgs,
-        di::code::{get_cal_vis, tests::test_1090008640_quality},
-    },
+    cli::di_calibrate::DiCalArgs,
+    di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
     pfb_gains::{EMPIRICAL_40KHZ, LEVINE_40KHZ},
     tests::{deflate_gz_into_file, reduced_obsids::get_reduced_1090008640},
 };
@@ -29,7 +27,7 @@ struct AutoData {
     weights_array: Array2<f32>,
 }
 
-fn get_cross_vis(args: CalibrateUserArgs) -> CrossData {
+fn get_cross_vis(args: DiCalArgs) -> CrossData {
     let result = args.into_params();
     let params = match result {
         Ok(p) => p,
@@ -58,7 +56,7 @@ fn get_cross_vis(args: CalibrateUserArgs) -> CrossData {
     }
 }
 
-fn get_auto_vis(args: CalibrateUserArgs) -> AutoData {
+fn get_auto_vis(args: DiCalArgs) -> AutoData {
     let result = args.into_params();
     let params = match result {
         Ok(p) => p,
@@ -87,7 +85,7 @@ fn get_auto_vis(args: CalibrateUserArgs) -> AutoData {
     }
 }
 
-fn get_cross_and_auto_vis(args: CalibrateUserArgs) -> (CrossData, AutoData) {
+fn get_cross_and_auto_vis(args: DiCalArgs) -> (CrossData, AutoData) {
     let result = args.into_params();
     let params = match result {
         Ok(p) => p,
@@ -129,7 +127,7 @@ fn get_cross_and_auto_vis(args: CalibrateUserArgs) -> (CrossData, AutoData) {
 fn read_1090008640_cross_vis() {
     // Other tests check that PFB gains and digital gains are correctly applied.
     // These simple _vis tests just check that the values are right.
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.no_cable_length_correction = true;
     args.no_geometric_correction = true;
@@ -165,7 +163,7 @@ fn read_1090008640_cross_vis() {
 // Test the visibility values with corrections applied (except PFB gains).
 #[test]
 fn read_1090008640_cross_vis_with_corrections() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.ignore_input_data_fine_channel_flags = true;
     let CrossData {
@@ -197,7 +195,7 @@ fn read_1090008640_cross_vis_with_corrections() {
 
 #[test]
 fn read_1090008640_auto_vis() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.no_cable_length_correction = true;
     args.no_geometric_correction = true;
@@ -250,7 +248,7 @@ fn read_1090008640_auto_vis() {
 
 #[test]
 fn read_1090008640_auto_vis_with_flags() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.no_cable_length_correction = true;
     args.no_geometric_correction = true;
@@ -309,7 +307,7 @@ fn read_1090008640_auto_vis_with_flags() {
 
 #[test]
 fn read_1090008640_cross_and_auto_vis() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.no_cable_length_correction = true;
     args.no_geometric_correction = true;
@@ -368,7 +366,7 @@ fn read_1090008640_cross_and_auto_vis() {
 
 #[test]
 fn pfb_empirical_gains() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("empirical".to_string());
     args.ignore_input_data_fine_channel_flags = true;
     let CrossData {
@@ -376,7 +374,7 @@ fn pfb_empirical_gains() {
         weights_array: weights_pfb,
     } = get_cross_vis(args);
 
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.ignore_input_data_fine_channel_flags = true;
     let CrossData {
@@ -404,7 +402,7 @@ fn pfb_empirical_gains() {
 
 #[test]
 fn pfb_levine_gains() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("levine".to_string());
     args.no_digital_gains = true;
     args.ignore_input_data_fine_channel_flags = true;
@@ -413,7 +411,7 @@ fn pfb_levine_gains() {
         weights_array: weights_pfb,
     } = get_cross_vis(args);
 
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = true;
     args.ignore_input_data_fine_channel_flags = true;
@@ -442,7 +440,7 @@ fn pfb_levine_gains() {
 
 #[test]
 fn test_digital_gains() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     // Some("none") turns off the PFB correction, whereas None would be the
     // default behaviour (apply PFB correction).
     args.pfb_flavour = Some("none".to_string());
@@ -452,7 +450,7 @@ fn test_digital_gains() {
         weights_array: weights_dg,
     } = get_cross_vis(args);
 
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.pfb_flavour = Some("none".to_string());
     args.no_digital_gains = true;
     let CrossData {
@@ -485,7 +483,7 @@ fn test_digital_gains() {
 #[test]
 fn test_mwaf_flags() {
     // First test without any mwaf flags.
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = Some("none".to_string());
@@ -523,7 +521,7 @@ fn test_mwaf_flags() {
     result.unwrap();
 
     // Now use the flags from our doctored mwaf file.
-    let mut args = get_reduced_1090008640(true);
+    let mut args = get_reduced_1090008640(false, true);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = Some("none".to_string());
@@ -597,7 +595,7 @@ fn test_mwaf_flags() {
 #[test]
 fn test_mwaf_flags_primes() {
     // First test without any mwaf flags.
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = Some("none".to_string());
@@ -635,7 +633,7 @@ fn test_mwaf_flags_primes() {
     result.unwrap();
 
     // Now use the flags from our "primes" mwaf file.
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = Some("none".to_string());
@@ -716,7 +714,7 @@ fn test_mwaf_flags_primes() {
 /// Test that cotter flags are correctly (as possible) ingested.
 #[test]
 fn test_mwaf_flags_cotter() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     args.ignore_input_data_fine_channel_flags = true;
     args.ignore_input_data_tile_flags = true;
     args.pfb_flavour = Some("none".to_string());
@@ -928,7 +926,7 @@ fn test_mwaf_flags_cotter() {
 
 #[test]
 fn test_1090008640_calibration_quality() {
-    let mut args = get_reduced_1090008640(false);
+    let mut args = get_reduced_1090008640(false, false);
     let temp_dir = tempdir().expect("Couldn't make temp dir");
     args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
     args.pfb_flavour = Some("none".to_string());

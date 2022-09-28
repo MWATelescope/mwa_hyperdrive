@@ -10,8 +10,7 @@ use serial_test::serial;
 use vec1::vec1;
 
 use super::*;
-use mwa_hyperdrive_common::{marlu, ndarray, vec1};
-use mwa_hyperdrive_srclist::{Source, SourceList};
+use crate::srclist::{Source, SourceList};
 
 // Put a single point source at zenith.
 #[test]

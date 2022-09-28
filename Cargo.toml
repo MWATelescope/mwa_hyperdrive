@@ -14,11 +14,9 @@ repository = "https://github.com/MWATelescope/mwa_hyperdrive"
 homepage = "https://mwatelescope.github.io/mwa_hyperdrive"
 exclude = [".github/*", "test_files/*"]
 
-[workspace]
-members = [".", "common", "beam", "cuda", "srclist"]
-
 [profile.release]
 panic = "abort"
+lto = "thin"
 
 [profile.dev]
 opt-level = 2
@@ -27,18 +25,12 @@ opt-level = 2
 default = ["plotting"]
 
 # Use CUDA code with double-precision floats.
-cuda = [
-    "mwa_hyperdrive_cuda",
-    "mwa_hyperdrive_beam/cuda",
-    "mwa_hyperdrive_srclist/cuda",
-]
+cuda = ["mwa_hyperbeam/cuda", "marlu/cuda"]
 
 # Use CUDA code with single-precision floats.
 cuda-single = [
     "cuda",
-    "mwa_hyperdrive_cuda/cuda-single",
-    "mwa_hyperdrive_beam/cuda-single",
-    "mwa_hyperdrive_srclist/cuda-single",
+    "mwa_hyperbeam/cuda-single",
 ]
 
 # Enable plotting.
@@ -48,37 +40,58 @@ plotting = ["plotters"]
 fontconfig-dlopen = ["plotters/fontconfig-dlopen"]
 
 # Compile cfitsio statically and link it
-cfitsio-static = [
-    "mwa_hyperdrive_common/cfitsio-static",
-    "birli/cfitsio-static",
-]
+cfitsio-static = ["fitsio-sys/fitsio-src"]
 
 # Compile cfitsio statically and link it
-erfa-static = ["mwa_hyperdrive_common/erfa-static", "birli/erfa-static"]
+erfa-static = ["erfa-sys/static"]
 
 # Compile HDF5 statically and link it
-hdf5-static = [
-    "mwa_hyperdrive_beam/hdf5-static",
-    "mwa_hyperdrive_srclist/hdf5-static",
-]
+hdf5-static = ["mwa_hyperbeam/hdf5-static"]
 
 # Link CUDA statically
-cuda-static = ["mwa_hyperdrive_common/cuda-static"]
+cuda-static = ["marlu/cuda-static"]
 
 # Link all C dependencies statically
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
+atty = "0.2.11"
 birli = { version = "0.8.0", default_features = false }
+byteorder = "1.4.3"
+cfg-if = "1.0.0"
+chrono = "0.4.0"
+clap = { version = "3.1.0", features = ["derive", "wrap_help"] }
 console = "0.15.0"
 crossbeam-channel = "0.5.0"
 crossbeam-utils = "0.8.7"
+erfa-sys = "0.2.0"
+fern = { version = "0.6.0", features = ["chrono", "colored"] }
+fitsio = "0.19.0"
+fitsio-sys = "0.4.0"
+flate2 = "1.0.13"
 glob = "0.3.0"
+hifitime = "3.0.0"
+indexmap = { version = "1.8.0", features = ["rayon"] }
+itertools = "0.10.0"
+indicatif = { version = "0.17.0", features = ["rayon"] }
+lazy_static = "1.4.0"
+log = "0.4.0"
+marlu = "0.8.0"
+mwa_hyperbeam = "0.5.0"
+mwalib = "0.15.0"
+ndarray = { version = "0.15.4", features = ["rayon"] }
+num-complex = "0.4.1"
+rayon = "1.5.0"
 regex = "1.4.6"
 scopeguard = "1.1.0"
 serde = { version = "1.0.103", features = ["derive"] }
+serde_json = "1.0.0"
+serde_yaml = "0.8.3"
 strum = "0.24.0"
 strum_macros = "0.24.0"
+thiserror = "1.0.7"
+toml = "0.5.2"
+vec1 = "1.5.0"
 
 plotters = { version = "0.3.1", default-features = false, features = [
     "bitmap_backend",
@@ -86,20 +99,19 @@ plotters = { version = "0.3.1", default-features = false, features = [
     "point_series",
 ], optional = true }
 
-mwa_hyperdrive_common = { path = "common" }
-mwa_hyperdrive_beam = { path = "beam" }
-mwa_hyperdrive_cuda = { path = "cuda", optional = true }
-mwa_hyperdrive_srclist = { path = "srclist" }
-
 [dev-dependencies]
 approx = "0.5.0"
 assert_cmd = "2.0.0"
-criterion = "0.3.5"
+criterion = "0.4.0"
 indoc = "1.0.0"
 marlu = { version = "0.8.0", features = ["approx"] }
 ndarray = { version = "0.15.4", features = ["approx-0_5"] }
 serial_test = "0.9.0"
 tempfile = "3.3.0"
+
+[build-dependencies]
+built = { version = "0.5.0", features = ["chrono", "git2"] }
+cc = { version = "1.0.72", features = ["parallel"] }
 
 [[bench]]
 name = "bench"

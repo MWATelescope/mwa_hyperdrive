@@ -9,8 +9,6 @@ use std::path::PathBuf;
 use marlu::mwalib::MwalibError;
 use thiserror::Error;
 
-use mwa_hyperdrive_common::{marlu, thiserror};
-
 #[derive(Error, Debug)]
 pub(crate) enum MsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]

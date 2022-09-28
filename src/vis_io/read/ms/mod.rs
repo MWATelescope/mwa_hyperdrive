@@ -28,11 +28,9 @@ use ndarray::prelude::*;
 use rubbl_casatables::Table;
 
 use super::*;
-use crate::{context::ObsContext, metafits, time::round_hundredths_of_a_second};
-use mwa_hyperdrive_beam::Delays;
-use mwa_hyperdrive_common::{hifitime, log, marlu, mwalib, ndarray};
+use crate::{beam::Delays, context::ObsContext, metafits, misc::round_hundredths_of_a_second};
 
-pub struct MsReader {
+pub(crate) struct MsReader {
     /// Input data metadata.
     obs_context: ObsContext,
 
@@ -80,7 +78,7 @@ impl MsReader {
             let mwalib_context = match metafits {
                 None => None,
                 // TODO: Let the user supply the MWA version
-                Some(m) => Some(mwalib::MetafitsContext::new(&m, None)?),
+                Some(m) => Some(mwalib::MetafitsContext::new(m, None)?),
             };
 
             let mut main_table = read_table(ms, None)?;
@@ -249,7 +247,7 @@ impl MsReader {
                             "FLAG",
                             // Auto-correlations are more likely to be flagged than
                             // cross-correlations, so ignore the autos (if present).
-                            (i * step + if autocorrelations_present { 1 } else { 0 }) as u64,
+                            (i * step + usize::from(autocorrelations_present)) as u64,
                         )
                         .unwrap();
                     match (first, last, vis_flags.into_iter().all(|f| f)) {

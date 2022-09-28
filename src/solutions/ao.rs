@@ -20,11 +20,10 @@ use vec1::vec1;
 
 use super::{error::*, CalibrationSolutions};
 use crate::math::average_epoch;
-use mwa_hyperdrive_common::{byteorder, hifitime, marlu, ndarray, rayon, vec1, Complex};
 
-pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
+pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
     let file_str = file.display().to_string();
-    let mut bin_file = BufReader::new(File::open(&file)?);
+    let mut bin_file = BufReader::new(File::open(file)?);
     // The first 7 bytes should be ASCII "MWAOCAL".
     let mwaocal_str = String::from_utf8(vec![
         bin_file.read_u8()?,
@@ -84,10 +83,7 @@ pub(super) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
     bin_file.read_f64_into::<LittleEndian>(di_jones_a4.as_slice_mut().unwrap())?;
     let di_jones = di_jones_a4.map_axis(Axis(3), |view| {
         Jones::from([
-            Complex::new(view[0], view[1]),
-            Complex::new(view[2], view[3]),
-            Complex::new(view[4], view[5]),
-            Complex::new(view[6], view[7]),
+            view[0], view[1], view[2], view[3], view[4], view[5], view[6], view[7],
         ])
     });
 
