@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
-
 use approx::assert_abs_diff_eq;
 use crossbeam_channel::bounded;
 use crossbeam_utils::{atomic::AtomicCell, thread};
@@ -18,6 +16,7 @@ use vec1::{vec1, Vec1};
 use super::*;
 use crate::{
     averaging::timesteps_to_timeblocks,
+    math::TileBaselineFlags,
     vis_io::read::{MsReader, UvfitsReader, VisRead},
 };
 
@@ -108,6 +107,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
 
     let shape = (timesteps.len(), ant_pairs.len(), num_channels);
     let (vis_data, vis_weights) = synthesize_test_data(shape);
+    let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
 
     let (tx, rx) = bounded(1);
     let error = AtomicCell::new(false);
@@ -219,13 +219,6 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
-        let bl_map: HashMap<(usize, usize), usize> = vis_ctx
-            .sel_baselines
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(a, b)| (b, a))
-            .collect();
         let flagged_fine_chans: HashSet<usize> =
             obs_context.flagged_fine_chans.iter().cloned().collect();
 
@@ -235,7 +228,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                     avg_data.view_mut(),
                     avg_weights.view_mut(),
                     i_timestep,
-                    &bl_map,
+                    &tile_baseline_flags,
                     &flagged_fine_chans,
                 )
                 .unwrap();
@@ -312,6 +305,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
 
     let shape = (timesteps.len(), ant_pairs.len(), num_channels);
     let (vis_data, vis_weights) = synthesize_test_data(shape);
+    let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
 
     let (tx, rx) = bounded(1);
     let error = AtomicCell::new(false);
@@ -431,13 +425,6 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
-        let bl_map: HashMap<(usize, usize), usize> = vis_ctx
-            .sel_baselines
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(a, b)| (b, a))
-            .collect();
         let flagged_fine_chans: HashSet<usize> =
             obs_context.flagged_fine_chans.iter().cloned().collect();
 
@@ -447,7 +434,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                     avg_data.view_mut(),
                     avg_weights.view_mut(),
                     i_timestep,
-                    &bl_map,
+                    &tile_baseline_flags,
                     &flagged_fine_chans,
                 )
                 .unwrap();
@@ -526,6 +513,7 @@ fn test_vis_output_time_averaging() {
 
     let shape = (timesteps.len(), ant_pairs.len(), num_channels);
     let (vis_data, mut vis_weights) = synthesize_test_data(shape);
+    let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
     // I'm keeping the weights simple because predicting the vis values is
     // hurting my head.
     vis_weights.fill(1.0);
@@ -647,13 +635,6 @@ fn test_vis_output_time_averaging() {
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
-        let bl_map: HashMap<(usize, usize), usize> = vis_ctx
-            .sel_baselines
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(a, b)| (b, a))
-            .collect();
         let flagged_fine_chans: HashSet<usize> =
             obs_context.flagged_fine_chans.iter().cloned().collect();
 
@@ -663,7 +644,7 @@ fn test_vis_output_time_averaging() {
                     avg_data.view_mut(),
                     avg_weights.view_mut(),
                     i_timestep,
-                    &bl_map,
+                    &tile_baseline_flags,
                     &flagged_fine_chans,
                 )
                 .unwrap();

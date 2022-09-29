@@ -4,6 +4,8 @@
 
 //! Code to generate sky-model visibilities with CUDA.
 
+use std::collections::HashSet;
+
 use hifitime::{Duration, Epoch};
 use log::debug;
 use marlu::{
@@ -156,7 +158,7 @@ impl<'a> SkyModellerCuda<'a> {
         source_list: &SourceList,
         unflagged_tile_xyzs: &'a [XyzGeodetic],
         unflagged_fine_chan_freqs: &[f64],
-        flagged_tiles: &[usize],
+        flagged_tiles: &HashSet<usize>,
         phase_centre: RADec,
         array_longitude_rad: f64,
         array_latitude_rad: f64,

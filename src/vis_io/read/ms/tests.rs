@@ -14,7 +14,7 @@ use tempfile::tempdir;
 use super::*;
 use crate::{
     di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
-    math::TileBaselineMaps,
+    math::TileBaselineFlags,
     tests::reduced_obsids::get_reduced_1090008640_ms,
 };
 
@@ -35,10 +35,7 @@ fn test_1090008640_cross_vis() {
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
-    let TileBaselineMaps {
-        tile_to_unflagged_cross_baseline_map,
-        ..
-    } = TileBaselineMaps::new(total_num_tiles, &[]);
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -51,7 +48,7 @@ fn test_1090008640_cross_vis() {
         vis.view_mut(),
         vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         &HashSet::new(),
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -102,6 +99,7 @@ fn read_1090008640_auto_vis() {
     let obs_context = &ms_reader.obs_context;
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -114,7 +112,7 @@ fn read_1090008640_auto_vis() {
         vis.view_mut(),
         vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &[],
+        &tile_baseline_flags,
         &HashSet::new(),
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -191,10 +189,11 @@ fn read_1090008640_auto_vis_with_flags() {
     let obs_context = &ms_reader.obs_context;
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
-    let tile_flags = [1, 9];
+    let tile_flags = HashSet::from([1, 9]);
     let num_unflagged_tiles = total_num_tiles - tile_flags.len();
     let chan_flags = HashSet::from([1]);
     let num_unflagged_chans = num_chans - chan_flags.len();
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, tile_flags);
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -207,7 +206,7 @@ fn read_1090008640_auto_vis_with_flags() {
         vis.view_mut(),
         vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &tile_flags,
+        &tile_baseline_flags,
         &chan_flags,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -289,10 +288,7 @@ fn read_1090008640_cross_and_auto_vis() {
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
-    let TileBaselineMaps {
-        tile_to_unflagged_cross_baseline_map,
-        ..
-    } = TileBaselineMaps::new(total_num_tiles, &[]);
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -314,8 +310,7 @@ fn read_1090008640_cross_and_auto_vis() {
         auto_vis.view_mut(),
         auto_vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &tile_to_unflagged_cross_baseline_map,
-        &[],
+        &tile_baseline_flags,
         &HashSet::new(),
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -425,6 +420,7 @@ fn test_1090008640_calibration_quality() {
 }
 
 #[test]
+#[serial]
 fn test_timestep_reading() {
     let temp_dir = tempdir().expect("Couldn't make temp dir");
     let vis_path = temp_dir.path().join("vis.ms");
@@ -518,5 +514,88 @@ fn test_timestep_reading() {
             .iter()
             .map(|t| t.as_gpst_seconds())
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+#[serial]
+fn test_trunc_data() {
+    let metafits: Option<&str> = None;
+    let expected_num_tiles = 128;
+    let expected_unavailable_tiles = (2..128).into_iter().collect::<Vec<usize>>();
+
+    let result = MsReader::new(
+        "test_files/1090008640/1090008640_cotter_trunc_autos.ms",
+        metafits,
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+    let reader = result.unwrap();
+    assert!(reader.obs_context.autocorrelations_present);
+    assert_eq!(reader.obs_context.get_total_num_tiles(), expected_num_tiles);
+    assert_eq!(reader.obs_context.get_num_unflagged_tiles(), 2);
+    assert_eq!(
+        &reader.obs_context.unavailable_tiles,
+        &expected_unavailable_tiles
+    );
+    assert_eq!(
+        &reader.obs_context.flagged_tiles,
+        &expected_unavailable_tiles
+    );
+    assert_eq!(&reader.obs_context.all_timesteps, &[0, 1, 2]);
+    assert_eq!(&reader.obs_context.unflagged_timesteps, &[2]);
+
+    let result = MsReader::new(
+        "test_files/1090008640/1090008640_cotter_trunc_noautos.ms",
+        metafits,
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+    let reader = result.unwrap();
+    assert!(!reader.obs_context.autocorrelations_present);
+    assert_eq!(reader.obs_context.get_total_num_tiles(), expected_num_tiles);
+    assert_eq!(reader.obs_context.get_num_unflagged_tiles(), 2);
+    assert_eq!(
+        &reader.obs_context.unavailable_tiles,
+        &expected_unavailable_tiles
+    );
+    assert_eq!(
+        &reader.obs_context.flagged_tiles,
+        &expected_unavailable_tiles
+    );
+    assert_eq!(&reader.obs_context.all_timesteps, &[0, 1, 2]);
+    assert_eq!(&reader.obs_context.unflagged_timesteps, &[2]);
+
+    let result = MsReader::new("test_files/1090008640/1090008640_birli_trunc.ms", metafits);
+    assert!(result.is_ok(), "{:?}", result.err());
+    let reader = result.unwrap();
+    assert!(reader.obs_context.autocorrelations_present);
+    assert_eq!(reader.obs_context.get_total_num_tiles(), expected_num_tiles);
+    assert_eq!(reader.obs_context.get_num_unflagged_tiles(), 2);
+    assert_eq!(
+        &reader.obs_context.unavailable_tiles,
+        &expected_unavailable_tiles
+    );
+    assert_eq!(
+        &reader.obs_context.flagged_tiles,
+        &expected_unavailable_tiles
+    );
+    assert_eq!(&reader.obs_context.all_timesteps, &[0, 1, 2]);
+    assert_eq!(&reader.obs_context.unflagged_timesteps, &[1, 2]);
+
+    // Test that attempting to use all tiles still results in only 2 tiles being available.
+    let mut args = get_reduced_1090008640_ms();
+    let temp_dir = tempdir().expect("Couldn't make temp dir");
+    match args.data.as_mut() {
+        Some(d) => d[1] = "test_files/1090008640/1090008640_birli_trunc.ms".to_string(),
+        None => unreachable!(),
+    }
+    args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
+    args.ignore_input_data_tile_flags = true;
+    let result = args.into_params();
+    assert!(result.is_ok(), "{:?}", result.err());
+    let params = result.unwrap();
+
+    assert_eq!(
+        params.tile_baseline_flags.flagged_tiles.len(),
+        expected_unavailable_tiles.len()
     );
 }

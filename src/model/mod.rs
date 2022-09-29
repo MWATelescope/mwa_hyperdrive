@@ -16,6 +16,8 @@ use cpu::SkyModellerCpu;
 #[cfg(feature = "cuda")]
 use cuda::SkyModellerCuda;
 
+use std::collections::HashSet;
+
 use hifitime::{Duration, Epoch};
 use marlu::{Jones, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
@@ -148,7 +150,7 @@ pub(crate) fn new_cpu_sky_modeller<'a>(
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a [usize],
+    flagged_tiles: &'a HashSet<usize>,
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
@@ -192,7 +194,7 @@ pub(crate) unsafe fn new_cuda_sky_modeller<'a>(
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a [usize],
+    flagged_tiles: &'a HashSet<usize>,
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
@@ -236,7 +238,7 @@ pub(crate) fn new_sky_modeller<'a>(
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a [usize],
+    flagged_tiles: &'a HashSet<usize>,
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
@@ -301,7 +303,7 @@ pub(super) fn new_cpu_sky_modeller_inner<'a>(
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a [usize],
+    flagged_tiles: &'a HashSet<usize>,
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
@@ -309,9 +311,9 @@ pub(super) fn new_cpu_sky_modeller_inner<'a>(
     apply_precession: bool,
 ) -> SkyModellerCpu<'a> {
     let components = ComponentList::new(source_list, unflagged_fine_chan_freqs, phase_centre);
-    let maps = crate::math::TileBaselineMaps::new(
+    let maps = crate::math::TileBaselineFlags::new(
         unflagged_tile_xyzs.len() + flagged_tiles.len(),
-        flagged_tiles,
+        flagged_tiles.clone(),
     );
 
     SkyModellerCpu {
@@ -351,7 +353,7 @@ pub(super) unsafe fn new_cuda_sky_modeller_inner<'a>(
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a [usize],
+    flagged_tiles: &'a HashSet<usize>,
     phase_centre: RADec,
     array_longitude_rad: f64,
     array_latitude_rad: f64,

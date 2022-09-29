@@ -14,7 +14,7 @@ use tempfile::{tempdir, NamedTempFile};
 use super::*;
 use crate::{
     di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
-    math::TileBaselineMaps,
+    math::TileBaselineFlags,
     tests::reduced_obsids::get_reduced_1090008640_uvfits,
 };
 
@@ -47,7 +47,7 @@ fn write_then_read_uvfits(autos: bool) {
         })
         .unzip();
 
-    let flagged_tiles = vec![];
+    let flagged_tiles = HashSet::new();
 
     let all_ant_pairs: Vec<(usize, usize)> = (0..num_tiles)
         .flat_map(|tile1| {
@@ -84,7 +84,7 @@ fn write_then_read_uvfits(autos: bool) {
     };
 
     let flagged_fine_chans = HashSet::new();
-    let maps = TileBaselineMaps::new(num_tiles, &flagged_tiles);
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, flagged_tiles);
 
     let array_pos = LatLngHeight::new_mwa();
 
@@ -177,7 +177,7 @@ fn write_then_read_uvfits(autos: bool) {
             cross_vis_read.view_mut(),
             cross_weights_read.view_mut(),
             timestep,
-            &maps.tile_to_unflagged_cross_baseline_map,
+            &tile_baseline_flags,
             &flagged_fine_chans,
         );
         assert!(
@@ -206,7 +206,7 @@ fn write_then_read_uvfits(autos: bool) {
                 auto_vis_read.view_mut(),
                 auto_weights_read.view_mut(),
                 timestep,
-                &flagged_tiles,
+                &tile_baseline_flags,
                 &flagged_fine_chans,
             );
             assert!(
@@ -259,10 +259,7 @@ fn test_1090008640_cross_vis() {
     let total_num_tiles = obs_context.tile_xyzs.len();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
-    let TileBaselineMaps {
-        tile_to_unflagged_cross_baseline_map,
-        ..
-    } = TileBaselineMaps::new(total_num_tiles, &[]);
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -275,7 +272,7 @@ fn test_1090008640_cross_vis() {
         vis.view_mut(),
         vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         &HashSet::new(),
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -325,6 +322,7 @@ fn test_1090008640_auto_vis() {
     let obs_context = &uvfits_reader.obs_context;
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -337,7 +335,7 @@ fn test_1090008640_auto_vis() {
         vis.view_mut(),
         vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &[],
+        &tile_baseline_flags,
         &HashSet::new(),
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -413,10 +411,11 @@ fn test_1090008640_auto_vis_with_flags() {
     let obs_context = &uvfits_reader.obs_context;
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
-    let tile_flags = [1, 9];
-    let num_unflagged_tiles = total_num_tiles - tile_flags.len();
+    let flagged_tiles = HashSet::from([1, 9]);
+    let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
     let chan_flags = HashSet::from([1]);
     let num_unflagged_chans = num_chans - chan_flags.len();
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -429,7 +428,7 @@ fn test_1090008640_auto_vis_with_flags() {
         vis.view_mut(),
         vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &tile_flags,
+        &tile_baseline_flags,
         &chan_flags,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -510,10 +509,7 @@ fn read_1090008640_cross_and_auto_vis() {
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
     let num_chans = obs_context.num_fine_chans_per_coarse_chan;
-    let TileBaselineMaps {
-        tile_to_unflagged_cross_baseline_map,
-        ..
-    } = TileBaselineMaps::new(total_num_tiles, &[]);
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
         obs_context.timestamps.first().as_gpst_seconds(),
@@ -530,8 +526,7 @@ fn read_1090008640_cross_and_auto_vis() {
         auto_vis.view_mut(),
         auto_vis_weights.view_mut(),
         *obs_context.all_timesteps.first(),
-        &tile_to_unflagged_cross_baseline_map,
-        &[],
+        &tile_baseline_flags,
         &HashSet::new(),
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());

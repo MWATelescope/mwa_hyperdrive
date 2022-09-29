@@ -32,6 +32,7 @@ use crate::{
     beam::Delays,
     context::ObsContext,
     flagging::{MwafFlags, MwafProducer},
+    math::TileBaselineFlags,
     metafits,
     pfb_gains::{PfbFlavour, PfbParseError},
 };
@@ -414,6 +415,7 @@ impl RawDataReader {
             tile_names,
             tile_xyzs,
             flagged_tiles,
+            unavailable_tiles: vec![],
             autocorrelations_present: true,
             dipole_delays: Some(dipole_delays),
             dipole_gains: Some(dipole_gains),
@@ -626,7 +628,7 @@ impl RawDataReader {
         if let Some(CrossData {
             mut data_array,
             mut weights_array,
-            tile_to_unflagged_baseline_map,
+            tile_baseline_flags,
         }) = crosses
         {
             vis.outer_iter()
@@ -646,9 +648,9 @@ impl RawDataReader {
                         .filter(|(i_baseline, _)| {
                             let (tile1, tile2) =
                                 baseline_to_tiles(metafits_context.num_ants, *i_baseline);
-                            tile_to_unflagged_baseline_map
-                                .get(&(tile1, tile2))
-                                .is_some()
+                            tile_baseline_flags
+                                .tile_to_unflagged_cross_baseline_map
+                                .contains_key(&(tile1, tile2))
                         })
                         // Discard the baseline index and get the unflagged baseline
                         // index.
@@ -662,11 +664,11 @@ impl RawDataReader {
         }
 
         // If applicable, write the auto-correlation visibilities to our
-        // `data_array`, ignoring any flagged baselines.
+        // `data_array`, ignoring any flagged tiles.
         if let Some(AutoData {
             mut data_array,
             mut weights_array,
-            flagged_tiles,
+            tile_baseline_flags,
         }) = autos
         {
             vis.outer_iter()
@@ -686,7 +688,7 @@ impl RawDataReader {
                         .filter(|(i_baseline, _)| {
                             let (tile1, tile2) =
                                 baseline_to_tiles(metafits_context.num_ants, *i_baseline);
-                            tile1 == tile2 && !flagged_tiles.contains(&tile1)
+                            tile1 == tile2 && !tile_baseline_flags.flagged_tiles.contains(&tile1)
                         })
                         // Discard the baseline index and get the unflagged tile
                         // index.
@@ -727,20 +729,19 @@ impl VisRead for RawDataReader {
         auto_data_array: ArrayViewMut2<Jones<f32>>,
         auto_weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_tiles: &[usize],
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
                 data_array: cross_data_array,
                 weights_array: cross_weights_array,
-                tile_to_unflagged_baseline_map,
+                tile_baseline_flags,
             }),
             Some(AutoData {
                 data_array: auto_data_array,
                 weights_array: auto_weights_array,
-                flagged_tiles,
+                tile_baseline_flags,
             }),
             timestep,
             flagged_fine_chans,
@@ -752,14 +753,14 @@ impl VisRead for RawDataReader {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
                 data_array,
                 weights_array,
-                tile_to_unflagged_baseline_map,
+                tile_baseline_flags,
             }),
             None,
             timestep,
@@ -772,7 +773,7 @@ impl VisRead for RawDataReader {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        flagged_tiles: &[usize],
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
@@ -780,7 +781,7 @@ impl VisRead for RawDataReader {
             Some(AutoData {
                 data_array,
                 weights_array,
-                flagged_tiles,
+                tile_baseline_flags,
             }),
             timestep,
             flagged_fine_chans,

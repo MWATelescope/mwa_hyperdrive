@@ -30,12 +30,12 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     // be the same as the input.
     // Get the reference visibilities.
     let obs_context = input_data.get_obs_context();
-    let mut tile_flags = obs_context.get_tile_flags(false, None).unwrap();
-    assert!(tile_flags.is_empty());
+    let flagged_tiles = obs_context.get_tile_flags(false, None).unwrap();
+    assert!(flagged_tiles.is_empty());
     let total_num_tiles = obs_context.get_total_num_tiles();
     let total_num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
     let total_num_channels = obs_context.fine_chan_freqs.len();
-    let maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
     let mut flagged_fine_chans = HashSet::new();
     let mut ref_crosses = Array2::zeros((total_num_baselines, total_num_channels));
     let mut ref_cross_weights = Array2::zeros((total_num_baselines, total_num_channels));
@@ -48,8 +48,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             ref_autos.view_mut(),
             ref_auto_weights.view_mut(),
             obs_context.unflagged_timesteps[0],
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             &flagged_fine_chans,
         )
         .unwrap();
@@ -72,8 +71,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         LatLngHeight::new_mwa(),
         Duration::from_total_nanoseconds(0),
         false,
-        &tile_flags,
-        &maps.tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         &flagged_fine_chans,
         true,
         &outputs,
@@ -96,8 +94,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             autos.view_mut(),
             auto_weights.view_mut(),
             0,
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             &flagged_fine_chans,
         )
         .unwrap();
@@ -117,8 +114,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         LatLngHeight::new_mwa(),
         Duration::from_total_nanoseconds(0),
         false,
-        &tile_flags,
-        &maps.tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         &flagged_fine_chans,
         true,
         &outputs,
@@ -141,8 +137,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             autos.view_mut(),
             auto_weights.view_mut(),
             0,
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             &flagged_fine_chans,
         )
         .unwrap();
@@ -167,8 +162,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         LatLngHeight::new_mwa(),
         Duration::from_total_nanoseconds(0),
         false,
-        &tile_flags,
-        &maps.tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         &flagged_fine_chans,
         true,
         &outputs,
@@ -191,8 +185,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             autos.view_mut(),
             auto_weights.view_mut(),
             0,
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             &flagged_fine_chans,
         )
         .unwrap();
@@ -202,7 +195,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .zip_eq(ref_crosses.outer_iter())
         .enumerate()
     {
-        let (tile1, tile2) = cross_correlation_baseline_to_tiles(total_num_tiles, i_baseline);
+        let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map[&i_baseline];
         let ref_baseline =
             ref_baseline.mapv(Jones::<f64>::from) * (tile1 + 1) as f64 * (tile2 + 1) as f64;
         // Need to use a relative test because the numbers get quite big and
@@ -213,17 +206,34 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             max_relative = 1e-7
         );
     }
-
     assert_abs_diff_eq!(cross_weights, ref_cross_weights);
-    assert_abs_diff_eq!(autos, ref_autos);
+
+    for (i_tile, (baseline, ref_baseline)) in autos
+        .outer_iter()
+        .zip_eq(ref_autos.outer_iter())
+        .enumerate()
+    {
+        let i_tile = tile_baseline_flags.unflagged_auto_index_to_tile_map[&i_tile];
+        let ref_baseline =
+            ref_baseline.mapv(Jones::<f64>::from) * (i_tile + 1) as f64 * (i_tile + 1) as f64;
+        assert_relative_eq!(
+            baseline.mapv(Jones::<f64>::from),
+            ref_baseline,
+            max_relative = 1e-7
+        );
+    }
     assert_abs_diff_eq!(auto_weights, ref_auto_weights);
 
     // Use tile indices for solutions again, but now flag some tiles.
-    tile_flags.extend_from_slice(&[10, 78]);
-    let maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
-    sols.flagged_tiles.extend_from_slice(&tile_flags);
+    let mut flagged_tiles = tile_baseline_flags.flagged_tiles;
+    flagged_tiles.insert(10);
+    flagged_tiles.insert(78);
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
+    for f in &tile_baseline_flags.flagged_tiles {
+        sols.flagged_tiles.push(*f);
+    }
     // Re-generate the reference data.
-    let num_unflagged_tiles = total_num_tiles - tile_flags.len();
+    let num_unflagged_tiles = total_num_tiles - tile_baseline_flags.flagged_tiles.len();
     let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
     let mut ref_crosses = Array2::zeros((num_unflagged_cross_baselines, total_num_channels));
     let mut ref_cross_weights = Array2::zeros((num_unflagged_cross_baselines, total_num_channels));
@@ -236,8 +246,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             ref_autos.view_mut(),
             ref_auto_weights.view_mut(),
             obs_context.unflagged_timesteps[0],
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             &flagged_fine_chans,
         )
         .unwrap();
@@ -249,8 +258,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         LatLngHeight::new_mwa(),
         Duration::from_total_nanoseconds(0),
         false,
-        &tile_flags,
-        &maps.tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         &flagged_fine_chans,
         true,
         &outputs,
@@ -273,8 +281,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             autos.view_mut(),
             auto_weights.view_mut(),
             0,
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             &flagged_fine_chans,
         )
         .unwrap();
@@ -284,14 +291,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .zip_eq(ref_crosses.outer_iter())
         .enumerate()
     {
-        let (mut tile1, mut tile2) =
-            cross_correlation_baseline_to_tiles(num_unflagged_tiles, i_baseline);
-        // `tile1` and `tile2` are based on the number of unflagged tiles, not
-        // the total number of tiles. This means they need to be adjusted by how
-        // many tiles are flagged before them.
-        tile1 += tile_flags.iter().take_while(|&&flag| flag <= tile1).count();
-        tile2 += tile_flags.iter().take_while(|&&flag| flag <= tile2).count();
-
+        let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map[&i_baseline];
         let ref_baseline =
             ref_baseline.mapv(Jones::<f64>::from) * (tile1 + 1) as f64 * (tile2 + 1) as f64;
         assert_relative_eq!(
@@ -305,14 +305,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .zip_eq(ref_autos.outer_iter())
         .enumerate()
     {
-        // `i_tile` is based on the number of unflagged tiles, not the total
-        // number of tiles. It needs to be adjusted by how many tiles are
-        // flagged before it.
-        let tile_factor = tile_flags
-            .iter()
-            .take_while(|&&flag| flag <= i_tile)
-            .count();
-
+        let tile_factor = tile_baseline_flags.unflagged_auto_index_to_tile_map[&i_tile];
         let ref_tile =
             ref_tile.mapv(Jones::<f64>::from) * (tile_factor + 1) as f64 * (tile_factor + 1) as f64;
         assert_relative_eq!(tile.mapv(Jones::<f64>::from), ref_tile, max_relative = 1e-7);
@@ -330,8 +323,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             ref_autos.view_mut(),
             ref_auto_weights.view_mut(),
             obs_context.unflagged_timesteps[0],
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             // We want to read all channels, even the flagged ones.
             &HashSet::new(),
         )
@@ -344,8 +336,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         LatLngHeight::new_mwa(),
         Duration::from_total_nanoseconds(0),
         false,
-        &tile_flags,
-        &maps.tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         &flagged_fine_chans,
         true,
         &outputs,
@@ -368,8 +359,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
             autos.view_mut(),
             auto_weights.view_mut(),
             0,
-            &maps.tile_to_unflagged_cross_baseline_map,
-            &tile_flags,
+            &tile_baseline_flags,
             &HashSet::new(),
         )
         .unwrap();
@@ -379,11 +369,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .zip_eq(ref_crosses.outer_iter())
         .enumerate()
     {
-        let (mut tile1, mut tile2) =
-            cross_correlation_baseline_to_tiles(num_unflagged_tiles, i_baseline);
-        tile1 += tile_flags.iter().take_while(|&&flag| flag <= tile1).count();
-        tile2 += tile_flags.iter().take_while(|&&flag| flag <= tile2).count();
-
+        let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map[&i_baseline];
         let ref_baseline =
             ref_baseline.mapv(Jones::<f64>::from) * (tile1 + 1) as f64 * (tile2 + 1) as f64;
         assert_relative_eq!(
@@ -397,11 +383,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .zip_eq(ref_autos.outer_iter())
         .enumerate()
     {
-        let tile_factor = tile_flags
-            .iter()
-            .take_while(|&&flag| flag <= i_tile)
-            .count();
-
+        let tile_factor = tile_baseline_flags.unflagged_auto_index_to_tile_map[&i_tile];
         let ref_tile =
             ref_tile.mapv(Jones::<f64>::from) * (tile_factor + 1) as f64 * (tile_factor + 1) as f64;
         assert_relative_eq!(tile.mapv(Jones::<f64>::from), ref_tile, max_relative = 1e-7);
@@ -647,9 +629,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_and_ms() {
 
     let ms_ctx = ms_data.get_obs_context();
 
-    // XXX(dev): Can't write obsid to ms file without MwaObsContext "MS obsid not available (no MWA_GPS_TIME in OBSERVATION table)"
-    // assert_eq!(uvfits_ctx.obsid, ms_ctx.obsid);
-    assert_eq!(uvfits_ctx.obsid, Some(1090008640));
+    assert_eq!(uvfits_ctx.obsid, ms_ctx.obsid);
     assert_eq!(uvfits_ctx.timestamps, ms_ctx.timestamps);
     assert_eq!(uvfits_ctx.timestamps.len(), 1);
     assert_abs_diff_eq!(uvfits_ctx.timestamps[0].as_gpst_seconds(), 1090008658.);
@@ -657,4 +637,278 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_and_ms() {
     assert_eq!(uvfits_ctx.all_timesteps.len(), exp_timesteps);
     assert_eq!(uvfits_ctx.fine_chan_freqs, ms_ctx.fine_chan_freqs);
     assert_eq!(uvfits_ctx.fine_chan_freqs.len(), exp_channels);
+}
+
+#[test]
+/// This test is probably only re-testing things that get tested above, but...
+/// why not.
+fn test_1090008640_solutions_apply_correct_vis() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+
+    let mut sols = CalibrationSolutions {
+        di_jones: Array3::from_shape_fn((1, 128, 32), |(_, i, _)| {
+            Jones::identity() * (i + 1) as f64
+        }),
+        ..Default::default()
+    };
+    let sols_file = tmp_dir.path().join("sols.fits");
+    sols.write_solutions_from_ext::<&Path>(&sols_file).unwrap();
+    let sols_file_string = sols_file.display().to_string();
+
+    let flagged_tiles = HashSet::from([1, 3, 5]);
+
+    let args = get_reduced_1090008640_uvfits();
+    let data = args.data.unwrap();
+    let metafits = &data[0];
+    let uvfits = &data[1];
+    let vis_out = tmp_dir.path().join("vis.uvfits");
+    let vis_out_string = vis_out.display().to_string();
+
+    #[rustfmt::skip]
+    let mut args = vec![
+        "solutions-apply",
+        "--data", metafits, uvfits,
+        "--solutions", &sols_file_string,
+        "--outputs", &vis_out_string,
+        "--no-progress-bars"
+    ];
+    let flag_strings = flagged_tiles
+        .iter()
+        .map(|f| format!("{}", f))
+        .collect::<Vec<_>>();
+    if !flag_strings.is_empty() {
+        args.push("--tile-flags");
+        for f in &flag_strings {
+            args.push(f);
+        }
+    }
+    let args = SolutionsApplyArgs::parse_from(args);
+
+    // Run solutions-apply and check that it succeeds
+    let result = args.run(false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+    assert!(vis_out.exists(), "out vis file not written");
+
+    let uncal_reader = UvfitsReader::new(uvfits, Some(metafits)).unwrap();
+    let cal_reader = UvfitsReader::new(vis_out, Some(metafits)).unwrap();
+    let obs_context = cal_reader.get_obs_context();
+
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let total_num_cross_baselines = {
+        let n = total_num_tiles;
+        (n * (n - 1)) / 2
+    };
+    let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
+    assert_eq!(num_unflagged_tiles, 125);
+    let num_unflagged_cross_baselines = {
+        let n = num_unflagged_tiles;
+        (n * (n - 1)) / 2
+    };
+
+    // Check cross correlations.
+    let unflagged_maps = TileBaselineFlags::new(total_num_tiles, HashSet::new());
+    let flagged_maps = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
+
+    let mut uncal_cross_vis_data =
+        Array2::zeros((total_num_cross_baselines, obs_context.fine_chan_freqs.len()));
+    let mut cal_cross_vis_data = Array2::zeros((
+        num_unflagged_cross_baselines,
+        obs_context.fine_chan_freqs.len(),
+    ));
+    let mut uncal_cross_vis_weights = Array2::zeros(uncal_cross_vis_data.dim());
+    let mut cal_cross_vis_weights = Array2::zeros(cal_cross_vis_data.dim());
+    uncal_reader
+        .read_crosses(
+            uncal_cross_vis_data.view_mut(),
+            uncal_cross_vis_weights.view_mut(),
+            0,
+            &unflagged_maps,
+            &HashSet::new(),
+        )
+        .unwrap();
+    cal_reader
+        .read_crosses(
+            cal_cross_vis_data.view_mut(),
+            cal_cross_vis_weights.view_mut(),
+            0,
+            &flagged_maps,
+            &HashSet::new(),
+        )
+        .unwrap();
+    for tile1 in 0..total_num_tiles - 2 {
+        for tile2 in tile1 + 1..total_num_tiles - 1 {
+            if let Some(i_flagged_baseline) = flagged_maps
+                .tile_to_unflagged_cross_baseline_map
+                .get(&(tile1, tile2))
+                .copied()
+            {
+                let i_unflagged_baseline =
+                    unflagged_maps.tile_to_unflagged_cross_baseline_map[&(tile1, tile2)];
+                let expected_multiplier = ((tile1 + 1) * (tile2 + 1)) as f32;
+                assert_abs_diff_eq!(
+                    uncal_cross_vis_data
+                        .slice(s![i_unflagged_baseline, ..])
+                        .to_owned()
+                        * expected_multiplier,
+                    cal_cross_vis_data.slice(s![i_flagged_baseline, ..]),
+                    epsilon = 1e-10
+                );
+            }
+        }
+    }
+
+    // Check auto correlations.
+    let mut uncal_auto_vis_data =
+        Array2::zeros((total_num_tiles, obs_context.fine_chan_freqs.len()));
+    let mut cal_auto_vis_data =
+        Array2::zeros((num_unflagged_tiles, obs_context.fine_chan_freqs.len()));
+    let mut uncal_auto_vis_weights = Array2::zeros(uncal_auto_vis_data.dim());
+    let mut cal_auto_vis_weights = Array2::zeros(cal_auto_vis_data.dim());
+    uncal_reader
+        .read_autos(
+            uncal_auto_vis_data.view_mut(),
+            uncal_auto_vis_weights.view_mut(),
+            0,
+            &unflagged_maps,
+            &HashSet::new(),
+        )
+        .unwrap();
+    cal_reader
+        .read_autos(
+            cal_auto_vis_data.view_mut(),
+            cal_auto_vis_weights.view_mut(),
+            0,
+            &flagged_maps,
+            &HashSet::new(),
+        )
+        .unwrap();
+    for tile in 0..total_num_tiles - 1 {
+        if let Some(i_flagged_tile) = flagged_maps
+            .tile_to_unflagged_cross_baseline_map
+            .get(&(tile, tile))
+            .copied()
+        {
+            let expected_multiplier = ((tile + 1) * (tile + 1)) as f32;
+            assert_abs_diff_eq!(
+                uncal_auto_vis_data.slice(s![tile, ..]).to_owned() * expected_multiplier,
+                cal_auto_vis_data.slice(s![i_flagged_tile, ..]),
+                epsilon = 1e-10
+            );
+        }
+    }
+
+    // Do all this again, but this time make some tile solutions all NaN. The
+    // output uvfits should have *exactly* the same data for tiles we haven't
+    // affected.
+    let bad_sols = [10, 100];
+    for i_bad_sol in bad_sols {
+        sols.di_jones
+            .slice_mut(s![0, i_bad_sol, ..])
+            .fill(Jones::nan());
+    }
+    let sols_file = tmp_dir.path().join("sols.fits");
+    sols.write_solutions_from_ext::<&Path>(&sols_file).unwrap();
+    let vis_out = tmp_dir.path().join("vis2.uvfits");
+    let vis_out_string = vis_out.display().to_string();
+
+    #[rustfmt::skip]
+    let mut args = vec![
+        "solutions-apply",
+        "--data", metafits, uvfits,
+        "--solutions", &sols_file_string,
+        "--outputs", &vis_out_string,
+        "--no-progress-bars",
+        // Deliberately ignore solution tile flags, otherwise the code will
+        // write out a different number of baselines.
+        "--ignore-input-solutions-tile-flags"
+    ];
+    if !flag_strings.is_empty() {
+        args.push("--tile-flags");
+        for f in &flag_strings {
+            args.push(f);
+        }
+    }
+    let args = SolutionsApplyArgs::parse_from(args);
+
+    // Run solutions-apply and check that it succeeds
+    let result = args.run(false);
+    assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
+    assert!(vis_out.exists(), "out vis file not written");
+
+    let cal2_reader = UvfitsReader::new(vis_out, Some(metafits)).unwrap();
+    let mut cal2_cross_vis_data = Array2::zeros((
+        num_unflagged_cross_baselines,
+        obs_context.fine_chan_freqs.len(),
+    ));
+    let mut cal2_cross_vis_weights = Array2::zeros(cal2_cross_vis_data.dim());
+    let mut cal2_auto_vis_data =
+        Array2::zeros((num_unflagged_tiles, obs_context.fine_chan_freqs.len()));
+    let mut cal2_auto_vis_weights = Array2::zeros(cal2_auto_vis_data.dim());
+    cal2_reader
+        .read_crosses_and_autos(
+            cal2_cross_vis_data.view_mut(),
+            cal2_cross_vis_weights.view_mut(),
+            cal2_auto_vis_data.view_mut(),
+            cal2_auto_vis_weights.view_mut(),
+            0,
+            &flagged_maps,
+            &HashSet::new(),
+        )
+        .unwrap();
+
+    for i_bl in 0..num_unflagged_cross_baselines {
+        let (tile1, tile2) = flagged_maps.unflagged_cross_baseline_to_tile_map[&i_bl];
+        if bad_sols.contains(&tile1) || bad_sols.contains(&tile2) {
+            assert!(cal2_cross_vis_data
+                .slice(s![i_bl, ..])
+                .iter()
+                .flat_map(|j| j.to_float_array())
+                .all(|f| f.abs() < f32::EPSILON));
+            assert_abs_diff_eq!(
+                cal_cross_vis_weights.slice(s![i_bl, ..]).map(|w| -w.abs()),
+                cal2_cross_vis_weights.slice(s![i_bl, ..])
+            );
+            assert!(cal2_cross_vis_weights
+                .slice(s![i_bl, ..])
+                .iter()
+                .all(|w| *w < 0.0));
+        } else {
+            assert_abs_diff_eq!(
+                cal_cross_vis_data.slice(s![i_bl, ..]),
+                cal2_cross_vis_data.slice(s![i_bl, ..])
+            );
+            assert_abs_diff_eq!(
+                cal_cross_vis_weights.slice(s![i_bl, ..]),
+                cal2_cross_vis_weights.slice(s![i_bl, ..])
+            );
+        }
+    }
+
+    for i_tile in 0..num_unflagged_tiles {
+        let tile = flagged_maps.unflagged_auto_index_to_tile_map[&i_tile];
+        if bad_sols.contains(&tile) {
+            assert!(cal2_auto_vis_data
+                .slice(s![i_tile, ..])
+                .iter()
+                .flat_map(|j| j.to_float_array())
+                .all(|f| f.abs() < f32::EPSILON));
+            assert_abs_diff_eq!(
+                cal_auto_vis_weights.slice(s![i_tile, ..]).map(|w| -w.abs()),
+                cal2_auto_vis_weights.slice(s![i_tile, ..])
+            );
+            assert!(cal2_auto_vis_weights
+                .slice(s![i_tile, ..])
+                .iter()
+                .all(|w| *w < 0.0));
+        } else {
+            assert_abs_diff_eq!(
+                cal_auto_vis_data.slice(s![i_tile, ..]),
+                cal2_auto_vis_data.slice(s![i_tile, ..])
+            );
+            assert_abs_diff_eq!(
+                cal_auto_vis_weights.slice(s![i_tile, ..]),
+                cal2_auto_vis_weights.slice(s![i_tile, ..])
+            );
+        }
+    }
 }

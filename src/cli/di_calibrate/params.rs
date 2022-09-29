@@ -4,12 +4,7 @@
 
 //! Parameters required for DI calibration.
 
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Deref,
-    path::PathBuf,
-    str::FromStr,
-};
+use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr};
 
 use hifitime::Duration;
 use itertools::Itertools;
@@ -34,7 +29,7 @@ use crate::{
     di_calibrate::{calibrate_timeblocks, get_cal_vis, CalVis},
     filenames::InputDataTypes,
     glob::*,
-    math::TileBaselineMaps,
+    math::TileBaselineFlags,
     messages,
     model::ModellerInfo,
     solutions::{CalSolutionType, CalibrationSolutions},
@@ -65,14 +60,6 @@ pub(crate) struct DiCalParams {
 
     /// The sky-model source list.
     pub(crate) source_list: SourceList,
-
-    /// Which tiles are flagged? This field contains flags that are
-    /// user-specified as well as whatever was already flagged in the supplied
-    /// data.
-    ///
-    /// These values correspond to those from the "Antenna" column in HDU 2 of
-    /// the metafits file. Zero indexed.
-    pub(crate) flagged_tiles: Vec<usize>,
 
     /// The minimum UVW cutoff used in calibration \[metres\].
     pub(crate) uvw_min: f64,
@@ -140,13 +127,8 @@ pub(crate) struct DiCalParams {
     /// contain 0 and 767.
     pub(crate) flagged_fine_chans: HashSet<usize>,
 
-    /// Given two antenna indices, get the unflagged cross-correlation baseline
-    /// index. e.g. If antenna 1 (i.e. the second antenna) is flagged, then the
-    /// first baseline (i.e. 0) is between antenna 0 and antenna 2.
-    ///
-    /// This exists because some tiles may be flagged, so some baselines may be
-    /// flagged.
-    pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
+    /// Information on flagged tiles, baselines and mapping between indices.
+    pub(crate) tile_baseline_flags: TileBaselineFlags,
 
     /// The unflagged [XyzGeodetic] coordinates of each tile \[metres\]. This
     /// does not change over time; it is determined only by the telescope's tile
@@ -505,18 +487,7 @@ impl DiCalParams {
             obs_context.get_tile_flags(ignore_input_data_tile_flags, tile_flags.as_deref())?;
         let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
         if log_enabled!(Debug) {
-            debug!("Tile indices, names and statuses:");
-            obs_context
-                .tile_names
-                .iter()
-                .enumerate()
-                .map(|(i, name)| {
-                    let flagged = flagged_tiles.contains(&i);
-                    (i, name, if flagged { "  flagged" } else { "unflagged" })
-                })
-                .for_each(|(i, name, status)| {
-                    debug!("    {:3}: {:10}: {}", i, name, status);
-                })
+            obs_context.print_debug_tile_statuses();
         }
         if num_unflagged_tiles == 0 {
             return Err(DiCalArgsError::NoTiles);
@@ -532,8 +503,8 @@ impl DiCalParams {
             num_unflagged_tiles,
             flagged_tiles: &flagged_tiles
                 .iter()
-                .cloned()
-                .map(|i| (obs_context.tile_names[i].as_str(), i))
+                .sorted()
+                .map(|&i| (obs_context.tile_names[i].as_str(), i))
                 .collect::<Vec<_>>(),
         }
         .print();
@@ -847,8 +818,8 @@ impl DiCalParams {
         }
         let fences = Vec1::try_from_vec(fences).map_err(|_| DiCalArgsError::NoChannels)?;
 
-        // XXX(Dev): TileBaselineMaps logic might fit inside FlagContext
-        let tile_baseline_maps = TileBaselineMaps::new(total_num_tiles, &flagged_tiles);
+        let tile_index_maps = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
+        let flagged_tiles = &tile_index_maps.flagged_tiles;
 
         let unflagged_tile_xyzs: Vec<XyzGeodetic> = obs_context
             .tile_xyzs
@@ -893,7 +864,7 @@ impl DiCalParams {
         let (baseline_weights, num_flagged_baselines) = {
             let mut baseline_weights = Vec1::try_from_vec(vec![
                 1.0;
-                tile_baseline_maps
+                tile_index_maps
                     .unflagged_cross_baseline_to_tile_map
                     .len()
             ])
@@ -1093,7 +1064,6 @@ impl DiCalParams {
             raw_data_corrections,
             beam,
             source_list,
-            flagged_tiles,
             uvw_min: uvw_min_metres,
             uvw_max: uvw_max_metres,
             freq_centroid,
@@ -1104,8 +1074,7 @@ impl DiCalParams {
             fences,
             unflagged_fine_chan_freqs,
             flagged_fine_chans,
-            tile_to_unflagged_cross_baseline_map: tile_baseline_maps
-                .tile_to_unflagged_cross_baseline_map,
+            tile_baseline_flags: tile_index_maps,
             unflagged_tile_xyzs,
             array_position,
             dut1: dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
@@ -1137,7 +1106,7 @@ impl DiCalParams {
     /// Get the number of unflagged tiles to be used (may not match what is in
     /// the observation data).
     pub(crate) fn get_num_unflagged_tiles(&self) -> usize {
-        self.get_total_num_tiles() - self.flagged_tiles.len()
+        self.get_total_num_tiles() - self.tile_baseline_flags.flagged_tiles.len()
     }
 
     /// The number of calibration timesteps.
@@ -1163,7 +1132,7 @@ impl DiCalParams {
             vis,
             weights,
             timestep,
-            &self.tile_to_unflagged_cross_baseline_map,
+            &self.tile_baseline_flags,
             &self.flagged_fine_chans,
         )
     }

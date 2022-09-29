@@ -11,7 +11,7 @@ pub(crate) use error::VisSubtractError;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -42,7 +42,7 @@ use crate::{
         ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP as sdc_help,
         SOURCE_LIST_TYPE_HELP, VETO_THRESHOLD_HELP as vt_help,
     },
-    math::TileBaselineMaps,
+    math::TileBaselineFlags,
     messages,
     model::ModellerInfo,
     srclist::{read::read_source_list_file, veto_sources, SourceList, SourceListType},
@@ -385,9 +385,12 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
 
     let obs_context = input_data.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
-    let num_unflagged_tiles = total_num_tiles - obs_context.flagged_tiles.len();
+    let num_unflagged_tiles = obs_context.get_num_unflagged_tiles();
     let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
-    let maps = TileBaselineMaps::new(total_num_tiles, &obs_context.flagged_tiles);
+    let flagged_tiles = obs_context
+        .get_tile_flags(false, None)
+        .expect("can't fail; no additional flags");
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
     let vis_shape = (
         num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
@@ -528,10 +531,11 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         },
         total_num_tiles,
         num_unflagged_tiles,
-        flagged_tiles: &obs_context
+        flagged_tiles: &tile_baseline_flags
             .flagged_tiles
             .iter()
             .cloned()
+            .sorted()
             .map(|i| (obs_context.tile_names[i].as_str(), i))
             .collect::<Vec<_>>(),
     }
@@ -757,7 +761,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
 
             let result = read_vis(
                 obs_context,
-                &maps.tile_to_unflagged_cross_baseline_map,
+                &tile_baseline_flags,
                 input_data.deref(),
                 &timesteps,
                 vis_shape,
@@ -825,7 +829,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
                 freq_res,
                 &obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64),
-                &maps
+                &tile_baseline_flags
                     .unflagged_cross_baseline_to_tile_map
                     .values()
                     .copied()
@@ -865,7 +869,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
 #[allow(clippy::too_many_arguments)]
 fn read_vis(
     obs_context: &ObsContext,
-    tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+    tile_baseline_flags: &TileBaselineFlags,
     input_data: &dyn VisRead,
     timesteps: &Vec1<usize>,
     vis_shape: (usize, usize),
@@ -887,7 +891,7 @@ fn read_vis(
             cross_data.view_mut(),
             cross_weights.view_mut(),
             timestep,
-            tile_to_unflagged_baseline_map,
+            tile_baseline_flags,
             &flagged_fine_chans,
         )?;
 
@@ -932,11 +936,14 @@ fn model_vis_and_subtract(
     progress_bar: ProgressBar,
     #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
 ) -> Result<(), VisSubtractError> {
+    let flagged_tiles = obs_context
+        .get_tile_flags(false, None)
+        .expect("can't fail; no additional flags");
     let unflagged_tile_xyzs = obs_context
         .tile_xyzs
         .iter()
         .enumerate()
-        .filter(|(i, _)| !obs_context.flagged_tiles.contains(i))
+        .filter(|(i, _)| !flagged_tiles.contains(i))
         .map(|(_, xyz)| *xyz)
         .collect::<Vec<_>>();
     let freqs = obs_context
@@ -951,7 +958,7 @@ fn model_vis_and_subtract(
         source_list,
         &unflagged_tile_xyzs,
         &freqs,
-        &obs_context.flagged_tiles,
+        &flagged_tiles,
         obs_context.phase_centre,
         array_pos.longitude_rad,
         array_pos.latitude_rad,

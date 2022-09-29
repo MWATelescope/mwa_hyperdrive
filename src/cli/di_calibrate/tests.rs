@@ -33,8 +33,11 @@ fn test_new_params_defaults() {
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
     // No tiles are flagged in the input data, and no additional flags were
     // supplied.
-    assert_eq!(obs_context.flagged_tiles.len(), 0);
-    assert_eq!(params.flagged_tiles.len(), 0);
+    assert_eq!(
+        obs_context.get_total_num_tiles(),
+        obs_context.get_num_unflagged_tiles()
+    );
+    assert_eq!(params.tile_baseline_flags.flagged_tiles.len(), 0);
 
     // By default there are 5 flagged channels per coarse channel. We only have
     // one coarse channel here so we expect 27/32 channels. Also no picket fence
@@ -52,8 +55,11 @@ fn test_new_params_no_input_flags() {
     let obs_context = params.get_obs_context();
     assert_abs_diff_eq!(obs_context.time_res.unwrap().in_seconds(), 2.0);
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
-    assert_eq!(obs_context.flagged_tiles.len(), 0);
-    assert_eq!(params.flagged_tiles.len(), 0);
+    assert_eq!(
+        obs_context.get_total_num_tiles(),
+        obs_context.get_num_unflagged_tiles(),
+    );
+    assert_eq!(params.tile_baseline_flags.flagged_tiles.len(), 0);
 
     assert_eq!(params.fences.len(), 1);
     assert_eq!(params.fences[0].chanblocks.len(), 32);
@@ -169,16 +175,42 @@ fn test_new_params_tile_flags() {
         Ok(p) => p,
         Err(e) => panic!("{}", e),
     };
-    assert_eq!(params.flagged_tiles.len(), 3);
-    assert!(params.flagged_tiles.contains(&1));
-    assert!(params.flagged_tiles.contains(&2));
-    assert!(params.flagged_tiles.contains(&3));
-    assert_eq!(params.tile_to_unflagged_cross_baseline_map.len(), 7750);
+    assert_eq!(params.tile_baseline_flags.flagged_tiles.len(), 3);
+    assert!(params.tile_baseline_flags.flagged_tiles.contains(&1));
+    assert!(params.tile_baseline_flags.flagged_tiles.contains(&2));
+    assert!(params.tile_baseline_flags.flagged_tiles.contains(&3));
+    assert_eq!(
+        params
+            .tile_baseline_flags
+            .tile_to_unflagged_cross_baseline_map
+            .len(),
+        7750
+    );
 
-    assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 4)], 0);
-    assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 5)], 1);
-    assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 6)], 2);
-    assert_eq!(params.tile_to_unflagged_cross_baseline_map[&(0, 7)], 3);
+    assert_eq!(
+        params
+            .tile_baseline_flags
+            .tile_to_unflagged_cross_baseline_map[&(0, 4)],
+        0
+    );
+    assert_eq!(
+        params
+            .tile_baseline_flags
+            .tile_to_unflagged_cross_baseline_map[&(0, 5)],
+        1
+    );
+    assert_eq!(
+        params
+            .tile_baseline_flags
+            .tile_to_unflagged_cross_baseline_map[&(0, 6)],
+        2
+    );
+    assert_eq!(
+        params
+            .tile_baseline_flags
+            .tile_to_unflagged_cross_baseline_map[&(0, 7)],
+        3
+    );
 }
 
 #[test]

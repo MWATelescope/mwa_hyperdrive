@@ -30,7 +30,7 @@ use crate::{
     averaging::{Chanblock, Fence, Timeblock},
     beam::create_no_beam_object,
     cli::di_calibrate::DiCalParams,
-    math::{is_prime, TileBaselineMaps},
+    math::{is_prime, TileBaselineFlags},
     solutions::CalSolutionType,
     srclist::SourceList,
     tests::reduced_obsids::get_reduced_1090008640,
@@ -289,7 +289,6 @@ fn get_default_params() -> DiCalParams {
         raw_data_corrections: None,
         beam: create_no_beam_object(1),
         source_list: SourceList::new(),
-        flagged_tiles: vec![],
         uvw_min: 0.0,
         uvw_max: f64::INFINITY,
         freq_centroid: 150e6,
@@ -314,7 +313,13 @@ fn get_default_params() -> DiCalParams {
         }],
         unflagged_fine_chan_freqs: vec![0.0],
         flagged_fine_chans: HashSet::new(),
-        tile_to_unflagged_cross_baseline_map: HashMap::new(),
+        tile_baseline_flags: TileBaselineFlags {
+            tile_to_unflagged_cross_baseline_map: HashMap::new(),
+            tile_to_unflagged_auto_index_map: HashMap::new(),
+            unflagged_cross_baseline_to_tile_map: HashMap::new(),
+            unflagged_auto_index_to_tile_map: HashMap::new(),
+            flagged_tiles: HashSet::new(),
+        },
         unflagged_tile_xyzs: vec![],
         array_position: LatLngHeight {
             longitude_rad: 0.0,
@@ -364,7 +369,7 @@ fn incomplete_to_complete_trivial() {
         },
     ];
     params.fences.first_mut().flagged_chanblock_indices = vec![];
-    params.flagged_tiles = vec![];
+    params.tile_baseline_flags.flagged_tiles = HashSet::new();
     let num_timeblocks = params.timeblocks.len();
     let num_tiles = params.get_total_num_tiles();
     let num_chanblocks = params.fences.first().chanblocks.len();
@@ -427,10 +432,10 @@ fn incomplete_to_complete_flags_simple() {
         },
     ];
     params.fences.first_mut().flagged_chanblock_indices = vec![0];
-    params.flagged_tiles = vec![];
+    params.tile_baseline_flags.flagged_tiles = HashSet::new();
     let num_timeblocks = params.timeblocks.len();
     let total_num_tiles = params.get_total_num_tiles();
-    let num_tiles = total_num_tiles - params.flagged_tiles.len();
+    let num_tiles = total_num_tiles - params.tile_baseline_flags.flagged_tiles.len();
     let num_chanblocks = params.fences.first().chanblocks.len();
 
     let di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
@@ -499,12 +504,12 @@ fn incomplete_to_complete_flags_simple2() {
             _freq: 153e6,
         },
     ];
-    params.flagged_tiles = vec![];
+    params.tile_baseline_flags.flagged_tiles = HashSet::new();
     params.fences.first_mut().flagged_chanblock_indices = vec![3];
     let num_timeblocks = params.timeblocks.len();
     let num_chanblocks = params.fences.first().chanblocks.len();
     let total_num_tiles = params.get_total_num_tiles();
-    let num_tiles = total_num_tiles - params.flagged_tiles.len();
+    let num_tiles = total_num_tiles - params.tile_baseline_flags.flagged_tiles.len();
 
     let incomplete_di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
         .into_iter()
@@ -575,11 +580,11 @@ fn incomplete_to_complete_flags_complex() {
         },
     ];
     params.fences.first_mut().flagged_chanblock_indices = vec![1];
-    params.flagged_tiles = vec![2];
+    params.tile_baseline_flags.flagged_tiles = HashSet::from([2]);
     let num_timeblocks = params.timeblocks.len();
     let num_chanblocks = params.fences.first().chanblocks.len();
     let total_num_tiles = params.get_total_num_tiles();
-    let num_tiles = total_num_tiles - params.flagged_tiles.len();
+    let num_tiles = total_num_tiles - params.tile_baseline_flags.flagged_tiles.len();
     let total_num_chanblocks =
         num_chanblocks + params.fences.first().flagged_chanblock_indices.len();
 
@@ -620,7 +625,7 @@ fn incomplete_to_complete_flags_complex() {
         let sub_array = complete.di_jones.slice(s![0, i_tile, ..]);
         let mut i_unflagged_chanblock = 0;
 
-        if params.flagged_tiles.contains(&i_tile) {
+        if params.tile_baseline_flags.flagged_tiles.contains(&i_tile) {
             assert!(sub_array.iter().all(|j| j.any_nan()));
         } else {
             for i_chan in 0..total_num_chanblocks {
@@ -934,14 +939,21 @@ fn test_1090008640_calibrate_model_ms() {
     assert_eq!(ctx_m.all_timesteps.len(), num_timesteps);
     assert_eq!(ctx_m.timestamps, ctx_c.timestamps);
     assert_eq!(ctx_m.fine_chan_freqs, ctx_c.fine_chan_freqs);
-    assert_eq!(ctx_m.flagged_tiles, ctx_c.flagged_tiles);
+    let m_flags = ctx_m.get_tile_flags(false, None).unwrap();
+    let c_flags = ctx_c.get_tile_flags(false, None).unwrap();
+    for m in &m_flags {
+        assert!(c_flags.contains(m));
+    }
     assert_eq!(ctx_m.tile_xyzs, ctx_c.tile_xyzs);
     assert_eq!(ctx_m.flagged_fine_chans, ctx_c.flagged_fine_chans);
 
     let flagged_fine_chans_set: HashSet<usize> = ctx_m.flagged_fine_chans.iter().cloned().collect();
-    let tile_to_baseline_map = TileBaselineMaps::new(ctx_m.tile_xyzs.len(), &ctx_m.flagged_tiles)
-        .tile_to_unflagged_cross_baseline_map;
-    let max_baseline_idx = tile_to_baseline_map.values().max().unwrap();
+    let tile_baseline_flags = TileBaselineFlags::new(ctx_m.tile_xyzs.len(), m_flags);
+    let max_baseline_idx = tile_baseline_flags
+        .tile_to_unflagged_cross_baseline_map
+        .values()
+        .max()
+        .unwrap();
     let data_shape = (
         max_baseline_idx + 1,
         ctx_m.fine_chan_freqs.len() - ctx_m.flagged_fine_chans.len(),
@@ -956,7 +968,7 @@ fn test_1090008640_calibrate_model_ms() {
             vis_m.view_mut(),
             weight_m.view_mut(),
             timestep,
-            &tile_to_baseline_map,
+            &tile_baseline_flags,
             &flagged_fine_chans_set,
         )
         .unwrap();
@@ -964,7 +976,7 @@ fn test_1090008640_calibrate_model_ms() {
             vis_c.view_mut(),
             weight_c.view_mut(),
             timestep,
-            &tile_to_baseline_map,
+            &tile_baseline_flags,
             &flagged_fine_chans_set,
         )
         .unwrap();

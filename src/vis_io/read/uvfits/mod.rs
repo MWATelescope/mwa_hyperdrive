@@ -203,14 +203,14 @@ impl UvfitsReader {
                 ));
             }
 
-            // Work out the tile flags.
+            // Work out which tiles are unavailable.
             let mut present_tiles_set: HashSet<usize> = HashSet::new();
             metadata.uvfits_baselines.iter().for_each(|&uvfits_bl| {
                 let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
                 present_tiles_set.insert(ant1);
                 present_tiles_set.insert(ant2);
             });
-            let flagged_tiles = {
+            let unavailable_tiles = {
                 let mut v = tile_map
                     .iter()
                     .filter(|(i, _)| !present_tiles_set.contains(*i))
@@ -219,6 +219,12 @@ impl UvfitsReader {
                 v.sort_unstable();
                 v
             };
+            // Similar to the measurement set situation, we have no way(?) to
+            // identify tiles in the uvfits file that have data but shouldn't be
+            // used (i.e. they are flagged). So, we assume all tiles are
+            // unflagged, except those that are "unavailable" (determined
+            // above).
+            let flagged_tiles = unavailable_tiles.clone();
 
             // Work out the timestamp epochs. The file tells us what time standard
             // is being used (probably UTC). If this is false, then we assume TAI.
@@ -319,7 +325,8 @@ impl UvfitsReader {
                 }
             }
 
-            debug!("Flagged tiles in the uvfits: {:?}", flagged_tiles);
+            debug!("Unavailable tiles in the uvfits: {unavailable_tiles:?}");
+            debug!("Flagged tiles in the uvfits: {flagged_tiles:?}");
             debug!(
                 "Autocorrelations present: {}",
                 metadata.autocorrelations_present
@@ -465,6 +472,7 @@ impl UvfitsReader {
                 tile_names,
                 tile_xyzs,
                 flagged_tiles,
+                unavailable_tiles,
                 autocorrelations_present: metadata.autocorrelations_present,
                 dipole_delays,
                 dipole_gains,
@@ -535,7 +543,8 @@ impl UvfitsReader {
 
             if let Some(crosses) = crosses.as_mut() {
                 if let Some(i_baseline) = crosses
-                    .tile_to_unflagged_baseline_map
+                    .tile_baseline_flags
+                    .tile_to_unflagged_cross_baseline_map
                     .get(&(ant1, ant2))
                     .copied()
                 {
@@ -591,52 +600,54 @@ impl UvfitsReader {
             }
 
             if let Some(autos) = autos.as_mut() {
-                if ant1 == ant2 && !autos.flagged_tiles.contains(&(ant1)) {
-                    let ant = ant1
-                        - (0..ant1)
-                            .filter(|i_ant| autos.flagged_tiles.contains(i_ant))
-                            .count();
+                if ant1 == ant2 {
+                    if let Some(i_ant) = autos
+                        .tile_baseline_flags
+                        .tile_to_unflagged_auto_index_map
+                        .get(&ant1)
+                        .copied()
+                    {
+                        unsafe {
+                            // ffgpve = fits_read_img_flt
+                            fitsio_sys::ffgpve(
+                                uvfits.as_raw(),         /* I - FITS file pointer                       */
+                                1 + row as i64, /* I - group to read (1 = 1st group)           */
+                                1,              /* I - first vector element to read (1 = 1st)  */
+                                uvfits_vis.len() as i64, /* I - number of values to read                */
+                                0.0, /* I - value for undefined pixels              */
+                                uvfits_vis.as_mut_ptr(), /* O - array of values that are returned       */
+                                &mut 0,      /* O - set to 1 if any values are null; else 0 */
+                                &mut status, /* IO - error status                           */
+                            );
+                        }
+                        fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
+                            row_num: row + 1,
+                            err,
+                        })?;
 
-                    unsafe {
-                        // ffgpve = fits_read_img_flt
-                        fitsio_sys::ffgpve(
-                            uvfits.as_raw(),         /* I - FITS file pointer                       */
-                            1 + row as i64, /* I - group to read (1 = 1st group)           */
-                            1,              /* I - first vector element to read (1 = 1st)  */
-                            uvfits_vis.len() as i64, /* I - number of values to read                */
-                            0.0, /* I - value for undefined pixels              */
-                            uvfits_vis.as_mut_ptr(), /* O - array of values that are returned       */
-                            &mut 0,      /* O - set to 1 if any values are null; else 0 */
-                            &mut status, /* IO - error status                           */
-                        );
+                        let mut out_vis = autos.data_array.slice_mut(s![i_ant, ..]);
+                        let mut out_weights = autos.weights_array.slice_mut(s![i_ant, ..]);
+                        uvfits_vis
+                            .outer_iter()
+                            .enumerate()
+                            .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
+                            .zip(out_vis.iter_mut())
+                            .zip(out_weights.iter_mut())
+                            .for_each(|(((_, data_pol_axis), out_vis), out_weight)| {
+                                let data_xx = data_pol_axis.index_axis(Axis(0), 0);
+                                let data_yy = data_pol_axis.index_axis(Axis(0), 1);
+                                let data_xy = data_pol_axis.index_axis(Axis(0), 2);
+                                let data_yx = data_pol_axis.index_axis(Axis(0), 3);
+
+                                // We assume that weights are all equal for these
+                                // visibilities.
+                                *out_weight = data_xx[2];
+                                *out_vis = Jones::from([
+                                    data_xx[0], data_xx[1], data_xy[0], data_xy[1], data_yx[0],
+                                    data_yx[1], data_yy[0], data_yy[1],
+                                ]);
+                            });
                     }
-                    fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
-                        row_num: row + 1,
-                        err,
-                    })?;
-
-                    let mut out_vis = autos.data_array.slice_mut(s![ant, ..]);
-                    let mut out_weights = autos.weights_array.slice_mut(s![ant, ..]);
-                    uvfits_vis
-                        .outer_iter()
-                        .enumerate()
-                        .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                        .zip(out_vis.iter_mut())
-                        .zip(out_weights.iter_mut())
-                        .for_each(|(((_, data_pol_axis), out_vis), out_weight)| {
-                            let data_xx = data_pol_axis.index_axis(Axis(0), 0);
-                            let data_yy = data_pol_axis.index_axis(Axis(0), 1);
-                            let data_xy = data_pol_axis.index_axis(Axis(0), 2);
-                            let data_yx = data_pol_axis.index_axis(Axis(0), 3);
-
-                            // We assume that weights are all equal for these
-                            // visibilities.
-                            *out_weight = data_xx[2];
-                            *out_vis = Jones::from([
-                                data_xx[0], data_xx[1], data_xy[0], data_xy[1], data_yx[0],
-                                data_yx[1], data_yy[0], data_yy[1],
-                            ]);
-                        });
                 }
             }
         }
@@ -669,20 +680,19 @@ impl VisRead for UvfitsReader {
         auto_data_array: ArrayViewMut2<Jones<f32>>,
         auto_weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_tiles: &[usize],
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
                 data_array: cross_data_array,
                 weights_array: cross_weights_array,
-                tile_to_unflagged_baseline_map,
+                tile_baseline_flags,
             }),
             Some(AutoData {
                 data_array: auto_data_array,
                 weights_array: auto_weights_array,
-                flagged_tiles,
+                tile_baseline_flags,
             }),
             timestep,
             flagged_fine_chans,
@@ -694,14 +704,14 @@ impl VisRead for UvfitsReader {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
                 data_array,
                 weights_array,
-                tile_to_unflagged_baseline_map,
+                tile_baseline_flags,
             }),
             None,
             timestep,
@@ -714,7 +724,7 @@ impl VisRead for UvfitsReader {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        flagged_tiles: &[usize],
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
@@ -722,7 +732,7 @@ impl VisRead for UvfitsReader {
             Some(AutoData {
                 data_array,
                 weights_array,
-                flagged_tiles,
+                tile_baseline_flags,
             }),
             timestep,
             flagged_fine_chans,

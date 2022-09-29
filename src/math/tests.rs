@@ -33,19 +33,88 @@ fn test_average_epoch2() {
 }
 
 #[test]
-fn test_generate_tile_baseline_maps() {
-    let total_num_tiles = 128;
-    let mut tile_flags = vec![];
-    let maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
-    assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 1)], 0);
-    assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&0], (0, 1));
+#[should_panic]
+fn test_tile_baseline_flags_panics() {
+    let maps = TileBaselineFlags::new(0, HashSet::new());
+    assert!(!maps.flagged_tiles.is_empty(), "Shouldn't get here!");
+}
 
-    tile_flags.push(1);
-    let maps = TileBaselineMaps::new(total_num_tiles, &tile_flags);
+#[test]
+fn test_tile_baseline_flags_without_flags() {
+    let total_num_tiles = 128;
+    let tile_flags = HashSet::new();
+    let maps = TileBaselineFlags::new(total_num_tiles, tile_flags);
+    assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 1)], 0);
+    assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 127)], 126);
+    assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(126, 127)], 8127);
+    assert!(maps
+        .tile_to_unflagged_cross_baseline_map
+        .get(&(0, 0))
+        .is_none());
+    assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&0], (0, 1));
+    assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&8127], (126, 127));
+    assert!(maps
+        .unflagged_cross_baseline_to_tile_map
+        .get(&8128)
+        .is_none());
+
+    assert_eq!(maps.tile_to_unflagged_auto_index_map[&0], 0);
+    assert_eq!(maps.tile_to_unflagged_auto_index_map[&127], 127);
+    assert!(maps.tile_to_unflagged_auto_index_map.get(&128).is_none());
+    assert_eq!(maps.unflagged_auto_index_to_tile_map[&0], 0);
+    assert_eq!(maps.unflagged_auto_index_to_tile_map[&127], 127);
+    assert!(maps.unflagged_auto_index_to_tile_map.get(&128).is_none());
+
+    assert!(maps.flagged_tiles.is_empty());
+
+    // First index is always smaller or equal to second.
+    for (i1, i2) in maps.tile_to_unflagged_cross_baseline_map.keys().copied() {
+        assert!(i1 <= i2);
+    }
+    for (i1, i2) in maps.unflagged_cross_baseline_to_tile_map.values().copied() {
+        assert!(i1 <= i2);
+    }
+}
+
+#[test]
+fn test_tile_baseline_flags() {
+    let total_num_tiles = 128;
+    let tile_flags = HashSet::from([1]);
+    let maps = TileBaselineFlags::new(total_num_tiles, tile_flags);
+    assert_eq!(maps.tile_to_unflagged_auto_index_map[&0], 0);
+    assert_eq!(maps.tile_to_unflagged_auto_index_map[&2], 1);
+    assert!(maps.tile_to_unflagged_auto_index_map.get(&1).is_none());
+    assert!(maps.tile_to_unflagged_auto_index_map.get(&128).is_none());
+
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 2)], 0);
+    assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 127)], 125);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(2, 3)], 126);
+    assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(126, 127)], 8000);
+    assert!(maps
+        .tile_to_unflagged_cross_baseline_map
+        .get(&(0, 1))
+        .is_none());
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&0], (0, 2));
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&126], (2, 3));
+    assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&8000], (126, 127));
+    assert!(maps
+        .unflagged_cross_baseline_to_tile_map
+        .get(&8001)
+        .is_none());
+
+    assert_eq!(maps.unflagged_auto_index_to_tile_map[&0], 0);
+    assert_eq!(maps.unflagged_auto_index_to_tile_map[&1], 2);
+    assert_eq!(maps.unflagged_auto_index_to_tile_map[&126], 127);
+
+    assert!(maps.flagged_tiles.contains(&1));
+
+    // First index is always smaller or equal to second.
+    for (i1, i2) in maps.tile_to_unflagged_cross_baseline_map.keys().copied() {
+        assert!(i1 <= i2);
+    }
+    for (i1, i2) in maps.unflagged_cross_baseline_to_tile_map.values().copied() {
+        assert!(i1 <= i2);
+    }
 }
 
 #[test]

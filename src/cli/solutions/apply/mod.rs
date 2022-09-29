@@ -11,12 +11,7 @@ mod tests;
 
 pub(crate) use error::SolutionsApplyError;
 
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Deref,
-    path::PathBuf,
-    str::FromStr,
-};
+use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr};
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -25,7 +20,7 @@ use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
-use marlu::{math::cross_correlation_baseline_to_tiles, Jones, LatLngHeight, MwaObsContext};
+use marlu::{Jones, LatLngHeight, MwaObsContext};
 use ndarray::{prelude::*, ArcArray2};
 use scopeguard::defer_on_unwind;
 use vec1::{vec1, Vec1};
@@ -38,7 +33,7 @@ use crate::{
     context::ObsContext,
     filenames::InputDataTypes,
     help_texts::ARRAY_POSITION_HELP,
-    math::TileBaselineMaps,
+    math::TileBaselineFlags,
     messages,
     pfb_gains::PfbFlavour,
     solutions::CalibrationSolutions,
@@ -101,6 +96,11 @@ pub struct SolutionsApplyArgs {
     /// If specified, pretend that all tiles are unflagged in the input data.
     #[clap(long, help_heading = "FLAGGING")]
     ignore_input_data_tile_flags: bool,
+
+    /// If specified, pretend that all tiles are unflagged in the input
+    /// solutions.
+    #[clap(long, help_heading = "FLAGGING")]
+    ignore_input_solutions_tile_flags: bool,
 
     #[clap(
         short, long, multiple_values(true), help = OUTPUTS_HELP.as_str(),
@@ -180,6 +180,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
         ignore_dut1,
         tile_flags,
         ignore_input_data_tile_flags,
+        ignore_input_solutions_tile_flags,
         outputs,
         time_average,
         freq_average,
@@ -417,13 +418,30 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
     let tile_flags = {
         // Need to convert indices into strings to use the `get_tile_flags`
         // method below.
-        let mut sol_flags: Vec<String> = sols
-            .flagged_tiles
-            .iter()
-            .map(|i| format!("{}", i))
-            .collect();
+        let mut sol_flags: Vec<String> = if ignore_input_solutions_tile_flags {
+            debug!("Including any tiles with only NaN for solutions");
+            vec![]
+        } else {
+            debug!(
+                "There are {} tiles with only NaN for solutions; considering them as flagged tiles",
+                sols.flagged_tiles.len()
+            );
+            sols.flagged_tiles
+                .iter()
+                .map(|i| format!("{}", i))
+                .collect()
+        };
         if let Some(user_tile_flags) = tile_flags {
+            debug!("Using additional user tile flags: {user_tile_flags:?}");
             sol_flags.extend(user_tile_flags.into_iter());
+        }
+        if ignore_input_data_tile_flags {
+            debug!("Not using flagged tiles in the input data");
+        } else {
+            debug!(
+                "Using input data tile flags: {:?}",
+                obs_context.flagged_tiles
+            );
         }
         obs_context.get_tile_flags(ignore_input_data_tile_flags, Some(&sol_flags))?
     };
@@ -469,13 +487,13 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
         flagged_tiles: &tile_flags
             .iter()
             .cloned()
+            .sorted()
             .map(|i| (obs_context.tile_names[i].as_str(), i))
             .collect::<Vec<_>>(),
     }
     .print();
 
-    let tile_to_unflagged_cross_baseline_map =
-        TileBaselineMaps::new(total_num_tiles, &tile_flags).tile_to_unflagged_cross_baseline_map;
+    let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, tile_flags);
     let timesteps = match (use_all_timesteps, timesteps) {
         (true, _) => Vec1::try_from(obs_context.all_timesteps.as_slice()),
         (false, None) => Vec1::try_from(obs_context.unflagged_timesteps.as_slice()),
@@ -614,8 +632,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
         array_position,
         dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
         no_autos,
-        &tile_flags,
-        &tile_to_unflagged_cross_baseline_map,
+        &tile_baseline_flags,
         // TODO: Provide CLI options
         &HashSet::new(),
         false,
@@ -634,8 +651,7 @@ pub(super) fn apply_solutions_inner(
     array_position: LatLngHeight,
     dut1: Duration,
     no_autos: bool,
-    tile_flags: &[usize],
-    tile_to_unflagged_cross_baseline_map: &HashMap<(usize, usize), usize>,
+    tile_baseline_flags: &TileBaselineFlags,
     flagged_fine_chans: &HashSet<usize>,
     ignore_input_data_fine_channel_flags: bool,
     outputs: &Vec1<(PathBuf, VisOutputType)>,
@@ -713,8 +729,7 @@ pub(super) fn apply_solutions_inner(
 
             let result = read_vis(
                 obs_context,
-                tile_flags,
-                tile_to_unflagged_cross_baseline_map,
+                tile_baseline_flags,
                 input_data.deref(),
                 timesteps,
                 no_autos,
@@ -738,7 +753,7 @@ pub(super) fn apply_solutions_inner(
             let result = apply_solutions_thread(
                 obs_context,
                 sols,
-                tile_flags,
+                tile_baseline_flags,
                 &fine_chan_flags,
                 rx_data,
                 tx_write,
@@ -765,11 +780,12 @@ pub(super) fn apply_solutions_inner(
             };
             let unflagged_tiles_iter = (0..total_num_tiles)
                 .into_iter()
-                .filter(|i_tile| !tile_flags.contains(i_tile))
+                .filter(|i_tile| !tile_baseline_flags.flagged_tiles.contains(i_tile))
                 .map(|i_tile| (i_tile, i_tile));
             // Form (sorted) unflagged baselines from our cross- and
             // auto-correlation baselines.
-            let unflagged_cross_and_auto_baseline_tile_pairs = tile_to_unflagged_cross_baseline_map
+            let unflagged_cross_and_auto_baseline_tile_pairs = tile_baseline_flags
+                .tile_to_unflagged_cross_baseline_map
                 .keys()
                 .copied()
                 .chain(unflagged_tiles_iter)
@@ -836,8 +852,7 @@ pub(super) fn apply_solutions_inner(
 #[allow(clippy::too_many_arguments)]
 fn read_vis(
     obs_context: &ObsContext,
-    tile_flags: &[usize],
-    tile_to_unflagged_cross_baseline_map: &HashMap<(usize, usize), usize>,
+    tile_baseline_flags: &TileBaselineFlags,
     input_data: &dyn VisRead,
     timesteps: &Vec1<usize>,
     no_autos: bool,
@@ -845,7 +860,7 @@ fn read_vis(
     error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
 ) -> Result<(), SolutionsApplyError> {
-    let num_unflagged_tiles = obs_context.get_total_num_tiles() - tile_flags.len();
+    let num_unflagged_tiles = tile_baseline_flags.unflagged_auto_index_to_tile_map.len();
     let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
 
     let cross_vis_shape = (
@@ -880,8 +895,7 @@ fn read_vis(
                 auto_data.view_mut(),
                 auto_weights.view_mut(),
                 timestep,
-                tile_to_unflagged_cross_baseline_map,
-                tile_flags,
+                tile_baseline_flags,
                 // We want to read in all channels, even if they're flagged.
                 // Channels will get flagged later based on the calibration
                 // solutions, the input data flags and user flags.
@@ -892,7 +906,7 @@ fn read_vis(
                 cross_data.view_mut(),
                 cross_weights.view_mut(),
                 timestep,
-                tile_to_unflagged_cross_baseline_map,
+                tile_baseline_flags,
                 &HashSet::new(),
             )?;
         }
@@ -928,15 +942,13 @@ fn read_vis(
 fn apply_solutions_thread(
     obs_context: &ObsContext,
     solutions: &CalibrationSolutions,
-    tile_flags: &[usize],
+    tile_baseline_flags: &TileBaselineFlags,
     fine_chan_flags: &HashSet<usize>,
     rx: Receiver<VisTimestep>,
     tx: Sender<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
 ) -> Result<(), SolutionsApplyError> {
-    let num_unflagged_tiles = obs_context.get_total_num_tiles() - tile_flags.len();
-
     for VisTimestep {
         mut cross_data,
         mut cross_weights,
@@ -963,13 +975,12 @@ fn apply_solutions_thread(
             .zip_eq(cross_weights.outer_iter_mut())
             .enumerate()
         {
-            let (mut tile1, mut tile2) =
-                cross_correlation_baseline_to_tiles(num_unflagged_tiles, i_baseline);
-            // `tile1` and `tile2` are based on `num_unflagged_tiles`, not the
-            // total number of tiles. This means they need to be adjusted by how
-            // many tiles are flagged before them.
-            tile1 += tile_flags.iter().take_while(|&&flag| flag <= tile1).count();
-            tile2 += tile_flags.iter().take_while(|&&flag| flag <= tile2).count();
+            let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map
+                .get(&i_baseline)
+                .copied()
+                .unwrap_or_else(|| {
+                    panic!("Couldn't find baseline index {i_baseline} in unflagged_cross_baseline_to_tile_map")
+                });
             // TODO: Allow solutions to have a different number of channels than
             // the data.
 
@@ -986,13 +997,12 @@ fn apply_solutions_thread(
                     // One of the tiles doesn't have a solution; flag.
                     if sol1.any_nan() || sol2.any_nan() {
                         *vis_weight = -vis_weight.abs();
-                    } else if fine_chan_flags.contains(&i_chan) {
-                        // The channel is flagged, but we still have a solution for it.
-                        *vis_weight = -vis_weight.abs();
-                        // Promote the data before demoting it again.
-                        let d: Jones<f64> = Jones::from(*vis_data);
-                        *vis_data = Jones::from((*sol1 * d) * sol2.h());
+                        *vis_data = Jones::default();
                     } else {
+                        if fine_chan_flags.contains(&i_chan) {
+                            // The channel is flagged, but we still have a solution for it.
+                            *vis_weight = -vis_weight.abs();
+                        }
                         // Promote the data before demoting it again.
                         let d: Jones<f64> = Jones::from(*vis_data);
                         *vis_data = Jones::from((*sol1 * d) * sol2.h());
@@ -1006,13 +1016,15 @@ fn apply_solutions_thread(
                 .zip_eq(auto_weights.outer_iter_mut())
                 .enumerate()
             {
-                // `i_tile` is based on `num_unflagged_tiles`, not the total
-                // number of tiles. This means it needs to be adjusted by how
-                // many tiles are flagged before it.
-                let i_tile = tile_flags
-                    .iter()
-                    .take_while(|&&flag| flag <= i_tile)
-                    .count();
+                let i_tile = tile_baseline_flags
+                    .unflagged_auto_index_to_tile_map
+                    .get(&i_tile)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Couldn't find auto index {i_tile} in unflagged_auto_index_to_tile_map"
+                        )
+                    });
 
                 // Get the solutions for the tile and apply it twice.
                 let sols = sols.slice(s![i_tile, ..]);
@@ -1025,13 +1037,12 @@ fn apply_solutions_thread(
                         // No solution; flag.
                         if sol.any_nan() {
                             *vis_weight = -vis_weight.abs();
-                        } else if fine_chan_flags.contains(&i_chan) {
-                            // The channel is flagged, but we still have a solution for it.
-                            *vis_weight = -vis_weight.abs();
-                            // Promote the data before demoting it again.
-                            let d: Jones<f64> = Jones::from(*vis_data);
-                            *vis_data = Jones::from((*sol * d) * sol.h());
+                            *vis_data = Jones::default();
                         } else {
+                            if fine_chan_flags.contains(&i_chan) {
+                                // The channel is flagged, but we still have a solution for it.
+                                *vis_weight = -vis_weight.abs();
+                            }
                             // Promote the data before demoting it again.
                             let d: Jones<f64> = Jones::from(*vis_data);
                             *vis_data = Jones::from((*sol * d) * sol.h());

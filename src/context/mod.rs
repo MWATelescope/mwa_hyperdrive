@@ -7,11 +7,10 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Write};
 
 use hifitime::{Duration, Epoch, Unit};
-use itertools::Itertools;
-use log::{info, warn};
+use log::{debug, error, info, trace, warn};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     LatLngHeight, RADec, XyzGeodetic,
@@ -74,17 +73,29 @@ pub(crate) struct ObsContext {
     /// change significantly across the course of an observation.
     pub(crate) dut1: Option<Duration>,
 
-    /// The names of each of the tiles used in the array.
+    /// The names of each of the tiles in the input data. This includes flagged
+    /// and unavailable tiles.
     pub(crate) tile_names: Vec1<String>,
 
-    /// The [XyzGeodetic] coordinates of all tiles in the array (all coordinates
-    /// are specified in \[metres\]). This includes tiles that have been flagged
-    /// in the input data.
+    /// The [`XyzGeodetic`] coordinates of all tiles in the array (all
+    /// coordinates are specified in \[metres\]). This includes flagged and
+    /// unavailable tiles.
     pub(crate) tile_xyzs: Vec1<XyzGeodetic>,
 
-    /// The flagged tiles, either already missing data or suggested to be
-    /// flagged. Zero indexed.
+    /// The flagged tiles, i.e. what the observation data suggests to be
+    /// flagged. Generally `hyperdrive` will discourage using flagged data, but
+    /// the user can still access them if desired. Zero indexed.
     pub(crate) flagged_tiles: Vec<usize>,
+
+    /// Tiles that are described by the observation data in some capacity, but
+    /// their data is not available, regardless of what the user wants. Zero
+    /// indexed.
+    ///
+    /// Why is this distinguished from flagged tiles? An observation with 128
+    /// tiles *should* have solutions for 128 tiles. It would look weird if, for
+    /// example, one tile was not included in the input data and the output data
+    /// described 127 tiles.
+    pub(crate) unavailable_tiles: Vec<usize>,
 
     /// Are auto-correlations present in the visibility data?
     pub(crate) autocorrelations_present: bool,
@@ -150,6 +161,12 @@ impl ObsContext {
         self.tile_xyzs.len()
     }
 
+    /// Get the number of unflagged tiles in the observation, i.e. total -
+    /// flagged.
+    pub(crate) fn get_num_unflagged_tiles(&self) -> usize {
+        self.get_total_num_tiles() - self.flagged_tiles.len()
+    }
+
     /// Attempt to get time resolution using heuristics if it is not present.
     ///
     /// If `time_res` is `None`, then attempt to determine it from the minimum
@@ -186,7 +203,7 @@ impl ObsContext {
         &self,
         ignore_input_data_tile_flags: bool,
         additional_flags: Option<&[String]>,
-    ) -> Result<Vec<usize>, InvalidTileFlag> {
+    ) -> Result<HashSet<usize>, InvalidTileFlag> {
         let mut flagged_tiles = HashSet::new();
 
         if !ignore_input_data_tile_flags {
@@ -195,6 +212,10 @@ impl ObsContext {
                 flagged_tiles.insert(obs_tile_flag);
             }
         }
+        // Unavailable tiles must be regarded as flagged.
+        for i in &self.unavailable_tiles {
+            flagged_tiles.insert(*i);
+        }
 
         if let Some(flag_strings) = additional_flags {
             // We need to convert the strings into antenna indices. The strings
@@ -202,15 +223,15 @@ impl ObsContext {
             for flag_string in flag_strings {
                 // Try to parse a naked number.
                 let result = match flag_string.trim().parse().ok() {
-                    Some(n) => {
+                    Some(i) => {
                         let total_num_tiles = self.get_total_num_tiles();
-                        if n >= total_num_tiles {
+                        if i >= total_num_tiles {
                             Err(InvalidTileFlag::Index {
-                                got: n,
+                                got: i,
                                 max: total_num_tiles - 1,
                             })
                         } else {
-                            flagged_tiles.insert(n);
+                            flagged_tiles.insert(i);
                             Ok(())
                         }
                     }
@@ -235,18 +256,61 @@ impl ObsContext {
                 if result.is_err() {
                     // If there's a problem, show all the tile names and their
                     // indices to help out the user.
-                    info!("All tile indices and names:");
-                    self.tile_names.iter().enumerate().for_each(|(i, name)| {
-                        info!("    {:3}: {:10}", i, name);
-                    });
+                    self.print_info_tile_statuses();
                     // Propagate the error.
                     result?;
                 }
             }
         }
 
-        // Convert the set to a vector.
-        Ok(flagged_tiles.into_iter().sorted().collect())
+        Ok(flagged_tiles)
+    }
+
+    /// Print information on the indices, names and statuses of all of the tiles
+    /// in this observation at the indicated log level.
+    fn print_tile_statuses(&self, level: log::Level) {
+        let s = "All tile indices, names and default statuses:";
+        match level {
+            log::Level::Error => error!("{}", s),
+            log::Level::Warn => warn!("{}", s),
+            log::Level::Info => info!("{}", s),
+            log::Level::Debug => debug!("{}", s),
+            log::Level::Trace => trace!("{}", s),
+        }
+
+        let mut s = String::new();
+        self.tile_names.iter().enumerate().for_each(|(i, name)| {
+            let msg = match (
+                self.unavailable_tiles.contains(&i),
+                self.flagged_tiles.contains(&i),
+            ) {
+                (true, _) => "unavailable",
+                (false, false) => "  unflagged",
+                (false, true) => "    flagged",
+            };
+
+            write!(&mut s, "    {i:3}: {name:10}: {msg}").unwrap();
+            match level {
+                log::Level::Error => error!("{}", s),
+                log::Level::Warn => warn!("{}", s),
+                log::Level::Info => info!("{}", s),
+                log::Level::Debug => debug!("{}", s),
+                log::Level::Trace => trace!("{}", s),
+            }
+            s.clear();
+        });
+    }
+
+    /// At info level, print information on the indices, names and statuses of
+    /// all of the tiles in this observation.
+    pub(crate) fn print_info_tile_statuses(&self) {
+        self.print_tile_statuses(log::Level::Info)
+    }
+
+    /// At info level, print information on the indices, names and statuses of
+    /// all of the tiles in this observation.
+    pub(crate) fn print_debug_tile_statuses(&self) {
+        self.print_tile_statuses(log::Level::Debug)
     }
 }
 
@@ -255,6 +319,6 @@ pub(crate) enum InvalidTileFlag {
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}")]
     Index { got: usize, max: usize },
 
-    #[error("Bad flag value: '{0}' is neither an integer or an available antenna name. Run with extra verbosity to see all tile names.")]
+    #[error("Bad flag value: '{0}' is neither an integer or an available antenna name. Run with extra verbosity to see all tile statuses.")]
     BadTileFlag(String),
 }

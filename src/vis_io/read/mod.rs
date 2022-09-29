@@ -14,14 +14,14 @@ pub(crate) use ms::MsReader;
 pub(crate) use raw::{RawDataCorrections, RawDataReader};
 pub(crate) use uvfits::UvfitsReader;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use marlu::Jones;
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use vec1::Vec1;
 
-use crate::{context::ObsContext, flagging::MwafFlags};
+use crate::{context::ObsContext, flagging::MwafFlags, math::TileBaselineFlags};
 
 #[derive(Debug)]
 pub(crate) enum VisInputType {
@@ -53,8 +53,7 @@ pub(crate) trait VisRead: Sync + Send {
         auto_data_array: ArrayViewMut2<Jones<f32>>,
         auto_weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
-        flagged_tiles: &[usize],
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError>;
 
@@ -65,7 +64,7 @@ pub(crate) trait VisRead: Sync + Send {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        tile_to_unflagged_baseline_map: &HashMap<(usize, usize), usize>,
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError>;
 
@@ -76,7 +75,7 @@ pub(crate) trait VisRead: Sync + Send {
         data_array: ArrayViewMut2<Jones<f32>>,
         weights_array: ArrayViewMut2<f32>,
         timestep: usize,
-        flagged_tiles: &[usize],
+        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError>;
 }
@@ -86,7 +85,7 @@ pub(crate) trait VisRead: Sync + Send {
 struct CrossData<'a, 'b, 'c> {
     data_array: ArrayViewMut2<'a, Jones<f32>>,
     weights_array: ArrayViewMut2<'b, f32>,
-    tile_to_unflagged_baseline_map: &'c HashMap<(usize, usize), usize>,
+    tile_baseline_flags: &'c TileBaselineFlags,
 }
 
 /// A private container for auto-correlation data. It only exists to give
@@ -94,5 +93,5 @@ struct CrossData<'a, 'b, 'c> {
 struct AutoData<'a, 'b, 'c> {
     data_array: ArrayViewMut2<'a, Jones<f32>>,
     weights_array: ArrayViewMut2<'b, f32>,
-    flagged_tiles: &'c [usize],
+    tile_baseline_flags: &'c TileBaselineFlags,
 }

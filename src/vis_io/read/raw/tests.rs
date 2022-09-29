@@ -34,7 +34,10 @@ fn get_cross_vis(args: DiCalArgs) -> CrossData {
         Err(e) => panic!("{}", e),
     };
 
-    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
+    let num_unflagged_cross_baselines = params
+        .tile_baseline_flags
+        .tile_to_unflagged_cross_baseline_map
+        .len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut data_array = Array2::zeros(vis_shape);
@@ -44,7 +47,7 @@ fn get_cross_vis(args: DiCalArgs) -> CrossData {
         data_array.view_mut(),
         weights_array.view_mut(),
         *params.timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -73,7 +76,7 @@ fn get_auto_vis(args: DiCalArgs) -> AutoData {
         data_array.view_mut(),
         weights_array.view_mut(),
         *params.timesteps.first(),
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -92,7 +95,10 @@ fn get_cross_and_auto_vis(args: DiCalArgs) -> (CrossData, AutoData) {
         Err(e) => panic!("{}", e),
     };
 
-    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
+    let num_unflagged_cross_baselines = params
+        .tile_baseline_flags
+        .tile_to_unflagged_cross_baseline_map
+        .len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
     let mut cross_data = CrossData {
@@ -113,8 +119,7 @@ fn get_cross_and_auto_vis(args: DiCalArgs) -> (CrossData, AutoData) {
         auto_data.data_array.view_mut(),
         auto_data.weights_array.view_mut(),
         *params.timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -497,7 +502,10 @@ fn test_mwaf_flags() {
     let timesteps = params.timesteps;
 
     // Set up our arrays for reading.
-    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
+    let num_unflagged_cross_baselines = params
+        .tile_baseline_flags
+        .tile_to_unflagged_cross_baseline_map
+        .len();
     let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let cross_vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
@@ -513,8 +521,7 @@ fn test_mwaf_flags() {
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -544,8 +551,7 @@ fn test_mwaf_flags() {
         flagged_auto_data_array.view_mut(),
         flagged_auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -609,7 +615,10 @@ fn test_mwaf_flags_primes() {
     let timesteps = params.timesteps;
 
     // Set up our arrays for reading.
-    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
+    let num_unflagged_cross_baselines = params
+        .tile_baseline_flags
+        .tile_to_unflagged_cross_baseline_map
+        .len();
     let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let cross_vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
@@ -625,8 +634,7 @@ fn test_mwaf_flags_primes() {
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -664,8 +672,7 @@ fn test_mwaf_flags_primes() {
         flagged_auto_data_array.view_mut(),
         flagged_auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -740,7 +747,10 @@ fn test_mwaf_flags_cotter() {
     let timesteps = &params.timesteps;
 
     // Set up our arrays for reading.
-    let num_unflagged_cross_baselines = params.tile_to_unflagged_cross_baseline_map.len();
+    let num_unflagged_cross_baselines = params
+        .tile_baseline_flags
+        .tile_to_unflagged_cross_baseline_map
+        .len();
     let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
     let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let cross_vis_shape = (num_unflagged_cross_baselines, num_unflagged_fine_chans);
@@ -756,8 +766,7 @@ fn test_mwaf_flags_cotter() {
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -824,8 +833,7 @@ fn test_mwaf_flags_cotter() {
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
@@ -887,8 +895,7 @@ fn test_mwaf_flags_cotter() {
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_to_unflagged_cross_baseline_map,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags,
         &params.flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());

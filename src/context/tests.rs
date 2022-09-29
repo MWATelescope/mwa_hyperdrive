@@ -21,6 +21,7 @@ fn get_minimal_obs_context() -> ObsContext {
         tile_names: vec1!["Tile00".into()],
         tile_xyzs: vec1![XyzGeodetic::default()],
         flagged_tiles: vec![],
+        unavailable_tiles: vec![],
         autocorrelations_present: false,
         dipole_delays: Some(Delays::Partial(vec![0; 16])),
         dipole_gains: None,

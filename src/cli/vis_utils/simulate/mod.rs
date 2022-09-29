@@ -9,7 +9,7 @@ mod error;
 pub(crate) use error::VisSimulateError;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     ops::{Deref, Range},
     path::PathBuf,
     str::FromStr,
@@ -40,7 +40,7 @@ use crate::{
     help_texts::{
         ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
     },
-    math::TileBaselineMaps,
+    math::TileBaselineFlags,
     messages,
     metafits::{get_dipole_delays, get_dipole_gains},
     model::{self, ModellerInfo, SkyModeller},
@@ -271,11 +271,8 @@ struct VisSimParams {
     /// The names of the tiles.
     tile_names: Vec<String>,
 
-    /// A map from baseline index to the baseline's constituent tiles.
-    baseline_to_tile_map: HashMap<usize, (usize, usize)>,
-
-    /// Flagged tiles.
-    flagged_tiles: Vec<usize>,
+    /// Information on flagged tiles, baselines and mapping between indices.
+    tile_baseline_flags: TileBaselineFlags,
 
     /// Timestamps to be simulated.
     timestamps: Vec1<Epoch>,
@@ -460,8 +457,8 @@ impl VisSimParams {
 
         // Prepare a map between baselines and their constituent tiles.
         // TODO: Utilise tile flags.
-        let flagged_tiles: Vec<usize> = vec![];
-        let maps = TileBaselineMaps::new(metafits.num_ants, &flagged_tiles);
+        let flagged_tiles = HashSet::new();
+        let tile_baseline_flags = TileBaselineFlags::new(metafits.num_ants, flagged_tiles);
 
         // Treat the specified source list as file path. Does it exist? Then use it.
         // Otherwise, treat the specified source list as a glob and attempt to find
@@ -682,8 +679,7 @@ impl VisSimParams {
             freq_res_hz: freq_res,
             tile_xyzs,
             tile_names,
-            baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
-            flagged_tiles,
+            tile_baseline_flags,
             timestamps,
             time_res,
             beam,
@@ -708,8 +704,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         freq_res_hz,
         tile_xyzs,
         tile_names,
-        baseline_to_tile_map,
-        flagged_tiles,
+        tile_baseline_flags,
         timestamps,
         time_res,
         beam,
@@ -776,7 +771,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 &source_list,
                 &tile_xyzs,
                 &fine_chan_freqs,
-                &flagged_tiles,
+                &tile_baseline_flags.flagged_tiles,
                 phase_centre,
                 array_position.longitude_rad,
                 array_position.latitude_rad,
@@ -784,7 +779,12 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 apply_precession,
             )?;
 
-            let cross_vis_shape = (baseline_to_tile_map.len(), fine_chan_freqs.len());
+            let cross_vis_shape = (
+                tile_baseline_flags
+                    .unflagged_cross_baseline_to_tile_map
+                    .len(),
+                fine_chan_freqs.len(),
+            );
             let weight_factor =
                 (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR);
             let result = model_thread(
@@ -809,7 +809,8 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
 
             // Form (sorted) unflagged baselines from our cross- and
             // auto-correlation baselines.
-            let unflagged_baseline_tile_pairs = baseline_to_tile_map
+            let unflagged_baseline_tile_pairs = tile_baseline_flags
+                .unflagged_cross_baseline_to_tile_map
                 .values()
                 .copied()
                 .sorted()

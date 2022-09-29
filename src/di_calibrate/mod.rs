@@ -237,6 +237,7 @@ pub(crate) fn get_cal_vis(
 
                 let fine_chan_freqs = obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64);
                 let unflagged_baseline_tile_pairs = params
+                    .tile_baseline_flags
                     .tile_to_unflagged_cross_baseline_map
                     .keys()
                     .copied()
@@ -404,7 +405,7 @@ fn model_vis<'a>(
         &params.source_list,
         &params.unflagged_tile_xyzs,
         &params.unflagged_fine_chan_freqs,
-        &params.flagged_tiles,
+        &params.tile_baseline_flags.flagged_tiles,
         obs_context.phase_centre,
         params.array_position.longitude_rad,
         params.array_position.latitude_rad,
@@ -545,7 +546,7 @@ impl<'a> IncompleteSolutions<'a> {
         assert_eq!(num_timeblocks, timeblocks.len());
         assert!(num_unflagged_tiles <= total_num_tiles);
         assert_eq!(
-            num_unflagged_tiles + params.flagged_tiles.len(),
+            num_unflagged_tiles + params.tile_baseline_flags.flagged_tiles.len(),
             total_num_tiles
         );
         assert_eq!(num_unflagged_chanblocks, chanblocks.len());
@@ -577,7 +578,7 @@ impl<'a> IncompleteSolutions<'a> {
                     .enumerate()
                     .for_each(|(i_tile, mut out_di_jones)| {
                         // Nothing needs to be done if this tile is flagged.
-                        if !params.flagged_tiles.contains(&i_tile) {
+                        if !params.tile_baseline_flags.flagged_tiles.contains(&i_tile) {
                             // Iterate over the chanblocks.
                             let mut i_unflagged_chanblock = 0;
                             out_di_jones.iter_mut().enumerate().for_each(
@@ -633,8 +634,8 @@ impl<'a> IncompleteSolutions<'a> {
             let mut i_baseline = 0;
             for i_tile_1 in 0..total_num_tiles {
                 for i_tile_2 in i_tile_1 + 1..total_num_tiles {
-                    if params.flagged_tiles.contains(&i_tile_1)
-                        || params.flagged_tiles.contains(&i_tile_2)
+                    if params.tile_baseline_flags.flagged_tiles.contains(&i_tile_1)
+                        || params.tile_baseline_flags.flagged_tiles.contains(&i_tile_2)
                     {
                         i_baseline += 1;
                         continue;
@@ -650,7 +651,13 @@ impl<'a> IncompleteSolutions<'a> {
 
         CalibrationSolutions {
             di_jones: out_di_jones,
-            flagged_tiles: params.flagged_tiles.clone(),
+            flagged_tiles: params
+                .tile_baseline_flags
+                .flagged_tiles
+                .iter()
+                .copied()
+                .sorted()
+                .collect(),
             flagged_chanblocks: flagged_chanblock_indices.clone(),
             chanblock_freqs: Some(chanblock_freqs),
             obsid: obs_context.obsid,

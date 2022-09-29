@@ -15,7 +15,10 @@ pub(crate) enum MsReadError {
     BadFile(PathBuf),
 
     #[error("The main table of the measurement set contains no rows!")]
-    Empty,
+    MainTableEmpty,
+
+    #[error("The antenna table of the measurement set contains no rows!")]
+    AntennaTableEmpty,
 
     #[error("The SPECTRAL_WINDOW table contained no channel frequencies")]
     NoChannelFreqs,
@@ -25,9 +28,6 @@ pub(crate) enum MsReadError {
 
     #[error("The SPECTRAL_WINDOW table contains unequal channel widths")]
     ChanWidthsUnequal,
-
-    #[error("Couldn't work out the good start and end times of the measurement set; are all visibilities flagged?")]
-    AllFlagged,
 
     #[error("No timesteps were in file {file}")]
     NoTimesteps { file: String },
@@ -42,6 +42,27 @@ pub(crate) enum MsReadError {
         expected_len: usize,
         axis_num: usize,
     },
+
+    #[error("There were different numbers of antenna names and antenna XYZs; there must be an equal number for both")]
+    MismatchNumNamesNumXyzs,
+
+    #[error("There were different numbers of main table antennas ({main}) antenna XYZs ({xyzs}); there must be an equal number for both")]
+    MismatchNumMainTableNumXyzs { main: usize, xyzs: usize },
+
+    #[error("Found a negative antenna number ({0}); all antenna numbers must be positive")]
+    AntennaNumNegative(i32),
+
+    #[error("Found an antenna number ({0}), but this is bigger than the total number of antennas in the antenna table.")]
+    AntennaNumTooBig(i32),
+
+    #[error("Found {num} of dipole delays in the MWA_TILE_POINTING table, but this must be 16")]
+    WrongNumDipoleDelays { num: usize },
+
+    #[error("Found a dipole delay '{delay}' in the MWA_TILE_POINTING table; values must be between 0 and 32")]
+    InvalidDelay { delay: i32 },
+
+    #[error("Found a MWA_SUBBAND number '{num}'; values must not be negative")]
+    NegativeSubband { num: i32 },
 
     #[error("Error when trying to interface with measurement set: {0}")]
     RubblError(String),

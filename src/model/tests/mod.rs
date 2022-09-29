@@ -138,7 +138,7 @@ struct ObsParams {
     xyzs: Vec<XyzGeodetic>,
     uvws: Vec<UVW>,
     beam: Box<dyn Beam>,
-    flagged_tiles: Vec<usize>,
+    flagged_tiles: HashSet<usize>,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
 }
@@ -174,7 +174,7 @@ impl ObsParams {
             create_fee_beam_object(beam_file, xyzs.len(), Delays::Partial(vec![0; 16]), None)
                 .unwrap()
         };
-        let flagged_tiles = vec![];
+        let flagged_tiles = HashSet::new();
         let array_longitude_rad = MWA_LONG_RAD;
         let array_latitude_rad = MWA_LAT_RAD;
 
