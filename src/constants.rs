@@ -7,7 +7,7 @@
 /// When a spectral index must be assumed, this value is used.
 pub(crate) const DEFAULT_SPEC_INDEX: f64 = -0.8;
 
-/// The smallest allowable spectral index.
+/// The smallest spectral index before we report that things look fishy.
 pub(crate) const SPEC_INDEX_CAP: f64 = -2.0;
 
 /// The minimum Stokes XX+YY a source must have before it gets vetoed \[Jy\].

@@ -239,18 +239,11 @@ impl FluxDensityType {
                             };
                         }
 
-                        let mut spec_index = fd1.calc_spec_index(fd2);
+                        let spec_index = fd1.calc_spec_index(fd2);
 
-                        // Stop stupid spectral indices.
-                        if spec_index < SPEC_INDEX_CAP {
-                            if we_should_trace_log {
-                                trace!(
-                                    "Component had a spectral index {}; capping at {}",
-                                    spec_index,
-                                    SPEC_INDEX_CAP
-                                );
-                            }
-                            spec_index = SPEC_INDEX_CAP;
+                        // Report stupid spectral indices.
+                        if spec_index < SPEC_INDEX_CAP && we_should_trace_log {
+                            trace!("Component had a spectral index {} !", spec_index);
                         }
 
                         (

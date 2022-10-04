@@ -11,6 +11,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Bugs were fixed surrounding the reading of RTS solutions.
 
 ### Changed
+- Stop capping spectral indices less than -2. Results from estimating flux
+  densities may change.
 - RTS solutions may no longer be written out.
 - Use "lto = "thin"". This makes performance slightly better and decreases the
   size of the binary.

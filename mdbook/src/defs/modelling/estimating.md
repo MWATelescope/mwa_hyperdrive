@@ -34,7 +34,7 @@ whereas another term is needed for curved power laws:
 values are used for each Stokes flux density.
 ~~~
 
-~~~admonish info title="Flux density lists"
+<!-- ~~~admonish info title="Flux density lists" -->
 To estimate a flux density (\\( S \\)) at an arbitrary frequency (\\( \nu \\)),
 a number of considerations must be made.
 
@@ -48,8 +48,9 @@ closest to \\( \nu \\) (these can both be smaller and larger than \\( \nu \\)).
 If the flux densities \\( S_i \\) and \\( S_j \\) are both positive or both
 negative, we proceed with the power law approach: A spectral index is calculated
 with \\( \nu_i \\) and \\( \nu_j \\) (\\( \alpha \\)) and used to estimate a
-flux density with the power law algorithm. If \\( \alpha < -2.0 \\) (the
-"spectral-index cap"), we set \\( \alpha = 2 \\).
+flux density with the power law algorithm. If \\( \alpha < -2.0 \\), a
+trace-level message is emitted, indicating that this is a very steep spectral
+index.
 
 If the signs of \\( S_i \\) and \\( S_j \\) are opposites, then we cannot fit a
 spectral index. Instead, we fit a straight between \\( S_i \\) and \\( S_j \\)
@@ -57,7 +58,7 @@ and use the straight line to estimate \\( S \\).
 
 No estimation is required when \\( \nu \\) is equal to any of the list
 frequencies \\( \nu_i \\).
-~~~
+<!-- ~~~ -->
 
 
 ~~~admonish danger title="Concerns on list types"

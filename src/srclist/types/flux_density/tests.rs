@@ -81,8 +81,8 @@ fn estimate_with_negative_fds() {
         fdt.estimate_at_freq(190e6),
         FluxDensity {
             freq: 190e6,
-            // Spectral index would be -3.036, but it gets capped to -2.
-            i: -2.545013850415513,
+            // Spec index -3.036.
+            i: -2.3370702845538984,
             ..Default::default()
         }
     );
@@ -90,8 +90,8 @@ fn estimate_with_negative_fds() {
         fdt.estimate_at_freq(210e6),
         FluxDensity {
             freq: 210e6,
-            // Spectral index would be -3.036, but it gets capped to -2.
-            i: -1.8140589569160996,
+            // Spectral index -3.036.
+            i: -1.72460308893938,
             ..Default::default()
         }
     );

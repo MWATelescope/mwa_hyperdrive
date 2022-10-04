@@ -8,12 +8,9 @@ use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use marlu::RADec;
 use vec1::vec1;
 
-use crate::{
-    constants::SPEC_INDEX_CAP,
-    srclist::{
-        calc_flux_ratio,
-        types::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent},
-    },
+use crate::srclist::{
+    calc_flux_ratio,
+    types::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent},
 };
 
 fn get_list_source_1() -> Source {
@@ -51,7 +48,7 @@ fn get_list_source_1() -> Source {
 }
 
 // TODO: Write more tests using this source.
-// This is an extreme example; particularly useful for verifying a SI cap.
+// This is an extreme example.
 fn get_list_source_2() -> Source {
     Source {
         components: vec1![SourceComponent {
@@ -164,8 +161,6 @@ fn list_estimate_flux_density_at_freq_extrapolation_source_1() {
 
 #[test]
 fn list_estimate_flux_density_at_freq_source_2() {
-    // Verify that the spectral index is capped if the calculated value
-    // is below SPEC_INDEX_CAP. Use a freq. of 210 MHz.
     let source = get_list_source_2();
     let fds = match &source.components[0].flux_type {
         FluxDensityType::List { fds } => fds,
@@ -176,43 +171,14 @@ fn list_estimate_flux_density_at_freq_source_2() {
     let fd = source.components[0]
         .flux_type
         .estimate_at_freq(desired_freq);
-    let freq_ratio_capped = calc_flux_ratio(desired_freq, fds[1].freq, SPEC_INDEX_CAP);
-    let expected = fds[1].clone() * freq_ratio_capped;
+    let si = (fds[1].i / fds[0].i).ln() / (fds[1].freq / fds[0].freq).ln();
+    assert_abs_diff_eq!(si, -LOG2_10, epsilon = 1e-10);
+    let freq_ratio = calc_flux_ratio(desired_freq, fds[1].freq, si);
+    let expected = fds[1].clone() * freq_ratio;
     assert_abs_diff_eq!(fd.i, expected.i, epsilon = 1e-10);
     assert_abs_diff_eq!(fd.q, expected.q, epsilon = 1e-10);
     assert_abs_diff_eq!(fd.u, expected.u, epsilon = 1e-10);
     assert_abs_diff_eq!(fd.v, expected.v, epsilon = 1e-10);
-
-    // Calculate the estimated flux density manually.
-    // si should be -3.321928094887362 (this is also tested above).
-    let si = fds[0].calc_spec_index(&fds[1]);
-    assert_abs_diff_eq!(si, -LOG2_10, epsilon = 1e-10);
-    let freq_ratio = calc_flux_ratio(desired_freq, fds[1].freq, si);
-    let manual = fds[1].clone() * freq_ratio;
-
-    // Compare our manually-calculated values with the output of the
-    // estimation function. Our manually-calculated flux densities should be
-    // smaller than those of the function, as our SI has not been capped.
-    assert!(
-        fd.i > manual.i,
-        "Stokes I FD ({}) was smaller than expected!",
-        fd.i,
-    );
-    assert!(
-        fd.q > manual.q,
-        "Stokes Q FD ({}) was smaller than expected!",
-        fd.q,
-    );
-    assert!(
-        fd.u > manual.u,
-        "Stokes U FD ({}) was smaller than expected!",
-        fd.u,
-    );
-    assert!(
-        fd.v > manual.v,
-        "Stokes V FD ({}) was smaller than expected!",
-        fd.v,
-    );
 }
 
 #[test]
