@@ -304,9 +304,7 @@ impl From<SolutionsWriteError> for HyperdriveError {
     fn from(e: SolutionsWriteError) -> Self {
         let s = e.to_string();
         match e {
-            SolutionsWriteError::UnsupportedExt { .. }
-            | SolutionsWriteError::RtsMetafitsRequired
-            | SolutionsWriteError::Rts(_) => Self::Solutions(s),
+            SolutionsWriteError::UnsupportedExt { .. } => Self::Solutions(s),
             SolutionsWriteError::Fits(_) | SolutionsWriteError::Fitsio(_) => Self::Cfitsio(s),
             SolutionsWriteError::IO(_) => Self::Generic(s),
         }

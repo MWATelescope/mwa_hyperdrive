@@ -7,7 +7,11 @@ and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.1] - Unreleased
+### Fixed
+- Bugs were fixed surrounding the reading of RTS solutions.
+
 ### Changed
+- RTS solutions may no longer be written out.
 - Use "lto = "thin"". This makes performance slightly better and decreases the
   size of the binary.
 - Internal crates have been "folded" in with the main code. This should

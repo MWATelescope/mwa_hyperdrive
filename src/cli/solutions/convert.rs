@@ -32,7 +32,7 @@ impl SolutionsConvertArgs {
     pub fn run(self) -> Result<(), HyperdriveError> {
         let sols =
             CalibrationSolutions::read_solutions_from_ext(&self.input, self.metafits.as_ref())?;
-        sols.write_solutions_from_ext(&self.output, self.metafits.as_deref())?;
+        sols.write_solutions_from_ext(&self.output)?;
 
         info!(
             "Converted {} to {}",

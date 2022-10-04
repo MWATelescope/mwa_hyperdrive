@@ -9,10 +9,7 @@ use ndarray::prelude::*;
 use vec1::{vec1, Vec1};
 
 use super::*;
-use crate::{
-    pfb_gains::PfbFlavour, tests::reduced_obsids::get_reduced_1090008640,
-    vis_io::read::RawDataCorrections,
-};
+use crate::{pfb_gains::PfbFlavour, vis_io::read::RawDataCorrections};
 
 fn make_solutions() -> CalibrationSolutions {
     let num_timeblocks = 2;
@@ -322,48 +319,4 @@ fn test_write_and_read_ao_solutions() {
     let disk_average_timestamps = sols_from_disk.average_timestamps.unwrap();
     assert_eq!(disk_average_timestamps.len(), 1);
     assert_abs_diff_eq!(disk_average_timestamps[0].as_gpst_seconds(), 1090008650.0);
-}
-
-#[test]
-fn test_write_and_read_rts_solutions() {
-    let sols = make_solutions();
-    let args = get_reduced_1090008640(false, false);
-    let metafits = &args.data.unwrap()[0];
-    let tmp_dir = tempfile::tempdir().expect("Couldn't make tmp dir");
-
-    let result = rts::write(&sols, tmp_dir.path(), metafits);
-    assert!(result.is_ok(), "{}", result.unwrap_err());
-    result.unwrap();
-
-    let result = rts::read(tmp_dir.path(), metafits);
-    let sols_from_disk = match result {
-        Ok(r) => r,
-        Err(e) => panic!("{}", e),
-    };
-
-    // `sols` has 2 timeblocks, but RTS solutions can only ever have 1.
-    assert_eq!(sols_from_disk.di_jones.dim().0, 1);
-    assert_eq!(sols.di_jones.dim().1, sols_from_disk.di_jones.dim().1);
-    assert_eq!(sols.di_jones.dim().2, sols_from_disk.di_jones.dim().2);
-    // Can't use assert_abs_diff_eq on the whole array, because it rejects NaN
-    // equality.
-    sols.di_jones
-        .into_iter()
-        .zip(sols_from_disk.di_jones.into_iter())
-        .for_each(|(expected, result)| {
-            if expected.any_nan() {
-                assert!(result.any_nan());
-            } else {
-                assert_abs_diff_eq!(
-                    expected,
-                    result,
-                    // lmao
-                    epsilon = 0.06
-                );
-            }
-        });
-
-    assert!(sols_from_disk.start_timestamps.is_none());
-    assert!(sols_from_disk.end_timestamps.is_none());
-    assert!(sols_from_disk.average_timestamps.is_none());
 }

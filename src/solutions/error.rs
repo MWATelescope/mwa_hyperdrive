@@ -8,7 +8,7 @@ use marlu::mwalib;
 use mwalib::{fitsio, FitsError};
 use thiserror::Error;
 
-use super::rts::{RtsReadSolsError, RtsWriteSolsError};
+use super::rts::RtsReadSolsError;
 
 #[derive(Error, Debug)]
 pub(crate) enum SolutionsReadError {
@@ -61,12 +61,6 @@ pub(crate) enum SolutionsReadError {
 pub(crate) enum SolutionsWriteError {
     #[error("Tried to write calibration solutions file with an unsupported extension '{ext}'!")]
     UnsupportedExt { ext: String },
-
-    #[error("When interfacing with RTS calibration solutions, a metafits file is required")]
-    RtsMetafitsRequired,
-
-    #[error(transparent)]
-    Rts(#[from] RtsWriteSolsError),
 
     #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),

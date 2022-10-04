@@ -473,8 +473,7 @@ pub(crate) fn get_1090008640_identity_solutions_file(tmp_dir: &Path) -> PathBuf 
         ..Default::default()
     };
     let file = tmp_dir.join("sols.fits");
-    sols.write_solutions_from_ext::<&Path, &Path>(&file, None)
-        .unwrap();
+    sols.write_solutions_from_ext::<&Path>(&file).unwrap();
     file
 }
 

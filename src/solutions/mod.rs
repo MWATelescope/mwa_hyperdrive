@@ -179,37 +179,22 @@ impl CalibrationSolutions {
     ///
     /// It is generally preferable to use [hyperdrive::write] for
     /// hyperdrive-style files, because that allows more metadata to be written.
-    pub fn write_solutions_from_ext<P: AsRef<Path>, P2: AsRef<Path>>(
-        &self,
-        file: P,
-        metafits: Option<P2>,
-    ) -> Result<(), HyperdriveError> {
-        Self::write_solutions_from_ext_inner(
-            self,
-            file.as_ref(),
-            metafits.as_ref().map(|f| f.as_ref()),
-        )
-        .map_err(HyperdriveError::from)
+    pub fn write_solutions_from_ext<P: AsRef<Path>>(&self, file: P) -> Result<(), HyperdriveError> {
+        Self::write_solutions_from_ext_inner(self, file.as_ref()).map_err(HyperdriveError::from)
     }
 
     pub(crate) fn write_solutions_from_ext_inner(
         sols: &CalibrationSolutions,
         file: &Path,
-        metafits: Option<&Path>,
     ) -> Result<(), SolutionsWriteError> {
-        if file.is_dir() {
-            let metafits = metafits.ok_or(SolutionsWriteError::RtsMetafitsRequired)?;
-            rts::write(sols, file, metafits)?;
-        } else {
-            let ext = file.extension().and_then(|e| e.to_str());
-            match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
-                Some(CalSolutionType::Fits) => hyperdrive::write(sols, file),
-                Some(CalSolutionType::Bin) => ao::write(sols, file),
-                None => Err(SolutionsWriteError::UnsupportedExt {
-                    ext: ext.unwrap_or("<no extension>").to_string(),
-                }),
-            }?;
-        }
+        let ext = file.extension().and_then(|e| e.to_str());
+        match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
+            Some(CalSolutionType::Fits) => hyperdrive::write(sols, file),
+            Some(CalSolutionType::Bin) => ao::write(sols, file),
+            None => Err(SolutionsWriteError::UnsupportedExt {
+                ext: ext.unwrap_or("<no extension>").to_string(),
+            }),
+        }?;
 
         Ok(())
     }
