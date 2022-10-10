@@ -813,7 +813,10 @@ impl DiCalParams {
                 if f.chanblocks.is_empty() {
                     return Err(DiCalArgsError::NoChannels);
                 }
-                warn!("\"Picket fence\" data detected. Only the first contiguous band will be used as this is not well supported right now.");
+                // TODO: Allow picket fence.
+                eprintln!("\"Picket fence\" data detected. hyperdrive does not support this right now -- exiting.");
+                eprintln!("See for more info: https://MWATelescope.github.io/mwa_hyperdrive/defs/mwa/picket_fence.html");
+                std::process::exit(1);
             }
         }
         let fences = Vec1::try_from_vec(fences).map_err(|_| DiCalArgsError::NoChannels)?;

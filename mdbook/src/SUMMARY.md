@@ -42,6 +42,7 @@
   - [Dead dipoles](defs/mwa/dead_dipoles.md)
   - [mwaf flag files](defs/mwa/mwaf.md)
   - [Raw data corrections](defs/mwa/corrections.md)
+  - [Picket fence obs](defs/mwa/picket_fence.md)
   - [mwalib](defs/mwa/mwalib.md)
 - [Sky-model source lists](defs/source_lists.md)
   - [Flux-density types](defs/fd_types.md)

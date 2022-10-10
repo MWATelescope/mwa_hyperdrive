@@ -13,6 +13,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `solutions-apply`.
 
 ### Fixed
+- Picket fence observations were previously detected, but not still handled
+  correctly. Until they are fixed, hyperdrive will not attempt to do anything
+  with a picket fence observation. A doc page has been added for picket fences.
 - `solutions-apply` would incorrectly apply solutions when flagged tiles were
   present. Thorough testing suggests that this is no longer the case and cannot
   happen again.
