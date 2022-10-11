@@ -236,6 +236,21 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
     }
     debug!("Raw data corrections with user input: {raw_data_corrections:?}");
 
+    // If the user supplied the array position, unpack it here.
+    let array_position = match array_position {
+        Some(pos) => {
+            if pos.len() != 3 {
+                return Err(SolutionsApplyError::BadArrayPosition { pos });
+            }
+            Some(LatLngHeight {
+                longitude_rad: pos[0].to_radians(),
+                latitude_rad: pos[1].to_radians(),
+                height_metres: pos[2],
+            })
+        }
+        None => None,
+    };
+
     // Prepare an input data reader.
     let input_data: Box<dyn VisRead> = match (
         input_data_types.metafits,
@@ -296,7 +311,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
                 }
             };
 
-            let input_data = MsReader::new(&ms, meta)?;
+            let input_data = MsReader::new(&ms, meta, array_position)?;
 
             messages::InputFileDetails::MeasurementSet {
                 obsid: input_data.get_obs_context().obsid,
@@ -463,22 +478,11 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
     if num_unflagged_tiles == 0 {
         return Err(SolutionsApplyError::NoTiles);
     }
-    let array_position = match array_position {
-        None => obs_context.array_position.unwrap_or_else(|| {
-            trace!("The array position was not specified in the input data; assuming MWA");
-            LatLngHeight::new_mwa()
-        }),
-        Some(pos) => {
-            if pos.len() != 3 {
-                return Err(SolutionsApplyError::BadArrayPosition { pos });
-            }
-            LatLngHeight {
-                longitude_rad: pos[0].to_radians(),
-                latitude_rad: pos[1].to_radians(),
-                height_metres: pos[2],
-            }
-        }
-    };
+    // If the array position wasn't user defined, try the input data.
+    let array_position = array_position.unwrap_or_else(|| {
+        trace!("The array position was not specified in the input data; assuming MWA");
+        LatLngHeight::new_mwa()
+    });
     messages::ArrayDetails {
         array_position: Some(array_position),
         array_latitude_j2000: None,

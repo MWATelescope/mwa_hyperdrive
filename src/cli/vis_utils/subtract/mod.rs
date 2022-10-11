@@ -281,6 +281,21 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         }
     }
 
+    // If the user supplied the array position, unpack it here.
+    let array_position = match array_position {
+        Some(pos) => {
+            if pos.len() != 3 {
+                return Err(VisSubtractError::BadArrayPosition { pos });
+            }
+            Some(LatLngHeight {
+                longitude_rad: pos[0].to_radians(),
+                latitude_rad: pos[1].to_radians(),
+                height_metres: pos[2],
+            })
+        }
+        None => None,
+    };
+
     // Prepare an input data reader.
     let input_data_types = InputDataTypes::new(&data)?;
     let input_data: Box<dyn VisRead> = match (
@@ -311,7 +326,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 }
             };
 
-            let input_data = MsReader::new(&ms, meta)?;
+            let input_data = MsReader::new(&ms, meta, array_position)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from measurement set {}",
@@ -462,22 +477,11 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     let beam_file = beam.get_beam_file();
     debug!("Beam file: {beam_file:?}");
 
-    let array_pos = match array_position {
-        None => obs_context.array_position.unwrap_or_else(|| {
-            trace!("The array position was not specified in the input data; assuming MWA");
-            LatLngHeight::new_mwa()
-        }),
-        Some(pos) => {
-            if pos.len() != 3 {
-                return Err(VisSubtractError::BadArrayPosition { pos });
-            }
-            LatLngHeight {
-                longitude_rad: pos[0].to_radians(),
-                latitude_rad: pos[1].to_radians(),
-                height_metres: pos[2],
-            }
-        }
-    };
+    // If the array position wasn't user defined, try the input data.
+    let array_pos = array_position.unwrap_or_else(|| {
+        trace!("The array position was not specified in the input data; assuming MWA");
+        LatLngHeight::new_mwa()
+    });
 
     let timesteps = match timesteps {
         None => Vec1::try_from(obs_context.all_timesteps.as_slice()),

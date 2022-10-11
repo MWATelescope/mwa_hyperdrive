@@ -931,9 +931,10 @@ fn test_1090008640_calibrate_model_ms() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     let sols = result.unwrap();
 
-    let ms_m = MsReader::new(&model, Some(metafits)).unwrap();
+    let array_pos = LatLngHeight::new_mwa();
+    let ms_m = MsReader::new(&model, Some(metafits), Some(array_pos)).unwrap();
     let ctx_m = ms_m.get_obs_context();
-    let ms_c = MsReader::new(&cal_model, Some(metafits)).unwrap();
+    let ms_c = MsReader::new(&cal_model, Some(metafits), Some(array_pos)).unwrap();
     let ctx_c = ms_c.get_obs_context();
     assert_eq!(ctx_m.all_timesteps, ctx_c.all_timesteps);
     assert_eq!(ctx_m.all_timesteps.len(), num_timesteps);
@@ -963,7 +964,7 @@ fn test_1090008640_calibrate_model_ms() {
     let mut weight_m = Array2::<f32>::zeros(data_shape);
     let mut weight_c = Array2::<f32>::zeros(data_shape);
 
-    for timestep in ctx_m.all_timesteps.clone() {
+    for &timestep in &ctx_m.all_timesteps {
         ms_m.read_crosses(
             vis_m.view_mut(),
             weight_m.view_mut(),
@@ -981,7 +982,14 @@ fn test_1090008640_calibrate_model_ms() {
         )
         .unwrap();
 
-        assert_abs_diff_eq!(vis_m, vis_c);
+        // Unlike the equivalent uvfits test, we have to use an epsilon here.
+        // This is due to the MS antenna positions being in geocentric
+        // coordinates and not geodetic like uvfits; in the process of
+        // converting from geocentric to geodetic, small float errors are
+        // introduced. If a metafits' positions are used instead, the results
+        // are *exactly* the same, but we should trust the MS's positions, so
+        // these errors must remain.
+        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 4e-5);
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
@@ -989,7 +997,7 @@ fn test_1090008640_calibrate_model_ms() {
     assert_abs_diff_eq!(
         sols.di_jones,
         Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
-        epsilon = 1e-15
+        epsilon = 1e-8
     );
 }
 

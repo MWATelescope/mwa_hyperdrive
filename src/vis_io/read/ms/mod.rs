@@ -5,12 +5,10 @@
 //! Code to interface with CASA measurement sets.
 
 mod error;
-mod helpers;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use error::*;
-use helpers::*;
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -27,10 +25,39 @@ use marlu::{
     rubbl_casatables, Jones, LatLngHeight, RADec, XyzGeocentric,
 };
 use ndarray::prelude::*;
-use rubbl_casatables::Table;
+use rayon::prelude::*;
+use rubbl_casatables::{Table, TableOpenMode};
 
 use super::*;
 use crate::{beam::Delays, context::ObsContext, metafits, misc::round_hundredths_of_a_second};
+
+pub(crate) enum MsFlavour {
+    Hyperdrive,
+
+    /// Birli before version 0.2.0 and after 0.7.0
+    Birli,
+
+    /// Anything that writes ms with the Marlu library without specifying the
+    /// appropriate history
+    Marlu,
+
+    Cotter,
+
+    /// Generic?
+    Casa,
+}
+
+/// Open a measurement set table read only. If `table` is `None`, then open the
+/// base table.
+pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MsReadError> {
+    match Table::open(
+        &format!("{}/{}", ms.display(), table.unwrap_or("")),
+        TableOpenMode::Read,
+    ) {
+        Ok(t) => Ok(t),
+        Err(e) => Err(MsReadError::RubblError(e.to_string())),
+    }
+}
 
 pub(crate) struct MsReader {
     /// Input data metadata.
@@ -51,19 +78,6 @@ pub(crate) struct MsReader {
     tile_map: HashMap<i32, usize>,
 }
 
-pub(crate) enum MsFlavour {
-    /// Birli before version 0.2.0
-    Birli,
-
-    /// Anything that writes ms with the marlu library
-    Marlu,
-
-    Cotter,
-
-    /// Generic?
-    Casa,
-}
-
 impl MsReader {
     /// Verify and populate metadata associated with this measurement set.
     ///
@@ -75,8 +89,13 @@ impl MsReader {
     pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         ms: P,
         metafits: Option<P2>,
+        array_pos: Option<LatLngHeight>,
     ) -> Result<MsReader, VisReadError> {
-        fn inner(ms: &Path, metafits: Option<&Path>) -> Result<MsReader, MsReadError> {
+        fn inner(
+            ms: &Path,
+            metafits: Option<&Path>,
+            array_pos: Option<LatLngHeight>,
+        ) -> Result<MsReader, MsReadError> {
             debug!("Using measurement set: {}", ms.display());
             if !ms.exists() {
                 return Err(MsReadError::BadFile(ms.to_path_buf()));
@@ -94,15 +113,14 @@ impl MsReader {
                 return Err(MsReadError::MainTableEmpty);
             }
 
-            // This currently only returns table names. Maybe that's this function's
-            // intention, but there should be a way to read the "String" types, not
-            // just "Table" types from the table keywords.
-            // Was this measurement set created by cotter?
+            // What created this measurement set?
             let flavour = {
                 let mut history_table = read_table(ms, Some("HISTORY"))?;
                 let app: String = history_table.get_cell("APPLICATION", 0).unwrap();
                 let app = app.to_uppercase();
-                let app_name = if app.starts_with("BIRLI") {
+                let app_name = if app.starts_with("MWA_HYPERDRIVE") {
+                    Some(MsFlavour::Hyperdrive)
+                } else if app.starts_with("BIRLI") {
                     Some(MsFlavour::Birli)
                 } else if app.starts_with("MARLU") {
                     Some(MsFlavour::Marlu)
@@ -119,7 +137,10 @@ impl MsReader {
                     let mut app = None;
                     for message in messages {
                         let upper = message.to_uppercase();
-                        if upper.contains("MARLU") {
+                        if upper.contains("HYPERDRIVE") {
+                            app = Some(MsFlavour::Hyperdrive);
+                            break;
+                        } else if upper.contains("MARLU") {
                             app = Some(MsFlavour::Marlu);
                             break;
                         } else if upper.contains("BIRLI") {
@@ -140,7 +161,7 @@ impl MsReader {
             let tile_names =
                 Vec1::try_from_vec(tile_names).map_err(|_| MsReadError::AntennaTableEmpty)?;
 
-            let get_casacore_positions = |antenna_table: &mut Table, flavour: &MsFlavour| {
+            let (tile_xyzs, array_pos): (Vec<marlu::XyzGeodetic>, LatLngHeight) = {
                 let mut casacore_positions = Vec::with_capacity(antenna_table.n_rows() as usize);
                 antenna_table
                     .for_each_row(|row| {
@@ -155,25 +176,33 @@ impl MsReader {
                         Ok(())
                     })
                     .unwrap();
-                let array_pos = match flavour {
-                    MsFlavour::Birli | MsFlavour::Marlu => LatLngHeight::new_mwa(),
-                    MsFlavour::Cotter => LatLngHeight {
-                        longitude_rad: COTTER_MWA_LONGITUDE_RADIANS,
-                        latitude_rad: COTTER_MWA_LATITUDE_RADIANS,
-                        height_metres: COTTER_MWA_HEIGHT_METRES,
-                    },
-                    MsFlavour::Casa => todo!(),
+                // XXX(Dev): no way to get array_pos from MS AFAIK
+                let array_pos = match (array_pos, flavour) {
+                    (Some(p), _) => p,
+                    (None, MsFlavour::Hyperdrive | MsFlavour::Birli | MsFlavour::Marlu) => {
+                        warn!("Assuming that this measurement set's array position is the MWA");
+                        LatLngHeight::new_mwa()
+                    }
+                    (None, MsFlavour::Cotter) => {
+                        warn!("Assuming that this measurement set's array position is cotter's MWA position");
+                        LatLngHeight {
+                            longitude_rad: COTTER_MWA_LONGITUDE_RADIANS,
+                            latitude_rad: COTTER_MWA_LATITUDE_RADIANS,
+                            height_metres: COTTER_MWA_HEIGHT_METRES,
+                        }
+                    }
+                    (None, MsFlavour::Casa) => todo!(),
                 };
-                casacore_positions_to_local_xyz(&casacore_positions, array_pos)
-            };
-            let tile_xyzs = match (&flavour, mwalib_context.as_ref()) {
-                // If the antenna table is present, we trust this more than the
-                // metafits file.
-                (MsFlavour::Birli | MsFlavour::Marlu | MsFlavour::Cotter, _) => {
-                    get_casacore_positions(&mut antenna_table, &flavour)?
-                }
-                (MsFlavour::Casa, Some(context)) => marlu::XyzGeodetic::get_tiles_mwa(context),
-                (MsFlavour::Casa, None) => todo!(),
+
+                let vec = XyzGeocentric::get_geocentric_vector(array_pos)
+                    .map_err(|_| MsReadError::Geodetic2Geocentric)?;
+                let (s_long, c_long) = array_pos.longitude_rad.sin_cos();
+                let tile_xyzs = casacore_positions
+                    .par_iter()
+                    .map(|xyz| xyz.to_geodetic_inner(vec, s_long, c_long))
+                    .collect();
+
+                (tile_xyzs, array_pos)
             };
             trace!("There are positions for {} tiles", tile_xyzs.len());
             // Not sure if this is even possible, but we'll handle it anyway.
@@ -671,8 +700,7 @@ impl MsReader {
                 unflagged_timesteps,
                 phase_centre,
                 pointing_centre,
-                // XXX(Dev): no way to get array_pos from MS AFAIK
-                array_position: None,
+                array_position: Some(array_pos),
                 dut1,
                 tile_names,
                 tile_xyzs,
@@ -700,7 +728,12 @@ impl MsReader {
             };
             Ok(ms)
         }
-        inner(ms.as_ref(), metafits.as_ref().map(|f| f.as_ref())).map_err(VisReadError::from)
+        inner(
+            ms.as_ref(),
+            metafits.as_ref().map(|f| f.as_ref()),
+            array_pos,
+        )
+        .map_err(VisReadError::from)
     }
 
     /// An internal method for reading visibilities. Cross- and/or

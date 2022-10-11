@@ -24,7 +24,7 @@ use crate::{
 fn test_1090008640_cross_vis() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits)) {
+        match MsReader::new(ms, Some(metafits), None) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -89,7 +89,7 @@ fn test_1090008640_cross_vis() {
 fn read_1090008640_auto_vis() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits)) {
+        match MsReader::new(ms, Some(metafits), None) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -179,7 +179,7 @@ fn read_1090008640_auto_vis() {
 fn read_1090008640_auto_vis_with_flags() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits)) {
+        match MsReader::new(ms, Some(metafits), None) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -277,7 +277,7 @@ fn read_1090008640_auto_vis_with_flags() {
 fn read_1090008640_cross_and_auto_vis() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits)) {
+        match MsReader::new(ms, Some(metafits), None) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -499,7 +499,7 @@ fn test_timestep_reading() {
         .write_vis(vis_data.view(), weight_data.view(), &vis_ctx, false)
         .unwrap();
 
-    let ms_reader = MsReader::new::<&PathBuf, &PathBuf>(&vis_path, None).unwrap();
+    let ms_reader = MsReader::new::<&PathBuf, &PathBuf>(&vis_path, None, None).unwrap();
     let ms_ctx = ms_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)
@@ -528,6 +528,7 @@ fn test_trunc_data() {
     let result = MsReader::new(
         "test_files/1090008640/1090008640_cotter_trunc_autos.ms",
         metafits,
+        None,
     );
     assert!(result.is_ok(), "{:?}", result.err());
     let reader = result.unwrap();
@@ -548,6 +549,7 @@ fn test_trunc_data() {
     let result = MsReader::new(
         "test_files/1090008640/1090008640_cotter_trunc_noautos.ms",
         metafits,
+        None,
     );
     assert!(result.is_ok(), "{:?}", result.err());
     let reader = result.unwrap();
@@ -565,7 +567,11 @@ fn test_trunc_data() {
     assert_eq!(&reader.obs_context.all_timesteps, &[0, 1, 2]);
     assert_eq!(&reader.obs_context.unflagged_timesteps, &[2]);
 
-    let result = MsReader::new("test_files/1090008640/1090008640_birli_trunc.ms", metafits);
+    let result = MsReader::new(
+        "test_files/1090008640/1090008640_birli_trunc.ms",
+        metafits,
+        None,
+    );
     assert!(result.is_ok(), "{:?}", result.err());
     let reader = result.unwrap();
     assert!(reader.obs_context.autocorrelations_present);
@@ -608,7 +614,12 @@ fn test_map_metafits_antenna_order() {
     // MS has its tiles in the same order as the "metafits order", the delays
     // and gains are already correct without re-ordering.
     let metafits_path = "test_files/1090008640/1090008640.metafits";
-    let ms = MsReader::new("test_files/1090008640/1090008640.ms", Some(metafits_path)).unwrap();
+    let ms = MsReader::new(
+        "test_files/1090008640/1090008640.ms",
+        Some(metafits_path),
+        None,
+    )
+    .unwrap();
     let obs_context = ms.get_obs_context();
     let delays = match obs_context.dipole_delays.as_ref() {
         Some(Delays::Full(d)) => d,
@@ -706,7 +717,12 @@ fn test_map_metafits_antenna_order() {
         fits_check_status(status).unwrap();
     }
 
-    let ms = MsReader::new("test_files/1090008640/1090008640.ms", Some(metafits.path())).unwrap();
+    let ms = MsReader::new(
+        "test_files/1090008640/1090008640.ms",
+        Some(metafits.path()),
+        None,
+    )
+    .unwrap();
     let obs_context = ms.get_obs_context();
     let delays = match obs_context.dipole_delays.as_ref() {
         Some(Delays::Full(d)) => d,
@@ -803,12 +819,13 @@ fn test_map_metafits_antenna_order() {
         fits_check_status(status).unwrap();
     }
 
-    let uvfits = UvfitsReader::new(
-        "test_files/1090008640/1090008640.uvfits",
+    let ms = MsReader::new(
+        "test_files/1090008640/1090008640.ms",
         Some(metafits.path()),
+        None,
     )
     .unwrap();
-    let obs_context = uvfits.get_obs_context();
+    let obs_context = ms.get_obs_context();
     let delays = match obs_context.dipole_delays.as_ref() {
         Some(Delays::Full(d)) => d,
         _ => unreachable!(),

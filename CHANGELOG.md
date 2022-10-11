@@ -22,8 +22,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `solutions-apply` would incorrectly apply solutions when flagged tiles were
   present. Thorough testing suggests that this is no longer the case and cannot
   happen again.
-- Birli and possibly cotter measurement set metadata weren't being read
-  correctly.
+- Various improvements when reading measurement sets:
+  - Birli and possibly cotter measurement set metadata weren't being read
+    correctly.
+  - MSs can't provide the array location, so the code assumes that all MSs were
+    situated at the MWA. It is now possible to use a user-supplied array
+    location to get around this.
+  - `hyperdrive`-written MSs weren't being handled properly (oops)
 - Bugs were fixed surrounding the reading of RTS solutions.
 
 ### Changed

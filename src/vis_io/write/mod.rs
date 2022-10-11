@@ -239,7 +239,7 @@ pub(crate) fn write_vis<'a>(
                         coarse_chan_range,
                     )?;
                 } else {
-                    ms.initialize(&vis_ctx, &marlu_obs_ctx, None)?;
+                    ms.initialize(&vis_ctx, &marlu_obs_ctx, Some(&history))?;
                 }
                 Box::new(ms)
             }

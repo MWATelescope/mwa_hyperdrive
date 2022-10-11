@@ -433,7 +433,7 @@ fn test_solutions_apply_trivial_ms() {
     let mut data = cal_args.data.unwrap().into_iter();
     let metafits = data.next().unwrap();
     let ms = data.next().unwrap();
-    let input_data = MsReader::new(&ms, Some(&metafits)).unwrap();
+    let input_data = MsReader::new(&ms, Some(&metafits), None).unwrap();
 
     test_solutions_apply_trivial(Box::new(input_data).deref(), &metafits)
 }
@@ -625,7 +625,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_and_ms() {
     // check ms file has been created, is readable
     assert!(out_ms_path.exists(), "out vis file not written");
 
-    let ms_data = MsReader::new(&out_ms_path, Some(metafits)).unwrap();
+    let ms_data = MsReader::new(&out_ms_path, Some(metafits), None).unwrap();
 
     let ms_ctx = ms_data.get_obs_context();
 

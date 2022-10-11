@@ -256,6 +256,21 @@ impl DiCalParams {
         #[cfg(not(feature = "cuda"))]
         let modeller_info = ModellerInfo::Cpu;
 
+        // If the user supplied the array position, unpack it here.
+        let array_position = match array_position {
+            Some(pos) => {
+                if pos.len() != 3 {
+                    return Err(DiCalArgsError::BadArrayPosition { pos });
+                }
+                Some(LatLngHeight {
+                    longitude_rad: pos[0].to_radians(),
+                    latitude_rad: pos[1].to_radians(),
+                    height_metres: pos[2],
+                })
+            }
+            None => None,
+        };
+
         // Handle input data. We expect one of three possibilities:
         // - gpubox files, a metafits file (and maybe mwaf files),
         // - a measurement set (and maybe a metafits file), or
@@ -327,7 +342,7 @@ impl DiCalParams {
                         }
                     };
 
-                    let input_data = MsReader::new(&ms, meta)?;
+                    let input_data = MsReader::new(&ms, meta, array_position)?;
 
                     messages::InputFileDetails::MeasurementSet {
                         obsid: input_data.get_obs_context().obsid,
@@ -416,22 +431,11 @@ impl DiCalParams {
 
         let obs_context = input_data.get_obs_context();
 
-        let array_position = match array_position {
-            None => obs_context.array_position.unwrap_or_else(|| {
-                trace!("The array position was not specified in the input data; assuming MWA");
-                LatLngHeight::new_mwa()
-            }),
-            Some(pos) => {
-                if pos.len() != 3 {
-                    return Err(DiCalArgsError::BadArrayPosition { pos });
-                }
-                LatLngHeight {
-                    longitude_rad: pos[0].to_radians(),
-                    latitude_rad: pos[1].to_radians(),
-                    height_metres: pos[2],
-                }
-            }
-        };
+        // If the array position wasn't user defined, try the input data.
+        let array_position = array_position.unwrap_or_else(|| {
+            trace!("The array position was not specified in the input data; assuming MWA");
+            LatLngHeight::new_mwa()
+        });
         let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
 
         let timesteps_to_use = {
