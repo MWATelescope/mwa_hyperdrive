@@ -27,7 +27,7 @@ use super::*;
 use crate::{
     beam::Delays,
     context::ObsContext,
-    metafits,
+    metafits::{get_dipole_delays, get_dipole_gains, map_antenna_order},
     misc::quantize_duration,
     vis_io::read::{VisRead, VisReadError},
 };
@@ -191,16 +191,43 @@ impl UvfitsReader {
                 RADec::new_degrees(ra, dec)
             };
 
-            // Populate the dipole delays and the pointing centre if we can.
+            // Populate the dipole delays, gains and the pointing centre if we
+            // can.
             let mut dipole_delays: Option<Delays> = None;
+            let mut dipole_gains: Option<_> = None;
             let mut pointing_centre: Option<RADec> = None;
             if let Some(context) = &mwalib_context {
-                debug!("Using metafits for dipole delays and pointing centre");
-                dipole_delays = Some(Delays::Full(metafits::get_dipole_delays(context)));
+                debug!("Using metafits for dipole delays, gains and pointing centre");
+                let delays = get_dipole_delays(context);
+                let gains = get_dipole_gains(context);
                 pointing_centre = Some(RADec::new_degrees(
                     context.ra_tile_pointing_degrees,
                     context.dec_tile_pointing_degrees,
                 ));
+
+                // Re-order the tile delays and gains according to the uvfits
+                // order, if possible.
+                if let Some(map) = map_antenna_order(context, &tile_names) {
+                    let mut delays2 = delays.clone();
+                    let mut gains2 = gains.clone();
+                    for i in 0..tile_names.len() {
+                        let j = map[&i];
+                        delays2
+                            .slice_mut(s![i, ..])
+                            .assign(&delays.slice(s![j, ..]));
+                        gains2.slice_mut(s![i, ..]).assign(&gains.slice(s![j, ..]));
+                    }
+                    dipole_delays = Some(Delays::Full(delays2));
+                    dipole_gains = Some(gains2);
+                } else {
+                    // We have no choice but to leave the order as is.
+                    warn!(
+                        "The uvfits antenna names are different to those supplied in the metafits."
+                    );
+                    warn!("Dipole delays/gains may be incorrectly mapped to uvfits antennas.");
+                    dipole_delays = Some(Delays::Full(delays));
+                    dipole_gains = Some(gains);
+                }
             }
 
             // Work out which tiles are unavailable.
@@ -332,10 +359,7 @@ impl UvfitsReader {
                 metadata.autocorrelations_present
             );
 
-            // Get the dipole gains. Only available with a metafits.
-            let dipole_gains = mwalib_context.as_ref().map(metafits::get_dipole_gains);
-
-            // Get the obsid. There is an "obs. name" in the "object" filed, but
+            // Get the obsid. There is an "obs. name" in the "object" key, but
             // that's not the same thing.
             let obsid = mwalib_context.as_ref().map(|context| context.obs_id);
 

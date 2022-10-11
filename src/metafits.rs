@@ -6,6 +6,9 @@
 //!
 //! Anything here is to supplement mwalib.
 
+use std::collections::HashMap;
+
+use log::debug;
 use mwalib::{MetafitsContext, Pol};
 use ndarray::prelude::*;
 
@@ -55,4 +58,53 @@ pub(crate) fn get_dipole_gains(context: &MetafitsContext) -> Array2<f64> {
             .assign(&ArrayView1::from(&rf_input_y.dipole_gains));
     }
     dipole_gains
+}
+
+pub(crate) fn map_antenna_order(
+    context: &MetafitsContext,
+    antenna_names: &[String],
+) -> Option<HashMap<usize, usize>> {
+    let metafits_names: Vec<&str> = context
+        .antennas
+        .iter()
+        .map(|a| a.tile_name.as_str())
+        .collect();
+
+    let mut hm = HashMap::with_capacity(antenna_names.len());
+    // Innocent until proven guilty.
+    let mut all_antennas_present = true;
+    for (i_name, antenna_name) in antenna_names.iter().enumerate() {
+        match metafits_names.iter().position(|&n| n == antenna_name) {
+            Some(i) => hm.insert(i_name, i),
+            None => {
+                debug!("Could not find tile name '{antenna_name}' in the metafits file");
+                all_antennas_present = false;
+                break;
+            }
+        };
+    }
+
+    if all_antennas_present {
+        Some(hm)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_map_metafits_antenna_order() {
+        let metafits = "test_files/1090008640/1090008640.metafits";
+        let context = mwalib::MetafitsContext::new(metafits, None).unwrap();
+        let antenna_names = ["Tile142".to_string(), "Tile083".to_string()];
+
+        let map = map_antenna_order(&context, &antenna_names);
+        assert!(map.is_some());
+        let map = map.unwrap();
+        assert_eq!(map[&0], 105);
+        assert_eq!(map[&1], 58);
+    }
 }

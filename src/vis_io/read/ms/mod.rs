@@ -18,7 +18,7 @@ use std::{
 };
 
 use hifitime::{Duration, Epoch, Unit};
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use marlu::{
     c32,
     constants::{
@@ -167,18 +167,11 @@ impl MsReader {
                 casacore_positions_to_local_xyz(&casacore_positions, array_pos)
             };
             let tile_xyzs = match (&flavour, mwalib_context.as_ref()) {
-                // If possible, use the metafits positions because even if the
-                // MS's positions are derived from the same metafits values,
-                // they're stored as geocentric positions, but we want geodetic
-                // positions. The additional transform done for the MS means
-                // that they're slightly less accurate.
-                (MsFlavour::Birli | MsFlavour::Marlu, Some(context)) => {
-                    marlu::XyzGeodetic::get_tiles_mwa(context)
-                }
-                (MsFlavour::Birli | MsFlavour::Marlu, None) => {
+                // If the antenna table is present, we trust this more than the
+                // metafits file.
+                (MsFlavour::Birli | MsFlavour::Marlu | MsFlavour::Cotter, _) => {
                     get_casacore_positions(&mut antenna_table, &flavour)?
                 }
-                (MsFlavour::Cotter, _) => get_casacore_positions(&mut antenna_table, &flavour)?,
                 (MsFlavour::Casa, Some(context)) => marlu::XyzGeodetic::get_tiles_mwa(context),
                 (MsFlavour::Casa, None) => todo!(),
             };
@@ -450,28 +443,61 @@ impl MsReader {
                 RADec::new(phase_vec[0], phase_vec[1])
             };
 
-            // Populate the dipole delays and the pointing centre if we can.
+            // Populate the dipole delays, gains and the pointing centre if we
+            // can.
             let mut dipole_delays: Option<Delays> = None;
+            let mut dipole_gains: Option<_> = None;
             let mut pointing_centre: Option<RADec> = None;
 
-            match (read_table(ms, Some("MWA_TILE_POINTING")), &mwalib_context) {
-                // MWA_TILE_POINTING doesn't exist and no metafits file was
-                // provided; we have no information on the delays. We also know
-                // nothing about the pointing centre.
-                (Err(_), None) => (),
+            match (&mwalib_context, read_table(ms, Some("MWA_TILE_POINTING"))) {
+                // No metafits file was provided and MWA_TILE_POINTING doesn't
+                // exist; we have no information on the dipole delays or gains.
+                // We also know nothing about the pointing centre.
+                (None, Err(_)) => {
+                    debug!(
+                        "No dipole delays, dipole gains or pointing centre information available"
+                    );
+                }
 
-                // Use the metafits file.
-                (_, Some(context)) => {
-                    debug!("Using metafits for dipole delays and pointing centre");
-                    dipole_delays = Some(Delays::Full(metafits::get_dipole_delays(context)));
+                // Use the metafits file. The MWA_TILE_POINTING table can only
+                // supply ideal dipole delays, so it's always better to use the
+                // metafits.
+                (Some(context), _) => {
+                    debug!("Using metafits for dipole delays, dipole gains and pointing centre");
+                    let delays = metafits::get_dipole_delays(context);
+                    let gains = metafits::get_dipole_gains(context);
                     pointing_centre = Some(RADec::new_degrees(
                         context.ra_tile_pointing_degrees,
                         context.dec_tile_pointing_degrees,
                     ));
+
+                    // Re-order the tile delays and gains according to the
+                    // uvfits order, if possible.
+                    if let Some(map) = metafits::map_antenna_order(context, &tile_names) {
+                        let mut delays2 = delays.clone();
+                        let mut gains2 = gains.clone();
+                        for i in 0..tile_names.len() {
+                            let j = map[&i];
+                            delays2
+                                .slice_mut(s![i, ..])
+                                .assign(&delays.slice(s![j, ..]));
+                            gains2.slice_mut(s![i, ..]).assign(&gains.slice(s![j, ..]));
+                        }
+                        dipole_delays = Some(Delays::Full(delays2));
+                        dipole_gains = Some(gains2);
+                    } else {
+                        // We have no choice but to leave the order as is.
+                        warn!(
+                            "The MS antenna names are different to those supplied in the metafits."
+                        );
+                        warn!("Dipole delays/gains may be incorrectly mapped to MS antennas.");
+                        dipole_delays = Some(Delays::Full(delays));
+                        dipole_gains = Some(gains);
+                    }
                 }
 
                 // MWA_TILE_POINTING exists.
-                (Ok(mut mwa_tile_pointing_table), _) => {
+                (_, Ok(mut mwa_tile_pointing_table)) => {
                     debug!("Using MWA_TILE_POINTING for dipole delays and pointing centre");
                     let table_delays: Vec<i32> = mwa_tile_pointing_table
                         .get_cell_as_vec("DELAYS", 0)
@@ -499,10 +525,6 @@ impl MsReader {
                     pointing_centre = Some(RADec::new(pointing_vec[0], pointing_vec[1]));
                 }
             }
-
-            // Get dipole gain information from the metafits, if it exists.
-            // Measurement sets cannot supply dipole information.
-            let dipole_gains = mwalib_context.as_ref().map(metafits::get_dipole_gains);
 
             // Round the values in here because sometimes they have a fractional
             // component, for some reason. We're unlikely to ever have a fraction of

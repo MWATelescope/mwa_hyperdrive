@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ffi::CString};
 
-use approx::assert_abs_diff_eq;
+use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use birli::marlu::XyzGeodetic;
+use fitsio::errors::check_status as fits_check_status;
 use hifitime::{Duration, Unit};
 use marlu::{Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWrite};
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
@@ -598,4 +599,226 @@ fn test_trunc_data() {
         params.tile_baseline_flags.flagged_tiles.len(),
         expected_unavailable_tiles.len()
     );
+}
+
+#[test]
+#[serial]
+fn test_map_metafits_antenna_order() {
+    // First, check the delays and gains of the existing test data. Because this
+    // MS has its tiles in the same order as the "metafits order", the delays
+    // and gains are already correct without re-ordering.
+    let metafits_path = "test_files/1090008640/1090008640.metafits";
+    let ms = MsReader::new("test_files/1090008640/1090008640.ms", Some(metafits_path)).unwrap();
+    let obs_context = ms.get_obs_context();
+    let delays = match obs_context.dipole_delays.as_ref() {
+        Some(Delays::Full(d)) => d,
+        _ => unreachable!(),
+    };
+    // All delays should be 0.
+    assert_eq!(delays, Array2::from_elem(delays.dim(), 0));
+    // Keep the true gains for later.
+    let gains = match obs_context.dipole_gains.as_ref() {
+        Some(g) => g,
+        _ => unreachable!(),
+    };
+
+    // Test that the dipole delays/gains get mapped correctly. As the test MS is
+    // already in the same order as the metafits file, the easiest thing to do
+    // is to modify the metafits file.
+    let metafits = tempfile::NamedTempFile::new().expect("couldn't make a temp file");
+    std::fs::copy(metafits_path, metafits.path()).unwrap();
+    unsafe {
+        let metafits = CString::new(metafits.path().display().to_string())
+            .unwrap()
+            .into_raw();
+        let mut fptr = std::ptr::null_mut();
+        let mut status = 0;
+
+        // ffopen = fits_open_file
+        fitsio_sys::ffopen(
+            &mut fptr,   /* O - FITS file pointer                   */
+            metafits,    /* I - full name of file to open           */
+            1,           /* I - 0 = open readonly; 1 = read/write   */
+            &mut status, /* IO - error status                       */
+        );
+        fits_check_status(status).unwrap();
+        drop(CString::from_raw(metafits));
+        // ffmahd = fits_movabs_hdu
+        fitsio_sys::ffmahd(
+            fptr,                 /* I - FITS file pointer             */
+            2,                    /* I - number of the HDU to move to  */
+            std::ptr::null_mut(), /* O - type of extension, 0, 1, or 2 */
+            &mut status,          /* IO - error status                 */
+        );
+        fits_check_status(status).unwrap();
+
+        // Swap Tile011 (rows 87 and 88) with Tile017 (rows 91 and 92), as
+        // Tile017 has a dead dipole but Tile011 doesn't.
+        let mut tile_name = CString::new("Tile017").unwrap().into_raw();
+        // ffpcls = fits_write_col_str
+        fitsio_sys::ffpcls(
+            fptr,           /* I - FITS file pointer                       */
+            4,              /* I - number of column to write (1 = 1st col) */
+            87,             /* I - first row to write (1 = 1st row)        */
+            1,              /* I - first vector element to write (1 = 1st) */
+            1,              /* I - number of strings to write              */
+            &mut tile_name, /* I - array of pointers to strings            */
+            &mut status,    /* IO - error status                           */
+        );
+        fits_check_status(status).unwrap();
+        fitsio_sys::ffpcls(
+            fptr,           /* I - FITS file pointer                       */
+            4,              /* I - number of column to write (1 = 1st col) */
+            88,             /* I - first row to write (1 = 1st row)        */
+            1,              /* I - first vector element to write (1 = 1st) */
+            1,              /* I - number of strings to write              */
+            &mut tile_name, /* I - array of pointers to strings            */
+            &mut status,    /* IO - error status                           */
+        );
+        fits_check_status(status).unwrap();
+        drop(CString::from_raw(tile_name));
+
+        let mut tile_name = CString::new("Tile011").unwrap().into_raw();
+        fitsio_sys::ffpcls(
+            fptr,           /* I - FITS file pointer                       */
+            4,              /* I - number of column to write (1 = 1st col) */
+            91,             /* I - first row to write (1 = 1st row)        */
+            1,              /* I - first vector element to write (1 = 1st) */
+            1,              /* I - number of strings to write              */
+            &mut tile_name, /* I - array of pointers to strings            */
+            &mut status,    /* IO - error status                           */
+        );
+        fits_check_status(status).unwrap();
+        fitsio_sys::ffpcls(
+            fptr,           /* I - FITS file pointer                       */
+            4,              /* I - number of column to write (1 = 1st col) */
+            92,             /* I - first row to write (1 = 1st row)        */
+            1,              /* I - first vector element to write (1 = 1st) */
+            1,              /* I - number of strings to write              */
+            &mut tile_name, /* I - array of pointers to strings            */
+            &mut status,    /* IO - error status                           */
+        );
+        fits_check_status(status).unwrap();
+        drop(CString::from_raw(tile_name));
+
+        // ffclos = fits_close_file
+        fitsio_sys::ffclos(fptr, &mut status);
+        fits_check_status(status).unwrap();
+    }
+
+    let ms = MsReader::new("test_files/1090008640/1090008640.ms", Some(metafits.path())).unwrap();
+    let obs_context = ms.get_obs_context();
+    let delays = match obs_context.dipole_delays.as_ref() {
+        Some(Delays::Full(d)) => d,
+        _ => unreachable!(),
+    };
+    // All delays should be 0.
+    assert_eq!(delays, Array2::from_elem(delays.dim(), 0));
+    let mut perturbed_gains = match obs_context.dipole_gains.as_ref() {
+        Some(g) => g.clone(),
+        _ => unreachable!(),
+    };
+
+    // If the gains are mapped correctly, the before and after gains are
+    // different.
+    assert_abs_diff_ne!(gains, &perturbed_gains);
+
+    // The first tile's gains of the perturbed metafits
+    // (corresponding to Tile017) will have a dead dipole.
+    assert_eq!(
+        perturbed_gains.slice(s![0, ..]).as_slice().unwrap(),
+        [
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+        ]
+    );
+    // Tile011 is all 1s.
+    assert_eq!(
+        perturbed_gains.slice(s![6, ..]).as_slice().unwrap(),
+        &[1.0; 32]
+    );
+
+    // Confirm that the gains are equal when the gain rows are swapped.
+    let row1 = perturbed_gains.slice(s![0, ..]).into_owned();
+    let row2 = perturbed_gains.slice(s![6, ..]).into_owned();
+    perturbed_gains.slice_mut(s![0, ..]).assign(&row2);
+    perturbed_gains.slice_mut(s![6, ..]).assign(&row1);
+    assert_abs_diff_eq!(gains, &perturbed_gains);
+
+    // Test that the dipole delays/gains aren't mapped when an unknown tile name
+    // is encountered.
+    let metafits = tempfile::NamedTempFile::new().expect("couldn't make a temp file");
+    std::fs::copy(metafits_path, metafits.path()).unwrap();
+    unsafe {
+        let metafits = CString::new(metafits.path().display().to_string())
+            .unwrap()
+            .into_raw();
+        let mut fptr = std::ptr::null_mut();
+        let mut status = 0;
+
+        // ffopen = fits_open_file
+        fitsio_sys::ffopen(
+            &mut fptr,   /* O - FITS file pointer                   */
+            metafits,    /* I - full name of file to open           */
+            1,           /* I - 0 = open readonly; 1 = read/write   */
+            &mut status, /* IO - error status                       */
+        );
+        fits_check_status(status).unwrap();
+        drop(CString::from_raw(metafits));
+        // ffmahd = fits_movabs_hdu
+        fitsio_sys::ffmahd(
+            fptr,                 /* I - FITS file pointer             */
+            2,                    /* I - number of the HDU to move to  */
+            std::ptr::null_mut(), /* O - type of extension, 0, 1, or 2 */
+            &mut status,          /* IO - error status                 */
+        );
+        fits_check_status(status).unwrap();
+
+        let mut tile_name = CString::new("darkness").unwrap().into_raw();
+        // ffpcls = fits_write_col_str
+        fitsio_sys::ffpcls(
+            fptr,           /* I - FITS file pointer                       */
+            4,              /* I - number of column to write (1 = 1st col) */
+            87,             /* I - first row to write (1 = 1st row)        */
+            1,              /* I - first vector element to write (1 = 1st) */
+            1,              /* I - number of strings to write              */
+            &mut tile_name, /* I - array of pointers to strings            */
+            &mut status,    /* IO - error status                           */
+        );
+        fits_check_status(status).unwrap();
+        fitsio_sys::ffpcls(
+            fptr,           /* I - FITS file pointer                       */
+            4,              /* I - number of column to write (1 = 1st col) */
+            88,             /* I - first row to write (1 = 1st row)        */
+            1,              /* I - first vector element to write (1 = 1st) */
+            1,              /* I - number of strings to write              */
+            &mut tile_name, /* I - array of pointers to strings            */
+            &mut status,    /* IO - error status                           */
+        );
+        fits_check_status(status).unwrap();
+        drop(CString::from_raw(tile_name));
+
+        // ffclos = fits_close_file
+        fitsio_sys::ffclos(fptr, &mut status);
+        fits_check_status(status).unwrap();
+    }
+
+    let uvfits = UvfitsReader::new(
+        "test_files/1090008640/1090008640.uvfits",
+        Some(metafits.path()),
+    )
+    .unwrap();
+    let obs_context = uvfits.get_obs_context();
+    let delays = match obs_context.dipole_delays.as_ref() {
+        Some(Delays::Full(d)) => d,
+        _ => unreachable!(),
+    };
+    // All delays should be 0.
+    assert_eq!(delays, Array2::from_elem(delays.dim(), 0));
+    let perturbed_gains = match obs_context.dipole_gains.as_ref() {
+        Some(g) => g,
+        _ => unreachable!(),
+    };
+    // The gains should be the same as the unaltered-metafits case.
+    assert_abs_diff_eq!(gains, perturbed_gains);
 }

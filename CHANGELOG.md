@@ -13,6 +13,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `solutions-apply`.
 
 ### Fixed
+- When reading from uvfits/measurement set, a metafits' dipole information was
+  applied, but perhaps in the wrong order. Order checks are now in place, but
+  tile names must be consistent between the metafits and uvfits/MS.
 - Picket fence observations were previously detected, but not still handled
   correctly. Until they are fixed, hyperdrive will not attempt to do anything
   with a picket fence observation. A doc page has been added for picket fences.
