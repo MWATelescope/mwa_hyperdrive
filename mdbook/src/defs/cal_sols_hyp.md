@@ -144,7 +144,7 @@ the observation). Note that this is not necessarily the same as the total number
 of *channels* in the observation; channels may be averaged before calibration,
 making the number of chanblocks less than the number of channels.
 
-`Flag` indicates whether calibration was attempted (1) or not (0) on a chanblock
+`Flag` indicates whether calibration was attempted (0) or not (1) on a chanblock
 (boolean).
 
 `Freq` is the centroid frequency of the chanblock (as a double-precision float).
@@ -194,10 +194,10 @@ obsid = f[0].header["OBSID"]
 pfb_flavour = f[0].header["PFB"]
 start_times = f[0].header["S_TIMES"]
 
-tile_names = [tile[1] for tile in f["TILES"].data]
-tile_flags = [tile[2] for tile in f["TILES"].data]
+tile_names = [tile["TileName"] for tile in f["TILES"].data]
+tile_flags = [tile["Flag"] for tile in f["TILES"].data]
 
-freqs = [chan[1] for chan in f["CHANBLOCKS"].data]
+freqs = [chan["FREQ"] for chan in f["CHANBLOCKS"].data]
 
 cal_precisions_for_timeblock_0 = f["RESULTS"].data[0]
 ```
