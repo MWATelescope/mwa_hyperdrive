@@ -32,6 +32,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Bugs were fixed surrounding the reading of RTS solutions.
 
 ### Changed
+- The output of `dipole-gains` is now less confusing.
 - When applying solutions, if a baseline/tile doesn't have an appropriate
   solution available, the output Jones matrix is all zeros. This is to avoid
   confusion on whether the Jones matrix has been calibrated but is just flagged

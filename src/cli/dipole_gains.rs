@@ -29,25 +29,24 @@ impl DipoleGainsArgs {
                 .iter()
                 .all(|&g| g.is_finite() && (g - 1.0).abs() < f64::EPSILON)
             {
-                all_unity.push(i);
+                all_unity.push((i, &meta.antennas[i].tile_name));
             } else {
-                non_unity.push((i, tile_gains));
+                non_unity.push((i, &meta.antennas[i].tile_name, tile_gains));
             }
         }
 
         if all_unity.len() == meta.num_ants {
             info!("All dipoles on all tiles have a gain of 1.0!");
         } else {
-            info!(
-                "Tiles with all dipoles alive ({}): {:?}",
-                all_unity.len(),
-                all_unity
-            );
+            info!("Tiles with all dipoles alive ({}):", all_unity.len());
+            for (tile_num, tile_name) in all_unity {
+                info!("    {:>3}: {:>8}", tile_num, tile_name);
+            }
             info!("Other tiles:");
             let mut bad_x = Vec::with_capacity(16);
             let mut bad_y = Vec::with_capacity(16);
             let mut bad_string = String::new();
-            for (tile_num, tile_gains) in non_unity {
+            for (tile_num, tile_name, tile_gains) in non_unity {
                 let tile_gains = tile_gains.as_slice().unwrap();
                 tile_gains[..16].iter().enumerate().for_each(|(i, &g)| {
                     if (g - 1.0).abs() > f64::EPSILON {
@@ -59,7 +58,7 @@ impl DipoleGainsArgs {
                         bad_y.push(i);
                     }
                 });
-                bad_string.push_str(&format!("    Tile {:>3}: ", tile_num));
+                bad_string.push_str(&format!("    {:>3}: {:>8}: ", tile_num, tile_name));
                 if !bad_x.is_empty() {
                     bad_string.push_str(&format!("X {:?}", &bad_x));
                 }

@@ -396,3 +396,9 @@ impl From<DiCalArgsError> for HyperdriveError {
         }
     }
 }
+
+impl From<mwalib::MwalibError> for HyperdriveError {
+    fn from(e: mwalib::MwalibError) -> Self {
+        Self::Mwalib(e.to_string())
+    }
+}

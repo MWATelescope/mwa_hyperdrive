@@ -202,6 +202,11 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)
     DipoleGains {
         #[clap(flatten)]
         args: mwa_hyperdrive::DipoleGainsArgs,
+
+        /// The verbosity of the program. The default is to print high-level
+        /// information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
     },
 }
 
@@ -222,7 +227,7 @@ fn cli() -> Result<(), HyperdriveError> {
         Args::SrclistConvert { verbosity, .. } => (verbosity, "srclist-convert"),
         Args::SrclistShift { verbosity, .. } => (verbosity, "srclist-shift"),
         Args::SrclistVerify { verbosity, .. } => (verbosity, "srclist-verify"),
-        Args::DipoleGains { .. } => (&0, "dipole-gains"),
+        Args::DipoleGains { verbosity, .. } => (verbosity, "dipole-gains"),
     };
     setup_logging(*verbosity).expect("Failed to initialise logging.");
 
@@ -278,7 +283,7 @@ fn cli() -> Result<(), HyperdriveError> {
         Args::SrclistVerify { args, .. } => args.run()?,
 
         // Misc. utilities.
-        Args::DipoleGains { args } => args.run().unwrap(),
+        Args::DipoleGains { args, .. } => args.run()?,
     }
 
     info!("hyperdrive {} complete.", sub_command);
