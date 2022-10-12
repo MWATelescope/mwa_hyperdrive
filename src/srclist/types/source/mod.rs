@@ -7,15 +7,17 @@
 #[cfg(test)]
 mod tests;
 
-use vec1::Vec1;
+use serde::{Deserialize, Serialize};
 
 use super::{FluxDensity, SourceComponent};
 
 /// A collection of components.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Source {
     /// The components associated with the source.
-    pub components: Vec1<SourceComponent>,
+    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    pub components: Box<[SourceComponent]>,
 }
 
 impl Source {
@@ -26,5 +28,18 @@ impl Source {
             .iter()
             .map(|comp| comp.flux_type.estimate_at_freq(freq_hz))
             .collect()
+    }
+}
+
+#[cfg(test)]
+impl approx::AbsDiffEq for Source {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        approx::abs_diff_eq!(*self.components, *other.components, epsilon = epsilon)
     }
 }

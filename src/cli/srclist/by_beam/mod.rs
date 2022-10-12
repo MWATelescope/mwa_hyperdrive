@@ -4,6 +4,9 @@
 
 //! Code to reduce a sky-model source list to the top N sources.
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -291,13 +294,17 @@ fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
             let mut num_collapsed_components = base.1.components.len() - 1;
             collapsed.insert(base.0, base.1);
             let base_src = collapsed.get_index_mut(0).unwrap().1;
+            let mut base_comps = vec![].into_boxed_slice();
+            std::mem::swap(&mut base_src.components, &mut base_comps);
+            let mut base_comps = base_comps.into_vec();
             sl.into_iter()
                 .take(num_sources)
-                .flat_map(|(_, src)| src.components)
+                .flat_map(|(_, src)| src.components.to_vec())
                 .for_each(|comp| {
                     num_collapsed_components += 1;
-                    base_src.components.push(comp);
+                    base_comps.push(comp);
                 });
+            std::mem::swap(&mut base_src.components, &mut base_comps.into_boxed_slice());
             info!(
                 "Collapsed {num_sources} into 1 base source with {num_collapsed_components} components"
             );

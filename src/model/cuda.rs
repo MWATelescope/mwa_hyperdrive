@@ -227,7 +227,7 @@ impl<'a> SkyModellerCuda<'a> {
         for comp in source_list
             .iter()
             .rev()
-            .flat_map(|(_, src)| &src.components)
+            .flat_map(|(_, src)| src.components.iter())
         {
             let radec = comp.radec;
             let LmnRime { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
@@ -348,7 +348,7 @@ impl<'a> SkyModellerCuda<'a> {
                     };
                 }
 
-                FluxDensityType::List { fds: _ } => match &comp.comp_type {
+                FluxDensityType::List(_) => match &comp.comp_type {
                     ComponentType::Point => {
                         point_list_radecs.push(radec);
                         point_list_lmns.push(lmn);

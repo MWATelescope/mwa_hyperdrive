@@ -12,7 +12,7 @@ use std::{
 use approx::assert_abs_diff_eq;
 use marlu::RADec;
 use tempfile::NamedTempFile;
-use vec1::{vec1, Vec1};
+use vec1::vec1;
 
 use super::*;
 use crate::constants::DEFAULT_SPEC_INDEX;
@@ -85,14 +85,14 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
             }
 
             match &s1_comp.flux_type {
-                FluxDensityType::List { fds } => {
+                FluxDensityType::List(fds) => {
                     assert!(
                         matches!(s2_comp.flux_type, FluxDensityType::List { .. }),
                         "{s1_comp:?} {s2_comp:?}"
                     );
                     let s1_fds = fds;
                     match &s2_comp.flux_type {
-                        FluxDensityType::List { fds } => {
+                        FluxDensityType::List(fds) => {
                             assert_eq!(s1_fds.len(), fds.len());
                             for (s1_fd, s2_fd) in s1_fds.iter().zip(fds.iter()) {
                                 assert_abs_diff_eq!(s1_fd.freq, s2_fd.freq, epsilon = 1e-10);
@@ -172,9 +172,9 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
 fn hyperdrive_conversion_works() {
     let mut sl = SourceList::new();
     sl.insert(
-        "gaussian".to_string(),
+        "g".to_string(),
         Source {
-            components: vec1![SourceComponent {
+            components: vec![SourceComponent {
                 radec: RADec::from_degrees(61.0, -28.0),
                 comp_type: ComponentType::Gaussian {
                     maj: 1.0,
@@ -191,13 +191,14 @@ fn hyperdrive_conversion_works() {
                         v: 3.0,
                     },
                 },
-            }],
+            }]
+            .into_boxed_slice(),
         },
     );
     sl.insert(
-        "point".to_string(),
+        "p".to_string(),
         Source {
-            components: vec1![SourceComponent {
+            components: vec![SourceComponent {
                 radec: RADec::from_degrees(60.0, -27.0),
                 comp_type: ComponentType::Point,
                 flux_type: FluxDensityType::PowerLaw {
@@ -210,13 +211,14 @@ fn hyperdrive_conversion_works() {
                         v: 3.0,
                     },
                 },
-            }],
+            }]
+            .into_boxed_slice(),
         },
     );
     sl.insert(
-        "shapelet".to_string(),
+        "s".to_string(),
         Source {
-            components: vec1![SourceComponent {
+            components: vec![SourceComponent {
                 radec: RADec::from_degrees(59.0, -26.0),
                 comp_type: ComponentType::Shapelet {
                     maj: 1.0,
@@ -226,7 +228,8 @@ fn hyperdrive_conversion_works() {
                         n1: 0,
                         n2: 0,
                         value: 1.0,
-                    }],
+                    }]
+                    .into_boxed_slice(),
                 },
                 flux_type: FluxDensityType::PowerLaw {
                     si: DEFAULT_SPEC_INDEX,
@@ -238,13 +241,15 @@ fn hyperdrive_conversion_works() {
                         v: 3.0,
                     },
                 },
-            }],
+            }]
+            .into_boxed_slice(),
         },
     );
 
     // Write this source list as hyperdrive style into a buffer.
     let mut buf = Cursor::new(vec![]);
     hyperdrive::source_list_to_yaml(&mut buf, &sl, None).unwrap();
+    buf.set_position(0);
     // Read it back in, and test that things are sensible.
     buf.set_position(0);
     let new_sl = hyperdrive::source_list_from_yaml(&mut buf).unwrap();
@@ -280,14 +285,15 @@ fn ao_conversion_works() {
     for (name, src) in hyperdrive_sl.into_iter() {
         let comps: Vec<_> = src
             .components
-            .into_iter()
+            .iter()
             .filter(|comp| !matches!(comp.comp_type, ComponentType::Shapelet { .. }))
+            .cloned()
             .collect();
         if !comps.is_empty() {
             new_hyperdrive_sl.insert(
                 name,
                 Source {
-                    components: Vec1::try_from_vec(comps).unwrap(),
+                    components: comps.into_boxed_slice(),
                 },
             );
         }
@@ -317,8 +323,8 @@ fn woden_conversion_works() {
     let mut flux_density_types_are_different = false;
     for (hyp_comp, woden_comp) in hyperdrive_sl
         .iter()
-        .flat_map(|(_, s)| &s.components)
-        .zip(woden_sl.iter().flat_map(|(_, s)| &s.components))
+        .flat_map(|(_, s)| s.components.iter())
+        .zip(woden_sl.iter().flat_map(|(_, s)| s.components.iter()))
     {
         if std::mem::discriminant(&hyp_comp.flux_type)
             != std::mem::discriminant(&woden_comp.flux_type)
@@ -332,17 +338,14 @@ fn woden_conversion_works() {
     // Now alter the hyperdrive source list to match WODEN.
     for comp in hyperdrive_sl
         .iter_mut()
-        .flat_map(|(_, s)| &mut s.components)
+        .flat_map(|(_, s)| s.components.iter_mut())
     {
         comp.flux_type = match &comp.flux_type {
-            FluxDensityType::List { fds } => FluxDensityType::PowerLaw {
-                fd: fds[0].clone(),
+            FluxDensityType::List(fds) => FluxDensityType::PowerLaw {
+                fd: fds[0],
                 si: DEFAULT_SPEC_INDEX,
             },
-            FluxDensityType::PowerLaw { fd, si } => FluxDensityType::PowerLaw {
-                si: *si,
-                fd: fd.clone(),
-            },
+            FluxDensityType::PowerLaw { fd, si } => FluxDensityType::PowerLaw { si: *si, fd: *fd },
             FluxDensityType::CurvedPowerLaw { .. } => panic!(
                 "Source list has a curved power law, but it shouldn't, and WODEN can't handle it."
             ),
@@ -616,31 +619,30 @@ fn woden_write_throws_away_unsupported_things() {
 /// what is in the examples.
 fn get_example_sl() -> SourceList {
     let source1 = Source {
-        components: vec1![SourceComponent {
+        components: vec![SourceComponent {
             radec: RADec::from_degrees(10.0, -27.0),
             comp_type: ComponentType::Point,
-            flux_type: FluxDensityType::List {
-                fds: vec1![
-                    FluxDensity {
-                        freq: 150e6,
-                        i: 10.0,
-                        q: 0.0,
-                        u: 0.0,
-                        v: 0.0,
-                    },
-                    FluxDensity {
-                        freq: 170e6,
-                        i: 5.0,
-                        q: 1.0,
-                        u: 2.0,
-                        v: 3.0,
-                    },
-                ],
-            },
-        }],
+            flux_type: FluxDensityType::List(vec1![
+                FluxDensity {
+                    freq: 150e6,
+                    i: 10.0,
+                    q: 0.0,
+                    u: 0.0,
+                    v: 0.0,
+                },
+                FluxDensity {
+                    freq: 170e6,
+                    i: 5.0,
+                    q: 1.0,
+                    u: 2.0,
+                    v: 3.0,
+                },
+            ]),
+        }]
+        .into_boxed_slice(),
     };
     let source2 = Source {
-        components: vec1![
+        components: vec![
             SourceComponent {
                 radec: RADec::from_degrees(0.0, -35.0),
                 comp_type: ComponentType::Gaussian {
@@ -669,7 +671,8 @@ fn get_example_sl() -> SourceList {
                         n1: 0,
                         n2: 1,
                         value: 0.5,
-                    }],
+                    }]
+                    .into_boxed_slice(),
                 },
                 flux_type: FluxDensityType::CurvedPowerLaw {
                     si: -0.6,
@@ -683,7 +686,8 @@ fn get_example_sl() -> SourceList {
                     q: 0.2,
                 },
             },
-        ],
+        ]
+        .into_boxed_slice(),
     };
 
     let mut sl = SourceList::new();
@@ -758,4 +762,114 @@ fn write_json_file() {
         just_written.push('\n');
     }
     assert_eq!(example, just_written);
+}
+
+#[test]
+fn write_yaml_file_n_sources() {
+    let sl = get_example_sl();
+
+    {
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_yaml(&mut temp, &sl, Some(1)).unwrap();
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        let new_sl = hyperdrive::source_list_from_yaml(&mut f).unwrap();
+        assert_eq!(new_sl.len(), 1);
+        assert_eq!(sl[0], new_sl[0]);
+    }
+    {
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_yaml(&mut temp, &sl, Some(2)).unwrap();
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        let new_sl = hyperdrive::source_list_from_yaml(&mut f).unwrap();
+        assert_eq!(new_sl.len(), 2);
+        assert_eq!(sl[0], new_sl[0]);
+        assert_eq!(sl[1], new_sl[1]);
+    }
+    {
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_yaml(&mut temp, &sl, Some(3)).unwrap();
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        let new_sl = hyperdrive::source_list_from_yaml(&mut f).unwrap();
+        // There are only 2 sources.
+        assert_eq!(new_sl.len(), 2);
+        assert_eq!(sl[0], new_sl[0]);
+        assert_eq!(sl[1], new_sl[1]);
+    }
+}
+
+#[test]
+fn write_json_file_n_sources() {
+    let sl = get_example_sl();
+
+    {
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_json(&mut temp, &sl, Some(1)).unwrap();
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        let new_sl = hyperdrive::source_list_from_json(&mut f).unwrap();
+        assert_eq!(new_sl.len(), 1);
+        assert_eq!(sl[0], new_sl[0]);
+    }
+    {
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_json(&mut temp, &sl, Some(2)).unwrap();
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        let new_sl = hyperdrive::source_list_from_json(&mut f).unwrap();
+        assert_eq!(new_sl.len(), 2);
+        assert_eq!(sl[0], new_sl[0]);
+        assert_eq!(sl[1], new_sl[1]);
+    }
+    {
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_json(&mut temp, &sl, Some(3)).unwrap();
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        let new_sl = hyperdrive::source_list_from_json(&mut f).unwrap();
+        // There are only 2 sources.
+        assert_eq!(new_sl.len(), 2);
+        assert_eq!(sl[0], new_sl[0]);
+        assert_eq!(sl[1], new_sl[1]);
+    }
+}
+
+#[test]
+fn read_invalid_json_file() {
+    // Read in a good source list to start, then modify it, write it out, and
+    // verify we get errors when reading it back in.
+
+    let f = File::open("test_files/hyperdrive_srclist.json").unwrap();
+    let mut f = BufReader::new(f);
+    let sl = hyperdrive::source_list_from_json(&mut f).unwrap();
+
+    for ra in [-1.0, 360.0, 361.0] {
+        let mut sl = sl.clone();
+        sl["super_sweet_source1"].components[0].radec.ra = ra;
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_json(&mut temp, &sl, None).unwrap();
+
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        assert!(matches!(
+            hyperdrive::source_list_from_json(&mut f),
+            Err(ReadSourceListError::InvalidRa(_))
+        ));
+    }
+
+    for dec in [-100.0, 100.0] {
+        let mut sl = sl.clone();
+        sl["super_sweet_source1"].components[0].radec.dec = dec;
+        let mut temp = NamedTempFile::new().unwrap();
+        hyperdrive::source_list_to_json(&mut temp, &sl, None).unwrap();
+
+        let f = File::open(temp.path()).unwrap();
+        let mut f = BufReader::new(f);
+        assert!(matches!(
+            hyperdrive::source_list_from_json(&mut f),
+            Err(ReadSourceListError::InvalidDec(_))
+        ));
+    }
 }

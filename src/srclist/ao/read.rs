@@ -7,12 +7,12 @@
 //! The code here is probably incomplete, but it should work for the majority of
 //! source lists.
 
+use log::warn;
 use marlu::{sexagesimal::*, RADec};
-use vec1::Vec1;
+use vec1::vec1;
 
 use crate::srclist::{
     error::{ReadSourceListAOError, ReadSourceListCommonError, ReadSourceListError},
-    hyperdrive::{TmpComponent, TmpFluxDensityType},
     ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList,
 };
 
@@ -28,10 +28,10 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
     let mut in_measurement = false;
     let mut measurement_got_freq = false;
     let mut measurement_got_fd = false;
-    let mut measurement_made_fd = false;
     let mut source_name = String::new();
-    let mut components: Vec<TmpComponent> = vec![];
+    let mut components: Vec<SourceComponent> = vec![];
     let mut source_list = SourceList::new();
+    let mut one_point_oh = false;
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
         string
@@ -52,10 +52,28 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
             continue;
         }
 
-        let mut items = line.split_whitespace();
+        let mut items = line.split_ascii_whitespace();
         match items.next() {
-            // Ignore the "fileformat" line.
-            Some("skymodel") => (),
+            Some("skymodel") => {
+                match items.next() {
+                    Some("fileformat") => (),
+                    Some(s) => warn!("Malformed AO source list 'skymodel' line; expected 'fileformat', got '{s}'"),
+                    None => warn!("Malformed AO source list 'skymodel' line; expected 'fileformat', got nothing"),
+                }
+
+                match items.next() {
+                    // 1.0 means that instrumental pols are used instead of
+                    // Stokes.
+                    Some("1.0") => one_point_oh = true,
+                    Some("1.1") => (),
+                    Some(v) => {
+                        warn!("Unrecognised AO source list fileformat '{v}'; pretending it is 1.1")
+                    }
+                    None => {
+                        warn!("This AO source list does not specify a fileformat; pretending it is 1.1")
+                    }
+                }
+            }
 
             Some("source") => {
                 if in_source {
@@ -96,13 +114,17 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
 
                 // We have to assume everything about the component, and
                 // overwrite it later.
-                components.push(TmpComponent {
-                    ra: 0.0,
-                    dec: 0.0,
+                components.push(SourceComponent {
+                    radec: RADec::default(),
                     comp_type: ComponentType::Point,
-                    flux_type: TmpFluxDensityType::PowerLaw {
+                    // AO source lists do not handle curved power laws. We use
+                    // this here as a placeholder stating that it must be
+                    // changed by the time we have finished reading in the
+                    // component.
+                    flux_type: FluxDensityType::CurvedPowerLaw {
                         si: 0.0,
                         fd: FluxDensity::default(),
+                        q: 0.0,
                     },
                 });
 
@@ -195,8 +217,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 let comp = components.iter_mut().last().unwrap();
-                comp.ra = right_ascension.to_radians();
-                comp.dec = declination.to_radians();
+                comp.radec = RADec::from_degrees(right_ascension, declination);
             }
 
             Some("shape") => {
@@ -244,7 +265,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
             Some("sed") => {
                 in_sed = true;
 
-                components.iter_mut().last().unwrap().flux_type = TmpFluxDensityType::PowerLaw {
+                components.iter_mut().last().unwrap().flux_type = FluxDensityType::PowerLaw {
                     si: 0.0,
                     fd: FluxDensity::default(),
                 };
@@ -253,12 +274,6 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
             // A flux-density at a single frequency.
             Some("measurement") => {
                 in_measurement = true;
-
-                if !measurement_made_fd {
-                    components.iter_mut().last().unwrap().flux_type =
-                        TmpFluxDensityType::List(vec![]);
-                    measurement_made_fd = true;
-                }
             }
 
             Some("frequency") => {
@@ -302,12 +317,12 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
 
                 if in_sed {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        TmpFluxDensityType::PowerLaw { fd, .. } => fd.freq = freq * freq_unit,
+                        FluxDensityType::PowerLaw { fd, .. } => fd.freq = freq * freq_unit,
                         _ => unreachable!(),
                     }
                 } else if in_measurement {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        TmpFluxDensityType::List(fds) => {
+                        FluxDensityType::List(fds) => {
                             // If both bools are false, then we need to make a
                             // new `FluxDensity` struct.
                             if !measurement_got_freq && !measurement_got_fd {
@@ -323,6 +338,16 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                                 // We should edit the last `FluxDensity` struct.
                                 fds.iter_mut().last().unwrap().freq = freq * freq_unit;
                             }
+                        }
+                        fdt @ FluxDensityType::CurvedPowerLaw { .. } => {
+                            *fdt = FluxDensityType::List(vec1![FluxDensity {
+                                freq: freq * freq_unit,
+                                i: 0.0,
+                                q: 0.0,
+                                u: 0.0,
+                                v: 0.0,
+                            }]);
+                            measurement_got_freq = true;
                         }
                         _ => unreachable!(),
                     }
@@ -363,7 +388,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
 
-                let i = match items.next() {
+                let mut i = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(
@@ -371,7 +396,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         )
                     }
                 };
-                let q = match items.next() {
+                let mut q = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(
@@ -379,7 +404,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         )
                     }
                 };
-                let u = match items.next() {
+                let mut u = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(
@@ -387,7 +412,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         )
                     }
                 };
-                let v = match items.next() {
+                let mut v = match items.next() {
                     Some(f) => parse_float(f, line_num)?,
                     None => {
                         return Err(
@@ -400,9 +425,25 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     return Err(ReadSourceListError::NaNsInComponent { source_name });
                 }
 
+                if one_point_oh {
+                    // `i`, `q`, `u` and `v` are actually XX XY YX and YY.
+                    // Convert to Stokes. André's code actually treats the
+                    // read-in values as complex values, but it doesn't look
+                    // like it's ever possible for them to be complex in the
+                    // file???
+                    let i_tmp = (i + v) / 2.0;
+                    let q_tmp = (i - v) / 2.0;
+                    let u_tmp = (q + u) / 2.0;
+                    let v_tmp = (q - u) / 2.0;
+                    i = i_tmp;
+                    q = q_tmp;
+                    u = u_tmp;
+                    v = v_tmp;
+                }
+
                 if in_sed {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        TmpFluxDensityType::PowerLaw { fd, .. } => {
+                        FluxDensityType::PowerLaw { fd, .. } => {
                             fd.i = i * fd_unit;
                             fd.q = q * fd_unit;
                             fd.u = u * fd_unit;
@@ -412,7 +453,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 } else if in_measurement {
                     match &mut components.iter_mut().last().unwrap().flux_type {
-                        TmpFluxDensityType::List(fds) => {
+                        FluxDensityType::List(fds) => {
                             // If both bools are false, then we need to make a
                             // new `FluxDensity` struct.
                             if !measurement_got_freq && !measurement_got_fd {
@@ -432,6 +473,16 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                                 fd.u = u * fd_unit;
                                 fd.v = v * fd_unit;
                             }
+                        }
+                        fdt @ FluxDensityType::CurvedPowerLaw { .. } => {
+                            *fdt = FluxDensityType::List(vec1![FluxDensity {
+                                freq: 0.0,
+                                i: i * fd_unit,
+                                q: q * fd_unit,
+                                u: u * fd_unit,
+                                v: v * fd_unit,
+                            }]);
+                            measurement_got_fd = true;
                         }
                         _ => unreachable!(),
                     }
@@ -485,7 +536,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 match &mut components.iter_mut().last().unwrap().flux_type {
-                    TmpFluxDensityType::PowerLaw { si, .. } => *si = spec_index,
+                    FluxDensityType::PowerLaw { si, .. } => *si = spec_index,
                     _ => unreachable!(),
                 }
             }
@@ -499,16 +550,30 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     measurement_got_fd = false;
                 } else if in_component {
                     in_component = false;
-                    measurement_made_fd = false;
 
                     // Check that the last component struct added actually has
                     // flux densities.
-                    let fd = match &components.iter().last().unwrap().flux_type {
-                        TmpFluxDensityType::PowerLaw { fd, .. } => fd.clone(),
-                        TmpFluxDensityType::List(fds) => {
-                            fds.iter().fold(FluxDensity::default(), |acc, fd| acc + fd)
-                        }
-                        _ => unreachable!(),
+                    let fd = match components.as_slice() {
+                        [] => return Err(ReadSourceListAOError::MissingComponents(line_num).into()),
+                        [.., comp] => match &comp.flux_type {
+                            FluxDensityType::PowerLaw { fd, .. } => *fd,
+                            FluxDensityType::List(fds) => {
+                                fds.iter().fold(FluxDensity::default(), |acc, fd| acc + fd)
+                            }
+                            FluxDensityType::CurvedPowerLaw { .. } => {
+                                return Err(ReadSourceListAOError::MissingFluxes {
+                                    line_num,
+                                    comp_type: match comp.comp_type {
+                                        ComponentType::Point => "Point",
+                                        ComponentType::Gaussian { .. } => "Gaussian",
+                                        ComponentType::Shapelet { .. } => "Shapelet",
+                                    },
+                                    ra: comp.radec.ra,
+                                    dec: comp.radec.dec,
+                                }
+                                .into());
+                            }
+                        },
                     };
                     if (fd.i.abs() + fd.q.abs() + fd.u.abs() + fd.v.abs()) < 1e-6 {
                         return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
@@ -517,40 +582,10 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     if components.is_empty() {
                         return Err(ReadSourceListAOError::MissingComponents(line_num).into());
                     }
-                    let mut out_components = vec![];
-                    for comp in components {
-                        let flux_type = match comp.flux_type {
-                            TmpFluxDensityType::List(fds) => FluxDensityType::List {
-                                fds: Vec1::try_from_vec(fds).map_err(|_| {
-                                    ReadSourceListAOError::MissingFluxes {
-                                        line_num,
-                                        comp_type: match comp.comp_type {
-                                            ComponentType::Point => "Point",
-                                            ComponentType::Gaussian { .. } => "Gaussian",
-                                            ComponentType::Shapelet { .. } => "Shapelet",
-                                        },
-                                        ra: comp.ra,
-                                        dec: comp.dec,
-                                    }
-                                })?,
-                            },
-                            TmpFluxDensityType::PowerLaw { si, fd } => {
-                                FluxDensityType::PowerLaw { si, fd }
-                            }
-                            TmpFluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                                FluxDensityType::CurvedPowerLaw { si, fd, q }
-                            }
-                        };
-                        out_components.push(SourceComponent {
-                            radec: RADec::from_radians(comp.ra, comp.dec),
-                            comp_type: comp.comp_type,
-                            flux_type,
-                        })
-                    }
                     let source = Source {
-                        components: Vec1::try_from_vec(out_components).unwrap(),
+                        components: components.clone().into_boxed_slice(),
                     };
-                    components = vec![];
+                    components.clear();
 
                     // Ensure that the sum of each Stokes' flux densities is
                     // positive.
@@ -558,7 +593,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     let mut sum_q = 0.0;
                     let mut sum_u = 0.0;
                     let mut sum_v = 0.0;
-                    for c in &source.components {
+                    for c in source.components.iter() {
                         match &c.flux_type {
                             FluxDensityType::PowerLaw { fd, .. } => {
                                 sum_i += fd.i;
@@ -574,7 +609,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                                 sum_v += fd.v;
                             }
 
-                            FluxDensityType::List { fds } => {
+                            FluxDensityType::List(fds) => {
                                 for fd in fds {
                                     sum_i += fd.i;
                                     sum_q += fd.q;
@@ -786,7 +821,7 @@ source {
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
@@ -845,7 +880,7 @@ source {
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
@@ -930,7 +965,7 @@ source {
         assert_abs_diff_eq!(comp.radec.dec, -0.2971423051520346, epsilon = 1e-10);
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 167.355e6, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].i, 37.0557, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
@@ -950,7 +985,7 @@ source {
         assert_abs_diff_eq!(comp.radec.dec, -0.2106621177436647, epsilon = 1e-10);
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 157.355e6, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].i, 27.0557, epsilon = 1e-10);
                 assert_abs_diff_eq!(fds[0].q, 0.0, epsilon = 1e-10);
@@ -962,5 +997,75 @@ source {
             }
             _ => unreachable!(),
         };
+    }
+
+    #[test]
+    fn ao_fileformat() {
+        // Verify 1.1
+        let mut sl = Cursor::new(
+            r#"
+skymodel fileformat 1.1
+source {
+  name "GLEAM J113423-172750"
+  component {
+    type point
+    position 11h34m23.7854s -17d27m50.6772s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.0 0 0 2.0
+      spectral-index { -0.81 0.00 }
+    }
+  }
+}
+"#,
+        );
+
+        let sl = parse_source_list(&mut sl).unwrap();
+        let s = sl.get("GLEAM J113423-172750").unwrap();
+        let comp = &s.components[0];
+        let (fd, si) = match &comp.flux_type {
+            FluxDensityType::PowerLaw { fd, si } => (fd, si),
+            _ => unreachable!(),
+        };
+        assert_abs_diff_eq!(fd.freq, 200e6, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.i, 2.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.q, 0.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.u, 0.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.v, 2.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(*si, -0.81, epsilon = 1e-10);
+
+        // Now verify 1.0
+        let mut sl = Cursor::new(
+            r#"
+skymodel fileformat 1.0
+source {
+  name "GLEAM J113423-172750"
+  component {
+    type point
+    position 11h34m23.7854s -17d27m50.6772s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2.0 0 0 2.0
+      spectral-index { -0.81 0.00 }
+    }
+  }
+}
+"#,
+        );
+
+        let sl = parse_source_list(&mut sl).unwrap();
+        let s = sl.get("GLEAM J113423-172750").unwrap();
+        let comp = &s.components[0];
+        let (fd, si) = match &comp.flux_type {
+            FluxDensityType::PowerLaw { fd, si } => (fd, si),
+            _ => unreachable!(),
+        };
+        assert_abs_diff_eq!(fd.freq, 200e6, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.i, 2.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.q, 0.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(fd.u, 0.0, epsilon = 1e-10);
+        // Stokes V is actually 0
+        assert_abs_diff_eq!(fd.v, 0.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(*si, -0.81, epsilon = 1e-10);
     }
 }

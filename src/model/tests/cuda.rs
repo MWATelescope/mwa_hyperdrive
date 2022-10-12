@@ -7,7 +7,6 @@
 //! These tests use the same expected values as the CPU tests.
 
 use ndarray::prelude::*;
-use vec1::vec1;
 
 use super::*;
 use crate::{
@@ -261,19 +260,22 @@ fn non_trivial_gaussian() {
         &SourceList::from([(
             "list".to_string(),
             Source {
-                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::List)]
+                components: vec![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::List)]
+                    .into_boxed_slice()
             }
         )]),
         &SourceList::from([(
             "power_law".to_string(),
             Source {
-                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]
+                components: vec![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]
+                    .into_boxed_slice()
             }
         )]),
         &SourceList::from([(
             "curved_power_law".to_string(),
             Source {
-                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]
+                components: vec![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]
+                    .into_boxed_slice()
             }
         )]),
         test_non_trivial_gaussian_list,
@@ -293,10 +295,11 @@ macro_rules! test_beam_applies_to_first_component {
         srclist.insert(
             "mixed".to_string(),
             Source {
-                components: vec1![
+                components: vec![
                     get_point(obs.phase_centre, $flux_type1),
-                    get_point(RADec::from_degrees(45.0, 18.0), $flux_type2)
-                ],
+                    get_point(RADec::from_degrees(45.0, 18.0), $flux_type2),
+                ]
+                .into_boxed_slice(),
             },
         );
         let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
@@ -338,11 +341,12 @@ macro_rules! test_beam_applies_to_first_component {
         srclist.insert(
             "mixed".to_string(),
             Source {
-                components: vec1![
+                components: vec![
                     // Every component type needs to be checked.
                     get_gaussian(obs.phase_centre, $flux_type1),
-                    get_gaussian(RADec::from_degrees(45.0, 18.0), $flux_type2)
-                ],
+                    get_gaussian(RADec::from_degrees(45.0, 18.0), $flux_type2),
+                ]
+                .into_boxed_slice(),
             },
         );
         let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
@@ -376,10 +380,11 @@ macro_rules! test_beam_applies_to_first_component {
         srclist.insert(
             "mixed".to_string(),
             Source {
-                components: vec1![
+                components: vec![
                     get_shapelet(obs.phase_centre, $flux_type1),
-                    get_shapelet(RADec::from_degrees(45.0, 18.0), $flux_type2)
-                ],
+                    get_shapelet(RADec::from_degrees(45.0, 18.0), $flux_type2),
+                ]
+                .into_boxed_slice(),
             },
         );
         let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
@@ -464,10 +469,11 @@ fn gaussian_multiple_components() {
     srclist.insert(
         "gaussians".to_string(),
         Source {
-            components: vec1![
+            components: vec![
                 get_gaussian(RADec::from_degrees(1.0, -27.0), FluxType::List),
-                get_gaussian(RADec::from_degrees(1.1, -27.0), FluxType::List)
-            ],
+                get_gaussian(RADec::from_degrees(1.1, -27.0), FluxType::List),
+            ]
+            .into_boxed_slice(),
         },
     );
     let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
@@ -504,10 +510,11 @@ fn shapelet_multiple_components() {
     srclist.insert(
         "shapelets".to_string(),
         Source {
-            components: vec1![
+            components: vec![
                 get_shapelet(RADec::from_degrees(1.0, -27.0), FluxType::List),
-                get_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List)
-            ],
+                get_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List),
+            ]
+            .into_boxed_slice(),
         },
     );
     let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);

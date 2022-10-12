@@ -6,7 +6,6 @@
 
 use marlu::RADec;
 use ndarray::prelude::*;
-use vec1::vec1;
 
 use super::*;
 use crate::srclist::{Source, SourceList};
@@ -279,19 +278,22 @@ fn non_trivial_gaussian() {
         &SourceList::from([(
             "list".to_string(),
             Source {
-                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::List)]
+                components: vec![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::List)]
+                    .into_boxed_slice()
             }
         )]),
         &SourceList::from([(
             "power_law".to_string(),
             Source {
-                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]
+                components: vec![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]
+                    .into_boxed_slice()
             }
         )]),
         &SourceList::from([(
             "curved_power_law".to_string(),
             Source {
-                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]
+                components: vec![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]
+                    .into_boxed_slice()
             }
         )]),
         test_non_trivial_gaussian_list,
@@ -307,10 +309,11 @@ fn gaussian_multiple_components() {
     srclist.insert(
         "gaussians".to_string(),
         Source {
-            components: vec1![
+            components: vec![
                 get_gaussian(RADec::from_degrees(1.0, -27.0), FluxType::List),
-                get_gaussian(RADec::from_degrees(1.1, -27.0), FluxType::List)
-            ],
+                get_gaussian(RADec::from_degrees(1.1, -27.0), FluxType::List),
+            ]
+            .into_boxed_slice(),
         },
     );
     let modeller = obs.get_cpu_modeller(&srclist);
@@ -332,10 +335,11 @@ fn shapelet_multiple_components() {
     srclist.insert(
         "shapelets".to_string(),
         Source {
-            components: vec1![
+            components: vec![
                 get_shapelet(RADec::from_degrees(1.0, -27.0), FluxType::List),
-                get_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List)
-            ],
+                get_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List),
+            ]
+            .into_boxed_slice(),
         },
     );
     let modeller = obs.get_cpu_modeller(&srclist);

@@ -36,7 +36,7 @@ fn write_comp_type<T: std::io::Write>(
                 maj.to_degrees() * 60.0,
                 min.to_degrees() * 60.0
             )?;
-            for c in coeffs {
+            for c in coeffs.iter() {
                 writeln!(buf, "COEFF {} {} {}", c.n1, c.n2, c.value)?;
             }
         }
@@ -50,7 +50,7 @@ fn write_flux_type<T: std::io::Write>(
     flux_type: &FluxDensityType,
 ) -> Result<(), WriteSourceListError> {
     match &flux_type {
-        FluxDensityType::List { fds } => {
+        FluxDensityType::List(fds) => {
             for fd in fds {
                 writeln!(
                     buf,
@@ -118,7 +118,10 @@ pub(crate) fn write_source_list<T: std::io::Write>(
         }
 
         // Write out the first component as the RTS base source.
-        let first_comp = source.components.first();
+        let first_comp = source
+            .components
+            .first()
+            .expect("source's components aren't empty");
         writeln!(
             buf,
             "SOURCE {} {} {}",
@@ -187,7 +190,10 @@ pub(crate) fn write_source_list_with_order<T: std::io::Write>(
         }
 
         // Write out the first component as the RTS base source.
-        let first_comp = source.components.first();
+        let first_comp = source
+            .components
+            .first()
+            .expect("source's components aren't empty");
         writeln!(
             buf,
             "SOURCE {} {} {}",

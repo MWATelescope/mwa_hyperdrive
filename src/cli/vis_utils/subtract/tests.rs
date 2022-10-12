@@ -38,17 +38,16 @@ fn test_1090008640_vis_subtract() {
     srclist.insert(
         "src1".to_string(),
         Source {
-            components: vec1![SourceComponent {
+            components: vec![SourceComponent {
                 radec: RADec::from_degrees(0.0, -27.0),
                 comp_type: ComponentType::Point,
-                flux_type: FluxDensityType::List {
-                    fds: vec1![FluxDensity {
-                        freq: 150e6,
-                        i: 1.0,
-                        ..Default::default()
-                    }],
-                },
-            }],
+                flux_type: FluxDensityType::List(vec1![FluxDensity {
+                    freq: 150e6,
+                    i: 1.0,
+                    ..Default::default()
+                }]),
+            }]
+            .into_boxed_slice(),
         },
     );
     // Write out this 1-source source list for comparison.
@@ -61,17 +60,16 @@ fn test_1090008640_vis_subtract() {
     srclist.insert(
         "src2".to_string(),
         Source {
-            components: vec1![SourceComponent {
+            components: vec![SourceComponent {
                 radec: RADec::from_degrees(1.0, -27.0),
                 comp_type: ComponentType::Point,
-                flux_type: FluxDensityType::List {
-                    fds: vec1![FluxDensity {
-                        freq: 150e6,
-                        i: 1.0,
-                        ..Default::default()
-                    }],
-                },
-            }],
+                flux_type: FluxDensityType::List(vec1![FluxDensity {
+                    freq: 150e6,
+                    i: 1.0,
+                    ..Default::default()
+                }]),
+            }]
+            .into_boxed_slice(),
         },
     );
     let source_list_2 = temp_dir.path().join("srclist_2.yaml");

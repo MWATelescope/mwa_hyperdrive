@@ -43,105 +43,103 @@ lazy_static::lazy_static! {
 
     static ref POINT_ZENITH_LIST: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_point(*PHASE_CENTRE, FluxType::List)]})
+        Source {components: vec![get_point(*PHASE_CENTRE, FluxType::List)].into_boxed_slice()})
     ]);
     static ref POINT_ZENITH_POWER_LAW: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_point(*PHASE_CENTRE, FluxType::PowerLaw)]})
+        Source {components: vec![get_point(*PHASE_CENTRE, FluxType::PowerLaw)].into_boxed_slice()})
     ]);
     static ref POINT_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_point(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+        Source {components: vec![get_point(*PHASE_CENTRE, FluxType::CurvedPowerLaw)].into_boxed_slice()})
     ]);
 
     static ref POINT_OFF_ZENITH_LIST: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_point(*OFF_PHASE_CENTRE, FluxType::List)]})
+        Source {components: vec![get_point(*OFF_PHASE_CENTRE, FluxType::List)].into_boxed_slice()})
     ]);
     static ref POINT_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_point(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]})
+        Source {components: vec![get_point(*OFF_PHASE_CENTRE, FluxType::PowerLaw)].into_boxed_slice()})
     ]);
     static ref POINT_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_point(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+        Source {components: vec![get_point(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)].into_boxed_slice()})
     ]);
 
     static ref GAUSSIAN_ZENITH_LIST: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_gaussian(*PHASE_CENTRE, FluxType::List)]})
+        Source {components: vec![get_gaussian(*PHASE_CENTRE, FluxType::List)].into_boxed_slice()})
     ]);
     static ref GAUSSIAN_ZENITH_POWER_LAW: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_gaussian(*PHASE_CENTRE, FluxType::PowerLaw)]})
+        Source {components: vec![get_gaussian(*PHASE_CENTRE, FluxType::PowerLaw)].into_boxed_slice()})
     ]);
     static ref GAUSSIAN_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_gaussian(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+        Source {components: vec![get_gaussian(*PHASE_CENTRE, FluxType::CurvedPowerLaw)].into_boxed_slice()})
     ]);
 
     static ref GAUSSIAN_OFF_ZENITH_LIST: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_gaussian(*OFF_PHASE_CENTRE, FluxType::List)]})
+        Source {components: vec![get_gaussian(*OFF_PHASE_CENTRE, FluxType::List)].into_boxed_slice()})
     ]);
     static ref GAUSSIAN_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_gaussian(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]})
+        Source {components: vec![get_gaussian(*OFF_PHASE_CENTRE, FluxType::PowerLaw)].into_boxed_slice()})
     ]);
     static ref GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_gaussian(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+        Source {components: vec![get_gaussian(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)].into_boxed_slice()})
     ]);
 
     static ref SHAPELET_ZENITH_LIST: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_shapelet(*PHASE_CENTRE, FluxType::List)]})
+        Source {components: vec![get_shapelet(*PHASE_CENTRE, FluxType::List)].into_boxed_slice()})
     ]);
     static ref SHAPELET_ZENITH_POWER_LAW: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_shapelet(*PHASE_CENTRE, FluxType::PowerLaw)]})
+        Source {components: vec![get_shapelet(*PHASE_CENTRE, FluxType::PowerLaw)].into_boxed_slice()})
     ]);
     static ref SHAPELET_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
         ("zenith".to_string(),
-        Source {components: vec1![get_shapelet(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+        Source {components: vec![get_shapelet(*PHASE_CENTRE, FluxType::CurvedPowerLaw)].into_boxed_slice()})
     ]);
 
 
     static ref SHAPELET_OFF_ZENITH_LIST: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_shapelet(*OFF_PHASE_CENTRE, FluxType::List)]})
+        Source {components: vec![get_shapelet(*OFF_PHASE_CENTRE, FluxType::List)].into_boxed_slice()})
     ]);
     static ref SHAPELET_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_shapelet(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]})
+        Source {components: vec![get_shapelet(*OFF_PHASE_CENTRE, FluxType::PowerLaw)].into_boxed_slice()})
     ]);
     static ref SHAPELET_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
         ("off_zenith".to_string(),
-        Source {components: vec1![get_shapelet(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+        Source {components: vec![get_shapelet(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)].into_boxed_slice()})
     ]);
 
 }
 
 fn get_list() -> FluxDensityType {
-    FluxDensityType::List {
-        fds: vec1![
-            FluxDensity {
-                freq: 150e6,
-                i: 1.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 175e6,
-                i: 3.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 200e6,
-                i: 2.0,
-                ..Default::default()
-            },
-        ],
-    }
+    FluxDensityType::List(vec1![
+        FluxDensity {
+            freq: 150e6,
+            i: 1.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 175e6,
+            i: 3.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 200e6,
+            i: 2.0,
+            ..Default::default()
+        },
+    ])
 }
 
 fn get_power_law() -> FluxDensityType {
@@ -229,7 +227,8 @@ fn get_shapelet(pos: RADec, flux_type: FluxType) -> SourceComponent {
                 n1: 0,
                 n2: 0,
                 value: 1.0,
-            }],
+            }]
+            .into_boxed_slice(),
         },
         flux_type: match flux_type {
             FluxType::List => get_list(),

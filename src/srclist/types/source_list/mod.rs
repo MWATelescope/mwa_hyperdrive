@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code surrounding the [IndexMap] used to contain all sky-model sources and
+//! Code surrounding the [`IndexMap`] used to contain all sky-model sources and
 //! their components.
 
 #[cfg(test)]
@@ -11,18 +11,20 @@ mod tests;
 use std::ops::{Deref, DerefMut};
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 
 use super::*;
 
-/// A [IndexMap] of source names for keys and [Source] structs for values.
+/// A [`IndexMap`] of source names for keys and [`Source`] structs for values.
 ///
-/// By making [SourceList] a new type (specifically, an anonymous struct),
+/// By making [`SourceList`] a new type (specifically, an anonymous struct),
 /// useful methods can be put onto it.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SourceList(IndexMap<String, Source>);
 
 impl SourceList {
-    /// Create an empty [SourceList].
+    /// Create an empty [`SourceList`].
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -31,7 +33,7 @@ impl SourceList {
     pub(crate) fn get_counts(&self) -> ComponentCounts {
         let mut counts = ComponentCounts::default();
         self.iter()
-            .flat_map(|(_, src)| &src.components)
+            .flat_map(|(_, src)| src.components.iter())
             .for_each(|c| {
                 match (c.is_point(), c.is_gaussian(), c.is_shapelet()) {
                     (true, false, false) => counts.num_points += 1,
@@ -57,7 +59,7 @@ impl SourceList {
         counts
     }
 
-    /// Filter component types from one [SourceList] and return a new one.
+    /// Filter component types from one [`SourceList`] and return a new one.
     pub(crate) fn filter(
         self,
         filter_points: bool,

@@ -15,35 +15,34 @@ use crate::srclist::{
 
 fn get_list_source_1() -> Source {
     Source {
-        components: vec1![SourceComponent {
+        components: vec![SourceComponent {
             radec: RADec::from_radians(PI, FRAC_PI_4),
             comp_type: ComponentType::Point,
-            flux_type: FluxDensityType::List {
-                fds: vec1![
-                    FluxDensity {
-                        freq: 100.0,
-                        i: 10.0,
-                        q: 7.0,
-                        u: 6.0,
-                        v: 1.0,
-                    },
-                    FluxDensity {
-                        freq: 150.0,
-                        i: 8.0,
-                        q: 5.0,
-                        u: 4.0,
-                        v: 0.25,
-                    },
-                    FluxDensity {
-                        freq: 200.0,
-                        i: 6.0,
-                        q: 4.0,
-                        u: 3.0,
-                        v: 0.1,
-                    },
-                ],
-            },
-        }],
+            flux_type: FluxDensityType::List(vec1![
+                FluxDensity {
+                    freq: 100.0,
+                    i: 10.0,
+                    q: 7.0,
+                    u: 6.0,
+                    v: 1.0,
+                },
+                FluxDensity {
+                    freq: 150.0,
+                    i: 8.0,
+                    q: 5.0,
+                    u: 4.0,
+                    v: 0.25,
+                },
+                FluxDensity {
+                    freq: 200.0,
+                    i: 6.0,
+                    q: 4.0,
+                    u: 3.0,
+                    v: 0.1,
+                },
+            ]),
+        }]
+        .into_boxed_slice(),
     }
 }
 
@@ -51,28 +50,27 @@ fn get_list_source_1() -> Source {
 // This is an extreme example.
 fn get_list_source_2() -> Source {
     Source {
-        components: vec1![SourceComponent {
+        components: vec![SourceComponent {
             radec: RADec::from_radians(PI - 0.82, -FRAC_PI_4),
             comp_type: ComponentType::Point,
-            flux_type: FluxDensityType::List {
-                fds: vec1![
-                    FluxDensity {
-                        freq: 100.0,
-                        i: 10.0,
-                        q: 7.0,
-                        u: 6.0,
-                        v: 1.0,
-                    },
-                    FluxDensity {
-                        freq: 200.0,
-                        i: 1.0,
-                        q: 2.0,
-                        u: 3.0,
-                        v: 4.1,
-                    },
-                ],
-            },
-        }],
+            flux_type: FluxDensityType::List(vec1![
+                FluxDensity {
+                    freq: 100.0,
+                    i: 10.0,
+                    q: 7.0,
+                    u: 6.0,
+                    v: 1.0,
+                },
+                FluxDensity {
+                    freq: 200.0,
+                    i: 1.0,
+                    q: 2.0,
+                    u: 3.0,
+                    v: 4.1,
+                },
+            ]),
+        }]
+        .into_boxed_slice(),
     }
 }
 
@@ -80,7 +78,7 @@ fn get_list_source_2() -> Source {
 fn list_calc_spec_index_source_1() {
     let source = get_list_source_1();
     let fds = match &source.components[0].flux_type {
-        FluxDensityType::List { fds } => fds,
+        FluxDensityType::List(fds) => fds,
         _ => unreachable!(),
     };
 
@@ -104,7 +102,7 @@ fn list_calc_spec_index_source_1() {
 fn list_calc_spec_index_source_2() {
     let source = get_list_source_2();
     let fds = match &source.components[0].flux_type {
-        FluxDensityType::List { fds } => fds,
+        FluxDensityType::List(fds) => fds,
         _ => unreachable!(),
     };
 
@@ -118,7 +116,7 @@ fn list_estimate_flux_density_at_freq_no_comps() {
     let mut source = get_list_source_1();
     // Delete all flux densities. This will panic on the unwrap because `fds` needs to have at least 1 elements.
     match &mut source.components[0].flux_type {
-        FluxDensityType::List { fds } => fds.drain(..).unwrap(),
+        FluxDensityType::List(fds) => fds.drain(..).unwrap(),
         _ => unreachable!(),
     };
 }
@@ -126,7 +124,7 @@ fn list_estimate_flux_density_at_freq_no_comps() {
 fn list_estimate_flux_density_at_freq_extrapolation_single_comp1() {
     let mut source = get_list_source_1();
     match &mut source.components[0].flux_type {
-        FluxDensityType::List { fds } => fds.drain(1..).unwrap(),
+        FluxDensityType::List(fds) => fds.drain(1..).unwrap(),
         _ => unreachable!(),
     };
 
@@ -163,7 +161,7 @@ fn list_estimate_flux_density_at_freq_extrapolation_source_1() {
 fn list_estimate_flux_density_at_freq_source_2() {
     let source = get_list_source_2();
     let fds = match &source.components[0].flux_type {
-        FluxDensityType::List { fds } => fds,
+        FluxDensityType::List(fds) => fds,
         _ => unreachable!(),
     };
 
@@ -174,7 +172,7 @@ fn list_estimate_flux_density_at_freq_source_2() {
     let si = (fds[1].i / fds[0].i).ln() / (fds[1].freq / fds[0].freq).ln();
     assert_abs_diff_eq!(si, -LOG2_10, epsilon = 1e-10);
     let freq_ratio = calc_flux_ratio(desired_freq, fds[1].freq, si);
-    let expected = fds[1].clone() * freq_ratio;
+    let expected = fds[1] * freq_ratio;
     assert_abs_diff_eq!(fd.i, expected.i, epsilon = 1e-10);
     assert_abs_diff_eq!(fd.q, expected.q, epsilon = 1e-10);
     assert_abs_diff_eq!(fd.u, expected.u, epsilon = 1e-10);
@@ -186,7 +184,7 @@ fn list_estimate_flux_density_at_freq_source_2() {
 fn unsorted_list_error() {
     let mut source = get_list_source_2();
     match &mut source.components[0].flux_type {
-        FluxDensityType::List { fds } => {
+        FluxDensityType::List(fds) => {
             fds.reverse();
         }
         _ => unreachable!(),

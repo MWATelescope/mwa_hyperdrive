@@ -12,17 +12,20 @@ use std::borrow::Borrow;
 use marlu::{pos::xyz::xyzs_to_cross_uvws, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{FluxDensity, FluxDensityType, SourceList};
 
 /// Information on a source's component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SourceComponent {
     /// Coordinates struct associated with the component.
+    #[serde(flatten)]
     pub radec: RADec,
+
     /// The type of component.
     pub comp_type: ComponentType,
+
     /// The flux densities associated with this component.
     pub flux_type: FluxDensityType,
 }
@@ -51,31 +54,70 @@ impl SourceComponent {
 
 /// Source component types supported by hyperdrive.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ComponentType {
-    #[serde(rename = "point")]
     Point,
 
-    #[serde(rename = "gaussian")]
     Gaussian {
         /// Major axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         maj: f64,
+
         /// Minor axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         min: f64,
+
         /// Position angle \[radians\]
+        #[serde(serialize_with = "radians_to_degrees")]
+        #[serde(deserialize_with = "degrees_to_radians")]
         pa: f64,
     },
 
-    #[serde(rename = "shapelet")]
     Shapelet {
         /// Major axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         maj: f64,
+
         /// Minor axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         min: f64,
+
         /// Position angle \[radians\]
+        #[serde(serialize_with = "radians_to_degrees")]
+        #[serde(deserialize_with = "degrees_to_radians")]
         pa: f64,
+
         /// Shapelet coefficients
-        coeffs: Vec<ShapeletCoeff>,
+        coeffs: Box<[ShapeletCoeff]>,
     },
+}
+
+fn radians_to_arcsecs<S: Serializer>(num: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(num.to_degrees() * 3600.0)
+}
+
+fn radians_to_degrees<S: Serializer>(num: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(num.to_degrees())
+}
+
+fn arcsecs_to_radians<'de, D>(d: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num: f64 = Deserialize::deserialize(d)?;
+    Ok(num.to_radians() / 3600.0)
+}
+
+fn degrees_to_radians<'de, D>(d: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num: f64 = Deserialize::deserialize(d)?;
+    Ok(num.to_radians())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -166,7 +208,7 @@ impl ComponentList {
         for comp in source_list
             .iter()
             .rev()
-            .flat_map(|(_, src)| &src.components)
+            .flat_map(|(_, src)| src.components.iter())
         {
             let comp_lmn = comp.radec.to_lmn(phase_centre).prepare_for_rime();
             match &comp.comp_type {
@@ -369,5 +411,129 @@ impl PerComponentParams for GaussianComponentParams {
 impl PerComponentParams for ShapeletComponentParams {
     fn get_azels_mwa_parallel(&self, lst_rad: f64, array_latitude_rad: f64) -> Vec<AzEl> {
         get_azels_mwa_parallel(&self.radecs, lst_rad, array_latitude_rad)
+    }
+}
+
+#[cfg(test)]
+impl approx::AbsDiffEq for SourceComponent {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        self.radec.abs_diff_eq(&other.radec, epsilon)
+            && self.comp_type.abs_diff_eq(&other.comp_type, epsilon)
+            && self.flux_type.abs_diff_eq(&other.flux_type, epsilon)
+    }
+}
+
+#[cfg(test)]
+impl approx::AbsDiffEq for ComponentType {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        match (self, other) {
+            (ComponentType::Point, ComponentType::Point) => true,
+
+            (
+                ComponentType::Gaussian { maj, min, pa },
+                ComponentType::Gaussian {
+                    maj: maj2,
+                    min: min2,
+                    pa: pa2,
+                },
+            ) => {
+                f64::abs_diff_eq(maj, maj2, epsilon)
+                    && f64::abs_diff_eq(min, min2, epsilon)
+                    && f64::abs_diff_eq(pa, pa2, epsilon)
+            }
+
+            (
+                ComponentType::Shapelet {
+                    maj,
+                    min,
+                    pa,
+                    coeffs,
+                },
+                ComponentType::Shapelet {
+                    maj: maj2,
+                    min: min2,
+                    pa: pa2,
+                    coeffs: coeffs2,
+                },
+            ) => {
+                maj.abs_diff_eq(maj2, epsilon)
+                    && min.abs_diff_eq(min2, epsilon)
+                    && pa.abs_diff_eq(pa2, epsilon)
+                    && coeffs.eq(coeffs2)
+            }
+
+            (
+                ComponentType::Point,
+                ComponentType::Gaussian { .. } | ComponentType::Shapelet { .. },
+            ) => false,
+            (
+                ComponentType::Gaussian { .. },
+                ComponentType::Point | ComponentType::Shapelet { .. },
+            ) => false,
+            (
+                ComponentType::Shapelet { .. },
+                ComponentType::Point | ComponentType::Gaussian { .. },
+            ) => false,
+        }
+    }
+}
+
+#[cfg(test)]
+impl approx::AbsDiffEq for FluxDensityType {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        match (self, other) {
+            (FluxDensityType::List(v), FluxDensityType::List(v2)) => {
+                approx::abs_diff_eq!(v.as_slice(), v2.as_slice(), epsilon = epsilon)
+            }
+
+            (
+                FluxDensityType::PowerLaw { si, fd },
+                FluxDensityType::PowerLaw { si: si2, fd: fd2 },
+            ) => si.abs_diff_eq(si2, epsilon) && fd.abs_diff_eq(fd2, epsilon),
+
+            (
+                FluxDensityType::CurvedPowerLaw { si, fd, q },
+                FluxDensityType::CurvedPowerLaw {
+                    si: si2,
+                    fd: fd2,
+                    q: q2,
+                },
+            ) => {
+                si.abs_diff_eq(si2, epsilon)
+                    && fd.abs_diff_eq(fd2, epsilon)
+                    && q.abs_diff_eq(q2, epsilon)
+            }
+
+            (
+                FluxDensityType::List(_),
+                FluxDensityType::PowerLaw { .. } | FluxDensityType::CurvedPowerLaw { .. },
+            ) => false,
+            (
+                FluxDensityType::PowerLaw { .. },
+                FluxDensityType::List(_) | FluxDensityType::CurvedPowerLaw { .. },
+            ) => false,
+            (
+                FluxDensityType::CurvedPowerLaw { .. },
+                FluxDensityType::List(_) | FluxDensityType::PowerLaw { .. },
+            ) => false,
+        }
     }
 }

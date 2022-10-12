@@ -28,7 +28,6 @@ use std::convert::TryInto;
 
 use log::warn;
 use marlu::{constants::DH2R, RADec};
-use vec1::Vec1;
 
 use crate::{
     constants::DEFAULT_SPEC_INDEX,
@@ -53,6 +52,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
     let mut num_shapelet_coeffs = 0;
     let mut source_name = String::new();
     let mut components: Vec<SourceComponent> = vec![];
+    let mut shapelet_coeffs = vec![];
     let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
@@ -91,7 +91,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
             continue;
         }
 
-        let mut items = line.split_whitespace();
+        let mut items = line.split_ascii_whitespace();
         match items.next() {
             Some("SOURCE") => {
                 if in_source {
@@ -227,7 +227,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         maj: 0.0,
                         min: 0.0,
                         pa: 0.0,
-                        coeffs: vec![],
+                        coeffs: vec![].into_boxed_slice(),
                     },
                     Some(k) => {
                         return Err(ReadSourceListCommonError::UnrecognisedKeyword {
@@ -571,7 +571,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     maj: (maj_arcmin / 60.0).to_radians(),
                     min: (min_arcmin / 60.0).to_radians(),
                     pa: position_angle.to_radians(),
-                    coeffs: vec![],
+                    coeffs: vec![].into_boxed_slice(),
                 };
 
                 // Does this component type match what was on the COMPONENT
@@ -641,11 +641,14 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         .expect("shapelet coeff is not bigger than u8::MAX"),
                     value,
                 };
+                shapelet_coeffs.push(shapelet_coeff);
 
-                match &mut components.iter_mut().last().unwrap().comp_type {
-                    ComponentType::Shapelet { coeffs, .. } => coeffs.push(shapelet_coeff),
-                    // If the last component isn't a shapelet, we've got problems.
-                    _ => return Err(ReadSourceListWodenError::MissingSParamsLine(line_num).into()),
+                // If the last component isn't a shapelet, we've got problems.
+                if !matches!(
+                    components.iter_mut().last().unwrap().comp_type,
+                    ComponentType::Shapelet { .. }
+                ) {
+                    return Err(ReadSourceListWodenError::MissingSParamsLine(line_num).into());
                 }
             }
 
@@ -671,13 +674,15 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 // If we were reading a shapelet component, check that shapelet
-                // coefficients were read.
+                // coefficients were read and populate the boxed slice.
                 if let ComponentType::Shapelet { coeffs, .. } =
-                    &components.last().unwrap().comp_type
+                    &mut components.last_mut().expect("not empty").comp_type
                 {
-                    if coeffs.is_empty() {
+                    if shapelet_coeffs.is_empty() {
                         return Err(ReadSourceListWodenError::NoShapeletSCoeffs(line_num).into());
                     }
+                    *coeffs = shapelet_coeffs.clone().into_boxed_slice();
+                    shapelet_coeffs.clear();
                 }
 
                 in_component = false;
@@ -694,9 +699,9 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 }
 
                 let source = Source {
-                    components: Vec1::try_from_vec(components).unwrap(),
+                    components: components.clone().into_boxed_slice(),
                 };
-                components = vec![];
+                components.clear();
 
                 // Check that the specified counts of each component type were
                 // read in. Also ensure that the sum of each Stokes' flux
@@ -709,7 +714,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 let mut sum_q = 0.0;
                 let mut sum_u = 0.0;
                 let mut sum_v = 0.0;
-                for comp in &source.components {
+                for comp in source.components.iter() {
                     match &comp.comp_type {
                         ComponentType::Point => read_num_points += 1,
                         ComponentType::Gaussian { .. } => read_num_gaussians += 1,

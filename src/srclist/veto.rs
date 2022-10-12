@@ -69,7 +69,7 @@ pub(crate) fn veto_sources(
             // Filter trivial sources: are any of this source's components too
             // low in elevation? Or too far from the phase centre?
             let mut azels = vec![];
-            for comp in &source.components {
+            for comp in source.components.iter() {
                 let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                 if azel.el.to_degrees() < ELEVATION_LIMIT {
                     if log_enabled!(Trace) {
@@ -222,7 +222,6 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use marlu::{constants::MWA_LAT_RAD, AzEl};
     use serial_test::*;
-    use vec1::vec1;
 
     use super::*;
     use crate::{
@@ -308,7 +307,7 @@ mod tests {
         source_list.insert(
             "bad_source1".to_string(),
             Source {
-                components: vec1![SourceComponent {
+                components: vec![SourceComponent {
                     radec: RADec::from_degrees(330.0, -80.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
@@ -321,13 +320,14 @@ mod tests {
                             v: 0.0,
                         },
                     },
-                }],
+                }]
+                .into_boxed_slice(),
             },
         );
         source_list.insert(
             "bad_source2".to_string(),
             Source {
-                components: vec1![SourceComponent {
+                components: vec![SourceComponent {
                     radec: RADec::from_degrees(30.0, -80.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
@@ -340,13 +340,14 @@ mod tests {
                             v: 0.0,
                         },
                     },
-                }],
+                }]
+                .into_boxed_slice(),
             },
         );
         source_list.insert(
             "bad_source3".to_string(),
             Source {
-                components: vec1![SourceComponent {
+                components: vec![SourceComponent {
                     radec: RADec::from_degrees(285.0, 40.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
@@ -359,7 +360,8 @@ mod tests {
                             v: 0.0,
                         },
                     },
-                }],
+                }]
+                .into_boxed_slice(),
             },
         );
 

@@ -49,7 +49,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     source_list.insert(
                         format!("source{i}"),
                         Source {
-                            components: vec1![SourceComponent {
+                            components: vec![SourceComponent {
                                 radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Point,
                                 flux_type: FluxDensityType::PowerLaw {
@@ -62,7 +62,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                         v: 0.0,
                                     },
                                 },
-                            }],
+                            }]
+                            .into_boxed_slice(),
                         },
                     );
                 }
@@ -111,7 +112,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     source_list.insert(
                         format!("source{i}"),
                         Source {
-                            components: vec1![SourceComponent {
+                            components: vec![SourceComponent {
                                 radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Point,
                                 flux_type: FluxDensityType::PowerLaw {
@@ -124,7 +125,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                         v: 0.0,
                                     },
                                 },
-                            }],
+                            }]
+                            .into_boxed_slice(),
                         },
                     );
                 }
@@ -164,7 +166,7 @@ fn model_benchmarks(c: &mut Criterion) {
             source_list.insert(
                 format!("source{i}"),
                 Source {
-                    components: vec1![SourceComponent {
+                    components: vec![SourceComponent {
                         radec: RADec::from_degrees(0.0, -27.0),
                         comp_type: ComponentType::Gaussian {
                             maj: 1.0,
@@ -181,7 +183,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                 v: 0.0,
                             },
                         },
-                    }],
+                    }]
+                    .into_boxed_slice(),
                 },
             );
         }
@@ -228,7 +231,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     source_list.insert(
                         format!("source{i}"),
                         Source {
-                            components: vec1![SourceComponent {
+                            components: vec![SourceComponent {
                                 radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Gaussian {
                                     maj: 1.0,
@@ -245,7 +248,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                         v: 0.0,
                                     },
                                 },
-                            }],
+                            }]
+                            .into_boxed_slice(),
                         },
                     );
                 }
@@ -287,7 +291,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 source_list.insert(
                     format!("source{i}"),
                     Source {
-                        components: vec1![SourceComponent {
+                        components: vec![SourceComponent {
                             radec: RADec::from_degrees(0.0, -27.0),
                             comp_type: ComponentType::Shapelet {
                                 maj: 1.0,
@@ -300,7 +304,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                         value: 1.0,
                                     };
                                     10
-                                ],
+                                ]
+                                .into_boxed_slice(),
                             },
                             flux_type: FluxDensityType::PowerLaw {
                                 si: -0.7,
@@ -312,7 +317,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                     v: 0.0,
                                 },
                             },
-                        }],
+                        }]
+                        .into_boxed_slice(),
                     },
                 );
             }
@@ -360,7 +366,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     source_list.insert(
                         format!("source{i}"),
                         Source {
-                            components: vec1![SourceComponent {
+                            components: vec![SourceComponent {
                                 radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Shapelet {
                                     maj: 1.0,
@@ -373,7 +379,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                             value: 1.0,
                                         };
                                         10
-                                    ],
+                                    ]
+                                    .into_boxed_slice(),
                                 },
                                 flux_type: FluxDensityType::PowerLaw {
                                     si: -0.7,
@@ -385,7 +392,8 @@ fn model_benchmarks(c: &mut Criterion) {
                                         v: 0.0,
                                     },
                                 },
-                            }],
+                            }]
+                            .into_boxed_slice(),
                         },
                     );
                 }
@@ -503,7 +511,7 @@ fn source_list_benchmarks(c: &mut Criterion) {
             v: 0.0,
         }
     ];
-    let comp_fds = vec![FluxDensityType::List { fds }; num_comps];
+    let comp_fds = vec![FluxDensityType::List(fds); num_comps];
     let freqs: Vec<f64> = Array1::linspace(140e6, 210e6, num_comps).to_vec();
 
     c.bench_function(

@@ -9,12 +9,12 @@ mod tests;
 
 use log::{log_enabled, trace, Level::Trace};
 use marlu::{c64, Jones};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use vec1::Vec1;
 
 use crate::constants::{DEFAULT_SPEC_INDEX, SPEC_INDEX_CAP};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 /// At a frequency, four flux densities for each Stokes parameter.
 // When serialising/deserialising, ignore Stokes Q U V if they are zero.
 pub struct FluxDensity {
@@ -55,7 +55,7 @@ impl FluxDensity {
     /// and Y as NS. For this reason, this conversion looks like the opposite of
     /// what is expected (equation 4.55). In other words, hyperdrive orders its
     /// Jones matrices [XX XY YX YY], where X is East-West and Y is North-South.
-    pub(crate) fn to_inst_stokes(&self) -> Jones<f64> {
+    pub(crate) fn to_inst_stokes(self) -> Jones<f64> {
         Jones::from([
             c64::new(self.i - self.q, 0.0),
             c64::new(self.u, -self.v),
@@ -114,8 +114,15 @@ impl std::ops::Mul<f64> for FluxDensity {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FluxDensityType {
+    /// A list of flux densities specified at multiple frequencies.
+    /// Interpolation/extrapolation is needed to get flux densities at
+    /// non-specified frequencies.
+    #[serde(serialize_with = "sort_vector")]
+    List(Vec1<FluxDensity>),
+
     /// $S_\nu = a \nu^{\alpha}$
     PowerLaw {
         /// Spectral index (alpha)
@@ -135,11 +142,6 @@ pub enum FluxDensityType {
         /// Spectral curvature (q)
         q: f64,
     },
-
-    /// A list of flux densities specified at multiple frequencies.
-    /// Interpolation/extrapolation is needed to get flux densities at
-    /// non-specified frequencies.
-    List { fds: Vec1<FluxDensity> },
 }
 
 impl FluxDensityType {
@@ -159,19 +161,19 @@ impl FluxDensityType {
         match self {
             FluxDensityType::PowerLaw { si, fd } => {
                 let ratio = calc_flux_ratio(freq_hz, fd.freq, *si);
-                let mut new_fd = fd.clone() * ratio;
+                let mut new_fd = *fd * ratio;
                 new_fd.freq = freq_hz;
                 new_fd
             }
 
             FluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                let mut power_law_component = fd.clone() * calc_flux_ratio(freq_hz, fd.freq, *si);
+                let mut power_law_component = *fd * calc_flux_ratio(freq_hz, fd.freq, *si);
                 power_law_component.freq = freq_hz;
                 let curved_component = (q * (freq_hz / fd.freq).ln().powi(2)).exp();
                 power_law_component * curved_component
             }
 
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 // `smaller_flux_density` is a bad name given to the component's flux
                 // density corresponding to a frequency smaller than but nearest to the
                 // specified frequency.
@@ -201,10 +203,10 @@ impl FluxDensityType {
                             if (window[0].freq - freq_hz).abs() < 1e-3 {
                                 // ... then just return the flux density
                                 // information from this frequency.
-                                return window[0].clone();
+                                return window[0];
                             }
                             if (window[1].freq - freq_hz).abs() < 1e-3 {
-                                return window[1].clone();
+                                return window[1];
                             }
                             // If the specified freq is smaller than the second
                             // element...
@@ -270,6 +272,19 @@ impl FluxDensityType {
 /// Given a spectral index, determine the flux-density ratio of two frequencies.
 pub(crate) fn calc_flux_ratio(desired_freq_hz: f64, cat_freq_hz: f64, spec_index: f64) -> f64 {
     (desired_freq_hz / cat_freq_hz).powf(spec_index)
+}
+
+fn sort_vector<S>(value: &Vec1<FluxDensity>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut value = value.clone();
+    value.sort_unstable_by(|a, b| {
+        a.freq
+            .partial_cmp(&b.freq)
+            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.freq, b.freq))
+    });
+    value.serialize(serializer)
 }
 
 #[cfg(test)]

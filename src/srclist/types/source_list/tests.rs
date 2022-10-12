@@ -6,7 +6,6 @@ use std::f64::consts::*;
 
 use approx::*;
 use marlu::RADec;
-use vec1::vec1;
 
 use super::*;
 use crate::srclist::{FluxDensity, FluxDensityType};
@@ -33,47 +32,67 @@ fn test_get_azel_mwa() {
         },
     };
     // Don't modify the first component.
-    let mut s = Source {
-        components: vec1![comp.clone()],
-    };
+    let mut comps = vec![comp.clone()];
 
     // Modify the coordinates of other components.
-    s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::from_radians(PI - 0.1, FRAC_PI_4 + 0.1);
+    let mut comp2 = comp.clone();
+    comp2.radec = RADec::from_radians(PI - 0.1, FRAC_PI_4 + 0.1);
+    comps.push(comp2);
 
-    s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::from_radians(PI + 0.1, FRAC_PI_4 - 0.1);
+    let mut comp2 = comp.clone();
+    comp2.radec = RADec::from_radians(PI + 0.1, FRAC_PI_4 - 0.1);
+    comps.push(comp2);
 
     // Push "source_1".
-    sl.insert("source_1".to_string(), s);
+    sl.insert(
+        "source_1".to_string(),
+        Source {
+            components: comps.clone().into_boxed_slice(),
+        },
+    );
+    comps.clear();
 
-    let mut s = Source {
-        components: vec1![comp.clone()],
-    };
+    comps.push(comp.clone());
+    let mut comp2 = comp.clone();
+    comp2.radec = RADec::from_radians(PI - 0.1, FRAC_PI_4 + 0.1);
+    comps.push(comp2);
 
-    s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::from_radians(PI - 0.1, FRAC_PI_4 + 0.1);
+    let mut comp2 = comp.clone();
+    comp2.radec = RADec::from_radians(PI + 0.1, FRAC_PI_4 - 0.1);
+    comps.push(comp2);
 
-    s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::from_radians(PI + 0.1, FRAC_PI_4 - 0.1);
+    sl.insert(
+        "source_2".to_string(),
+        Source {
+            components: comps.clone().into_boxed_slice(),
+        },
+    );
+    comps.clear();
 
-    sl.insert("source_2".to_string(), s);
+    let mut comp2 = comp.clone();
+    comp2.radec = RADec::from_radians(FRAC_PI_2, PI);
+    comps.push(comp2);
 
-    let mut s = Source {
-        components: vec1![comp.clone()],
-    };
-    s.components.last_mut().radec = RADec::from_radians(FRAC_PI_2, PI);
+    let mut comp2 = comp;
+    comp2.radec = RADec::from_radians(FRAC_PI_2 - 0.1, PI + 0.2);
+    comps.push(comp2);
 
-    s.components.push(comp);
-    s.components.last_mut().radec = RADec::from_radians(FRAC_PI_2 - 0.1, PI + 0.2);
-
-    sl.insert("source_3".to_string(), s);
+    sl.insert(
+        "source_3".to_string(),
+        Source {
+            components: comps.into_boxed_slice(),
+        },
+    );
 
     let lst = 3.0 * FRAC_PI_4;
-    let azels = sl
+    let (azs, zas): (Vec<_>, Vec<_>) = sl
         .iter()
-        .flat_map(|(_, src)| &src.components)
-        .map(|comp| comp.radec.to_hadec(lst).to_azel_mwa());
+        .flat_map(|(_, src)| src.components.iter())
+        .map(|comp| {
+            let azel = comp.radec.to_hadec(lst).to_azel_mwa();
+            (azel.az, azel.za())
+        })
+        .unzip();
     let az_expected = [
         0.5284641294204054,
         0.4140207507698987,
@@ -94,10 +113,6 @@ fn test_get_azel_mwa() {
         2.254528351516936,
         2.0543439118454256,
     ];
-    for ((azel, &expected_az), &expected_za) in
-        azels.zip(az_expected.iter()).zip(za_expected.iter())
-    {
-        assert_abs_diff_eq!(azel.az, expected_az, epsilon = 1e-10);
-        assert_abs_diff_eq!(azel.za(), expected_za, epsilon = 1e-10);
-    }
+    assert_abs_diff_eq!(azs.as_slice(), az_expected.as_slice(), epsilon = 1e-10);
+    assert_abs_diff_eq!(zas.as_slice(), za_expected.as_slice(), epsilon = 1e-10);
 }

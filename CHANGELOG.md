@@ -20,9 +20,17 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   spectral window, it is no longer treated as a "picket fence" situation.
 - Flux densities were not being correctly estimated for curved-power-law
   components with GPU code.
+- AO source lists were always read like they were version 1.1; version 1.0 is
+  now read properly.
+- RTS source lists with multiple SHAPELET components are now removed properly
+  (not to be confused with the favoured SHAPELET2 component type).
 
 ### Changed
 - The performance of CPU visibility modelling has been dramatically improved.
+- Internal source list types can now be (de)serialised directly. This makes
+  interfacing with YAML and JSON files is ~7% faster and simplifies the internal
+  code.
+- More error checks have been added to RTS, AO and WODEN source list reading.
 
 ## [0.2.1] - 2022-10-20
 ### Added

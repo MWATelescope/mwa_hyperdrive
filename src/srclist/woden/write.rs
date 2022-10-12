@@ -40,7 +40,7 @@ fn write_comp_type<T: std::io::Write>(
                 maj.to_degrees() * 60.0,
                 min.to_degrees() * 60.0
             )?;
-            for c in coeffs {
+            for c in coeffs.iter() {
                 writeln!(buf, "SCOEFF {} {} {}", c.n1, c.n2, c.value)?;
             }
         }
@@ -54,7 +54,7 @@ fn write_flux_type<T: std::io::Write>(
     flux_type: &FluxDensityType,
 ) -> Result<(), WriteSourceListError> {
     match &flux_type {
-        FluxDensityType::List { fds } => {
+        FluxDensityType::List(fds) => {
             // Only use the first. WODEN can't use multiple.
             let fd = &fds[0];
             writeln!(
@@ -122,7 +122,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
         let mut num_gaussians = 0;
         let mut num_shapelets = 0;
         let mut num_shapelet_coeffs = 0;
-        for comp in &source.components {
+        for comp in source.components.iter() {
             match &comp.comp_type {
                 ComponentType::Point => num_points += 1,
                 ComponentType::Gaussian { .. } => num_gaussians += 1,
@@ -144,7 +144,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
         )?;
 
         // Write out the components.
-        for comp in &source.components {
+        for comp in source.components.iter() {
             let comp_type_str = match comp.comp_type {
                 ComponentType::Point => "POINT",
                 ComponentType::Gaussian { .. } => "GAUSSIAN",

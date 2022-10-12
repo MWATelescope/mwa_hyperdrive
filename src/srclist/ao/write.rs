@@ -61,7 +61,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
 
         writeln!(buf, "source {{")?;
         writeln!(buf, "  name \"{name}\"")?;
-        for c in &source.components {
+        for c in source.components.iter() {
             writeln!(buf, "  component {{")?;
 
             let (comp_type, shape) = match c.comp_type {
@@ -107,7 +107,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
                     writeln!(buf, "    }}")?;
                 }
 
-                FluxDensityType::List { fds } => {
+                FluxDensityType::List(fds) => {
                     for fd in fds {
                         writeln!(buf, "    measurement {{")?;
                         writeln!(buf, "      frequency {} MHz", fd.freq / 1e6)?;

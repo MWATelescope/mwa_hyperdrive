@@ -8,12 +8,11 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_rts.html>
 
 use log::warn;
-use marlu::{constants::DH2R, RADec};
-use vec1::Vec1;
+use marlu::RADec;
+use vec1::vec1;
 
 use crate::srclist::{
     error::{ReadSourceListCommonError, ReadSourceListError, ReadSourceListRtsError},
-    hyperdrive::{TmpComponent, TmpFluxDensityType},
     ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
     SourceList,
 };
@@ -31,7 +30,8 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
     let mut found_shapelets = vec![];
     let mut component_type_set = false;
     let mut source_name = String::new();
-    let mut components: Vec<TmpComponent> = vec![];
+    let mut components: Vec<SourceComponent> = vec![];
+    let mut shapelet_coeffs = vec![];
     let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
@@ -70,7 +70,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
             continue;
         }
 
-        let mut items = line.split_whitespace();
+        let mut items = line.split_ascii_whitespace();
         match items.next() {
             Some("SOURCE") => {
                 if in_source {
@@ -118,13 +118,20 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListError::InvalidDec(declination));
                     }
 
-                    components.push(TmpComponent {
-                        ra: hour_angle * DH2R,
-                        dec: declination.to_radians(),
+                    components.push(SourceComponent {
+                        radec: RADec::from_degrees(hour_angle * 15.0, declination),
                         // Assume the base source is a point source. If we find
                         // component type information, we can overwrite this.
                         comp_type: ComponentType::Point,
-                        flux_type: TmpFluxDensityType::List(vec![]),
+                        // RTS source lists do not handle curved power laws. We
+                        // use this here as a placeholder stating that it must
+                        // be changed by the time we have finished reading in
+                        // the component.
+                        flux_type: FluxDensityType::CurvedPowerLaw {
+                            si: 0.0,
+                            fd: FluxDensity::default(),
+                            q: 0.0,
+                        },
                     });
                 }
             }
@@ -191,7 +198,10 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
 
                 match components.iter_mut().last().map(|c| &mut c.flux_type) {
-                    Some(TmpFluxDensityType::List(fds)) => fds.push(fd),
+                    Some(FluxDensityType::List(fds)) => fds.push(fd),
+                    Some(c @ FluxDensityType::CurvedPowerLaw { .. }) => {
+                        *c = FluxDensityType::List(vec1![fd])
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -298,7 +308,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     maj: maj_arcmin.to_radians() / 60.0,
                     min: min_arcmin.to_radians() / 60.0,
                     pa: position_angle.to_radians(),
-                    coeffs: vec![],
+                    coeffs: vec![].into_boxed_slice(),
                 };
 
                 // Have we already set the component type?
@@ -326,7 +336,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     maj: 0.0,
                     min: 0.0,
                     pa: -999.0,
-                    coeffs: vec![],
+                    coeffs: vec![].into_boxed_slice(),
                 };
                 components.iter_mut().last().unwrap().comp_type = comp_type;
 
@@ -392,12 +402,13 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                             .expect("shapelet coeff is not bigger than u8::MAX"),
                         value,
                     };
-                    match &mut components.iter_mut().last().unwrap().comp_type {
-                        ComponentType::Shapelet { coeffs, .. } => coeffs.push(shapelet_coeff),
-                        _ => {
-                            return Err(ReadSourceListRtsError::MissingShapeletLine(line_num).into())
-                        }
+                    if !matches!(
+                        components.iter_mut().last().unwrap().comp_type,
+                        ComponentType::Shapelet { .. }
+                    ) {
+                        return Err(ReadSourceListRtsError::MissingShapeletLine(line_num).into());
                     }
+                    shapelet_coeffs.push(shapelet_coeff);
                 }
             }
 
@@ -416,12 +427,26 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 // struct corresponds to the "base source"). RTS source lists
                 // can only have the "list" type.
                 match &components.last().unwrap().flux_type {
-                    TmpFluxDensityType::List(fds) => {
+                    FluxDensityType::List(fds) => {
                         if fds.is_empty() {
                             return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
                         }
                     }
                     _ => unreachable!(),
+                }
+                // If we were reading a SHAPELET2 component, check that shapelet
+                // coefficients were read and populate the boxed slice.
+                if in_shapelet2 {
+                    if shapelet_coeffs.is_empty() {
+                        return Err(ReadSourceListRtsError::NoShapeletCoeffs(line_num).into());
+                    }
+                    match &mut components.last_mut().expect("not empty").comp_type {
+                        ComponentType::Shapelet { coeffs, .. } => {
+                            *coeffs = shapelet_coeffs.clone().into_boxed_slice();
+                            shapelet_coeffs.clear();
+                        }
+                        _ => unreachable!("should be inside a SHAPELET2"),
+                    }
                 }
 
                 if in_component {
@@ -456,15 +481,22 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 if !(-90.0..=90.0).contains(&declination) {
                     return Err(ReadSourceListError::InvalidDec(declination));
                 }
-                let radec = RADec::from_radians(hour_angle * DH2R, declination.to_radians());
+                let radec = RADec::from_degrees(hour_angle * 15.0, declination);
 
-                components.push(TmpComponent {
-                    ra: radec.ra,
-                    dec: radec.dec,
+                components.push(SourceComponent {
+                    radec,
                     // Assume the base source is a point source. If we find
                     // component type information, we can overwrite this.
                     comp_type: ComponentType::Point,
-                    flux_type: TmpFluxDensityType::List(vec![]),
+                    // RTS source lists do not handle curved power laws. We use
+                    // this here as a placeholder stating that it must be
+                    // changed by the time we have finished reading in the
+                    // component.
+                    flux_type: FluxDensityType::CurvedPowerLaw {
+                        si: 0.0,
+                        fd: FluxDensity::default(),
+                        q: 0.0,
+                    },
                 });
 
                 in_shapelet = false;
@@ -479,34 +511,44 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
 
                 // Check that the last component struct added actually has flux
                 // densities. RTS source lists can only have the "list" type.
-                match &mut components.iter_mut().last().unwrap().flux_type {
-                    TmpFluxDensityType::List(fds) => {
-                        if fds.is_empty() {
-                            return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
-                        } else {
-                            // Sort the existing flux densities by frequency.
-                            fds.sort_unstable_by(|a, b| {
-                                a.freq.partial_cmp(&b.freq).unwrap_or_else(|| {
-                                    panic!("Couldn't compare {} to {}", a.freq, b.freq)
-                                })
-                            });
+                let comp = components.iter_mut().last().unwrap();
+                match &mut comp.flux_type {
+                    FluxDensityType::List(fds) => {
+                        // Sort the existing flux densities by frequency.
+                        fds.sort_unstable_by(|a, b| {
+                            a.freq.partial_cmp(&b.freq).unwrap_or_else(|| {
+                                panic!("Couldn't compare {} to {}", a.freq, b.freq)
+                            })
+                        });
+                    }
+                    FluxDensityType::CurvedPowerLaw { .. } => {
+                        return Err(ReadSourceListRtsError::MissingFluxes {
+                            line_num,
+                            comp_type: match comp.comp_type {
+                                ComponentType::Point => "Point",
+                                ComponentType::Gaussian { .. } => "Gaussian",
+                                ComponentType::Shapelet { .. } => "Shapelet",
+                            },
+                            ra: comp.radec.ra,
+                            dec: comp.radec.dec,
                         }
+                        .into());
                     }
                     _ => unreachable!(),
                 }
 
-                // If we were reading a SHAPELET2 component, check that
-                // shapelet coefficients were read.
+                // If we were reading a SHAPELET2 component, check that shapelet
+                // coefficients were read and populate the boxed slice.
                 if in_shapelet2 {
-                    match &components.last().unwrap().comp_type {
+                    if shapelet_coeffs.is_empty() {
+                        return Err(ReadSourceListRtsError::NoShapeletCoeffs(line_num).into());
+                    }
+                    match &mut components.last_mut().expect("not empty").comp_type {
                         ComponentType::Shapelet { coeffs, .. } => {
-                            if coeffs.is_empty() {
-                                return Err(
-                                    ReadSourceListRtsError::NoShapeletCoeffs(line_num).into()
-                                );
-                            }
+                            *coeffs = shapelet_coeffs.clone().into_boxed_slice();
+                            shapelet_coeffs.clear();
                         }
-                        _ => unreachable!(),
+                        _ => unreachable!("should be inside a SHAPELET2"),
                     }
                 }
 
@@ -523,41 +565,27 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     return Err(ReadSourceListCommonError::MissingEndComponent(line_num).into());
                 }
 
-                let mut out_components = vec![];
-                for comp in components {
-                    let flux_type = match comp.flux_type {
-                        TmpFluxDensityType::List(fds) => FluxDensityType::List {
-                            fds: Vec1::try_from_vec(fds).map_err(|_| {
-                                ReadSourceListRtsError::MissingFluxes {
-                                    line_num,
-                                    comp_type: match comp.comp_type {
-                                        ComponentType::Point => "Point",
-                                        ComponentType::Gaussian { .. } => "Gaussian",
-                                        ComponentType::Shapelet { .. } => "Shapelet",
-                                    },
-                                    ra: comp.ra,
-                                    dec: comp.dec,
-                                }
-                            })?,
-                        },
-                        TmpFluxDensityType::PowerLaw { si, fd } => {
-                            FluxDensityType::PowerLaw { si, fd }
+                // Ensure that no curved power law placeholders exist.
+                for comp in &components {
+                    if matches!(comp.flux_type, FluxDensityType::CurvedPowerLaw { .. }) {
+                        return Err(ReadSourceListRtsError::MissingFluxes {
+                            line_num,
+                            comp_type: match comp.comp_type {
+                                ComponentType::Point => "Point",
+                                ComponentType::Gaussian { .. } => "Gaussian",
+                                ComponentType::Shapelet { .. } => "Shapelet",
+                            },
+                            ra: comp.radec.ra,
+                            dec: comp.radec.dec,
                         }
-                        TmpFluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                            FluxDensityType::CurvedPowerLaw { si, fd, q }
-                        }
-                    };
-                    out_components.push(SourceComponent {
-                        radec: RADec::from_radians(comp.ra, comp.dec),
-                        comp_type: comp.comp_type,
-                        flux_type,
-                    })
+                        .into());
+                    }
                 }
 
                 let mut source = Source {
-                    components: Vec1::try_from_vec(out_components).unwrap(),
+                    components: components.clone().into_boxed_slice(),
                 };
-                components = vec![];
+                components.clear();
 
                 // Find any SHAPELET components (not SHAPELET2 components). If
                 // we find one, we ignore it, and we don't need to return an
@@ -575,7 +603,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
 
                     match &c.flux_type {
-                        FluxDensityType::List { fds } => {
+                        FluxDensityType::List(fds) => {
                             for fd in fds {
                                 sum_i += fd.i;
                                 sum_q += fd.q;
@@ -616,8 +644,12 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 if source.components.len() == found_shapelets.len() {
                     return Err(ReadSourceListCommonError::NoNonShapeletComponents(line_num).into());
                 }
-                for &i in &found_shapelets {
-                    source.components.remove(i).unwrap();
+                if !found_shapelets.is_empty() {
+                    let mut comps = source.components.to_vec();
+                    for &i in found_shapelets.iter().rev() {
+                        comps.remove(i);
+                    }
+                    source.components = comps.into_boxed_slice();
                 }
 
                 if source.components.is_empty() && found_shapelets.is_empty() {
@@ -629,7 +661,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 // densities. RTS source lists can only have the "list" type.
                 if !source.components.is_empty() {
                     match &mut source.components.iter_mut().last().unwrap().flux_type {
-                        FluxDensityType::List { fds } => {
+                        FluxDensityType::List(fds) => {
                             if fds.is_empty() {
                                 return Err(
                                     ReadSourceListCommonError::NoFluxDensities(line_num).into()
@@ -647,18 +679,18 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 }
 
-                // If we were reading a SHAPELET2 component, check that
-                // shapelet coefficients were read.
+                // If we were reading a SHAPELET2 component, check that shapelet
+                // coefficients were read and populate the boxed slice.
                 if in_shapelet2 {
-                    match &source.components.last().comp_type {
+                    if shapelet_coeffs.is_empty() {
+                        return Err(ReadSourceListRtsError::NoShapeletCoeffs(line_num).into());
+                    }
+                    match &mut source.components.last_mut().expect("not empty").comp_type {
                         ComponentType::Shapelet { coeffs, .. } => {
-                            if coeffs.is_empty() {
-                                return Err(
-                                    ReadSourceListRtsError::NoShapeletCoeffs(line_num).into()
-                                );
-                            }
+                            *coeffs = shapelet_coeffs.clone().into_boxed_slice();
+                            shapelet_coeffs.clear();
                         }
-                        _ => unreachable!(),
+                        _ => unreachable!("should be inside a SHAPELET2"),
                     }
                 }
 
@@ -712,6 +744,7 @@ mod tests {
     // indoc allows us to write test source lists that look like they would in a
     // file.
     use indoc::indoc;
+    use marlu::constants::DH2R;
 
     use super::*;
 
@@ -739,7 +772,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.5551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 180e6);
                 assert_abs_diff_eq!(fds[0].i, 1.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
@@ -758,7 +791,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.0551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 180e6);
                 assert_abs_diff_eq!(fds[0].i, 2.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
@@ -823,7 +856,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.5551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 180e6);
                 assert_abs_diff_eq!(fds[0].i, 1.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
@@ -838,7 +871,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.6_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 // Note that 180 MHz isn't the first FREQ specified; the list
                 // has been sorted.
                 assert_abs_diff_eq!(fds[0].freq, 170e6);
@@ -860,7 +893,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.0551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].i, 2.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
             }
@@ -978,6 +1011,19 @@ mod tests {
         SOURCE VLA_ForA 3.40182 -37.5551
         FREQ 190e+6 0.123 0.5 0 0
          ENDSOURCE
+        "});
+        let result = parse_source_list(&mut sl);
+        assert!(&result.is_err(), "{:?}", &result);
+    }
+
+    #[test]
+    fn parse_empty_component() {
+        let mut sl = Cursor::new(indoc! {"
+        SOURCE VLA_ForA 3.40182 -37.5551
+        FREQ 190e+6 0.123 0.5 0 0
+        COMPONENT 3.40200 -37.6
+        ENDCOMPONENT
+        ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
         assert!(&result.is_err(), "{:?}", &result);
@@ -1133,6 +1179,11 @@ mod tests {
         GAUSSIAN 90 1.0 0.5
         FREQ 180e+6 0.5 0 0 0
         FREQ 170e+6 1.0 0 0.2 0
+        ENDCOMPONENT
+        COMPONENT 3.40200 -37.6
+        FREQ 185.0e+6 209.81459 0 0 0
+        SHAPELET 68.70984356 3.75 4.0
+        COEFF 0.0 0.0 0.099731291104
         ENDCOMPONENT
         ENDSOURCE
         SOURCE VLA_ForB 3.40182 -37.5551
