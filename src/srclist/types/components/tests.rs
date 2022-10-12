@@ -82,20 +82,18 @@ fn test_split_components() {
     assert_eq!(shapelets.flux_densities.dim(), (1, 0));
 
     // Test one of the component's instrumental flux densities.
-    let fd = FluxDensityType::List {
-        fds: vec1![
-            FluxDensity {
-                freq: 80e6,
-                i: 2.13017,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 240e6,
-                i: 0.33037,
-                ..Default::default()
-            },
-        ],
-    }
+    let fd = FluxDensityType::List(vec1![
+        FluxDensity {
+            freq: 80e6,
+            i: 2.13017,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 240e6,
+            i: 0.33037,
+            ..Default::default()
+        },
+    ])
     .estimate_at_freq(freqs[0]);
     let inst_fd: Jones<f64> = fd.to_inst_stokes();
 

@@ -12,17 +12,20 @@ use std::borrow::Borrow;
 use marlu::{pos::xyz::xyzs_to_cross_uvws, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{FluxDensity, FluxDensityType, SourceList};
 
 /// Information on a source's component.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SourceComponent {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SourceComponent {
     /// Coordinates struct associated with the component.
-    pub radec: RADec,
+    #[serde(flatten)]
+    pub(crate) radec: RADec,
+
     /// The type of component.
-    pub comp_type: ComponentType,
+    pub(crate) comp_type: ComponentType,
+
     /// The flux densities associated with this component.
     pub flux_type: FluxDensityType,
 }
@@ -51,38 +54,78 @@ impl SourceComponent {
 
 /// Source component types supported by hyperdrive.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum ComponentType {
-    #[serde(rename = "point")]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ComponentType {
     Point,
 
-    #[serde(rename = "gaussian")]
     Gaussian {
         /// Major axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         maj: f64,
+
         /// Minor axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         min: f64,
+
         /// Position angle \[radians\]
+        #[serde(serialize_with = "radians_to_degrees")]
+        #[serde(deserialize_with = "degrees_to_radians")]
         pa: f64,
     },
 
     #[serde(rename = "shapelet")]
     Shapelet {
         /// Major axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         maj: f64,
+
         /// Minor axis size \[radians\]
+        #[serde(serialize_with = "radians_to_arcsecs")]
+        #[serde(deserialize_with = "arcsecs_to_radians")]
         min: f64,
+
         /// Position angle \[radians\]
+        #[serde(serialize_with = "radians_to_degrees")]
+        #[serde(deserialize_with = "degrees_to_radians")]
         pa: f64,
+
         /// Shapelet coefficients
         coeffs: Vec<ShapeletCoeff>,
     },
 }
 
+fn radians_to_arcsecs<S: Serializer>(num: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(num.to_degrees() * 3600.0)
+}
+
+fn radians_to_degrees<S: Serializer>(num: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(num.to_degrees())
+}
+
+fn arcsecs_to_radians<'de, D>(d: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num: f64 = Deserialize::deserialize(d)?;
+    Ok(num.to_radians() / 3600.0)
+}
+
+fn degrees_to_radians<'de, D>(d: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num: f64 = Deserialize::deserialize(d)?;
+    Ok(num.to_radians())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ShapeletCoeff {
-    pub n1: usize,
-    pub n2: usize,
-    pub value: f64,
+pub(crate) struct ShapeletCoeff {
+    pub(crate) n1: usize,
+    pub(crate) n2: usize,
+    pub(crate) value: f64,
 }
 
 impl ComponentType {

@@ -4,10 +4,9 @@
 
 //! Common code for reading sky-model source list files.
 
-use std::fs::File;
-use std::path::Path;
+use std::{fs::File, path::Path};
 
-use log::trace;
+use log::{debug, trace};
 
 use super::{error::ReadSourceListError, SourceList, SourceListType};
 use crate::srclist::{ao, hyperdrive, rts, woden};
@@ -23,7 +22,7 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
         path: &Path,
         sl_type: Option<SourceListType>,
     ) -> Result<(SourceList, SourceListType), ReadSourceListError> {
-        trace!("Attempting to read source list");
+        debug!("Attempting to read source list");
         let mut f = std::io::BufReader::new(File::open(path)?);
 
         // If the file extension corresponds to YAML or JSON, we know what to
@@ -34,12 +33,14 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
             .map(|s| s.to_lowercase());
         match ext.as_deref() {
             Some("yaml" | "yml") => {
+                debug!("Read as hyperdrive yaml");
                 return hyperdrive::source_list_from_yaml(&mut f)
-                    .map(|r| (r, SourceListType::Hyperdrive))
+                    .map(|r| (r, SourceListType::Hyperdrive));
             }
             Some("json") => {
+                debug!("Read as hyperdrive json");
                 return hyperdrive::source_list_from_json(&mut f)
-                    .map(|r| (r, SourceListType::Hyperdrive))
+                    .map(|r| (r, SourceListType::Hyperdrive));
             }
             _ => (),
         }

@@ -31,25 +31,23 @@ fn calc_freq_ratio_2() {
 #[test]
 fn estimate_with_negative_fds() {
     // All negative to start with.
-    let fdt = FluxDensityType::List {
-        fds: vec1![
-            FluxDensity {
-                freq: 150e6,
-                i: -1.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 175e6,
-                i: -3.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 200e6,
-                i: -2.0,
-                ..Default::default()
-            }
-        ],
-    };
+    let fdt = FluxDensityType::List(vec1![
+        FluxDensity {
+            freq: 150e6,
+            i: -1.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 175e6,
+            i: -3.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 200e6,
+            i: -2.0,
+            ..Default::default()
+        }
+    ]);
     assert_abs_diff_eq!(
         fdt.estimate_at_freq(140e6),
         FluxDensity {
@@ -97,22 +95,20 @@ fn estimate_with_negative_fds() {
     );
 
     // One negative, one positive.
-    let fdt = FluxDensityType::List {
-        fds: vec1![
-            FluxDensity {
-                freq: 100e6,
-                i: -1.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 200e6,
-                i: 1.0,
-                ..Default::default()
-            },
-        ],
-    };
+    let fdt = FluxDensityType::List(vec1![
+        FluxDensity {
+            freq: 100e6,
+            i: -1.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 200e6,
+            i: 1.0,
+            ..Default::default()
+        },
+    ]);
     let fds = match &fdt {
-        FluxDensityType::List { fds } => fds,
+        FluxDensityType::List(fds) => fds,
         _ => unreachable!(),
     };
     let desired_freq = 90e6;
@@ -151,27 +147,25 @@ fn estimate_with_negative_fds() {
     assert_abs_diff_eq!(result, expected);
 
     // Two negative, one positive.
-    let fdt = FluxDensityType::List {
-        fds: vec1![
-            FluxDensity {
-                freq: 100e6,
-                i: -1.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 150e6,
-                i: -0.5,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 200e6,
-                i: 1.0,
-                ..Default::default()
-            },
-        ],
-    };
+    let fdt = FluxDensityType::List(vec1![
+        FluxDensity {
+            freq: 100e6,
+            i: -1.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 150e6,
+            i: -0.5,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 200e6,
+            i: 1.0,
+            ..Default::default()
+        },
+    ]);
     let fds = match &fdt {
-        FluxDensityType::List { fds } => fds,
+        FluxDensityType::List(fds) => fds,
         _ => unreachable!(),
     };
     let desired_freq = 90e6;

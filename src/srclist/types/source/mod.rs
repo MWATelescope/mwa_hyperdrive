@@ -7,15 +7,18 @@
 #[cfg(test)]
 mod tests;
 
+use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 use super::{FluxDensity, SourceComponent};
 
 /// A collection of components.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Source {
     /// The components associated with the source.
-    pub components: Vec1<SourceComponent>,
+    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    pub(crate) components: Vec1<SourceComponent>,
 }
 
 impl Source {

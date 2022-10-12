@@ -85,14 +85,14 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
             }
 
             match &s1_comp.flux_type {
-                FluxDensityType::List { fds } => {
+                FluxDensityType::List(fds) => {
                     assert!(
                         matches!(s2_comp.flux_type, FluxDensityType::List { .. }),
                         "{s1_comp:?} {s2_comp:?}"
                     );
                     let s1_fds = fds;
                     match &s2_comp.flux_type {
-                        FluxDensityType::List { fds } => {
+                        FluxDensityType::List(fds) => {
                             assert_eq!(s1_fds.len(), fds.len());
                             for (s1_fd, s2_fd) in s1_fds.iter().zip(fds.iter()) {
                                 assert_abs_diff_eq!(s1_fd.freq, s2_fd.freq, epsilon = 1e-10);
@@ -172,7 +172,7 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
 fn hyperdrive_conversion_works() {
     let mut sl = SourceList::new();
     sl.insert(
-        "gaussian".to_string(),
+        "g".to_string(),
         Source {
             components: vec1![SourceComponent {
                 radec: RADec::from_degrees(61.0, -28.0),
@@ -195,7 +195,7 @@ fn hyperdrive_conversion_works() {
         },
     );
     sl.insert(
-        "point".to_string(),
+        "p".to_string(),
         Source {
             components: vec1![SourceComponent {
                 radec: RADec::from_degrees(60.0, -27.0),
@@ -214,7 +214,7 @@ fn hyperdrive_conversion_works() {
         },
     );
     sl.insert(
-        "shapelet".to_string(),
+        "s".to_string(),
         Source {
             components: vec1![SourceComponent {
                 radec: RADec::from_degrees(59.0, -26.0),
@@ -245,6 +245,7 @@ fn hyperdrive_conversion_works() {
     // Write this source list as hyperdrive style into a buffer.
     let mut buf = Cursor::new(vec![]);
     hyperdrive::source_list_to_yaml(&mut buf, &sl, None).unwrap();
+    buf.set_position(0);
     // Read it back in, and test that things are sensible.
     buf.set_position(0);
     let new_sl = hyperdrive::source_list_from_yaml(&mut buf).unwrap();
@@ -335,7 +336,7 @@ fn woden_conversion_works() {
         .flat_map(|(_, s)| &mut s.components)
     {
         comp.flux_type = match &comp.flux_type {
-            FluxDensityType::List { fds } => FluxDensityType::PowerLaw {
+            FluxDensityType::List(fds) => FluxDensityType::PowerLaw {
                 fd: fds[0].clone(),
                 si: DEFAULT_SPEC_INDEX,
             },
@@ -619,24 +620,22 @@ fn get_example_sl() -> SourceList {
         components: vec1![SourceComponent {
             radec: RADec::from_degrees(10.0, -27.0),
             comp_type: ComponentType::Point,
-            flux_type: FluxDensityType::List {
-                fds: vec1![
-                    FluxDensity {
-                        freq: 150e6,
-                        i: 10.0,
-                        q: 0.0,
-                        u: 0.0,
-                        v: 0.0,
-                    },
-                    FluxDensity {
-                        freq: 170e6,
-                        i: 5.0,
-                        q: 1.0,
-                        u: 2.0,
-                        v: 3.0,
-                    },
-                ],
-            },
+            flux_type: FluxDensityType::List(vec1![
+                FluxDensity {
+                    freq: 150e6,
+                    i: 10.0,
+                    q: 0.0,
+                    u: 0.0,
+                    v: 0.0,
+                },
+                FluxDensity {
+                    freq: 170e6,
+                    i: 5.0,
+                    q: 1.0,
+                    u: 2.0,
+                    v: 3.0,
+                },
+            ]),
         }],
     };
     let source2 = Source {

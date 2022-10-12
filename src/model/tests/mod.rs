@@ -104,25 +104,23 @@ lazy_static::lazy_static! {
 }
 
 fn get_list() -> FluxDensityType {
-    FluxDensityType::List {
-        fds: vec1![
-            FluxDensity {
-                freq: 150e6,
-                i: 1.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 175e6,
-                i: 3.0,
-                ..Default::default()
-            },
-            FluxDensity {
-                freq: 200e6,
-                i: 2.0,
-                ..Default::default()
-            },
-        ],
-    }
+    FluxDensityType::List(vec1![
+        FluxDensity {
+            freq: 150e6,
+            i: 1.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 175e6,
+            i: 3.0,
+            ..Default::default()
+        },
+        FluxDensity {
+            freq: 200e6,
+            i: 2.0,
+            ..Default::default()
+        },
+    ])
 }
 
 fn get_power_law() -> FluxDensityType {
