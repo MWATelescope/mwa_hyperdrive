@@ -41,13 +41,11 @@ fn test_1090008640_vis_subtract() {
             components: vec1![SourceComponent {
                 radec: RADec::from_degrees(0.0, -27.0),
                 comp_type: ComponentType::Point,
-                flux_type: FluxDensityType::List {
-                    fds: vec1![FluxDensity {
-                        freq: 150e6,
-                        i: 1.0,
-                        ..Default::default()
-                    }],
-                },
+                flux_type: FluxDensityType::List(vec1![FluxDensity {
+                    freq: 150e6,
+                    i: 1.0,
+                    ..Default::default()
+                }]),
             }],
         },
     );
@@ -64,13 +62,11 @@ fn test_1090008640_vis_subtract() {
             components: vec1![SourceComponent {
                 radec: RADec::from_degrees(1.0, -27.0),
                 comp_type: ComponentType::Point,
-                flux_type: FluxDensityType::List {
-                    fds: vec1![FluxDensity {
-                        freq: 150e6,
-                        i: 1.0,
-                        ..Default::default()
-                    }],
-                },
+                flux_type: FluxDensityType::List(vec1![FluxDensity {
+                    freq: 150e6,
+                    i: 1.0,
+                    ..Default::default()
+                }])
             }],
         },
     );

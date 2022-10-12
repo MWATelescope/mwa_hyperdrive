@@ -35,6 +35,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Bugs were fixed surrounding the reading of RTS solutions.
 
 ### Changed
+- Internal source list types can now be (de)serialised directly. This makes
+  interfacing with YAML and JSON files ~7% faster and simplifies the internal
+  code.
+- More error checks have been added to RTS, AO and WODEN source list reading.
 - The library used for logging has changed. The user experience should only be
   superficial, but piping `hyperdrive` output to a file (e.g. a job output on a
   supercomputer) should display a little better.

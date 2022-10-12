@@ -8,12 +8,11 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_rts.html>
 
 use log::warn;
-use marlu::{constants::DH2R, RADec};
-use vec1::Vec1;
+use marlu::RADec;
+use vec1::{vec1, Vec1};
 
 use crate::srclist::{
     error::{ReadSourceListCommonError, ReadSourceListError, ReadSourceListRtsError},
-    hyperdrive::{TmpComponent, TmpFluxDensityType},
     ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
     SourceList,
 };
@@ -31,7 +30,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
     let mut found_shapelets = vec![];
     let mut component_type_set = false;
     let mut source_name = String::new();
-    let mut components: Vec<TmpComponent> = vec![];
+    let mut components: Vec<SourceComponent> = vec![];
     let mut source_list = SourceList::new();
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
@@ -118,13 +117,20 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         return Err(ReadSourceListError::InvalidDec(declination));
                     }
 
-                    components.push(TmpComponent {
-                        ra: hour_angle * DH2R,
-                        dec: declination.to_radians(),
+                    components.push(SourceComponent {
+                        radec: RADec::from_degrees(hour_angle * 15.0, declination),
                         // Assume the base source is a point source. If we find
                         // component type information, we can overwrite this.
                         comp_type: ComponentType::Point,
-                        flux_type: TmpFluxDensityType::List(vec![]),
+                        // RTS source lists do not handle curved power laws. We
+                        // use this here as a placeholder stating that it must
+                        // be changed by the time we have finished reading in
+                        // the component.
+                        flux_type: FluxDensityType::CurvedPowerLaw {
+                            si: 0.0,
+                            fd: FluxDensity::default(),
+                            q: 0.0,
+                        },
                     });
                 }
             }
@@ -191,7 +197,10 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
 
                 match components.iter_mut().last().map(|c| &mut c.flux_type) {
-                    Some(TmpFluxDensityType::List(fds)) => fds.push(fd),
+                    Some(FluxDensityType::List(fds)) => fds.push(fd),
+                    Some(c @ FluxDensityType::CurvedPowerLaw { .. }) => {
+                        *c = FluxDensityType::List(vec1![fd])
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -410,7 +419,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 // struct corresponds to the "base source"). RTS source lists
                 // can only have the "list" type.
                 match &components.last().unwrap().flux_type {
-                    TmpFluxDensityType::List(fds) => {
+                    FluxDensityType::List(fds) => {
                         if fds.is_empty() {
                             return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
                         }
@@ -450,15 +459,22 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 if !(-90.0..=90.0).contains(&declination) {
                     return Err(ReadSourceListError::InvalidDec(declination));
                 }
-                let radec = RADec::from_radians(hour_angle * DH2R, declination.to_radians());
+                let radec = RADec::from_degrees(hour_angle * 15.0, declination);
 
-                components.push(TmpComponent {
-                    ra: radec.ra,
-                    dec: radec.dec,
+                components.push(SourceComponent {
+                    radec,
                     // Assume the base source is a point source. If we find
                     // component type information, we can overwrite this.
                     comp_type: ComponentType::Point,
-                    flux_type: TmpFluxDensityType::List(vec![]),
+                    // RTS source lists do not handle curved power laws. We use
+                    // this here as a placeholder stating that it must be
+                    // changed by the time we have finished reading in the
+                    // component.
+                    flux_type: FluxDensityType::CurvedPowerLaw {
+                        si: 0.0,
+                        fd: FluxDensity::default(),
+                        q: 0.0,
+                    },
                 });
 
                 in_shapelet = false;
@@ -473,18 +489,28 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
 
                 // Check that the last component struct added actually has flux
                 // densities. RTS source lists can only have the "list" type.
-                match &mut components.iter_mut().last().unwrap().flux_type {
-                    TmpFluxDensityType::List(fds) => {
-                        if fds.is_empty() {
-                            return Err(ReadSourceListCommonError::NoFluxDensities(line_num).into());
-                        } else {
-                            // Sort the existing flux densities by frequency.
-                            fds.sort_unstable_by(|a, b| {
-                                a.freq.partial_cmp(&b.freq).unwrap_or_else(|| {
-                                    panic!("Couldn't compare {} to {}", a.freq, b.freq)
-                                })
-                            });
+                let comp = components.iter_mut().last().unwrap();
+                match &mut comp.flux_type {
+                    FluxDensityType::List(fds) => {
+                        // Sort the existing flux densities by frequency.
+                        fds.sort_unstable_by(|a, b| {
+                            a.freq.partial_cmp(&b.freq).unwrap_or_else(|| {
+                                panic!("Couldn't compare {} to {}", a.freq, b.freq)
+                            })
+                        });
+                    }
+                    FluxDensityType::CurvedPowerLaw { .. } => {
+                        return Err(ReadSourceListRtsError::MissingFluxes {
+                            line_num,
+                            comp_type: match comp.comp_type {
+                                ComponentType::Point => "Point",
+                                ComponentType::Gaussian { .. } => "Gaussian",
+                                ComponentType::Shapelet { .. } => "Shapelet",
+                            },
+                            ra: comp.radec.ra,
+                            dec: comp.radec.dec,
                         }
+                        .into());
                     }
                     _ => unreachable!(),
                 }
@@ -517,41 +543,27 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     return Err(ReadSourceListCommonError::MissingEndComponent(line_num).into());
                 }
 
-                let mut out_components = vec![];
-                for comp in components {
-                    let flux_type = match comp.flux_type {
-                        TmpFluxDensityType::List(fds) => FluxDensityType::List {
-                            fds: Vec1::try_from_vec(fds).map_err(|_| {
-                                ReadSourceListRtsError::MissingFluxes {
-                                    line_num,
-                                    comp_type: match comp.comp_type {
-                                        ComponentType::Point => "Point",
-                                        ComponentType::Gaussian { .. } => "Gaussian",
-                                        ComponentType::Shapelet { .. } => "Shapelet",
-                                    },
-                                    ra: comp.ra,
-                                    dec: comp.dec,
-                                }
-                            })?,
-                        },
-                        TmpFluxDensityType::PowerLaw { si, fd } => {
-                            FluxDensityType::PowerLaw { si, fd }
+                // Ensure that no curved power law placeholders exist.
+                for comp in &components {
+                    if matches!(comp.flux_type, FluxDensityType::CurvedPowerLaw { .. }) {
+                        return Err(ReadSourceListRtsError::MissingFluxes {
+                            line_num,
+                            comp_type: match comp.comp_type {
+                                ComponentType::Point => "Point",
+                                ComponentType::Gaussian { .. } => "Gaussian",
+                                ComponentType::Shapelet { .. } => "Shapelet",
+                            },
+                            ra: comp.radec.ra,
+                            dec: comp.radec.dec,
                         }
-                        TmpFluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                            FluxDensityType::CurvedPowerLaw { si, fd, q }
-                        }
-                    };
-                    out_components.push(SourceComponent {
-                        radec: RADec::from_radians(comp.ra, comp.dec),
-                        comp_type: comp.comp_type,
-                        flux_type,
-                    })
+                        .into());
+                    }
                 }
 
                 let mut source = Source {
-                    components: Vec1::try_from_vec(out_components).unwrap(),
+                    components: Vec1::try_from_vec(components.clone()).unwrap(),
                 };
-                components = vec![];
+                components.clear();
 
                 // Find any SHAPELET components (not SHAPELET2 components). If
                 // we find one, we ignore it, and we don't need to return an
@@ -569,7 +581,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
 
                     match &c.flux_type {
-                        FluxDensityType::List { fds } => {
+                        FluxDensityType::List(fds) => {
                             for fd in fds {
                                 sum_i += fd.i;
                                 sum_q += fd.q;
@@ -623,7 +635,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 // densities. RTS source lists can only have the "list" type.
                 if !source.components.is_empty() {
                     match &mut source.components.iter_mut().last().unwrap().flux_type {
-                        FluxDensityType::List { fds } => {
+                        FluxDensityType::List(fds) => {
                             if fds.is_empty() {
                                 return Err(
                                     ReadSourceListCommonError::NoFluxDensities(line_num).into()
@@ -706,6 +718,7 @@ mod tests {
     // indoc allows us to write test source lists that look like they would in a
     // file.
     use indoc::indoc;
+    use marlu::constants::DH2R;
 
     use super::*;
 
@@ -733,7 +746,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.5551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 180e6);
                 assert_abs_diff_eq!(fds[0].i, 1.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
@@ -752,7 +765,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.0551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 180e6);
                 assert_abs_diff_eq!(fds[0].i, 2.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
@@ -817,7 +830,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.5551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].freq, 180e6);
                 assert_abs_diff_eq!(fds[0].i, 1.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
@@ -832,7 +845,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.6_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 // Note that 180 MHz isn't the first FREQ specified; the list
                 // has been sorted.
                 assert_abs_diff_eq!(fds[0].freq, 170e6);
@@ -854,7 +867,7 @@ mod tests {
         assert_abs_diff_eq!(comp.radec.dec, -37.0551_f64.to_radians());
         assert!(matches!(comp.flux_type, FluxDensityType::List { .. }));
         match &comp.flux_type {
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 assert_abs_diff_eq!(fds[0].i, 2.0);
                 assert_abs_diff_eq!(fds[0].q, 0.0);
             }
@@ -972,6 +985,19 @@ mod tests {
         SOURCE VLA_ForA 3.40182 -37.5551
         FREQ 190e+6 0.123 0.5 0 0
          ENDSOURCE
+        "});
+        let result = parse_source_list(&mut sl);
+        assert!(&result.is_err(), "{:?}", &result);
+    }
+
+    #[test]
+    fn parse_empty_component() {
+        let mut sl = Cursor::new(indoc! {"
+        SOURCE VLA_ForA 3.40182 -37.5551
+        FREQ 190e+6 0.123 0.5 0 0
+        COMPONENT 3.40200 -37.6
+        ENDCOMPONENT
+        ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
         assert!(&result.is_err(), "{:?}", &result);

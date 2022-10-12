@@ -54,7 +54,7 @@ fn write_flux_type<T: std::io::Write>(
     flux_type: &FluxDensityType,
 ) -> Result<(), WriteSourceListError> {
     match &flux_type {
-        FluxDensityType::List { fds } => {
+        FluxDensityType::List(fds) => {
             // Only use the first. WODEN can't use multiple.
             let fd = &fds[0];
             writeln!(

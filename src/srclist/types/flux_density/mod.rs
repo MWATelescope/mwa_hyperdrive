@@ -9,7 +9,7 @@ mod tests;
 
 use log::{log_enabled, trace, Level::Trace};
 use marlu::{c64, Jones};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use vec1::Vec1;
 
 use crate::constants::{DEFAULT_SPEC_INDEX, SPEC_INDEX_CAP};
@@ -114,8 +114,9 @@ impl std::ops::Mul<f64> for FluxDensity {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum FluxDensityType {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FluxDensityType {
     /// $S_\nu = a \nu^{\alpha}$
     PowerLaw {
         /// Spectral index (alpha)
@@ -139,7 +140,8 @@ pub enum FluxDensityType {
     /// A list of flux densities specified at multiple frequencies.
     /// Interpolation/extrapolation is needed to get flux densities at
     /// non-specified frequencies.
-    List { fds: Vec1<FluxDensity> },
+    #[serde(serialize_with = "sort_vector")]
+    List(Vec1<FluxDensity>),
 }
 
 impl FluxDensityType {
@@ -171,7 +173,7 @@ impl FluxDensityType {
                 power_law_component * curved_component
             }
 
-            FluxDensityType::List { fds } => {
+            FluxDensityType::List(fds) => {
                 // `smaller_flux_density` is a bad name given to the component's flux
                 // density corresponding to a frequency smaller than but nearest to the
                 // specified frequency.
@@ -270,6 +272,19 @@ impl FluxDensityType {
 /// Given a spectral index, determine the flux-density ratio of two frequencies.
 pub(crate) fn calc_flux_ratio(desired_freq_hz: f64, cat_freq_hz: f64, spec_index: f64) -> f64 {
     (desired_freq_hz / cat_freq_hz).powf(spec_index)
+}
+
+fn sort_vector<S>(value: &Vec1<FluxDensity>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let mut value = value.clone();
+    value.sort_unstable_by(|a, b| {
+        a.freq
+            .partial_cmp(&b.freq)
+            .unwrap_or_else(|| panic!("Couldn't compare {} to {}", a.freq, b.freq))
+    });
+    value.serialize(serializer)
 }
 
 #[cfg(test)]
