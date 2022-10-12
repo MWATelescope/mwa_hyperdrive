@@ -50,7 +50,7 @@ fn write_flux_type<T: std::io::Write>(
     flux_type: &FluxDensityType,
 ) -> Result<(), WriteSourceListError> {
     match &flux_type {
-        FluxDensityType::List { fds } => {
+        FluxDensityType::List(fds) => {
             for fd in fds {
                 writeln!(
                     buf,

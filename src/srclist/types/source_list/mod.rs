@@ -11,6 +11,7 @@ mod tests;
 use std::ops::{Deref, DerefMut};
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 
 use super::*;
 
@@ -18,7 +19,8 @@ use super::*;
 ///
 /// By making [SourceList] a new type (specifically, an anonymous struct),
 /// useful methods can be put onto it.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SourceList(IndexMap<String, Source>);
 
 impl SourceList {
