@@ -13,6 +13,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `solutions-apply`.
 
 ### Fixed
+- Until now, `hyperdrive` only supported raw MWA data with a frequency
+  resolution of 10, 20 or 40 kHz. It now supports any resolution.
 - When reading from uvfits/measurement set, a metafits' dipole information was
   applied, but perhaps in the wrong order. Order checks are now in place, but
   tile names must be consistent between the metafits and uvfits/MS.

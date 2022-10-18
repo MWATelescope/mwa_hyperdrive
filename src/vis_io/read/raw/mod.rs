@@ -200,29 +200,11 @@ impl RawDataReader {
             }
         }
 
-        let flagged_fine_chans_per_coarse_chan: Vec<usize> =
-            // If the flags aren't specified, use the observation's fine-channel
-            // frequency resolution to set them.
-            match (metafits_context.corr_fine_chan_width_hz, is_mwax) {
-                // 10 kHz, 128 channels.
-                (10000, true) => vec![
-                    0, 1, 2, 3, 4, 5, 6, 7, 120, 121, 122, 123, 124, 125, 126, 127,
-                ],
-                // Include the centre channel.
-                (10000, false) => vec![
-                    0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127,
-                ],
-
-                // 20 kHz, 64 channels.
-                (20000, true) => vec![0, 1, 2, 3, 60, 61, 62, 63],
-                (20000, false) => vec![0, 1, 2, 3, 32, 60, 61, 62, 63],
-
-                // 40 kHz, 32 channels.
-                (40000, true) => vec![0, 1, 30, 31],
-                (40000, false) => vec![0, 1, 16, 30, 31],
-
-                (f, _) => return Err(RawReadError::UnhandledFreqResolutionForFlags(f)),
-        };
+        let flagged_fine_chans_per_coarse_chan = get_80khz_fine_chan_flags_per_coarse_chan(
+            metafits_context.corr_fine_chan_width_hz,
+            metafits_context.num_corr_fine_chans_per_coarse,
+            is_mwax,
+        );
         let flagged_fine_chans = {
             let mut flagged_fine_chans = Vec::with_capacity(
                 flagged_fine_chans_per_coarse_chan.len() * mwalib_context.num_coarse_chans,
@@ -787,4 +769,26 @@ impl VisRead for RawDataReader {
             flagged_fine_chans,
         )
     }
+}
+
+fn get_80khz_fine_chan_flags_per_coarse_chan(
+    fine_chan_width: u32,
+    num_fine_chans_per_coarse_chan: usize,
+    is_mwax: bool,
+) -> Vec<usize> {
+    let mut flags = vec![];
+
+    // Any fractional parts are discarded, meaning e.g. if the resolution was
+    // 79kHz per channel, only 1 edge channel is flagged rather than 2.
+    let num_flagged_fine_chans_per_edge = (80000 / fine_chan_width) as usize;
+    for i in 0..num_flagged_fine_chans_per_edge {
+        flags.push(i);
+        flags.push(num_fine_chans_per_coarse_chan - 1 - i);
+    }
+    // Also put the centre channel in if this isn't an MWAX obs.
+    if !is_mwax {
+        flags.push(num_fine_chans_per_coarse_chan / 2);
+    }
+    flags.sort_unstable();
+    flags
 }

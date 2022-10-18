@@ -22,9 +22,6 @@ pub(crate) enum RawReadError {
     #[error("All of this observation's coarse channels are deemed bad; cannot continue")]
     NoGoodCoarseChannels,
 
-    #[error("No fine-channel flags were specified, and no rule is in place for automatically flagging observations with a fine-channel resolution of {0} Hz")]
-    UnhandledFreqResolutionForFlags(u32),
-
     #[error("The raw MWA data contains no timesteps")]
     NoTimesteps,
 

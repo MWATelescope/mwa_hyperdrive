@@ -932,6 +932,46 @@ fn test_mwaf_flags_cotter() {
 }
 
 #[test]
+fn test_default_flags_per_coarse_chan() {
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(10000, 128, true),
+        &[0, 1, 2, 3, 4, 5, 6, 7, 120, 121, 122, 123, 124, 125, 126, 127]
+    );
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(10000, 128, false),
+        &[0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127]
+    );
+
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(20000, 64, true),
+        &[0, 1, 2, 3, 60, 61, 62, 63]
+    );
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(20000, 64, false),
+        &[0, 1, 2, 3, 32, 60, 61, 62, 63]
+    );
+
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(40000, 32, true),
+        &[0, 1, 30, 31]
+    );
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(40000, 32, false),
+        &[0, 1, 16, 30, 31]
+    );
+
+    // Future proofing?
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(7200, 100, true),
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+    );
+    assert_eq!(
+        get_80khz_fine_chan_flags_per_coarse_chan(7200, 100, false),
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 50, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+    );
+}
+
+#[test]
 fn test_1090008640_calibration_quality() {
     let mut args = get_reduced_1090008640(false, false);
     let temp_dir = tempdir().expect("Couldn't make temp dir");
