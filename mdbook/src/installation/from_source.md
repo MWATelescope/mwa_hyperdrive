@@ -70,6 +70,14 @@ information to do this. Similar, perhaps more direct information is
 
 **Do not** use `apt` to install Rust components.
 
+## Installing `hyperdrive` from crates.io
+
+```shell
+cargo install mwa_hyperdrive --locked
+```
+
+If you want to download the source code and install it yourself, read on.
+
 ## Cloning the `hyperdrive` repo
 
 ```shell
