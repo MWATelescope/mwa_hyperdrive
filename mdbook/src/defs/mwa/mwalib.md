@@ -4,6 +4,14 @@
 raw-data-reading library. `hyperdrive` users usually don't need to concern
 themselves with it, but `mwalib` errors may arise.
 
+`mwalib` can be quite noisy with log messages (particularly at the "trace"
+level); it is possible to suppress these messages by setting an environment
+variable:
+
+```
+RUST_LOG=mwalib=error
+```
+
 ## Errors
 
 ### Missing a key in the metafits file

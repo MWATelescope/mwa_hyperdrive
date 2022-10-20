@@ -80,7 +80,7 @@ pub(crate) fn veto_sources(
                 let separation = comp.radec.separation(phase_centre);
                 if separation > dist_cutoff {
                     if log_enabled!(Trace) {
-                        trace!("A component (source {source_name}) was too far from the phase centre (separation {separation}°)");
+                        trace!("A component (source {source_name}) was too far from the phase centre (separation {}°)", separation.to_degrees());
                     }
                     return Either::Left(Ok(source_name));
                 }
@@ -166,11 +166,15 @@ pub(crate) fn veto_sources(
         "{} sources were vetoed from the source list",
         vetoed_sources.len()
     );
-    trace!(
-        "The following {} sources were vetoed from the source list: {:?}",
-        vetoed_sources.len(),
-        vetoed_sources
-    );
+    if log_enabled!(Trace) {
+        trace!(
+            "The following {} sources were vetoed from the source list:",
+            vetoed_sources.len()
+        );
+        for vetoed_sources in vetoed_sources.chunks(5) {
+            trace!("  {vetoed_sources:?}");
+        }
+    }
 
     // If there are fewer sources than requested after vetoing, we need to bail
     // out.

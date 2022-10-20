@@ -481,7 +481,20 @@ impl SkyModelDetails<'_> {
         if num_components > 10000 {
             warn!("Using more than 10,000 components!");
         }
-        trace!("Using sources: {:?}", self.source_list.keys());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Using sources:");
+            let mut v = Vec::with_capacity(5);
+            for source in self.source_list.keys() {
+                if v.len() == 5 {
+                    trace!("  {v:?}");
+                    v.clear();
+                }
+                v.push(source);
+            }
+            if !v.is_empty() {
+                trace!("  {v:?}");
+            }
+        }
     }
 }
 

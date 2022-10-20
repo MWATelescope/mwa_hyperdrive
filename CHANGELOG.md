@@ -34,6 +34,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Bugs were fixed surrounding the reading of RTS solutions.
 
 ### Changed
+- The library used for logging has changed. The user experience should only be
+  superficial, but piping `hyperdrive` output to a file (e.g. a job output on a
+  supercomputer) should display a little better.
 - The output of `dipole-gains` is now less confusing.
 - When applying solutions, if a baseline/tile doesn't have an appropriate
   solution available, the output Jones matrix is all zeros. This is to avoid

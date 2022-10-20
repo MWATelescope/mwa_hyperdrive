@@ -5,7 +5,6 @@
 //! The main hyperdrive binary.
 
 use clap::{AppSettings, Parser};
-use fern::colors::{Color, ColoredLevelConfig};
 use log::info;
 
 use mwa_hyperdrive::HyperdriveError;
@@ -290,70 +289,37 @@ fn cli() -> Result<(), HyperdriveError> {
     Ok(())
 }
 
-/// Activate a logger. Use colours only if we're on a tty (e.g. a terminal) and
-/// display source lines in log messages with verbosity >= 3.
-// This is pretty dirty code. Can it be cleaned up?
+/// Activate a logger. All log messages are put onto `stdout`. `env_logger`
+/// automatically only uses colours and fancy symbols if we're on a tty (e.g. a
+/// terminal); piped output will be formatted sensibly. Source code lines are
+/// displayed in log messages when verbosity >= 3.
 fn setup_logging(verbosity: u8) -> Result<(), log::SetLoggerError> {
-    let is_a_tty = is_a_tty();
+    let mut builder = env_logger::Builder::from_default_env();
+    builder.target(env_logger::Target::Stdout);
+    builder.format_target(false);
+    match verbosity {
+        0 => builder.filter_level(log::LevelFilter::Info),
+        1 => builder.filter_level(log::LevelFilter::Debug),
+        2 => builder.filter_level(log::LevelFilter::Trace),
+        _ => {
+            builder.filter_level(log::LevelFilter::Trace);
+            builder.format(|buf, record| {
+                use std::io::Write;
 
-    let (high_level_messages, low_level_messages) = if is_a_tty {
-        let colours = ColoredLevelConfig::new()
-            .warn(Color::Red)
-            .info(Color::Green)
-            .debug(Color::Blue)
-            .trace(Color::Yellow);
-        let colours2 = colours;
+                // TODO: Add colours.
+                let timestamp = buf.timestamp();
+                let level = record.level();
+                let target = record.target();
+                let line = record.line().unwrap_or(0);
+                let message = record.args();
 
-        (
-            fern::Dispatch::new().format(move |out, message, record| {
-                out.finish(format_args!(
-                    "{} {:<5} {}",
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    colours.color(record.level()),
-                    message
-                ))
-            }),
-            fern::Dispatch::new().format(move |out, message, record| {
-                out.finish(format_args!(
-                    "{} {} line {:<3} {:<5} {}",
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    record.target(),
-                    record.line().unwrap_or(0),
-                    colours2.color(record.level()),
-                    message
-                ))
-            }),
-        )
-    } else {
-        (
-            fern::Dispatch::new().format(move |out, message, record| {
-                out.finish(format_args!(
-                    "{} {:<5} {}",
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    record.level(),
-                    message
-                ))
-            }),
-            fern::Dispatch::new().format(move |out, message, record| {
-                out.finish(format_args!(
-                    "{} {} line {:<3} {:<5} {}",
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    record.target(),
-                    record.line().unwrap_or(0),
-                    record.level(),
-                    message
-                ))
-            }),
-        )
+                writeln!(buf, "[{timestamp} {level} {target}:{line}] {message}")
+            })
+        }
     };
+    builder.init();
 
-    let logger = match verbosity {
-        0 => high_level_messages.level(log::LevelFilter::Info),
-        1 => high_level_messages.level(log::LevelFilter::Debug),
-        2 => high_level_messages.level(log::LevelFilter::Trace),
-        _ => low_level_messages.level(log::LevelFilter::Trace),
-    };
-    logger.chain(std::io::stdout()).apply()
+    Ok(())
 }
 
 /// Write many info-level log lines of how this executable was compiled.
@@ -373,8 +339,4 @@ fn display_build_info() {
     info!("            {}", BUILT_TIME_UTC);
     info!("         with compiler {}", RUSTC_VERSION);
     info!("");
-}
-
-fn is_a_tty() -> bool {
-    atty::is(atty::Stream::Stdout) || atty::is(atty::Stream::Stderr)
 }
