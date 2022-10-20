@@ -27,7 +27,7 @@ use vec1::{vec1, Vec1};
 
 use super::{calibrate, calibrate_timeblocks, CalVis, IncompleteSolutions};
 use crate::{
-    averaging::{Chanblock, Fence, Timeblock},
+    averaging::{channels_to_chanblocks, timesteps_to_timeblocks, Chanblock, Fence, Timeblock},
     beam::create_no_beam_object,
     cli::di_calibrate::DiCalParams,
     math::{is_prime, TileBaselineFlags},
@@ -999,6 +999,46 @@ fn test_1090008640_calibrate_model_ms() {
         Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
         epsilon = 1e-8
     );
+}
+
+#[test]
+fn test_multiple_timeblocks_behave() {
+    let timestamps = vec1![
+        Epoch::from_gpst_seconds(1090008640.0),
+        Epoch::from_gpst_seconds(1090008642.0),
+        Epoch::from_gpst_seconds(1090008644.0),
+    ];
+    let num_timesteps = timestamps.len();
+    let timesteps_to_use = Vec1::try_from_vec((0..num_timesteps).into_iter().collect()).unwrap();
+    let num_tiles = 5;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let num_chanblocks = 1;
+
+    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+
+    let timeblocks = timesteps_to_timeblocks(&timestamps, 1, &timesteps_to_use);
+    let fences = channels_to_chanblocks(&[150000000], Some(40e3), 1, &HashSet::new());
+
+    let (incomplete_sols, _) = calibrate_timeblocks(
+        vis_data.view(),
+        vis_model.view(),
+        &timeblocks,
+        &fences.first().unwrap().chanblocks,
+        10,
+        1e-8,
+        1e-4,
+        false,
+        false,
+    );
+
+    // The solutions for all timeblocks should be the same.
+    let expected = Array3::from_elem(
+        (num_timesteps, num_tiles, num_chanblocks),
+        Jones::identity() * 2.0,
+    );
+    assert_abs_diff_eq!(incomplete_sols.di_jones, expected, epsilon = 1e-14);
 }
 
 /// Given calibration parameters and visibilities, this function tests that
