@@ -8,7 +8,7 @@ themselves with it, but `mwalib` errors may arise.
 level); it is possible to suppress these messages by setting an environment
 variable:
 
-```
+```shell
 RUST_LOG=mwalib=error
 ```
 
