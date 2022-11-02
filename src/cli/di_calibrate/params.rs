@@ -893,6 +893,9 @@ impl DiCalParams {
             }
             (baseline_weights, num_flagged_baselines)
         };
+        if num_flagged_baselines == baseline_weights.len() {
+            return Err(DiCalArgsError::AllBaselinesFlaggedFromUvwCutoffs);
+        }
 
         // Make sure the calibration thresholds are sensible.
         let mut stop_threshold =

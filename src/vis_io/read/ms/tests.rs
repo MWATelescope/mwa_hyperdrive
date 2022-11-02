@@ -597,6 +597,7 @@ fn test_trunc_data() {
     }
     args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
     args.ignore_input_data_tile_flags = true;
+    args.uvw_min = Some("0L".to_string());
     let result = args.into_params();
     assert!(result.is_ok(), "{:?}", result.err());
     let params = result.unwrap();

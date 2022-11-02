@@ -660,6 +660,10 @@ impl VisSimParams {
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
         )?;
+        if source_list.is_empty() {
+            return Err(VisSimulateError::NoSourcesAfterVeto);
+        }
+
         messages::SkyModelDetails {
             source_list: &source_list,
         }

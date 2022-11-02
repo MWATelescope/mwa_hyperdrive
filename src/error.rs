@@ -201,6 +201,7 @@ impl From<VisSimulateError> for HyperdriveError {
             VisSimulateError::RaInvalid
             | VisSimulateError::DecInvalid
             | VisSimulateError::OnlyOneRAOrDec
+            | VisSimulateError::NoSourcesAfterVeto
             | VisSimulateError::FineChansZero
             | VisSimulateError::FineChansWidthTooSmall
             | VisSimulateError::ZeroTimeSteps
@@ -349,6 +350,7 @@ impl From<DiCalArgsError> for HyperdriveError {
             | DiCalArgsError::NoTiles
             | DiCalArgsError::NoChannels
             | DiCalArgsError::NoTimesteps
+            | DiCalArgsError::AllBaselinesFlaggedFromUvwCutoffs
             | DiCalArgsError::UnavailableTimestep { .. }
             | DiCalArgsError::DuplicateTimesteps
             | DiCalArgsError::TileFlag(_)
