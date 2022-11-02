@@ -59,6 +59,11 @@ pub(crate) enum DiCalArgsError {
     #[error("The data either contains no frequency channels or all channels are flagged")]
     NoChannels,
 
+    #[error(
+        "All baselines were flagged due to UVW cutoffs. Try adjusting the UVW min and/or max."
+    )]
+    AllBaselinesFlaggedFromUvwCutoffs,
+
     #[error("The data either contains no timesteps or no timesteps are being used")]
     NoTimesteps,
 
