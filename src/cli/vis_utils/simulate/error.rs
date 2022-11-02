@@ -44,6 +44,9 @@ pub(crate) enum VisSimulateError {
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
     BadArrayPosition { pos: Vec<f64> },
 
+    #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
+    NoSourcesAfterVeto,
+
     #[cfg(feature = "cuda")]
     #[error("CUDA error: {0}")]
     CudaError(String),
