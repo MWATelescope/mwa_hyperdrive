@@ -529,7 +529,7 @@ fn calibrate_benchmarks(c: &mut Criterion) {
 
     // use mwa_hyperdrive::{
     //     averaging::{Chanblock, Timeblock},
-    //     calibrate::di::calibrate_timeblocks,
+    //     di_calibrate::calibrate_timeblocks,
     // };
 
     // let num_timesteps = 10;
