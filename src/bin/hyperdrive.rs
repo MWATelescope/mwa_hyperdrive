@@ -17,7 +17,7 @@ fn main() {
     // prints the debug representation of the error. The code below prints the
     // "display" or human readable representation of the error.
     if let Err(e) = cli() {
-        eprintln!("Error: {}", e);
+        eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }

@@ -257,7 +257,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(InputFileError::DoesNotExist(_)) => (),
-            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
     }
@@ -286,7 +286,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(InputFileError::CouldNotRead(_)) => (),
-            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
 
@@ -311,7 +311,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(InputFileError::NotRecognised(_)) => (),
-            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
     }
@@ -323,7 +323,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(InputFileError::DoesNotExist(_)) => (),
-            Err(e) => panic!("Unexpected error kind! {:?}", e),
+            Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
     }

@@ -865,7 +865,7 @@ impl UvfitsMetadata {
         // We expect that the PZERO corresponding to the second date (if
         // available) is 0.
         if let Some(d2) = indices.date2 {
-            let pzero = format!("PZERO{}", d2);
+            let pzero = format!("PZERO{d2}");
             let key: Option<String> = get_optional_fits_key!(uvfits, hdu, &pzero)?;
             match key {
                 Some(key) => match key.parse::<f32>() {
@@ -992,8 +992,7 @@ impl Indices {
         // Accumulate the "PTYPE" keys.
         let mut ptypes = Vec::with_capacity(12);
         for i in 1.. {
-            let ptype: Option<String> =
-                get_optional_fits_key!(uvfits, hdu, &format!("PTYPE{}", i))?;
+            let ptype: Option<String> = get_optional_fits_key!(uvfits, hdu, &format!("PTYPE{i}"))?;
             match ptype {
                 Some(ptype) => ptypes.push(ptype),
 

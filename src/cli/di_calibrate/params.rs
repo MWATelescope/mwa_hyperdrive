@@ -946,7 +946,7 @@ impl DiCalParams {
             // kinds.
             let sl_type_specified = source_list_type.is_none();
             let sl_type = source_list_type.and_then(|t| SourceListType::from_str(t.as_ref()).ok());
-            let (sl, sl_type) = match read_source_list_file(&sl_pb, sl_type) {
+            let (sl, sl_type) = match read_source_list_file(sl_pb, sl_type) {
                 Ok((sl, sl_type)) => (sl, sl_type),
                 Err(e) => return Err(DiCalArgsError::from(e)),
             };

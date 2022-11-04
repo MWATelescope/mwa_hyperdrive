@@ -263,7 +263,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         let sl_type = source_list_type
             .as_ref()
             .and_then(|t| SourceListType::from_str(t.as_ref()).ok());
-        let (sl, _) = match read_source_list_file(&pb, sl_type) {
+        let (sl, _) = match read_source_list_file(pb, sl_type) {
             Ok((sl, sl_type)) => (sl, sl_type),
             Err(e) => return Err(VisSubtractError::from(e)),
         };
@@ -326,7 +326,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 }
             };
 
-            let input_data = MsReader::new(&ms, meta, array_position)?;
+            let input_data = MsReader::new(ms, meta, array_position)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from measurement set {}",
@@ -362,7 +362,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 }
             };
 
-            let input_data = UvfitsReader::new(&uvfits, meta)?;
+            let input_data = UvfitsReader::new(uvfits, meta)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from uvfits {}",

@@ -88,9 +88,7 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
                 FluxDensityType::List { fds } => {
                     assert!(
                         matches!(s2_comp.flux_type, FluxDensityType::List { .. }),
-                        "{:?} {:?}",
-                        s1_comp,
-                        s2_comp
+                        "{s1_comp:?} {s2_comp:?}"
                     );
                     let s1_fds = fds;
                     match &s2_comp.flux_type {

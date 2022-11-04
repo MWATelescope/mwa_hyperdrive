@@ -38,7 +38,7 @@ fn write_then_read_uvfits(autos: bool) {
         .into_iter()
         .map(|i| {
             (
-                format!("Tile{}", i),
+                format!("Tile{i}"),
                 XyzGeodetic {
                     x: 1.0 * i as f64,
                     y: 2.0 * i as f64,
@@ -686,7 +686,7 @@ fn test_timestep_reading() {
         array_pos,
         phase_centre,
         Duration::from_total_nanoseconds(0),
-        Some(&format!("synthesized test data {}", obsid)),
+        Some(&format!("synthesized test data {obsid}")),
         tile_names,
         tile_xyzs,
         None,

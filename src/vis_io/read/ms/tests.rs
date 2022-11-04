@@ -467,7 +467,7 @@ fn test_timestep_reading() {
     let marlu_obs_ctx = MarluObsContext {
         sched_start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
         sched_duration: ((num_timesteps + 1) as f64 * vis_ctx.int_time),
-        name: Some(format!("MWA obsid {}", obsid)),
+        name: Some(format!("MWA obsid {obsid}")),
         phase_centre,
         pointing_centre: Some(phase_centre),
         array_pos,

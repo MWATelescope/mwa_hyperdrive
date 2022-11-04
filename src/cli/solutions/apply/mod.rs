@@ -441,10 +441,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
                 "There are {} tiles with only NaN for solutions; considering them as flagged tiles",
                 sols.flagged_tiles.len()
             );
-            sols.flagged_tiles
-                .iter()
-                .map(|i| format!("{}", i))
-                .collect()
+            sols.flagged_tiles.iter().map(|i| format!("{i}")).collect()
         };
         if let Some(user_tile_flags) = tile_flags {
             debug!("Using additional user tile flags: {user_tile_flags:?}");

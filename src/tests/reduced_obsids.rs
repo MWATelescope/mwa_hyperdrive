@@ -44,8 +44,7 @@ pub(crate) fn get_reduced_1090008640(use_fee_beam: bool, include_mwaf: bool) -> 
     );
     assert!(
         PathBuf::from(&srclist).exists(),
-        "Could not find {}, which is required for this test",
-        srclist
+        "Could not find {srclist}, which is required for this test"
     );
 
     DiCalArgs {
@@ -79,8 +78,7 @@ pub(crate) fn get_reduced_1090008640_ms() -> DiCalArgs {
             .to_string();
     assert!(
         PathBuf::from(&srclist).exists(),
-        "Could not find {}, which is required for this test",
-        srclist
+        "Could not find {srclist}, which is required for this test"
     );
 
     DiCalArgs {
@@ -114,8 +112,7 @@ pub(crate) fn get_reduced_1090008640_uvfits() -> DiCalArgs {
             .to_string();
     assert!(
         PathBuf::from(&srclist).exists(),
-        "Could not find {}, which is required for this test",
-        srclist
+        "Could not find {srclist}, which is required for this test"
     );
 
     DiCalArgs {

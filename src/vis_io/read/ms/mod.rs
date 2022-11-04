@@ -51,7 +51,7 @@ pub(crate) enum MsFlavour {
 /// base table.
 pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MsReadError> {
     match Table::open(
-        &format!("{}/{}", ms.display(), table.unwrap_or("")),
+        format!("{}/{}", ms.display(), table.unwrap_or("")),
         TableOpenMode::Read,
     ) {
         Ok(t) => Ok(t),

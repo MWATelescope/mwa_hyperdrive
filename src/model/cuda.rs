@@ -445,7 +445,7 @@ impl<'a> SkyModellerCuda<'a> {
                 i_unflagged_tile += 1;
                 continue;
             }
-            tile_index_to_unflagged_tile_index_map.push(i_unflagged_tile as i32);
+            tile_index_to_unflagged_tile_index_map.push(i_unflagged_tile);
             i_unflagged_tile += 1;
         }
         let d_tile_index_to_unflagged_tile_index_map =

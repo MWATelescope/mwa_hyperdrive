@@ -36,25 +36,25 @@ fn test_parse_time_str_with_units() {
             time_format_str.to_lowercase(),
             time_format_str.to_uppercase(),
         ] {
-            let result = parse_time(&format!("1{}", time_format_str));
+            let result = parse_time(&format!("1{time_format_str}"));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 1.0);
             assert_eq!(pair.1, Some(time_format));
 
-            let result = parse_time(&format!("1.0{}", time_format_str));
+            let result = parse_time(&format!("1.0{time_format_str}"));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 1.0);
             assert_eq!(pair.1, Some(time_format));
 
-            let result = parse_time(&format!(" 1.0{} ", time_format_str));
+            let result = parse_time(&format!(" 1.0{time_format_str} "));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 1.0);
             assert_eq!(pair.1, Some(time_format));
 
-            let result = parse_time(&format!(" 1.0 {} ", time_format_str));
+            let result = parse_time(&format!(" 1.0 {time_format_str} "));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 1.0);
@@ -93,25 +93,25 @@ fn test_parse_freq_str_with_units() {
             freq_format_str.to_lowercase(),
             freq_format_str.to_uppercase(),
         ] {
-            let result = parse_freq(&format!("20{}", freq_format_str));
+            let result = parse_freq(&format!("20{freq_format_str}"));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 20.0);
             assert_eq!(pair.1, Some(freq_format));
 
-            let result = parse_freq(&format!("10.0{}", freq_format_str));
+            let result = parse_freq(&format!("10.0{freq_format_str}"));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 10.0);
             assert_eq!(pair.1, Some(freq_format));
 
-            let result = parse_freq(&format!(" 40.0{} ", freq_format_str));
+            let result = parse_freq(&format!(" 40.0{freq_format_str} "));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 40.0);
             assert_eq!(pair.1, Some(freq_format));
 
-            let result = parse_freq(&format!(" 40.0 {} ", freq_format_str));
+            let result = parse_freq(&format!(" 40.0 {freq_format_str} "));
             assert!(result.is_ok(), "{:?}", result.unwrap_err());
             let pair = result.unwrap();
             assert_abs_diff_eq!(pair.0, 40.0);
@@ -131,10 +131,10 @@ fn test_parse_wavelength_str() {
         ] {
             // Iterate over a bunch of inputs.
             for (mut expected, input) in [
-                (20.0, format!("20{}", wavelength_format_str)),
-                (10.0, format!("10.0{}", wavelength_format_str)),
-                (40.0, format!(" 40.0{} ", wavelength_format_str)),
-                (40.0, format!(" 40.0 {} ", wavelength_format_str)),
+                (20.0, format!("20{wavelength_format_str}")),
+                (10.0, format!("10.0{wavelength_format_str}")),
+                (40.0, format!(" 40.0{wavelength_format_str} ")),
+                (40.0, format!(" 40.0 {wavelength_format_str} ")),
             ] {
                 let result = parse_wavelength(&input);
                 assert!(result.is_ok(), "{:?}", result.unwrap_err());

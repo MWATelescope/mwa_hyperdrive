@@ -58,7 +58,7 @@ impl DipoleGainsArgs {
                         bad_y.push(i);
                     }
                 });
-                bad_string.push_str(&format!("    {:>3}: {:>8}: ", tile_num, tile_name));
+                bad_string.push_str(&format!("    {tile_num:>3}: {tile_name:>8}: "));
                 if !bad_x.is_empty() {
                     bad_string.push_str(&format!("X {:?}", &bad_x));
                 }

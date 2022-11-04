@@ -244,19 +244,19 @@ mod plotting {
             let mut output_phases = PathBuf::new();
 
             if num_timeblocks > 1 {
-                let filename = format!("{}_amps_{:03}.png", filename_base, timeblock);
+                let filename = format!("{filename_base}_amps_{timeblock:03}.png");
                 output_amps.set_file_name(&filename);
                 output_filenames.push(filename);
 
-                let filename = format!("{}_phases_{:03}.png", filename_base, timeblock);
+                let filename = format!("{filename_base}_phases_{timeblock:03}.png");
                 output_phases.set_file_name(&filename);
                 output_filenames.push(filename);
             } else {
-                let filename = format!("{}_amps.png", filename_base);
+                let filename = format!("{filename_base}_amps.png");
                 output_amps.set_file_name(&filename);
                 output_filenames.push(filename);
 
-                let filename = format!("{}_phases.png", filename_base);
+                let filename = format!("{filename_base}_phases.png");
                 output_phases.set_file_name(&filename);
                 output_filenames.push(filename);
             }
@@ -358,12 +358,12 @@ mod plotting {
 
             let amps_root_area = amps_root_area
                 .shrink((15, 0), (X_PIXELS - 15, Y_PIXELS))
-                .titled(&format!("Amps for {}", obs_name), title_style.clone())
+                .titled(&format!("Amps for {obs_name}"), title_style.clone())
                 .map_err(|e| DrawError::Plotters(Box::new(e)))?;
             let amps_tile_plots = amps_root_area.split_evenly(split);
 
             let phases_root_area = phases_root_area
-                .titled(&format!("Phases for {}", obs_name), title_style.clone())
+                .titled(&format!("Phases for {obs_name}"), title_style.clone())
                 .map_err(|e| DrawError::Plotters(Box::new(e)))?;
             let phase_tile_plots = phases_root_area.split_evenly(split);
 
@@ -451,7 +451,7 @@ mod plotting {
             {
                 let tile_name = match tile_names {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile]),
-                    None => format!("{}", i_tile),
+                    None => format!("{i_tile}"),
                 };
                 plot_amps(
                     &amp_tile_plot,
@@ -470,7 +470,7 @@ mod plotting {
             {
                 let tile_name = match tile_names {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile]),
-                    None => format!("{}", i_tile),
+                    None => format!("{i_tile}"),
                 };
                 plot_phases(
                     &phase_tile_plot,

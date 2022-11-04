@@ -154,7 +154,7 @@ pub(crate) fn write_vis<'a>(
         start_timestamp,
         int_time: time_res,
         num_sel_chans: fine_chan_freqs.len(),
-        start_freq_hz: *fine_chan_freqs.first() as f64,
+        start_freq_hz: *fine_chan_freqs.first(),
         freq_resolution_hz: freq_res,
         sel_baselines: unflagged_baseline_tile_pairs.to_vec(),
         avg_time: time_average_factor,

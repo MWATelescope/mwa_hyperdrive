@@ -681,9 +681,9 @@ fn test_1090008640_di_calibrate_uses_array_position() {
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
         "--array-position",
-            &format!("{}", exp_long_deg),
-            &format!("{}", exp_lat_deg),
-            &format!("{}", exp_height_m),
+            &format!("{exp_long_deg}"),
+            &format!("{exp_lat_deg}"),
+            &format!("{exp_height_m}"),
         "--no-progress-bars",
     ]);
 
@@ -716,8 +716,8 @@ fn test_1090008640_di_calibrate_array_pos_requires_3_args() {
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
         "--array-position",
-            &format!("{}", exp_long_deg),
-            &format!("{}", exp_lat_deg),
+            &format!("{exp_long_deg}"),
+            &format!("{exp_lat_deg}"),
     ]);
 
     assert!(result.is_err());
@@ -746,8 +746,8 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--metafits", metafits,
         "--source-list", &srclist,
         "--output-model-files", &format!("{}", model.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars",
     ]);
@@ -905,8 +905,8 @@ fn test_1090008640_calibrate_model_ms() {
         "--metafits", metafits,
         "--source-list", &srclist,
         "--output-model-files", &format!("{}", model.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--no-progress-bars"
     ]);
 
@@ -1105,19 +1105,11 @@ pub(crate) fn test_1090008640_quality(params: DiCalParams, cal_vis: CalVis) {
         panic!(
             r#"
 Calibration quality has changed. This test expects:
-  {} chanblocks with 50 iterations (got {}),
-  {} chanblocks with 42 iterations (got {}),
-  chanblocks {:?} to need 42 iterations (got {:?}), and
-  no chanblocks to finish in less than {} iterations (got {}).
-"#,
-            expected_count_50,
-            count_50,
-            expected_count_42,
-            count_42,
-            expected_chanblocks_42,
-            chanblocks_42,
-            fewest_iterations,
-            expected_fewest_iterations
+  {expected_count_50} chanblocks with 50 iterations (got {count_50}),
+  {expected_count_42} chanblocks with 42 iterations (got {count_42}),
+  chanblocks {expected_chanblocks_42:?} to need 42 iterations (got {chanblocks_42:?}), and
+  no chanblocks to finish in less than {expected_fewest_iterations} iterations (got {fewest_iterations}).
+"#
         );
     }
 }

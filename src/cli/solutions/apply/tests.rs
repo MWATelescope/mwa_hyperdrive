@@ -433,7 +433,7 @@ fn test_solutions_apply_trivial_ms() {
     let mut data = cal_args.data.unwrap().into_iter();
     let metafits = data.next().unwrap();
     let ms = data.next().unwrap();
-    let input_data = MsReader::new(&ms, Some(&metafits), None).unwrap();
+    let input_data = MsReader::new(ms, Some(&metafits), None).unwrap();
 
     test_solutions_apply_trivial(Box::new(input_data).deref(), &metafits)
 }
@@ -444,7 +444,7 @@ fn test_solutions_apply_trivial_uvfits() {
     let mut data = cal_args.data.unwrap().into_iter();
     let metafits = data.next().unwrap();
     let uvfits = data.next().unwrap();
-    let input_data = UvfitsReader::new(&uvfits, Some(&metafits)).unwrap();
+    let input_data = UvfitsReader::new(uvfits, Some(&metafits)).unwrap();
 
     test_solutions_apply_trivial(Box::new(input_data).deref(), &metafits)
 }
@@ -560,7 +560,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_avg_freq() {
         "--data", metafits, gpubox,
         "--solutions", &format!("{}", solutions.display()),
         "--outputs", &format!("{}", out_vis_path.display()),
-        "--freq-average", &format!("{}", freq_avg_factor),
+        "--freq-average", &format!("{freq_avg_factor}"),
         "--no-progress-bars",
     ]);
 
@@ -674,7 +674,7 @@ fn test_1090008640_solutions_apply_correct_vis() {
     ];
     let flag_strings = flagged_tiles
         .iter()
-        .map(|f| format!("{}", f))
+        .map(|f| format!("{f}"))
         .collect::<Vec<_>>();
     if !flag_strings.is_empty() {
         args.push("--tile-flags");

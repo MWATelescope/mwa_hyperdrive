@@ -74,8 +74,8 @@ fn test_1090008640_vis_simulate() {
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
         "--output-model-files", &format!("{}", output_path.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars"
     ]);
