@@ -85,8 +85,8 @@ fn test_1090008640_vis_subtract() {
         "--metafits", metafits,
         "--source-list", &format!("{}", source_list_1.display()),
         "--output-model-files", &format!("{}", model_1.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--no-progress-bars"
     ]);
     let result = sim_args.run(false);
@@ -98,8 +98,8 @@ fn test_1090008640_vis_subtract() {
         "--metafits", metafits,
         "--source-list", &format!("{}", source_list_2.display()),
         "--output-model-files", &format!("{}", model_2.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--no-progress-bars"
     ]);
     let result = sim_args.run(false);

@@ -109,7 +109,6 @@ impl Fence {
     fn _get_freqs(&self) -> Vec<f64> {
         if let Some(freq_res) = self._freq_res {
             (0..self._get_total_num_chanblocks())
-                .into_iter()
                 .map(|i_chanblock| self._first_freq + i_chanblock as f64 * freq_res)
                 .collect()
         } else {

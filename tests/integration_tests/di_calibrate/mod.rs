@@ -62,8 +62,7 @@ fn test_1090008640_woden() {
             found_a_chanblock_line = true;
             assert!(
                 !line.contains("failed"),
-                "Expected no lines with 'failed': {}",
-                line
+                "Expected no lines with 'failed': {line}"
             );
         }
     }
@@ -125,8 +124,7 @@ fn test_1090008640_woden() {
             found_a_chanblock_line = true;
             assert!(
                 !line.contains("failed"),
-                "Expected no lines with 'failed': {}",
-                line
+                "Expected no lines with 'failed': {line}"
             );
         }
     }

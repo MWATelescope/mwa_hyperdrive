@@ -51,7 +51,7 @@ pub(crate) enum MsFlavour {
 /// base table.
 pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MsReadError> {
     match Table::open(
-        &format!("{}/{}", ms.display(), table.unwrap_or("")),
+        format!("{}/{}", ms.display(), table.unwrap_or("")),
         TableOpenMode::Read,
     ) {
         Ok(t) => Ok(t),
@@ -325,7 +325,6 @@ impl MsReader {
                     _ => 0..0,
                 }
             }
-            .into_iter()
             .collect();
 
             // Neither Birli nor cotter utilise the "FLAG_ROW" column of the
@@ -393,7 +392,7 @@ impl MsReader {
                 Some(time_res)
             };
 
-            let all_timesteps = (0..timestamps.len()).into_iter().collect();
+            let all_timesteps = (0..timestamps.len()).collect();
             let all_timesteps =
                 Vec1::try_from_vec(all_timesteps).map_err(|_| MsReadError::NoTimesteps {
                     file: ms.display().to_string(),

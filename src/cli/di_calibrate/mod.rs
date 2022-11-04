@@ -84,13 +84,13 @@ lazy_static::lazy_static! {
         format!("The maximum UVW length to use. This value must have a unit annotated. Allowed units: {}. No default.", *WAVELENGTH_FORMATS);
 
     static ref MAX_ITERATIONS_HELP: String =
-        format!("The maximum number of times to iterate when performing \"MitchCal\". Default: {}", DEFAULT_MAX_ITERATIONS);
+        format!("The maximum number of times to iterate when performing \"MitchCal\". Default: {DEFAULT_MAX_ITERATIONS}");
 
     static ref STOP_THRESHOLD_HELP: String =
-        format!("The threshold at which we stop iterating when performing \"MitchCal\". Default: {:e}", DEFAULT_STOP_THRESHOLD);
+        format!("The threshold at which we stop iterating when performing \"MitchCal\". Default: {DEFAULT_STOP_THRESHOLD:e}");
 
     static ref MIN_THRESHOLD_HELP: String =
-        format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Even when this threshold is exceeded, iteration will continue until max iterations or the stop threshold is reached. Default: {:e}", DEFAULT_MIN_THRESHOLD);
+        format!("The minimum threshold to satisfy convergence when performing \"MitchCal\". Even when this threshold is exceeded, iteration will continue until max iterations or the stop threshold is reached. Default: {DEFAULT_MIN_THRESHOLD:e}");
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]

@@ -471,7 +471,7 @@ impl VisSimParams {
         };
         // Read the source list.
         // TODO: Allow the user to specify a source list type.
-        let source_list = match read_source_list_file(&sl_pb, None) {
+        let source_list = match read_source_list_file(sl_pb, None) {
             Ok((sl, sl_type)) => {
                 debug!("Successfully parsed {}-style source list", sl_type);
                 sl
@@ -718,7 +718,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
     } = VisSimParams::new(args)?;
 
     let timesteps = {
-        let timesteps = (0..timestamps.len()).into_iter().collect::<Vec<_>>();
+        let timesteps = (0..timestamps.len()).collect::<Vec<_>>();
         // unwrap is safe because `timestamps` is never empty.
         Vec1::try_from_vec(timesteps).unwrap()
     };
@@ -819,7 +819,6 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 .copied()
                 .sorted()
                 .collect::<Vec<_>>();
-            let fine_chan_freqs = fine_chan_freqs.mapped_ref(|&f| f as f64);
             let marlu_mwa_obs_context = MwaObsContext::from_mwalib(&metafits);
 
             let result = write_vis(

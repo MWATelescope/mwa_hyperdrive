@@ -201,7 +201,6 @@ fn read_no_files(
     }
 
     let antenna_to_rf_input_on_2_map: BTreeMap<_, _> = (0..total_num_tiles)
-        .into_iter()
         .map(|i_tile| {
             let i_input = context
                 .rf_inputs
@@ -218,7 +217,6 @@ fn read_no_files(
 
     // Get the flagged tile indices from the flagged RF inputs.
     let flagged_tiles: Vec<_> = (0..total_num_tiles)
-        .into_iter()
         .filter(|i_tile| {
             let i_input = context
                 .rf_inputs
@@ -280,7 +278,6 @@ fn read_no_files(
         })
         .collect::<HashSet<_>>();
     let mut flagged_fine_channels: HashSet<u16> = (0..total_num_fine_freq_chans)
-        .into_iter()
         .filter(|i_chan| !unflagged_fine_chans.contains(i_chan))
         .map(|i_chan| {
             let i_chan: u16 = i_chan.try_into().unwrap();

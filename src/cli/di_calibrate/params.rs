@@ -613,7 +613,6 @@ impl DiCalParams {
         }
         if log_enabled!(Debug) {
             let unflagged_fine_chans: Vec<_> = (0..obs_context.fine_chan_freqs.len())
-                .into_iter()
                 .filter(|i_chan| !flagged_fine_chans.contains(i_chan))
                 .collect();
             match unflagged_fine_chans.as_slice() {
@@ -946,7 +945,7 @@ impl DiCalParams {
             // kinds.
             let sl_type_specified = source_list_type.is_none();
             let sl_type = source_list_type.and_then(|t| SourceListType::from_str(t.as_ref()).ok());
-            let (sl, sl_type) = match read_source_list_file(&sl_pb, sl_type) {
+            let (sl, sl_type) = match read_source_list_file(sl_pb, sl_type) {
                 Ok((sl, sl_type)) => (sl, sl_type),
                 Err(e) => return Err(DiCalArgsError::from(e)),
             };

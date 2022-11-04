@@ -855,7 +855,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -890,7 +890,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -927,7 +927,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -963,7 +963,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -1007,7 +1007,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -1061,7 +1061,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
         let err_message = format!("{}", result.unwrap_err());
         assert_eq!(
             err_message,

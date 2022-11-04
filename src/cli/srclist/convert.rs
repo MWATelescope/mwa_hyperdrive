@@ -182,7 +182,7 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
                 "Using coarse channel frequencies [MHz]: {}",
                 coarse_chan_freqs
                     .iter()
-                    .map(|cc_freq_hz| format!("{:.2}", *cc_freq_hz as f64 / 1e6))
+                    .map(|cc_freq_hz| format!("{:.2}", *cc_freq_hz / 1e6))
                     .join(", ")
             );
 

@@ -96,9 +96,8 @@ fn test_calibrate_trivial() {
 
         let mut di_jones_rev = di_jones.slice_mut(s![timeblock, .., ..]).reversed_axes();
 
-        for (chanblock_index, mut di_jones_rev) in (0..num_chanblocks)
-            .into_iter()
-            .zip(di_jones_rev.outer_iter_mut())
+        for (chanblock_index, mut di_jones_rev) in
+            (0..num_chanblocks).zip(di_jones_rev.outer_iter_mut())
         {
             let range = s![
                 time_range_start..time_range_end,
@@ -169,9 +168,8 @@ fn test_calibrate_trivial_with_flags() {
 
         let mut di_jones_rev = di_jones.slice_mut(s![timeblock, .., ..]).reversed_axes();
 
-        for (chanblock_index, mut di_jones_rev) in (0..num_chanblocks)
-            .into_iter()
-            .zip(di_jones_rev.outer_iter_mut())
+        for (chanblock_index, mut di_jones_rev) in
+            (0..num_chanblocks).zip(di_jones_rev.outer_iter_mut())
         {
             let range = s![
                 time_range_start..time_range_end,
@@ -222,9 +220,8 @@ fn test_calibrate_trivial_with_flags() {
 
         let mut di_jones_rev = di_jones.slice_mut(s![timeblock, .., ..]).reversed_axes();
 
-        for (chanblock_index, mut di_jones_rev) in (0..num_chanblocks)
-            .into_iter()
-            .zip(di_jones_rev.outer_iter_mut())
+        for (chanblock_index, mut di_jones_rev) in
+            (0..num_chanblocks).zip(di_jones_rev.outer_iter_mut())
         {
             let range = s![
                 time_range_start..time_range_end,
@@ -375,7 +372,6 @@ fn incomplete_to_complete_trivial() {
     let num_chanblocks = params.fences.first().chanblocks.len();
 
     let incomplete_di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
-        .into_iter()
         .map(|i| Jones::identity() * (i + 1) as f64 * if is_prime(i) { 1.0 } else { 0.5 })
         .collect();
     let incomplete_di_jones = Array3::from_shape_vec(
@@ -439,7 +435,6 @@ fn incomplete_to_complete_flags_simple() {
     let num_chanblocks = params.fences.first().chanblocks.len();
 
     let di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
-        .into_iter()
         .map(|i| Jones::identity() * (i + 1) as f64 * if is_prime(i) { 1.0 } else { 0.5 })
         .collect();
     let incomplete_di_jones =
@@ -512,7 +507,6 @@ fn incomplete_to_complete_flags_simple2() {
     let num_tiles = total_num_tiles - params.tile_baseline_flags.flagged_tiles.len();
 
     let incomplete_di_jones: Vec<Jones<f64>> = (0..num_tiles * num_chanblocks)
-        .into_iter()
         .map(|i| Jones::identity() * (i + 1) as f64 * if is_prime(i) { 1.0 } else { 0.5 })
         .collect();
     let incomplete_di_jones = Array3::from_shape_vec(
@@ -591,10 +585,7 @@ fn incomplete_to_complete_flags_complex() {
     // Cower at my evil, awful code.
     let mut primes = vec1![2];
     while primes.len() < num_tiles * num_chanblocks {
-        let next = (*primes.last() + 1..)
-            .into_iter()
-            .find(|&i| is_prime(i))
-            .unwrap();
+        let next = (*primes.last() + 1..).find(|&i| is_prime(i)).unwrap();
         primes.push(next);
     }
     let incomplete_di_jones = Array3::from_shape_vec(
@@ -681,9 +672,9 @@ fn test_1090008640_di_calibrate_uses_array_position() {
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
         "--array-position",
-            &format!("{}", exp_long_deg),
-            &format!("{}", exp_lat_deg),
-            &format!("{}", exp_height_m),
+            &format!("{exp_long_deg}"),
+            &format!("{exp_lat_deg}"),
+            &format!("{exp_height_m}"),
         "--no-progress-bars",
     ]);
 
@@ -716,8 +707,8 @@ fn test_1090008640_di_calibrate_array_pos_requires_3_args() {
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
         "--array-position",
-            &format!("{}", exp_long_deg),
-            &format!("{}", exp_lat_deg),
+            &format!("{exp_long_deg}"),
+            &format!("{exp_lat_deg}"),
     ]);
 
     assert!(result.is_err());
@@ -746,8 +737,8 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--metafits", metafits,
         "--source-list", &srclist,
         "--output-model-files", &format!("{}", model.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars",
     ]);
@@ -905,8 +896,8 @@ fn test_1090008640_calibrate_model_ms() {
         "--metafits", metafits,
         "--source-list", &srclist,
         "--output-model-files", &format!("{}", model.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--no-progress-bars"
     ]);
 
@@ -1009,7 +1000,7 @@ fn test_multiple_timeblocks_behave() {
         Epoch::from_gpst_seconds(1090008644.0),
     ];
     let num_timesteps = timestamps.len();
-    let timesteps_to_use = Vec1::try_from_vec((0..num_timesteps).into_iter().collect()).unwrap();
+    let timesteps_to_use = Vec1::try_from_vec((0..num_timesteps).collect()).unwrap();
     let num_tiles = 5;
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = 1;
@@ -1105,19 +1096,11 @@ pub(crate) fn test_1090008640_quality(params: DiCalParams, cal_vis: CalVis) {
         panic!(
             r#"
 Calibration quality has changed. This test expects:
-  {} chanblocks with 50 iterations (got {}),
-  {} chanblocks with 42 iterations (got {}),
-  chanblocks {:?} to need 42 iterations (got {:?}), and
-  no chanblocks to finish in less than {} iterations (got {}).
-"#,
-            expected_count_50,
-            count_50,
-            expected_count_42,
-            count_42,
-            expected_chanblocks_42,
-            chanblocks_42,
-            fewest_iterations,
-            expected_fewest_iterations
+  {expected_count_50} chanblocks with 50 iterations (got {count_50}),
+  {expected_count_42} chanblocks with 42 iterations (got {count_42}),
+  chanblocks {expected_chanblocks_42:?} to need 42 iterations (got {chanblocks_42:?}), and
+  no chanblocks to finish in less than {expected_fewest_iterations} iterations (got {fewest_iterations}).
+"#
         );
     }
 }

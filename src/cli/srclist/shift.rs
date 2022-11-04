@@ -112,16 +112,13 @@ fn shift<P: AsRef<Path>, S: AsRef<str>>(
                 let input_path_base = source_list_file
                     .file_stem()
                     .and_then(|os_str| os_str.to_str())
-                    .map(|str| str.to_string())
                     .expect("Input file didn't have a filename stem");
                 let input_path_ext = source_list_file
                     .extension()
                     .and_then(|os_str| os_str.to_str())
                     .expect("Input file didn't have an extension");
-                let mut output_path = input_path_base;
-                output_path.push_str("_shifted");
-                output_path.push_str(&format!(".{}", input_path_ext));
-                let output_pb = PathBuf::from(output_path);
+                let output_pb =
+                    PathBuf::from(format!("{input_path_base}_shifted.{input_path_ext}"));
                 trace!("Writing shifted source list to {}", output_pb.display());
                 output_pb
             }
@@ -225,7 +222,7 @@ fn shift<P: AsRef<Path>, S: AsRef<str>>(
                 "Using coarse channel frequencies [MHz]: {}",
                 coarse_chan_freqs
                     .iter()
-                    .map(|cc_freq_hz| format!("{:.2}", *cc_freq_hz as f64 / 1e6))
+                    .map(|cc_freq_hz| format!("{:.2}", *cc_freq_hz / 1e6))
                     .join(", ")
             );
 

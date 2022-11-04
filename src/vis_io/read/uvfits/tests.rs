@@ -30,15 +30,13 @@ fn write_then_read_uvfits(autos: bool) {
     let fine_chan_width_hz = 80000.0;
     let num_chans = 16;
     let fine_chan_freqs_hz: Vec<f64> = (0..num_chans)
-        .into_iter()
         .map(|i| 150e6 + fine_chan_width_hz * i as f64)
         .collect();
 
     let (tile_names, xyzs): (Vec<String>, Vec<XyzGeodetic>) = (0..num_tiles)
-        .into_iter()
         .map(|i| {
             (
-                format!("Tile{}", i),
+                format!("Tile{i}"),
                 XyzGeodetic {
                     x: 1.0 * i as f64,
                     y: 2.0 * i as f64,
@@ -686,7 +684,7 @@ fn test_timestep_reading() {
         array_pos,
         phase_centre,
         Duration::from_total_nanoseconds(0),
-        Some(&format!("synthesized test data {}", obsid)),
+        Some(&format!("synthesized test data {obsid}")),
         tile_names,
         tile_xyzs,
         None,

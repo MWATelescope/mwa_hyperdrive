@@ -703,7 +703,7 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
             )
         };
         if let Some(p) = prefix {
-            format!("{} {}", p, suffix)
+            format!("{p} {suffix}")
         } else {
             suffix
         }
@@ -714,7 +714,7 @@ fn range_or_comma_separated(collection: &[usize], prefix: Option<&str>) -> Strin
             .collect::<Vec<_>>()
             .join(", ");
         if let Some(p) = prefix {
-            format!("{} [{}]", p, suffix)
+            format!("{p} [{suffix}]")
         } else {
             suffix
         }

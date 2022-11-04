@@ -598,7 +598,7 @@ impl RawDataReader {
                 -(*weight).abs()
             } else {
                 (*weight).abs()
-            } as f32;
+            };
         }
 
         let mut weights = weight_array.remove_axis(Axis(0));

@@ -387,9 +387,9 @@ fn read_vis_data(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn model_vis<'a>(
+fn model_vis(
     params: &DiCalParams,
-    vis_model_slices: AxisIterMut<'a, Jones<f32>, Dim<[usize; 2]>>,
+    vis_model_slices: AxisIterMut<Jones<f32>, Dim<[usize; 2]>>,
     time_res: Duration,
     freq_res: f64,
     tx_model: Sender<VisTimestep>,
@@ -964,8 +964,7 @@ fn calibrate_timeblock(
         while new_converged_count > 0 && total_converged_count != num_chanblocks {
             retry_iter += 1;
             progress_bar.println(format!(
-                "*** Re-calibrating failed chanblocks iteration {} ***",
-                retry_iter
+                "*** Re-calibrating failed chanblocks iteration {retry_iter} ***"
             ));
 
             // Iterate over all the calibration results until we find one
@@ -1039,7 +1038,7 @@ fn calibrate_timeblock(
                         new_cal_result.chanblock = Some(chanblock);
                         new_cal_result.i_chanblock = Some(i_chanblock);
 
-                        let mut status_str = format!("Chanblock {:>3}", chanblock);
+                        let mut status_str = format!("Chanblock {chanblock:>3}");
                         if num_unflagged_tiles - new_cal_result.num_failed <= 4 {
                             status_str.push_str(&format!(
                                 ": failed    ({:>2}): Too many antenna solutions failed ({})",

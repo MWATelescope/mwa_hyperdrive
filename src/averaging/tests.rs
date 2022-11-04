@@ -13,7 +13,6 @@ use crate::math::average_epoch;
 #[test]
 fn test_timesteps_to_timeblocks() {
     let all_timestamps: Vec<Epoch> = (0..20)
-        .into_iter()
         .map(|i| Epoch::from_gpst_seconds(1065880128.0 + (2 * i) as f64))
         .collect();
     let all_timestamps = Vec1::try_from_vec(all_timestamps).unwrap();
@@ -30,7 +29,7 @@ fn test_timesteps_to_timeblocks() {
         .zip([1065880132.0, 1065880134.0, 1065880136.0, 1065880138.0])
     {
         assert_eq!(timeblock.range.len(), expected_indices.len());
-        for (timestep, expected_index) in timeblock.range.into_iter().zip(expected_indices) {
+        for (timestep, expected_index) in timeblock.range.zip(expected_indices) {
             assert_eq!(timestep, expected_index);
         }
 
@@ -53,7 +52,7 @@ fn test_timesteps_to_timeblocks() {
         .zip([1065880133.0, 1065880137.0])
     {
         assert_eq!(timeblock.range.len(), expected_indices.len());
-        for (timestep, expected_index) in timeblock.range.into_iter().zip(expected_indices) {
+        for (timestep, expected_index) in timeblock.range.zip(expected_indices) {
             assert_eq!(timestep, expected_index);
         }
 
@@ -76,8 +75,7 @@ fn test_timesteps_to_timeblocks() {
         .zip([1065880134.0, 1065880138.0])
     {
         assert_eq!(timeblock.range.len(), expected_indices.len());
-        for (timestep, expected_index) in timeblock.range.clone().into_iter().zip(expected_indices)
-        {
+        for (timestep, expected_index) in timeblock.range.clone().zip(expected_indices) {
             assert_eq!(timestep, expected_index);
         }
 
@@ -105,7 +103,7 @@ fn test_timesteps_to_timeblocks() {
         timeblocks.into_iter().zip([[0, 1, 2]]).zip([1065880150.0])
     {
         assert_eq!(timeblock.range.len(), expected_indices.len());
-        for (timestep, expected_index) in timeblock.range.into_iter().zip(expected_indices) {
+        for (timestep, expected_index) in timeblock.range.zip(expected_indices) {
             assert_eq!(timestep, expected_index);
         }
 
