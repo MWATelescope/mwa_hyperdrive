@@ -441,14 +441,11 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
                 "There are {} tiles with only NaN for solutions; considering them as flagged tiles",
                 sols.flagged_tiles.len()
             );
-            sols.flagged_tiles
-                .iter()
-                .map(|i| format!("{}", i))
-                .collect()
+            sols.flagged_tiles.iter().map(|i| format!("{i}")).collect()
         };
         if let Some(user_tile_flags) = tile_flags {
             debug!("Using additional user tile flags: {user_tile_flags:?}");
-            sol_flags.extend(user_tile_flags.into_iter());
+            sol_flags.extend(user_tile_flags);
         }
         if ignore_input_data_tile_flags {
             debug!("Not using flagged tiles in the input data");
@@ -734,7 +731,7 @@ pub(super) fn apply_solutions_inner(
             let result = read_vis(
                 obs_context,
                 tile_baseline_flags,
-                input_data.deref(),
+                input_data,
                 timesteps,
                 no_autos,
                 tx_data,
@@ -783,7 +780,6 @@ pub(super) fn apply_solutions_inner(
                 obs_context.get_total_num_tiles()
             };
             let unflagged_tiles_iter = (0..total_num_tiles)
-                .into_iter()
                 .filter(|i_tile| !tile_baseline_flags.flagged_tiles.contains(i_tile))
                 .map(|i_tile| (i_tile, i_tile));
             // Form (sorted) unflagged baselines from our cross- and

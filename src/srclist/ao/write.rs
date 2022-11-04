@@ -60,7 +60,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
         }
 
         writeln!(buf, "source {{")?;
-        writeln!(buf, "  name \"{}\"", name)?;
+        writeln!(buf, "  name \"{name}\"")?;
         for c in &source.components {
             writeln!(buf, "  component {{")?;
 
@@ -74,7 +74,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
                     })
                 }
             };
-            writeln!(buf, "    type {}", comp_type)?;
+            writeln!(buf, "    type {comp_type}")?;
 
             writeln!(
                 buf,
@@ -103,7 +103,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
                         "      fluxdensity Jy {} {} {} {}",
                         fd.i, fd.q, fd.u, fd.v
                     )?;
-                    writeln!(buf, "      spectral-index {{ {} 0.00 }}", si)?;
+                    writeln!(buf, "      spectral-index {{ {si} 0.00 }}")?;
                     writeln!(buf, "    }}")?;
                 }
 

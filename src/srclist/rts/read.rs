@@ -721,7 +721,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 2);
 
@@ -772,7 +772,7 @@ mod tests {
         ENDSOURCE"});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 2);
 
@@ -805,7 +805,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 2);
 
@@ -887,7 +887,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 2);
     }
@@ -907,7 +907,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 2);
     }
@@ -926,7 +926,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
         let comps = &sl.get("VLA_ForA").unwrap().components;
@@ -1087,7 +1087,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
         let err_message = format!("{}", result.unwrap_err());
         assert_eq!(
             err_message,
@@ -1107,7 +1107,7 @@ mod tests {
         "});
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_err(), "{:?}", result);
+        assert!(result.is_err(), "{result:?}");
         let err_message = format!("{}", result.unwrap_err());
         assert_eq!(
             err_message,
@@ -1141,7 +1141,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl["VLA_ForA"].components.len(), 1);
         assert_eq!(sl["VLA_ForB"].components.len(), 2);
@@ -1189,7 +1189,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         let source = &sl["VLA_ForA"];
 

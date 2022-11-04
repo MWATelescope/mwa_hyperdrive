@@ -192,16 +192,13 @@ fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
                 let input_path_base = input_path
                     .file_stem()
                     .and_then(|os_str| os_str.to_str())
-                    .map(|str| str.to_string())
                     .expect("Input file didn't have a filename stem");
                 let input_path_ext = input_path
                     .extension()
                     .and_then(|os_str| os_str.to_str())
                     .expect("Input file didn't have an extension");
-                let mut output_path = input_path_base;
-                output_path.push_str(&format!("_{}", num_sources));
-                output_path.push_str(&format!(".{}", input_path_ext));
-                let output_pb = PathBuf::from(output_path);
+                let output_pb =
+                    PathBuf::from(format!("{input_path_base}_{num_sources}.{input_path_ext}"));
                 debug!("Writing reduced source list to {}", output_pb.display());
                 output_pb
             }
@@ -245,7 +242,7 @@ fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
             "Using coarse channel frequencies [MHz]: {}",
             coarse_chan_freqs
                 .iter()
-                .map(|cc_freq_hz| format!("{:.2}", *cc_freq_hz as f64 / 1e6))
+                .map(|cc_freq_hz| format!("{:.2}", *cc_freq_hz / 1e6))
                 .join(", ")
         );
 

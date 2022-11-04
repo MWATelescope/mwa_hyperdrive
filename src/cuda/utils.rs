@@ -58,7 +58,7 @@ pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), Stri
                 .to_str()
                 .expect("CUDA device name isn't UTF-8")
                 .to_string(),
-            capability: format!("{}.{}", device_major, device_minor),
+            capability: format!("{device_major}.{device_minor}"),
             total_global_mem: total_global_mem / 1048576,
         };
 

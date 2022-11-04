@@ -48,7 +48,6 @@ fn make_solutions() -> CalibrationSolutions {
         flagged_chanblocks: flagged_chanblocks.into_iter().map(|i| i as u16).collect(),
         chanblock_freqs: Vec1::try_from_vec(
             (0..num_chanblocks)
-                .into_iter()
                 .map(|i| ((i + 10) * 10) as f64)
                 .collect(),
         )
@@ -75,21 +74,13 @@ fn make_solutions() -> CalibrationSolutions {
             cable_length: false,
             geometric: false,
         }),
-        tile_names: Vec1::try_from_vec(
-            (0..num_tiles)
-                .into_iter()
-                .map(|i| format!("tile{i:03}"))
-                .collect(),
-        )
-        .ok(),
+        tile_names: Vec1::try_from_vec((0..num_tiles).map(|i| format!("tile{i:03}")).collect())
+            .ok(),
         dipole_gains: Some(Array2::ones((num_tiles, 32)).into_shared()),
         dipole_delays: Some(Array2::zeros((num_tiles, 16)).into_shared()),
         beam_file: None,
         calibration_results: Some(Array2::from_elem((num_timeblocks, num_chanblocks), 1e-6)),
-        baseline_weights: Vec1::try_from_vec(
-            (0..num_baselines).into_iter().map(|i| i as _).collect(),
-        )
-        .ok(),
+        baseline_weights: Vec1::try_from_vec((0..num_baselines).map(|i| i as _).collect()).ok(),
         uvw_min: Some(82.0),
         uvw_max: Some(f64::INFINITY),
         freq_centroid: Some(182e6),

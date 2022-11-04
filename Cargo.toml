@@ -12,7 +12,7 @@ readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
 repository = "https://github.com/MWATelescope/mwa_hyperdrive"
 homepage = "https://mwatelescope.github.io/mwa_hyperdrive"
-exclude = [".github/*", "test_files/*"]
+exclude = [".github/*", "test_files/*", "examples/*", "mdbook/*"]
 
 [profile.release]
 panic = "abort"

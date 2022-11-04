@@ -113,7 +113,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
                     node_num: *node_num,
                 }
             })?;
-            let mut r = receiver_channel_to_data
+            let r = receiver_channel_to_data
                 .entry(*receiver_number)
                 .or_insert((*node_num, None, None));
             r.1 = Some(
@@ -133,7 +133,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
                     node_num: *node_num,
                 }
             })?;
-            let mut r = receiver_channel_to_data
+            let r = receiver_channel_to_data
                 .entry(*receiver_number)
                 // Yeah, if we have to insert here, it meant there was no
                 // corresponding DI_JM file. Handle that error soon.
@@ -201,7 +201,6 @@ fn read_no_files(
     }
 
     let antenna_to_rf_input_on_2_map: BTreeMap<_, _> = (0..total_num_tiles)
-        .into_iter()
         .map(|i_tile| {
             let i_input = context
                 .rf_inputs
@@ -218,7 +217,6 @@ fn read_no_files(
 
     // Get the flagged tile indices from the flagged RF inputs.
     let flagged_tiles: Vec<_> = (0..total_num_tiles)
-        .into_iter()
         .filter(|i_tile| {
             let i_input = context
                 .rf_inputs
@@ -280,7 +278,6 @@ fn read_no_files(
         })
         .collect::<HashSet<_>>();
     let mut flagged_fine_channels: HashSet<u16> = (0..total_num_fine_freq_chans)
-        .into_iter()
         .filter(|i_chan| !unflagged_fine_chans.contains(i_chan))
         .map(|i_chan| {
             let i_chan: u16 = i_chan.try_into().unwrap();

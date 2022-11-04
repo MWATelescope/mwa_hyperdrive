@@ -17,7 +17,7 @@ lazy_static::lazy_static! {
         format!("The 'flavour' of poly-phase filter bank corrections applied to raw MWA data. The default is '{}'. Valid flavours are: {}", DEFAULT_PFB_FLAVOUR, *PFB_FLAVOURS);
 
     pub(crate) static ref ARRAY_POSITION_HELP: String =
-        format!("The Earth longitude, latitude, and height of the instrumental array [degrees, degrees, meters]. Default (MWA): ({}°, {}°, {}m)", MWA_LONG_DEG, MWA_LAT_DEG, MWA_HEIGHT_M);
+        format!("The Earth longitude, latitude, and height of the instrumental array [degrees, degrees, meters]. Default (MWA): ({MWA_LONG_DEG}°, {MWA_LAT_DEG}°, {MWA_HEIGHT_M}m)");
 
     pub(crate) static ref DIPOLE_DELAYS_HELP: String =
         format!("If specified, use these dipole delays for the MWA pointing. e.g. 0 1 2 3 0 1 2 3 0 1 2 3 0 1 2 3");
@@ -26,12 +26,10 @@ lazy_static::lazy_static! {
         format!("The type of sky-model source list. Valid types are: {}. If not specified, all types are attempted", *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 
     pub(crate) static ref SOURCE_DIST_CUTOFF_HELP: String =
-        format!("Specifies the maximum distance from the phase centre a source can be [degrees]. Default: {}",
-                DEFAULT_CUTOFF_DISTANCE);
+        format!("Specifies the maximum distance from the phase centre a source can be [degrees]. Default: {DEFAULT_CUTOFF_DISTANCE}");
 
     pub(crate) static ref VETO_THRESHOLD_HELP: String =
-        format!("Specifies the minimum Stokes XX+YY a source must have before it gets vetoed [Jy]. Default: {}",
-                DEFAULT_VETO_THRESHOLD);
+        format!("Specifies the minimum Stokes XX+YY a source must have before it gets vetoed [Jy]. Default: {DEFAULT_VETO_THRESHOLD}");
 
     pub(crate) static ref SOURCE_LIST_INPUT_TYPE_HELP: String =
         format!("Specifies the type of the input source list. Currently supported types: {}",

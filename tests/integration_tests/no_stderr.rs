@@ -81,8 +81,8 @@ fn test_vis_simulate_and_vis_subtract_no_stderr() {
             "--metafits", &metafits,
             "--source-list", args.source_list.as_ref().unwrap(),
             "--output-model-files", &format!("{}", model_path.display()),
-            "--num-timesteps", &format!("{}", num_timesteps),
-            "--num-fine-channels", &format!("{}", num_chans),
+            "--num-timesteps", &format!("{num_timesteps}"),
+            "--num-fine-channels", &format!("{num_chans}"),
             "--no-progress-bars"
         ])
         .ok();

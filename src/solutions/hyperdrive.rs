@@ -902,16 +902,12 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         hdu.write_col(
             &mut fptr,
             "Antenna",
-            &(0..total_num_tiles)
-                .into_iter()
-                .map(|i| i as u32)
-                .collect::<Vec<_>>(),
+            &(0..total_num_tiles).map(|i| i as u32).collect::<Vec<_>>(),
         )?;
         hdu.write_col(
             &mut fptr,
             "Flag",
             &(0..total_num_tiles)
-                .into_iter()
                 .map(|i_tile| flagged_tiles.contains(&i_tile).into())
                 .collect::<Vec<i32>>(),
         )?;
@@ -947,7 +943,6 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
             &mut fptr,
             "Index",
             &(0..di_jones.len_of(Axis(2)))
-                .into_iter()
                 .map(|i_cb| i_cb as u32)
                 .collect::<Vec<u32>>(),
         )?;
@@ -955,7 +950,6 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
             &mut fptr,
             "Flag",
             &(0..di_jones.len_of(Axis(2)))
-                .into_iter()
                 .map(|i_cb| flagged_chanblocks.contains(&(i_cb as u16)).into())
                 .collect::<Vec<i32>>(),
         )?;

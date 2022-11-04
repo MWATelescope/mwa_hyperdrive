@@ -74,8 +74,8 @@ fn test_1090008640_vis_simulate() {
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
         "--output-model-files", &format!("{}", output_path.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars"
     ]);
@@ -277,13 +277,13 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let args = get_reduced_1090008640(false, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
-    let sim_args = VisSimulateArgs::parse_from(&[
+    let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
         "--output-model-files", &format!("{}", output_path.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--no-progress-bars",
         "--cpu",
     ]);
@@ -326,13 +326,13 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let args = get_reduced_1090008640(false, false);
     let metafits = args.data.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
-    let sim_args = VisSimulateArgs::parse_from(&[
+    let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
         "--metafits", &metafits,
         "--source-list", &args.source_list.unwrap(),
         "--output-model-files", &format!("{}", output_path.display()),
-        "--num-timesteps", &format!("{}", num_timesteps),
-        "--num-fine-channels", &format!("{}", num_chans),
+        "--num-timesteps", &format!("{num_timesteps}"),
+        "--num-fine-channels", &format!("{num_chans}"),
         "--no-progress-bars"
     ]);
 

@@ -58,12 +58,12 @@ fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(filename: T, dir: U) -> (Pat
 
 fn serialise_cal_args_toml(args: &DiCalArgs, file: &mut File) {
     let ser = toml::to_string_pretty(&args).expect("couldn't serialise DiCalArgs as toml");
-    write!(file, "{}", ser).unwrap();
+    write!(file, "{ser}").unwrap();
 }
 
 fn serialise_cal_args_json(args: &DiCalArgs, file: &mut File) {
     let ser = serde_json::to_string_pretty(&args).expect("couldn't serialise DiCalArgs as json");
-    write!(file, "{}", ser).unwrap();
+    write!(file, "{ser}").unwrap();
 }
 
 /// Get the calibration arguments associated with the obsid 1090008640 (raw MWA
@@ -101,8 +101,7 @@ fn get_reduced_1090008640(use_fee_beam: bool, include_mwaf: bool) -> DiCalArgs {
     );
     assert!(
         PathBuf::from(&srclist).exists(),
-        "Could not find {}, which is required for this test",
-        srclist
+        "Could not find {srclist}, which is required for this test"
     );
 
     DiCalArgs {

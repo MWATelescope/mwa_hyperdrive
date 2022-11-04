@@ -427,8 +427,7 @@ mod tests {
         for &name in &["J000042-342358", "J000105-165921", "J000143-305731"] {
             assert!(
                 &source_list.contains_key(name),
-                "Expected to find {} in the source list after vetoing",
-                name
+                "Expected to find {name} in the source list after vetoing"
             );
         }
     }

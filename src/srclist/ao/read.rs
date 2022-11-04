@@ -681,7 +681,7 @@ source {
         );
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -723,7 +723,7 @@ source {
         );
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -774,7 +774,7 @@ source {
         );
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -833,7 +833,7 @@ source {
         );
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
@@ -918,7 +918,7 @@ source {
         );
 
         let result = parse_source_list(&mut sl);
-        assert!(result.is_ok(), "{:?}", result);
+        assert!(result.is_ok(), "{result:?}");
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
 
