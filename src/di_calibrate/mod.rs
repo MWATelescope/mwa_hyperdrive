@@ -466,7 +466,7 @@ fn model_vis(
 /// because all of them are necessary for `calibrate_timeblocks`, which is the
 /// only function to create `IncompleteSolutions`. To "complete" the solutions,
 /// extra metadata may be supplied.
-pub(crate) struct IncompleteSolutions<'a> {
+pub struct IncompleteSolutions<'a> {
     /// Direction-independent calibration solutions *for only unflagged data*.
     /// The first dimension is timeblock, the second is unflagged tile, the
     /// third is unflagged chanblock.
@@ -708,7 +708,7 @@ impl<'a> IncompleteSolutions<'a> {
 /// calibrated together (as if they all belonged to a single timeblock) before
 /// any timeblocks are individually calibrated. This decision can be revisited.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn calibrate_timeblocks<'a>(
+pub fn calibrate_timeblocks<'a>(
     vis_data: ArrayView3<Jones<f32>>,
     vis_model: ArrayView3<Jones<f32>>,
     timeblocks: &'a Vec1<Timeblock>,
@@ -1091,7 +1091,7 @@ fn calibrate_timeblock(
 }
 
 #[derive(Debug)]
-pub(crate) struct CalibrationResult {
+pub struct CalibrationResult {
     pub(crate) num_iterations: u32,
     pub(crate) converged: bool,
     pub(crate) max_precision: f64,

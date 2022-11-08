@@ -520,76 +520,76 @@ fn model_benchmarks(c: &mut Criterion) {
 }
 
 fn calibrate_benchmarks(c: &mut Criterion) {
-    c.bench_function("nothing", |b| b.iter(marlu::Jones::<f64>::identity));
+    // c.bench_function("nothing", |b| b.iter(marlu::Jones::<f64>::identity));
 
-    // use hifitime::Epoch;
-    // use marlu::Jones;
-    // use ndarray::prelude::*;
-    // use vec1::{vec1, Vec1};
+    use hifitime::Epoch;
+    use marlu::Jones;
+    use ndarray::prelude::*;
+    use vec1::{vec1, Vec1};
 
-    // use mwa_hyperdrive::{
-    //     averaging::{Chanblock, Timeblock},
-    //     di_calibrate::calibrate_timeblocks,
-    // };
+    use mwa_hyperdrive::{
+        averaging::{Chanblock, Timeblock},
+        di_calibrate::calibrate_timeblocks,
+    };
 
-    // let num_timesteps = 10;
-    // let num_timeblocks = 1;
-    // let mut timeblocks = Vec::with_capacity(num_timeblocks);
-    // timeblocks.push(Timeblock {
-    //     index: 0,
-    //     range: 0..num_timesteps,
-    //     timestamps: vec1![
-    //         Epoch::from_gpst_seconds(1090008640.0),
-    //         Epoch::from_gpst_seconds(1090008641.0),
-    //         Epoch::from_gpst_seconds(1090008642.0),
-    //         Epoch::from_gpst_seconds(1090008643.0),
-    //         Epoch::from_gpst_seconds(1090008644.0),
-    //         Epoch::from_gpst_seconds(1090008645.0),
-    //         Epoch::from_gpst_seconds(1090008646.0),
-    //         Epoch::from_gpst_seconds(1090008647.0),
-    //         Epoch::from_gpst_seconds(1090008648.0),
-    //         Epoch::from_gpst_seconds(1090008649.0),
-    //     ],
-    //     median: Epoch::from_gpst_seconds(1090008644.5),
-    // });
-    // let timeblocks = Vec1::try_from_vec(timeblocks).unwrap();
+    let num_timesteps = 10;
+    let num_timeblocks = 1;
+    let mut timeblocks = Vec::with_capacity(num_timeblocks);
+    timeblocks.push(Timeblock {
+        index: 0,
+        range: 0..num_timesteps,
+        timestamps: vec1![
+            Epoch::from_gpst_seconds(1090008640.0),
+            Epoch::from_gpst_seconds(1090008641.0),
+            Epoch::from_gpst_seconds(1090008642.0),
+            Epoch::from_gpst_seconds(1090008643.0),
+            Epoch::from_gpst_seconds(1090008644.0),
+            Epoch::from_gpst_seconds(1090008645.0),
+            Epoch::from_gpst_seconds(1090008646.0),
+            Epoch::from_gpst_seconds(1090008647.0),
+            Epoch::from_gpst_seconds(1090008648.0),
+            Epoch::from_gpst_seconds(1090008649.0),
+        ],
+        median: Epoch::from_gpst_seconds(1090008644.5),
+    });
+    let timeblocks = Vec1::try_from_vec(timeblocks).unwrap();
 
-    // let num_chanblocks = 100;
-    // let mut chanblocks = Vec::with_capacity(num_chanblocks);
-    // for i_chanblock in 0..num_chanblocks {
-    //     chanblocks.push(Chanblock {
-    //         chanblock_index: i_chanblock as _,
-    //         unflagged_index: i_chanblock as _,
-    //         _freq: 150e6 + i_chanblock as f64,
-    //     })
-    // }
-    // let chanblocks = Vec1::try_from_vec(chanblocks).unwrap();
+    let num_chanblocks = 100;
+    let mut chanblocks = Vec::with_capacity(num_chanblocks);
+    for i_chanblock in 0..num_chanblocks {
+        chanblocks.push(Chanblock {
+            chanblock_index: i_chanblock as _,
+            unflagged_index: i_chanblock as _,
+            _freq: 150e6 + i_chanblock as f64,
+        })
+    }
+    let chanblocks = Vec1::try_from_vec(chanblocks).unwrap();
 
-    // let num_tiles = 128;
-    // let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let num_tiles = 128;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
 
-    // let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
-    // let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
-    // let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
 
-    // c.bench_function(
-    //     &format!("calibrate with {num_timesteps} timesteps, {num_baselines} baselines, {num_chanblocks} chanblocks"),
-    //     |b| {
-    //         b.iter(|| {
-    //             calibrate_timeblocks(
-    //                 vis_data.view(),
-    //                 vis_model.view(),
-    //                 &timeblocks,
-    //                 &chanblocks,
-    //                 50,
-    //                 1e-8,
-    //                 1e-4,
-    //                 false,
-    //                 false,
-    //             );
-    //         });
-    //     }
-    // );
+    c.bench_function(
+        &format!("calibrate with {num_timesteps} timesteps, {num_baselines} baselines, {num_chanblocks} chanblocks"),
+        |b| {
+            b.iter(|| {
+                calibrate_timeblocks(
+                    vis_data.view(),
+                    vis_model.view(),
+                    &timeblocks,
+                    &chanblocks,
+                    50,
+                    1e-8,
+                    1e-4,
+                    false,
+                    false,
+                );
+            });
+        }
+    );
 }
 
 fn source_list_benchmarks(c: &mut Criterion) {
@@ -636,19 +636,20 @@ fn source_list_benchmarks(c: &mut Criterion) {
     // );
 }
 
-criterion_group!(
-    name = model;
-    config = Criterion::default().sample_size(10);
-    targets = model_benchmarks,
-);
+// criterion_group!(
+//     name = model;
+//     config = Criterion::default().sample_size(10);
+//     targets = model_benchmarks,
+// );
 criterion_group!(
     name = calibrate;
     config = Criterion::default().sample_size(10);
     targets = calibrate_benchmarks,
 );
-criterion_group!(
-    name = source_lists;
-    config = Criterion::default().sample_size(100);
-    targets = source_list_benchmarks,
-);
-criterion_main!(model, calibrate, source_lists);
+// criterion_group!(
+//     name = source_lists;
+//     config = Criterion::default().sample_size(100);
+//     targets = source_list_benchmarks,
+// );
+// criterion_main!(model, calibrate, source_lists);
+criterion_main!(calibrate);

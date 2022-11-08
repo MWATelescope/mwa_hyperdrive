@@ -7,12 +7,12 @@
 //!
 //! <https://mwatelescope.github.io/mwa_hyperdrive/index.html>
 
-pub(crate) mod averaging;
+pub mod averaging;
 pub(crate) mod beam;
 mod cli;
 pub(crate) mod constants;
 pub(crate) mod context;
-pub(crate) mod di_calibrate;
+pub mod di_calibrate;
 pub(crate) mod error;
 pub(crate) mod filenames;
 pub(crate) mod flagging;
