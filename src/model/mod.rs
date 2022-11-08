@@ -43,7 +43,7 @@ pub(crate) enum ModellerInfo {
 }
 
 /// An object that simulates sky-model visibilities.
-pub(crate) trait SkyModeller<'a> {
+pub trait SkyModeller<'a> {
     /// Generate sky-model visibilities for a single timestep. The [UVW]
     /// coordinates used in generating the visibilities are returned.
     ///
@@ -145,7 +145,7 @@ pub(crate) trait SkyModeller<'a> {
 /// flagged tiles is the total number of tiles in the observation. The
 /// frequencies should have units of \[Hz\].
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn new_cpu_sky_modeller<'a>(
+pub fn new_cpu_sky_modeller<'a>(
     beam: &'a dyn Beam,
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
@@ -189,7 +189,7 @@ pub(crate) fn new_cpu_sky_modeller<'a>(
 /// catch problems but there are no guarantees.
 #[cfg(feature = "cuda")]
 #[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn new_cuda_sky_modeller<'a>(
+pub unsafe fn new_cuda_sky_modeller<'a>(
     beam: &'a dyn Beam,
     source_list: &SourceList,
     unflagged_tile_xyzs: &'a [XyzGeodetic],

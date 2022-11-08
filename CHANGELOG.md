@@ -13,6 +13,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     this report.
   - If all sources are vetoed from a source list, then the program exits with
     this report.
+- More CUDA benchmarks for the modelling code.
 
 ## [0.2.1] - 2022-10-20
 ### Added
