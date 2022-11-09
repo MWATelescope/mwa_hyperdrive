@@ -43,7 +43,7 @@ fn model_benchmarks(c: &mut Criterion) {
         let num_points = 100;
         let num_chans = 2;
         let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
-        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut vis = Array2::from_elem((num_chans, num_bls), Jones::default());
         let mut source_list = SourceList::default();
         for i in 0..num_points {
             source_list.insert(
@@ -148,7 +148,7 @@ fn model_benchmarks(c: &mut Criterion) {
         let num_gaussians = 100;
         let num_chans = 2;
         let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
-        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut vis = Array2::from_elem((num_chans, num_bls), Jones::default());
         let mut source_list = SourceList::default();
         for i in 0..num_gaussians {
             source_list.insert(
@@ -263,7 +263,7 @@ fn model_benchmarks(c: &mut Criterion) {
             let num_shapelets = 100;
             let num_chans = 2;
             let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
-            let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+            let mut vis = Array2::from_elem((num_chans, num_bls), Jones::default());
             let mut source_list = SourceList::default();
             for i in 0..num_shapelets {
                 source_list.insert(
@@ -426,7 +426,7 @@ fn calibrate_benchmarks(c: &mut Criterion) {
     let num_tiles = 128;
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
 
-    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
 

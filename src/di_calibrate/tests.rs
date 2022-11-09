@@ -12,6 +12,7 @@ use std::{
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use clap::Parser;
 use hifitime::{Duration, Epoch};
+use indicatif::{ProgressBar, ProgressDrawTarget};
 use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     Jones, LatLngHeight,
@@ -30,6 +31,7 @@ use crate::{
     averaging::{channels_to_chanblocks, timesteps_to_timeblocks, Chanblock, Fence, Timeblock},
     beam::create_no_beam_object,
     cli::di_calibrate::DiCalParams,
+    di_calibrate::calibrate_timeblock,
     math::{is_prime, TileBaselineFlags},
     solutions::CalSolutionType,
     srclist::SourceList,
@@ -82,7 +84,7 @@ fn test_calibrate_trivial() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = 1;
 
-    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     let mut di_jones = Array3::from_elem(
@@ -101,8 +103,8 @@ fn test_calibrate_trivial() {
         {
             let range = s![
                 time_range_start..time_range_end,
-                ..,
-                chanblock_index..chanblock_index + 1
+                chanblock_index..chanblock_index + 1,
+                ..
             ];
             let vis_data_slice = vis_data.slice(range);
             let vis_model_slice = vis_model.slice(range);
@@ -142,15 +144,15 @@ fn test_calibrate_trivial_with_flags() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = 2;
 
-    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
     let mut vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     // Make the first chanblock's data be 4x identity.
     vis_data
-        .slice_mut(s![.., .., 0])
+        .slice_mut(s![.., 0, ..])
         .fill(Jones::identity() * 4.0);
     // Make the second chanblock's data be 9x identity.
     vis_data
-        .slice_mut(s![.., .., 1])
+        .slice_mut(s![.., 1, ..])
         .fill(Jones::identity() * 9.0);
     // Inject some wicked RFI.
     let bad_vis = vis_data.get_mut((0, 0, 0)).unwrap();
@@ -173,8 +175,8 @@ fn test_calibrate_trivial_with_flags() {
         {
             let range = s![
                 time_range_start..time_range_end,
-                ..,
-                chanblock_index..chanblock_index + 1
+                chanblock_index..chanblock_index + 1,
+                ..
             ];
             let vis_data_slice = vis_data.slice(range);
             let vis_model_slice = vis_model.slice(range);
@@ -225,8 +227,8 @@ fn test_calibrate_trivial_with_flags() {
         {
             let range = s![
                 time_range_start..time_range_end,
-                ..,
-                chanblock_index..chanblock_index + 1
+                chanblock_index..chanblock_index + 1,
+                ..
             ];
             let vis_data_slice = vis_data.slice(range);
             let vis_model_slice = vis_model.slice(range);
@@ -947,8 +949,8 @@ fn test_1090008640_calibrate_model_ms() {
         .max()
         .unwrap();
     let data_shape = (
-        max_baseline_idx + 1,
         ctx_m.fine_chan_freqs.len() - ctx_m.flagged_fine_chans.len(),
+        max_baseline_idx + 1,
     );
     let mut vis_m = Array2::<Jones<f32>>::zeros(data_shape);
     let mut vis_c = Array2::<Jones<f32>>::zeros(data_shape);
@@ -1005,7 +1007,7 @@ fn test_multiple_timeblocks_behave() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = 1;
 
-    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
 
@@ -1032,13 +1034,133 @@ fn test_multiple_timeblocks_behave() {
     assert_abs_diff_eq!(incomplete_sols.di_jones, expected, epsilon = 1e-14);
 }
 
+#[test]
+fn test_chanblocks_without_data_have_nan_solutions() {
+    let timestamps = vec1![
+        Epoch::from_gpst_seconds(1090008640.0),
+        Epoch::from_gpst_seconds(1090008642.0),
+        Epoch::from_gpst_seconds(1090008644.0),
+    ];
+    let num_timesteps = timestamps.len();
+    let timesteps_to_use = Vec1::try_from_vec((0..num_timesteps).collect()).unwrap();
+    let num_tiles = 5;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let freqs = [150000000];
+    let num_chanblocks = freqs.len();
+
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
+    let vis_data: Array3<Jones<f32>> = Array3::zeros(vis_shape);
+    let vis_model: Array3<Jones<f32>> = Array3::zeros(vis_shape);
+
+    let timeblocks = timesteps_to_timeblocks(&timestamps, 1, &timesteps_to_use);
+    let fences = channels_to_chanblocks(&freqs, Some(40e3), 1, &HashSet::new());
+
+    let (incomplete_sols, results) = calibrate_timeblocks(
+        vis_data.view(),
+        vis_model.view(),
+        &timeblocks,
+        &fences[0].chanblocks,
+        10,
+        1e-8,
+        1e-4,
+        false,
+        false,
+    );
+    // All solutions are NaN, because all data and model Jones matrices were 0.
+    assert!(incomplete_sols.di_jones.into_iter().all(|j| j.any_nan()));
+    // Everything took 1 iteration.
+    assert!(results.iter().all(|r| r.num_iterations == 1));
+
+    // If we make the visibilities exactly the same and non zero, then we should
+    // still see 1 iteration, but with non-NaN solutions.
+    let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+
+    let (incomplete_sols, results) = calibrate_timeblocks(
+        vis_data.view(),
+        vis_model.view(),
+        &timeblocks,
+        &fences[0].chanblocks,
+        10,
+        1e-8,
+        1e-4,
+        false,
+        false,
+    );
+    assert!(incomplete_sols.di_jones.into_iter().all(|j| !j.any_nan()));
+    assert!(results.iter().all(|r| r.num_iterations == 1));
+}
+
+#[test]
+fn test_recalibrating_failed_chanblocks() {
+    let timestamps = vec1![Epoch::from_gpst_seconds(1090008640.0),];
+    let num_timesteps = timestamps.len();
+    let timesteps_to_use = Vec1::try_from_vec((0..num_timesteps).collect()).unwrap();
+    let num_tiles = 5;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let freqs = [150000000, 150040000, 150080000];
+    let num_chanblocks = freqs.len();
+
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
+    let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+
+    let timeblocks = timesteps_to_timeblocks(&timestamps, 1, &timesteps_to_use);
+    let fences = channels_to_chanblocks(&freqs, Some(40e3), 1, &HashSet::new());
+
+    // Unlike `calibrate_timeblocks`, `calibrate_timeblock` takes in calibration
+    // solutions. These are initially set to identity by `calibrate_timeblocks`;
+    // here, we set the middle of 3 chanblocks to 0, so that a guess can be made
+    // at what its solution should be after it fails.
+    let mut di_jones = Array3::from_elem((1, num_tiles, num_chanblocks), Jones::identity());
+    di_jones.slice_mut(s![0, .., 1]).fill(Jones::default());
+    let pb = ProgressBar::with_draw_target(Some(num_chanblocks as _), ProgressDrawTarget::hidden());
+    let results = calibrate_timeblock(
+        vis_data.view(),
+        vis_model.view(),
+        di_jones.view_mut(),
+        &timeblocks[0],
+        &fences[0].chanblocks,
+        10,
+        1e-8,
+        1e-4,
+        pb.clone(),
+        false,
+    );
+    // For reasons I don't understand (it's late), chanblocks 0 and 2 need 10
+    // iterations. Chanblock 1 only needs 2, which makes sense, because its been
+    // feed the correct calibration solution from its neighbours.
+    assert_eq!(results[0].num_iterations, 10);
+    assert_eq!(results[1].num_iterations, 2);
+    assert_eq!(results[2].num_iterations, 10);
+
+    // Ensure that everything breaks when all initial calibration solutions are
+    // zeros.
+    let mut di_jones = Array3::from_elem((1, num_tiles, num_chanblocks), Jones::default());
+    let results = calibrate_timeblock(
+        vis_data.view(),
+        vis_model.view(),
+        di_jones.view_mut(),
+        &timeblocks[0],
+        &fences[0].chanblocks,
+        10,
+        1e-8,
+        1e-4,
+        pb,
+        false,
+    );
+    for result in results {
+        assert!(!result.converged);
+    }
+}
+
 /// Given calibration parameters and visibilities, this function tests that
 /// everything matches an expected quality. The values may change over time but
 /// they should be consistent with whatever tests use this test code.
 pub(crate) fn test_1090008640_quality(params: DiCalParams, cal_vis: CalVis) {
     let (_, cal_results) = calibrate_timeblocks(
-        cal_vis.vis_data.view(),
-        cal_vis.vis_model.view(),
+        cal_vis.vis_data_tfb.view(),
+        cal_vis.vis_model_tfb.view(),
         &params.timeblocks,
         &params.fences.first().chanblocks,
         50,

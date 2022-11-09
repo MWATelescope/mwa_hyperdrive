@@ -1154,11 +1154,11 @@ impl DiCalParams {
         }
 
         let CalVis {
-            vis_data,
-            vis_weights,
-            vis_model,
+            vis_data_tfb,
+            vis_weights_tfb,
+            vis_model_tfb,
         } = get_cal_vis(self, !self.no_progress_bars)?;
-        assert_eq!(vis_weights.len_of(Axis(1)), self.baseline_weights.len());
+        assert_eq!(vis_weights_tfb.len_of(Axis(2)), self.baseline_weights.len());
 
         // The shape of the array containing output Jones matrices.
         let num_timeblocks = self.timeblocks.len();
@@ -1179,8 +1179,8 @@ impl DiCalParams {
         }
 
         let (sols, results) = calibrate_timeblocks(
-            vis_data.view(),
-            vis_model.view(),
+            vis_data_tfb.view(),
+            vis_model_tfb.view(),
             &self.timeblocks,
             // TODO: Picket fences.
             &self.fences.first().chanblocks,

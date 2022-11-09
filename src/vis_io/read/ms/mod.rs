@@ -822,23 +822,23 @@ impl MsReader {
                         }
                         assert_eq!(ms_data.dim(), ms_weights.dim());
                         assert_eq!(ms_weights.dim(), flags.dim());
-                        if crosses.data_array.len_of(Axis(0)) < bl {
+                        if crosses.vis_fb.len_of(Axis(1)) < bl {
                             panic!(
                                 "{}",
                                 VisReadError::BadArraySize {
                                     array_type: "data_array",
                                     expected_len: bl,
-                                    axis_num: 0,
+                                    axis_num: 1,
                                 }
                             );
                         }
-                        if crosses.data_array.len_of(Axis(1)) > ms_data.len_of(Axis(0)) {
+                        if crosses.vis_fb.len_of(Axis(0)) > ms_data.len_of(Axis(0)) {
                             panic!(
                                 "{}",
                                 VisReadError::BadArraySize {
                                     array_type: "data_array",
                                     expected_len: ms_data.len_of(Axis(0)),
-                                    axis_num: 1,
+                                    axis_num: 0,
                                 }
                             );
                         }
@@ -846,7 +846,7 @@ impl MsReader {
                         // Put the data and weights into the shared arrays
                         // outside this scope. Before we can do this, we need to
                         // remove any globally-flagged fine channels.
-                        let mut out_vis = crosses.data_array.slice_mut(s![bl, ..]);
+                        let mut out_vis = crosses.vis_fb.slice_mut(s![.., bl]);
                         ms_data
                             .outer_iter()
                             .enumerate()
@@ -861,7 +861,7 @@ impl MsReader {
                         // and throw away 3 of the 4 weights; there are 4
                         // weights (for XX XY YX YY) and we assume that the
                         // first weight is the same as the others.
-                        let mut out_weights = crosses.weights_array.slice_mut(s![bl, ..]);
+                        let mut out_weights = crosses.weights_fb.slice_mut(s![.., bl]);
                         ms_weights
                             .into_iter()
                             .step_by(4)
@@ -923,28 +923,28 @@ impl MsReader {
                             assert_eq!(ms_data.dim(), ms_weights.dim());
                             assert_eq!(ms_weights.dim(), flags.dim());
 
-                            if autos.data_array.len_of(Axis(0)) < i_ant {
+                            if autos.vis_fb.len_of(Axis(1)) < i_ant {
                                 panic!(
                                     "{}",
                                     VisReadError::BadArraySize {
                                         array_type: "data_array",
                                         expected_len: i_ant,
-                                        axis_num: 0,
+                                        axis_num: 1,
                                     }
                                 );
                             }
-                            if autos.data_array.len_of(Axis(1)) > ms_data.len_of(Axis(0)) {
+                            if autos.vis_fb.len_of(Axis(0)) > ms_data.len_of(Axis(0)) {
                                 panic!(
                                     "{}",
                                     VisReadError::BadArraySize {
                                         array_type: "data_array",
                                         expected_len: ms_data.len_of(Axis(0)),
-                                        axis_num: 1,
+                                        axis_num: 0,
                                     }
                                 );
                             }
 
-                            let mut out_vis = autos.data_array.slice_mut(s![i_ant, ..]);
+                            let mut out_vis = autos.vis_fb.slice_mut(s![.., i_ant]);
                             ms_data
                                 .outer_iter()
                                 .enumerate()
@@ -956,7 +956,7 @@ impl MsReader {
                                     ]);
                                 });
 
-                            let mut out_weights = autos.weights_array.slice_mut(s![i_ant, ..]);
+                            let mut out_weights = autos.weights_fb.slice_mut(s![.., i_ant]);
                             ms_weights
                                 .into_iter()
                                 .step_by(4)
@@ -999,23 +999,23 @@ impl VisRead for MsReader {
 
     fn read_crosses_and_autos(
         &self,
-        cross_data_array: ArrayViewMut2<Jones<f32>>,
-        cross_weights_array: ArrayViewMut2<f32>,
-        auto_data_array: ArrayViewMut2<Jones<f32>>,
-        auto_weights_array: ArrayViewMut2<f32>,
+        cross_vis_fb: ArrayViewMut2<Jones<f32>>,
+        cross_weights_fb: ArrayViewMut2<f32>,
+        auto_vis_fb: ArrayViewMut2<Jones<f32>>,
+        auto_weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
-                data_array: cross_data_array,
-                weights_array: cross_weights_array,
+                vis_fb: cross_vis_fb,
+                weights_fb: cross_weights_fb,
                 tile_baseline_flags,
             }),
             Some(AutoData {
-                data_array: auto_data_array,
-                weights_array: auto_weights_array,
+                vis_fb: auto_vis_fb,
+                weights_fb: auto_weights_fb,
                 tile_baseline_flags,
             }),
             timestep,
@@ -1025,16 +1025,16 @@ impl VisRead for MsReader {
 
     fn read_crosses(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
-                data_array,
-                weights_array,
+                vis_fb,
+                weights_fb,
                 tile_baseline_flags,
             }),
             None,
@@ -1045,8 +1045,8 @@ impl VisRead for MsReader {
 
     fn read_autos(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
@@ -1054,8 +1054,8 @@ impl VisRead for MsReader {
         self.read_inner(
             None,
             Some(AutoData {
-                data_array,
-                weights_array,
+                vis_fb,
+                weights_fb,
                 tile_baseline_flags,
             }),
             timestep,

@@ -56,19 +56,19 @@ impl<'a> SkyModellerCpu<'a> {
     /// frequencies, generate visibilities for each specified sky-model
     /// point-source component.
     ///
-    /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
-    /// returning an array from this function, modelled visibilities are written
-    /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `vis_model_fb`: A mutable view into an `ndarray`. Rather than returning
+    /// an array from this function, modelled visibilities are written into
+    /// this array. This slice *must* have dimensions `[n1][n2]`, where `n1`
+    /// is number of unflagged frequencies and `n2` is the number of unflagged
+    /// cross correlation baselines.
     ///
-    /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
-    /// be the same length as `vis_model_slice`'s first axis.
+    /// `uvws`: The [`UVW`] coordinates of each baseline \[metres\]. This should
+    /// be the same length as `vis_model_fb`'s first axis.
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     pub(super) fn model_points_inner(
         &self,
-        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
         uvws: &[UVW],
         lst_rad: f64,
         array_latitude_rad: f64,
@@ -85,14 +85,14 @@ impl<'a> SkyModellerCpu<'a> {
             .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
 
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_fb.len_of(Axis(1)),
             uvws.len(),
-            "vis_model_slice.len_of(Axis(0)) != uvws.len()"
+            "vis_model_fb.len_of(Axis(1)) != uvws.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(1)),
+            vis_model_fb.len_of(Axis(0)),
             self.unflagged_fine_chan_freqs.len(),
-            "vis_model_slice.len_of(Axis(1)) != self.unflagged_fine_chan_freqs.len()"
+            "vis_model_fb.len_of(Axis(0)) != self.unflagged_fine_chan_freqs.len()"
         );
         assert_eq!(
             fds.len_of(Axis(0)),
@@ -132,29 +132,29 @@ impl<'a> SkyModellerCpu<'a> {
         }
 
         // Iterate over the unflagged baseline axis.
-        vis_model_slice
-            .outer_iter_mut()
+        vis_model_fb
+            .axis_iter_mut(Axis(1))
             .into_par_iter()
             .zip(uvws.par_iter())
             .enumerate()
-            .for_each(|(i_baseline, (mut model_bl_axis, uvw_metres))| {
+            .for_each(|(i_baseline, (mut vis_model_f, uvw_metres))| {
                 let (i_tile1, i_tile2) = self.unflagged_baseline_to_tile_map[&i_baseline];
 
                 // Unflagged fine-channel axis.
-                model_bl_axis
+                vis_model_f
                     .iter_mut()
                     .zip(fds.outer_iter())
                     .zip(self.unflagged_fine_chan_freqs)
                     .zip(beam_responses.slice(s![i_tile1, .., ..]).outer_iter())
                     .zip(beam_responses.slice(s![i_tile2, .., ..]).outer_iter())
                     .for_each(
-                        |((((model_vis, comp_fds), freq), tile1_beam), tile2_beam)| {
+                        |((((vis_model, comp_fds), freq), tile1_beam), tile2_beam)| {
                             // Divide UVW by lambda to make UVW dimensionless.
                             let uvw = *uvw_metres * *freq / VEL_C;
 
                             // Accumulate the double-precision visibilities into a
                             // double-precision Jones matrix before putting that into
-                            // the `vis_model_slice`.
+                            // the `vis_model_fb`.
                             let mut jones_accum: Jones<f64> = Jones::default();
 
                             comp_fds
@@ -175,7 +175,7 @@ impl<'a> SkyModellerCpu<'a> {
                                 });
                             // Demote to single precision now that all operations are
                             // done.
-                            *model_vis += Jones::from(jones_accum);
+                            *vis_model += Jones::from(jones_accum);
                         },
                     );
             });
@@ -186,19 +186,19 @@ impl<'a> SkyModellerCpu<'a> {
     /// frequencies, generate visibilities for each specified sky-model
     /// Gaussian-source component.
     ///
-    /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
-    /// returning an array from this function, modelled visibilities are written
-    /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `vis_model_fb`: A mutable view into an `ndarray`. Rather than returning
+    /// an array from this function, modelled visibilities are written into
+    /// this array. This slice *must* have dimensions `[n1][n2]`, where `n1`
+    /// is number of unflagged frequencies and `n2` is the number of unflagged
+    /// cross correlation baselines.
     ///
-    /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
-    /// be the same length as `vis_model_slice`'s first axis.
+    /// `uvws`: The [`UVW`] coordinates of each baseline \[metres\]. This should
+    /// be the same length as `vis_model_fb`'s first axis.
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     pub(super) fn model_gaussians_inner(
         &self,
-        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
         uvws: &[UVW],
         lst_rad: f64,
         array_latitude_rad: f64,
@@ -216,14 +216,14 @@ impl<'a> SkyModellerCpu<'a> {
         let gaussian_params = &self.components.gaussians.gaussian_params;
 
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_fb.len_of(Axis(1)),
             uvws.len(),
-            "vis_model_slice.len_of(Axis(0)) != uvws.len()"
+            "vis_model_fb.len_of(Axis(1)) != uvws.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(1)),
+            vis_model_fb.len_of(Axis(0)),
             self.unflagged_fine_chan_freqs.len(),
-            "vis_model_slice.len_of(Axis(1)) != self.unflagged_fine_chan_freqs.len()"
+            "vis_model_fb.len_of(Axis(0)) != self.unflagged_fine_chan_freqs.len()"
         );
         assert_eq!(
             fds.len_of(Axis(0)),
@@ -262,23 +262,23 @@ impl<'a> SkyModellerCpu<'a> {
         }
 
         // Iterate over the unflagged baseline axis.
-        vis_model_slice
-            .outer_iter_mut()
+        vis_model_fb
+            .axis_iter_mut(Axis(1))
             .into_par_iter()
             .zip(uvws.par_iter())
             .enumerate()
-            .for_each(|(i_baseline, (mut model_bl_axis, uvw_metres))| {
+            .for_each(|(i_baseline, (mut vis_model_f, uvw_metres))| {
                 let (i_tile1, i_tile2) = self.unflagged_baseline_to_tile_map[&i_baseline];
 
                 // Unflagged fine-channel axis.
-                model_bl_axis
+                vis_model_f
                     .iter_mut()
                     .zip(fds.outer_iter())
                     .zip(self.unflagged_fine_chan_freqs)
                     .zip(beam_responses.slice(s![i_tile1, .., ..]).outer_iter())
                     .zip(beam_responses.slice(s![i_tile2, .., ..]).outer_iter())
                     .for_each(
-                        |((((model_vis, comp_fds), freq), tile1_beam), tile2_beam)| {
+                        |((((vis_model, comp_fds), freq), tile1_beam), tile2_beam)| {
                             // Divide UVW by lambda to make UVW dimensionless.
                             let uvw = *uvw_metres * *freq / VEL_C;
 
@@ -295,9 +295,9 @@ impl<'a> SkyModellerCpu<'a> {
                                 .exp()
                             });
 
-                            // Accumulate the double-precision visibilities into a
-                            // double-precision Jones matrix before putting that into
-                            // the `vis_model_slice`.
+                            // Accumulate the double-precision visibilities into
+                            // a double-precision Jones matrix before putting
+                            // that into the `vis_model_fb`.
                             let mut jones_accum: Jones<f64> = Jones::default();
 
                             comp_fds
@@ -319,7 +319,7 @@ impl<'a> SkyModellerCpu<'a> {
                                 });
                             // Demote to single precision now that all operations are
                             // done.
-                            *model_vis += Jones::from(jones_accum);
+                            *vis_model += Jones::from(jones_accum);
                         },
                     );
             });
@@ -330,23 +330,23 @@ impl<'a> SkyModellerCpu<'a> {
     /// frequencies, generate visibilities for each specified sky-model
     /// shapelet-source component.
     ///
-    /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
-    /// returning an array from this function, modelled visibilities are written
-    /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `vis_model_fb`: A mutable view into an `ndarray`. Rather than returning
+    /// an array from this function, modelled visibilities are written into
+    /// this array. This slice *must* have dimensions `[n1][n2]`, where `n1`
+    /// is number of unflagged frequencies and `n2` is the number of unflagged
+    /// cross correlation baselines.
     ///
-    /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
-    /// be the same length as `vis_model_slice`'s first axis.
+    /// `uvws`: The [`UVW`] coordinates of each baseline \[metres\]. This should
+    /// be the same length as `vis_model_fb`'s first axis.
     ///
-    /// `shapelet_uvws` are special UVWs generated as if each shapelet component was
-    /// at the phase centre \[metres\]. The first axis is unflagged baseline, the
-    /// second shapelet component.
+    /// `shapelet_uvws` are special UVWs generated as if each shapelet component
+    /// was at the phase centre \[metres\]. The first axis is unflagged
+    /// baseline, the second shapelet component.
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     pub(super) fn model_shapelets_inner(
         &self,
-        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
         uvws: &[UVW],
         shapelet_uvws: ArrayView2<UVW>,
         lst_rad: f64,
@@ -366,14 +366,14 @@ impl<'a> SkyModellerCpu<'a> {
         let shapelet_coeffs = &self.components.shapelets.shapelet_coeffs;
 
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_fb.len_of(Axis(1)),
             uvws.len(),
-            "vis_model_slice.len_of(Axis(0)) != uvws.len()"
+            "vis_model_fb.len_of(Axis(1)) != uvws.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(1)),
+            vis_model_fb.len_of(Axis(0)),
             self.unflagged_fine_chan_freqs.len(),
-            "vis_model_slice.len_of(Axis(1)) != self.unflagged_fine_chan_freqs.len()"
+            "vis_model_fb.len_of(Axis(0)) != self.unflagged_fine_chan_freqs.len()"
         );
         assert_eq!(
             fds.len_of(Axis(0)),
@@ -396,9 +396,9 @@ impl<'a> SkyModellerCpu<'a> {
             "uvws.len() != self.unflagged_baseline_to_tile_map.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_fb.len_of(Axis(1)),
             shapelet_uvws.len_of(Axis(0)),
-            "vis_model_slice.len_of(Axis(0)) != shapelet_uvws.len_of(Axis(0))"
+            "vis_model_fb.len_of(Axis(1)) != shapelet_uvws.len_of(Axis(0))"
         );
         assert_eq!(
             fds.len_of(Axis(1)),
@@ -429,14 +429,14 @@ impl<'a> SkyModellerCpu<'a> {
         }
 
         // Iterate over the unflagged baseline axis.
-        vis_model_slice
-            .outer_iter_mut()
+        vis_model_fb
+            .axis_iter_mut(Axis(1))
             .into_par_iter()
             .zip(uvws.par_iter())
             .zip(shapelet_uvws.outer_iter())
             .enumerate()
             .for_each(
-                |(i_baseline, ((mut model_bl_axis, uvw_metres), shapelet_uvws_per_comp))| {
+                |(i_baseline, ((mut vis_model_f, uvw_metres), shapelet_uvws_per_comp))| {
                     let (i_tile1, i_tile2) = self.unflagged_baseline_to_tile_map[&i_baseline];
 
                     // Preallocate a vector for the envelopes.
@@ -444,14 +444,14 @@ impl<'a> SkyModellerCpu<'a> {
                         vec![Complex::default(); gaussian_params.len()];
 
                     // Unflagged fine-channel axis.
-                    model_bl_axis
+                    vis_model_f
                         .iter_mut()
                         .zip(fds.outer_iter())
                         .zip(self.unflagged_fine_chan_freqs)
                         .zip(beam_responses.slice(s![i_tile1, .., ..]).outer_iter())
                         .zip(beam_responses.slice(s![i_tile2, .., ..]).outer_iter())
                         .for_each(
-                            |((((model_vis, comp_fds), freq), tile1_beam), tile2_beam)| {
+                            |((((vis_model, comp_fds), freq), tile1_beam), tile2_beam)| {
                                 // Divide UVW by lambda to make UVW dimensionless.
                                 let lambda = VEL_C / freq;
                                 let uvw = *uvw_metres / lambda;
@@ -529,9 +529,9 @@ impl<'a> SkyModellerCpu<'a> {
                                         )
                                     });
 
-                                // Accumulate the double-precision visibilities into a
-                                // double-precision Jones matrix before putting that
-                                // into the `vis_model_slice`.
+                                // Accumulate the double-precision visibilities
+                                // into a double-precision Jones matrix before
+                                // putting that into the `vis_model_fb`.
                                 let mut jones_accum: Jones<f64> = Jones::default();
 
                                 comp_fds
@@ -553,7 +553,7 @@ impl<'a> SkyModellerCpu<'a> {
                                     });
                                 // Demote to single precision now that all operations are
                                 // done.
-                                *model_vis += Jones::from(jones_accum);
+                                *vis_model += Jones::from(jones_accum);
                             },
                         );
                 },
@@ -565,7 +565,7 @@ impl<'a> SkyModellerCpu<'a> {
 impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
     fn model_timestep(
         &self,
-        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
@@ -601,10 +601,10 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             .shapelets
             .get_shapelet_uvws(lst, self.unflagged_tile_xyzs);
 
-        self.model_points_inner(vis_model_slice.view_mut(), &uvws, lst, latitude)?;
-        self.model_gaussians_inner(vis_model_slice.view_mut(), &uvws, lst, latitude)?;
+        self.model_points_inner(vis_model_fb.view_mut(), &uvws, lst, latitude)?;
+        self.model_gaussians_inner(vis_model_fb.view_mut(), &uvws, lst, latitude)?;
         self.model_shapelets_inner(
-            vis_model_slice.view_mut(),
+            vis_model_fb.view_mut(),
             &uvws,
             shapelet_uvws.view(),
             lst,
@@ -616,7 +616,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
 
     fn model_points(
         &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        vis_model_fb: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
@@ -647,13 +647,13 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             );
             (uvws, lst, self.array_latitude)
         };
-        self.model_points_inner(vis_model_slice, &uvws, lst, latitude)?;
+        self.model_points_inner(vis_model_fb, &uvws, lst, latitude)?;
         Ok(uvws)
     }
 
     fn model_gaussians(
         &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        vis_model_fb: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
@@ -684,13 +684,13 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             );
             (uvws, lst, self.array_latitude)
         };
-        self.model_gaussians_inner(vis_model_slice, &uvws, lst, latitude)?;
+        self.model_gaussians_inner(vis_model_fb, &uvws, lst, latitude)?;
         Ok(uvws)
     }
 
     fn model_shapelets(
         &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        vis_model_fb: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, BeamError> {
         let (uvws, lst, latitude) = if self.precess {
@@ -726,7 +726,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             .components
             .shapelets
             .get_shapelet_uvws(lst, self.unflagged_tile_xyzs);
-        self.model_shapelets_inner(vis_model_slice, &uvws, shapelet_uvws.view(), lst, latitude)?;
+        self.model_shapelets_inner(vis_model_fb, &uvws, shapelet_uvws.view(), lst, latitude)?;
 
         Ok(uvws)
     }

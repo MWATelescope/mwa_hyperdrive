@@ -3,6 +3,12 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 //! Tests on generating sky-model visibilities.
+//!
+//! There are no actual test functions in this module; the functions test input
+//! visibilities against expected values. The `track_caller` annotation is
+//! useful here because it allows the responsible caller to be highlighted if
+//! there's an error, rather than an assert in one of these functions being
+//! highlighted.
 
 mod cpu;
 #[cfg(feature = "cuda")]
@@ -10,7 +16,7 @@ mod cuda;
 
 use std::ops::Deref;
 
-use approx::abs_diff_eq;
+use approx::assert_abs_diff_eq;
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::xyz::xyzs_to_cross_uvws_parallel,
@@ -226,40 +232,33 @@ impl ObsParams {
     }
 }
 
-fn assert_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
 
-    // First column: flux density at first frequency (i.e. 1 Jy XX and YY).
-    let expected = Array1::from_elem(vis.dim().0, Jones::identity());
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    // First row: flux density at first frequency (i.e. 1 Jy XX and YY).
+    let expected_1st_row = Array1::from_elem(vis.dim().0, Jones::identity());
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
     // 3 Jy XX and YY.
-    let expected = Array1::from_elem(vis.dim().0, Jones::identity() * 3.0);
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let expected_2nd_row = Array1::from_elem(vis.dim().0, Jones::identity() * 3.0);
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
     // 2 Jy XX and YY.
-    let expected = Array1::from_elem(vis.dim().0, Jones::identity() * 2.0);
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let expected_3rd_row = Array1::from_elem(vis.dim().0, Jones::identity() * 2.0);
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
 
-    let expected = array![
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(0.99522406, 0.09761678),
             Complex::new(0.0, 0.0),
@@ -279,13 +278,10 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &s
             Complex::new(0.9988261, -0.04844065),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(2.980504, 0.34146205),
             Complex::new(0.0, 0.0),
@@ -305,13 +301,10 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &s
             Complex::new(2.9952068, -0.1695183),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(1.9830295, 0.25998875),
             Complex::new(0.0, 0.0),
@@ -331,20 +324,18 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &s
             Complex::new(1.9958266, -0.12913574),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
 
-    // First column: flux density at first frequency (i.e. ~1 Jy XX and YY).
-    let expected = array![
+    // First row: flux density at first frequency (i.e. ~1 Jy XX and YY).
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(9.9958146e-1, 0.0),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -364,13 +355,10 @@ fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &s
             Complex::new(9.995525e-1, 0.0),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
     // ~3 Jy XX and YY.
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(2.9982994e0, 0.0),
             Complex::new(-1.4202512e-3, -1.0991403e-5),
@@ -390,13 +378,10 @@ fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &s
             Complex::new(2.998176e0, -1.110223e-16),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
     // ~2 Jy XX and YY.
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(1.9986509e0, 0.0),
             Complex::new(-6.9212046e-4, 8.06261e-6),
@@ -416,19 +401,17 @@ fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &s
             Complex::new(1.9984484e0, 0.0),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
 
-    let expected = array![
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(9.907169e-1, 9.717469e-2),
             Complex::new(-4.694063e-4, -4.0636343e-5),
@@ -448,13 +431,10 @@ fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str
             Complex::new(9.945328e-1, -4.823244e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(2.962178e0, 3.3936253e-1),
             Complex::new(-1.2438099e-3, -1.5220148e-4),
@@ -474,13 +454,10 @@ fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str
             Complex::new(2.9777725e0, -1.685316e-1),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(1.9675823e0, 2.5796354e-1),
             Complex::new(-5.92617e-4, -6.803491e-5),
@@ -500,27 +477,22 @@ fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str
             Complex::new(1.9818958e0, -1.2823439e-1),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
 
-    // First column: flux density at first frequency (i.e. 1 Jy XX and YY).
-    let expected = Array1::from_elem(vis.dim().0, Jones::identity());
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    // First row: flux density at first frequency (i.e. 1 Jy XX and YY).
+    let expected_1st_row = Array1::from_elem(vis.dim().0, Jones::identity());
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.839803e-1, 0.0),
             Complex::new(0.0, 0.0),
@@ -540,13 +512,10 @@ fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &
             Complex::new(8.839803e-1, 0.0)
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.9441786e-1, 0.0),
             Complex::new(0.0, 0.0),
@@ -566,19 +535,17 @@ fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &
             Complex::new(7.9441786e-1, 0.0)
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
 
-    let expected = array![
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(0.99522406, 0.09761678),
             Complex::new(0.0, 0.0),
@@ -598,13 +565,10 @@ fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_st
             Complex::new(0.9988261, -0.04844065),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.782355e-1, 1.0061524e-1),
             Complex::new(0.0, 0.0),
@@ -624,13 +588,10 @@ fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_st
             Complex::new(8.825679e-1, -4.995028e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.8767705e-1, 1.0326985e-1),
             Complex::new(0.0, 0.0),
@@ -650,20 +611,18 @@ fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_st
             Complex::new(7.927602e-1, -5.1293872e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
 
-    // First column: flux density at first frequency (i.e. ~1 Jy XX and YY).
-    let expected = array![
+    // First row: flux density at first frequency (i.e. ~1 Jy XX and YY).
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(9.9958146e-1, 0.0),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -683,13 +642,10 @@ fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_st
             Complex::new(9.995525e-1, 0.0),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.834791e-1, 1.6543612e-24),
             Complex::new(-4.1849137e-4, -3.2387275e-6),
@@ -709,13 +665,10 @@ fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_st
             Complex::new(8.834428e-1, 0.0),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.93882e-1, 0.0),
             Complex::new(-2.7491644e-4, 3.2025407e-6),
@@ -735,19 +688,17 @@ fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_st
             Complex::new(7.9380155e-1, 3.3087225e-24),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
 
-    let expected = array![
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(9.907169e-1, 9.717469e-2),
             Complex::new(-4.694063e-4, -4.0636343e-5),
@@ -767,13 +718,10 @@ fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fai
             Complex::new(9.945328e-1, -4.823244e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.7283564e-1, 9.99966e-2),
             Complex::new(-3.6650113e-4, -4.4847704e-5),
@@ -793,13 +741,10 @@ fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fai
             Complex::new(8.7743074e-1, -4.9659535e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.815413e-1, 1.0246542e-1),
             Complex::new(-2.3539278e-4, -2.7024074e-5),
@@ -819,27 +764,22 @@ fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fai
             Complex::new(7.8722674e-1, -5.0935842e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
 
-    // First column: flux density at first frequency (i.e. 1 Jy XX and YY).
-    let expected = Array1::from_elem(vis.dim().0, Jones::identity());
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    // First row: flux density at first frequency (i.e. 1 Jy XX and YY).
+    let expected_1st_row = Array1::from_elem(vis.dim().0, Jones::identity());
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.8461065e-1, 0.0),
             Complex::new(0.0, 0.0),
@@ -859,13 +799,10 @@ fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail
             Complex::new(8.8461065e-1, 0.0),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.9639274e-1, 0.0),
             Complex::new(0.0, 0.0),
@@ -885,19 +822,17 @@ fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail
             Complex::new(7.9639274e-1, 0.0),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
 
-    let expected = array![
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(0.99522406, 0.09761678),
             Complex::new(0.0, 0.0),
@@ -917,13 +852,10 @@ fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, 
             Complex::new(0.9988261, -0.04844065),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.7886184e-1, 1.0068699e-1),
             Complex::new(0.0, 0.0),
@@ -943,13 +875,10 @@ fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, 
             Complex::new(8.8319725e-1, -4.99859e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.896351e-1, 1.0352658e-1),
             Complex::new(0.0, 0.0),
@@ -969,20 +898,18 @@ fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, 
             Complex::new(7.947309e-1, -5.1421385e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, fail_str: &str) {
+#[track_caller]
+fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
 
-    // First column: flux density at first frequency (i.e. ~1 Jy XX and YY).
-    let expected = array![
+    // First row: flux density at first frequency (i.e. ~1 Jy XX and YY).
+    let expected_1st_row = array![
         Jones::from([
             Complex::new(9.9958146e-1, 0.0),
             Complex::new(-5.405832e-4, 5.00542e-6),
@@ -1002,13 +929,10 @@ fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, 
             Complex::new(9.995525e-1, 0.0),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st_row, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.8410914e-1, 1.6543612e-24),
             Complex::new(-4.187898e-4, -3.2410371e-6),
@@ -1028,13 +952,10 @@ fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, 
             Complex::new(8.8407284e-1, 3.3087225e-24),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.958555e-1, -6.938894e-18),
             Complex::new(-2.7559986e-4, 3.210502e-6),
@@ -1054,22 +975,17 @@ fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, 
             Complex::new(7.957749e-1, 6.938894e-18),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }
 
-fn assert_curved_power_law_off_zenith_visibilities_fee(
-    vis: ArrayView2<Jones<f32>>,
-    fail_str: &str,
-) {
+#[track_caller]
+fn assert_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
 
-    let expected = array![
+    let expected_1st = array![
         Jones::from([
             Complex::new(9.907169e-1, 9.717469e-2),
             Complex::new(-4.694063e-4, -4.0636343e-5),
@@ -1089,13 +1005,10 @@ fn assert_curved_power_law_off_zenith_visibilities_fee(
             Complex::new(9.945328e-1, -4.823244e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 0]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st, result);
 
-    let expected = array![
+    let expected_2nd_row = array![
         Jones::from([
             Complex::new(8.73458e-1, 1.00067906e-1),
             Complex::new(-3.667625e-4, -4.4879685e-5),
@@ -1115,13 +1028,10 @@ fn assert_curved_power_law_off_zenith_visibilities_fee(
             Complex::new(8.780564e-1, -4.9694948e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 1]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result);
 
-    let expected = array![
+    let expected_3rd_row = array![
         Jones::from([
             Complex::new(7.8348416e-1, 1.0272014e-1),
             Complex::new(-2.3597795e-4, -2.7091255e-5),
@@ -1141,9 +1051,6 @@ fn assert_curved_power_law_off_zenith_visibilities_fee(
             Complex::new(7.8918374e-1, -5.1062465e-2),
         ]),
     ];
-    let result = vis.slice(s![.., 2]);
-    assert!(
-        abs_diff_eq!(expected, result),
-        "{fail_str}:\nexpected: {expected:?}\ngot:      {result:?}\n",
-    );
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result);
 }

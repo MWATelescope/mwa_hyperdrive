@@ -48,10 +48,10 @@ pub(crate) trait VisRead: Sync + Send {
     #[allow(clippy::too_many_arguments)]
     fn read_crosses_and_autos(
         &self,
-        cross_data_array: ArrayViewMut2<Jones<f32>>,
-        cross_weights_array: ArrayViewMut2<f32>,
-        auto_data_array: ArrayViewMut2<Jones<f32>>,
-        auto_weights_array: ArrayViewMut2<f32>,
+        cross_vis_fb: ArrayViewMut2<Jones<f32>>,
+        cross_weights_fb: ArrayViewMut2<f32>,
+        auto_vis_fb: ArrayViewMut2<Jones<f32>>,
+        auto_weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
@@ -61,8 +61,8 @@ pub(crate) trait VisRead: Sync + Send {
     /// a single timestep into the `data_array` and similar for the weights.
     fn read_crosses(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
@@ -72,8 +72,8 @@ pub(crate) trait VisRead: Sync + Send {
     /// single timestep into the `data_array` and similar for the weights.
     fn read_autos(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
@@ -83,15 +83,15 @@ pub(crate) trait VisRead: Sync + Send {
 /// A private container for cross-correlation data. It only exists to give
 /// meaning to the types.
 struct CrossData<'a, 'b, 'c> {
-    data_array: ArrayViewMut2<'a, Jones<f32>>,
-    weights_array: ArrayViewMut2<'b, f32>,
+    vis_fb: ArrayViewMut2<'a, Jones<f32>>,
+    weights_fb: ArrayViewMut2<'b, f32>,
     tile_baseline_flags: &'c TileBaselineFlags,
 }
 
 /// A private container for auto-correlation data. It only exists to give
 /// meaning to the types.
 struct AutoData<'a, 'b, 'c> {
-    data_array: ArrayViewMut2<'a, Jones<f32>>,
-    weights_array: ArrayViewMut2<'b, f32>,
+    vis_fb: ArrayViewMut2<'a, Jones<f32>>,
+    weights_fb: ArrayViewMut2<'b, f32>,
     tile_baseline_flags: &'c TileBaselineFlags,
 }

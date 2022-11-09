@@ -407,8 +407,8 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         .expect("can't fail; no additional flags");
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
     let vis_shape = (
-        num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
+        num_unflagged_cross_baselines,
     );
 
     // Set up the beam for modelling.
@@ -889,11 +889,11 @@ fn read_vis(
         let timestamp = obs_context.timestamps[timestep];
         debug!("Reading timestamp {}", timestamp.as_gpst_seconds());
 
-        let mut cross_data: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
-        let mut cross_weights: ArcArray2<f32> = ArcArray2::zeros(vis_shape);
+        let mut cross_data_fb: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
+        let mut cross_weights_fb: ArcArray2<f32> = ArcArray2::zeros(vis_shape);
         input_data.read_crosses(
-            cross_data.view_mut(),
-            cross_weights.view_mut(),
+            cross_data_fb.view_mut(),
+            cross_weights_fb.view_mut(),
             timestep,
             tile_baseline_flags,
             &flagged_fine_chans,
@@ -905,8 +905,8 @@ fn read_vis(
         }
 
         match tx.send(VisTimestep {
-            cross_data,
-            cross_weights,
+            cross_data_fb,
+            cross_weights_fb,
             autos: None,
             timestamp,
         }) {
@@ -971,26 +971,25 @@ fn model_vis_and_subtract(
     )?;
 
     // Recycle an array for model visibilities.
-    let mut vis_model = Array2::zeros(vis_shape);
+    let mut cross_model_fb = Array2::zeros(vis_shape);
 
     // Iterate over the incoming data.
     for VisTimestep {
-        cross_data: mut vis_data,
-        cross_weights,
+        mut cross_data_fb,
+        cross_weights_fb,
         autos,
         timestamp,
     } in rx.iter()
     {
         debug!("Modelling timestamp {}", timestamp.as_gpst_seconds());
-        modeller.model_timestep(vis_model.view_mut(), timestamp)?;
-        vis_data
+        modeller.model_timestep(cross_model_fb.view_mut(), timestamp)?;
+        cross_data_fb
             .iter_mut()
-            .zip(vis_model.iter())
-            .for_each(|(vis_data, vis_model)| {
-                *vis_data =
-                    Jones::from(Jones::<f64>::from(*vis_data) - Jones::<f64>::from(*vis_model));
+            .zip(cross_model_fb.iter())
+            .for_each(|(data, model)| {
+                *data = Jones::from(Jones::<f64>::from(*data) - Jones::<f64>::from(*model));
             });
-        vis_model.fill(Jones::default());
+        cross_model_fb.fill(Jones::default());
 
         // Should we continue?
         if error.load() {
@@ -998,8 +997,8 @@ fn model_vis_and_subtract(
         }
 
         match tx.send(VisTimestep {
-            cross_data: vis_data,
-            cross_weights,
+            cross_data_fb,
+            cross_weights_fb,
             autos,
             timestamp,
         }) {

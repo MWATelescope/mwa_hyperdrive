@@ -572,8 +572,8 @@ impl<'a> SkyModellerCuda<'a> {
     /// point-source component.
     ///
     /// `vis_model_slice`: A mutable `ndarray` view of the model of all
-    /// visibilities. The first axis is unflagged baseline, the second unflagged
-    /// fine channel.
+    /// visibilities. The first axis is unflagged fine channel, the second
+    /// unflagged baseline.
     ///
     /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
     /// be the same length as `vis_model_slice`'s first axis.
@@ -638,8 +638,8 @@ impl<'a> SkyModellerCuda<'a> {
     /// Gaussian-source component.
     ///
     /// `vis_model_slice`: A mutable `ndarray` view of the model of all
-    /// visibilities. The first axis is unflagged baseline, the second unflagged
-    /// fine channel.
+    /// visibilities. The first axis is unflagged fine channel, the second
+    /// unflagged baseline.
     ///
     /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
     /// be the same length as `vis_model_slice`'s first axis.
@@ -707,15 +707,15 @@ impl<'a> SkyModellerCuda<'a> {
     /// Gaussian-source component.
     ///
     /// `vis_model_slice`: A mutable `ndarray` view of the model of all
-    /// visibilities. The first axis is unflagged baseline, the second unflagged
-    /// fine channel.
+    /// visibilities. The first axis is unflagged fine channel, the second
+    /// unflagged baseline.
     ///
     /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
     /// be the same length as `vis_model_slice`'s first axis.
     ///
-    /// `shapelet_uvws` are special UVWs generated as if each shapelet component was
-    /// at the phase centre \[metres\]. The first axis is unflagged baseline, the
-    /// second shapelet component.
+    /// `shapelet_uvws` are special UVWs generated as if each shapelet component
+    /// was at the phase centre \[metres\]. The first axis is unflagged
+    /// baseline, the second shapelet component.
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     pub(super) unsafe fn model_shapelets_inner(
@@ -850,7 +850,7 @@ impl<'a> SkyModellerCuda<'a> {
     ///
     /// The returned arrays have baseline as the first axis and component as the
     /// second.
-    fn get_shapelet_uvs(&self, lst_rad: f64) -> ShapeletUVs {
+    pub(super) fn get_shapelet_uvs(&self, lst_rad: f64) -> ShapeletUVs {
         ShapeletUVs {
             power_law: get_shapelet_uvs_inner(
                 &self.shapelet_power_law_radecs,
@@ -1121,10 +1121,10 @@ impl std::fmt::Debug for SkyModellerCuda<'_> {
 
 /// The return type of [SkyModellerCuda::get_shapelet_uvs]. These arrays have
 /// baseline as the first axis and component as the second.
-struct ShapeletUVs {
+pub(super) struct ShapeletUVs {
     power_law: Array2<cuda::ShapeletUV>,
     curved_power_law: Array2<cuda::ShapeletUV>,
-    list: Array2<cuda::ShapeletUV>,
+    pub(super) list: Array2<cuda::ShapeletUV>,
 }
 
 fn get_shapelet_uvs_inner(

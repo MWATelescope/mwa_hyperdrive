@@ -12,8 +12,8 @@ use marlu::Jones;
 use ndarray::Array3;
 
 // Set up `vis` and `weights` to be 3D arrays. The dimensions are time,
-// baseline, channel.
-let shape = (2, 8128, 768);
+// channel/frequency, baseline.
+let shape = (2, 768, 8128);
 let mut vis: Array3<Jones<f32>> = Array3::from_elem(shape, Jones::identity());
 let mut weights: Array3<f32> = Array3::ones(shape);
 // `outer_iter_mut` mutably iterates over the slowest dimension (in this
@@ -29,20 +29,20 @@ vis.outer_iter_mut()
         vis.outer_iter_mut()
             .zip(weights.outer_iter_mut())
             .enumerate()
-            .for_each(|(i_bl, (mut vis, mut weights))| {
-                // `vis` and `weights` are now 1D arrays. `i_bl` starts from
-                // 0 and is an index for the baseline dimension.
+            .for_each(|(i_chan, (mut vis, mut weights))| {
+                // `vis` and `weights` are now 1D arrays. `i_chan` starts from
+                // 0 and is an index for the channel/frequency dimension.
 
                 // Use standard Rust iterators to get the
                 // elements of the 1D arrays.
                 vis.iter_mut().zip(weights.iter_mut()).enumerate().for_each(
-                    |(i_chan, (vis, weight))| {
+                    |(i_bl, (vis, weight))| {
                         // `vis` is a mutable references to a Jones matrix
                         // and `weight` is a mutable reference to a float.
-                        // `i_chan` starts from 0 and is an index for the
-                        // channel dimension.
+                        // `i_bl` starts from 0 and is an index for the
+                        // baseline dimension.
                         // Do something with these references.
-                        *vis += Jones::identity() * (i_time + i_bl + i_chan) as f32;
+                        *vis += Jones::identity() * (i_time + i_chan + i_bl) as f32;
                         *weight += 2.0;
                     },
                 );

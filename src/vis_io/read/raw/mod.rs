@@ -20,7 +20,7 @@ use std::{
 
 use birli::PreprocessContext;
 use hifitime::{Duration, Epoch, Unit};
-use itertools::izip;
+use itertools::Itertools;
 use log::{debug, trace, warn};
 use marlu::{math::baseline_to_tiles, Jones, LatLngHeight, RADec, VisSelection, XyzGeodetic};
 use mwalib::{CorrelatorContext, GeometricDelaysApplied, MWAVersion, Pol};
@@ -461,7 +461,7 @@ impl RawDataReader {
 
                         weights
                             .iter_mut()
-                            .zip(flags_for_bls)
+                            .zip_eq(flags_for_bls)
                             .for_each(|(weight, flag)| {
                                 if flag {
                                     *weight = -weight.abs();
@@ -540,19 +540,19 @@ impl RawDataReader {
             .mwalib_context
             .metafits_context
             .num_corr_fine_chans_per_coarse;
-        let mut jones_array = vis_sel.allocate_jones(fine_chans_per_coarse)?;
-        let mut flag_array = vis_sel.allocate_flags(fine_chans_per_coarse)?;
-        let mut weight_array = vis_sel.allocate_weights(fine_chans_per_coarse)?;
+        let mut jones_array_tfb = vis_sel.allocate_jones(fine_chans_per_coarse)?;
+        let mut flag_array_tfb = vis_sel.allocate_flags(fine_chans_per_coarse)?;
+        let mut weight_array_tfb = vis_sel.allocate_weights(fine_chans_per_coarse)?;
         vis_sel.read_mwalib(
             &self.mwalib_context,
-            jones_array.view_mut(),
-            flag_array.view_mut(),
+            jones_array_tfb.view_mut(),
+            flag_array_tfb.view_mut(),
             false,
         )?;
 
         let weight_factor = birli::flags::get_weight_factor(&self.mwalib_context);
         // populate weights
-        weight_array.fill(weight_factor as _);
+        weight_array_tfb.fill(weight_factor as _);
 
         // Correct the raw data.
         let metafits_context = &self.mwalib_context.metafits_context;
@@ -583,17 +583,17 @@ impl RawDataReader {
 
         prep_ctx.preprocess(
             &self.mwalib_context,
-            jones_array.view_mut(),
-            weight_array.view_mut(),
-            flag_array.view_mut(),
+            jones_array_tfb.view_mut(),
+            weight_array_tfb.view_mut(),
+            flag_array_tfb.view_mut(),
             &vis_sel,
         )?;
 
         // Remove the extraneous time dimension; there's only ever one timestep.
-        let vis = jones_array.remove_axis(Axis(0));
+        let data_vis_fb = jones_array_tfb.remove_axis(Axis(0));
 
         // bake flags into weights
-        for (weight, flag) in izip!(weight_array.iter_mut(), flag_array.iter()) {
+        for (weight, flag) in weight_array_tfb.iter_mut().zip_eq(flag_array_tfb.iter()) {
             *weight = if *flag {
                 -(*weight).abs()
             } else {
@@ -601,86 +601,97 @@ impl RawDataReader {
             };
         }
 
-        let mut weights = weight_array.remove_axis(Axis(0));
+        let mut data_weights_fb = weight_array_tfb.remove_axis(Axis(0));
 
-        self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, weights.view_mut());
+        self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, data_weights_fb.view_mut());
 
         // If applicable, write the cross-correlation visibilities to our
         // `data_array`, ignoring any flagged baselines.
         if let Some(CrossData {
-            mut data_array,
-            mut weights_array,
+            mut vis_fb,
+            mut weights_fb,
             tile_baseline_flags,
         }) = crosses
         {
-            vis.outer_iter()
-                .zip(weights.outer_iter())
+            data_vis_fb
+                .outer_iter()
+                .zip_eq(data_weights_fb.outer_iter())
                 .enumerate()
                 // Let only unflagged channels proceed.
                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                // Discard the channel index and get the unflagged
-                // channel index.
+                // Discard the channel index and then zip with the outgoing
+                // array.
                 .map(|(_, data)| data)
-                .enumerate()
-                .for_each(|(i_unflagged_chan, (vis, weights))| {
-                    vis.iter()
-                        .zip(weights)
-                        .enumerate()
-                        // Let only unflagged baselines proceed.
-                        .filter(|(i_baseline, _)| {
-                            let (tile1, tile2) =
-                                baseline_to_tiles(metafits_context.num_ants, *i_baseline);
-                            tile_baseline_flags
-                                .tile_to_unflagged_cross_baseline_map
-                                .contains_key(&(tile1, tile2))
-                        })
-                        // Discard the baseline index and get the unflagged baseline
-                        // index.
-                        .map(|(_, data)| data)
-                        .enumerate()
-                        .for_each(|(i_unflagged_baseline, (vis, weight))| {
-                            data_array[(i_unflagged_baseline, i_unflagged_chan)] = *vis;
-                            weights_array[(i_unflagged_baseline, i_unflagged_chan)] = *weight;
-                        });
-                });
+                .zip_eq(vis_fb.outer_iter_mut())
+                .zip_eq(weights_fb.outer_iter_mut())
+                .for_each(
+                    |(((data_vis_b, data_weights_b), mut vis_b), mut weights_b)| {
+                        data_vis_b
+                            .iter()
+                            .zip_eq(data_weights_b)
+                            .enumerate()
+                            // Let only unflagged baselines proceed.
+                            .filter(|(i_baseline, _)| {
+                                let (tile1, tile2) =
+                                    baseline_to_tiles(metafits_context.num_ants, *i_baseline);
+                                tile_baseline_flags
+                                    .tile_to_unflagged_cross_baseline_map
+                                    .contains_key(&(tile1, tile2))
+                            })
+                            // Discard the baseline index and then zip with the outgoing array.
+                            .map(|(_, data)| data)
+                            .zip_eq(vis_b.iter_mut())
+                            .zip_eq(weights_b.iter_mut())
+                            .for_each(|(((data_vis, data_weight), vis), weight)| {
+                                *vis = *data_vis;
+                                *weight = *data_weight;
+                            });
+                    },
+                );
         }
 
         // If applicable, write the auto-correlation visibilities to our
         // `data_array`, ignoring any flagged tiles.
         if let Some(AutoData {
-            mut data_array,
-            mut weights_array,
+            mut vis_fb,
+            mut weights_fb,
             tile_baseline_flags,
         }) = autos
         {
-            vis.outer_iter()
-                .zip(weights.outer_iter())
+            data_vis_fb
+                .outer_iter()
+                .zip(data_weights_fb.outer_iter())
                 .enumerate()
                 // Let only unflagged channels proceed.
                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                // Discard the channel index and get the unflagged channel
-                // index.
+                // Discard the channel index and then zip with the outgoing
+                // array.
                 .map(|(_, data)| data)
-                .enumerate()
-                .for_each(|(i_unflagged_chan, (vis, weights))| {
-                    vis.iter()
-                        .zip(weights)
-                        .enumerate()
-                        // Let only unflagged autos proceed.
-                        .filter(|(i_baseline, _)| {
-                            let (tile1, tile2) =
-                                baseline_to_tiles(metafits_context.num_ants, *i_baseline);
-                            tile1 == tile2 && !tile_baseline_flags.flagged_tiles.contains(&tile1)
-                        })
-                        // Discard the baseline index and get the unflagged tile
-                        // index.
-                        .map(|(_, data)| data)
-                        .enumerate()
-                        .for_each(|(i_unflagged_tile, (vis, weight))| {
-                            data_array[(i_unflagged_tile, i_unflagged_chan)] = *vis;
-                            weights_array[(i_unflagged_tile, i_unflagged_chan)] = *weight;
-                        });
-                });
+                .zip_eq(vis_fb.outer_iter_mut())
+                .zip_eq(weights_fb.outer_iter_mut())
+                .for_each(
+                    |(((data_vis_b, data_weights_b), mut vis_b), mut weights_b)| {
+                        data_vis_b
+                            .iter()
+                            .zip(data_weights_b)
+                            .enumerate()
+                            // Let only unflagged autos proceed.
+                            .filter(|(i_baseline, _)| {
+                                let (tile1, tile2) =
+                                    baseline_to_tiles(metafits_context.num_ants, *i_baseline);
+                                tile1 == tile2
+                                    && !tile_baseline_flags.flagged_tiles.contains(&tile1)
+                            })
+                            // Discard the baseline index and then zip with the outgoing array.
+                            .map(|(_, data)| data)
+                            .zip_eq(vis_b.iter_mut())
+                            .zip_eq(weights_b.iter_mut())
+                            .for_each(|(((data_vis, data_weight), vis), weight)| {
+                                *vis = *data_vis;
+                                *weight = *data_weight;
+                            });
+                    },
+                );
         }
 
         Ok(())
@@ -706,23 +717,23 @@ impl VisRead for RawDataReader {
 
     fn read_crosses_and_autos(
         &self,
-        cross_data_array: ArrayViewMut2<Jones<f32>>,
-        cross_weights_array: ArrayViewMut2<f32>,
-        auto_data_array: ArrayViewMut2<Jones<f32>>,
-        auto_weights_array: ArrayViewMut2<f32>,
+        cross_vis_fb: ArrayViewMut2<Jones<f32>>,
+        cross_weights_fb: ArrayViewMut2<f32>,
+        auto_vis_fb: ArrayViewMut2<Jones<f32>>,
+        auto_weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
-                data_array: cross_data_array,
-                weights_array: cross_weights_array,
+                vis_fb: cross_vis_fb,
+                weights_fb: cross_weights_fb,
                 tile_baseline_flags,
             }),
             Some(AutoData {
-                data_array: auto_data_array,
-                weights_array: auto_weights_array,
+                vis_fb: auto_vis_fb,
+                weights_fb: auto_weights_fb,
                 tile_baseline_flags,
             }),
             timestep,
@@ -732,16 +743,16 @@ impl VisRead for RawDataReader {
 
     fn read_crosses(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
-                data_array,
-                weights_array,
+                vis_fb,
+                weights_fb,
                 tile_baseline_flags,
             }),
             None,
@@ -752,8 +763,8 @@ impl VisRead for RawDataReader {
 
     fn read_autos(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
@@ -761,8 +772,8 @@ impl VisRead for RawDataReader {
         self.read_inner(
             None,
             Some(AutoData {
-                data_array,
-                weights_array,
+                vis_fb,
+                weights_fb,
                 tile_baseline_flags,
             }),
             timestep,

@@ -9,8 +9,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub(crate) enum DiCalibrateError {
-    #[error("Insufficient memory available to perform calibration; need {need_gib} GiB of memory.\nYou could try using fewer timesteps and channels.")]
-    InsufficientMemory { need_gib: usize },
+    #[error("Insufficient memory available to perform calibration; need {need_gib} of memory.\nYou could try using fewer timesteps and channels.")]
+    InsufficientMemory { need_gib: indicatif::HumanBytes },
 
     #[error(
         "Timestep {timestep} wasn't available in the timestamps list; this is a programmer error"

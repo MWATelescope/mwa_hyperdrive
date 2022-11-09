@@ -591,8 +591,8 @@ impl UvfitsReader {
                     // Put the data and weights into the shared arrays outside this
                     // scope. Before we can do this, we need to remove any
                     // globally-flagged fine channels.
-                    let mut out_vis = crosses.data_array.slice_mut(s![i_baseline, ..]);
-                    let mut out_weights = crosses.weights_array.slice_mut(s![i_baseline, ..]);
+                    let mut out_vis = crosses.vis_fb.slice_mut(s![.., i_baseline]);
+                    let mut out_weights = crosses.weights_fb.slice_mut(s![.., i_baseline]);
                     uvfits_vis
                         .outer_iter()
                         .enumerate()
@@ -647,8 +647,8 @@ impl UvfitsReader {
                             err,
                         })?;
 
-                        let mut out_vis = autos.data_array.slice_mut(s![i_ant, ..]);
-                        let mut out_weights = autos.weights_array.slice_mut(s![i_ant, ..]);
+                        let mut out_vis = autos.vis_fb.slice_mut(s![.., i_ant]);
+                        let mut out_weights = autos.weights_fb.slice_mut(s![.., i_ant]);
                         uvfits_vis
                             .outer_iter()
                             .enumerate()
@@ -697,23 +697,23 @@ impl VisRead for UvfitsReader {
 
     fn read_crosses_and_autos(
         &self,
-        cross_data_array: ArrayViewMut2<Jones<f32>>,
-        cross_weights_array: ArrayViewMut2<f32>,
-        auto_data_array: ArrayViewMut2<Jones<f32>>,
-        auto_weights_array: ArrayViewMut2<f32>,
+        cross_vis_fb: ArrayViewMut2<Jones<f32>>,
+        cross_weights_fb: ArrayViewMut2<f32>,
+        auto_vis_fb: ArrayViewMut2<Jones<f32>>,
+        auto_weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
-                data_array: cross_data_array,
-                weights_array: cross_weights_array,
+                vis_fb: cross_vis_fb,
+                weights_fb: cross_weights_fb,
                 tile_baseline_flags,
             }),
             Some(AutoData {
-                data_array: auto_data_array,
-                weights_array: auto_weights_array,
+                vis_fb: auto_vis_fb,
+                weights_fb: auto_weights_fb,
                 tile_baseline_flags,
             }),
             timestep,
@@ -723,16 +723,16 @@ impl VisRead for UvfitsReader {
 
     fn read_crosses(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
         self.read_inner(
             Some(CrossData {
-                data_array,
-                weights_array,
+                vis_fb,
+                weights_fb,
                 tile_baseline_flags,
             }),
             None,
@@ -743,8 +743,8 @@ impl VisRead for UvfitsReader {
 
     fn read_autos(
         &self,
-        data_array: ArrayViewMut2<Jones<f32>>,
-        weights_array: ArrayViewMut2<f32>,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+        weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
@@ -752,8 +752,8 @@ impl VisRead for UvfitsReader {
         self.read_inner(
             None,
             Some(AutoData {
-                data_array,
-                weights_array,
+                vis_fb,
+                weights_fb,
                 tile_baseline_flags,
             }),
             timestep,

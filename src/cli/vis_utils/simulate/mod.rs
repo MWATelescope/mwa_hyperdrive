@@ -784,10 +784,10 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
             )?;
 
             let cross_vis_shape = (
+                fine_chan_freqs.len(),
                 tile_baseline_flags
                     .unflagged_cross_baseline_to_tile_map
                     .len(),
-                fine_chan_freqs.len(),
             );
             let weight_factor =
                 (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR);
@@ -876,9 +876,9 @@ fn model_thread(
     progress_bar: ProgressBar,
 ) -> Result<(), VisSimulateError> {
     for &timestamp in timestamps {
-        let mut cross_data: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
+        let mut cross_data_fb: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
 
-        modeller.model_timestep(cross_data.view_mut(), timestamp)?;
+        modeller.model_timestep(cross_data_fb.view_mut(), timestamp)?;
 
         // Should we continue?
         if error.load() {
@@ -886,8 +886,8 @@ fn model_thread(
         }
 
         match tx.send(VisTimestep {
-            cross_data,
-            cross_weights: ArcArray2::from_elem(vis_shape, weight_factor as f32),
+            cross_data_fb,
+            cross_weights_fb: ArcArray2::from_elem(vis_shape, weight_factor as f32),
             autos: None,
             timestamp,
         }) {

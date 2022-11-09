@@ -25,8 +25,8 @@ fn synthesize_test_data(
 ) -> (ArcArray<Jones<f32>, Ix3>, ArcArray<f32, Ix3>) {
     let vis_data = ArcArray::<Jones<f32>, Ix3>::from_shape_fn(shape, |(t, c, b)| {
         let t = t as f32;
-        let b = b as f32;
         let c = c as f32;
+        let b = b as f32;
         Jones::from([
             t + b + c,
             t * 2.0 + b + c,
@@ -39,7 +39,7 @@ fn synthesize_test_data(
         ])
     });
     let vis_weights =
-        ArcArray::<f32, Ix3>::from_shape_fn(shape, |(t, c, b)| (t + b + c + 1) as f32);
+        ArcArray::<f32, Ix3>::from_shape_fn(shape, |(t, c, b)| (t + c + b + 1) as f32);
 
     (vis_data, vis_weights)
 }
@@ -105,7 +105,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     ];
     let tile_names = ["tile_0_0".into(), "tile_1_0".into(), "tile_0_1".into()];
 
-    let shape = (timesteps.len(), ant_pairs.len(), num_channels);
+    let shape = (timesteps.len(), num_channels, ant_pairs.len());
     let (vis_data, vis_weights) = synthesize_test_data(shape);
     let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
 
@@ -117,8 +117,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
             for (i_timestep, &timestep) in timesteps.iter().enumerate() {
                 let timestamp = timestamps[timestep];
                 match tx.send(VisTimestep {
-                    cross_data: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
-                    cross_weights: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_data_fb: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
                     autos: None,
                     timestamp,
                 }) {
@@ -214,8 +214,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
-            vis_ctx.sel_baselines.len(),
             obs_context.fine_chan_freqs.len(),
+            vis_ctx.sel_baselines.len(),
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
@@ -303,7 +303,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
     ];
     let tile_names = ["tile_0_0".into(), "tile_1_0".into(), "tile_0_1".into()];
 
-    let shape = (timesteps.len(), ant_pairs.len(), num_channels);
+    let shape = (timesteps.len(), num_channels, ant_pairs.len());
     let (vis_data, vis_weights) = synthesize_test_data(shape);
     let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
 
@@ -315,8 +315,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             for (i_timestep, &timestep) in timesteps.iter().enumerate() {
                 let timestamp = timestamps[timestep];
                 match tx.send(VisTimestep {
-                    cross_data: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
-                    cross_weights: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_data_fb: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
                     autos: None,
                     timestamp,
                 }) {
@@ -420,8 +420,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
-            vis_ctx.sel_baselines.len(),
             obs_context.fine_chan_freqs.len(),
+            vis_ctx.sel_baselines.len(),
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
@@ -511,7 +511,7 @@ fn test_vis_output_time_averaging() {
     ];
     let tile_names = ["tile_0_0".into(), "tile_1_0".into(), "tile_0_1".into()];
 
-    let shape = (timesteps.len(), ant_pairs.len(), num_channels);
+    let shape = (timesteps.len(), num_channels, ant_pairs.len());
     let (vis_data, mut vis_weights) = synthesize_test_data(shape);
     let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
     // I'm keeping the weights simple because predicting the vis values is
@@ -526,8 +526,8 @@ fn test_vis_output_time_averaging() {
             for (i_timestep, &timestep) in timesteps.iter().enumerate() {
                 let timestamp = timestamps[timestep];
                 match tx.send(VisTimestep {
-                    cross_data: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
-                    cross_weights: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_data_fb: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
                     autos: None,
                     timestamp,
                 }) {
@@ -630,8 +630,8 @@ fn test_vis_output_time_averaging() {
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
-            vis_ctx.sel_baselines.len(),
             obs_context.fine_chan_freqs.len(),
+            vis_ctx.sel_baselines.len(),
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
@@ -652,7 +652,7 @@ fn test_vis_output_time_averaging() {
             match i_timestep {
                 0 => {
                     let vis_data = Array2::from_shape_fn(
-                        (vis_ctx.sel_baselines.len(), vis_ctx.num_sel_chans),
+                        (vis_ctx.num_sel_chans, vis_ctx.sel_baselines.len()),
                         |(b, c)| {
                             // This function similar to that within
                             // `synthesize_test_data`, but modified to match
@@ -679,7 +679,7 @@ fn test_vis_output_time_averaging() {
                 }
                 1 => {
                     let vis_data = Array2::from_shape_fn(
-                        (vis_ctx.sel_baselines.len(), vis_ctx.num_sel_chans),
+                        (vis_ctx.num_sel_chans, vis_ctx.sel_baselines.len()),
                         |(b, c)| {
                             let t = 2.0;
                             let b = b as f32;

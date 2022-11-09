@@ -864,10 +864,10 @@ fn read_vis(
     let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
 
     let cross_vis_shape = (
-        num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
+        num_unflagged_cross_baselines,
     );
-    let auto_vis_shape = (num_unflagged_tiles, obs_context.fine_chan_freqs.len());
+    let auto_vis_shape = (obs_context.fine_chan_freqs.len(), num_unflagged_tiles);
 
     // Send the data as timesteps.
     for &timestep in timesteps {
@@ -877,8 +877,8 @@ fn read_vis(
             timestamp.as_gpst_seconds()
         );
 
-        let mut cross_data: ArcArray2<Jones<f32>> = ArcArray2::zeros(cross_vis_shape);
-        let mut cross_weights: ArcArray2<f32> = ArcArray2::zeros(cross_vis_shape);
+        let mut cross_data_fb: ArcArray2<Jones<f32>> = ArcArray2::zeros(cross_vis_shape);
+        let mut cross_weights_fb: ArcArray2<f32> = ArcArray2::zeros(cross_vis_shape);
         let mut autos = if no_autos {
             None
         } else {
@@ -888,12 +888,12 @@ fn read_vis(
             ))
         };
 
-        if let Some((auto_data, auto_weights)) = autos.as_mut() {
+        if let Some((auto_data_fb, auto_weights_fb)) = autos.as_mut() {
             input_data.read_crosses_and_autos(
-                cross_data.view_mut(),
-                cross_weights.view_mut(),
-                auto_data.view_mut(),
-                auto_weights.view_mut(),
+                cross_data_fb.view_mut(),
+                cross_weights_fb.view_mut(),
+                auto_data_fb.view_mut(),
+                auto_weights_fb.view_mut(),
                 timestep,
                 tile_baseline_flags,
                 // We want to read in all channels, even if they're flagged.
@@ -903,8 +903,8 @@ fn read_vis(
             )?;
         } else {
             input_data.read_crosses(
-                cross_data.view_mut(),
-                cross_weights.view_mut(),
+                cross_data_fb.view_mut(),
+                cross_weights_fb.view_mut(),
                 timestep,
                 tile_baseline_flags,
                 &HashSet::new(),
@@ -917,8 +917,8 @@ fn read_vis(
         }
 
         match tx.send(VisTimestep {
-            cross_data,
-            cross_weights,
+            cross_data_fb,
+            cross_weights_fb,
             autos,
             timestamp,
         }) {
@@ -950,8 +950,8 @@ fn apply_solutions_thread(
     progress_bar: ProgressBar,
 ) -> Result<(), SolutionsApplyError> {
     for VisTimestep {
-        mut cross_data,
-        mut cross_weights,
+        mut cross_data_fb,
+        mut cross_weights_fb,
         mut autos,
         timestamp,
     } in rx.iter()
@@ -970,9 +970,9 @@ fn apply_solutions_thread(
         // Find solutions corresponding to this timestamp.
         let sols = solutions.get_timeblock(timestamp, timestamp_fraction);
 
-        for (i_baseline, (mut vis_data, mut vis_weights)) in cross_data
-            .outer_iter_mut()
-            .zip_eq(cross_weights.outer_iter_mut())
+        for (i_baseline, (mut cross_data_f, mut cross_weights_f)) in cross_data_fb
+            .axis_iter_mut(Axis(1))
+            .zip_eq(cross_weights_fb.axis_iter_mut(Axis(1)))
             .enumerate()
         {
             let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map
@@ -987,33 +987,33 @@ fn apply_solutions_thread(
             // Get the solutions for both tiles and apply them.
             let sols_tile1 = sols.slice(s![tile1, ..]);
             let sols_tile2 = sols.slice(s![tile2, ..]);
-            vis_data
+            cross_data_f
                 .iter_mut()
-                .zip(vis_weights.iter_mut())
-                .zip(sols_tile1.iter())
-                .zip(sols_tile2.iter())
+                .zip_eq(cross_weights_f.iter_mut())
+                .zip_eq(sols_tile1.iter())
+                .zip_eq(sols_tile2.iter())
                 .enumerate()
-                .for_each(|(i_chan, (((vis_data, vis_weight), sol1), sol2))| {
+                .for_each(|(i_chan, (((data, weight), sol1), sol2))| {
                     // One of the tiles doesn't have a solution; flag.
                     if sol1.any_nan() || sol2.any_nan() {
-                        *vis_weight = -vis_weight.abs();
-                        *vis_data = Jones::default();
+                        *weight = -weight.abs();
+                        *data = Jones::default();
                     } else {
                         if fine_chan_flags.contains(&i_chan) {
                             // The channel is flagged, but we still have a solution for it.
-                            *vis_weight = -vis_weight.abs();
+                            *weight = -weight.abs();
                         }
                         // Promote the data before demoting it again.
-                        let d: Jones<f64> = Jones::from(*vis_data);
-                        *vis_data = Jones::from((*sol1 * d) * sol2.h());
+                        let d: Jones<f64> = Jones::from(*data);
+                        *data = Jones::from((*sol1 * d) * sol2.h());
                     }
                 });
         }
 
-        if let Some((auto_data, auto_weights)) = autos.as_mut() {
-            for (i_tile, (mut vis_data, mut vis_weights)) in auto_data
-                .outer_iter_mut()
-                .zip_eq(auto_weights.outer_iter_mut())
+        if let Some((auto_data_fb, auto_weights_fb)) = autos.as_mut() {
+            for (i_tile, (mut auto_data_f, mut auto_weights_f)) in auto_data_fb
+                .axis_iter_mut(Axis(1))
+                .zip_eq(auto_weights_fb.axis_iter_mut(Axis(1)))
                 .enumerate()
             {
                 let i_tile = tile_baseline_flags
@@ -1028,24 +1028,24 @@ fn apply_solutions_thread(
 
                 // Get the solutions for the tile and apply it twice.
                 let sols = sols.slice(s![i_tile, ..]);
-                vis_data
+                auto_data_f
                     .iter_mut()
-                    .zip(vis_weights.iter_mut())
-                    .zip(sols.iter())
+                    .zip_eq(auto_weights_f.iter_mut())
+                    .zip_eq(sols.iter())
                     .enumerate()
-                    .for_each(|(i_chan, ((vis_data, vis_weight), sol))| {
+                    .for_each(|(i_chan, ((data, weight), sol))| {
                         // No solution; flag.
                         if sol.any_nan() {
-                            *vis_weight = -vis_weight.abs();
-                            *vis_data = Jones::default();
+                            *weight = -weight.abs();
+                            *data = Jones::default();
                         } else {
                             if fine_chan_flags.contains(&i_chan) {
                                 // The channel is flagged, but we still have a solution for it.
-                                *vis_weight = -vis_weight.abs();
+                                *weight = -weight.abs();
                             }
                             // Promote the data before demoting it again.
-                            let d: Jones<f64> = Jones::from(*vis_data);
-                            *vis_data = Jones::from((*sol * d) * sol.h());
+                            let d: Jones<f64> = Jones::from(*data);
+                            *data = Jones::from((*sol * d) * sol.h());
                         }
                     });
             }
@@ -1053,8 +1053,8 @@ fn apply_solutions_thread(
 
         // Send the calibrated visibilities to the writer.
         match tx.send(VisTimestep {
-            cross_data,
-            cross_weights,
+            cross_data_fb,
+            cross_weights_fb,
             autos,
             timestamp,
         }) {

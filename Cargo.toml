@@ -105,7 +105,7 @@ plotters = { version = "0.3.1", default-features = false, features = [
 ], optional = true }
 
 [dev-dependencies]
-approx = "0.5.0"
+approx = "0.5.1"
 assert_cmd = "2.0.0"
 criterion = "0.4.0"
 indoc = "1.0.0"
