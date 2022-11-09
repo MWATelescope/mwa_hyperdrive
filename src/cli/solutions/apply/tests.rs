@@ -37,10 +37,10 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     let total_num_channels = obs_context.fine_chan_freqs.len();
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
     let mut flagged_fine_chans = HashSet::new();
-    let mut ref_crosses = Array2::zeros((total_num_baselines, total_num_channels));
-    let mut ref_cross_weights = Array2::zeros((total_num_baselines, total_num_channels));
-    let mut ref_autos = Array2::zeros((total_num_tiles, total_num_channels));
-    let mut ref_auto_weights = Array2::zeros((total_num_tiles, total_num_channels));
+    let mut ref_crosses = Array2::zeros((total_num_channels, total_num_baselines));
+    let mut ref_cross_weights = Array2::zeros((total_num_channels, total_num_baselines));
+    let mut ref_autos = Array2::zeros((total_num_channels, total_num_tiles));
+    let mut ref_auto_weights = Array2::zeros((total_num_channels, total_num_tiles));
     input_data
         .read_crosses_and_autos(
             ref_crosses.view_mut(),
@@ -83,10 +83,10 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
 
     // Read the output visibilities.
     let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
-    let mut crosses = Array2::zeros((total_num_baselines, total_num_channels));
-    let mut cross_weights = Array2::zeros((total_num_baselines, total_num_channels));
-    let mut autos = Array2::zeros((total_num_tiles, total_num_channels));
-    let mut auto_weights = Array2::zeros((total_num_tiles, total_num_channels));
+    let mut crosses = Array2::zeros((total_num_channels, total_num_baselines));
+    let mut cross_weights = Array2::zeros((total_num_channels, total_num_baselines));
+    let mut autos = Array2::zeros((total_num_channels, total_num_tiles));
+    let mut auto_weights = Array2::zeros((total_num_channels, total_num_tiles));
     output_data
         .read_crosses_and_autos(
             crosses.view_mut(),
@@ -191,8 +191,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .unwrap();
 
     for (i_baseline, (baseline, ref_baseline)) in crosses
-        .outer_iter()
-        .zip_eq(ref_crosses.outer_iter())
+        .axis_iter(Axis(1))
+        .zip_eq(ref_crosses.axis_iter(Axis(1)))
         .enumerate()
     {
         let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map[&i_baseline];
@@ -209,8 +209,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     assert_abs_diff_eq!(cross_weights, ref_cross_weights);
 
     for (i_tile, (baseline, ref_baseline)) in autos
-        .outer_iter()
-        .zip_eq(ref_autos.outer_iter())
+        .axis_iter(Axis(1))
+        .zip_eq(ref_autos.axis_iter(Axis(1)))
         .enumerate()
     {
         let i_tile = tile_baseline_flags.unflagged_auto_index_to_tile_map[&i_tile];
@@ -235,10 +235,10 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     // Re-generate the reference data.
     let num_unflagged_tiles = total_num_tiles - tile_baseline_flags.flagged_tiles.len();
     let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
-    let mut ref_crosses = Array2::zeros((num_unflagged_cross_baselines, total_num_channels));
-    let mut ref_cross_weights = Array2::zeros((num_unflagged_cross_baselines, total_num_channels));
-    let mut ref_autos = Array2::zeros((num_unflagged_tiles, total_num_channels));
-    let mut ref_auto_weights = Array2::zeros((num_unflagged_tiles, total_num_channels));
+    let mut ref_crosses = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
+    let mut ref_cross_weights = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
+    let mut ref_autos = Array2::zeros((total_num_channels, num_unflagged_tiles));
+    let mut ref_auto_weights = Array2::zeros((total_num_channels, num_unflagged_tiles));
     input_data
         .read_crosses_and_autos(
             ref_crosses.view_mut(),
@@ -270,10 +270,10 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
 
     // Read the output visibilities.
     let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
-    let mut crosses = Array2::zeros((num_unflagged_cross_baselines, total_num_channels));
-    let mut cross_weights = Array2::zeros((num_unflagged_cross_baselines, total_num_channels));
-    let mut autos = Array2::zeros((num_unflagged_tiles, total_num_channels));
-    let mut auto_weights = Array2::zeros((num_unflagged_tiles, total_num_channels));
+    let mut crosses = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
+    let mut cross_weights = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
+    let mut autos = Array2::zeros((total_num_channels, num_unflagged_tiles));
+    let mut auto_weights = Array2::zeros((total_num_channels, num_unflagged_tiles));
     output_data
         .read_crosses_and_autos(
             crosses.view_mut(),
@@ -287,8 +287,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .unwrap();
 
     for (i_baseline, (baseline, ref_baseline)) in crosses
-        .outer_iter()
-        .zip_eq(ref_crosses.outer_iter())
+        .axis_iter(Axis(1))
+        .zip_eq(ref_crosses.axis_iter(Axis(1)))
         .enumerate()
     {
         let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map[&i_baseline];
@@ -301,8 +301,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         );
     }
     for (i_tile, (tile, ref_tile)) in autos
-        .outer_iter()
-        .zip_eq(ref_autos.outer_iter())
+        .axis_iter(Axis(1))
+        .zip_eq(ref_autos.axis_iter(Axis(1)))
         .enumerate()
     {
         let tile_factor = tile_baseline_flags.unflagged_auto_index_to_tile_map[&i_tile];
@@ -365,8 +365,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         .unwrap();
 
     for (i_baseline, (baseline, ref_baseline)) in crosses
-        .outer_iter()
-        .zip_eq(ref_crosses.outer_iter())
+        .axis_iter(Axis(1))
+        .zip_eq(ref_crosses.axis_iter(Axis(1)))
         .enumerate()
     {
         let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map[&i_baseline];
@@ -379,8 +379,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         );
     }
     for (i_tile, (tile, ref_tile)) in autos
-        .outer_iter()
-        .zip_eq(ref_autos.outer_iter())
+        .axis_iter(Axis(1))
+        .zip_eq(ref_autos.axis_iter(Axis(1)))
         .enumerate()
     {
         let tile_factor = tile_baseline_flags.unflagged_auto_index_to_tile_map[&i_tile];
@@ -391,10 +391,10 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     // Manually negate the weights corresponding to our flagged channels.
     for c in flagged_fine_chans {
         ref_cross_weights
-            .slice_mut(s![.., c])
+            .slice_mut(s![c, ..])
             .map_inplace(|w| *w = -w.abs());
         ref_auto_weights
-            .slice_mut(s![.., c])
+            .slice_mut(s![c, ..])
             .map_inplace(|w| *w = -w.abs());
     }
     assert_abs_diff_eq!(cross_weights, ref_cross_weights);
@@ -710,10 +710,10 @@ fn test_1090008640_solutions_apply_correct_vis() {
     let flagged_maps = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
 
     let mut uncal_cross_vis_data =
-        Array2::zeros((total_num_cross_baselines, obs_context.fine_chan_freqs.len()));
+        Array2::zeros((obs_context.fine_chan_freqs.len(), total_num_cross_baselines));
     let mut cal_cross_vis_data = Array2::zeros((
-        num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
+        num_unflagged_cross_baselines,
     ));
     let mut uncal_cross_vis_weights = Array2::zeros(uncal_cross_vis_data.dim());
     let mut cal_cross_vis_weights = Array2::zeros(cal_cross_vis_data.dim());
@@ -747,10 +747,10 @@ fn test_1090008640_solutions_apply_correct_vis() {
                 let expected_multiplier = ((tile1 + 1) * (tile2 + 1)) as f32;
                 assert_abs_diff_eq!(
                     uncal_cross_vis_data
-                        .slice(s![i_unflagged_baseline, ..])
+                        .slice(s![.., i_unflagged_baseline])
                         .to_owned()
                         * expected_multiplier,
-                    cal_cross_vis_data.slice(s![i_flagged_baseline, ..]),
+                    cal_cross_vis_data.slice(s![.., i_flagged_baseline]),
                     epsilon = 1e-10
                 );
             }
@@ -759,9 +759,9 @@ fn test_1090008640_solutions_apply_correct_vis() {
 
     // Check auto correlations.
     let mut uncal_auto_vis_data =
-        Array2::zeros((total_num_tiles, obs_context.fine_chan_freqs.len()));
+        Array2::zeros((obs_context.fine_chan_freqs.len(), total_num_tiles));
     let mut cal_auto_vis_data =
-        Array2::zeros((num_unflagged_tiles, obs_context.fine_chan_freqs.len()));
+        Array2::zeros((obs_context.fine_chan_freqs.len(), num_unflagged_tiles));
     let mut uncal_auto_vis_weights = Array2::zeros(uncal_auto_vis_data.dim());
     let mut cal_auto_vis_weights = Array2::zeros(cal_auto_vis_data.dim());
     uncal_reader
@@ -790,8 +790,8 @@ fn test_1090008640_solutions_apply_correct_vis() {
         {
             let expected_multiplier = ((tile + 1) * (tile + 1)) as f32;
             assert_abs_diff_eq!(
-                uncal_auto_vis_data.slice(s![tile, ..]).to_owned() * expected_multiplier,
-                cal_auto_vis_data.slice(s![i_flagged_tile, ..]),
+                uncal_auto_vis_data.slice(s![.., tile]).to_owned() * expected_multiplier,
+                cal_auto_vis_data.slice(s![.., i_flagged_tile]),
                 epsilon = 1e-10
             );
         }
@@ -837,12 +837,12 @@ fn test_1090008640_solutions_apply_correct_vis() {
 
     let cal2_reader = UvfitsReader::new(vis_out, Some(metafits)).unwrap();
     let mut cal2_cross_vis_data = Array2::zeros((
-        num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
+        num_unflagged_cross_baselines,
     ));
     let mut cal2_cross_vis_weights = Array2::zeros(cal2_cross_vis_data.dim());
     let mut cal2_auto_vis_data =
-        Array2::zeros((num_unflagged_tiles, obs_context.fine_chan_freqs.len()));
+        Array2::zeros((obs_context.fine_chan_freqs.len(), num_unflagged_tiles));
     let mut cal2_auto_vis_weights = Array2::zeros(cal2_auto_vis_data.dim());
     cal2_reader
         .read_crosses_and_autos(
@@ -860,26 +860,26 @@ fn test_1090008640_solutions_apply_correct_vis() {
         let (tile1, tile2) = flagged_maps.unflagged_cross_baseline_to_tile_map[&i_bl];
         if bad_sols.contains(&tile1) || bad_sols.contains(&tile2) {
             assert!(cal2_cross_vis_data
-                .slice(s![i_bl, ..])
+                .slice(s![.., i_bl])
                 .iter()
                 .flat_map(|j| j.to_float_array())
                 .all(|f| f.abs() < f32::EPSILON));
             assert_abs_diff_eq!(
-                cal_cross_vis_weights.slice(s![i_bl, ..]).map(|w| -w.abs()),
-                cal2_cross_vis_weights.slice(s![i_bl, ..])
+                cal_cross_vis_weights.slice(s![.., i_bl]).map(|w| -w.abs()),
+                cal2_cross_vis_weights.slice(s![.., i_bl])
             );
             assert!(cal2_cross_vis_weights
-                .slice(s![i_bl, ..])
+                .slice(s![.., i_bl])
                 .iter()
                 .all(|w| *w < 0.0));
         } else {
             assert_abs_diff_eq!(
-                cal_cross_vis_data.slice(s![i_bl, ..]),
-                cal2_cross_vis_data.slice(s![i_bl, ..])
+                cal_cross_vis_data.slice(s![.., i_bl]),
+                cal2_cross_vis_data.slice(s![.., i_bl])
             );
             assert_abs_diff_eq!(
-                cal_cross_vis_weights.slice(s![i_bl, ..]),
-                cal2_cross_vis_weights.slice(s![i_bl, ..])
+                cal_cross_vis_weights.slice(s![.., i_bl]),
+                cal2_cross_vis_weights.slice(s![.., i_bl])
             );
         }
     }
@@ -888,26 +888,26 @@ fn test_1090008640_solutions_apply_correct_vis() {
         let tile = flagged_maps.unflagged_auto_index_to_tile_map[&i_tile];
         if bad_sols.contains(&tile) {
             assert!(cal2_auto_vis_data
-                .slice(s![i_tile, ..])
+                .slice(s![.., i_tile])
                 .iter()
                 .flat_map(|j| j.to_float_array())
                 .all(|f| f.abs() < f32::EPSILON));
             assert_abs_diff_eq!(
-                cal_auto_vis_weights.slice(s![i_tile, ..]).map(|w| -w.abs()),
-                cal2_auto_vis_weights.slice(s![i_tile, ..])
+                cal_auto_vis_weights.slice(s![.., i_tile]).map(|w| -w.abs()),
+                cal2_auto_vis_weights.slice(s![.., i_tile])
             );
             assert!(cal2_auto_vis_weights
-                .slice(s![i_tile, ..])
+                .slice(s![.., i_tile])
                 .iter()
                 .all(|w| *w < 0.0));
         } else {
             assert_abs_diff_eq!(
-                cal_auto_vis_data.slice(s![i_tile, ..]),
-                cal2_auto_vis_data.slice(s![i_tile, ..])
+                cal_auto_vis_data.slice(s![.., i_tile]),
+                cal2_auto_vis_data.slice(s![.., i_tile])
             );
             assert_abs_diff_eq!(
-                cal_auto_vis_weights.slice(s![i_tile, ..]),
-                cal2_auto_vis_weights.slice(s![i_tile, ..])
+                cal_auto_vis_weights.slice(s![.., i_tile]),
+                cal2_auto_vis_weights.slice(s![.., i_tile])
             );
         }
     }

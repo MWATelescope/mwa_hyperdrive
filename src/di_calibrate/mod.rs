@@ -13,10 +13,10 @@ pub(crate) mod tests;
 
 pub(crate) use error::DiCalibrateError;
 
-use std::ops::Deref;
+use std::{ops::Deref, thread};
 
 use crossbeam_channel::{unbounded, Sender};
-use crossbeam_utils::{atomic::AtomicCell, thread};
+use crossbeam_utils::atomic::AtomicCell;
 use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
@@ -24,7 +24,7 @@ use log::{debug, info};
 use marlu::{
     c64,
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
-    math::{cross_correlation_baseline_to_tiles, num_tiles_from_num_cross_correlation_baselines},
+    math::num_tiles_from_num_cross_correlation_baselines,
     Jones, MwaObsContext,
 };
 use ndarray::{iter::AxisIterMut, prelude::*};
@@ -70,8 +70,8 @@ pub(crate) fn get_cal_vis(
 
     let vis_shape = (
         params.get_num_timesteps(),
-        params.get_num_unflagged_cross_baselines(),
         fence.chanblocks.len(),
+        params.get_num_unflagged_cross_baselines(),
     );
     let num_elems = vis_shape.0 * vis_shape.1 * vis_shape.2;
     let size = num_elems * std::mem::size_of::<Jones<f32>>();
@@ -81,7 +81,7 @@ pub(crate) fn get_cal_vis(
         ("GiB", size as f64 / (1024.0_f64.powi(3)))
     };
     debug!(
-        "Shape of data and model arrays: ({} timesteps, {} baselines, {} channels; {:.2} {} each)",
+        "Shape of data and model arrays: ({} timesteps, {} channels, {} baselines; {:.2} {} each)",
         vis_shape.0, vis_shape.1, vis_shape.2, size, size_unit
     );
 
@@ -181,7 +181,7 @@ pub(crate) fn get_cal_vis(
         let vis_weight_slices = vis_weights.outer_iter_mut();
 
         // Input visibility-data reading thread.
-        let data_handle = scope.spawn(|_| {
+        let data_handle = scope.spawn(|| {
             // If a panic happens, update our atomic error.
             defer_on_unwind! { error.store(true); }
             read_progress.tick();
@@ -202,7 +202,7 @@ pub(crate) fn get_cal_vis(
         });
 
         // Sky-model generation thread.
-        let model_handle = scope.spawn(|_| {
+        let model_handle = scope.spawn(|| {
             defer_on_unwind! { error.store(true); }
             model_progress.tick();
 
@@ -225,7 +225,7 @@ pub(crate) fn get_cal_vis(
 
         // Model writing thread. If the user hasn't specified to write the model
         // to a file, then this thread just consumes messages from the modeller.
-        let writer_handle = scope.spawn(|_| {
+        let writer_handle = scope.spawn(|| {
             defer_on_unwind! { error.store(true); }
 
             // If the user wants the sky model written out, `model_file` is
@@ -302,9 +302,9 @@ pub(crate) fn get_cal_vis(
         // Cargo.toml. (It would be nice to capture the panic information, if
         // it's possible, but I don't know how, so panics are currently
         // aborting.)
-        let result = data_handle.join().unwrap();
-        let result = result.and_then(|_| model_handle.join().unwrap());
-        result.and_then(|_| writer_handle.join().unwrap())
+        let result = data_handle.join();
+        let result = result.and_then(|_| model_handle.join());
+        result.and_then(|_| writer_handle.join())
     });
 
     // Propagate errors.
@@ -327,27 +327,25 @@ pub(crate) fn get_cal_vis(
                 .outer_iter_mut()
                 .zip(vis_model.outer_iter_mut())
                 .zip(vis_weights.outer_iter())
-                .zip(params.baseline_weights.iter())
-                .for_each(
-                    |(((mut vis_data, mut vis_model), vis_weights), &baseline_weight)| {
-                        vis_data
-                            .iter_mut()
-                            .zip(vis_model.iter_mut())
-                            .zip(vis_weights.iter())
-                            .for_each(|((vis_data, vis_model), &vis_weight)| {
-                                let weight = f64::from(vis_weight) * baseline_weight;
-                                if weight <= 0.0 {
-                                    *vis_data = Jones::default();
-                                    *vis_model = Jones::default();
-                                } else {
-                                    *vis_data =
-                                        Jones::<f32>::from(Jones::<f64>::from(*vis_data) * weight);
-                                    *vis_model =
-                                        Jones::<f32>::from(Jones::<f64>::from(*vis_model) * weight);
-                                }
-                            });
-                    },
-                );
+                .for_each(|((mut vis_data, mut vis_model), vis_weights)| {
+                    vis_data
+                        .iter_mut()
+                        .zip(vis_model.iter_mut())
+                        .zip(vis_weights.iter())
+                        .zip(params.baseline_weights.iter())
+                        .for_each(|(((vis_data, vis_model), &vis_weight), baseline_weight)| {
+                            let weight = f64::from(vis_weight) * *baseline_weight;
+                            if weight <= 0.0 {
+                                *vis_data = Jones::default();
+                                *vis_model = Jones::default();
+                            } else {
+                                *vis_data =
+                                    Jones::<f32>::from(Jones::<f64>::from(*vis_data) * weight);
+                                *vis_model =
+                                    Jones::<f32>::from(Jones::<f64>::from(*vis_model) * weight);
+                            }
+                        });
+                });
         });
 
     info!("Finished reading input data and sky modelling");
@@ -719,7 +717,7 @@ pub fn calibrate_timeblocks<'a>(
     draw_progress_bar: bool,
     print_convergence_messages: bool,
 ) -> (IncompleteSolutions<'a>, Array2<CalibrationResult>) {
-    let num_unflagged_tiles = num_tiles_from_num_cross_correlation_baselines(vis_data.dim().1);
+    let num_unflagged_tiles = num_tiles_from_num_cross_correlation_baselines(vis_data.dim().2);
     let num_timeblocks = timeblocks.len();
     let num_chanblocks = chanblocks.len();
     let shape = (num_timeblocks, num_unflagged_tiles, num_chanblocks);
@@ -896,11 +894,11 @@ fn calibrate_timeblock(
             let i_chanblock = chanblock.unflagged_index as usize;
             let range = s![
                 timeblock.range.clone(),
-                ..,
                 // We use a range because `calibrate` and `calibration_loop`
                 // expect visibility arrays with potentially multiple
                 // chanblocks. It may be worth enforcing only single chanblocks.
-                i_chanblock..i_chanblock + 1
+                i_chanblock..i_chanblock + 1,
+                ..
             ];
             let mut cal_result = calibrate(
                 vis_data.slice(range),
@@ -963,9 +961,14 @@ fn calibrate_timeblock(
         let mut retry_iter = 0;
         while new_converged_count > 0 && total_converged_count != num_chanblocks {
             retry_iter += 1;
-            progress_bar.println(format!(
-                "*** Re-calibrating failed chanblocks iteration {retry_iter} ***"
-            ));
+            if print_convergence_messages {
+                let s = format!("*** Re-calibrating failed chanblocks iteration {retry_iter} ***");
+                if progress_bar.is_hidden() {
+                    println!("{s}");
+                } else {
+                    progress_bar.println(s);
+                }
+            }
 
             // Iterate over all the calibration results until we find one
             // that failed. Then find the next that succeeded. With a
@@ -1026,7 +1029,7 @@ fn calibrate_timeblock(
                     if !old_cal_result.converged {
                         let chanblock = old_cal_result.chanblock.unwrap();
                         let i_chanblock = old_cal_result.i_chanblock.unwrap();
-                        let range = s![timeblock.range.clone(), .., i_chanblock..i_chanblock + 1];
+                        let range = s![timeblock.range.clone(), i_chanblock..i_chanblock + 1, ..];
                         let mut new_cal_result = calibrate(
                             vis_data.slice(range),
                             vis_model.slice(range),
@@ -1067,7 +1070,13 @@ fn calibrate_timeblock(
                                 new_cal_result.max_precision
                             ));
                         }
-                        progress_bar.println(status_str);
+                        if print_convergence_messages {
+                            if progress_bar.is_hidden() {
+                                println!("{status_str}");
+                            } else {
+                                progress_bar.println(status_str);
+                            }
+                        }
 
                         // Convert precisions that have extremely large exponents to NaN.
                         if new_cal_result.max_precision.abs() > 1e100 {
@@ -1119,18 +1128,16 @@ pub(super) fn calibrate(
     min_threshold: f64,
 ) -> CalibrationResult {
     assert_eq!(data.dim(), model.dim());
+    let num_tiles = di_jones.len_of(Axis(0));
 
-    let mut new_jones: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
+    let mut old_jones: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
     let mut top: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
     let mut bot: Array1<Jones<f64>> = Array::zeros(di_jones.dim());
     // The convergence precisions per antenna. They are stored per polarisation
     // for programming convenience, but really only we're interested in the
     // largest value in the entire array.
-    let mut precisions: Array2<f64> = Array::zeros((di_jones.len(), 4));
-    let mut failed: Array1<bool> = Array1::from_elem(di_jones.len(), false);
-
-    // Shortcuts.
-    let num_tiles = di_jones.len_of(Axis(0));
+    let mut precisions: Array2<f64> = Array::zeros((num_tiles, 4));
+    let mut failed: Array1<bool> = Array1::from_elem(num_tiles, false);
 
     let mut iteration = 0;
     while iteration < max_iterations {
@@ -1141,30 +1148,49 @@ pub(super) fn calibrate(
 
         calibration_loop(data, model, di_jones.view(), top.view_mut(), bot.view_mut());
 
+        // Do a once-off check to see if `top` and `bot` are already identical.
+        // This probably only happens in simulated conditions.
+        if iteration == 1
+            && top.iter().zip(bot.iter()).all(|(&top, &bot)| {
+                let diff = top - bot;
+                diff[0].re.abs() < stop_threshold
+                    && diff[0].im.abs() < stop_threshold
+                    && diff[1].re.abs() < stop_threshold
+                    && diff[1].im.abs() < stop_threshold
+                    && diff[2].re.abs() < stop_threshold
+                    && diff[2].im.abs() < stop_threshold
+                    && diff[3].re.abs() < stop_threshold
+                    && diff[3].im.abs() < stop_threshold
+            })
+        {
+            // Nothing to do, break.
+            break;
+        }
+
         // Obtain the new DI Jones matrices from "top" and "bot".
         // Tile/antenna axis.
         di_jones
             .outer_iter_mut()
-            .zip(new_jones.outer_iter_mut())
+            .zip(old_jones.outer_iter_mut())
             .zip(top.outer_iter())
             .zip(bot.outer_iter())
             .zip(failed.iter_mut())
             .filter(|(_, &mut failed)| !failed)
-            .for_each(|((((mut di_jones, mut new_jones), top), bot), failed)| {
+            .for_each(|((((mut di_jones, mut old_jones), top), bot), failed)| {
                 // Unflagged fine-channel axis.
                 di_jones
                     .iter_mut()
-                    .zip(new_jones.iter_mut())
+                    .zip(old_jones.iter_mut())
                     .zip(top.iter())
                     .zip(bot.iter())
-                    .for_each(|(((di_jones, new_jones), top), bot)| {
+                    .for_each(|(((di_jones, old_jones), top), bot)| {
                         let div = *top / bot;
                         if div.any_nan() {
                             *failed = true;
                             *di_jones = Jones::default();
-                            *new_jones = Jones::default();
+                            *old_jones = Jones::default();
                         } else {
-                            *new_jones = div;
+                            *di_jones = div;
                         }
                     });
             });
@@ -1180,49 +1206,59 @@ pub(super) fn calibrate(
         // up convergence.
         if iteration % 2 == 0 {
             // Update the DI Jones matrices, and for each pair of Jones matrices
-            // in new_jones and di_jones, form a maximum "distance" between
+            // in `old_jones` and `di_jones`, form a maximum "distance" between
             // elements of the Jones matrices.
             di_jones
                 .outer_iter_mut()
-                .zip(new_jones.outer_iter())
+                .zip(old_jones.outer_iter())
                 .zip(precisions.outer_iter_mut())
                 .zip(failed.iter())
                 .filter(|(_, &failed)| !failed)
-                .for_each(|(((mut di_jones, new_jones), mut antenna_precision), _)| {
-                    // antenna_precision = sum(norm_sqr(new_jones - di_jones)) / num_freqs
-                    let jones_diff_sum = (&new_jones - &di_jones).into_iter().fold(
+                .for_each(|(((mut di_jones, old_jones), mut antenna_precision), _)| {
+                    // antenna_precision = sum(norm_sqr(di_jones - old_jones)) / num_freqs
+
+                    // Currently, this function only takes one frequency at a
+                    // time. So there's no need to normalise by the number of
+                    // frequencies. But, the following line should be used if
+                    // there are multiple frequencies present.
+                    // let num_freqs = di_jones.len_of(Axis(1));
+                    let jones_diff_sum = di_jones.iter().zip(old_jones.iter()).fold(
                         [0.0, 0.0, 0.0, 0.0],
-                        |acc, diff_jones| {
+                        |acc, (&new, &old)| {
+                            let diff = new - old;
                             [
-                                acc[0] + diff_jones[0].norm_sqr(),
-                                acc[1] + diff_jones[1].norm_sqr(),
-                                acc[2] + diff_jones[2].norm_sqr(),
-                                acc[3] + diff_jones[3].norm_sqr(),
+                                acc[0] + diff[0].norm_sqr(),
+                                acc[1] + diff[1].norm_sqr(),
+                                acc[2] + diff[2].norm_sqr(),
+                                acc[3] + diff[3].norm_sqr(),
                             ]
                         },
                     );
-                    let len = di_jones.len() as f64;
+
                     antenna_precision
                         .iter_mut()
                         .zip(jones_diff_sum.into_iter())
                         .for_each(|(a, d)| {
-                            *a = d / len;
+                            // As above, the following line should be used if
+                            // multiple frequencies are present.
+                            // *a = d / num_freqs;
+                            *a = d;
                         });
 
-                    // di_jones = 0.5 * (di_jones + new_jones)
-                    di_jones += &new_jones;
-                    di_jones.mapv_inplace(|v| v * 0.5);
+                    // di_jones = 0.5 * (di_jones + old_jones)
+                    di_jones.iter_mut().zip(old_jones.iter().copied()).for_each(
+                        |(di_jones, old_jones)| {
+                            *di_jones = (*di_jones + old_jones) * 0.5;
+                        },
+                    )
                 });
 
             // Stop iterating if we have reached the stop threshold.
             if precisions.iter().all(|&v| v < stop_threshold) {
                 break;
             }
-        } else {
-            // On odd iterations, update the DI Jones matrices with the new
-            // ones.
-            di_jones.assign(&new_jones);
         }
+        old_jones.assign(&di_jones);
     }
 
     // Set failed antennas to NaN.
@@ -1236,16 +1272,18 @@ pub(super) fn calibrate(
 
     // max_precision = maximum(distances)
     let max_precision: f64 = precisions
-        .outer_iter()
+        .as_slice()
+        .unwrap()
+        .chunks_exact(4)
         .zip(failed.iter())
         .filter(|(_, &failed)| !failed)
         .fold(f64::MIN, |acc, (antenna_precision, _)| {
             // Rust really doesn't want you to use the .max() iterator method on
             // floats...
-            acc.max(antenna_precision[[0]])
-                .max(antenna_precision[[1]])
-                .max(antenna_precision[[2]])
-                .max(antenna_precision[[3]])
+            acc.max(antenna_precision[3])
+                .max(antenna_precision[2])
+                .max(antenna_precision[1])
+                .max(antenna_precision[0])
         });
 
     let num_failed = failed.iter().filter(|&&f| f).count();
@@ -1272,7 +1310,11 @@ pub(super) fn calibrate(
     }
 }
 
-/// "MitchCal".
+/// The following is the same as "MitchCal", equation 11 of Mitchell et al.
+/// <https://ui.adsabs.harvard.edu/abs/2008ISTSP...2..707M/abstract>
+///
+/// The next iteration of gains is determined by summing the numerator ("top")
+/// and denominator ("bot") of each antenna separately.
 fn calibration_loop(
     data: ArrayView3<Jones<f32>>,
     model: ArrayView3<Jones<f32>>,
@@ -1286,44 +1328,55 @@ fn calibration_loop(
     data.outer_iter()
         .zip(model.outer_iter())
         .for_each(|(data, model)| {
-            // Unflagged baseline axis.
+            // Unflagged frequency chan axis.
             data.outer_iter()
                 .zip(model.outer_iter())
-                .enumerate()
-                .for_each(|(i_baseline, (data, model))| {
-                    let (tile1, tile2) = cross_correlation_baseline_to_tiles(num_tiles, i_baseline);
+                .for_each(|(data, model)| {
+                    let mut i_tile1 = 0;
+                    let mut i_tile2 = 0;
 
-                    // Unflagged frequency chan axis.
-                    data.iter().zip(model).for_each(|(j_data, j_model)| {
-                        let j_data = Jones::<f64>::from(j_data);
-                        let j_model = Jones::<f64>::from(j_model);
+                    // Unflagged baseline axis.
+                    #[allow(non_snake_case)]
+                    data.iter().zip(model.iter()).for_each(|(data, model)| {
+                        i_tile2 += 1;
+                        if i_tile2 == num_tiles {
+                            i_tile1 += 1;
+                            i_tile2 = i_tile1 + 1;
+                        }
+
+                        let D = Jones::<f64>::from(data);
+                        let M = Jones::<f64>::from(model);
 
                         // Suppress boundary checks for maximum performance!
                         unsafe {
-                            let j_t1 = di_jones.uget(tile1);
-                            let j_t2 = di_jones.uget(tile2);
+                            // Tile 1
+                            {
+                                let J2 = *di_jones.uget(i_tile2);
+                                let top_tile1 = top.uget_mut(i_tile1);
+                                let bot_tile1 = bot.uget_mut(i_tile1);
 
-                            let top_t1 = top.uget_mut(tile1);
-                            let bot_t1 = bot.uget_mut(tile1);
+                                // For tile 1, ( D G M^H ) / ( (M G^H) (M G^H)^H )
+                                // let Z = G M^H
+                                let Z = J2 * M.h();
+                                // D (G M^H) = D Z
+                                *top_tile1 += D * Z;
+                                // (M G^H) (M G^H)^H = (G M^H)^H (G M^H) = Z^H Z
+                                *bot_tile1 += Z.h() * Z;
+                            }
+                            // Tile 2
+                            {
+                                let J1 = *di_jones.uget(i_tile1);
+                                let top_tile2 = top.uget_mut(i_tile2);
+                                let bot_tile2 = bot.uget_mut(i_tile2);
 
-                            // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
-                            // J M^H
-                            let z = *j_t2 * j_model.h();
-                            // D (J M^H)
-                            *top_t1 += j_data * z;
-                            // (J M^H)^H (J M^H)
-                            *bot_t1 += z.h() * z;
-
-                            let top_t2 = top.uget_mut(tile2);
-                            let bot_t2 = bot.uget_mut(tile2);
-
-                            // André's calibrate: ( D J M^H ) / ( M J^H J M^H )
-                            // J (M^H)^H
-                            let z = *j_t1 * j_model;
-                            // D^H (J M^H)^H
-                            *top_t2 += j_data.h() * z;
-                            // (J M^H) (J M^H)
-                            *bot_t2 += z.h() * z;
+                                // For tile 2, ( D^H G M ) / ( (G M)^H (G M) )
+                                // let Z = G M
+                                let Z = J1 * M;
+                                // D^H G M = D^H Z
+                                *top_tile2 += D.h() * Z;
+                                // (G M)^H (G M) = Z^H Z
+                                *bot_tile2 += Z.h() * Z;
+                            }
                         }
                     });
                 })

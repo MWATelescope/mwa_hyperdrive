@@ -233,8 +233,8 @@ __global__ void model_points_kernel(const int num_freqs, const int num_vis, cons
 
     // Get the indices for this thread. `i_vis` indexes over baselines and
     // frequencies, with frequencies moving faster than baselines.
-    const int i_bl = i_vis / num_freqs;
-    const int i_freq = i_vis % num_freqs;
+    const int i_bl = i_vis % num_freqs;
+    const int i_freq = i_vis / num_freqs;
     const int i_fd = i_freq * d_comps.num_list_points;
     const FLOAT freq = d_freqs[i_freq];
     const FLOAT one_on_lambda = freq / VEL_C;
@@ -297,8 +297,8 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_vis, c
 
     // Get the indices for this thread. `i_vis` indexes over baselines and
     // frequencies, with frequencies moving faster than baselines.
-    const int i_bl = i_vis / num_freqs;
-    const int i_freq = i_vis % num_freqs;
+    const int i_bl = i_vis % num_freqs;
+    const int i_freq = i_vis / num_freqs;
     const int i_fd = i_freq * d_comps.num_list_gaussians;
     const FLOAT freq = d_freqs[i_freq];
     const FLOAT one_on_lambda = freq / VEL_C;
@@ -403,8 +403,8 @@ __global__ void model_shapelets_kernel(const size_t num_freqs, const size_t num_
 
     // Get the indices for this thread. `i_vis` indexes over baselines and
     // frequencies, with frequencies moving faster than baselines.
-    const int i_bl = i_vis / num_freqs;
-    const int i_freq = i_vis % num_freqs;
+    const int i_bl = i_vis % num_freqs;
+    const int i_freq = i_vis / num_freqs;
     const int i_fd = i_freq * d_comps.num_list_shapelets;
     const FLOAT freq = d_freqs[i_freq];
     const FLOAT one_on_lambda = freq / VEL_C;
@@ -649,9 +649,10 @@ __global__ void model_points_fee_kernel(int num_freqs, int num_vis, const UVW *d
         return;
 
     int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x - 1;
-    // `i_vis` indexes over baselines and frequencies, with frequencies moving
-    // faster than baselines.
-    int i_vis = i_bl * num_freqs + i_freq;
+    const int num_baselines = (gridDim.x * (gridDim.x - 1)) / 2;
+    // `i_vis` indexes over baselines and frequencies, with baselines moving
+    // faster than frequencies.
+    const int i_vis = i_freq * num_baselines + i_bl;
     if (i_vis >= num_vis)
         return;
 
@@ -746,9 +747,10 @@ __global__ void model_gaussians_fee_kernel(const int num_freqs, const int num_vi
         return;
 
     int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x - 1;
-    // `i_vis` indexes over baselines and frequencies, with frequencies moving
-    // faster than baselines.
-    int i_vis = i_bl * num_freqs + i_freq;
+    const int num_baselines = (gridDim.x * (gridDim.x - 1)) / 2;
+    // `i_vis` indexes over baselines and frequencies, with baselines moving
+    // faster than frequencies.
+    const int i_vis = i_freq * num_baselines + i_bl;
     if (i_vis >= num_vis)
         return;
 
@@ -889,9 +891,12 @@ __global__ void model_shapelets_fee_kernel(const size_t num_freqs, const size_t 
         return;
 
     int i_bl = gridDim.x * blockIdx.x - (blockIdx.x * blockIdx.x + blockIdx.x) / 2 + blockIdx.y - blockIdx.x - 1;
-    // `i_vis` indexes over baselines and frequencies, with frequencies moving
-    // faster than baselines.
-    int i_vis = i_bl * num_freqs + i_freq;
+    // `i_vis` indexes over baselines and frequencies, with baselines moving
+    // faster than frequencies.
+    const int num_baselines = (gridDim.x * (gridDim.x - 1)) / 2;
+    // `i_vis` indexes over baselines and frequencies, with baselines moving
+    // faster than frequencies.
+    const int i_vis = i_freq * num_baselines + i_bl;
     if (i_vis >= num_vis)
         return;
 

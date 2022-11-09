@@ -784,10 +784,10 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
             )?;
 
             let cross_vis_shape = (
+                fine_chan_freqs.len(),
                 tile_baseline_flags
                     .unflagged_cross_baseline_to_tile_map
                     .len(),
-                fine_chan_freqs.len(),
             );
             let weight_factor =
                 (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR);

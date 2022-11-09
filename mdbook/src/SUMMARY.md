@@ -22,6 +22,7 @@
   - [Advanced usage]()
     - [Varying solutions over time](user/di_cal/advanced/time_varying.md)
   - [Usage on garrawarla](user/di_cal/garrawarla.md)
+  - [How does it work?](user/di_cal/how_does_it_work.md)
 - [Apply solutions](user/solutions_apply/intro.md)
   - [Simple usage](user/solutions_apply/simple.md)
 - [Plot solutions](user/plotting.md)

@@ -7,7 +7,7 @@ use std::{collections::HashSet, ffi::CString, path::PathBuf};
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
 use hifitime::{Duration, Unit};
-use itertools::izip;
+use itertools::Itertools;
 use marlu::{c32, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWrite, XyzGeodetic};
 use ndarray::prelude::*;
 use tempfile::{tempdir, NamedTempFile};
@@ -70,19 +70,15 @@ fn write_then_read_uvfits(autos: bool) {
     //     .cloned()
     //     .collect();
 
-    let cross_ant_pairs: Vec<_> = all_ant_pairs
-        .clone()
-        .into_iter()
-        .filter(|&(tile1, tile2)| tile1 != tile2)
-        .collect();
-
-    let num_cross_baselines = cross_ant_pairs.len();
-
     let sel_ant_pairs = if autocorrelations_present {
         all_ant_pairs
     } else {
-        cross_ant_pairs
+        all_ant_pairs
+            .into_iter()
+            .filter(|&(tile1, tile2)| tile1 != tile2)
+            .collect()
     };
+    let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
 
     let flagged_fine_chans = HashSet::new();
     let tile_baseline_flags = TileBaselineFlags::new(num_tiles, flagged_tiles);
@@ -97,12 +93,12 @@ fn write_then_read_uvfits(autos: bool) {
 
     let vis_ctx = VisContext {
         num_sel_timesteps: num_timesteps,
-        start_timestamp: *timesteps.first().unwrap(),
+        start_timestamp: timesteps[0],
         int_time: Duration::from_f64(1., Unit::Second),
         num_sel_chans: num_chans,
         start_freq_hz: fine_chan_freqs_hz[0],
         freq_resolution_hz: fine_chan_width_hz,
-        sel_baselines: sel_ant_pairs.clone(),
+        sel_baselines: sel_ant_pairs,
         avg_time: 1,
         avg_freq: 1,
         num_vis_pols: 4,
@@ -111,7 +107,7 @@ fn write_then_read_uvfits(autos: bool) {
     let sel_vis = Array3::from_shape_fn(
         vis_ctx.avg_dims(),
         |(timestep_idx, ant_pair_idx, chan_idx)| {
-            let (tile1, tile2) = sel_ant_pairs[ant_pair_idx];
+            let (tile1, tile2) = vis_ctx.sel_baselines[ant_pair_idx];
             Jones::from([
                 c32::new(tile1 as _, tile2 as _),
                 c32::new(chan_idx as _, timestep_idx as _),
@@ -164,16 +160,16 @@ fn write_then_read_uvfits(autos: bool) {
     );
     let uvfits = result.unwrap();
 
-    let mut cross_vis_read = Array2::zeros((num_cross_baselines, num_chans));
-    let mut cross_weights_read = Array2::zeros((num_cross_baselines, num_chans));
-    let mut auto_vis_read = Array2::zeros((num_tiles, num_chans));
-    let mut auto_weights_read = Array2::zeros((num_tiles, num_chans));
+    let mut cross_vis_read = Array2::zeros((num_chans, num_cross_baselines));
+    let mut cross_weights_read = Array2::zeros((num_chans, num_cross_baselines));
+    let mut auto_vis_read = Array2::zeros((num_chans, num_tiles));
+    let mut auto_weights_read = Array2::zeros((num_chans, num_tiles));
 
-    for (timestep, vis_written, weights_written) in izip!(
-        0..num_timesteps,
-        sel_vis.outer_iter(),
-        sel_weights.outer_iter()
-    ) {
+    for ((timestep, vis_written), weights_written) in (0..num_timesteps)
+        .into_iter()
+        .zip_eq(sel_vis.outer_iter())
+        .zip_eq(sel_weights.outer_iter())
+    {
         let result = uvfits.read_crosses(
             cross_vis_read.view_mut(),
             cross_weights_read.view_mut(),
@@ -188,19 +184,19 @@ fn write_then_read_uvfits(autos: bool) {
         );
         result.unwrap();
 
-        for ((vis_written, weights_written, _), vis_read, weights_read) in izip!(
-            izip!(
-                vis_written.axis_iter(Axis(1)),
-                weights_written.axis_iter(Axis(1)),
-                sel_ant_pairs.clone().into_iter()
-            )
-            .filter(|(_, _, (tile1, tile2))| { tile1 != tile2 }),
-            cross_vis_read.outer_iter(),
-            cross_weights_read.outer_iter()
-        ) {
-            assert_abs_diff_eq!(vis_read, vis_written);
-            assert_abs_diff_eq!(weights_read, weights_written);
-        }
+        vis_written
+            .axis_iter(Axis(1))
+            .zip_eq(weights_written.axis_iter(Axis(1)))
+            .zip_eq(vis_ctx.sel_baselines.iter())
+            .filter(|((_, _), (tile1, tile2))| tile1 != tile2)
+            .zip_eq(cross_vis_read.axis_iter(Axis(1)))
+            .zip_eq(cross_weights_read.axis_iter(Axis(1)))
+            .for_each(
+                |((((vis_written, weights_written), _), cross_vis_read), cross_weights_read)| {
+                    assert_abs_diff_eq!(cross_vis_read, vis_written);
+                    assert_abs_diff_eq!(cross_weights_read, weights_written);
+                },
+            );
 
         if autocorrelations_present {
             let result = uvfits.read_autos(
@@ -217,19 +213,19 @@ fn write_then_read_uvfits(autos: bool) {
             );
             result.unwrap();
 
-            for ((vis_written, weights_written, _), vis_read, weights_read) in izip!(
-                izip!(
-                    vis_written.axis_iter(Axis(1)),
-                    weights_written.axis_iter(Axis(1)),
-                    sel_ant_pairs.clone().into_iter()
-                )
-                .filter(|(_, _, (tile1, tile2))| { tile1 == tile2 }),
-                auto_vis_read.outer_iter(),
-                auto_weights_read.outer_iter()
-            ) {
-                assert_abs_diff_eq!(vis_read, vis_written,);
-                assert_abs_diff_eq!(weights_read, weights_written);
-            }
+            vis_written
+                .axis_iter(Axis(1))
+                .zip_eq(weights_written.axis_iter(Axis(1)))
+                .zip_eq(vis_ctx.sel_baselines.iter())
+                .filter(|((_, _), (tile1, tile2))| tile1 == tile2)
+                .zip_eq(auto_vis_read.axis_iter(Axis(1)))
+                .zip_eq(auto_weights_read.axis_iter(Axis(1)))
+                .for_each(
+                    |((((vis_written, weights_written), _), auto_vis_read), auto_weights_read)| {
+                        assert_abs_diff_eq!(auto_vis_read, vis_written);
+                        assert_abs_diff_eq!(auto_weights_read, weights_written);
+                    },
+                );
         }
     }
 }
@@ -267,8 +263,8 @@ fn test_1090008640_cross_vis() {
         1090008658.0
     );
 
-    let mut vis = Array2::zeros((num_baselines, num_chans));
-    let mut vis_weights = Array2::zeros((num_baselines, num_chans));
+    let mut vis = Array2::zeros((num_chans, num_baselines));
+    let mut vis_weights = Array2::zeros((num_chans, num_baselines));
     let result = uvfits_reader.read_crosses(
         vis.view_mut(),
         vis_weights.view_mut(),
@@ -291,7 +287,7 @@ fn test_1090008640_cross_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(10, 16)],
+        vis[(16, 10)],
         Jones::from([
             c32::new(-4.138127e1, -2.638188e2),
             c32::new(5.220332e2, -2.6055228e2),
@@ -302,9 +298,9 @@ fn test_1090008640_cross_vis() {
 
     // PFB gains will affect weights, but these weren't in Birli when it made
     // this MS; all but one weight are 8.0 (it's flagged).
-    assert_abs_diff_eq!(vis_weights[(11, 2)], -8.0);
+    assert_abs_diff_eq!(vis_weights[(2, 11)], -8.0);
     // Undo the flag and test all values.
-    vis_weights[(11, 2)] = 8.0;
+    vis_weights[(2, 11)] = 8.0;
     assert_abs_diff_eq!(vis_weights, Array2::ones(vis_weights.dim()) * 8.0);
 }
 
@@ -330,8 +326,8 @@ fn test_1090008640_auto_vis() {
         1090008658.0
     );
 
-    let mut vis = Array2::zeros((total_num_tiles, num_chans));
-    let mut vis_weights = Array2::zeros((total_num_tiles, num_chans));
+    let mut vis = Array2::zeros((num_chans, total_num_tiles));
+    let mut vis_weights = Array2::zeros((num_chans, total_num_tiles));
     let result = uvfits_reader.read_autos(
         vis.view_mut(),
         vis_weights.view_mut(),
@@ -355,7 +351,7 @@ fn test_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(0, 2)],
+        vis[(2, 0)],
         Jones::from([
             7.1403125e4,
             -1.3957654e-6,
@@ -368,7 +364,7 @@ fn test_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(0, 16)],
+        vis[(16, 0)],
         Jones::from([
             1.07272586e5,
             1.9233863e-8,
@@ -381,7 +377,7 @@ fn test_1090008640_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        vis[(10, 16)],
+        vis[(16, 10)],
         Jones::from([
             1.0766406e5,
             1.5415758e-6,
@@ -423,8 +419,8 @@ fn test_1090008640_auto_vis_with_flags() {
         1090008658.0
     );
 
-    let mut vis = Array2::zeros((num_unflagged_tiles, num_unflagged_chans));
-    let mut vis_weights = Array2::zeros((num_unflagged_tiles, num_unflagged_chans));
+    let mut vis = Array2::zeros((num_unflagged_chans, num_unflagged_tiles));
+    let mut vis_weights = Array2::zeros((num_unflagged_chans, num_unflagged_tiles));
     let result = uvfits_reader.read_autos(
         vis.view_mut(),
         vis_weights.view_mut(),
@@ -450,7 +446,7 @@ fn test_1090008640_auto_vis_with_flags() {
     );
     assert_abs_diff_eq!(
         // Channel 2 -> 1
-        vis[(0, 1)],
+        vis[(1, 0)],
         Jones::from([
             7.1403125e4,
             -1.3957654e-6,
@@ -464,7 +460,7 @@ fn test_1090008640_auto_vis_with_flags() {
     );
     assert_abs_diff_eq!(
         // Channel 16 -> 15
-        vis[(0, 15)],
+        vis[(15, 0)],
         Jones::from([
             1.07272586e5,
             1.9233863e-8,
@@ -478,7 +474,7 @@ fn test_1090008640_auto_vis_with_flags() {
     );
     assert_abs_diff_eq!(
         // Two flagged tiles before tile 10; use index 8. Channel 16 -> 15.
-        vis[(8, 15)],
+        vis[(15, 8)],
         Jones::from([
             1.0766406e5,
             1.5415758e-6,
@@ -517,10 +513,10 @@ fn read_1090008640_cross_and_auto_vis() {
         1090008658.0
     );
 
-    let mut cross_vis = Array2::zeros((num_baselines, num_chans));
-    let mut cross_vis_weights = Array2::zeros((num_baselines, num_chans));
-    let mut auto_vis = Array2::zeros((total_num_tiles, num_chans));
-    let mut auto_vis_weights = Array2::zeros((total_num_tiles, num_chans));
+    let mut cross_vis = Array2::zeros((num_chans, num_baselines));
+    let mut cross_vis_weights = Array2::zeros((num_chans, num_baselines));
+    let mut auto_vis = Array2::zeros((num_chans, total_num_tiles));
+    let mut auto_vis_weights = Array2::zeros((num_chans, total_num_tiles));
     let result = uvfits_reader.read_crosses_and_autos(
         cross_vis.view_mut(),
         cross_vis_weights.view_mut(),
@@ -542,7 +538,7 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        cross_vis[(10, 16)],
+        cross_vis[(16, 10)],
         Jones::from([
             c32::new(-4.138127e1, -2.638188e2),
             c32::new(5.220332e2, -2.6055228e2),
@@ -551,8 +547,8 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
 
-    assert_abs_diff_eq!(cross_vis_weights[(11, 2)], -8.0);
-    cross_vis_weights[(11, 2)] = 8.0;
+    assert_abs_diff_eq!(cross_vis_weights[(2, 11)], -8.0);
+    cross_vis_weights[(2, 11)] = 8.0;
     assert_abs_diff_eq!(
         cross_vis_weights,
         Array2::ones(cross_vis_weights.dim()) * 8.0
@@ -572,7 +568,7 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        auto_vis[(0, 2)],
+        auto_vis[(2, 0)],
         Jones::from([
             7.1403125e4,
             -1.3957654e-6,
@@ -585,7 +581,7 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        auto_vis[(0, 16)],
+        auto_vis[(16, 0)],
         Jones::from([
             1.07272586e5,
             1.9233863e-8,
@@ -598,7 +594,7 @@ fn read_1090008640_cross_and_auto_vis() {
         ])
     );
     assert_abs_diff_eq!(
-        auto_vis[(10, 16)],
+        auto_vis[(16, 10)],
         Jones::from([
             1.0766406e5,
             1.5415758e-6,

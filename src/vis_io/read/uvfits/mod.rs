@@ -593,8 +593,8 @@ impl UvfitsReader {
                     // Put the data and weights into the shared arrays outside this
                     // scope. Before we can do this, we need to remove any
                     // globally-flagged fine channels.
-                    let mut out_vis = crosses.data_array.slice_mut(s![i_baseline, ..]);
-                    let mut out_weights = crosses.weights_array.slice_mut(s![i_baseline, ..]);
+                    let mut out_vis = crosses.data_array.slice_mut(s![.., i_baseline]);
+                    let mut out_weights = crosses.weights_array.slice_mut(s![.., i_baseline]);
                     uvfits_vis
                         .outer_iter()
                         .enumerate()
@@ -649,8 +649,8 @@ impl UvfitsReader {
                             err,
                         })?;
 
-                        let mut out_vis = autos.data_array.slice_mut(s![i_ant, ..]);
-                        let mut out_weights = autos.weights_array.slice_mut(s![i_ant, ..]);
+                        let mut out_vis = autos.data_array.slice_mut(s![.., i_ant]);
+                        let mut out_weights = autos.weights_array.slice_mut(s![.., i_ant]);
                         uvfits_vis
                             .outer_iter()
                             .enumerate()
