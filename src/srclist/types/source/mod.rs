@@ -13,9 +13,9 @@ use super::{FluxDensity, SourceComponent};
 
 /// A collection of components.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Source {
+pub struct Source {
     /// The components associated with the source.
-    pub(crate) components: Vec1<SourceComponent>,
+    pub components: Vec1<SourceComponent>,
 }
 
 impl Source {

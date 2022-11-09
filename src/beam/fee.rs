@@ -318,7 +318,7 @@ impl BeamCUDA for FEEBeamCUDA {
 /// `amps` *must* have 16 or 32 elements per row (each corresponds to an MWA
 /// dipole in a tile, in the M&C order; see
 /// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>).
-pub(crate) fn create_fee_beam_object<P: AsRef<Path>>(
+pub fn create_fee_beam_object<P: AsRef<Path>>(
     beam_file: Option<P>,
     num_tiles: usize,
     delays: Delays,

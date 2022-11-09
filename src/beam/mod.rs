@@ -18,7 +18,7 @@ mod fee;
 mod tests;
 
 pub(crate) use error::*;
-pub(crate) use fee::*;
+pub use fee::*;
 
 use std::path::Path;
 
@@ -33,7 +33,7 @@ use crate::cuda::CudaFloat;
 /// Supported beam types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
-pub(crate) enum BeamType {
+pub enum BeamType {
     /// Fully-embedded element beam.
     FEE,
 
@@ -42,7 +42,7 @@ pub(crate) enum BeamType {
 }
 
 /// A trait abstracting beam code functions.
-pub(crate) trait Beam: Sync + Send {
+pub trait Beam: Sync + Send {
     /// Get the type of beam.
     fn get_beam_type(&self) -> BeamType;
 
@@ -109,7 +109,7 @@ pub(crate) trait Beam: Sync + Send {
 
 /// A trait abstracting beam code functions on a CUDA-capable device.
 #[cfg(feature = "cuda")]
-pub(crate) trait BeamCUDA {
+pub trait BeamCUDA {
     /// Calculate the Jones matrices for an [AzEl] direction. The pointing
     /// information is not needed because it was provided when `self` was
     /// created.
@@ -145,7 +145,7 @@ pub(crate) trait BeamCUDA {
 
 /// An enum to track whether MWA dipole delays are provided and/or necessary.
 #[derive(Debug, Clone)]
-pub(crate) enum Delays {
+pub enum Delays {
     /// Delays are fully specified.
     Full(Array2<u32>),
 

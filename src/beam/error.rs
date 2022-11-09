@@ -7,7 +7,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum BeamError {
+pub enum BeamError {
     #[error("The number of delays per tile ({delays}) didn't match the number of gains per tile ({gains})")]
     DelayGainsDimensionMismatch { delays: usize, gains: usize },
 

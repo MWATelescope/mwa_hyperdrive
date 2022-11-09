@@ -18,7 +18,7 @@ mod general_tests;
 mod veto;
 
 pub(crate) use error::*;
-pub(crate) use types::*;
+pub use types::*;
 pub(crate) use veto::*;
 
 use itertools::Itertools;

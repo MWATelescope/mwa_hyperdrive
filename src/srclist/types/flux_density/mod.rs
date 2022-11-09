@@ -17,27 +17,27 @@ use crate::constants::{DEFAULT_SPEC_INDEX, SPEC_INDEX_CAP};
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 /// At a frequency, four flux densities for each Stokes parameter.
 // When serialising/deserialising, ignore Stokes Q U V if they are zero.
-pub(crate) struct FluxDensity {
+pub struct FluxDensity {
     /// The frequency that these flux densities apply to \[Hz\]
-    pub(crate) freq: f64,
+    pub freq: f64,
 
     /// The flux density of Stokes I \[Jy\]
-    pub(crate) i: f64,
+    pub i: f64,
 
     /// The flux density of Stokes Q \[Jy\]
     #[serde(default)]
     #[serde(skip_serializing_if = "is_zero")]
-    pub(crate) q: f64,
+    pub q: f64,
 
     /// The flux density of Stokes U \[Jy\]
     #[serde(default)]
     #[serde(skip_serializing_if = "is_zero")]
-    pub(crate) u: f64,
+    pub u: f64,
 
     /// The flux density of Stokes V \[Jy\]
     #[serde(default)]
     #[serde(skip_serializing_if = "is_zero")]
-    pub(crate) v: f64,
+    pub v: f64,
 }
 
 impl FluxDensity {
@@ -115,7 +115,7 @@ impl std::ops::Mul<f64> for FluxDensity {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum FluxDensityType {
+pub enum FluxDensityType {
     /// $S_\nu = a \nu^{\alpha}$
     PowerLaw {
         /// Spectral index (alpha)
