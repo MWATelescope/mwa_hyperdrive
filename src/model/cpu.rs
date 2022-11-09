@@ -59,8 +59,8 @@ impl<'a> SkyModellerCpu<'a> {
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
     /// returning an array from this function, modelled visibilities are written
     /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged cross correlation baselines.
     ///
     /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
     /// be the same length as `vis_model_slice`'s first axis.
@@ -85,14 +85,14 @@ impl<'a> SkyModellerCpu<'a> {
             .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
 
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_slice.len_of(Axis(1)),
             uvws.len(),
-            "vis_model_slice.len_of(Axis(0)) != uvws.len()"
+            "vis_model_slice.len_of(Axis(1)) != uvws.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(1)),
+            vis_model_slice.len_of(Axis(0)),
             self.unflagged_fine_chan_freqs.len(),
-            "vis_model_slice.len_of(Axis(1)) != self.unflagged_fine_chan_freqs.len()"
+            "vis_model_slice.len_of(Axis(0)) != self.unflagged_fine_chan_freqs.len()"
         );
         assert_eq!(
             fds.len_of(Axis(0)),
@@ -133,7 +133,7 @@ impl<'a> SkyModellerCpu<'a> {
 
         // Iterate over the unflagged baseline axis.
         vis_model_slice
-            .outer_iter_mut()
+            .axis_iter_mut(Axis(1))
             .into_par_iter()
             .zip(uvws.par_iter())
             .enumerate()
@@ -189,8 +189,8 @@ impl<'a> SkyModellerCpu<'a> {
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
     /// returning an array from this function, modelled visibilities are written
     /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged cross correlation baselines.
     ///
     /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
     /// be the same length as `vis_model_slice`'s first axis.
@@ -216,14 +216,14 @@ impl<'a> SkyModellerCpu<'a> {
         let gaussian_params = &self.components.gaussians.gaussian_params;
 
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_slice.len_of(Axis(1)),
             uvws.len(),
-            "vis_model_slice.len_of(Axis(0)) != uvws.len()"
+            "vis_model_slice.len_of(Axis(1)) != uvws.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(1)),
+            vis_model_slice.len_of(Axis(0)),
             self.unflagged_fine_chan_freqs.len(),
-            "vis_model_slice.len_of(Axis(1)) != self.unflagged_fine_chan_freqs.len()"
+            "vis_model_slice.len_of(Axis(0)) != self.unflagged_fine_chan_freqs.len()"
         );
         assert_eq!(
             fds.len_of(Axis(0)),
@@ -263,7 +263,7 @@ impl<'a> SkyModellerCpu<'a> {
 
         // Iterate over the unflagged baseline axis.
         vis_model_slice
-            .outer_iter_mut()
+            .axis_iter_mut(Axis(1))
             .into_par_iter()
             .zip(uvws.par_iter())
             .enumerate()
@@ -333,15 +333,15 @@ impl<'a> SkyModellerCpu<'a> {
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
     /// returning an array from this function, modelled visibilities are written
     /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged cross correlation baselines.
     ///
     /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
     /// be the same length as `vis_model_slice`'s first axis.
     ///
-    /// `shapelet_uvws` are special UVWs generated as if each shapelet component was
-    /// at the phase centre \[metres\]. The first axis is unflagged baseline, the
-    /// second shapelet component.
+    /// `shapelet_uvws` are special UVWs generated as if each shapelet component
+    /// was at the phase centre \[metres\]. The first axis is unflagged
+    /// baseline, the second shapelet component.
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     pub(super) fn model_shapelets_inner(
@@ -366,14 +366,14 @@ impl<'a> SkyModellerCpu<'a> {
         let shapelet_coeffs = &self.components.shapelets.shapelet_coeffs;
 
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_slice.len_of(Axis(1)),
             uvws.len(),
-            "vis_model_slice.len_of(Axis(0)) != uvws.len()"
+            "vis_model_slice.len_of(Axis(1)) != uvws.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(1)),
+            vis_model_slice.len_of(Axis(0)),
             self.unflagged_fine_chan_freqs.len(),
-            "vis_model_slice.len_of(Axis(1)) != self.unflagged_fine_chan_freqs.len()"
+            "vis_model_slice.len_of(Axis(0)) != self.unflagged_fine_chan_freqs.len()"
         );
         assert_eq!(
             fds.len_of(Axis(0)),
@@ -396,9 +396,9 @@ impl<'a> SkyModellerCpu<'a> {
             "uvws.len() != self.unflagged_baseline_to_tile_map.len()"
         );
         assert_eq!(
-            vis_model_slice.len_of(Axis(0)),
+            vis_model_slice.len_of(Axis(1)),
             shapelet_uvws.len_of(Axis(0)),
-            "vis_model_slice.len_of(Axis(0)) != shapelet_uvws.len_of(Axis(0))"
+            "vis_model_slice.len_of(Axis(1)) != shapelet_uvws.len_of(Axis(0))"
         );
         assert_eq!(
             fds.len_of(Axis(1)),
@@ -430,7 +430,7 @@ impl<'a> SkyModellerCpu<'a> {
 
         // Iterate over the unflagged baseline axis.
         vis_model_slice
-            .outer_iter_mut()
+            .axis_iter_mut(Axis(1))
             .into_par_iter()
             .zip(uvws.par_iter())
             .zip(shapelet_uvws.outer_iter())

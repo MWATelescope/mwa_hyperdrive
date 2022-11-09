@@ -50,8 +50,8 @@ pub trait SkyModeller<'a> {
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
     /// returning an array from this function, modelled visibilities are written
     /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged cross correlation baselines.
     ///
     /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
     /// timestep corresponds to.
@@ -73,8 +73,8 @@ pub trait SkyModeller<'a> {
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
     /// returning an array from this function, modelled visibilities are written
     /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged cross correlation baselines.
     ///
     /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
     /// timestep corresponds to.
@@ -97,8 +97,8 @@ pub trait SkyModeller<'a> {
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
     /// returning an array from this function, modelled visibilities are written
     /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged cross correlation baselines.
     ///
     /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
     /// timestep corresponds to.
@@ -121,8 +121,8 @@ pub trait SkyModeller<'a> {
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
     /// returning an array from this function, modelled visibilities are written
     /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged cross correlation baselines and `n2` is the
-    /// number of unflagged frequencies.
+    /// `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged cross correlation baselines.
     ///
     /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
     /// timestep corresponds to.

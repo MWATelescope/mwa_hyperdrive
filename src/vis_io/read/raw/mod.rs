@@ -20,7 +20,7 @@ use std::{
 
 use birli::PreprocessContext;
 use hifitime::{Duration, Epoch, Unit};
-use itertools::izip;
+use itertools::Itertools;
 use log::{debug, trace, warn};
 use marlu::{math::baseline_to_tiles, Jones, LatLngHeight, RADec, VisSelection, XyzGeodetic};
 use mwalib::{CorrelatorContext, GeometricDelaysApplied, MWAVersion, Pol};
@@ -461,7 +461,7 @@ impl RawDataReader {
 
                         weights
                             .iter_mut()
-                            .zip(flags_for_bls)
+                            .zip_eq(flags_for_bls)
                             .for_each(|(weight, flag)| {
                                 if flag {
                                     *weight = -weight.abs();
@@ -593,7 +593,7 @@ impl RawDataReader {
         let vis = jones_array.remove_axis(Axis(0));
 
         // bake flags into weights
-        for (weight, flag) in izip!(weight_array.iter_mut(), flag_array.iter()) {
+        for (weight, flag) in weight_array.iter_mut().zip_eq(flag_array.iter()) {
             *weight = if *flag {
                 -(*weight).abs()
             } else {
@@ -614,17 +614,18 @@ impl RawDataReader {
         }) = crosses
         {
             vis.outer_iter()
-                .zip(weights.outer_iter())
+                .zip_eq(weights.outer_iter())
                 .enumerate()
                 // Let only unflagged channels proceed.
                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                // Discard the channel index and get the unflagged
-                // channel index.
+                // Discard the channel index and then zip with the outgoing
+                // array.
                 .map(|(_, data)| data)
-                .enumerate()
-                .for_each(|(i_unflagged_chan, (vis, weights))| {
+                .zip_eq(data_array.outer_iter_mut())
+                .zip_eq(weights_array.outer_iter_mut())
+                .for_each(|(((vis, weights), mut data_array), mut weights_array)| {
                     vis.iter()
-                        .zip(weights)
+                        .zip_eq(weights)
                         .enumerate()
                         // Let only unflagged baselines proceed.
                         .filter(|(i_baseline, _)| {
@@ -634,13 +635,13 @@ impl RawDataReader {
                                 .tile_to_unflagged_cross_baseline_map
                                 .contains_key(&(tile1, tile2))
                         })
-                        // Discard the baseline index and get the unflagged baseline
-                        // index.
+                        // Discard the baseline index and then zip with the outgoing array.
                         .map(|(_, data)| data)
-                        .enumerate()
-                        .for_each(|(i_unflagged_baseline, (vis, weight))| {
-                            data_array[(i_unflagged_baseline, i_unflagged_chan)] = *vis;
-                            weights_array[(i_unflagged_baseline, i_unflagged_chan)] = *weight;
+                        .zip_eq(data_array.iter_mut())
+                        .zip_eq(weights_array.iter_mut())
+                        .for_each(|(((vis, weight), data_array), weights_array)| {
+                            *data_array = *vis;
+                            *weights_array = *weight;
                         });
                 });
         }
@@ -658,11 +659,12 @@ impl RawDataReader {
                 .enumerate()
                 // Let only unflagged channels proceed.
                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                // Discard the channel index and get the unflagged channel
-                // index.
+                // Discard the channel index and then zip with the outgoing
+                // array.
                 .map(|(_, data)| data)
-                .enumerate()
-                .for_each(|(i_unflagged_chan, (vis, weights))| {
+                .zip_eq(data_array.outer_iter_mut())
+                .zip_eq(weights_array.outer_iter_mut())
+                .for_each(|(((vis, weights), mut data_array), mut weights_array)| {
                     vis.iter()
                         .zip(weights)
                         .enumerate()
@@ -672,13 +674,13 @@ impl RawDataReader {
                                 baseline_to_tiles(metafits_context.num_ants, *i_baseline);
                             tile1 == tile2 && !tile_baseline_flags.flagged_tiles.contains(&tile1)
                         })
-                        // Discard the baseline index and get the unflagged tile
-                        // index.
+                        // Discard the baseline index and then zip with the outgoing array.
                         .map(|(_, data)| data)
-                        .enumerate()
-                        .for_each(|(i_unflagged_tile, (vis, weight))| {
-                            data_array[(i_unflagged_tile, i_unflagged_chan)] = *vis;
-                            weights_array[(i_unflagged_tile, i_unflagged_chan)] = *weight;
+                        .zip_eq(data_array.iter_mut())
+                        .zip_eq(weights_array.iter_mut())
+                        .for_each(|(((vis, weight), data_array), weights_array)| {
+                            *data_array = *vis;
+                            *weights_array = *weight;
                         });
                 });
         }

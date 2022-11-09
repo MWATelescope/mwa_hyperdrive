@@ -864,10 +864,10 @@ fn read_vis(
     let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
 
     let cross_vis_shape = (
-        num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
+        num_unflagged_cross_baselines,
     );
-    let auto_vis_shape = (num_unflagged_tiles, obs_context.fine_chan_freqs.len());
+    let auto_vis_shape = (obs_context.fine_chan_freqs.len(), num_unflagged_tiles);
 
     // Send the data as timesteps.
     for &timestep in timesteps {
@@ -971,8 +971,8 @@ fn apply_solutions_thread(
         let sols = solutions.get_timeblock(timestamp, timestamp_fraction);
 
         for (i_baseline, (mut vis_data, mut vis_weights)) in cross_data
-            .outer_iter_mut()
-            .zip_eq(cross_weights.outer_iter_mut())
+            .axis_iter_mut(Axis(1))
+            .zip_eq(cross_weights.axis_iter_mut(Axis(1)))
             .enumerate()
         {
             let (tile1, tile2) = tile_baseline_flags.unflagged_cross_baseline_to_tile_map
@@ -989,9 +989,9 @@ fn apply_solutions_thread(
             let sols_tile2 = sols.slice(s![tile2, ..]);
             vis_data
                 .iter_mut()
-                .zip(vis_weights.iter_mut())
-                .zip(sols_tile1.iter())
-                .zip(sols_tile2.iter())
+                .zip_eq(vis_weights.iter_mut())
+                .zip_eq(sols_tile1.iter())
+                .zip_eq(sols_tile2.iter())
                 .enumerate()
                 .for_each(|(i_chan, (((vis_data, vis_weight), sol1), sol2))| {
                     // One of the tiles doesn't have a solution; flag.
@@ -1012,8 +1012,8 @@ fn apply_solutions_thread(
 
         if let Some((auto_data, auto_weights)) = autos.as_mut() {
             for (i_tile, (mut vis_data, mut vis_weights)) in auto_data
-                .outer_iter_mut()
-                .zip_eq(auto_weights.outer_iter_mut())
+                .axis_iter_mut(Axis(1))
+                .zip_eq(auto_weights.axis_iter_mut(Axis(1)))
                 .enumerate()
             {
                 let i_tile = tile_baseline_flags
@@ -1030,8 +1030,8 @@ fn apply_solutions_thread(
                 let sols = sols.slice(s![i_tile, ..]);
                 vis_data
                     .iter_mut()
-                    .zip(vis_weights.iter_mut())
-                    .zip(sols.iter())
+                    .zip_eq(vis_weights.iter_mut())
+                    .zip_eq(sols.iter())
                     .enumerate()
                     .for_each(|(i_chan, ((vis_data, vis_weight), sol))| {
                         // No solution; flag.

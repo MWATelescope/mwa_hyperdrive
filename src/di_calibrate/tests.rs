@@ -82,7 +82,7 @@ fn test_calibrate_trivial() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = 1;
 
-    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     let mut di_jones = Array3::from_elem(
@@ -101,8 +101,8 @@ fn test_calibrate_trivial() {
         {
             let range = s![
                 time_range_start..time_range_end,
-                ..,
-                chanblock_index..chanblock_index + 1
+                chanblock_index..chanblock_index + 1,
+                ..
             ];
             let vis_data_slice = vis_data.slice(range);
             let vis_model_slice = vis_model.slice(range);
@@ -142,15 +142,15 @@ fn test_calibrate_trivial_with_flags() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = 2;
 
-    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
     let mut vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
     // Make the first chanblock's data be 4x identity.
     vis_data
-        .slice_mut(s![.., .., 0])
+        .slice_mut(s![.., 0, ..])
         .fill(Jones::identity() * 4.0);
     // Make the second chanblock's data be 9x identity.
     vis_data
-        .slice_mut(s![.., .., 1])
+        .slice_mut(s![.., 1, ..])
         .fill(Jones::identity() * 9.0);
     // Inject some wicked RFI.
     let bad_vis = vis_data.get_mut((0, 0, 0)).unwrap();
@@ -173,8 +173,8 @@ fn test_calibrate_trivial_with_flags() {
         {
             let range = s![
                 time_range_start..time_range_end,
-                ..,
-                chanblock_index..chanblock_index + 1
+                chanblock_index..chanblock_index + 1,
+                ..
             ];
             let vis_data_slice = vis_data.slice(range);
             let vis_model_slice = vis_model.slice(range);
@@ -225,8 +225,8 @@ fn test_calibrate_trivial_with_flags() {
         {
             let range = s![
                 time_range_start..time_range_end,
-                ..,
-                chanblock_index..chanblock_index + 1
+                chanblock_index..chanblock_index + 1,
+                ..
             ];
             let vis_data_slice = vis_data.slice(range);
             let vis_model_slice = vis_model.slice(range);
@@ -947,8 +947,8 @@ fn test_1090008640_calibrate_model_ms() {
         .max()
         .unwrap();
     let data_shape = (
-        max_baseline_idx + 1,
         ctx_m.fine_chan_freqs.len() - ctx_m.flagged_fine_chans.len(),
+        max_baseline_idx + 1,
     );
     let mut vis_m = Array2::<Jones<f32>>::zeros(data_shape);
     let mut vis_c = Array2::<Jones<f32>>::zeros(data_shape);
@@ -1005,7 +1005,7 @@ fn test_multiple_timeblocks_behave() {
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
     let num_chanblocks = 1;
 
-    let vis_shape = (num_timesteps, num_baselines, num_chanblocks);
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
     let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
     let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
 

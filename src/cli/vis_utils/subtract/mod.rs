@@ -407,8 +407,8 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         .expect("can't fail; no additional flags");
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
     let vis_shape = (
-        num_unflagged_cross_baselines,
         obs_context.fine_chan_freqs.len(),
+        num_unflagged_cross_baselines,
     );
 
     // Set up the beam for modelling.

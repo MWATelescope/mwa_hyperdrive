@@ -291,8 +291,8 @@ pub(crate) fn write_vis<'a>(
         if let Some(autos) = autos.as_ref() {
             // Get the number of tiles from the lengths of the cross and auto
             // arrays.
-            let num_cross_baselines = cross_data.len_of(Axis(0));
-            let num_auto_baselines = autos.0.len_of(Axis(0));
+            let num_cross_baselines = cross_data.len_of(Axis(1));
+            let num_auto_baselines = autos.0.len_of(Axis(1));
             let num_tiles = num_tiles_from_num_baselines(num_cross_baselines + num_auto_baselines);
             assert_eq!(
                 (num_tiles * (num_tiles + 1)) / 2,
@@ -303,23 +303,22 @@ pub(crate) fn write_vis<'a>(
             assert_eq!(num_cross_baselines + num_auto_baselines, out_shape.2);
             // freq
             assert_eq!(
-                cross_data.len_of(Axis(1)) + flagged_fine_chans.len(),
+                cross_data.len_of(Axis(0)) + flagged_fine_chans.len(),
                 out_shape.1
             );
-            assert_eq!(cross_data.len_of(Axis(1)), autos.0.len_of(Axis(1)));
+            assert_eq!(cross_data.len_of(Axis(0)), autos.0.len_of(Axis(0)));
         } else {
             // baseline
-            assert_eq!(cross_data.len_of(Axis(0)), out_shape.2);
+            assert_eq!(cross_data.len_of(Axis(1)), out_shape.2);
             // freq
             assert_eq!(
-                cross_data.len_of(Axis(1)) + flagged_fine_chans.len(),
+                cross_data.len_of(Axis(0)) + flagged_fine_chans.len(),
                 out_shape.1
             );
         }
 
-        // Pack `out_data` and `out_weights`; a transpose is needed. Start with
-        // cross-correlation data, skipping any auto-correlation indices; we'll
-        // fill them soon.
+        // Pack `out_data` and `out_weights`. Start with cross-correlation data,
+        // skipping any auto-correlation indices; we'll fill them soon.
         out_data
             .slice_mut(s![this_timestep, .., ..])
             .outer_iter_mut()
@@ -332,45 +331,45 @@ pub(crate) fn write_vis<'a>(
             .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
             // Discard the channel index
             .map(|(_, t)| t)
-            .zip_eq(cross_data.axis_iter(Axis(1)))
-            .zip_eq(cross_weights.axis_iter(Axis(1)))
+            .zip_eq(cross_data.outer_iter())
+            .zip_eq(cross_weights.outer_iter())
             .for_each(|(((mut out_data, mut out_weights), in_data), in_weights)| {
                 out_data
                     .iter_mut()
-                    .zip(out_weights.iter_mut())
-                    .zip(unflagged_baseline_tile_pairs.iter())
+                    .zip_eq(out_weights.iter_mut())
+                    .zip_eq(unflagged_baseline_tile_pairs.iter())
                     .filter(|(_, baseline)| baseline.0 != baseline.1)
-                    .zip(in_data.iter())
-                    .zip(in_weights.iter())
+                    .zip_eq(in_data.iter())
+                    .zip_eq(in_weights.iter())
                     .for_each(|((((out_jones, out_weight), _), in_jones), in_weight)| {
                         *out_jones = *in_jones;
                         *out_weight = *in_weight;
                     });
             });
         // Autos.
-        if let Some(autos) = autos {
+        if let Some((auto_data, auto_weights)) = autos {
             out_data
                 .slice_mut(s![this_timestep, .., ..])
-                .axis_iter_mut(Axis(0))
+                .outer_iter_mut()
                 .zip_eq(
                     out_weights
                         .slice_mut(s![this_timestep, .., ..])
-                        .axis_iter_mut(Axis(0)),
+                        .outer_iter_mut(),
                 )
                 .enumerate()
                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                 // Discard the channel index
                 .map(|(_, t)| t)
-                .zip_eq(autos.0.axis_iter(Axis(1)))
-                .zip_eq(autos.1.axis_iter(Axis(1)))
+                .zip_eq(auto_data.outer_iter())
+                .zip_eq(auto_weights.outer_iter())
                 .for_each(|(((mut out_data, mut out_weights), in_data), in_weights)| {
                     out_data
                         .iter_mut()
-                        .zip(out_weights.iter_mut())
-                        .zip(unflagged_baseline_tile_pairs.iter())
+                        .zip_eq(out_weights.iter_mut())
+                        .zip_eq(unflagged_baseline_tile_pairs.iter())
                         .filter(|(_, baseline)| baseline.0 == baseline.1)
-                        .zip(in_data.iter())
-                        .zip(in_weights.iter())
+                        .zip_eq(in_data.iter())
+                        .zip_eq(in_weights.iter())
                         .for_each(|((((out_jones, out_weight), _), in_jones), in_weight)| {
                             *out_jones = *in_jones;
                             *out_weight = *in_weight;
