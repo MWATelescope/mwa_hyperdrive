@@ -11,14 +11,11 @@ pub(crate) use error::VisSubtractError;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashSet;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr, thread};
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
-use crossbeam_utils::{atomic::AtomicCell, thread};
+use crossbeam_utils::atomic::AtomicCell;
 use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
@@ -230,8 +227,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     let modeller_info = if use_cpu_for_modelling {
         ModellerInfo::Cpu
     } else {
-        let (device_info, driver_info) =
-            crate::cuda::get_device_info().map_err(VisSubtractError::CudaError)?;
+        let (device_info, driver_info) = crate::cuda::get_device_info()?;
         ModellerInfo::Cuda {
             device_info,
             driver_info,
@@ -756,9 +752,9 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     let error = AtomicCell::new(false);
 
     info!("Reading input data, sky modelling, and writing");
-    let scoped_threads_result = thread::scope(|scope| {
+    let scoped_threads_result = thread::scope(|s| {
         // Input visibility-data reading thread.
-        let data_handle = scope.spawn(|_| {
+        let data_handle = s.spawn(|| {
             // If a panic happens, update our atomic error.
             defer_on_unwind! { error.store(true); }
             read_progress.tick();
@@ -782,7 +778,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         });
 
         // Sky-model generation and subtraction thread.
-        let model_handle = scope.spawn(|_| {
+        let model_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
             model_progress.tick();
 
@@ -808,7 +804,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         });
 
         // Subtracted vis writing thread.
-        let write_handle = scope.spawn(|_| {
+        let write_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
             write_progress.tick();
 
@@ -865,7 +861,8 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     });
 
     // Propagate errors and print out the write message.
-    info!("{}", scoped_threads_result.unwrap()?);
+    let s = scoped_threads_result?;
+    info!("{s}");
 
     Ok(())
 }
@@ -982,7 +979,7 @@ fn model_vis_and_subtract(
     } in rx.iter()
     {
         debug!("Modelling timestamp {}", timestamp.as_gpst_seconds());
-        modeller.model_timestep(cross_model_fb.view_mut(), timestamp)?;
+        modeller.model_timestep_with(timestamp, cross_model_fb.view_mut())?;
         cross_data_fb
             .iter_mut()
             .zip(cross_model_fb.iter())

@@ -89,6 +89,12 @@ impl From<IndexMap<String, Source>> for SourceList {
     }
 }
 
+impl<const N: usize> From<[(String, Source); N]> for SourceList {
+    fn from(value: [(String, Source); N]) -> Self {
+        Self(IndexMap::from(value))
+    }
+}
+
 impl Deref for SourceList {
     type Target = IndexMap<String, Source>;
 

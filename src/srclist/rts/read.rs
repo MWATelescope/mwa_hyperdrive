@@ -379,11 +379,17 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 // Because we ignore SHAPELET components, only add this COEFF
                 // line if we're dealing with a SHAPELET2.
                 if in_shapelet2 {
+                    let n1 = float_to_int(n1, line_num)
+                        .map_err(|_| ReadSourceListCommonError::ShapeletBasisNotInt(n1))?;
+                    let n2 = float_to_int(n2, line_num)
+                        .map_err(|_| ReadSourceListCommonError::ShapeletBasisNotInt(n2))?;
                     let shapelet_coeff = ShapeletCoeff {
-                        n1: float_to_int(n1, line_num)
-                            .map_err(|_| ReadSourceListCommonError::ShapeletBasisNotInt(n1))?,
-                        n2: float_to_int(n2, line_num)
-                            .map_err(|_| ReadSourceListCommonError::ShapeletBasisNotInt(n2))?,
+                        n1: n1
+                            .try_into()
+                            .expect("shapelet coeff is not bigger than u8::MAX"),
+                        n2: n2
+                            .try_into()
+                            .expect("shapelet coeff is not bigger than u8::MAX"),
                         value,
                     };
                     match &mut components.iter_mut().last().unwrap().comp_type {

@@ -982,7 +982,7 @@ fn test_1090008640_calibrate_model_ms() {
         // introduced. If a metafits' positions are used instead, the results
         // are *exactly* the same, but we should trust the MS's positions, so
         // these errors must remain.
-        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 4e-5);
+        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 1e-4);
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
@@ -990,7 +990,7 @@ fn test_1090008640_calibrate_model_ms() {
     assert_abs_diff_eq!(
         sols.di_jones,
         Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
-        epsilon = 1e-8
+        epsilon = 2e-8
     );
 }
 

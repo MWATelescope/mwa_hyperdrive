@@ -28,13 +28,101 @@ use vec1::vec1;
 
 use super::*;
 #[cfg(feature = "cuda")]
+use crate::cuda::DevicePointer;
+#[cfg(feature = "cuda")]
 use crate::model::cuda::SkyModellerCuda;
 use crate::{
     beam::{create_fee_beam_object, create_no_beam_object, Delays},
     srclist::{
-        ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, SourceComponent, SourceList,
+        ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
+        SourceList,
     },
 };
+
+lazy_static::lazy_static! {
+    static ref PHASE_CENTRE: RADec = RADec::new_degrees(0.0, -27.0);
+    static ref OFF_PHASE_CENTRE: RADec = RADec::new_degrees(1.0, -27.0);
+
+    static ref POINT_ZENITH_LIST: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_point(*PHASE_CENTRE, FluxType::List)]})
+    ]);
+    static ref POINT_ZENITH_POWER_LAW: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_point(*PHASE_CENTRE, FluxType::PowerLaw)]})
+    ]);
+    static ref POINT_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_point(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+    ]);
+
+    static ref POINT_OFF_ZENITH_LIST: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_point(*OFF_PHASE_CENTRE, FluxType::List)]})
+    ]);
+    static ref POINT_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_point(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]})
+    ]);
+    static ref POINT_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_point(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+    ]);
+
+    static ref GAUSSIAN_ZENITH_LIST: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_gaussian(*PHASE_CENTRE, FluxType::List)]})
+    ]);
+    static ref GAUSSIAN_ZENITH_POWER_LAW: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_gaussian(*PHASE_CENTRE, FluxType::PowerLaw)]})
+    ]);
+    static ref GAUSSIAN_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_gaussian(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+    ]);
+
+    static ref GAUSSIAN_OFF_ZENITH_LIST: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_gaussian(*OFF_PHASE_CENTRE, FluxType::List)]})
+    ]);
+    static ref GAUSSIAN_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_gaussian(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]})
+    ]);
+    static ref GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_gaussian(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+    ]);
+
+    static ref SHAPELET_ZENITH_LIST: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_shapelet(*PHASE_CENTRE, FluxType::List)]})
+    ]);
+    static ref SHAPELET_ZENITH_POWER_LAW: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_shapelet(*PHASE_CENTRE, FluxType::PowerLaw)]})
+    ]);
+    static ref SHAPELET_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
+        ("zenith".to_string(),
+        Source {components: vec1![get_shapelet(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+    ]);
+
+
+    static ref SHAPELET_OFF_ZENITH_LIST: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_shapelet(*OFF_PHASE_CENTRE, FluxType::List)]})
+    ]);
+    static ref SHAPELET_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_shapelet(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]})
+    ]);
+    static ref SHAPELET_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from([
+        ("off_zenith".to_string(),
+        Source {components: vec1![get_shapelet(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]})
+    ]);
+
+}
 
 fn get_list() -> FluxDensityType {
     FluxDensityType::List {
@@ -88,7 +176,7 @@ enum FluxType {
     CurvedPowerLaw,
 }
 
-fn get_simple_point(pos: RADec, flux_type: FluxType) -> SourceComponent {
+fn get_point(pos: RADec, flux_type: FluxType) -> SourceComponent {
     SourceComponent {
         radec: pos,
         comp_type: ComponentType::Point,
@@ -100,7 +188,7 @@ fn get_simple_point(pos: RADec, flux_type: FluxType) -> SourceComponent {
     }
 }
 
-fn get_simple_gaussian(pos: RADec, flux_type: FluxType) -> SourceComponent {
+fn get_gaussian(pos: RADec, flux_type: FluxType) -> SourceComponent {
     SourceComponent {
         radec: pos,
         comp_type: ComponentType::Gaussian {
@@ -116,7 +204,23 @@ fn get_simple_gaussian(pos: RADec, flux_type: FluxType) -> SourceComponent {
     }
 }
 
-fn get_simple_shapelet(pos: RADec, flux_type: FluxType) -> SourceComponent {
+fn get_gaussian2(pos: RADec, flux_type: FluxType) -> SourceComponent {
+    SourceComponent {
+        radec: pos,
+        comp_type: ComponentType::Gaussian {
+            maj: 1.0,
+            min: 0.5,
+            pa: 0.25,
+        },
+        flux_type: match flux_type {
+            FluxType::List => get_list(),
+            FluxType::PowerLaw => get_power_law(),
+            FluxType::CurvedPowerLaw => get_curved_power_law(),
+        },
+    }
+}
+
+fn get_shapelet(pos: RADec, flux_type: FluxType) -> SourceComponent {
     SourceComponent {
         radec: pos,
         comp_type: ComponentType::Shapelet {
@@ -198,7 +302,7 @@ impl ObsParams {
     }
 
     fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu {
-        new_cpu_sky_modeller_inner(
+        SkyModellerCpu::new(
             self.beam.deref(),
             srclist,
             &self.xyzs,
@@ -213,27 +317,40 @@ impl ObsParams {
     }
 
     #[cfg(feature = "cuda")]
-    fn get_gpu_modeller(&self, srclist: &SourceList) -> SkyModellerCuda {
-        unsafe {
-            super::new_cuda_sky_modeller_inner(
-                self.beam.deref(),
-                srclist,
-                &self.xyzs,
-                &self.freqs,
-                &self.flagged_tiles,
-                self.phase_centre,
-                self.array_longitude_rad,
-                self.array_latitude_rad,
-                Duration::from_total_nanoseconds(0),
-                true,
-            )
-            .unwrap()
-        }
+    #[track_caller]
+    fn get_gpu_modeller(
+        &self,
+        srclist: &SourceList,
+    ) -> (SkyModellerCuda, DevicePointer<crate::cuda::UVW>) {
+        let m = SkyModellerCuda::new(
+            self.beam.deref(),
+            srclist,
+            &self.xyzs,
+            &self.freqs,
+            &self.flagged_tiles,
+            self.phase_centre,
+            self.array_longitude_rad,
+            self.array_latitude_rad,
+            Duration::from_total_nanoseconds(0),
+            true,
+        )
+        .unwrap();
+        let cuda_uvws = self
+            .uvws
+            .iter()
+            .map(|&uvw| crate::cuda::UVW {
+                u: uvw.u as crate::cuda::CudaFloat,
+                v: uvw.v as crate::cuda::CudaFloat,
+                w: uvw.w as crate::cuda::CudaFloat,
+            })
+            .collect::<Vec<_>>();
+        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
+        (m, d_uvws)
     }
 }
 
 #[track_caller]
-fn assert_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
@@ -241,19 +358,19 @@ fn assert_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // First row: flux density at first frequency (i.e. 1 Jy XX and YY).
     let expected_1st_row = Array1::from_elem(vis.dim().0, Jones::identity());
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
     // 3 Jy XX and YY.
     let expected_2nd_row = Array1::from_elem(vis.dim().0, Jones::identity() * 3.0);
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
     // 2 Jy XX and YY.
     let expected_3rd_row = Array1::from_elem(vis.dim().0, Jones::identity() * 2.0);
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -279,7 +396,7 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -302,7 +419,7 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -325,11 +442,11 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
@@ -356,7 +473,7 @@ fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
     // ~3 Jy XX and YY.
     let expected_2nd_row = array![
         Jones::from([
@@ -379,7 +496,7 @@ fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
     // ~2 Jy XX and YY.
     let expected_3rd_row = array![
         Jones::from([
@@ -402,11 +519,11 @@ fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -432,7 +549,7 @@ fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -455,7 +572,7 @@ fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -478,11 +595,11 @@ fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
@@ -490,7 +607,7 @@ fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // First row: flux density at first frequency (i.e. 1 Jy XX and YY).
     let expected_1st_row = Array1::from_elem(vis.dim().0, Jones::identity());
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -513,7 +630,7 @@ fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -536,11 +653,11 @@ fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -566,7 +683,7 @@ fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -589,7 +706,7 @@ fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -612,11 +729,11 @@ fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
@@ -643,7 +760,7 @@ fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -666,7 +783,7 @@ fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -689,11 +806,11 @@ fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -719,7 +836,7 @@ fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -742,7 +859,7 @@ fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -765,11 +882,11 @@ fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
@@ -777,7 +894,7 @@ fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // First row: flux density at first frequency (i.e. 1 Jy XX and YY).
     let expected_1st_row = Array1::from_elem(vis.dim().0, Jones::identity());
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -800,7 +917,7 @@ fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -823,11 +940,11 @@ fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -853,7 +970,7 @@ fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) 
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -876,7 +993,7 @@ fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) 
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -899,11 +1016,11 @@ fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) 
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
@@ -930,7 +1047,7 @@ fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) 
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st_row, result);
+    assert_abs_diff_eq!(expected_1st_row, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -953,7 +1070,7 @@ fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) 
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -976,11 +1093,11 @@ fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) 
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
 }
 
 #[track_caller]
-fn assert_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -1006,7 +1123,7 @@ fn assert_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32
         ]),
     ];
     let result = vis.slice(s![0, ..]);
-    assert_abs_diff_eq!(expected_1st, result);
+    assert_abs_diff_eq!(expected_1st, result, epsilon = epsilon);
 
     let expected_2nd_row = array![
         Jones::from([
@@ -1029,7 +1146,7 @@ fn assert_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32
         ]),
     ];
     let result = vis.slice(s![1, ..]);
-    assert_abs_diff_eq!(expected_2nd_row, result);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
 
     let expected_3rd_row = array![
         Jones::from([
@@ -1052,5 +1169,403 @@ fn assert_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32
         ]),
     ];
     let result = vis.slice(s![2, ..]);
-    assert_abs_diff_eq!(expected_3rd_row, result);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
+}
+
+// I discovered that the code that handles a Gaussian's major and minor axes was
+// not tested by other test functions. So these functions exist to be used with
+// "gaussian2".
+#[track_caller]
+fn test_non_trivial_gaussian_list(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
+    let expected_1st = array![
+        Jones::from([
+            Complex::new(3.4502926e-1, 3.3842273e-2),
+            Complex::new(-1.6347648e-4, -1.4152103e-5),
+            Complex::new(-1.631107e-4, -1.7881275e-5),
+            Complex::new(3.4510916e-1, 3.385011e-2),
+        ]),
+        Jones::from([
+            Complex::new(7.413931e-1, 3.658988e-2),
+            Complex::new(-3.510803e-4, -1.331047e-5),
+            Complex::new(-3.506848e-4, -2.1323653e-5),
+            Complex::new(7.415648e-1, 3.6598355e-2),
+        ]),
+        Jones::from([
+            Complex::new(5.542552e-1, -2.6880039e-2),
+            Complex::new(-2.6216966e-4, 1.5716912e-5),
+            Complex::new(-2.624602e-4, 9.726368e-6),
+            Complex::new(5.543836e-1, -2.6886264e-2),
+        ]),
+    ];
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st, result, epsilon = epsilon);
+
+    let expected_2nd_row = array![
+        Jones::from([
+            Complex::new(7.0484686e-1, 8.0750935e-2),
+            Complex::new(-2.9596317e-4, -3.621617e-5),
+            Complex::new(-2.9648538e-4, -3.1657823e-5),
+            Complex::new(7.0507944e-1, 8.077758e-2),
+        ]),
+        Jones::from([
+            Complex::new(1.9963992e0, 1.14983074e-1),
+            Complex::new(-8.3865e-4, -5.4779157e-5),
+            Complex::new(-8.393936e-4, -4.1868152e-5),
+            Complex::new(1.9970578e0, 1.1502101e-1),
+        ]),
+        Jones::from([
+            Complex::new(1.3436505e0, -7.604595e-2),
+            Complex::new(-5.649386e-4, 2.7614855e-5),
+            Complex::new(-5.644468e-4, 3.630444e-5),
+            Complex::new(1.3440938e0, -7.607105e-2),
+        ]),
+    ];
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
+
+    let expected_3rd_row = array![
+        Jones::from([
+            Complex::new(3.016784e-1, 3.9552104e-2),
+            Complex::new(-9.086265e-5, -1.0431412e-5),
+            Complex::new(-9.04808e-5, -1.3343956e-5),
+            Complex::new(3.019246e-1, 3.958438e-2),
+        ]),
+        Jones::from([
+            Complex::new(1.1752038e0, 7.738176e-2),
+            Complex::new(-3.5358992e-4, -1.758469e-5),
+            Complex::new(-3.5284285e-4, -2.8930655e-5),
+            Complex::new(1.1761627e0, 7.74449e-2),
+        ]),
+        Jones::from([
+            Complex::new(7.006659e-1, -4.5335107e-2),
+            Complex::new(-2.1037158e-4, 1.7008086e-5),
+            Complex::new(-2.1080927e-4, 1.02435315e-5),
+            Complex::new(7.012376e-1, -4.53721e-2),
+        ]),
+    ];
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
+}
+
+#[track_caller]
+fn test_non_trivial_gaussian_power_law(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
+    let expected_1st = array![
+        Jones::from([
+            Complex::new(3.4502926e-1, 3.3842273e-2),
+            Complex::new(-1.6347648e-4, -1.4152103e-5),
+            Complex::new(-1.631107e-4, -1.7881275e-5),
+            Complex::new(3.4510916e-1, 3.385011e-2),
+        ]),
+        Jones::from([
+            Complex::new(7.413931e-1, 3.658988e-2),
+            Complex::new(-3.510803e-4, -1.331047e-5),
+            Complex::new(-3.506848e-4, -2.1323653e-5),
+            Complex::new(7.415648e-1, 3.6598355e-2),
+        ]),
+        Jones::from([
+            Complex::new(5.542552e-1, -2.6880039e-2),
+            Complex::new(-2.6216966e-4, 1.5716912e-5),
+            Complex::new(-2.624602e-4, 9.726368e-6),
+            Complex::new(5.543836e-1, -2.6886264e-2),
+        ]),
+    ];
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st, result, epsilon = epsilon);
+
+    let expected_2nd_row = array![
+        Jones::from([
+            Complex::new(2.0769024e-1, 2.3794077e-2),
+            Complex::new(-8.720853e-5, -1.067146e-5),
+            Complex::new(-8.736241e-5, -9.328297e-6),
+            Complex::new(2.0775877e-1, 2.3801927e-2),
+        ]),
+        Jones::from([
+            Complex::new(5.8825916e-1, 3.3880923e-2),
+            Complex::new(-2.4711667e-4, -1.6141232e-5),
+            Complex::new(-2.473358e-4, -1.2336873e-5),
+            Complex::new(5.8845323e-1, 3.3892103e-2),
+        ]),
+        Jones::from([
+            Complex::new(3.9592016e-1, -2.2407709e-2),
+            Complex::new(-1.6646486e-4, 8.136995e-6),
+            Complex::new(-1.6631994e-4, 1.0697469e-5),
+            Complex::new(3.9605078e-1, -2.2415102e-2),
+        ]),
+    ];
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
+
+    let expected_3rd_row = array![
+        Jones::from([
+            Complex::new(1.1982936e-1, 1.5710449e-2),
+            Complex::new(-3.6091456e-5, -4.14345e-6),
+            Complex::new(-3.593978e-5, -5.3003387e-6),
+            Complex::new(1.1992714e-1, 1.572327e-2),
+        ]),
+        Jones::from([
+            Complex::new(4.6680143e-1, 3.0736726e-2),
+            Complex::new(-1.4044908e-4, -6.9847965e-6),
+            Complex::new(-1.4015233e-4, -1.1491515e-5),
+            Complex::new(4.6718237e-1, 3.0761808e-2),
+        ]),
+        Jones::from([
+            Complex::new(2.7831075e-1, -1.800751e-2),
+            Complex::new(-8.356148e-5, 6.755764e-6),
+            Complex::new(-8.373533e-5, 4.0688224e-6),
+            Complex::new(2.7853787e-1, -1.8022204e-2),
+        ]),
+    ];
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
+}
+
+#[track_caller]
+fn test_non_trivial_gaussian_curved_power_law(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
+    let expected_1st = array![
+        Jones::from([
+            Complex::new(3.4502926e-1, 3.3842273e-2),
+            Complex::new(-1.6347648e-4, -1.4152103e-5),
+            Complex::new(-1.631107e-4, -1.7881275e-5),
+            Complex::new(3.4510916e-1, 3.385011e-2),
+        ]),
+        Jones::from([
+            Complex::new(7.413931e-1, 3.658988e-2),
+            Complex::new(-3.510803e-4, -1.331047e-5),
+            Complex::new(-3.506848e-4, -2.1323653e-5),
+            Complex::new(7.415648e-1, 3.6598355e-2),
+        ]),
+        Jones::from([
+            Complex::new(5.542552e-1, -2.6880039e-2),
+            Complex::new(-2.6216966e-4, 1.5716912e-5),
+            Complex::new(-2.624602e-4, 9.726368e-6),
+            Complex::new(5.543836e-1, -2.6886264e-2),
+        ]),
+    ];
+    let result = vis.slice(s![0, ..]);
+    assert_abs_diff_eq!(expected_1st, result, epsilon = epsilon);
+
+    let expected_2nd_row = array![
+        Jones::from([
+            Complex::new(2.0783836e-1, 2.3811044e-2),
+            Complex::new(-8.7270724e-5, -1.067907e-5),
+            Complex::new(-8.742471e-5, -9.334949e-6),
+            Complex::new(2.0790693e-1, 2.38189e-2),
+        ]),
+        Jones::from([
+            Complex::new(5.8867866e-1, 3.3905085e-2),
+            Complex::new(-2.472929e-4, -1.6152742e-5),
+            Complex::new(-2.4751216e-4, -1.2345671e-5),
+            Complex::new(5.888729e-1, 3.391627e-2),
+        ]),
+        Jones::from([
+            Complex::new(3.962025e-1, -2.2423686e-2),
+            Complex::new(-1.6658356e-4, 8.142798e-6),
+            Complex::new(-1.6643855e-4, 1.0705098e-5),
+            Complex::new(3.9633322e-1, -2.2431085e-2),
+        ]),
+    ];
+    let result = vis.slice(s![1, ..]);
+    assert_abs_diff_eq!(expected_2nd_row, result, epsilon = epsilon);
+
+    let expected_3rd_row = array![
+        Jones::from([
+            Complex::new(1.20127246e-1, 1.5749505e-2),
+            Complex::new(-3.6181176e-5, -4.1537505e-6),
+            Complex::new(-3.6029123e-5, -5.313515e-6),
+            Complex::new(1.20225266e-1, 1.5762357e-2),
+        ]),
+        Jones::from([
+            Complex::new(4.6796188e-1, 3.0813135e-2),
+            Complex::new(-1.4079822e-4, -7.00216e-6),
+            Complex::new(-1.4050074e-4, -1.1520082e-5),
+            Complex::new(4.6834373e-1, 3.0838279e-2),
+        ]),
+        Jones::from([
+            Complex::new(2.790026e-1, -1.8052274e-2),
+            Complex::new(-8.37692e-5, 6.772558e-6),
+            Complex::new(-8.394349e-5, 4.078937e-6),
+            Complex::new(2.7923027e-1, -1.8067004e-2),
+        ]),
+    ];
+    let result = vis.slice(s![2, ..]);
+    assert_abs_diff_eq!(expected_3rd_row, result, epsilon = epsilon);
+}
+
+#[track_caller]
+fn test_multiple_gaussian_components(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
+    let expected = array![
+        [
+            Jones::from([
+                Complex::new(1.9894463e0, 2.0495814e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9894463e0, 2.0495814e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.997311e0, 1.03556715e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.997311e0, 1.03556715e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.9974082e0, -1.0167356e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9974082e0, -1.0167356e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(5.9569197e0, 7.1689516e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9569197e0, 7.1689516e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.989021e0, 3.6238956e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.989021e0, 3.6238956e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.9894176e0, -3.5580167e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9894176e0, -3.5580167e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(3.9625018e0, 5.4580307e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9625018e0, 5.4580307e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9904408e0, 2.760545e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9904408e0, 2.760545e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9907863e0, -2.7103797e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9907863e0, -2.7103797e-1),
+            ]),
+        ]
+    ];
+    assert_abs_diff_eq!(expected, vis, epsilon = epsilon);
+}
+
+#[track_caller]
+fn test_multiple_shapelet_components(
+    vis: ArrayView2<Jones<f32>>,
+    shapelet_uvws: ArrayView2<UVW>,
+    epsilon1: f32,
+    epsilon2: f64,
+) {
+    let expected = array![
+        [
+            Jones::from([
+                Complex::new(1.9894463e0, 2.0495814e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9894463e0, 2.0495814e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.997311e0, 1.03556715e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.997311e0, 1.03556715e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.9974082e0, -1.0167356e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9974082e0, -1.0167356e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(5.9569197e0, 7.1689516e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9569197e0, 7.1689516e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.989021e0, 3.6238956e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.989021e0, 3.6238956e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.9894176e0, -3.5580167e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9894176e0, -3.5580167e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(3.9625018e0, 5.4580307e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9625018e0, 5.4580307e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9904408e0, 2.760545e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9904408e0, 2.760545e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9907863e0, -2.7103797e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9907863e0, -2.7103797e-1),
+            ]),
+        ]
+    ];
+    assert_abs_diff_eq!(expected, vis, epsilon = epsilon1);
+
+    let expected = array![
+        [
+            UVW {
+                u: 1.9996953903127825,
+                v: 0.01584645344024005,
+                w: 0.0,
+            },
+            UVW {
+                u: 1.9996314242432884,
+                v: 0.017430912937512553,
+                w: 0.0,
+            }
+        ],
+        [
+            UVW {
+                u: 1.0173001015936747,
+                v: -0.44599812806736405,
+                w: 0.0,
+            },
+            UVW {
+                u: 1.019013154521334,
+                v: -0.4451913783247998,
+                w: 0.0,
+            }
+        ],
+        [
+            UVW {
+                u: -0.9823952887191078,
+                v: -0.4618445815076041,
+                w: 0.0,
+            },
+            UVW {
+                u: -0.9806182697219545,
+                v: -0.46262229126231236,
+                w: 0.0,
+            }
+        ]
+    ];
+    assert_abs_diff_eq!(expected, shapelet_uvws, epsilon = epsilon2);
 }

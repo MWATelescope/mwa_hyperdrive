@@ -198,13 +198,45 @@ fn test_1090008640_vis_simulate() {
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406018466);
 
     // The values of the visibilities changes slightly depending on the precision.
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0..29], [36.239098, -37.919975, 64.0, 36.509888, -37.688175, 64.0, 0.13714215, -0.051078193, 64.0, 0.12929335, -0.07608978, 64.0, 36.183933, -37.978363, 64.0, 36.445034, -37.739532, 64.0, 0.14075089, -0.049377773, 64.0, 0.13295034, -0.07435731, 64.0, 36.12551, -38.03485, 64.0, 36.376793, -37.788895]);
-        } else {
-            assert_abs_diff_eq!(vis[0..29], [36.23898, -37.920006, 64.0, 36.50975, -37.68825, 64.0, 0.13713828, -0.05107821, 64.0, 0.12928975, -0.07608952, 64.0, 36.183853, -37.97843, 64.0, 36.44494, -37.739647, 64.0, 0.14074738, -0.049377635, 64.0, 0.13294694, -0.07435694, 64.0, 36.125416, -38.034897, 64.0, 36.37668, -37.788986]);
-        }
-    }
+    #[cfg(feature = "cuda-single")]
+    let epsilon = 2e-4;
+    #[cfg(not(feature = "cuda-single"))]
+    let epsilon = 0.0;
+    assert_abs_diff_eq!(
+        vis[0..29],
+        [
+            36.23898,
+            -37.920006,
+            64.0,
+            36.50975,
+            -37.68825,
+            64.0,
+            0.13713828,
+            -0.05107821,
+            64.0,
+            0.12928975,
+            -0.07608952,
+            64.0,
+            36.183853,
+            -37.97843,
+            64.0,
+            36.44494,
+            -37.739647,
+            64.0,
+            0.14074738,
+            -0.049377635,
+            64.0,
+            0.13294694,
+            -0.07435694,
+            64.0,
+            36.125416,
+            -38.034897,
+            64.0,
+            36.37668,
+            -37.788986
+        ],
+        epsilon = epsilon
+    );
     // Every third value (a weight) should be 64.
     for (i, vis) in vis.iter().enumerate() {
         if i % 3 == 2 {
@@ -249,13 +281,45 @@ fn test_1090008640_vis_simulate() {
     );
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406944424);
 
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "cuda-single")] {
-            assert_abs_diff_eq!(vis[0..29], [36.29235, -37.815643, 64.0, 36.566887, -37.594475, 64.0, 0.13810812, -0.051415868, 64.0, 0.1300995, -0.07634619, 64.0, 36.23478, -37.874428, 64.0, 36.499863, -37.646164, 64.0, 0.14170626, -0.049713243, 64.0, 0.13374655, -0.07461138, 64.0, 36.173973, -37.93127, 64.0, 36.42945, -37.69583]);
-        } else {
-            assert_abs_diff_eq!(vis[0..29], [36.29221, -37.81562, 64.0, 36.566708, -37.59445, 64.0, 0.13810773, -0.0514111, 64.0, 0.13010167, -0.07633954, 64.0, 36.234665, -37.87441, 64.0, 36.499706, -37.646156, 64.0, 0.14170499, -0.049708802, 64.0, 0.13374788, -0.07460498, 64.0, 36.173786, -37.931236, 64.0, 36.42923, -37.6958]);
-        }
-    }
+    #[cfg(feature = "cuda-single")]
+    let epsilon = 3e-4;
+    #[cfg(not(feature = "cuda-single"))]
+    let epsilon = 0.0;
+    assert_abs_diff_eq!(
+        vis[0..29],
+        [
+            36.29221,
+            -37.81562,
+            64.0,
+            36.566708,
+            -37.59445,
+            64.0,
+            0.13810773,
+            -0.0514111,
+            64.0,
+            0.13010167,
+            -0.07633954,
+            64.0,
+            36.234665,
+            -37.87441,
+            64.0,
+            36.499706,
+            -37.646156,
+            64.0,
+            0.14170499,
+            -0.049708802,
+            64.0,
+            0.13374788,
+            -0.07460498,
+            64.0,
+            36.173786,
+            -37.931236,
+            64.0,
+            36.42923,
+            -37.6958
+        ],
+        epsilon = epsilon
+    );
     for (i, vis) in vis.iter().enumerate() {
         if i % 3 == 2 {
             assert_abs_diff_eq!(*vis, 64.0);
@@ -269,8 +333,10 @@ fn test_1090008640_vis_simulate() {
 #[serial]
 #[cfg(all(feature = "cuda", not(feature = "cuda-single")))]
 fn test_1090008640_vis_simulate_cpu_gpu_match() {
+    use ndarray::prelude::*;
+
     let num_timesteps = 2;
-    let num_chans = 10;
+    let num_chans = 5;
 
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output_path = temp_dir.path().join("model.uvfits");
@@ -294,7 +360,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
 
     let mut group_params = [0.0; 5];
-    let mut vis_cpu: Vec<f32> = vec![0.0; num_chans * 4 * 3];
+    let mut vis_cpu = Array4::default((num_timesteps, num_chans, 4, 3));
     let mut status = 0;
     unsafe {
         // ffggpe = fits_read_grppar_flt
@@ -343,7 +409,7 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let mut uvfits = fits_open!(&output_path).unwrap();
     let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
 
-    let mut vis_gpu: Vec<f32> = vec![0.0; num_chans * 4 * 3];
+    let mut vis_gpu = Array4::default((num_timesteps, num_chans, 4, 3));
     unsafe {
         // ffggpe = fits_read_grppar_flt
         fitsio_sys::ffggpe(
@@ -371,7 +437,5 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     drop(hdu);
     drop(uvfits);
 
-    for (cpu, gpu) in vis_cpu.into_iter().zip(vis_gpu) {
-        assert_abs_diff_eq!(cpu, gpu)
-    }
+    assert_abs_diff_eq!(vis_cpu, vis_gpu, epsilon = 1e-5);
 }

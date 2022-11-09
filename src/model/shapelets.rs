@@ -6,8 +6,6 @@
 
 use std::io::{BufReader, Read};
 
-use byteorder::{ByteOrder, LittleEndian};
-
 // These values correspond to what were used when
 // "shapelet_basis_functions.bin.gz" was generated.
 pub(crate) const SBF_C: f64 = 5000.0;
@@ -28,14 +26,13 @@ lazy_static::lazy_static! {
         // Allocate a vector for the bytes and the values. There are too many to
         // sit on the stack!
         let mut bytes_array: Vec<u8> = Vec::with_capacity(SBF_L * SBF_N * 8) ;
-        let mut values_array: Vec<f64> = vec![0.0; SBF_L * SBF_N];
         // Read in the bytes...
         gz_reader.read_to_end(&mut bytes_array).unwrap();
         // ... ensure that the right number of bytes are there...
         assert_eq!(bytes_array.len(), SBF_L * SBF_N * 8);
-        // ... and then read them in as floats.
-        LittleEndian::read_f64_into(&bytes_array, &mut values_array);
-        values_array.leak()
+        // ... and then leak the memory, so it looks like a global immutable
+        // array, and cast the bytes to floats.
+        bytemuck::cast_slice(bytes_array.leak())
     };
 }
 

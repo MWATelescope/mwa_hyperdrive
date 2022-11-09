@@ -4,9 +4,9 @@
 
 //! Code to abstract beam calculations.
 //!
-//! [Beam] is a trait detailing how to perform various beam-related tasks. By
+//! [`Beam`] is a trait detailing how to perform various beam-related tasks. By
 //! making this trait, we can neatly abstract over multiple beam codes,
-//! including a simple [NoBeam] type (which just returns identity matrices).
+//! including a simple [`NoBeam`] type (which just returns identity matrices).
 //!
 //! Note that (where applicable) `norm_to_zenith` is always true; the
 //! implication being that a sky-model source's brightness is always assumed to
@@ -22,13 +22,11 @@ pub use fee::*;
 
 use std::path::Path;
 
-#[cfg(feature = "cuda")]
-use marlu::cuda::*;
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 
 #[cfg(feature = "cuda")]
-use crate::cuda::CudaFloat;
+use crate::cuda::{CudaFloat, DevicePointer};
 
 /// Supported beam types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +62,7 @@ pub trait Beam: Sync + Send {
     /// Get the beam file associated with this beam, if there is one.
     fn get_beam_file(&self) -> Option<&Path>;
 
-    /// Calculate the beam-response Jones matrix for an [AzEl] direction. The
+    /// Calculate the beam-response Jones matrix for an [`AzEl`] direction. The
     /// pointing information is not needed because it was provided when `self`
     /// was created.
     fn calc_jones(
@@ -75,7 +73,7 @@ pub trait Beam: Sync + Send {
         latitude_rad: f64,
     ) -> Result<Jones<f64>, BeamError>;
 
-    /// Calculate the beam-response Jones matrices for multiple [AzEl]
+    /// Calculate the beam-response Jones matrices for multiple [`AzEl`]
     /// directions. The pointing information is not needed because it was
     /// provided when `self` was created.
     fn calc_jones_array(
@@ -86,31 +84,39 @@ pub trait Beam: Sync + Send {
         latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, BeamError>;
 
+    /// Calculate the beam-response Jones matrices for multiple [`AzEl`]
+    /// directions, saving the results into the supplied slice. The slice must
+    /// have the same length as `azels`. The pointing information is not needed
+    /// because it was provided when `self` was created.
+    fn calc_jones_array_inner(
+        &self,
+        azels: &[AzEl],
+        freq_hz: f64,
+        tile_index: Option<usize>,
+        latitude_rad: f64,
+        results: &mut [Jones<f64>],
+    ) -> Result<(), BeamError>;
+
     /// Given a frequency in Hz, find the closest frequency that the beam code
     /// is defined for. An example of when this is important is with the FEE
     /// beam code, which can only give beam responses at specific frequencies.
     /// On the other hand, the analytic beam can be used at any frequency.
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
 
-    /// If this [Beam] supports it, empty the coefficient cache.
+    /// If this [`Beam`] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self);
 
     #[cfg(feature = "cuda")]
-    /// Using the tile information from this [Beam] and frequencies to be used,
-    /// return a [BeamCUDA]. This object only needs pointings to calculate beam
-    /// response [Jones] matrices.
-    ///
-    /// # Safety
-    ///
-    /// This function interfaces directly with the CUDA API. Rust errors attempt
-    /// to catch problems but there are no guarantees.
-    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
+    /// Using the tile information from this [`Beam`] and frequencies to be
+    /// used, return a [`BeamCUDA`]. This object only needs pointings to
+    /// calculate beam response [`Jones`] matrices.
+    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
 }
 
 /// A trait abstracting beam code functions on a CUDA-capable device.
 #[cfg(feature = "cuda")]
 pub trait BeamCUDA {
-    /// Calculate the Jones matrices for an [AzEl] direction. The pointing
+    /// Calculate the Jones matrices for an [`AzEl`] direction. The pointing
     /// information is not needed because it was provided when `self` was
     /// created.
     ///
@@ -120,12 +126,11 @@ pub trait BeamCUDA {
     /// to catch problems but there are no guarantees.
     unsafe fn calc_jones_pair(
         &self,
-        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] az_rad: &[f64],
-        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] za_rad: &[f64],
-        #[cfg(feature = "cuda-single")] az_rad: &[f32],
-        #[cfg(feature = "cuda-single")] za_rad: &[f32],
+        az_rad: &[CudaFloat],
+        za_rad: &[CudaFloat],
         latitude_rad: f64,
-    ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError>;
+        d_jones: *mut std::ffi::c_void,
+    ) -> Result<(), BeamError>;
 
     /// Get the type of beam.
     fn get_beam_type(&self) -> BeamType;
@@ -138,8 +143,11 @@ pub trait BeamCUDA {
     /// de-duplicated beam Jones matrices on the device.
     fn get_freq_map(&self) -> *const i32;
 
+    /// Get the number of de-duplicated tiles associated with this [`BeamCUDA`].
+    fn get_num_unique_tiles(&self) -> i32;
+
     /// Get the number of de-duplicated frequencies associated with this
-    /// [BeamCUDA].
+    /// [`BeamCUDA`].
     fn get_num_unique_freqs(&self) -> i32;
 }
 
@@ -260,6 +268,18 @@ impl Beam for NoBeam {
         Ok(vec![Jones::identity(); azels.len()])
     }
 
+    fn calc_jones_array_inner(
+        &self,
+        _azels: &[AzEl],
+        _freq_hz: f64,
+        _tile_index: Option<usize>,
+        _latitude_rad: f64,
+        results: &mut [Jones<f64>],
+    ) -> Result<(), BeamError> {
+        results.fill(Jones::identity());
+        Ok(())
+    }
+
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
         desired_freq_hz
     }
@@ -267,7 +287,7 @@ impl Beam for NoBeam {
     fn empty_coeff_cache(&self) {}
 
     #[cfg(feature = "cuda")]
-    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
+    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
         let obj = NoBeamCUDA {
             tile_map: DevicePointer::copy_to_device(&vec![0; self.num_tiles])?,
             freq_map: DevicePointer::copy_to_device(&vec![0; freqs_hz.len()])?,
@@ -288,14 +308,19 @@ pub(crate) struct NoBeamCUDA {
 impl BeamCUDA for NoBeamCUDA {
     unsafe fn calc_jones_pair(
         &self,
-        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] az_rad: &[f64],
-        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] _za_rad: &[f64],
-        #[cfg(feature = "cuda-single")] az_rad: &[f32],
-        #[cfg(feature = "cuda-single")] _za_rad: &[f32],
+        az_rad: &[CudaFloat],
+        _za_rad: &[CudaFloat],
         _latitude_rad: f64,
-    ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError> {
+        d_jones: *mut std::ffi::c_void,
+    ) -> Result<(), BeamError> {
         let identities: Vec<Jones<CudaFloat>> = vec![Jones::identity(); az_rad.len()];
-        DevicePointer::copy_to_device(&identities).map_err(BeamError::from)
+        cuda_runtime_sys::cudaMemcpy(
+            d_jones,
+            identities.as_ptr().cast(),
+            identities.len() * std::mem::size_of::<Jones<CudaFloat>>(),
+            cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyHostToDevice,
+        );
+        Ok(())
     }
 
     fn get_beam_type(&self) -> BeamType {
@@ -308,6 +333,10 @@ impl BeamCUDA for NoBeamCUDA {
 
     fn get_freq_map(&self) -> *const i32 {
         self.freq_map.get()
+    }
+
+    fn get_num_unique_tiles(&self) -> i32 {
+        1
     }
 
     fn get_num_unique_freqs(&self) -> i32 {

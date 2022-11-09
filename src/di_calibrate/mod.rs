@@ -162,7 +162,7 @@ pub(crate) fn get_cal_vis(
     // Use a variable to track whether any threads have an issue.
     let error = AtomicCell::new(false);
     info!("Reading input data and sky modelling");
-    let scoped_threads_result = thread::scope(|scope| {
+    let scoped_threads_result = thread::scope(|s| {
         // Mutable slices of the "global" arrays. These allow threads to mutate
         // the global arrays in parallel (using the Arc<Mutex<_>> pattern would
         // kill performance here).
@@ -171,7 +171,7 @@ pub(crate) fn get_cal_vis(
         let vis_weight_slices = vis_weights_tfb.outer_iter_mut();
 
         // Input visibility-data reading thread.
-        let data_handle = scope.spawn(|| {
+        let data_handle = s.spawn(|| {
             // If a panic happens, update our atomic error.
             defer_on_unwind! { error.store(true); }
             read_progress.tick();
@@ -192,7 +192,7 @@ pub(crate) fn get_cal_vis(
         });
 
         // Sky-model generation thread.
-        let model_handle = scope.spawn(|| {
+        let model_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
             model_progress.tick();
 
@@ -215,7 +215,7 @@ pub(crate) fn get_cal_vis(
 
         // Model writing thread. If the user hasn't specified to write the model
         // to a file, then this thread just consumes messages from the modeller.
-        let writer_handle = scope.spawn(|| {
+        let writer_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
 
             // If the user wants the sky model written out, `model_file` is
@@ -292,13 +292,13 @@ pub(crate) fn get_cal_vis(
         // Cargo.toml. (It would be nice to capture the panic information, if
         // it's possible, but I don't know how, so panics are currently
         // aborting.)
-        let result = data_handle.join();
-        let result = result.and_then(|_| model_handle.join());
-        result.and_then(|_| writer_handle.join())
+        let result = data_handle.join().unwrap();
+        let result = result.and_then(|_| model_handle.join().unwrap());
+        result.and_then(|_| writer_handle.join().unwrap())
     });
 
     // Propagate errors.
-    scoped_threads_result.unwrap()?;
+    scoped_threads_result?;
 
     debug!("Multiplying visibilities by weights");
 
@@ -410,7 +410,7 @@ fn model_vis(
             .timestamps
             .get(timestep)
             .ok_or(DiCalibrateError::TimestepUnavailable { timestep })?;
-        match modeller.model_timestep(vis_model_slice.view_mut(), *timestamp) {
+        match modeller.model_timestep_with(*timestamp, vis_model_slice.view_mut()) {
             // Send the model information to the writer.
             Ok(_) => match tx_model.send(VisTimestep {
                 cross_data_fb: vis_model_slice.to_shared(),

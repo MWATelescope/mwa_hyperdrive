@@ -634,11 +634,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     n1: float_to_int(n1, line_num)
                         .map_err(|_| ReadSourceListCommonError::ShapeletBasisNotInt(n1))?
                         .try_into()
-                        .unwrap(),
+                        .expect("shapelet coeff is not bigger than u8::MAX"),
                     n2: float_to_int(n2, line_num)
                         .map_err(|_| ReadSourceListCommonError::ShapeletBasisNotInt(n2))?
                         .try_into()
-                        .unwrap(),
+                        .expect("shapelet coeff is not bigger than u8::MAX"),
                     value,
                 };
 

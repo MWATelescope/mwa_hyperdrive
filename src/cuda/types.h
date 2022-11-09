@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <stddef.h>
+
 // If SINGLE is enabled, use single-precision floats everywhere. Otherwise
 // default to double-precision.
 #ifdef SINGLE
@@ -18,7 +20,10 @@
 #define JONES JonesF64
 #endif
 
-#include <stddef.h>
+const FLOAT SBF_C = 5000.0;
+const int SBF_L = 10001;
+const int SBF_N = 101;
+const FLOAT SBF_DX = 0.01;
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,11 +33,11 @@ extern "C" {
  * The (u,v,w) coordinates of a baseline. They are in units of metres.
  */
 typedef struct UVW {
-    // u coordinate [metres]
+    /// u coordinate [metres]
     FLOAT u;
-    // v coordinate [metres]
+    /// v coordinate [metres]
     FLOAT v;
-    // w coordinate [metres]
+    /// w coordinate [metres]
     FLOAT w;
 } UVW;
 
@@ -41,11 +46,11 @@ typedef struct UVW {
    RIME).
  */
 typedef struct LmnRime {
-    // l coordinate [dimensionless]
+    /// l coordinate [dimensionless]
     FLOAT l;
-    // m coordinate [dimensionless]
+    /// m coordinate [dimensionless]
     FLOAT m;
-    // n coordinate [dimensionless]
+    /// n coordinate [dimensionless]
     FLOAT n;
 } LmnRime;
 
@@ -53,11 +58,11 @@ typedef struct LmnRime {
  * Parameters describing a Gaussian (also applicable to shapelets).
  */
 typedef struct GaussianParams {
-    // Major axis size [radians]
+    /// Major axis size [radians]
     FLOAT maj;
-    // Minor axis size [radians]
+    /// Minor axis size [radians]
     FLOAT min;
-    // Position angle [radians]
+    /// Position angle [radians]
     FLOAT pa;
 } GaussianParams;
 
@@ -65,9 +70,9 @@ typedef struct GaussianParams {
  * Parameters describing a shapelet coefficient.
  */
 typedef struct ShapeletCoeff {
-    size_t n1;
-    size_t n2;
     FLOAT value;
+    unsigned char n1;
+    unsigned char n2;
 } ShapeletCoeff;
 
 /**
@@ -75,9 +80,9 @@ typedef struct ShapeletCoeff {
  * by not using UVW.
  */
 typedef struct ShapeletUV {
-    // u coordinate [metres]
+    /// u coordinate [metres]
     FLOAT u;
-    // v coordinate [metres]
+    /// v coordinate [metres]
     FLOAT v;
 } ShapeletUV;
 
@@ -86,22 +91,22 @@ typedef struct ShapeletUV {
  * components because complex numbers don't traverse the FFI boundary well.
  */
 typedef struct JonesF32 {
-    // Real XX component
-    float xx_re;
-    // Imag XX component
-    float xx_im;
-    // Real XY component
-    float xy_re;
-    // Imag XY component
-    float xy_im;
-    // Real YX component
-    float yx_re;
-    // Imag YX component
-    float yx_im;
-    // Real YY component
-    float yy_re;
-    // Imag YY component
-    float yy_im;
+    /// Real part of the (0,0) component
+    float j00_re;
+    /// Imaginary part of the (0,0) component
+    float j00_im;
+    /// Real part of the (0,1) component
+    float j01_re;
+    /// Imaginary part of the (0,1) component
+    float j01_im;
+    /// Real part of the (1,0) component
+    float j10_re;
+    /// Imaginary part of the (1, 0) component
+    float j10_im;
+    /// Real part of the (1,1) component
+    float j11_re;
+    /// Imaginary part of the (1,1) component
+    float j11_im;
 } JonesF32;
 
 /**
@@ -109,115 +114,131 @@ typedef struct JonesF32 {
  * components because complex numbers don't traverse the FFI boundary well.
  */
 typedef struct JonesF64 {
-    // Real XX component
-    double xx_re;
-    // Imag XX component
-    double xx_im;
-    // Real XY component
-    double xy_re;
-    // Imag XY component
-    double xy_im;
-    // Real YX component
-    double yx_re;
-    // Imag YX component
-    double yx_im;
-    // Real YY component
-    double yy_re;
-    // Imag YY component
-    double yy_im;
+    /// Real part of the (0,0) component
+    double j00_re;
+    /// Imaginary part of the (0,0) component
+    double j00_im;
+    /// Real part of the (0,1) component
+    double j01_re;
+    /// Imaginary part of the (0,1) component
+    double j01_im;
+    /// Real part of the (1,0) component
+    double j10_re;
+    /// Imaginary part of the (1, 0) component
+    double j10_im;
+    /// Real part of the (1,1) component
+    double j11_re;
+    /// Imaginary part of the (1,1) component
+    double j11_im;
 } JonesF64;
+
+/**
+ * Common things needed to perform modelling. All pointers are to device
+ * memory.
+ */
+typedef struct Addresses {
+    const int num_freqs;
+    const int num_vis;
+    const int num_baselines;
+    const FLOAT *d_freqs;
+    const FLOAT *d_shapelet_basis_values;
+    const int num_unique_beam_freqs;
+    const int *d_tile_map;
+    const int *d_freq_map;
+    const int *d_tile_index_to_unflagged_tile_index_map;
+} Addresses;
 
 /**
  * All the parameters needed to describe point-source components.
  */
 typedef struct Points {
-    size_t num_power_law_points;
-    LmnRime *power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    JONES *power_law_fds;
-    // Spectral indices.
-    FLOAT *power_law_sis;
+    const int num_power_laws;
+    const LmnRime *power_law_lmns;
+    /// Instrumental flux densities calculated at 150 MHz.
+    const JONES *power_law_fds;
+    /// Spectral indices.
+    const FLOAT *power_law_sis;
 
-    size_t num_curved_power_law_points;
-    LmnRime *curved_power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    JONES *curved_power_law_fds;
-    // Spectral indices.
-    FLOAT *curved_power_law_sis;
-    // Spectral curvatures.
-    FLOAT *curved_power_law_qs;
+    const int num_curved_power_laws;
+    const LmnRime *curved_power_law_lmns;
+    /// Instrumental flux densities calculated at 150 MHz.
+    const JONES *curved_power_law_fds;
+    /// Spectral indices.
+    const FLOAT *curved_power_law_sis;
+    /// Spectral curvatures.
+    const FLOAT *curved_power_law_qs;
 
-    size_t num_list_points;
-    LmnRime *list_lmns;
-    // Instrumental (i.e. XX, XY, YX, XX).
-    JONES *list_fds;
+    const int num_lists;
+    const LmnRime *list_lmns;
+    /// Instrumental (i.e. XX, XY, YX, XX).
+    const JONES *list_fds;
 } Points;
 
 /**
  * All the parameters needed to describe Gaussian components.
  */
 typedef struct Gaussians {
-    size_t num_power_law_gaussians;
-    LmnRime *power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    JONES *power_law_fds;
-    // Spectral indices.
-    FLOAT *power_law_sis;
-    GaussianParams *power_law_gps;
+    const int num_power_laws;
+    const LmnRime *power_law_lmns;
+    /// Instrumental flux densities calculated at 150 MHz.
+    const JONES *power_law_fds;
+    /// Spectral indices.
+    const FLOAT *power_law_sis;
+    const GaussianParams *power_law_gps;
 
-    size_t num_curved_power_law_gaussians;
-    LmnRime *curved_power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    JONES *curved_power_law_fds;
-    // Spectral indices.
-    FLOAT *curved_power_law_sis;
-    // Spectral curvatures.
-    FLOAT *curved_power_law_qs;
-    GaussianParams *curved_power_law_gps;
+    const int num_curved_power_laws;
+    const LmnRime *curved_power_law_lmns;
+    /// Instrumental flux densities calculated at 150 MHz.
+    const JONES *curved_power_law_fds;
+    /// Spectral indices.
+    const FLOAT *curved_power_law_sis;
+    /// Spectral curvatures.
+    const FLOAT *curved_power_law_qs;
+    const GaussianParams *curved_power_law_gps;
 
-    size_t num_list_gaussians;
-    LmnRime *list_lmns;
-    // Instrumental (i.e. XX, XY, YX, XX).
-    JONES *list_fds;
-    GaussianParams *list_gps;
+    const int num_lists;
+    const LmnRime *list_lmns;
+    /// Instrumental (i.e. XX, XY, YX, XX).
+    const JONES *list_fds;
+    const GaussianParams *list_gps;
 } Gaussians;
 
 /**
  * All the parameters needed to describe Shapelet components.
  */
 typedef struct Shapelets {
-    size_t num_power_law_shapelets;
-    LmnRime *power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    JONES *power_law_fds;
-    // Spectral indices.
-    FLOAT *power_law_sis;
-    GaussianParams *power_law_gps;
-    ShapeletUV *power_law_shapelet_uvs;
-    ShapeletCoeff *power_law_shapelet_coeffs;
-    size_t *power_law_num_shapelet_coeffs;
+    const int num_power_laws;
+    const LmnRime *power_law_lmns;
+    /// Instrumental flux densities calculated at 150 MHz.
+    const JONES *power_law_fds;
+    /// Spectral indices.
+    const FLOAT *power_law_sis;
+    const GaussianParams *power_law_gps;
+    const ShapeletUV *power_law_shapelet_uvs;
+    const ShapeletCoeff *power_law_shapelet_coeffs;
+    const int *power_law_num_shapelet_coeffs;
 
-    size_t num_curved_power_law_shapelets;
-    LmnRime *curved_power_law_lmns;
-    // Instrumental flux densities calculated at 150 MHz.
-    JONES *curved_power_law_fds;
-    // Spectral indices.
-    FLOAT *curved_power_law_sis;
-    // Spectral curvatures.
-    FLOAT *curved_power_law_qs;
-    GaussianParams *curved_power_law_gps;
-    ShapeletUV *curved_power_law_shapelet_uvs;
-    ShapeletCoeff *curved_power_law_shapelet_coeffs;
-    size_t *curved_power_law_num_shapelet_coeffs;
+    const int num_curved_power_laws;
+    const LmnRime *curved_power_law_lmns;
+    /// Instrumental flux densities calculated at 150 MHz.
+    const JONES *curved_power_law_fds;
+    /// Spectral indices.
+    const FLOAT *curved_power_law_sis;
+    /// Spectral curvatures.
+    const FLOAT *curved_power_law_qs;
+    const GaussianParams *curved_power_law_gps;
+    const ShapeletUV *curved_power_law_shapelet_uvs;
+    const ShapeletCoeff *curved_power_law_shapelet_coeffs;
+    const int *curved_power_law_num_shapelet_coeffs;
 
-    size_t num_list_shapelets;
-    LmnRime *list_lmns;
-    // Instrumental (i.e. XX, XY, YX, XX).
-    JONES *list_fds;
-    GaussianParams *list_gps;
-    ShapeletUV *list_shapelet_uvs;
-    ShapeletCoeff *list_shapelet_coeffs;
-    size_t *list_num_shapelet_coeffs;
+    const int num_lists;
+    const LmnRime *list_lmns;
+    /// Instrumental (i.e. XX, XY, YX, XX).
+    const JONES *list_fds;
+    const GaussianParams *list_gps;
+    const ShapeletUV *list_shapelet_uvs;
+    const ShapeletCoeff *list_shapelet_coeffs;
+    const int *list_num_shapelet_coeffs;
 } Shapelets;
 
 #ifdef __cplusplus

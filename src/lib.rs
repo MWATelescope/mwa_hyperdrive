@@ -24,7 +24,6 @@ pub(crate) mod metafits;
 pub(crate) mod misc;
 pub mod model;
 pub(crate) mod pfb_gains;
-pub(crate) mod shapelets;
 pub(crate) mod solutions;
 pub mod srclist;
 pub(crate) mod unit_parsing;

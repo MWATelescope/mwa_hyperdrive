@@ -8,31 +8,33 @@
 
 include!("utils_bindings.rs");
 
-use std::ffi::{CStr, CString};
+use std::{
+    ffi::{CStr, CString},
+    panic::Location,
+};
 
-use cuda_runtime_sys::*;
-use log::trace;
-use marlu::cuda_runtime_sys;
+use super::CudaError;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CudaDriverInfo {
     /// Formatted CUDA driver version, e.g. "11.7".
-    pub(crate) driver_version: String,
+    pub(crate) driver_version: Box<str>,
     /// Formatted CUDA runtime version, e.g. "11.7".
-    pub(crate) runtime_version: String,
+    pub(crate) runtime_version: Box<str>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct CudaDeviceInfo {
-    pub(crate) name: String,
-    pub(crate) capability: String,
+    pub(crate) name: Box<str>,
+    pub(crate) capability: Box<str>,
     /// \[MebiBytes (MiB)\]
     pub(crate) total_global_mem: usize,
 }
 
 /// Get CUDA device and driver information. At present, this function only
 /// returns information on "device 0".
-pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), String> {
+#[track_caller]
+pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), CudaError> {
     unsafe {
         // TODO: Always assume we're using device 0 for now.
         let device = 0;
@@ -42,7 +44,7 @@ pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), Stri
         let mut total_global_mem = 0;
         let mut driver_version = 0;
         let mut runtime_version = 0;
-        let error_id = get_cuda_device_info(
+        let error_message_ptr = get_cuda_device_info(
             device,
             name,
             &mut device_major,
@@ -51,47 +53,42 @@ pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), Stri
             &mut driver_version,
             &mut runtime_version,
         );
-        cuda_error_to_rust_error(error_id)?;
+        if !error_message_ptr.is_null() {
+            // Get the CUDA error message behind the pointer.
+            let error_message = CStr::from_ptr(error_message_ptr)
+                .to_str()
+                .unwrap_or("<cannot read CUDA error string>");
+            let location = Location::caller();
+            return Err(CudaError::Generic {
+                msg: error_message.into(),
+                file: location.file(),
+                line: location.line(),
+            });
+        }
 
         let device_info = CudaDeviceInfo {
             name: CString::from_raw(name)
                 .to_str()
                 .expect("CUDA device name isn't UTF-8")
-                .to_string(),
-            capability: format!("{device_major}.{device_minor}"),
+                .to_string()
+                .into_boxed_str(),
+            capability: format!("{device_major}.{device_minor}").into_boxed_str(),
             total_global_mem: total_global_mem / 1048576,
         };
 
-        let driver_version = format!("{}.{}", driver_version / 1000, (driver_version % 100) / 10);
+        let driver_version = format!("{}.{}", driver_version / 1000, (driver_version / 10) % 100);
         let runtime_version = format!(
             "{}.{}",
             runtime_version / 1000,
-            (runtime_version % 100) / 10
+            (runtime_version / 10) % 100
         );
 
         Ok((
             device_info,
             CudaDriverInfo {
-                driver_version,
-                runtime_version,
+                driver_version: driver_version.into_boxed_str(),
+                runtime_version: runtime_version.into_boxed_str(),
             },
         ))
-    }
-}
-
-/// Convert a `cudaError_t` cast to an `i32` to a Rust error.
-fn cuda_error_to_rust_error(error_id: i32) -> Result<(), String> {
-    if error_id == cudaError::cudaSuccess as i32 {
-        Ok(())
-    } else {
-        unsafe {
-            trace!("CUDA error ID: {error_id}");
-            let error_str = get_cuda_error(error_id);
-            trace!("CUDA error str address: {:#x}", error_str as usize);
-            Err(CStr::from_ptr(error_str)
-                .to_str()
-                .expect("CUDA error string isn't UTF-8")
-                .to_string())
-        }
     }
 }

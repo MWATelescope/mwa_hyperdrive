@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "memory.h"
 #include "types.h"
 
 const FLOAT POWER_LAW_FD_REF_FREQ = 150e6; // Hz
@@ -31,21 +30,24 @@ extern "C" {
  * frequency and direction. The metadata within `a` allows disambiguation of
  * which tile and frequency should use which set of responses.
  */
-int model_points(const Points *points, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
+const char *model_points(const Points *comps, const Addresses *a, const UVW *d_uvws, const JONES *d_beam_jones,
+                         JonesF32 *d_vis_fb);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
  * sky-model Gaussian components. See the documentation of `model_points` for
  * more info.
  */
-int model_gaussians(const Gaussians *gaussians, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
+const char *model_gaussians(const Gaussians *comps, const Addresses *a, const UVW *d_uvws, const JONES *d_beam_jones,
+                            JonesF32 *d_vis_fb);
 
 /**
  * Generate sky-model visibilities for a single timestep given multiple
  * sky-model shapelet components. See the documentation of `model_points` for
  * more info.
  */
-int model_shapelets(const Shapelets *shapelets, const Addresses *a, const UVW *d_uvws, const void *d_beam_jones);
+const char *model_shapelets(const Shapelets *comps, const Addresses *a, const UVW *d_uvws, const JONES *d_beam_jones,
+                            JonesF32 *d_vis_fb);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -143,9 +143,12 @@ mod cuda {
         #[cfg(feature = "cuda-single")]
         cuda_target.define("SINGLE", None);
 
-        cuda_target
-            .file("src/cuda/model.cu")
-            .file("src/cuda/utils.cu")
-            .compile("hyperdrive_cu");
+        // Break in case of emergency.
+        // cuda_target.debug(true);
+
+        for f in cuda_files {
+            cuda_target.file(f);
+        }
+        cuda_target.compile("hyperdrive_cu");
     }
 }

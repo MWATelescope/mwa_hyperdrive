@@ -131,7 +131,7 @@ impl From<DiCalibrateError> for HyperdriveError {
             DiCalibrateError::Fitsio(_) => Self::Cfitsio(s),
             DiCalibrateError::VisRead(e) => Self::from(e),
             DiCalibrateError::VisWrite(_) => Self::VisWrite(s),
-            DiCalibrateError::Beam(_) | DiCalibrateError::IO(_) => Self::Generic(s),
+            DiCalibrateError::Model(_) | DiCalibrateError::IO(_) => Self::Generic(s),
         }
     }
 }
@@ -216,9 +216,10 @@ impl From<VisSimulateError> for HyperdriveError {
             VisSimulateError::AverageFactor(_) => Self::Averaging(s),
             VisSimulateError::Glob(_)
             | VisSimulateError::FileWrite(_)
+            | VisSimulateError::Model(_)
             | VisSimulateError::IO(_) => Self::Generic(s),
             #[cfg(feature = "cuda")]
-            VisSimulateError::CudaError(_) => Self::Generic(s),
+            VisSimulateError::Cuda(_) => Self::Generic(s),
         }
     }
 }
@@ -257,9 +258,10 @@ impl From<VisSubtractError> for HyperdriveError {
             | VisSubtractError::OutputVisFreqResNotMultiple { .. } => Self::Averaging(s),
             VisSubtractError::Glob(_)
             | VisSubtractError::FileWrite(_)
+            | VisSubtractError::Model(_)
             | VisSubtractError::IO(_) => Self::Generic(s),
             #[cfg(feature = "cuda")]
-            VisSubtractError::CudaError(_) => Self::Generic(s),
+            VisSubtractError::Cuda(_) => Self::Generic(s),
         }
     }
 }
@@ -394,7 +396,7 @@ impl From<DiCalArgsError> for HyperdriveError {
             | DiCalArgsError::Glob(_)
             | DiCalArgsError::IO(_) => Self::Generic(s),
             #[cfg(feature = "cuda")]
-            DiCalArgsError::CudaError(_) => Self::Generic(s),
+            DiCalArgsError::Cuda(_) => Self::Generic(s),
         }
     }
 }

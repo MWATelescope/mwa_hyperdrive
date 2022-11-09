@@ -7,6 +7,8 @@
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Borrow;
+
 use marlu::{pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
@@ -78,8 +80,8 @@ pub enum ComponentType {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShapeletCoeff {
-    pub n1: usize,
-    pub n2: usize,
+    pub n1: u8,
+    pub n2: u8,
     pub value: f64,
 }
 
@@ -211,7 +213,7 @@ impl ComponentList {
         let shapelet_flux_densities =
             get_instrumental_flux_densities(&shapelet_fds, unflagged_fine_chan_freqs);
 
-        // Attempt to conserve memory. (Does Rust do this anyway?)
+        // Attempt to conserve memory.
         point_radecs.shrink_to_fit();
         point_lmns.shrink_to_fit();
         gaussian_radecs.shrink_to_fit();
@@ -275,8 +277,8 @@ impl ShapeletComponentParams {
 //
 // These don't change with time, so we can save a lot of computation by just
 // doing this once.
-pub fn get_instrumental_flux_densities(
-    comp_fds: &[FluxDensityType],
+pub fn get_instrumental_flux_densities<T: Borrow<FluxDensityType>>(
+    comp_fds: &[T],
     unflagged_fine_chan_freqs: &[f64],
 ) -> Array2<Jones<f64>> {
     let mut inst_fds = Array2::from_elem(
@@ -285,14 +287,13 @@ pub fn get_instrumental_flux_densities(
     );
     inst_fds
         .axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .zip(comp_fds.par_iter())
+        .zip(comp_fds.iter())
         .for_each(|(mut inst_fd_axis, comp_fd)| {
             inst_fd_axis
                 .iter_mut()
                 .zip(unflagged_fine_chan_freqs.iter())
                 .for_each(|(inst_fd, freq)| {
-                    let stokes_flux_density = comp_fd.estimate_at_freq(*freq);
+                    let stokes_flux_density = comp_fd.borrow().estimate_at_freq(*freq);
                     let instrumental_flux_density: Jones<f64> =
                         stokes_flux_density.to_inst_stokes();
                     *inst_fd = instrumental_flux_density;

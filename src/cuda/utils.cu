@@ -12,22 +12,16 @@
 
 #include <cuda.h>
 
-extern "C" const char *get_cuda_error(int cuda_error_id) {
-    cudaError_t error_id = static_cast<cudaError_t>(cuda_error_id);
-    return cudaGetErrorString(error_id);
-}
-
-extern "C" int get_cuda_device_info(int device, char name[256], int *device_major, int *device_minor,
-                                    size_t *total_global_mem, int *driver_version, int *runtime_version) {
+extern "C" const char *get_cuda_device_info(int device, char name[256], int *device_major, int *device_minor,
+                                            size_t *total_global_mem, int *driver_version, int *runtime_version) {
     cudaError_t error_id = cudaSetDevice(device);
     if (error_id != cudaSuccess)
-        // Can't pass `cudaError_t` over the FFI boundary. Cast to an int.
-        return static_cast<int>(error_id);
+        return cudaGetErrorString(error_id);
 
     cudaDeviceProp device_prop;
     error_id = cudaGetDeviceProperties(&device_prop, device);
     if (error_id != cudaSuccess)
-        return static_cast<int>(error_id);
+        return cudaGetErrorString(error_id);
 
     memcpy(name, device_prop.name, 256);
     *device_major = device_prop.major;
@@ -36,11 +30,11 @@ extern "C" int get_cuda_device_info(int device, char name[256], int *device_majo
 
     error_id = cudaDriverGetVersion(driver_version);
     if (error_id != cudaSuccess)
-        return static_cast<int>(error_id);
+        return cudaGetErrorString(error_id);
 
     error_id = cudaRuntimeGetVersion(runtime_version);
     if (error_id != cudaSuccess)
-        return static_cast<int>(error_id);
+        return cudaGetErrorString(error_id);
 
-    return cudaError_t::cudaSuccess;
+    return NULL;
 }

@@ -15,6 +15,13 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     this report.
 - More CUDA benchmarks for the modelling code.
 
+### Fixed
+- Flux densities were not being correctly estimated for curved-power-law
+  components with GPU code.
+
+### Changed
+- The performance of CPU visibility modelling has been dramatically improved.
+
 ## [0.2.1] - 2022-10-20
 ### Added
 - `hyperdrive` can now be installed from crates.io

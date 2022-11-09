@@ -94,10 +94,6 @@ pub(crate) enum VisSubtractError {
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
     BadArrayPosition { pos: Vec<f64> },
 
-    #[cfg(feature = "cuda")]
-    #[error("CUDA error: {0}")]
-    CudaError(String),
-
     #[error(transparent)]
     Veto(#[from] crate::srclist::VetoError),
 
@@ -120,5 +116,12 @@ pub(crate) enum VisSubtractError {
     Beam(#[from] crate::beam::BeamError),
 
     #[error(transparent)]
+    Model(#[from] crate::model::ModelError),
+
+    #[error(transparent)]
     IO(#[from] std::io::Error),
+
+    #[cfg(feature = "cuda")]
+    #[error(transparent)]
+    Cuda(#[from] crate::cuda::CudaError),
 }

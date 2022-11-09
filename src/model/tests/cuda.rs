@@ -4,1211 +4,497 @@
 
 //! Tests on generating sky-model visibilities with CUDA.
 //!
-//! These tests use the same expected values as the CPU tests. For this reason,
-//! tests using the FEE have to be restricted to double-precision CUDA, as
-//! single-precision CUDA will not match.
+//! These tests use the same expected values as the CPU tests.
 
-use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
-use marlu::cuda::DevicePointer;
 use ndarray::prelude::*;
-#[cfg(not(feature = "cuda-single"))]
-use serial_test::serial;
 use vec1::vec1;
 
 use super::*;
 use crate::{
-    cuda::{self, CudaFloat},
+    cuda::{self, CudaFloat, DevicePointer},
     srclist::Source,
 };
 
-/// Helper function to copy [UVW]s to the device.
-fn copy_uvws(uvws: &[UVW]) -> DevicePointer<cuda::UVW> {
-    unsafe {
-        let cuda_uvws = uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        DevicePointer::copy_to_device(&cuda_uvws).unwrap()
-    }
+/// Test with a bunch of parameters (are we using a beam?, what function are we
+/// using for modelling, what source list, what test function).
+macro_rules! test_modelling {
+    ($no_beam:expr, $model_fn:expr,
+        $list_srclist:expr, $power_law_srclist:expr, $curved_power_law_srclist:expr,
+        $list_test_fn:expr, $power_law_test_fn:expr, $curved_power_law_test_fn:expr) => {{
+        let obs = ObsParams::new($no_beam);
+        let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+        let mut d_vis_fb = DevicePointer::copy_to_device(visibilities.as_slice().unwrap()).unwrap();
+        let (modeller, d_uvws) = obs.get_gpu_modeller($list_srclist);
+        // The device buffer will automatically be resized.
+        let mut d_beam_jones = DevicePointer::default();
+        unsafe {
+            $model_fn(
+                &modeller,
+                obs.lst,
+                obs.array_latitude_rad,
+                &d_uvws,
+                &mut d_beam_jones,
+                &mut d_vis_fb,
+            )
+            .unwrap();
+        }
+        d_vis_fb
+            .copy_from_device(visibilities.as_slice_mut().unwrap())
+            .unwrap();
+        #[cfg(not(feature = "cuda-single"))]
+        let epsilon = if $no_beam { 0.0 } else { 1e-15 };
+        #[cfg(feature = "cuda-single")]
+        let epsilon = if $no_beam { 6e-8 } else { 2e-3 };
+        $list_test_fn(visibilities.view(), epsilon);
+        d_vis_fb.clear();
+
+        let (modeller, d_uvws) = obs.get_gpu_modeller($power_law_srclist);
+        unsafe {
+            $model_fn(
+                &modeller,
+                obs.lst,
+                obs.array_latitude_rad,
+                &d_uvws,
+                &mut d_beam_jones,
+                &mut d_vis_fb,
+            )
+            .unwrap();
+        }
+        d_vis_fb
+            .copy_from_device(visibilities.as_slice_mut().unwrap())
+            .unwrap();
+        $power_law_test_fn(visibilities.view(), epsilon);
+        d_vis_fb.clear();
+
+        let (modeller, d_uvws) = obs.get_gpu_modeller($curved_power_law_srclist);
+        unsafe {
+            $model_fn(
+                &modeller,
+                obs.lst,
+                obs.array_latitude_rad,
+                &d_uvws,
+                &mut d_beam_jones,
+                &mut d_vis_fb,
+            )
+            .unwrap();
+        }
+        d_vis_fb
+            .copy_from_device(visibilities.as_slice_mut().unwrap())
+            .unwrap();
+        $curved_power_law_test_fn(visibilities.view(), epsilon);
+    }};
 }
 
-// Put a single point source at zenith.
 #[test]
 fn point_zenith_gpu() {
-    let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::List)],
-        },
+    test_modelling!(
+        true,
+        SkyModellerCuda::model_points,
+        &POINT_ZENITH_LIST,
+        &POINT_ZENITH_POWER_LAW,
+        &POINT_ZENITH_CURVED_POWER_LAW,
+        test_list_zenith_visibilities,
+        test_power_law_zenith_visibilities,
+        test_curved_power_law_zenith_visibilities
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::CurvedPowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_zenith_visibilities(visibilities.view());
 }
 
 #[test]
 fn point_off_zenith_gpu() {
-    let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
+    test_modelling!(
+        true,
+        SkyModellerCuda::model_points,
+        &POINT_OFF_ZENITH_LIST,
+        &POINT_OFF_ZENITH_POWER_LAW,
+        &POINT_OFF_ZENITH_CURVED_POWER_LAW,
+        test_list_off_zenith_visibilities,
+        test_power_law_off_zenith_visibilities,
+        test_curved_power_law_off_zenith_visibilities
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_off_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_off_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_off_zenith_visibilities(visibilities.view());
 }
 
-// Put a single Gaussian source at zenith.
 #[test]
 fn gaussian_zenith_gpu() {
-    let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::List)],
-        },
+    test_modelling!(
+        true,
+        SkyModellerCuda::model_gaussians,
+        &GAUSSIAN_ZENITH_LIST,
+        &GAUSSIAN_ZENITH_POWER_LAW,
+        &GAUSSIAN_ZENITH_CURVED_POWER_LAW,
+        test_list_zenith_visibilities,
+        test_power_law_zenith_visibilities,
+        test_curved_power_law_zenith_visibilities
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let cuda_uvws = obs
-            .uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let cuda_uvws = obs
-            .uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let cuda_uvws = obs
-            .uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_zenith_visibilities(visibilities.view());
 }
 
-// Put a single Gaussian source just off zenith.
 #[test]
 fn gaussian_off_zenith_gpu() {
-    let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
+    test_modelling!(
+        true,
+        SkyModellerCuda::model_gaussians,
+        &GAUSSIAN_OFF_ZENITH_LIST,
+        &GAUSSIAN_OFF_ZENITH_POWER_LAW,
+        &GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW,
+        test_list_off_zenith_visibilities,
+        test_power_law_off_zenith_visibilities,
+        test_curved_power_law_off_zenith_visibilities
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_off_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_off_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_off_zenith_visibilities(visibilities.view());
 }
 
-// Put a single shapelet source at zenith.
 #[test]
 fn shapelet_zenith_gpu() {
-    let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::List)],
-        },
+    test_modelling!(
+        true,
+        SkyModellerCuda::model_shapelets,
+        &SHAPELET_ZENITH_LIST,
+        &SHAPELET_ZENITH_POWER_LAW,
+        &SHAPELET_ZENITH_CURVED_POWER_LAW,
+        test_list_zenith_visibilities,
+        test_power_law_zenith_visibilities,
+        test_curved_power_law_zenith_visibilities
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_zenith_visibilities(visibilities.view());
 }
 
-// Put a single shapelet source just off zenith.
 #[test]
 fn shapelet_off_zenith_gpu() {
-    let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
+    test_modelling!(
+        true,
+        SkyModellerCuda::model_shapelets,
+        &SHAPELET_OFF_ZENITH_LIST,
+        &SHAPELET_OFF_ZENITH_POWER_LAW,
+        &SHAPELET_OFF_ZENITH_CURVED_POWER_LAW,
+        test_list_off_zenith_visibilities,
+        test_power_law_off_zenith_visibilities,
+        test_curved_power_law_off_zenith_visibilities
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_off_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_off_zenith_visibilities(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_off_zenith_visibilities(visibilities.view());
 }
 
-// Put a single point source at zenith.
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
 fn point_zenith_gpu_fee() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::List)],
-        },
+    test_modelling!(
+        false,
+        SkyModellerCuda::model_points,
+        &POINT_ZENITH_LIST,
+        &POINT_ZENITH_POWER_LAW,
+        &POINT_ZENITH_CURVED_POWER_LAW,
+        test_list_zenith_visibilities_fee,
+        test_power_law_zenith_visibilities_fee,
+        test_curved_power_law_zenith_visibilities_fee
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::CurvedPowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_zenith_visibilities_fee(visibilities.view());
 }
 
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
 fn point_off_zenith_gpu_fee() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
+    test_modelling!(
+        false,
+        SkyModellerCuda::model_points,
+        &POINT_OFF_ZENITH_LIST,
+        &POINT_OFF_ZENITH_POWER_LAW,
+        &POINT_OFF_ZENITH_CURVED_POWER_LAW,
+        test_list_off_zenith_visibilities_fee,
+        test_power_law_off_zenith_visibilities_fee,
+        test_curved_power_law_off_zenith_visibilities_fee
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_off_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_off_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_off_zenith_visibilities_fee(visibilities.view());
 }
 
-// Put a single Gaussian source at zenith.
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
 fn gaussian_zenith_gpu_fee() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::List)],
-        },
+    test_modelling!(
+        false,
+        SkyModellerCuda::model_gaussians,
+        &GAUSSIAN_ZENITH_LIST,
+        &GAUSSIAN_ZENITH_POWER_LAW,
+        &GAUSSIAN_ZENITH_CURVED_POWER_LAW,
+        test_list_zenith_visibilities_fee,
+        test_power_law_zenith_visibilities_fee,
+        test_curved_power_law_zenith_visibilities_fee
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let cuda_uvws = obs
-            .uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let cuda_uvws = obs
-            .uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let cuda_uvws = obs
-            .uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_zenith_visibilities_fee(visibilities.view());
 }
 
-// Put a single Gaussian source just off zenith.
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
 fn gaussian_off_zenith_gpu_fee() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
+    test_modelling!(
+        false,
+        SkyModellerCuda::model_gaussians,
+        &GAUSSIAN_OFF_ZENITH_LIST,
+        &GAUSSIAN_OFF_ZENITH_POWER_LAW,
+        &GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW,
+        test_list_off_zenith_visibilities_fee,
+        test_power_law_off_zenith_visibilities_fee,
+        test_curved_power_law_off_zenith_visibilities_fee
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_off_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_off_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_off_zenith_visibilities_fee(visibilities.view());
 }
 
-// Put a single shapelet source at zenith.
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
 fn shapelet_zenith_gpu_fee() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::List)],
-        },
+    test_modelling!(
+        false,
+        SkyModellerCuda::model_shapelets,
+        &SHAPELET_ZENITH_LIST,
+        &SHAPELET_ZENITH_POWER_LAW,
+        &SHAPELET_ZENITH_CURVED_POWER_LAW,
+        test_list_zenith_visibilities_fee,
+        test_power_law_zenith_visibilities_fee,
+        test_curved_power_law_zenith_visibilities_fee
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_zenith_visibilities_fee(visibilities.view());
 }
 
-// Put a single shapelet source just off zenith.
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
 fn shapelet_off_zenith_gpu_fee() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
+    test_modelling!(
+        false,
+        SkyModellerCuda::model_shapelets,
+        &SHAPELET_OFF_ZENITH_LIST,
+        &SHAPELET_OFF_ZENITH_POWER_LAW,
+        &SHAPELET_OFF_ZENITH_CURVED_POWER_LAW,
+        test_list_off_zenith_visibilities_fee,
+        test_power_law_off_zenith_visibilities_fee,
+        test_curved_power_law_off_zenith_visibilities_fee
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_list_off_zenith_visibilities_fee(visibilities.view());
+}
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
+#[test]
+fn non_trivial_gaussian() {
+    test_modelling!(
+        false,
+        SkyModellerCuda::model_gaussians,
+        &SourceList::from([(
+            "list".to_string(),
+            Source {
+                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::List)]
+            }
+        )]),
+        &SourceList::from([(
+            "power_law".to_string(),
+            Source {
+                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]
+            }
+        )]),
+        &SourceList::from([(
+            "curved_power_law".to_string(),
+            Source {
+                components: vec1![get_gaussian2(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]
+            }
+        )]),
+        test_non_trivial_gaussian_list,
+        test_non_trivial_gaussian_power_law,
+        test_non_trivial_gaussian_curved_power_law
     );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_power_law_off_zenith_visibilities_fee(visibilities.view());
-
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    visibilities.fill(Jones::default());
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-    assert_curved_power_law_off_zenith_visibilities_fee(visibilities.view());
 }
 
 /// This test checks that beam responses are applied properly. The CUDA code
 /// previously had a bug where the wrong beam response *might* have been applied
 /// to the wrong component. Put multiple components with different flux types in
 /// a source list and model it.
-#[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
-fn beam_responses_apply_properly_power_law_and_list() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                get_simple_point(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_point(RADec::new_degrees(45.0, 18.0), FluxType::List)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
+macro_rules! test_beam_applies_to_first_component {
+    ($flux_type1:expr, $flux_type2:expr) => {{
+        let obs = ObsParams::new(false);
+        let mut srclist = SourceList::new();
+        srclist.insert(
+            "mixed".to_string(),
+            Source {
+                components: vec1![
+                    get_point(obs.phase_centre, $flux_type1),
+                    get_point(RADec::new_degrees(45.0, 18.0), $flux_type2)
+                ],
+            },
+        );
+        let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+        let mut d_vis_fb = DevicePointer::copy_to_device(visibilities.as_slice().unwrap()).unwrap();
+        let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
+        // The device buffer will automatically be resized.
+        let mut d_beam_jones = DevicePointer::default();
+        unsafe {
+            modeller
+                .model_points(
+                    obs.lst,
+                    obs.array_latitude_rad,
+                    &d_uvws,
+                    &mut d_beam_jones,
+                    &mut d_vis_fb,
+                )
+                .unwrap();
+        }
+        d_vis_fb
+            .copy_from_device(visibilities.as_slice_mut().unwrap())
+            .unwrap();
+        d_vis_fb.clear();
 
-    // The visibilities should be very similar to having only the zenith
-    // power-law component, because the list component is far from the pointing
-    // centre. The expected values are taken from
-    // `assert_power_law_zenith_visibilities_fee`.
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
+        // The visibilities should be very similar to having only the zenith
+        // component, because the other component is far from the pointing
+        // centre. The expected values are taken from
+        // `assert_power_law_zenith_visibilities_fee`.
+        assert_abs_diff_eq!(
+            visibilities[(0, 0)],
+            Jones::from([
+                Complex::new(9.995525e-1, 0.0),
+                Complex::new(-5.405832e-4, -5.00542e-6),
+                Complex::new(-5.405832e-4, 5.00542e-6),
+                Complex::new(9.9958146e-1, 0.0)
+            ]),
+            epsilon = 8e-4
+        );
 
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                // Every component type needs to be checked.
-                get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_gaussian(RADec::new_degrees(45.0, 18.0), FluxType::List)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
+        srclist.insert(
+            "mixed".to_string(),
+            Source {
+                components: vec1![
+                    // Every component type needs to be checked.
+                    get_gaussian(obs.phase_centre, $flux_type1),
+                    get_gaussian(RADec::new_degrees(45.0, 18.0), $flux_type2)
+                ],
+            },
+        );
+        let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
+        unsafe {
+            modeller
+                .model_gaussians(
+                    obs.lst,
+                    obs.array_latitude_rad,
+                    &d_uvws,
+                    &mut d_beam_jones,
+                    &mut d_vis_fb,
+                )
+                .unwrap();
+        }
+        d_vis_fb
+            .copy_from_device(visibilities.as_slice_mut().unwrap())
+            .unwrap();
+        d_vis_fb.clear();
 
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
+        assert_abs_diff_eq!(
+            visibilities[(0, 0)],
+            Jones::from([
+                Complex::new(9.995525e-1, 0.0),
+                Complex::new(-5.405832e-4, -5.00542e-6),
+                Complex::new(-5.405832e-4, 5.00542e-6),
+                Complex::new(9.9958146e-1, 0.0)
+            ]),
+            epsilon = 8e-4
+        );
 
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_shapelet(RADec::new_degrees(45.0, 18.0), FluxType::List)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
+        srclist.insert(
+            "mixed".to_string(),
+            Source {
+                components: vec1![
+                    get_shapelet(obs.phase_centre, $flux_type1),
+                    get_shapelet(RADec::new_degrees(45.0, 18.0), $flux_type2)
+                ],
+            },
+        );
+        let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
+        unsafe {
+            modeller
+                .model_shapelets(
+                    obs.lst,
+                    obs.array_latitude_rad,
+                    &d_uvws,
+                    &mut d_beam_jones,
+                    &mut d_vis_fb,
+                )
+                .unwrap();
+        }
+        d_vis_fb
+            .copy_from_device(visibilities.as_slice_mut().unwrap())
+            .unwrap();
+        d_vis_fb.clear();
 
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
+        assert_abs_diff_eq!(
+            visibilities[(0, 0)],
+            Jones::from([
+                Complex::new(9.995525e-1, 0.0),
+                Complex::new(-5.405832e-4, -5.00542e-6),
+                Complex::new(-5.405832e-4, 5.00542e-6),
+                Complex::new(9.9958146e-1, 0.0)
+            ]),
+            epsilon = 8e-4
+        );
+    }};
 }
 
-/// Similar to above.
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
+fn beam_responses_apply_properly_power_law2() {
+    test_beam_applies_to_first_component!(FluxType::PowerLaw, FluxType::PowerLaw);
+}
+
+#[test]
 fn beam_responses_apply_properly_power_law_and_curved_power_law() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                get_simple_point(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_point(RADec::new_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-
-    // The visibilities should be very similar to having only the zenith
-    // power-law component, because the list component is far from the pointing
-    // centre. The expected values are taken from
-    // `assert_power_law_zenith_visibilities_fee`.
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
-
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                // Every component type needs to be checked.
-                get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_gaussian(RADec::new_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
-
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_shapelet(RADec::new_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
+    test_beam_applies_to_first_component!(FluxType::PowerLaw, FluxType::CurvedPowerLaw);
 }
 
-/// Similar to above.
 #[test]
-#[serial]
-#[cfg(not(feature = "cuda-single"))]
+fn beam_responses_apply_properly_power_law_and_list() {
+    test_beam_applies_to_first_component!(FluxType::PowerLaw, FluxType::List);
+}
+
+#[test]
+fn beam_responses_apply_properly_curved_power_law_and_power_law() {
+    test_beam_applies_to_first_component!(FluxType::CurvedPowerLaw, FluxType::PowerLaw);
+}
+
+#[test]
+fn beam_responses_apply_properly_curved_power_law2() {
+    test_beam_applies_to_first_component!(FluxType::CurvedPowerLaw, FluxType::CurvedPowerLaw);
+}
+
+#[test]
 fn beam_responses_apply_properly_curved_power_law_and_list() {
-    let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                get_simple_point(obs.phase_centre, FluxType::CurvedPowerLaw),
-                get_simple_point(RADec::new_degrees(45.0, 18.0), FluxType::List)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-
-    // The visibilities should be very similar to having only the zenith
-    // power-law component, because the list component is far from the pointing
-    // centre. The expected values are taken from
-    // `assert_power_law_zenith_visibilities_fee`.
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
-
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                // Every component type needs to be checked.
-                get_simple_gaussian(obs.phase_centre, FluxType::CurvedPowerLaw),
-                get_simple_gaussian(RADec::new_degrees(45.0, 18.0), FluxType::List)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_gaussians_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
-
-    srclist.insert(
-        "mixed".to_string(),
-        Source {
-            components: vec1![
-                get_simple_shapelet(obs.phase_centre, FluxType::CurvedPowerLaw),
-                get_simple_shapelet(RADec::new_degrees(45.0, 18.0), FluxType::List)
-            ],
-        },
-    );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
-    unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
-        let result = modeller.model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-    }
-
-    assert_abs_diff_eq!(
-        visibilities[(0, 0)],
-        Jones::from([
-            Complex::new(9.995525e-1, 0.0),
-            Complex::new(-5.405832e-4, -5.00542e-6),
-            Complex::new(-5.405832e-4, 5.00542e-6),
-            Complex::new(9.9958146e-1, 0.0)
-        ]),
-        epsilon = 8e-4
-    );
+    test_beam_applies_to_first_component!(FluxType::CurvedPowerLaw, FluxType::List);
 }
 
-// Test that all visibilities get cleared after doing a copy.
 #[test]
-fn copy_reset_cuda_vis_works() {
+fn beam_responses_apply_properly_list_and_power_law() {
+    test_beam_applies_to_first_component!(FluxType::List, FluxType::PowerLaw);
+}
+
+#[test]
+fn beam_responses_apply_properly_list_and_curved_power_law() {
+    test_beam_applies_to_first_component!(FluxType::List, FluxType::CurvedPowerLaw);
+}
+
+#[test]
+fn beam_responses_apply_properly_list2() {
+    test_beam_applies_to_first_component!(FluxType::List, FluxType::List);
+}
+
+#[test]
+fn gaussian_multiple_components() {
     let obs = ObsParams::new(true);
     let mut srclist = SourceList::new();
     srclist.insert(
-        "zenith".to_string(),
+        "gaussians".to_string(),
         Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::List)],
+            components: vec1![
+                get_gaussian(RADec::new_degrees(1.0, -27.0), FluxType::List),
+                get_gaussian(RADec::new_degrees(1.1, -27.0), FluxType::List)
+            ],
         },
     );
+    let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
+
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let modeller = obs.get_gpu_modeller(&srclist);
+    let mut d_vis_fb = DevicePointer::copy_to_device(visibilities.as_slice().unwrap()).unwrap();
+    // The device buffer will automatically be resized.
+    let mut d_beam_jones = DevicePointer::default();
     unsafe {
-        let cuda_uvws = obs
-            .uvws
-            .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
-        let result = modeller.model_points_inner(&d_uvws, obs.lst, obs.array_latitude_rad);
-        assert!(result.is_ok());
-        result.unwrap();
+        modeller
+            .model_gaussians(
+                obs.lst,
+                obs.array_latitude_rad,
+                &d_uvws,
+                &mut d_beam_jones,
+                &mut d_vis_fb,
+            )
+            .unwrap();
+    };
+    d_vis_fb
+        .copy_from_device(visibilities.as_slice_mut().unwrap())
+        .unwrap();
 
-        // Copy the visibilities; these are not all zero.
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-        assert_abs_diff_ne!(
-            visibilities,
-            Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default())
-        );
-        // (In fact, none are zero.)
-        visibilities.iter().for_each(|&v| {
-            assert_abs_diff_ne!(v, Jones::default());
-        });
-
-        // Copy the visibilities again; because they've been reset before, these
-        // are all zero.
-        modeller.copy_and_reset_vis(visibilities.view_mut());
-        assert_abs_diff_eq!(
-            visibilities,
-            Array2::from_elem((obs.uvws.len(), obs.freqs.len()), Jones::default())
-        );
-    }
+    #[cfg(not(feature = "cuda-single"))]
+    test_multiple_gaussian_components(visibilities.view(), 0.0);
+    #[cfg(feature = "cuda-single")]
+    test_multiple_gaussian_components(visibilities.view(), 5e-7);
 }
 
 #[test]
@@ -1216,88 +502,34 @@ fn shapelet_multiple_components() {
     let obs = ObsParams::new(true);
     let mut srclist = SourceList::new();
     srclist.insert(
-        "shapelet".to_string(),
+        "shapelets".to_string(),
         Source {
             components: vec1![
-                get_simple_shapelet(RADec::new_degrees(1.0, -27.0), FluxType::List),
-                get_simple_shapelet(RADec::new_degrees(1.1, -27.0), FluxType::List)
+                get_shapelet(RADec::new_degrees(1.0, -27.0), FluxType::List),
+                get_shapelet(RADec::new_degrees(1.1, -27.0), FluxType::List)
             ],
         },
     );
-    let modeller = obs.get_gpu_modeller(&srclist);
+    let (modeller, d_uvws) = obs.get_gpu_modeller(&srclist);
 
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut d_vis_fb = DevicePointer::copy_to_device(visibilities.as_slice().unwrap()).unwrap();
+    // The device buffer will automatically be resized.
+    let mut d_beam_jones = DevicePointer::default();
     unsafe {
-        let d_uvws = copy_uvws(&obs.uvws);
         modeller
-            .model_shapelets_inner(&d_uvws, obs.lst, obs.array_latitude_rad)
+            .model_shapelets(
+                obs.lst,
+                obs.array_latitude_rad,
+                &d_uvws,
+                &mut d_beam_jones,
+                &mut d_vis_fb,
+            )
             .unwrap();
-        modeller.copy_and_reset_vis(visibilities.view_mut());
     };
-
-    let expected = array![
-        [
-            Jones::from([
-                Complex::new(1.9894463e0, 2.0495814e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(1.9894463e0, 2.0495814e-1),
-            ]),
-            Jones::from([
-                Complex::new(1.997311e0, 1.03556715e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(1.997311e0, 1.03556715e-1),
-            ]),
-            Jones::from([
-                Complex::new(1.9974082e0, -1.0167356e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(1.9974082e0, -1.0167356e-1),
-            ]),
-        ],
-        [
-            Jones::from([
-                Complex::new(5.9569197e0, 7.1689516e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(5.9569197e0, 7.1689516e-1),
-            ]),
-            Jones::from([
-                Complex::new(5.989021e0, 3.6238956e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(5.989021e0, 3.6238956e-1),
-            ]),
-            Jones::from([
-                Complex::new(5.9894176e0, -3.5580167e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(5.9894176e0, -3.5580167e-1),
-            ]),
-        ],
-        [
-            Jones::from([
-                Complex::new(3.9625018e0, 5.4580307e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(3.9625018e0, 5.4580307e-1),
-            ]),
-            Jones::from([
-                Complex::new(3.9904408e0, 2.760545e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(3.9904408e0, 2.760545e-1),
-            ]),
-            Jones::from([
-                Complex::new(3.9907863e0, -2.7103797e-1),
-                Complex::new(0e0, 0e0),
-                Complex::new(0e0, 0e0),
-                Complex::new(3.9907863e0, -2.7103797e-1),
-            ]),
-        ]
-    ];
-    assert_abs_diff_eq!(expected, visibilities.view());
+    d_vis_fb
+        .copy_from_device(visibilities.as_slice_mut().unwrap())
+        .unwrap();
 
     // Compare the shapelet UVs, but convert to UVWs so we can test an entire
     // array of values.
@@ -1309,43 +541,54 @@ fn shapelet_multiple_components() {
             v: CudaFloat::into(v),
             w: 0.0,
         });
-    let expected = array![
-        [
-            UVW {
-                u: 1.9996953903127825,
-                v: 0.01584645344024005,
-                w: 0.0,
-            },
-            UVW {
-                u: 1.9996314242432884,
-                v: 0.017430912937512553,
-                w: 0.0,
-            }
-        ],
-        [
-            UVW {
-                u: 1.0173001015936747,
-                v: -0.44599812806736405,
-                w: 0.0,
-            },
-            UVW {
-                u: 1.019013154521334,
-                v: -0.4451913783247998,
-                w: 0.0,
-            }
-        ],
-        [
-            UVW {
-                u: -0.9823952887191078,
-                v: -0.4618445815076041,
-                w: 0.0,
-            },
-            UVW {
-                u: -0.9806182697219545,
-                v: -0.46262229126231236,
-                w: 0.0,
-            }
-        ]
-    ];
-    assert_abs_diff_eq!(expected, shapelet_uvs.view());
+
+    #[cfg(not(feature = "cuda-single"))]
+    test_multiple_shapelet_components(visibilities.view(), shapelet_uvs.view(), 0.0, 0.0);
+    #[cfg(feature = "cuda-single")]
+    test_multiple_shapelet_components(visibilities.view(), shapelet_uvs.view(), 5e-7, 3e-8);
+}
+
+#[test]
+/// With Jack's help, we found that the old behaviour was incorrect. All of the
+/// above tests don't expose the incorrect behaviour because (currently) they
+/// use a curved-power-law source with a reference freq of 150 MHz, which
+/// matches the target freq. Using a different ref freq tests the conversion
+/// logic.
+fn test_curved_power_law_changing_ref_freq() {
+    let mut srclist = POINT_ZENITH_CURVED_POWER_LAW.clone();
+    {
+        let src = srclist.get_mut("zenith").expect("exists");
+        assert_eq!(src.components.len(), 1);
+        src.components
+            .iter_mut()
+            .for_each(|comp| match &mut comp.flux_type {
+                FluxDensityType::CurvedPowerLaw { fd, si, .. } => {
+                    // Set a different reference frequency.
+                    fd.freq = 200e6;
+                    assert_abs_diff_eq!(*si, -0.8);
+                }
+                _ => unreachable!(),
+            });
+    }
+
+    // Now that we have a different ref freq, test the values inside of a new
+    // sky modeller.
+    let mut obs = ObsParams::new(true);
+    obs.freqs.clear();
+    obs.freqs.push(150e6);
+    let (modeller, _) = obs.get_gpu_modeller(&srclist);
+    let mut modeller_fds = [crate::cuda::CudaJones::default(); 1];
+    let mut modeller_sis = [0.0; 1];
+    modeller
+        .point_curved_power_law_fds
+        .copy_from_device(&mut modeller_fds)
+        .unwrap();
+    modeller
+        .point_curved_power_law_sis
+        .copy_from_device(&mut modeller_sis)
+        .unwrap();
+
+    assert_abs_diff_eq!(modeller_fds[0].j00_re, 1.261912575563708);
+    // The SI has changed from -0.8, which was what we started with.
+    assert_abs_diff_eq!(modeller_sis[0], -0.8172609243471072);
 }
