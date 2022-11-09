@@ -19,7 +19,7 @@ use super::*;
 /// By making [SourceList] a new type (specifically, an anonymous struct),
 /// useful methods can be put onto it.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SourceList(IndexMap<String, Source>);
+pub struct SourceList(IndexMap<String, Source>);
 
 impl SourceList {
     /// Create an empty [SourceList].

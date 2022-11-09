@@ -8,7 +8,7 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/index.html>
 
 pub mod averaging;
-pub(crate) mod beam;
+pub mod beam;
 mod cli;
 pub(crate) mod constants;
 pub(crate) mod context;
@@ -22,11 +22,11 @@ pub(crate) mod math;
 pub(crate) mod messages;
 pub(crate) mod metafits;
 pub(crate) mod misc;
-pub(crate) mod model;
+pub mod model;
 pub(crate) mod pfb_gains;
 pub(crate) mod shapelets;
 pub(crate) mod solutions;
-pub(crate) mod srclist;
+pub mod srclist;
 pub(crate) mod unit_parsing;
 pub(crate) mod vis_io;
 

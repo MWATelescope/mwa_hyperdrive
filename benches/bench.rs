@@ -7,516 +7,518 @@ use criterion::*;
 fn model_benchmarks(c: &mut Criterion) {
     // These "nothing" benchmarks should be commented out when real benchmarking
     // is desired.
-    c.bench_function("nothing", |b| b.iter(marlu::Jones::<f64>::identity));
+    // c.bench_function("nothing", |b| b.iter(marlu::Jones::<f64>::identity));
 
-    // use hifitime::{Duration, Epoch};
-    // use marlu::{
-    //     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    //     Jones, RADec, XyzGeodetic,
-    // };
-    // use mwa_hyperdrive::{
-    //     beam::{create_fee_beam_object, Delays},
-    //     model,
-    //     srclist::{
-    //         ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
-    //         SourceList,
-    //     },
-    // };
-    // use ndarray::prelude::*;
-    // use std::ops::Deref;
-    // use vec1::vec1;
+    use std::collections::HashSet;
 
-    // let num_tiles = 128;
-    // let num_bls = (num_tiles * (num_tiles - 1)) / 2;
-    // let phase_centre = RADec::new_degrees(0.0, -27.0);
-    // let dut1 = Duration::from_total_nanoseconds(0);
-    // let apply_precession = true;
-    // let timestamp = Epoch::from_gpst_seconds(1065880128.0);
-    // let xyzs = vec![XyzGeodetic::default(); num_tiles];
-    // let flagged_tiles = [];
-    // let beam_file: Option<&str> = None; // Assume the env. variable is set.
-    // let beam =
-    //     create_fee_beam_object(beam_file, num_tiles, Delays::Partial(vec![0; 16]), None).unwrap();
+    use hifitime::{Duration, Epoch};
+    use marlu::{
+        constants::{MWA_LAT_RAD, MWA_LONG_RAD},
+        Jones, RADec, XyzGeodetic,
+    };
+    use mwa_hyperdrive::{
+        beam::{create_fee_beam_object, Delays},
+        model,
+        srclist::{
+            ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
+            SourceList,
+        },
+    };
+    use ndarray::prelude::*;
+    use std::ops::Deref;
+    use vec1::vec1;
 
-    // let mut points = c.benchmark_group("model points");
-    // points.bench_function("100 with CPU, 128 tiles, 2 channels", |b| {
-    //     let num_points = 100;
-    //     let num_chans = 2;
-    //     let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //     let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //     let mut source_list = SourceList::new();
-    //     for i in 0..num_points {
-    //         source_list.insert(
-    //             format!("source{i}"),
-    //             Source {
-    //                 components: vec1![SourceComponent {
-    //                     radec: RADec::new_degrees(0.0, -27.0),
-    //                     comp_type: ComponentType::Point,
-    //                     flux_type: FluxDensityType::PowerLaw {
-    //                         si: -0.7,
-    //                         fd: FluxDensity {
-    //                             freq: 150e6,
-    //                             i: 1.0,
-    //                             q: 0.0,
-    //                             u: 0.0,
-    //                             v: 0.0,
-    //                         },
-    //                     },
-    //                 }],
-    //             },
-    //         );
-    //     }
-    //     let modeller = model::new_cpu_sky_modeller(
-    //         beam.deref(),
-    //         &source_list,
-    //         &xyzs,
-    //         &freqs,
-    //         &flagged_tiles,
-    //         phase_centre,
-    //         MWA_LONG_RAD,
-    //         MWA_LAT_RAD,
-    //         dut1,
-    //         apply_precession,
-    //     );
+    let num_tiles = 128;
+    let num_bls = (num_tiles * (num_tiles - 1)) / 2;
+    let phase_centre = RADec::new_degrees(0.0, -27.0);
+    let dut1 = Duration::from_total_nanoseconds(0);
+    let apply_precession = true;
+    let timestamp = Epoch::from_gpst_seconds(1065880128.0);
+    let xyzs = vec![XyzGeodetic::default(); num_tiles];
+    let flagged_tiles = HashSet::new();
+    let beam_file: Option<&str> = None; // Assume the env. variable is set.
+    let beam =
+        create_fee_beam_object(beam_file, num_tiles, Delays::Partial(vec![0; 16]), None).unwrap();
 
-    //     b.iter(|| {
-    //         modeller.model_points(vis.view_mut(), timestamp).unwrap();
-    //     })
-    // });
+    let mut points = c.benchmark_group("model FEE points");
+    points.bench_function("100 with CPU, 128 tiles, 2 channels", |b| {
+        let num_points = 100;
+        let num_chans = 2;
+        let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut source_list = SourceList::default();
+        for i in 0..num_points {
+            source_list.insert(
+                format!("source{i}"),
+                Source {
+                    components: vec1![SourceComponent {
+                        radec: RADec::new_degrees(0.0, -27.0),
+                        comp_type: ComponentType::Point,
+                        flux_type: FluxDensityType::PowerLaw {
+                            si: -0.7,
+                            fd: FluxDensity {
+                                freq: 150e6,
+                                i: 1.0,
+                                q: 0.0,
+                                u: 0.0,
+                                v: 0.0,
+                            },
+                        },
+                    }],
+                },
+            );
+        }
+        let modeller = model::new_cpu_sky_modeller(
+            beam.deref(),
+            &source_list,
+            &xyzs,
+            &freqs,
+            &flagged_tiles,
+            phase_centre,
+            MWA_LONG_RAD,
+            MWA_LAT_RAD,
+            dut1,
+            apply_precession,
+        );
 
-    // #[cfg(feature = "cuda")]
-    // points.bench_function("100 with GPU, 128 tiles, 2 channels", |b| {
-    //     let num_points = 100;
-    //     let num_chans = 2;
-    //     let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //     let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //     let mut source_list = SourceList::new();
-    //     for i in 0..num_points {
-    //         source_list.insert(
-    //             format!("source{i}"),
-    //             Source {
-    //                 components: vec1![SourceComponent {
-    //                     radec: RADec::new_degrees(0.0, -27.0),
-    //                     comp_type: ComponentType::Point,
-    //                     flux_type: FluxDensityType::PowerLaw {
-    //                         si: -0.7,
-    //                         fd: FluxDensity {
-    //                             freq: 150e6,
-    //                             i: 1.0,
-    //                             q: 0.0,
-    //                             u: 0.0,
-    //                             v: 0.0,
-    //                         },
-    //                     },
-    //                 }],
-    //             },
-    //         );
-    //     }
-    //     let modeller = unsafe {
-    //         model::new_cuda_sky_modeller(
-    //             beam.deref(),
-    //             &source_list,
-    //             &xyzs,
-    //             &freqs,
-    //             &flagged_tiles,
-    //             phase_centre,
-    //             MWA_LONG_RAD,
-    //             MWA_LAT_RAD,
-    //             dut1,
-    //             apply_precession,
-    //         )
-    //         .unwrap()
-    //     };
+        b.iter(|| {
+            modeller.model_points(vis.view_mut(), timestamp).unwrap();
+        })
+    });
 
-    //     b.iter(|| modeller.model_points(vis.view_mut(), timestamp).unwrap());
-    // });
+    #[cfg(feature = "cuda")]
+    points.bench_function("100 with GPU, 128 tiles, 2 channels", |b| {
+        let num_points = 100;
+        let num_chans = 2;
+        let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut source_list = SourceList::default();
+        for i in 0..num_points {
+            source_list.insert(
+                format!("source{i}"),
+                Source {
+                    components: vec1![SourceComponent {
+                        radec: RADec::new_degrees(0.0, -27.0),
+                        comp_type: ComponentType::Point,
+                        flux_type: FluxDensityType::PowerLaw {
+                            si: -0.7,
+                            fd: FluxDensity {
+                                freq: 150e6,
+                                i: 1.0,
+                                q: 0.0,
+                                u: 0.0,
+                                v: 0.0,
+                            },
+                        },
+                    }],
+                },
+            );
+        }
+        let modeller = unsafe {
+            model::new_cuda_sky_modeller(
+                beam.deref(),
+                &source_list,
+                &xyzs,
+                &freqs,
+                &flagged_tiles,
+                phase_centre,
+                MWA_LONG_RAD,
+                MWA_LAT_RAD,
+                dut1,
+                apply_precession,
+            )
+            .unwrap()
+        };
 
-    // #[cfg(feature = "cuda")]
-    // points.bench_function("1000 with GPU, 128 tiles, 20 channels", |b| {
-    //     let num_points = 1000;
-    //     let num_chans = 20;
-    //     let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //     let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //     let mut source_list = SourceList::new();
-    //     for i in 0..num_points {
-    //         source_list.insert(
-    //             format!("source{i}"),
-    //             Source {
-    //                 components: vec1![SourceComponent {
-    //                     radec: RADec::new_degrees(0.0, -27.0),
-    //                     comp_type: ComponentType::Point,
-    //                     flux_type: FluxDensityType::PowerLaw {
-    //                         si: -0.7,
-    //                         fd: FluxDensity {
-    //                             freq: 150e6,
-    //                             i: 1.0,
-    //                             q: 0.0,
-    //                             u: 0.0,
-    //                             v: 0.0,
-    //                         },
-    //                     },
-    //                 }],
-    //             },
-    //         );
-    //     }
-    //     let modeller = unsafe {
-    //         model::new_cuda_sky_modeller(
-    //             beam.deref(),
-    //             &source_list,
-    //             &xyzs,
-    //             &freqs,
-    //             &flagged_tiles,
-    //             phase_centre,
-    //             MWA_LONG_RAD,
-    //             MWA_LAT_RAD,
-    //             dut1,
-    //             apply_precession,
-    //         )
-    //         .unwrap()
-    //     };
+        b.iter(|| modeller.model_points(vis.view_mut(), timestamp).unwrap());
+    });
 
-    //     b.iter(|| modeller.model_points(vis.view_mut(), timestamp).unwrap());
-    // });
-    // points.finish();
+    #[cfg(feature = "cuda")]
+    points.bench_function("1000 with GPU, 128 tiles, 64 channels", |b| {
+        let num_points = 1000;
+        let num_chans = 64;
+        let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut source_list = SourceList::default();
+        for i in 0..num_points {
+            source_list.insert(
+                format!("source{i}"),
+                Source {
+                    components: vec1![SourceComponent {
+                        radec: RADec::new_degrees(0.0, -27.0),
+                        comp_type: ComponentType::Point,
+                        flux_type: FluxDensityType::PowerLaw {
+                            si: -0.7,
+                            fd: FluxDensity {
+                                freq: 150e6,
+                                i: 1.0,
+                                q: 0.0,
+                                u: 0.0,
+                                v: 0.0,
+                            },
+                        },
+                    }],
+                },
+            );
+        }
+        let modeller = unsafe {
+            model::new_cuda_sky_modeller(
+                beam.deref(),
+                &source_list,
+                &xyzs,
+                &freqs,
+                &flagged_tiles,
+                phase_centre,
+                MWA_LONG_RAD,
+                MWA_LAT_RAD,
+                dut1,
+                apply_precession,
+            )
+            .unwrap()
+        };
 
-    // let mut gaussians = c.benchmark_group("model gaussians");
-    // gaussians.bench_function("100 with CPU, 128 tiles, 2 channels", |b| {
-    //     let num_gaussians = 100;
-    //     let num_chans = 2;
-    //     let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //     let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //     let mut source_list = SourceList::new();
-    //     for i in 0..num_gaussians {
-    //         source_list.insert(
-    //             format!("source{i}"),
-    //             Source {
-    //                 components: vec1![SourceComponent {
-    //                     radec: RADec::new_degrees(0.0, -27.0),
-    //                     comp_type: ComponentType::Gaussian {
-    //                         maj: 1.0,
-    //                         min: 0.5,
-    //                         pa: 0.0,
-    //                     },
-    //                     flux_type: FluxDensityType::PowerLaw {
-    //                         si: -0.7,
-    //                         fd: FluxDensity {
-    //                             freq: 150e6,
-    //                             i: 1.0,
-    //                             q: 0.0,
-    //                             u: 0.0,
-    //                             v: 0.0,
-    //                         },
-    //                     },
-    //                 }],
-    //             },
-    //         );
-    //     }
-    //     let modeller = model::new_cpu_sky_modeller(
-    //         beam.deref(),
-    //         &source_list,
-    //         &xyzs,
-    //         &freqs,
-    //         &flagged_tiles,
-    //         phase_centre,
-    //         MWA_LONG_RAD,
-    //         MWA_LAT_RAD,
-    //         dut1,
-    //         apply_precession,
-    //     );
+        b.iter(|| modeller.model_points(vis.view_mut(), timestamp).unwrap());
+    });
+    points.finish();
 
-    //     b.iter(|| {
-    //         modeller.model_gaussians(vis.view_mut(), timestamp).unwrap();
-    //     })
-    // });
+    let mut gaussians = c.benchmark_group("model FEE gaussians");
+    gaussians.bench_function("100 with CPU, 128 tiles, 2 channels", |b| {
+        let num_gaussians = 100;
+        let num_chans = 2;
+        let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut source_list = SourceList::default();
+        for i in 0..num_gaussians {
+            source_list.insert(
+                format!("source{i}"),
+                Source {
+                    components: vec1![SourceComponent {
+                        radec: RADec::new_degrees(0.0, -27.0),
+                        comp_type: ComponentType::Gaussian {
+                            maj: 1.0,
+                            min: 0.5,
+                            pa: 0.0,
+                        },
+                        flux_type: FluxDensityType::PowerLaw {
+                            si: -0.7,
+                            fd: FluxDensity {
+                                freq: 150e6,
+                                i: 1.0,
+                                q: 0.0,
+                                u: 0.0,
+                                v: 0.0,
+                            },
+                        },
+                    }],
+                },
+            );
+        }
+        let modeller = model::new_cpu_sky_modeller(
+            beam.deref(),
+            &source_list,
+            &xyzs,
+            &freqs,
+            &flagged_tiles,
+            phase_centre,
+            MWA_LONG_RAD,
+            MWA_LAT_RAD,
+            dut1,
+            apply_precession,
+        );
 
-    // #[cfg(feature = "cuda")]
-    // gaussians.bench_function("100 with GPU, 128 tiles, 2 channels", |b| {
-    //     let num_gaussians = 100;
-    //     let num_chans = 2;
-    //     let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //     let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //     let mut source_list = SourceList::new();
-    //     for i in 0..num_gaussians {
-    //         source_list.insert(
-    //             format!("source{i}"),
-    //             Source {
-    //                 components: vec1![SourceComponent {
-    //                     radec: RADec::new_degrees(0.0, -27.0),
-    //                     comp_type: ComponentType::Gaussian {
-    //                         maj: 1.0,
-    //                         min: 0.5,
-    //                         pa: 0.0,
-    //                     },
-    //                     flux_type: FluxDensityType::PowerLaw {
-    //                         si: -0.7,
-    //                         fd: FluxDensity {
-    //                             freq: 150e6,
-    //                             i: 1.0,
-    //                             q: 0.0,
-    //                             u: 0.0,
-    //                             v: 0.0,
-    //                         },
-    //                     },
-    //                 }],
-    //             },
-    //         );
-    //     }
-    //     let modeller = unsafe {
-    //         model::new_cuda_sky_modeller(
-    //             beam.deref(),
-    //             &source_list,
-    //             &xyzs,
-    //             &freqs,
-    //             &flagged_tiles,
-    //             phase_centre,
-    //             MWA_LONG_RAD,
-    //             MWA_LAT_RAD,
-    //             dut1,
-    //             apply_precession,
-    //         )
-    //         .unwrap()
-    //     };
+        b.iter(|| {
+            modeller.model_gaussians(vis.view_mut(), timestamp).unwrap();
+        })
+    });
 
-    //     b.iter(|| modeller.model_gaussians(vis.view_mut(), timestamp).unwrap());
-    // });
+    #[cfg(feature = "cuda")]
+    gaussians.bench_function("100 with GPU, 128 tiles, 2 channels", |b| {
+        let num_gaussians = 100;
+        let num_chans = 2;
+        let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut source_list = SourceList::default();
+        for i in 0..num_gaussians {
+            source_list.insert(
+                format!("source{i}"),
+                Source {
+                    components: vec1![SourceComponent {
+                        radec: RADec::new_degrees(0.0, -27.0),
+                        comp_type: ComponentType::Gaussian {
+                            maj: 1.0,
+                            min: 0.5,
+                            pa: 0.0,
+                        },
+                        flux_type: FluxDensityType::PowerLaw {
+                            si: -0.7,
+                            fd: FluxDensity {
+                                freq: 150e6,
+                                i: 1.0,
+                                q: 0.0,
+                                u: 0.0,
+                                v: 0.0,
+                            },
+                        },
+                    }],
+                },
+            );
+        }
+        let modeller = unsafe {
+            model::new_cuda_sky_modeller(
+                beam.deref(),
+                &source_list,
+                &xyzs,
+                &freqs,
+                &flagged_tiles,
+                phase_centre,
+                MWA_LONG_RAD,
+                MWA_LAT_RAD,
+                dut1,
+                apply_precession,
+            )
+            .unwrap()
+        };
 
-    // #[cfg(feature = "cuda")]
-    // gaussians.bench_function("1000 with GPU, 128 tiles, 20 channels", |b| {
-    //     let num_gaussians = 1000;
-    //     let num_chans = 20;
-    //     let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //     let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //     let mut source_list = SourceList::new();
-    //     for i in 0..num_gaussians {
-    //         source_list.insert(
-    //             format!("source{i}"),
-    //             Source {
-    //                 components: vec1![SourceComponent {
-    //                     radec: RADec::new_degrees(0.0, -27.0),
-    //                     comp_type: ComponentType::Gaussian {
-    //                         maj: 1.0,
-    //                         min: 0.5,
-    //                         pa: 0.0,
-    //                     },
-    //                     flux_type: FluxDensityType::PowerLaw {
-    //                         si: -0.7,
-    //                         fd: FluxDensity {
-    //                             freq: 150e6,
-    //                             i: 1.0,
-    //                             q: 0.0,
-    //                             u: 0.0,
-    //                             v: 0.0,
-    //                         },
-    //                     },
-    //                 }],
-    //             },
-    //         );
-    //     }
-    //     let modeller = unsafe {
-    //         model::new_cuda_sky_modeller(
-    //             beam.deref(),
-    //             &source_list,
-    //             &xyzs,
-    //             &freqs,
-    //             &flagged_tiles,
-    //             phase_centre,
-    //             MWA_LONG_RAD,
-    //             MWA_LAT_RAD,
-    //             dut1,
-    //             apply_precession,
-    //         )
-    //         .unwrap()
-    //     };
+        b.iter(|| modeller.model_gaussians(vis.view_mut(), timestamp).unwrap());
+    });
 
-    //     b.iter(|| modeller.model_gaussians(vis.view_mut(), timestamp).unwrap());
-    // });
-    // gaussians.finish();
+    #[cfg(feature = "cuda")]
+    gaussians.bench_function("1000 with GPU, 128 tiles, 64 channels", |b| {
+        let num_gaussians = 1000;
+        let num_chans = 64;
+        let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+        let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+        let mut source_list = SourceList::default();
+        for i in 0..num_gaussians {
+            source_list.insert(
+                format!("source{i}"),
+                Source {
+                    components: vec1![SourceComponent {
+                        radec: RADec::new_degrees(0.0, -27.0),
+                        comp_type: ComponentType::Gaussian {
+                            maj: 1.0,
+                            min: 0.5,
+                            pa: 0.0,
+                        },
+                        flux_type: FluxDensityType::PowerLaw {
+                            si: -0.7,
+                            fd: FluxDensity {
+                                freq: 150e6,
+                                i: 1.0,
+                                q: 0.0,
+                                u: 0.0,
+                                v: 0.0,
+                            },
+                        },
+                    }],
+                },
+            );
+        }
+        let modeller = unsafe {
+            model::new_cuda_sky_modeller(
+                beam.deref(),
+                &source_list,
+                &xyzs,
+                &freqs,
+                &flagged_tiles,
+                phase_centre,
+                MWA_LONG_RAD,
+                MWA_LAT_RAD,
+                dut1,
+                apply_precession,
+            )
+            .unwrap()
+        };
 
-    // let mut shapelets = c.benchmark_group("model shapelets");
-    // shapelets.bench_function(
-    //     "100 with CPU (10 coeffs each), 128 tiles, 2 channels",
-    //     |b| {
-    //         let num_shapelets = 100;
-    //         let num_chans = 2;
-    //         let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //         let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //         let mut source_list = SourceList::new();
-    //         for i in 0..num_shapelets {
-    //             source_list.insert(
-    //                 format!("source{i}"),
-    //                 Source {
-    //                     components: vec1![SourceComponent {
-    //                         radec: RADec::new_degrees(0.0, -27.0),
-    //                         comp_type: ComponentType::Shapelet {
-    //                             maj: 1.0,
-    //                             min: 0.5,
-    //                             pa: 0.0,
-    //                             coeffs: vec![
-    //                                 ShapeletCoeff {
-    //                                     n1: 0,
-    //                                     n2: 1,
-    //                                     value: 1.0,
-    //                                 };
-    //                                 10
-    //                             ],
-    //                         },
-    //                         flux_type: FluxDensityType::PowerLaw {
-    //                             si: -0.7,
-    //                             fd: FluxDensity {
-    //                                 freq: 150e6,
-    //                                 i: 1.0,
-    //                                 q: 0.0,
-    //                                 u: 0.0,
-    //                                 v: 0.0,
-    //                             },
-    //                         },
-    //                     }],
-    //                 },
-    //             );
-    //         }
-    //         let modeller = model::new_cpu_sky_modeller(
-    //             beam.deref(),
-    //             &source_list,
-    //             &xyzs,
-    //             &freqs,
-    //             &flagged_tiles,
-    //             phase_centre,
-    //             MWA_LONG_RAD,
-    //             MWA_LAT_RAD,
-    //             dut1,
-    //             apply_precession,
-    //         );
+        b.iter(|| modeller.model_gaussians(vis.view_mut(), timestamp).unwrap());
+    });
+    gaussians.finish();
 
-    //         b.iter(|| {
-    //             modeller.model_shapelets(vis.view_mut(), timestamp).unwrap();
-    //         })
-    //     },
-    // );
+    let mut shapelets = c.benchmark_group("model FEE shapelets");
+    shapelets.bench_function(
+        "100 with CPU (10 coeffs each), 128 tiles, 2 channels",
+        |b| {
+            let num_shapelets = 100;
+            let num_chans = 2;
+            let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+            let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+            let mut source_list = SourceList::default();
+            for i in 0..num_shapelets {
+                source_list.insert(
+                    format!("source{i}"),
+                    Source {
+                        components: vec1![SourceComponent {
+                            radec: RADec::new_degrees(0.0, -27.0),
+                            comp_type: ComponentType::Shapelet {
+                                maj: 1.0,
+                                min: 0.5,
+                                pa: 0.0,
+                                coeffs: vec![
+                                    ShapeletCoeff {
+                                        n1: 0,
+                                        n2: 1,
+                                        value: 1.0,
+                                    };
+                                    10
+                                ],
+                            },
+                            flux_type: FluxDensityType::PowerLaw {
+                                si: -0.7,
+                                fd: FluxDensity {
+                                    freq: 150e6,
+                                    i: 1.0,
+                                    q: 0.0,
+                                    u: 0.0,
+                                    v: 0.0,
+                                },
+                            },
+                        }],
+                    },
+                );
+            }
+            let modeller = model::new_cpu_sky_modeller(
+                beam.deref(),
+                &source_list,
+                &xyzs,
+                &freqs,
+                &flagged_tiles,
+                phase_centre,
+                MWA_LONG_RAD,
+                MWA_LAT_RAD,
+                dut1,
+                apply_precession,
+            );
 
-    // #[cfg(feature = "cuda")]
-    // shapelets.bench_function(
-    //     "100 with GPU (10 coeffs each), 128 tiles, 2 channels",
-    //     |b| {
-    //         let num_shapelets = 100;
-    //         let num_chans = 2;
-    //         let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //         let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //         let mut source_list = SourceList::new();
-    //         for i in 0..num_shapelets {
-    //             source_list.insert(
-    //                 format!("source{i}"),
-    //                 Source {
-    //                     components: vec1![SourceComponent {
-    //                         radec: RADec::new_degrees(0.0, -27.0),
-    //                         comp_type: ComponentType::Shapelet {
-    //                             maj: 1.0,
-    //                             min: 0.5,
-    //                             pa: 0.0,
-    //                             coeffs: vec![
-    //                                 ShapeletCoeff {
-    //                                     n1: 0,
-    //                                     n2: 1,
-    //                                     value: 1.0,
-    //                                 };
-    //                                 10
-    //                             ],
-    //                         },
-    //                         flux_type: FluxDensityType::PowerLaw {
-    //                             si: -0.7,
-    //                             fd: FluxDensity {
-    //                                 freq: 150e6,
-    //                                 i: 1.0,
-    //                                 q: 0.0,
-    //                                 u: 0.0,
-    //                                 v: 0.0,
-    //                             },
-    //                         },
-    //                     }],
-    //                 },
-    //             );
-    //         }
-    //         let modeller = unsafe {
-    //             model::new_cuda_sky_modeller(
-    //                 beam.deref(),
-    //                 &source_list,
-    //                 &xyzs,
-    //                 &freqs,
-    //                 &flagged_tiles,
-    //                 phase_centre,
-    //                 MWA_LONG_RAD,
-    //                 MWA_LAT_RAD,
-    //                 dut1,
-    //                 apply_precession,
-    //             )
-    //             .unwrap()
-    //         };
+            b.iter(|| {
+                modeller.model_shapelets(vis.view_mut(), timestamp).unwrap();
+            })
+        },
+    );
 
-    //         b.iter(|| modeller.model_shapelets(vis.view_mut(), timestamp).unwrap());
-    //     },
-    // );
+    #[cfg(feature = "cuda")]
+    shapelets.bench_function(
+        "100 with GPU (10 coeffs each), 128 tiles, 2 channels",
+        |b| {
+            let num_shapelets = 100;
+            let num_chans = 2;
+            let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+            let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+            let mut source_list = SourceList::default();
+            for i in 0..num_shapelets {
+                source_list.insert(
+                    format!("source{i}"),
+                    Source {
+                        components: vec1![SourceComponent {
+                            radec: RADec::new_degrees(0.0, -27.0),
+                            comp_type: ComponentType::Shapelet {
+                                maj: 1.0,
+                                min: 0.5,
+                                pa: 0.0,
+                                coeffs: vec![
+                                    ShapeletCoeff {
+                                        n1: 0,
+                                        n2: 1,
+                                        value: 1.0,
+                                    };
+                                    10
+                                ],
+                            },
+                            flux_type: FluxDensityType::PowerLaw {
+                                si: -0.7,
+                                fd: FluxDensity {
+                                    freq: 150e6,
+                                    i: 1.0,
+                                    q: 0.0,
+                                    u: 0.0,
+                                    v: 0.0,
+                                },
+                            },
+                        }],
+                    },
+                );
+            }
+            let modeller = unsafe {
+                model::new_cuda_sky_modeller(
+                    beam.deref(),
+                    &source_list,
+                    &xyzs,
+                    &freqs,
+                    &flagged_tiles,
+                    phase_centre,
+                    MWA_LONG_RAD,
+                    MWA_LAT_RAD,
+                    dut1,
+                    apply_precession,
+                )
+                .unwrap()
+            };
 
-    // #[cfg(feature = "cuda")]
-    // shapelets.bench_function(
-    //     "1000 with GPU (10 coeffs each), 128 tiles, 20 channels",
-    //     |b| {
-    //         let num_shapelets = 1000;
-    //         let num_chans = 20;
-    //         let freqs = Array1::linspace(150e6, 200e6, num_chans as usize).to_vec();
-    //         let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
-    //         let mut source_list = SourceList::new();
-    //         for i in 0..num_shapelets {
-    //             source_list.insert(
-    //                 format!("source{i}"),
-    //                 Source {
-    //                     components: vec1![SourceComponent {
-    //                         radec: RADec::new_degrees(0.0, -27.0),
-    //                         comp_type: ComponentType::Shapelet {
-    //                             maj: 1.0,
-    //                             min: 0.5,
-    //                             pa: 0.0,
-    //                             coeffs: vec![
-    //                                 ShapeletCoeff {
-    //                                     n1: 0,
-    //                                     n2: 1,
-    //                                     value: 1.0,
-    //                                 };
-    //                                 10
-    //                             ],
-    //                         },
-    //                         flux_type: FluxDensityType::PowerLaw {
-    //                             si: -0.7,
-    //                             fd: FluxDensity {
-    //                                 freq: 150e6,
-    //                                 i: 1.0,
-    //                                 q: 0.0,
-    //                                 u: 0.0,
-    //                                 v: 0.0,
-    //                             },
-    //                         },
-    //                     }],
-    //                 },
-    //             );
-    //         }
-    //         let modeller = unsafe {
-    //             model::new_cuda_sky_modeller(
-    //                 beam.deref(),
-    //                 &source_list,
-    //                 &xyzs,
-    //                 &freqs,
-    //                 &flagged_tiles,
-    //                 phase_centre,
-    //                 MWA_LONG_RAD,
-    //                 MWA_LAT_RAD,
-    //                 dut1,
-    //                 apply_precession,
-    //             )
-    //             .unwrap()
-    //         };
+            b.iter(|| modeller.model_shapelets(vis.view_mut(), timestamp).unwrap());
+        },
+    );
 
-    //         b.iter(|| modeller.model_shapelets(vis.view_mut(), timestamp).unwrap());
-    //     },
-    // );
-    // shapelets.finish();
+    #[cfg(feature = "cuda")]
+    shapelets.bench_function(
+        "1000 with GPU (10 coeffs each), 128 tiles, 64 channels",
+        |b| {
+            let num_shapelets = 1000;
+            let num_chans = 64;
+            let freqs = Array1::linspace(150e6, 200e6, num_chans).to_vec();
+            let mut vis = Array2::from_elem((num_bls, num_chans), Jones::default());
+            let mut source_list = SourceList::default();
+            for i in 0..num_shapelets {
+                source_list.insert(
+                    format!("source{i}"),
+                    Source {
+                        components: vec1![SourceComponent {
+                            radec: RADec::new_degrees(0.0, -27.0),
+                            comp_type: ComponentType::Shapelet {
+                                maj: 1.0,
+                                min: 0.5,
+                                pa: 0.0,
+                                coeffs: vec![
+                                    ShapeletCoeff {
+                                        n1: 0,
+                                        n2: 1,
+                                        value: 1.0,
+                                    };
+                                    10
+                                ],
+                            },
+                            flux_type: FluxDensityType::PowerLaw {
+                                si: -0.7,
+                                fd: FluxDensity {
+                                    freq: 150e6,
+                                    i: 1.0,
+                                    q: 0.0,
+                                    u: 0.0,
+                                    v: 0.0,
+                                },
+                            },
+                        }],
+                    },
+                );
+            }
+            let modeller = unsafe {
+                model::new_cuda_sky_modeller(
+                    beam.deref(),
+                    &source_list,
+                    &xyzs,
+                    &freqs,
+                    &flagged_tiles,
+                    phase_centre,
+                    MWA_LONG_RAD,
+                    MWA_LAT_RAD,
+                    dut1,
+                    apply_precession,
+                )
+                .unwrap()
+            };
+
+            b.iter(|| modeller.model_shapelets(vis.view_mut(), timestamp).unwrap());
+        },
+    );
+    shapelets.finish();
 }
 
 fn calibrate_benchmarks(c: &mut Criterion) {
@@ -636,11 +638,11 @@ fn source_list_benchmarks(c: &mut Criterion) {
     // );
 }
 
-// criterion_group!(
-//     name = model;
-//     config = Criterion::default().sample_size(10);
-//     targets = model_benchmarks,
-// );
+criterion_group!(
+    name = model;
+    config = Criterion::default().sample_size(10);
+    targets = model_benchmarks,
+);
 criterion_group!(
     name = calibrate;
     config = Criterion::default().sample_size(10);
@@ -652,4 +654,4 @@ criterion_group!(
 //     targets = source_list_benchmarks,
 // );
 // criterion_main!(model, calibrate, source_lists);
-criterion_main!(calibrate);
+criterion_main!(model, calibrate);
