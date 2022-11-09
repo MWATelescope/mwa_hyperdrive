@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Error code associated with beam calculations.
+//! Errors associated with beam calculations.
 
 use thiserror::Error;
 
@@ -21,6 +21,6 @@ pub enum BeamError {
     HyperbeamInit(#[from] mwa_hyperbeam::fee::InitFEEBeamError),
 
     #[cfg(feature = "cuda")]
-    #[error("CUDA error: {0}")]
-    Cuda(#[from] marlu::cuda::CudaError),
+    #[error(transparent)]
+    Cuda(#[from] crate::cuda::CudaError),
 }

@@ -4,13 +4,11 @@
 
 //! Code to generate sky-model visibilities with CUDA.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ffi::CStr};
 
 use hifitime::{Duration, Epoch};
 use log::debug;
 use marlu::{
-    cuda::{cuda_status_to_error, DevicePointer, ERROR_STR_LENGTH as CUDA_ERROR_STR_LENGTH},
-    cuda_runtime_sys,
     pos::xyz::xyzs_to_cross_uvws_parallel,
     precession::{get_lmst, precess_time},
     Jones, LmnRime, RADec, XyzGeodetic, UVW,
@@ -18,9 +16,10 @@ use marlu::{
 use ndarray::prelude::*;
 use rayon::prelude::*;
 
+use super::ModelError;
 use crate::{
-    beam::{Beam, BeamCUDA, BeamError},
-    cuda::{self, CudaFloat, CudaJones},
+    beam::{Beam, BeamCUDA},
+    cuda::{self, CudaError, CudaFloat, CudaJones, DevicePointer},
     shapelets,
     srclist::{
         get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
@@ -32,6 +31,8 @@ use crate::{
 /// `*_list_fds`'s second axis are the same.
 pub(crate) struct SkyModellerCuda<'a> {
     cuda_beam: Box<dyn BeamCUDA>,
+    /// The buffer for beam response Jones matrices.
+    d_beam_jones: DevicePointer<CudaJones>,
 
     /// The phase centre used for all modelling.
     phase_centre: RADec,
@@ -47,13 +48,12 @@ pub(crate) struct SkyModellerCuda<'a> {
     /// Shift baselines, LSTs and array latitudes back to J2000.
     precess: bool,
 
-    freqs: Vec<CudaFloat>,
-
-    /// The [XyzGeodetic] positions of each of the unflagged tiles.
+    /// The buffer for UVW coordinates.
+    d_uvws: DevicePointer<cuda::UVW>,
+    /// The [`XyzGeodetic`] positions of each of the unflagged tiles.
     unflagged_tile_xyzs: &'a [XyzGeodetic],
-    /// The number of cross-correlation baselines given the number of unflagged
-    /// tiles.
-    num_baselines: usize,
+    num_baselines: i32,
+    num_freqs: i32,
 
     /// A simple map from an absolute tile index into an unflagged tile index.
     /// This is important because CUDA will use tile indices from 0 to the
@@ -69,7 +69,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     sbf_c: CudaFloat,
     sbf_dx: CudaFloat,
 
-    d_vis: DevicePointer<f32>,
+    d_vis: DevicePointer<Jones<f32>>,
     d_freqs: DevicePointer<CudaFloat>,
     d_shapelet_basis_values: DevicePointer<CudaFloat>,
 
@@ -120,7 +120,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_power_law_sis: DevicePointer<CudaFloat>,
     shapelet_power_law_gps: DevicePointer<cuda::GaussianParams>,
     shapelet_power_law_coeffs: DevicePointer<cuda::ShapeletCoeff>,
-    shapelet_power_law_coeff_lens: DevicePointer<usize>,
+    shapelet_power_law_coeff_lens: DevicePointer<i32>,
 
     shapelet_curved_power_law_radecs: Vec<RADec>,
     shapelet_curved_power_law_lmns: DevicePointer<cuda::LmnRime>,
@@ -129,7 +129,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_curved_power_law_qs: DevicePointer<CudaFloat>,
     shapelet_curved_power_law_gps: DevicePointer<cuda::GaussianParams>,
     shapelet_curved_power_law_coeffs: DevicePointer<cuda::ShapeletCoeff>,
-    shapelet_curved_power_law_coeff_lens: DevicePointer<usize>,
+    shapelet_curved_power_law_coeff_lens: DevicePointer<i32>,
 
     shapelet_list_radecs: Vec<RADec>,
     shapelet_list_lmns: DevicePointer<cuda::LmnRime>,
@@ -137,7 +137,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_list_fds: DevicePointer<CudaJones>,
     shapelet_list_gps: DevicePointer<cuda::GaussianParams>,
     shapelet_list_coeffs: DevicePointer<cuda::ShapeletCoeff>,
-    shapelet_list_coeff_lens: DevicePointer<usize>,
+    shapelet_list_coeff_lens: DevicePointer<i32>,
 }
 
 impl<'a> SkyModellerCuda<'a> {
@@ -164,7 +164,7 @@ impl<'a> SkyModellerCuda<'a> {
         array_latitude_rad: f64,
         dut1: Duration,
         apply_precession: bool,
-    ) -> Result<SkyModellerCuda<'a>, BeamError> {
+    ) -> Result<SkyModellerCuda<'a>, ModelError> {
         let mut point_power_law_radecs: Vec<RADec> = vec![];
         let mut point_power_law_lmns: Vec<cuda::LmnRime> = vec![];
         let mut point_power_law_fds: Vec<_> = vec![];
@@ -178,7 +178,7 @@ impl<'a> SkyModellerCuda<'a> {
 
         let mut point_list_radecs: Vec<RADec> = vec![];
         let mut point_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut point_list_fds: Vec<FluxDensityType> = vec![];
+        let mut point_list_fds: Vec<&FluxDensityType> = vec![];
 
         let mut gaussian_power_law_radecs: Vec<RADec> = vec![];
         let mut gaussian_power_law_lmns: Vec<cuda::LmnRime> = vec![];
@@ -195,7 +195,7 @@ impl<'a> SkyModellerCuda<'a> {
 
         let mut gaussian_list_radecs: Vec<RADec> = vec![];
         let mut gaussian_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut gaussian_list_fds: Vec<FluxDensityType> = vec![];
+        let mut gaussian_list_fds: Vec<&FluxDensityType> = vec![];
         let mut gaussian_list_gps: Vec<cuda::GaussianParams> = vec![];
 
         let mut shapelet_power_law_radecs: Vec<RADec> = vec![];
@@ -203,7 +203,7 @@ impl<'a> SkyModellerCuda<'a> {
         let mut shapelet_power_law_fds: Vec<_> = vec![];
         let mut shapelet_power_law_sis: Vec<_> = vec![];
         let mut shapelet_power_law_gps: Vec<cuda::GaussianParams> = vec![];
-        let mut shapelet_power_law_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
+        let mut shapelet_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
         let mut shapelet_curved_power_law_radecs: Vec<RADec> = vec![];
         let mut shapelet_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
@@ -211,43 +211,26 @@ impl<'a> SkyModellerCuda<'a> {
         let mut shapelet_curved_power_law_sis: Vec<_> = vec![];
         let mut shapelet_curved_power_law_qs: Vec<_> = vec![];
         let mut shapelet_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
-        let mut shapelet_curved_power_law_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
+        let mut shapelet_curved_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
         let mut shapelet_list_radecs: Vec<RADec> = vec![];
         let mut shapelet_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut shapelet_list_fds: Vec<FluxDensityType> = vec![];
+        let mut shapelet_list_fds: Vec<&FluxDensityType> = vec![];
         let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
-        let mut shapelet_list_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
+        let mut shapelet_list_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "cuda-single")] {
-                let jones_to_cuda_jones = |j: Jones<f64>| -> cuda::JonesF32 {
-                    cuda::JonesF32 {
-                        xx_re: j[0].re as f32,
-                        xx_im: j[0].im as f32,
-                        xy_re: j[1].re as f32,
-                        xy_im: j[1].im as f32,
-                        yx_re: j[2].re as f32,
-                        yx_im: j[2].im as f32,
-                        yy_re: j[3].re as f32,
-                        yy_im: j[3].im as f32,
-                    }
-                };
-            } else {
-                let jones_to_cuda_jones = |j: Jones<f64>| -> cuda::JonesF64 {
-                    cuda::JonesF64 {
-                        xx_re: j[0].re,
-                        xx_im: j[0].im,
-                        xy_re: j[1].re,
-                        xy_im: j[1].im,
-                        yx_re: j[2].re,
-                        yx_im: j[2].im,
-                        yy_re: j[3].re,
-                        yy_im: j[3].im,
-                    }
-                };
+        let jones_to_cuda_jones = |j: Jones<f64>| -> CudaJones {
+            CudaJones {
+                j00_re: j[0].re as CudaFloat,
+                j00_im: j[0].im as CudaFloat,
+                j01_re: j[1].re as CudaFloat,
+                j01_im: j[1].im as CudaFloat,
+                j10_re: j[2].re as CudaFloat,
+                j10_im: j[2].im as CudaFloat,
+                j11_re: j[3].re as CudaFloat,
+                j11_im: j[3].im as CudaFloat,
             }
-        }
+        };
 
         // Reverse the source list; if the source list has been sorted
         // (brightest sources first), reversing makes the dimmest sources get
@@ -294,7 +277,7 @@ impl<'a> SkyModellerCuda<'a> {
                     FluxDensityType::List { .. } => {
                         point_list_radecs.push(radec);
                         point_list_lmns.push(lmn);
-                        point_list_fds.push(comp.flux_type.clone());
+                        point_list_fds.push(&comp.flux_type);
                     }
                 },
 
@@ -333,7 +316,7 @@ impl<'a> SkyModellerCuda<'a> {
                         FluxDensityType::List { .. } => {
                             gaussian_list_radecs.push(radec);
                             gaussian_list_lmns.push(lmn);
-                            gaussian_list_fds.push(comp.flux_type.clone());
+                            gaussian_list_fds.push(&comp.flux_type);
                             gaussian_list_gps.push(gp);
                         }
                     };
@@ -362,7 +345,7 @@ impl<'a> SkyModellerCuda<'a> {
                             shapelet_power_law_fds.push(cuda_inst_fd);
                             shapelet_power_law_sis.push(si as CudaFloat);
                             shapelet_power_law_gps.push(gp);
-                            shapelet_power_law_coeffs.push(coeffs.clone());
+                            shapelet_power_law_coeffs.push(coeffs);
                         }
 
                         FluxDensityType::CurvedPowerLaw { si, q, .. } => {
@@ -376,15 +359,15 @@ impl<'a> SkyModellerCuda<'a> {
                             shapelet_curved_power_law_qs.push(q as CudaFloat);
                             shapelet_curved_power_law_sis.push(si as CudaFloat);
                             shapelet_curved_power_law_gps.push(gp);
-                            shapelet_curved_power_law_coeffs.push(coeffs.clone());
+                            shapelet_curved_power_law_coeffs.push(coeffs);
                         }
 
                         FluxDensityType::List { .. } => {
                             shapelet_list_radecs.push(radec);
                             shapelet_list_lmns.push(lmn);
-                            shapelet_list_fds.push(comp.flux_type.clone());
+                            shapelet_list_fds.push(&comp.flux_type);
                             shapelet_list_gps.push(gp);
-                            shapelet_list_coeffs.push(coeffs.clone());
+                            shapelet_list_coeffs.push(coeffs);
                         }
                     }
                 }
@@ -420,22 +403,14 @@ impl<'a> SkyModellerCuda<'a> {
             .map(|&f| f as CudaFloat)
             .collect();
 
-        let n = unflagged_tile_xyzs.len();
-        let num_baselines = (n * (n - 1)) / 2;
+        let num_baselines = (unflagged_tile_xyzs.len() * (unflagged_tile_xyzs.len() - 1)) / 2;
+        let num_freqs = unflagged_fine_chan_freqs.len();
 
-        let d_vis: DevicePointer<f32> = DevicePointer::malloc(
-            num_baselines * unflagged_fine_chan_freqs.len() * std::mem::size_of::<Jones<f32>>(),
-        )?;
+        let mut d_vis =
+            DevicePointer::malloc(num_baselines * num_freqs * std::mem::size_of::<Jones<f32>>())?;
         // Ensure the visibilities are zero'd.
-        cuda_runtime_sys::cudaMemset(
-            d_vis.get_mut().cast(),
-            0,
-            num_baselines * unflagged_fine_chan_freqs.len() * std::mem::size_of::<Jones<f32>>(),
-        );
-        cuda_runtime_sys::cudaDeviceSynchronize();
-
+        d_vis.clear();
         let d_freqs = DevicePointer::copy_to_device(&unflagged_fine_chan_freqs_floats)?;
-        let d_shapelet_basis_values = DevicePointer::copy_to_device(&shapelet_basis_values)?;
 
         let mut tile_index_to_unflagged_tile_index_map: Vec<i32> =
             Vec::with_capacity(unflagged_tile_xyzs.len());
@@ -453,6 +428,7 @@ impl<'a> SkyModellerCuda<'a> {
 
         Ok(SkyModellerCuda {
             cuda_beam: beam.prepare_cuda_beam(&unflagged_fine_chan_freqs_ints)?,
+            d_beam_jones: DevicePointer::default(),
 
             phase_centre,
             array_longitude: array_longitude_rad,
@@ -460,21 +436,25 @@ impl<'a> SkyModellerCuda<'a> {
             dut1,
             precess: apply_precession,
 
-            freqs: unflagged_fine_chan_freqs_floats,
-
+            d_uvws: DevicePointer::default(),
             unflagged_tile_xyzs,
-            num_baselines,
+            num_baselines: num_baselines.try_into().expect("not too large"),
+            num_freqs: num_freqs.try_into().expect("not too large"),
 
             tile_index_to_unflagged_tile_index_map: d_tile_index_to_unflagged_tile_index_map,
 
-            sbf_l: shapelets::SBF_L.try_into().unwrap(),
-            sbf_n: shapelets::SBF_N.try_into().unwrap(),
+            sbf_l: shapelets::SBF_L
+                .try_into()
+                .expect("is positive and not too big"),
+            sbf_n: shapelets::SBF_N
+                .try_into()
+                .expect("is positive and not too big"),
             sbf_c: shapelets::SBF_C as CudaFloat,
             sbf_dx: shapelets::SBF_DX as CudaFloat,
 
             d_vis,
             d_freqs,
-            d_shapelet_basis_values,
+            d_shapelet_basis_values: DevicePointer::copy_to_device(&shapelet_basis_values)?,
 
             point_power_law_radecs,
             point_power_law_lmns: DevicePointer::copy_to_device(&point_power_law_lmns)?,
@@ -491,7 +471,9 @@ impl<'a> SkyModellerCuda<'a> {
 
             point_list_radecs,
             point_list_lmns: DevicePointer::copy_to_device(&point_list_lmns)?,
-            point_list_fds: DevicePointer::copy_to_device(point_list_fds.as_slice().unwrap())?,
+            point_list_fds: DevicePointer::copy_to_device(
+                point_list_fds.as_slice().expect("is contiguous"),
+            )?,
 
             gaussian_power_law_radecs,
             gaussian_power_law_lmns: DevicePointer::copy_to_device(&gaussian_power_law_lmns)?,
@@ -519,7 +501,7 @@ impl<'a> SkyModellerCuda<'a> {
             gaussian_list_radecs,
             gaussian_list_lmns: DevicePointer::copy_to_device(&gaussian_list_lmns)?,
             gaussian_list_fds: DevicePointer::copy_to_device(
-                gaussian_list_fds.as_slice().unwrap(),
+                gaussian_list_fds.as_slice().expect("is contiguous"),
             )?,
             gaussian_list_gps: DevicePointer::copy_to_device(&gaussian_list_gps)?,
 
@@ -559,7 +541,7 @@ impl<'a> SkyModellerCuda<'a> {
             shapelet_list_radecs,
             shapelet_list_lmns: DevicePointer::copy_to_device(&shapelet_list_lmns)?,
             shapelet_list_fds: DevicePointer::copy_to_device(
-                shapelet_list_fds.as_slice().unwrap(),
+                shapelet_list_fds.as_slice().expect("is contiguous"),
             )?,
             shapelet_list_gps: DevicePointer::copy_to_device(&shapelet_list_gps)?,
             shapelet_list_coeffs: DevicePointer::copy_to_device(&shapelet_list_coeffs)?,
@@ -567,24 +549,21 @@ impl<'a> SkyModellerCuda<'a> {
         })
     }
 
-    /// For a single timestep, over the already-provided baselines and
-    /// frequencies, generate visibilities for each specified sky-model
-    /// point-source component.
-    ///
-    /// `vis_model_slice`: A mutable `ndarray` view of the model of all
-    /// visibilities. The first axis is unflagged fine channel, the second
-    /// unflagged baseline.
-    ///
-    /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
-    /// be the same length as `vis_model_slice`'s first axis.
+    /// This function is mostly used for testing. For a single timestep, over
+    /// the already-provided baselines and frequencies, generate visibilities
+    /// for each specified sky-model point-source component. The
+    /// `SkyModellerCuda` object *must* already have its UVW coordinates set;
+    /// see [`SkyModellerCuda::set_uvws`].
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
-    pub(super) unsafe fn model_points_inner(
-        &self,
-        d_uvws: &DevicePointer<cuda::UVW>,
+    ///
+    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
+    /// in \[radians\].
+    pub(super) unsafe fn model_points(
+        &mut self,
         lst_rad: f64,
         array_latitude_rad: f64,
-    ) -> Result<(), BeamError> {
+    ) -> Result<(), ModelError> {
         if self.point_power_law_radecs.is_empty()
             && self.point_curved_power_law_radecs.is_empty()
             && self.point_list_radecs.is_empty()
@@ -592,65 +571,89 @@ impl<'a> SkyModellerCuda<'a> {
             return Ok(());
         }
 
-        let point_beam_jones = {
+        {
             let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
                 .point_power_law_radecs
-                .par_iter()
-                .chain(self.point_curved_power_law_radecs.par_iter())
-                .chain(self.point_list_radecs.par_iter())
+                .iter()
+                .chain(self.point_curved_power_law_radecs.iter())
+                .chain(self.point_list_radecs.iter())
                 .map(|radec| {
                     let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                     (azel.az as CudaFloat, azel.za() as CudaFloat)
                 })
                 .unzip();
-            self.cuda_beam
-                .calc_jones_pair(&azs, &zas, array_latitude_rad)?
-        };
+            self.d_beam_jones.realloc(
+                self.cuda_beam.get_num_unique_tiles() as usize
+                    * self.cuda_beam.get_num_unique_freqs() as usize
+                    * azs.len()
+                    * std::mem::size_of::<CudaJones>(),
+            )?;
+            self.cuda_beam.calc_jones_pair(
+                &azs,
+                &zas,
+                array_latitude_rad,
+                self.d_beam_jones.get_mut().cast(),
+            )?;
+        }
 
-        let cuda_status = cuda::model_points(
+        let error_message_ptr = cuda::model_points(
             &cuda::Points {
-                num_power_law_points: self.point_power_law_radecs.len(),
-                power_law_lmns: self.point_power_law_lmns.get_mut(),
-                power_law_fds: self.point_power_law_fds.get_mut(),
-                power_law_sis: self.point_power_law_sis.get_mut(),
-                num_curved_power_law_points: self.point_curved_power_law_radecs.len(),
-                curved_power_law_lmns: self.point_curved_power_law_lmns.get_mut(),
-                curved_power_law_fds: self.point_curved_power_law_fds.get_mut(),
-                curved_power_law_sis: self.point_curved_power_law_sis.get_mut(),
-                curved_power_law_qs: self.point_curved_power_law_qs.get_mut(),
-                num_list_points: self.point_list_radecs.len(),
-                list_lmns: self.point_list_lmns.get_mut(),
-                list_fds: self.point_list_fds.get_mut(),
+                num_power_laws: self
+                    .point_power_law_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                power_law_lmns: self.point_power_law_lmns.get(),
+                power_law_fds: self.point_power_law_fds.get(),
+                power_law_sis: self.point_power_law_sis.get(),
+                num_curved_power_laws: self
+                    .point_curved_power_law_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                curved_power_law_lmns: self.point_curved_power_law_lmns.get(),
+                curved_power_law_fds: self.point_curved_power_law_fds.get(),
+                curved_power_law_sis: self.point_curved_power_law_sis.get(),
+                curved_power_law_qs: self.point_curved_power_law_qs.get(),
+                num_lists: self
+                    .point_list_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                list_lmns: self.point_list_lmns.get(),
+                list_fds: self.point_list_fds.get(),
             },
             &self.get_addresses(),
-            d_uvws.get(),
-            point_beam_jones.get().cast(),
+            self.d_uvws.get(),
+            self.d_beam_jones.get(),
         );
-        let error_str =
-            std::ffi::CString::from_vec_unchecked(vec![0; CUDA_ERROR_STR_LENGTH]).into_raw();
-        cuda_status_to_error(cuda_status, error_str)?;
-
-        Ok(())
+        if error_message_ptr.is_null() {
+            Ok(())
+        } else {
+            // Get the CUDA error message associated with the enum variant.
+            let error_message = CStr::from_ptr(error_message_ptr)
+                .to_str()
+                .unwrap_or("<cannot read CUDA error string>");
+            let our_error_str = format!("{}:{}: model_points: {error_message}", file!(), line!());
+            Err(CudaError::Kernel(our_error_str).into())
+        }
     }
 
-    /// For a single timestep, over the already-provided baselines and
-    /// frequencies, generate visibilities for each specified sky-model
-    /// Gaussian-source component.
-    ///
-    /// `vis_model_slice`: A mutable `ndarray` view of the model of all
-    /// visibilities. The first axis is unflagged fine channel, the second
-    /// unflagged baseline.
-    ///
-    /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
-    /// be the same length as `vis_model_slice`'s first axis.
+    /// This function is mostly used for testing. For a single timestep, over
+    /// the already-provided baselines and frequencies, generate visibilities
+    /// for each specified sky-model Gaussian-source component. The
+    /// `SkyModellerCuda` object *must* already have its UVW coordinates set;
+    /// see [`SkyModellerCuda::set_uvws`].
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
-    pub(super) unsafe fn model_gaussians_inner(
-        &self,
-        d_uvws: &DevicePointer<cuda::UVW>,
+    ///
+    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
+    /// in \[radians\].
+    pub(super) unsafe fn model_gaussians(
+        &mut self,
         lst_rad: f64,
         array_latitude_rad: f64,
-    ) -> Result<(), BeamError> {
+    ) -> Result<(), ModelError> {
         if self.gaussian_power_law_radecs.is_empty()
             && self.gaussian_curved_power_law_radecs.is_empty()
             && self.gaussian_list_radecs.is_empty()
@@ -658,72 +661,93 @@ impl<'a> SkyModellerCuda<'a> {
             return Ok(());
         }
 
-        let gaussian_beam_jones = {
+        {
             let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
                 .gaussian_power_law_radecs
-                .par_iter()
-                .chain(self.gaussian_curved_power_law_radecs.par_iter())
-                .chain(self.gaussian_list_radecs.par_iter())
+                .iter()
+                .chain(self.gaussian_curved_power_law_radecs.iter())
+                .chain(self.gaussian_list_radecs.iter())
                 .map(|radec| {
                     let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                     (azel.az as CudaFloat, azel.za() as CudaFloat)
                 })
                 .unzip();
-            self.cuda_beam
-                .calc_jones_pair(&azs, &zas, array_latitude_rad)?
-        };
+            self.d_beam_jones.realloc(
+                self.cuda_beam.get_num_unique_tiles() as usize
+                    * self.cuda_beam.get_num_unique_freqs() as usize
+                    * azs.len()
+                    * std::mem::size_of::<CudaJones>(),
+            )?;
+            self.cuda_beam.calc_jones_pair(
+                &azs,
+                &zas,
+                array_latitude_rad,
+                self.d_beam_jones.get_mut().cast(),
+            )?;
+        }
 
-        let cuda_status = cuda::model_gaussians(
+        let error_message_ptr = cuda::model_gaussians(
             &cuda::Gaussians {
-                num_power_law_gaussians: self.gaussian_power_law_radecs.len(),
-                power_law_lmns: self.gaussian_power_law_lmns.get_mut(),
-                power_law_fds: self.gaussian_power_law_fds.get_mut(),
-                power_law_sis: self.gaussian_power_law_sis.get_mut(),
-                power_law_gps: self.gaussian_power_law_gps.get_mut(),
-                num_curved_power_law_gaussians: self.gaussian_curved_power_law_radecs.len(),
-                curved_power_law_lmns: self.gaussian_curved_power_law_lmns.get_mut(),
-                curved_power_law_fds: self.gaussian_curved_power_law_fds.get_mut(),
-                curved_power_law_sis: self.gaussian_curved_power_law_sis.get_mut(),
-                curved_power_law_qs: self.gaussian_curved_power_law_qs.get_mut(),
-                curved_power_law_gps: self.gaussian_curved_power_law_gps.get_mut(),
-                num_list_gaussians: self.gaussian_list_radecs.len(),
-                list_lmns: self.gaussian_list_lmns.get_mut(),
-                list_fds: self.gaussian_list_fds.get_mut(),
-                list_gps: self.gaussian_list_gps.get_mut(),
+                num_power_laws: self
+                    .gaussian_power_law_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                power_law_lmns: self.gaussian_power_law_lmns.get(),
+                power_law_fds: self.gaussian_power_law_fds.get(),
+                power_law_sis: self.gaussian_power_law_sis.get(),
+                power_law_gps: self.gaussian_power_law_gps.get(),
+                num_curved_power_laws: self
+                    .gaussian_curved_power_law_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                curved_power_law_lmns: self.gaussian_curved_power_law_lmns.get(),
+                curved_power_law_fds: self.gaussian_curved_power_law_fds.get(),
+                curved_power_law_sis: self.gaussian_curved_power_law_sis.get(),
+                curved_power_law_qs: self.gaussian_curved_power_law_qs.get(),
+                curved_power_law_gps: self.gaussian_curved_power_law_gps.get(),
+                num_lists: self
+                    .gaussian_list_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                list_lmns: self.gaussian_list_lmns.get(),
+                list_fds: self.gaussian_list_fds.get(),
+                list_gps: self.gaussian_list_gps.get(),
             },
             &self.get_addresses(),
-            d_uvws.get(),
-            gaussian_beam_jones.get().cast(),
+            self.d_uvws.get(),
+            self.d_beam_jones.get(),
         );
-        let error_str =
-            std::ffi::CString::from_vec_unchecked(vec![0; CUDA_ERROR_STR_LENGTH]).into_raw();
-        cuda_status_to_error(cuda_status, error_str)?;
-
-        Ok(())
+        if error_message_ptr.is_null() {
+            Ok(())
+        } else {
+            // Get the CUDA error message associated with the enum variant.
+            let error_message = CStr::from_ptr(error_message_ptr)
+                .to_str()
+                .unwrap_or("<cannot read CUDA error string>");
+            let our_error_str =
+                format!("{}:{}: model_gaussians: {error_message}", file!(), line!());
+            Err(CudaError::Kernel(our_error_str).into())
+        }
     }
 
-    /// For a single timestep, over the already-provided baselines and
-    /// frequencies, generate visibilities for each specified sky-model
-    /// Gaussian-source component.
-    ///
-    /// `vis_model_slice`: A mutable `ndarray` view of the model of all
-    /// visibilities. The first axis is unflagged fine channel, the second
-    /// unflagged baseline.
-    ///
-    /// `uvws`: The [UVW] coordinates of each baseline \[metres\]. This should
-    /// be the same length as `vis_model_slice`'s first axis.
-    ///
-    /// `shapelet_uvws` are special UVWs generated as if each shapelet component
-    /// was at the phase centre \[metres\]. The first axis is unflagged
-    /// baseline, the second shapelet component.
+    /// This function is mostly used for testing. For a single timestep, over
+    /// the already-provided baselines and frequencies, generate visibilities
+    /// for each specified sky-model Gaussian-source component. The
+    /// `SkyModellerCuda` object *must* already have its UVW coordinates set;
+    /// see [`SkyModellerCuda::set_uvws`].
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
-    pub(super) unsafe fn model_shapelets_inner(
-        &self,
-        d_uvws: &DevicePointer<cuda::UVW>,
+    ///
+    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
+    /// in \[radians\].
+    pub(super) unsafe fn model_shapelets(
+        &mut self,
         lst_rad: f64,
         array_latitude_rad: f64,
-    ) -> Result<(), BeamError> {
+    ) -> Result<(), ModelError> {
         if self.shapelet_power_law_radecs.is_empty()
             && self.shapelet_curved_power_law_radecs.is_empty()
             && self.shapelet_list_radecs.is_empty()
@@ -731,82 +755,108 @@ impl<'a> SkyModellerCuda<'a> {
             return Ok(());
         }
 
-        let shapelet_beam_jones = {
+        {
             let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
                 .shapelet_power_law_radecs
-                .par_iter()
-                .chain(self.shapelet_curved_power_law_radecs.par_iter())
-                .chain(self.shapelet_list_radecs.par_iter())
+                .iter()
+                .chain(self.shapelet_curved_power_law_radecs.iter())
+                .chain(self.shapelet_list_radecs.iter())
                 .map(|radec| {
                     let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
                     (azel.az as CudaFloat, azel.za() as CudaFloat)
                 })
                 .unzip();
-            self.cuda_beam
-                .calc_jones_pair(&azs, &zas, array_latitude_rad)?
+            self.d_beam_jones.realloc(
+                self.cuda_beam.get_num_unique_tiles() as usize
+                    * self.cuda_beam.get_num_unique_freqs() as usize
+                    * azs.len()
+                    * std::mem::size_of::<CudaJones>(),
+            )?;
+            self.cuda_beam.calc_jones_pair(
+                &azs,
+                &zas,
+                array_latitude_rad,
+                self.d_beam_jones.get_mut().cast(),
+            )?
         };
-
+        cuda::peek_and_sync(cuda::CudaCall::CopyFromDevice)?;
         let uvs = self.get_shapelet_uvs(lst_rad);
-        let power_law_uvs = DevicePointer::copy_to_device(uvs.power_law.as_slice().unwrap())?;
+        let power_law_uvs =
+            DevicePointer::copy_to_device(uvs.power_law.as_slice().expect("is contiguous"))?;
         let curved_power_law_uvs =
-            DevicePointer::copy_to_device(uvs.curved_power_law.as_slice().unwrap())?;
-        let list_uvs = DevicePointer::copy_to_device(uvs.list.as_slice().unwrap())?;
+            DevicePointer::copy_to_device(uvs.curved_power_law.as_slice().expect("is contiguous"))?;
+        let list_uvs = DevicePointer::copy_to_device(uvs.list.as_slice().expect("is contiguous"))?;
 
-        let cuda_status = cuda::model_shapelets(
+        let error_message_ptr = cuda::model_shapelets(
             &cuda::Shapelets {
-                num_power_law_shapelets: self.shapelet_power_law_radecs.len(),
-                power_law_lmns: self.shapelet_power_law_lmns.get_mut(),
-                power_law_fds: self.shapelet_power_law_fds.get_mut(),
-                power_law_sis: self.shapelet_power_law_sis.get_mut(),
-                power_law_gps: self.shapelet_power_law_gps.get_mut(),
-                power_law_shapelet_uvs: power_law_uvs.get_mut(),
-                power_law_shapelet_coeffs: self.shapelet_power_law_coeffs.get_mut(),
-                power_law_num_shapelet_coeffs: self.shapelet_power_law_coeff_lens.get_mut(),
-                num_curved_power_law_shapelets: self.shapelet_curved_power_law_radecs.len(),
-                curved_power_law_lmns: self.shapelet_curved_power_law_lmns.get_mut(),
-                curved_power_law_fds: self.shapelet_curved_power_law_fds.get_mut(),
-                curved_power_law_sis: self.shapelet_curved_power_law_sis.get_mut(),
-                curved_power_law_qs: self.shapelet_curved_power_law_qs.get_mut(),
-                curved_power_law_gps: self.shapelet_curved_power_law_gps.get_mut(),
-                curved_power_law_shapelet_uvs: curved_power_law_uvs.get_mut(),
-                curved_power_law_shapelet_coeffs: self.shapelet_curved_power_law_coeffs.get_mut(),
+                num_power_laws: self
+                    .shapelet_power_law_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                power_law_lmns: self.shapelet_power_law_lmns.get(),
+                power_law_fds: self.shapelet_power_law_fds.get(),
+                power_law_sis: self.shapelet_power_law_sis.get(),
+                power_law_gps: self.shapelet_power_law_gps.get(),
+                power_law_shapelet_uvs: power_law_uvs.get(),
+                power_law_shapelet_coeffs: self.shapelet_power_law_coeffs.get(),
+                power_law_num_shapelet_coeffs: self.shapelet_power_law_coeff_lens.get(),
+                num_curved_power_laws: self
+                    .shapelet_curved_power_law_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                curved_power_law_lmns: self.shapelet_curved_power_law_lmns.get(),
+                curved_power_law_fds: self.shapelet_curved_power_law_fds.get(),
+                curved_power_law_sis: self.shapelet_curved_power_law_sis.get(),
+                curved_power_law_qs: self.shapelet_curved_power_law_qs.get(),
+                curved_power_law_gps: self.shapelet_curved_power_law_gps.get(),
+                curved_power_law_shapelet_uvs: curved_power_law_uvs.get(),
+                curved_power_law_shapelet_coeffs: self.shapelet_curved_power_law_coeffs.get(),
                 curved_power_law_num_shapelet_coeffs: self
                     .shapelet_curved_power_law_coeff_lens
-                    .get_mut(),
-                num_list_shapelets: self.shapelet_list_radecs.len(),
-                list_lmns: self.shapelet_list_lmns.get_mut(),
-                list_fds: self.shapelet_list_fds.get_mut(),
-                list_gps: self.shapelet_list_gps.get_mut(),
-                list_shapelet_uvs: list_uvs.get_mut(),
-                list_shapelet_coeffs: self.shapelet_list_coeffs.get_mut(),
-                list_num_shapelet_coeffs: self.shapelet_list_coeff_lens.get_mut(),
+                    .get(),
+                num_lists: self
+                    .shapelet_list_radecs
+                    .len()
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                list_lmns: self.shapelet_list_lmns.get(),
+                list_fds: self.shapelet_list_fds.get(),
+                list_gps: self.shapelet_list_gps.get(),
+                list_shapelet_uvs: list_uvs.get(),
+                list_shapelet_coeffs: self.shapelet_list_coeffs.get(),
+                list_num_shapelet_coeffs: self.shapelet_list_coeff_lens.get(),
             },
             &self.get_addresses(),
-            d_uvws.get(),
-            shapelet_beam_jones.get().cast(),
+            self.d_uvws.get(),
+            self.d_beam_jones.get(),
         );
-        let error_str =
-            std::ffi::CString::from_vec_unchecked(vec![0; CUDA_ERROR_STR_LENGTH]).into_raw();
-        cuda_status_to_error(cuda_status, error_str)?;
-
-        Ok(())
+        if error_message_ptr.is_null() {
+            Ok(())
+        } else {
+            // Get the CUDA error message associated with the enum variant.
+            let error_message = CStr::from_ptr(error_message_ptr)
+                .to_str()
+                .unwrap_or("<cannot read CUDA error string>");
+            let our_error_str =
+                format!("{}:{}: model_shapelets: {error_message}", file!(), line!());
+            Err(CudaError::Kernel(our_error_str).into())
+        }
     }
 
-    /// Get a populated [cuda::Addresses]. This should never outlive `self`.
-    fn get_addresses(&self) -> cuda::Addresses {
-        let n = self.unflagged_tile_xyzs.len();
-        let num_baselines = (n * (n - 1)) / 2;
-
+    /// Get a populated [`cuda::Addresses`]. This should never outlive `self`.
+    fn get_addresses(&mut self) -> cuda::Addresses {
         cuda::Addresses {
-            num_freqs: self.freqs.len() as _,
-            num_vis: (num_baselines * self.freqs.len()) as _,
-            num_tiles: n as _,
+            num_freqs: self.num_freqs,
+            num_vis: self.num_baselines * self.num_freqs,
+            num_baselines: self.num_baselines,
             sbf_l: self.sbf_l,
             sbf_n: self.sbf_n,
             sbf_c: self.sbf_c,
             sbf_dx: self.sbf_dx,
-            d_freqs: self.d_freqs.get_mut(),
-            d_shapelet_basis_values: self.d_shapelet_basis_values.get_mut(),
+            d_freqs: self.d_freqs.get(),
+            d_shapelet_basis_values: self.d_shapelet_basis_values.get(),
             num_unique_beam_freqs: self.cuda_beam.get_num_unique_freqs(),
             d_tile_map: self.cuda_beam.get_tile_map(),
             d_freq_map: self.cuda_beam.get_freq_map(),
@@ -817,35 +867,9 @@ impl<'a> SkyModellerCuda<'a> {
         }
     }
 
-    /// Copy visibilities from the CUDA device (`d_vis` in the [SkyModellerCuda]
-    /// struct) into the provided `ndarray` slice. The visibilities on the
-    /// device are overwritten with zeros after the copy.
-    ///
-    /// # Safety
-    ///
-    /// This function interfaces directly with the CUDA API. Rust errors attempt
-    /// to catch problems but there are no guarantees.
-    pub(super) unsafe fn copy_and_reset_vis(&self, mut vis_model_slice: ArrayViewMut2<Jones<f32>>) {
-        // Rust's strict typing means that we can't neatly call `copy_from_device`
-        // on `d_vis` into `vis_model_slice`. Do the copy manually.
-        cuda_runtime_sys::cudaMemcpy(
-            vis_model_slice.as_mut_ptr().cast(),
-            self.d_vis.get().cast(),
-            self.num_baselines * self.freqs.len() * std::mem::size_of::<Jones<f32>>(),
-            cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToHost,
-        );
-        // Clear the device visibilities.
-        cuda_runtime_sys::cudaMemset(
-            self.d_vis.get_mut().cast(),
-            0,
-            self.num_baselines * self.freqs.len() * std::mem::size_of::<Jones<f32>>(),
-        );
-        cuda_runtime_sys::cudaDeviceSynchronize();
-    }
-
     /// Shapelets need their own special kind of UVW coordinates. Each shapelet
     /// component's position is treated as the phase centre. This function uses
-    /// the FFI type [cuda::ShapeletUV]; the W isn't actually used in
+    /// the FFI type [`cuda::ShapeletUV`]; the W isn't actually used in
     /// computation, and omitting it is hopefully a little more efficient.
     ///
     /// The returned arrays have baseline as the first axis and component as the
@@ -869,14 +893,31 @@ impl<'a> SkyModellerCuda<'a> {
             ),
         }
     }
+
+    /// Copy the visibilities from the device and clear them.
+    #[cfg(test)]
+    pub(super) fn get_vis(&mut self, mut vis_model_slice: ArrayViewMut2<Jones<f32>>) {
+        self.d_vis
+            .copy_from_device(vis_model_slice.as_slice_mut().expect("is contiguous"))
+            .unwrap();
+        self.d_vis.clear();
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_uvws(&mut self, uvws: &[cuda::UVW]) -> Result<(), CudaError> {
+        self.d_uvws.overwrite(uvws)
+    }
 }
 
 impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
     fn model_timestep(
-        &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        &mut self,
+        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError> {
+    ) -> Result<Vec<UVW>, ModelError> {
+        // Ensure the visibilities are zero'd.
+        self.d_vis.clear();
+
         let (uvws, lst, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.array_longitude,
@@ -927,186 +968,14 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
             .collect();
 
         unsafe {
-            let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
+            self.d_uvws.overwrite(&cuda_uvws)?;
 
-            self.model_points_inner(&d_uvws, lst, latitude)?;
-            self.model_gaussians_inner(&d_uvws, lst, latitude)?;
-            self.model_shapelets_inner(&d_uvws, lst, latitude)?;
+            self.model_points(lst, latitude)?;
+            self.model_gaussians(lst, latitude)?;
+            self.model_shapelets(lst, latitude)?;
 
-            self.copy_and_reset_vis(vis_model_slice);
-        }
-
-        Ok(uvws)
-    }
-
-    fn model_points(
-        &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
-        timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError> {
-        let (uvws, lst, latitude) = if self.precess {
-            let precession_info = precess_time(
-                self.array_longitude,
-                self.array_latitude,
-                self.phase_centre,
-                timestamp,
-                self.dut1,
-            );
-            // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs =
-                precession_info.precess_xyz_parallel(self.unflagged_tile_xyzs);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                &precessed_tile_xyzs,
-                self.phase_centre.to_hadec(precession_info.lmst_j2000),
-            );
-            (
-                uvws,
-                precession_info.lmst_j2000,
-                precession_info.array_latitude_j2000,
-            )
-        } else {
-            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                self.unflagged_tile_xyzs,
-                self.phase_centre.to_hadec(lst),
-            );
-            (uvws, lst, self.array_latitude)
-        };
-
-        let cuda_uvws: Vec<cuda::UVW> = uvws
-            .iter()
-            .map(|uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect();
-
-        unsafe {
-            let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
-
-            self.model_points_inner(&d_uvws, lst, latitude)?;
-            self.copy_and_reset_vis(vis_model_slice);
-        }
-
-        Ok(uvws)
-    }
-
-    /// Model only the Gaussian sources. If other types of sources will also be
-    /// modelled, it is more efficient to use `model_timestep`.
-    ///
-    /// # Safety
-    ///
-    /// This function interfaces directly with the CUDA API. Rust errors attempt
-    /// to catch problems but there are no guarantees.
-    fn model_gaussians(
-        &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
-        timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError> {
-        let (uvws, lst, latitude) = if self.precess {
-            let precession_info = precess_time(
-                self.array_longitude,
-                self.array_latitude,
-                self.phase_centre,
-                timestamp,
-                self.dut1,
-            );
-            // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs =
-                precession_info.precess_xyz_parallel(self.unflagged_tile_xyzs);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                &precessed_tile_xyzs,
-                self.phase_centre.to_hadec(precession_info.lmst_j2000),
-            );
-            (
-                uvws,
-                precession_info.lmst_j2000,
-                precession_info.array_latitude_j2000,
-            )
-        } else {
-            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                self.unflagged_tile_xyzs,
-                self.phase_centre.to_hadec(lst),
-            );
-            (uvws, lst, self.array_latitude)
-        };
-
-        let cuda_uvws: Vec<cuda::UVW> = uvws
-            .iter()
-            .map(|uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect();
-
-        unsafe {
-            let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
-
-            self.model_gaussians_inner(&d_uvws, lst, latitude)?;
-            self.copy_and_reset_vis(vis_model_slice);
-        }
-
-        Ok(uvws)
-    }
-
-    /// Model only the shapelet sources. If other types of sources will also be
-    /// modelled, it is more efficient to use `model_timestep`.
-    ///
-    /// # Safety
-    ///
-    /// This function interfaces directly with the CUDA API. Rust errors attempt
-    /// to catch problems but there are no guarantees.
-    fn model_shapelets(
-        &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
-        timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError> {
-        let (uvws, lst, latitude) = if self.precess {
-            let precession_info = precess_time(
-                self.array_longitude,
-                self.array_latitude,
-                self.phase_centre,
-                timestamp,
-                self.dut1,
-            );
-            // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs =
-                precession_info.precess_xyz_parallel(self.unflagged_tile_xyzs);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                &precessed_tile_xyzs,
-                self.phase_centre.to_hadec(precession_info.lmst_j2000),
-            );
-            (
-                uvws,
-                precession_info.lmst_j2000,
-                precession_info.array_latitude_j2000,
-            )
-        } else {
-            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                self.unflagged_tile_xyzs,
-                self.phase_centre.to_hadec(lst),
-            );
-            (uvws, lst, self.array_latitude)
-        };
-
-        let cuda_uvws: Vec<cuda::UVW> = uvws
-            .iter()
-            .map(|uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
-            })
-            .collect();
-
-        unsafe {
-            let d_uvws = DevicePointer::copy_to_device(&cuda_uvws)?;
-
-            self.model_shapelets_inner(&d_uvws, lst, latitude)?;
-            self.copy_and_reset_vis(vis_model_slice);
+            self.d_vis
+                .copy_from_device(vis_model_slice.as_slice_mut().expect("is contiguous"))?;
         }
 
         Ok(uvws)
@@ -1162,17 +1031,28 @@ fn get_shapelet_uvs_inner(
 /// method flattens the coefficients into a single array (lengths of the
 /// array-of-arrays).
 fn get_flattened_coeffs(
-    shapelet_coeffs: Vec<Vec<ShapeletCoeff>>,
-) -> (Vec<cuda::ShapeletCoeff>, Vec<usize>) {
+    shapelet_coeffs: Vec<&[ShapeletCoeff]>,
+) -> (Vec<cuda::ShapeletCoeff>, Vec<i32>) {
     let mut coeffs: Vec<cuda::ShapeletCoeff> = vec![];
     let mut coeff_lengths = Vec::with_capacity(coeffs.len());
 
     for coeffs_for_comp in shapelet_coeffs {
-        coeff_lengths.push(coeffs_for_comp.len());
+        coeff_lengths.push(
+            coeffs_for_comp
+                .len()
+                .try_into()
+                .expect("number not too big to fit into i32"),
+        );
         for coeff in coeffs_for_comp {
             coeffs.push(cuda::ShapeletCoeff {
-                n1: coeff.n1,
-                n2: coeff.n2,
+                n1: coeff
+                    .n1
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
+                n2: coeff
+                    .n2
+                    .try_into()
+                    .expect("number not too big to fit into i32"),
                 value: coeff.value as CudaFloat,
             })
         }

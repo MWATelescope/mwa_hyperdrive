@@ -10,14 +10,15 @@ pub(crate) use error::VisSimulateError;
 
 use std::{
     collections::HashSet,
-    ops::{Deref, Range},
+    ops::{Deref, DerefMut, Range},
     path::PathBuf,
     str::FromStr,
+    thread,
 };
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Sender};
-use crossbeam_utils::{atomic::AtomicCell, thread};
+use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch, Unit};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
@@ -337,8 +338,7 @@ impl VisSimParams {
         let modeller_info = if *cpu {
             ModellerInfo::Cpu
         } else {
-            let (device_info, driver_info) =
-                crate::cuda::get_device_info().map_err(VisSimulateError::CudaError)?;
+            let (device_info, driver_info) = crate::cuda::get_device_info()?;
             ModellerInfo::Cuda {
                 device_info,
                 driver_info,
@@ -761,14 +761,14 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
 
     // Generate the visibilities and write them out asynchronously.
     let error = AtomicCell::new(false);
-    let scoped_threads_result = thread::scope(|scope| {
+    let scoped_threads_result = thread::scope(|s| {
         // Modelling thread.
-        let model_handle = scope.spawn(|_| {
+        let model_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
             model_progress.tick();
 
             // Create a "modeller" object.
-            let modeller = model::new_sky_modeller(
+            let mut modeller = model::new_sky_modeller(
                 #[cfg(feature = "cuda")]
                 args.cpu,
                 beam.deref(),
@@ -792,7 +792,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
             let weight_factor =
                 (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR);
             let result = model_thread(
-                modeller.deref(),
+                modeller.deref_mut(),
                 &timestamps,
                 cross_vis_shape,
                 weight_factor,
@@ -807,7 +807,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         });
 
         // Writing thread.
-        let write_handle = scope.spawn(|_| {
+        let write_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
             write_progress.tick();
 
@@ -861,13 +861,14 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
     });
 
     // Propagate errors and print out the write message.
-    info!("{}", scoped_threads_result.unwrap()?);
+    let s = scoped_threads_result?;
+    info!("{s}");
 
     Ok(())
 }
 
 fn model_thread(
-    modeller: &dyn SkyModeller,
+    modeller: &mut dyn SkyModeller,
     timestamps: &[Epoch],
     vis_shape: (usize, usize),
     weight_factor: f64,

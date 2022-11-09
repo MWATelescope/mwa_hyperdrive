@@ -17,6 +17,7 @@ mod cuda;
 use std::ops::Deref;
 
 use approx::assert_abs_diff_eq;
+use indexmap::indexmap;
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::xyz::xyzs_to_cross_uvws_parallel,
@@ -32,9 +33,75 @@ use crate::model::cuda::SkyModellerCuda;
 use crate::{
     beam::{create_fee_beam_object, create_no_beam_object, Delays},
     srclist::{
-        ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, SourceComponent, SourceList,
+        ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
+        SourceList,
     },
 };
+
+lazy_static::lazy_static! {
+    static ref PHASE_CENTRE: RADec = RADec::new_degrees(0.0, -27.0);
+    static ref OFF_PHASE_CENTRE: RADec = RADec::new_degrees(1.0, -27.0);
+
+    static ref POINT_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_point(*PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref POINT_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_point(*PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref POINT_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_point(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref POINT_OFF_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_point(*OFF_PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref POINT_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_point(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref POINT_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_point(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref GAUSSIAN_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_gaussian(*PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref GAUSSIAN_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_gaussian(*PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref GAUSSIAN_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_gaussian(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref GAUSSIAN_OFF_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_gaussian(*OFF_PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref GAUSSIAN_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_gaussian(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_gaussian(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref SHAPELET_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_shapelet(*PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref SHAPELET_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_shapelet(*PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref SHAPELET_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_shapelet(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref SHAPELET_OFF_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_shapelet(*OFF_PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref SHAPELET_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_shapelet(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref SHAPELET_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_shapelet(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+}
 
 fn get_list() -> FluxDensityType {
     FluxDensityType::List {
@@ -198,24 +265,32 @@ impl ObsParams {
     }
 
     fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu {
-        new_cpu_sky_modeller_inner(
-            self.beam.deref(),
-            srclist,
-            &self.xyzs,
-            &self.freqs,
-            &self.flagged_tiles,
-            self.phase_centre,
-            self.array_longitude_rad,
-            self.array_latitude_rad,
-            Duration::from_total_nanoseconds(0),
-            true,
-        )
+        let components = ComponentList::new(srclist, &self.freqs, self.phase_centre);
+        let maps = crate::math::TileBaselineFlags::new(
+            self.xyzs.len() + self.flagged_tiles.len(),
+            self.flagged_tiles.clone(),
+        );
+
+        SkyModellerCpu {
+            beam: self.beam.deref(),
+            phase_centre: self.phase_centre,
+            array_longitude: self.array_longitude_rad,
+            array_latitude: self.array_latitude_rad,
+            dut1: Duration::from_total_nanoseconds(0),
+            precess: true,
+            unflagged_fine_chan_freqs: &self.freqs,
+            unflagged_tile_xyzs: &self.xyzs,
+            flagged_tiles: &self.flagged_tiles,
+            unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+            components,
+        }
     }
 
     #[cfg(feature = "cuda")]
+    #[track_caller]
     fn get_gpu_modeller(&self, srclist: &SourceList) -> SkyModellerCuda {
         unsafe {
-            super::new_cuda_sky_modeller_inner(
+            let mut m = SkyModellerCuda::new(
                 self.beam.deref(),
                 srclist,
                 &self.xyzs,
@@ -227,7 +302,18 @@ impl ObsParams {
                 Duration::from_total_nanoseconds(0),
                 true,
             )
-            .unwrap()
+            .unwrap();
+            let cuda_uvws = self
+                .uvws
+                .iter()
+                .map(|&uvw| crate::cuda::UVW {
+                    u: uvw.u as crate::cuda::CudaFloat,
+                    v: uvw.v as crate::cuda::CudaFloat,
+                    w: uvw.w as crate::cuda::CudaFloat,
+                })
+                .collect::<Vec<_>>();
+            m.set_uvws(&cuda_uvws).unwrap();
+            m
         }
     }
 }

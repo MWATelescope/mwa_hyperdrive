@@ -10,9 +10,7 @@ include!("utils_bindings.rs");
 
 use std::ffi::{CStr, CString};
 
-use cuda_runtime_sys::*;
-use log::trace;
-use marlu::cuda_runtime_sys;
+use super::CudaError;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CudaDriverInfo {
@@ -32,7 +30,7 @@ pub(crate) struct CudaDeviceInfo {
 
 /// Get CUDA device and driver information. At present, this function only
 /// returns information on "device 0".
-pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), String> {
+pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), CudaError> {
     unsafe {
         // TODO: Always assume we're using device 0 for now.
         let device = 0;
@@ -42,7 +40,7 @@ pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), Stri
         let mut total_global_mem = 0;
         let mut driver_version = 0;
         let mut runtime_version = 0;
-        let error_id = get_cuda_device_info(
+        let error_message_ptr = get_cuda_device_info(
             device,
             name,
             &mut device_major,
@@ -51,7 +49,18 @@ pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), Stri
             &mut driver_version,
             &mut runtime_version,
         );
-        cuda_error_to_rust_error(error_id)?;
+        if !error_message_ptr.is_null() {
+            // Get the CUDA error message associated with the enum variant.
+            let error_message = CStr::from_ptr(error_message_ptr)
+                .to_str()
+                .unwrap_or("<cannot read CUDA error string>");
+            let our_error_str = format!(
+                "{}:{}: get_cuda_device_info: {error_message}",
+                file!(),
+                line!()
+            );
+            return Err(CudaError::Generic(our_error_str));
+        }
 
         let device_info = CudaDeviceInfo {
             name: CString::from_raw(name)
@@ -76,22 +85,5 @@ pub(crate) fn get_device_info() -> Result<(CudaDeviceInfo, CudaDriverInfo), Stri
                 runtime_version,
             },
         ))
-    }
-}
-
-/// Convert a `cudaError_t` cast to an `i32` to a Rust error.
-fn cuda_error_to_rust_error(error_id: i32) -> Result<(), String> {
-    if error_id == cudaError::cudaSuccess as i32 {
-        Ok(())
-    } else {
-        unsafe {
-            trace!("CUDA error ID: {error_id}");
-            let error_str = get_cuda_error(error_id);
-            trace!("CUDA error str address: {:#x}", error_str as usize);
-            Err(CStr::from_ptr(error_str)
-                .to_str()
-                .expect("CUDA error string isn't UTF-8")
-                .to_string())
-        }
     }
 }

@@ -7,6 +7,7 @@
 mod cpu;
 #[cfg(feature = "cuda")]
 mod cuda;
+mod error;
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
@@ -15,15 +16,16 @@ mod tests;
 use cpu::SkyModellerCpu;
 #[cfg(feature = "cuda")]
 use cuda::SkyModellerCuda;
+pub(crate) use error::ModelError;
 
 use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
 use marlu::{Jones, RADec, XyzGeodetic, UVW};
-use ndarray::prelude::*;
+use ndarray::ArrayViewMut2;
 
 use crate::{
-    beam::{Beam, BeamError},
+    beam::Beam,
     srclist::{ComponentList, SourceList},
 };
 
@@ -44,7 +46,7 @@ pub(crate) enum ModellerInfo {
 
 /// An object that simulates sky-model visibilities.
 pub trait SkyModeller<'a> {
-    /// Generate sky-model visibilities for a single timestep. The [UVW]
+    /// Generate sky-model visibilities for a single timestep. The [`UVW`]
     /// coordinates used in generating the visibilities are returned.
     ///
     /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
@@ -53,171 +55,22 @@ pub trait SkyModeller<'a> {
     /// `n1` is number of unflagged frequencies and `n2` is the number of
     /// unflagged cross correlation baselines.
     ///
-    /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
+    /// `timestamp`: The [`hifitime::Epoch`] struct used to determine what this
     /// timestep corresponds to.
     ///
     /// # Errors
     ///
     /// This function will return an error if there was a problem with
-    /// beam-response calculation.
+    /// beam-response calculation or a CUDA error (if using CUDA functionality).
     fn model_timestep(
-        &self,
+        &mut self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError>;
-
-    /// Model only the point sources for a timestep. If other types of sources
-    /// will also be modelled, it is more efficient to use `model_timestep`. The
-    /// [UVW] coordinates used in generating the visibilities are returned.
-    ///
-    /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
-    /// returning an array from this function, modelled visibilities are written
-    /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged frequencies and `n2` is the number of
-    /// unflagged cross correlation baselines.
-    ///
-    /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
-    /// timestep corresponds to.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if there was a problem with
-    /// beam-response calculation.
-    fn model_points(
-        &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
-        timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError>;
-
-    /// Model only the Gaussian sources for a timestep. If other types of
-    /// sources will also be modelled, it is more efficient to use
-    /// `model_timestep`. The [UVW] coordinates used in generating the
-    /// visibilities are returned.
-    ///
-    /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
-    /// returning an array from this function, modelled visibilities are written
-    /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged frequencies and `n2` is the number of
-    /// unflagged cross correlation baselines.
-    ///
-    /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
-    /// timestep corresponds to.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if there was a problem with
-    /// beam-response calculation.
-    fn model_gaussians(
-        &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
-        timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError>;
-
-    /// Model only the shapelet sources for a timestep. If other types of
-    /// sources will also be modelled, it is more efficient to use
-    /// `model_timestep`. The [UVW] coordinates used in generating the
-    /// visibilities are returned.
-    ///
-    /// `vis_model_slice`: A mutable view into an `ndarray`. Rather than
-    /// returning an array from this function, modelled visibilities are written
-    /// into this array. This slice *must* have dimensions `[n1][n2]`, where
-    /// `n1` is number of unflagged frequencies and `n2` is the number of
-    /// unflagged cross correlation baselines.
-    ///
-    /// `timestamp`: The [hifitime::Epoch] struct used to determine what this
-    /// timestep corresponds to.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if there was a problem with
-    /// beam-response calculation.
-    fn model_shapelets(
-        &self,
-        vis_model_slice: ArrayViewMut2<Jones<f32>>,
-        timestamp: Epoch,
-    ) -> Result<Vec<UVW>, BeamError>;
+    ) -> Result<Vec<UVW>, ModelError>;
 }
 
-/// Create a [SkyModeller] trait object that generates sky-model visibilities on
-/// the CPU in parallel.
-///
-/// It is expected that the number of unflagged `XYZ`s plus the number of
-/// flagged tiles is the total number of tiles in the observation. The
-/// frequencies should have units of \[Hz\].
-#[allow(clippy::too_many_arguments)]
-pub fn new_cpu_sky_modeller<'a>(
-    beam: &'a dyn Beam,
-    source_list: &SourceList,
-    unflagged_tile_xyzs: &'a [XyzGeodetic],
-    unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a HashSet<usize>,
-    phase_centre: RADec,
-    array_longitude_rad: f64,
-    array_latitude_rad: f64,
-    dut1: Duration,
-    apply_precession: bool,
-) -> Box<dyn SkyModeller<'a> + 'a> {
-    Box::new(new_cpu_sky_modeller_inner(
-        beam,
-        source_list,
-        unflagged_tile_xyzs,
-        unflagged_fine_chan_freqs,
-        flagged_tiles,
-        phase_centre,
-        array_longitude_rad,
-        array_latitude_rad,
-        dut1,
-        apply_precession,
-    ))
-}
-
-/// Create a [SkyModeller] trait object that generates sky-model visibilities on
-/// CUDA-compatible GPU.
-///
-/// It is expected that the number of unflagged `XYZ`s plus the number of
-/// flagged tiles is the total number of tiles in the observation. The
-/// frequencies should have units of \[Hz\].
-///
-/// # Errors
-///
-/// This function will return an error if CUDA mallocs and copies can't be
-/// executed, or if there was a problem in setting up a `BeamCUDA`.
-///
-/// # Safety
-///
-/// This function interfaces directly with the CUDA API. Rust errors attempt to
-/// catch problems but there are no guarantees.
-#[cfg(feature = "cuda")]
-#[allow(clippy::too_many_arguments)]
-pub unsafe fn new_cuda_sky_modeller<'a>(
-    beam: &'a dyn Beam,
-    source_list: &SourceList,
-    unflagged_tile_xyzs: &'a [XyzGeodetic],
-    unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a HashSet<usize>,
-    phase_centre: RADec,
-    array_longitude_rad: f64,
-    array_latitude_rad: f64,
-    dut1: Duration,
-    apply_precession: bool,
-) -> Result<Box<dyn SkyModeller<'a> + 'a>, BeamError> {
-    let modeller = new_cuda_sky_modeller_inner(
-        beam,
-        source_list,
-        unflagged_tile_xyzs,
-        unflagged_fine_chan_freqs,
-        flagged_tiles,
-        phase_centre,
-        array_longitude_rad,
-        array_latitude_rad,
-        dut1,
-        apply_precession,
-    )?;
-    Ok(Box::new(modeller))
-}
-
-/// Create a [SkyModeller] trait object that generates sky-model visibilities on
-/// either the CPU or a CUDA-compatible GPU. This function conveniently uses
+/// Create a [`SkyModeller`] trait object that generates sky-model visibilities
+/// on either the CPU or a CUDA-compatible GPU. This function conveniently uses
 /// either [new_cpu_sky_modeller] or [new_cuda_sky_modeller] depending on how
 /// `hyperdrive` was compiled and the `use_cpu_for_modelling` flag.
 ///
@@ -232,7 +85,7 @@ pub unsafe fn new_cuda_sky_modeller<'a>(
 /// interfaces directly with the CUDA API. Rust errors attempt to catch problems
 /// but there are no guarantees.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn new_sky_modeller<'a>(
+pub fn new_sky_modeller<'a>(
     #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
     beam: &'a dyn Beam,
     source_list: &SourceList,
@@ -244,133 +97,66 @@ pub(crate) fn new_sky_modeller<'a>(
     array_latitude_rad: f64,
     dut1: Duration,
     apply_precession: bool,
-) -> Result<Box<dyn SkyModeller<'a> + 'a>, BeamError> {
+) -> Result<Box<dyn SkyModeller<'a> + 'a>, ModelError> {
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda")] {
             if use_cpu_for_modelling {
-                Ok(new_cpu_sky_modeller(beam,
-                    source_list,
-                    unflagged_tile_xyzs,
-                    unflagged_fine_chan_freqs,
-                    flagged_tiles,
+                let components = ComponentList::new(source_list, unflagged_fine_chan_freqs, phase_centre);
+                let maps = crate::math::TileBaselineFlags::new(
+                    unflagged_tile_xyzs.len() + flagged_tiles.len(),
+                    flagged_tiles.clone(),
+                );
+
+                Ok(Box::new(SkyModellerCpu {
+                    beam,
                     phase_centre,
-                    array_longitude_rad,
-                    array_latitude_rad,
+                    array_longitude: array_longitude_rad,
+                    array_latitude: array_latitude_rad,
                     dut1,
-                    apply_precession,
-                ))
+                    precess: apply_precession,
+                    unflagged_fine_chan_freqs,
+                    unflagged_tile_xyzs,
+                    flagged_tiles,
+                    unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+                    components,
+                }))
             } else {
                 unsafe {
-                new_cuda_sky_modeller(
-                    beam,
-                    source_list,
-                    unflagged_tile_xyzs,
-                    unflagged_fine_chan_freqs,
-                    flagged_tiles,
-                    phase_centre,
-                    array_longitude_rad,
-                    array_latitude_rad,
-                    dut1,
-                    apply_precession,
-                )}
+                    let modeller = SkyModellerCuda::new(
+                        beam,
+                        source_list,
+                        unflagged_tile_xyzs,
+                        unflagged_fine_chan_freqs,
+                        flagged_tiles,
+                        phase_centre,
+                        array_longitude_rad,
+                        array_latitude_rad,
+                        dut1,
+                        apply_precession,
+                    )?;
+                    Ok(Box::new(modeller))
+                }
             }
         } else {
-            Ok(new_cpu_sky_modeller(
+            let components = ComponentList::new(source_list, unflagged_fine_chan_freqs, phase_centre);
+            let maps = crate::math::TileBaselineFlags::new(
+                unflagged_tile_xyzs.len() + flagged_tiles.len(),
+                flagged_tiles.clone(),
+            );
+
+            Ok(Box::new(SkyModellerCpu {
                 beam,
-                source_list,
-                unflagged_tile_xyzs,
-                unflagged_fine_chan_freqs,
-                flagged_tiles,
                 phase_centre,
-                array_longitude_rad,
-                array_latitude_rad,
+                array_longitude: array_longitude_rad,
+                array_latitude: array_latitude_rad,
                 dut1,
-                apply_precession,
-            ))
+                precess: apply_precession,
+                unflagged_fine_chan_freqs,
+                unflagged_tile_xyzs,
+                flagged_tiles,
+                unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+                components,
+            }))
         }
     }
-}
-
-/// Create a [SkyModellerCpu] struct that generates sky-model visibilities on
-/// the CPU in parallel. This function is mostly provided for testing.
-///
-/// It is expected that the number of unflagged `XYZ`s plus the number of
-/// flagged tiles is the total number of tiles in the observation. The
-/// frequencies should have units of \[Hz\].
-#[allow(clippy::too_many_arguments)]
-pub(super) fn new_cpu_sky_modeller_inner<'a>(
-    beam: &'a dyn Beam,
-    source_list: &SourceList,
-    unflagged_tile_xyzs: &'a [XyzGeodetic],
-    unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a HashSet<usize>,
-    phase_centre: RADec,
-    array_longitude_rad: f64,
-    array_latitude_rad: f64,
-    dut1: Duration,
-    apply_precession: bool,
-) -> SkyModellerCpu<'a> {
-    let components = ComponentList::new(source_list, unflagged_fine_chan_freqs, phase_centre);
-    let maps = crate::math::TileBaselineFlags::new(
-        unflagged_tile_xyzs.len() + flagged_tiles.len(),
-        flagged_tiles.clone(),
-    );
-
-    SkyModellerCpu {
-        beam,
-        phase_centre,
-        array_longitude: array_longitude_rad,
-        array_latitude: array_latitude_rad,
-        dut1,
-        precess: apply_precession,
-        unflagged_fine_chan_freqs,
-        unflagged_tile_xyzs,
-        unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
-        components,
-    }
-}
-
-/// Create a [SkyModellerCuda] struct that generates sky-model visibilities on a
-/// CUDA-compatible GPU. This function is mostly provided for testing.
-///
-/// It is expected that the number of unflagged `XYZ`s plus the number of
-/// flagged tiles is the total number of tiles in the observation. The
-/// frequencies should have units of \[Hz\].
-///
-/// # Errors
-///
-/// This function will return an error if CUDA mallocs and copies can't be
-/// executed, or if there was a problem in setting up a `BeamCUDA`.
-///
-/// # Safety
-///
-/// This function interfaces directly with the CUDA API. Rust errors attempt to
-/// catch problems but there are no guarantees.
-#[cfg(feature = "cuda")]
-#[allow(clippy::too_many_arguments)]
-pub(super) unsafe fn new_cuda_sky_modeller_inner<'a>(
-    beam: &'a dyn Beam,
-    source_list: &SourceList,
-    unflagged_tile_xyzs: &'a [XyzGeodetic],
-    unflagged_fine_chan_freqs: &'a [f64],
-    flagged_tiles: &'a HashSet<usize>,
-    phase_centre: RADec,
-    array_longitude_rad: f64,
-    array_latitude_rad: f64,
-    dut1: Duration,
-    apply_precession: bool,
-) -> Result<SkyModellerCuda<'a>, BeamError> {
-    let modeller = SkyModellerCuda::new(
-        beam,
-        source_list,
-        unflagged_tile_xyzs,
-        unflagged_fine_chan_freqs,
-        flagged_tiles,
-        phase_centre,
-        array_longitude_rad,
-        array_latitude_rad,
-        dut1,
-        apply_precession,
-    )?;
-    Ok(modeller)
 }

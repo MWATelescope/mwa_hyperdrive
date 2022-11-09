@@ -27,7 +27,7 @@ pub(crate) enum DiCalibrateError {
     SolutionsWrite(#[from] crate::solutions::SolutionsWriteError),
 
     #[error(transparent)]
-    Beam(#[from] crate::beam::BeamError),
+    Model(#[from] crate::model::ModelError),
 
     #[error(transparent)]
     VisRead(#[from] crate::vis_io::read::VisReadError),

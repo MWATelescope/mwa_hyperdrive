@@ -12,14 +12,10 @@ use ndarray::prelude::*;
 
 use super::{Beam, BeamError, BeamType, Delays};
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "cuda")] {
-        use marlu::cuda::*;
-        use super::{BeamCUDA, CudaFloat};
-    }
-}
+#[cfg(feature = "cuda")]
+use super::{BeamCUDA, CudaFloat};
 
-/// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [Beam]
+/// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [`Beam`]
 /// trait.
 pub(super) struct FEEBeam {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
@@ -123,7 +119,7 @@ impl FEEBeam {
         // .map(|j| unsafe { std::mem::transmute(j) })
     }
 
-    fn calc_jones_array_inner(
+    fn calc_jones_array(
         &self,
         azels: &[AzEl],
         freq_hz: f64,
@@ -145,6 +141,27 @@ impl FEEBeam {
         // // from that of hyperbeam. Testing shows that this operation takes
         // // tens of nanoseconds.
         // .map(|v| unsafe { std::mem::transmute(v) })
+    }
+
+    fn calc_jones_array_inner(
+        &self,
+        azels: &[AzEl],
+        freq_hz: f64,
+        delays: &[u32],
+        amps: &[f64],
+        latitude_rad: f64,
+        results: &mut [Jones<f64>],
+    ) -> Result<(), mwa_hyperbeam::fee::FEEBeamError> {
+        self.hyperbeam_object.calc_jones_array_inner(
+            unsafe { std::mem::transmute(azels) },
+            freq_hz as _,
+            delays,
+            amps,
+            true,
+            Some(latitude_rad),
+            false,
+            results,
+        )
     }
 }
 
@@ -186,7 +203,7 @@ impl Beam for FEEBeam {
         // frequency and use that for the hash.
         let beam_freq = self.find_closest_freq(freq_hz);
 
-        if let Some(tile_index) = tile_index {
+        let jones = if let Some(tile_index) = tile_index {
             if tile_index > self.delays.len_of(Axis(0)) {
                 return Err(BeamError::BadTileIndex {
                     got: tile_index,
@@ -201,13 +218,13 @@ impl Beam for FEEBeam {
                 delays.as_slice().unwrap(),
                 amps.as_slice().unwrap(),
                 latitude_rad,
-            )
+            )?
         } else {
             let delays = &self.ideal_delays;
             let amps = [1.0; 32];
-            self.calc_jones_inner(azel, beam_freq, delays, &amps, latitude_rad)
-        }
-        .map_err(BeamError::from)
+            self.calc_jones_inner(azel, beam_freq, delays, &amps, latitude_rad)?
+        };
+        Ok(jones)
     }
 
     fn calc_jones_array(
@@ -217,6 +234,44 @@ impl Beam for FEEBeam {
         tile_index: Option<usize>,
         latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, BeamError> {
+        // The FEE beam is defined only at specific frequencies. For this
+        // reason, rather than making a unique hash for every single different
+        // frequency, round specified frequency (`freq_hz`) to the nearest beam
+        // frequency and use that for the hash.
+        let beam_freq = self.find_closest_freq(freq_hz);
+
+        let jones = if let Some(tile_index) = tile_index {
+            if tile_index > self.delays.len_of(Axis(0)) {
+                return Err(BeamError::BadTileIndex {
+                    got: tile_index,
+                    max: self.delays.len_of(Axis(0)),
+                });
+            }
+            let delays = self.delays.slice(s![tile_index, ..]);
+            let amps = self.gains.slice(s![tile_index, ..]);
+            self.calc_jones_array(
+                azels,
+                beam_freq,
+                delays.as_slice().unwrap(),
+                amps.as_slice().unwrap(),
+                latitude_rad,
+            )?
+        } else {
+            let delays = &self.ideal_delays;
+            let amps = [1.0; 32];
+            self.calc_jones_array(azels, beam_freq, delays, &amps, latitude_rad)?
+        };
+        Ok(jones)
+    }
+
+    fn calc_jones_array_inner(
+        &self,
+        azels: &[AzEl],
+        freq_hz: f64,
+        tile_index: Option<usize>,
+        latitude_rad: f64,
+        results: &mut [Jones<f64>],
+    ) -> Result<(), BeamError> {
         // The FEE beam is defined only at specific frequencies. For this
         // reason, rather than making a unique hash for every single different
         // frequency, round specified frequency (`freq_hz`) to the nearest beam
@@ -238,13 +293,14 @@ impl Beam for FEEBeam {
                 delays.as_slice().unwrap(),
                 amps.as_slice().unwrap(),
                 latitude_rad,
-            )
+                results,
+            )?;
         } else {
             let delays = &self.ideal_delays;
             let amps = [1.0; 32];
-            self.calc_jones_array_inner(azels, beam_freq, delays, &amps, latitude_rad)
+            self.calc_jones_array_inner(azels, beam_freq, delays, &amps, latitude_rad, results)?;
         }
-        .map_err(BeamError::from)
+        Ok(())
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
@@ -279,20 +335,19 @@ pub(crate) struct FEEBeamCUDA {
 impl BeamCUDA for FEEBeamCUDA {
     unsafe fn calc_jones_pair(
         &self,
-        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] az_rad: &[f64],
-        #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] za_rad: &[f64],
-        #[cfg(feature = "cuda-single")] az_rad: &[f32],
-        #[cfg(feature = "cuda-single")] za_rad: &[f32],
+        az_rad: &[CudaFloat],
+        za_rad: &[CudaFloat],
         latitude_rad: f64,
-    ) -> Result<DevicePointer<Jones<CudaFloat>>, BeamError> {
-        self.hyperbeam_object
-            .calc_jones_device_pair(az_rad, za_rad, Some(latitude_rad), false)
-            // // This hilariously unsafe map is to convert hyperbeam's `Jones` to
-            // // our `Jones`. Both come from Marlu, but the Marlu used all over
-            // // hyperdrive is imported differently from that of hyperbeam.
-            // // Testing shows that this operation takes tens of nanoseconds.
-            // .map(|ptr| std::mem::transmute(ptr))
-            .map_err(BeamError::from)
+        d_jones: *mut std::ffi::c_void,
+    ) -> Result<(), BeamError> {
+        self.hyperbeam_object.calc_jones_device_pair_inner(
+            az_rad,
+            za_rad,
+            Some(latitude_rad),
+            false,
+            d_jones,
+        )?;
+        Ok(())
     }
 
     fn get_beam_type(&self) -> BeamType {
@@ -305,6 +360,10 @@ impl BeamCUDA for FEEBeamCUDA {
 
     fn get_freq_map(&self) -> *const i32 {
         self.hyperbeam_object.get_freq_map()
+    }
+
+    fn get_num_unique_tiles(&self) -> i32 {
+        self.hyperbeam_object.get_num_unique_tiles()
     }
 
     fn get_num_unique_freqs(&self) -> i32 {

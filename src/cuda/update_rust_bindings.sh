@@ -10,16 +10,14 @@
 SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
 
 bindgen "${SCRIPTPATH}"/utils.h \
-    --allowlist-function "get_cuda_error_length" \
-    --allowlist-function "get_cuda_error" \
     --allowlist-function "get_cuda_device_info" \
     --size_t-is-usize \
     > "${SCRIPTPATH}"/utils_bindings.rs
 
 bindgen "${SCRIPTPATH}"/model.h \
     --allowlist-function "model_.*" \
-    --blocklist-type "Addresses" \
     --blocklist-type "__int8_t" \
+    --allowlist-type "Addresses" \
     --allowlist-type "RADec" \
     --allowlist-type "UVW" \
     --allowlist-type "LmnRime" \
@@ -35,8 +33,8 @@ bindgen "${SCRIPTPATH}"/model.h \
 
 bindgen "${SCRIPTPATH}"/model.h \
     --allowlist-function "model_.*" \
-    --blocklist-type "Addresses" \
     --blocklist-type "__int8_t" \
+    --allowlist-type "Addresses" \
     --allowlist-type "RADec" \
     --allowlist-type "UVW" \
     --allowlist-type "LmnRime" \
@@ -50,24 +48,3 @@ bindgen "${SCRIPTPATH}"/model.h \
     --size_t-is-usize \
     -- -D SINGLE \
     > "${SCRIPTPATH}"/model_single.rs
-
-bindgen "${SCRIPTPATH}"/memory.h \
-    --blocklist-function "model_.*" \
-    --blocklist-type "__uint64_t" \
-    --blocklist-type "UVW" \
-    --blocklist-type "LmnRime" \
-    --blocklist-type "JonesF.*" \
-    --allowlist-type "Addresses" \
-    --size_t-is-usize \
-    > "${SCRIPTPATH}"/memory_double.rs
-
-bindgen "${SCRIPTPATH}"/memory.h \
-    --blocklist-function "model_.*" \
-    --blocklist-type "__uint64_t" \
-    --blocklist-type "UVW" \
-    --blocklist-type "LmnRime" \
-    --blocklist-type "JonesF.*" \
-    --allowlist-type "Addresses" \
-    --size_t-is-usize \
-    -- -D SINGLE \
-    > "${SCRIPTPATH}"/memory_single.rs

@@ -1397,8 +1397,7 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dfaab3855e73d35abf06ae00c17fcd9189efbaefbb25fd452b94bb7dc870bfa"
+source = "git+https://github.com/cjordan/mwa_hyperbeam?branch=devel#20a27e5d3bff02928afc857df4c96a24fb7cb937"
 dependencies = [
  "cbindgen",
  "cc",
@@ -1429,6 +1428,7 @@ dependencies = [
  "criterion",
  "crossbeam-channel",
  "crossbeam-utils",
+ "cuda-runtime-sys",
  "env_logger",
  "erfa-sys",
  "fitsio",

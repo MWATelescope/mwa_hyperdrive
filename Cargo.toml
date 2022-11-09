@@ -29,7 +29,7 @@ opt-level = 0
 default = ["plotting"]
 
 # Use CUDA code with double-precision floats.
-cuda = ["mwa_hyperbeam/cuda", "marlu/cuda"]
+cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys"]
 
 # Use CUDA code with single-precision floats.
 cuda-single = [
@@ -53,7 +53,7 @@ erfa-static = ["erfa-sys/static"]
 hdf5-static = ["mwa_hyperbeam/hdf5-static"]
 
 # Link CUDA statically
-cuda-static = ["marlu/cuda-static"]
+cuda-static = ["mwa_hyperbeam/cuda-static"]
 
 # Link all C dependencies statically
 all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
@@ -81,7 +81,8 @@ indicatif = { version = "0.17.0", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
 marlu = "0.8.0"
-mwa_hyperbeam = "0.5.0"
+# mwa_hyperbeam = "0.5.0"
+mwa_hyperbeam = { git = "https://github.com/cjordan/mwa_hyperbeam", branch = "devel" }
 mwalib = "0.15.0"
 ndarray = { version = "0.15.4", features = ["rayon"] }
 num-complex = "0.4.1"
@@ -97,6 +98,10 @@ thiserror = "1.0.7"
 toml = "0.5.2"
 vec1 = "1.5.0"
 
+# "cuda" feature
+cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
+
+# "plotting" feature
 plotters = { version = "0.3.1", default-features = false, features = [
     "bitmap_backend",
     "bitmap_encoder",

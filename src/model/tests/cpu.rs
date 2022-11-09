@@ -16,16 +16,9 @@ use crate::srclist::{Source, SourceList};
 #[test]
 fn point_zenith_cpu() {
     let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::List)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -34,15 +27,9 @@ fn point_zenith_cpu() {
     assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -51,15 +38,9 @@ fn point_zenith_cpu() {
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::CurvedPowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -73,19 +54,9 @@ fn point_zenith_cpu() {
 #[test]
 fn point_off_zenith_cpu() {
     let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_OFF_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -94,18 +65,9 @@ fn point_off_zenith_cpu() {
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_OFF_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -114,18 +76,9 @@ fn point_off_zenith_cpu() {
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_OFF_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -139,16 +92,9 @@ fn point_off_zenith_cpu() {
 #[test]
 fn gaussian_zenith_cpu() {
     let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::List)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -157,15 +103,9 @@ fn gaussian_zenith_cpu() {
     assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -174,18 +114,9 @@ fn gaussian_zenith_cpu() {
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -199,19 +130,9 @@ fn gaussian_zenith_cpu() {
 #[test]
 fn gaussian_off_zenith_cpu() {
     let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_OFF_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -220,18 +141,9 @@ fn gaussian_off_zenith_cpu() {
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_OFF_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -240,18 +152,9 @@ fn gaussian_off_zenith_cpu() {
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -265,20 +168,13 @@ fn gaussian_off_zenith_cpu() {
 #[test]
 fn shapelet_zenith_cpu() {
     let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::List)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_ZENITH_LIST);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -288,19 +184,13 @@ fn shapelet_zenith_cpu() {
     assert!(result.is_ok());
     assert_list_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_ZENITH_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -310,22 +200,13 @@ fn shapelet_zenith_cpu() {
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_ZENITH_CURVED_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -340,23 +221,13 @@ fn shapelet_zenith_cpu() {
 #[test]
 fn shapelet_off_zenith_cpu() {
     let obs = ObsParams::new(true);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_OFF_ZENITH_LIST);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -366,22 +237,13 @@ fn shapelet_off_zenith_cpu() {
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_OFF_ZENITH_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -391,22 +253,13 @@ fn shapelet_off_zenith_cpu() {
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_OFF_ZENITH_CURVED_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -422,16 +275,9 @@ fn shapelet_off_zenith_cpu() {
 #[serial]
 fn point_zenith_cpu_fee() {
     let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::List)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -440,15 +286,9 @@ fn point_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_list_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -457,15 +297,9 @@ fn point_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(obs.phase_centre, FluxType::CurvedPowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -480,19 +314,9 @@ fn point_zenith_cpu_fee() {
 #[serial]
 fn point_off_zenith_cpu_fee() {
     let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_OFF_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -501,18 +325,9 @@ fn point_off_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_OFF_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -521,18 +336,9 @@ fn point_off_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_point(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&POINT_OFF_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_points_inner(
+    let result = modeller.model_points(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -547,16 +353,9 @@ fn point_off_zenith_cpu_fee() {
 #[serial]
 fn gaussian_zenith_cpu_fee() {
     let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::List)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -565,15 +364,9 @@ fn gaussian_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_list_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -582,18 +375,9 @@ fn gaussian_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -608,19 +392,9 @@ fn gaussian_zenith_cpu_fee() {
 #[serial]
 fn gaussian_off_zenith_cpu_fee() {
     let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_OFF_ZENITH_LIST);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -629,18 +403,9 @@ fn gaussian_off_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_OFF_ZENITH_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -649,18 +414,9 @@ fn gaussian_off_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_gaussian(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW);
     visibilities.fill(Jones::default());
-    let result = modeller.model_gaussians_inner(
+    let result = modeller.model_gaussians(
         visibilities.view_mut(),
         &obs.uvws,
         obs.lst,
@@ -675,20 +431,13 @@ fn gaussian_off_zenith_cpu_fee() {
 #[serial]
 fn shapelet_zenith_cpu_fee() {
     let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::List)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_ZENITH_LIST);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -698,19 +447,13 @@ fn shapelet_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_list_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw)],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_ZENITH_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -720,22 +463,13 @@ fn shapelet_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_power_law_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                obs.phase_centre,
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_ZENITH_CURVED_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -751,23 +485,13 @@ fn shapelet_zenith_cpu_fee() {
 #[serial]
 fn shapelet_off_zenith_cpu_fee() {
     let obs = ObsParams::new(false);
-    let mut srclist = SourceList::new();
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::List
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_OFF_ZENITH_LIST);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -777,22 +501,13 @@ fn shapelet_off_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_list_off_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::PowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_OFF_ZENITH_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -802,22 +517,13 @@ fn shapelet_off_zenith_cpu_fee() {
     assert!(result.is_ok());
     assert_power_law_off_zenith_visibilities_fee(visibilities.view());
 
-    srclist.insert(
-        "off_zenith".to_string(),
-        Source {
-            components: vec1![get_simple_shapelet(
-                RADec::new_degrees(1.0, -27.0),
-                FluxType::CurvedPowerLaw
-            )],
-        },
-    );
-    let modeller = obs.get_cpu_modeller(&srclist);
+    let modeller = obs.get_cpu_modeller(&SHAPELET_OFF_ZENITH_CURVED_POWER_LAW);
     let shapelet_uvws = modeller
         .components
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     visibilities.fill(Jones::default());
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
@@ -847,7 +553,7 @@ fn shapelet_multiple_components() {
         .shapelets
         .get_shapelet_uvws(obs.lst, &obs.xyzs);
     let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
-    let result = modeller.model_shapelets_inner(
+    let result = modeller.model_shapelets(
         visibilities.view_mut(),
         &obs.uvws,
         shapelet_uvws.view(),
