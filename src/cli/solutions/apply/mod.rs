@@ -11,11 +11,11 @@ mod tests;
 
 pub(crate) use error::SolutionsApplyError;
 
-use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr};
+use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr, thread};
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
-use crossbeam_utils::{atomic::AtomicCell, thread};
+use crossbeam_utils::atomic::AtomicCell;
 use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
@@ -721,9 +721,9 @@ pub(super) fn apply_solutions_inner(
     let error = AtomicCell::new(false);
 
     info!("Reading input data, applying, and writing");
-    let scoped_threads_result = thread::scope(|scope| {
+    let scoped_threads_result = thread::scope(|s| {
         // Input visibility-data reading thread.
-        let data_handle = scope.spawn(|_| {
+        let data_handle = s.spawn(|| {
             // If a panic happens, update our atomic error.
             defer_on_unwind! { error.store(true); }
             read_progress.tick();
@@ -747,7 +747,7 @@ pub(super) fn apply_solutions_inner(
         });
 
         // Solutions applying thread.
-        let apply_handle = scope.spawn(|_| {
+        let apply_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
             apply_progress.tick();
 
@@ -768,7 +768,7 @@ pub(super) fn apply_solutions_inner(
         });
 
         // Calibrated vis writing thread.
-        let write_handle = scope.spawn(|_| {
+        let write_handle = s.spawn(|| {
             defer_on_unwind! { error.store(true); }
             write_progress.tick();
 
@@ -844,7 +844,8 @@ pub(super) fn apply_solutions_inner(
     });
 
     // Propagate errors and print out the write message.
-    info!("{}", scoped_threads_result.unwrap()?);
+    let s = scoped_threads_result?;
+    info!("{s}");
 
     Ok(())
 }

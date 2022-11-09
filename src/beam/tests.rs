@@ -99,14 +99,28 @@ fn fee_cuda_beam_values_are_sensible() {
     // Compare these with the hyperdrive `Beam` trait.
     let hyperdrive = super::FEEBeam::new_from_env(1, Delays::Full(delays), Some(amps)).unwrap();
     let hyperdrive = unsafe { hyperdrive.prepare_cuda_beam(&freqs).unwrap() };
-    let hyperdrive_values_device =
-        unsafe { hyperdrive.calc_jones_pair(&azs, &zas, MWA_LAT_RAD).unwrap() };
-    let mut hyperdrive_values = vec![Jones::default(); hyperbeam_values.len()];
-    unsafe {
-        hyperdrive_values_device
-            .copy_from_device(&mut hyperdrive_values)
+    let hyperdrive_values_device = unsafe {
+        let mut hyperdrive_values_device: DevicePointer<Jones<CudaFloat>> = DevicePointer::malloc(
+            hyperdrive.get_num_unique_tiles() as usize
+                * hyperdrive.get_num_unique_freqs() as usize
+                * azs.len()
+                * std::mem::size_of::<Jones<CudaFloat>>(),
+        )
+        .unwrap();
+        hyperdrive
+            .calc_jones_pair(
+                &azs,
+                &zas,
+                MWA_LAT_RAD,
+                hyperdrive_values_device.get_mut().cast(),
+            )
             .unwrap();
-    }
+        hyperdrive_values_device
+    };
+    let mut hyperdrive_values = vec![Jones::default(); hyperbeam_values.len()];
+    hyperdrive_values_device
+        .copy_from_device(&mut hyperdrive_values)
+        .unwrap();
 
     let hyperdrive_values =
         Array3::from_shape_vec(hyperbeam_values.dim(), hyperdrive_values).unwrap();

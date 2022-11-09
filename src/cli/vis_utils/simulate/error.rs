@@ -47,10 +47,6 @@ pub(crate) enum VisSimulateError {
     #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
     NoSourcesAfterVeto,
 
-    #[cfg(feature = "cuda")]
-    #[error("CUDA error: {0}")]
-    CudaError(String),
-
     #[error(transparent)]
     FileWrite(#[from] crate::vis_io::write::FileWriteError),
 
@@ -76,5 +72,12 @@ pub(crate) enum VisSimulateError {
     Mwalib(#[from] mwalib::MwalibError),
 
     #[error(transparent)]
+    Model(#[from] crate::model::ModelError),
+
+    #[error(transparent)]
     IO(#[from] std::io::Error),
+
+    #[cfg(feature = "cuda")]
+    #[error(transparent)]
+    Cuda(#[from] crate::cuda::CudaError),
 }

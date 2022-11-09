@@ -246,8 +246,7 @@ impl DiCalParams {
         let modeller_info = if cpu {
             ModellerInfo::Cpu
         } else {
-            let (device_info, driver_info) =
-                crate::cuda::get_device_info().map_err(DiCalArgsError::CudaError)?;
+            let (device_info, driver_info) = crate::cuda::get_device_info()?;
             ModellerInfo::Cuda {
                 device_info,
                 driver_info,

@@ -17,6 +17,7 @@ mod cuda;
 use std::ops::Deref;
 
 use approx::assert_abs_diff_eq;
+use indexmap::indexmap;
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     pos::xyz::xyzs_to_cross_uvws_parallel,
@@ -32,9 +33,75 @@ use crate::model::cuda::SkyModellerCuda;
 use crate::{
     beam::{create_fee_beam_object, create_no_beam_object, Delays},
     srclist::{
-        ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, SourceComponent, SourceList,
+        ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
+        SourceList,
     },
 };
+
+lazy_static::lazy_static! {
+    static ref PHASE_CENTRE: RADec = RADec::new_degrees(0.0, -27.0);
+    static ref OFF_PHASE_CENTRE: RADec = RADec::new_degrees(1.0, -27.0);
+
+    static ref POINT_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_point(*PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref POINT_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_point(*PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref POINT_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_point(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref POINT_OFF_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_point(*OFF_PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref POINT_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_point(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref POINT_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_point(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref GAUSSIAN_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_gaussian(*PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref GAUSSIAN_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_gaussian(*PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref GAUSSIAN_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_gaussian(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref GAUSSIAN_OFF_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_gaussian(*OFF_PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref GAUSSIAN_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_gaussian(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_gaussian(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref SHAPELET_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_shapelet(*PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref SHAPELET_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_shapelet(*PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref SHAPELET_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "zenith".to_string() => Source {components: vec1![get_simple_shapelet(*PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+
+    static ref SHAPELET_OFF_ZENITH_LIST: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_shapelet(*OFF_PHASE_CENTRE, FluxType::List)]}
+    });
+    static ref SHAPELET_OFF_ZENITH_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_shapelet(*OFF_PHASE_CENTRE, FluxType::PowerLaw)]}
+    });
+    static ref SHAPELET_OFF_ZENITH_CURVED_POWER_LAW: SourceList = SourceList::from(indexmap! {
+        "off_zenith".to_string() => Source {components: vec1![get_simple_shapelet(*OFF_PHASE_CENTRE, FluxType::CurvedPowerLaw)]}
+    });
+}
 
 fn get_list() -> FluxDensityType {
     FluxDensityType::List {
@@ -198,24 +265,32 @@ impl ObsParams {
     }
 
     fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu {
-        new_cpu_sky_modeller_inner(
-            self.beam.deref(),
-            srclist,
-            &self.xyzs,
-            &self.freqs,
-            &self.flagged_tiles,
-            self.phase_centre,
-            self.array_longitude_rad,
-            self.array_latitude_rad,
-            Duration::from_total_nanoseconds(0),
-            true,
-        )
+        let components = ComponentList::new(srclist, &self.freqs, self.phase_centre);
+        let maps = crate::math::TileBaselineFlags::new(
+            self.xyzs.len() + self.flagged_tiles.len(),
+            self.flagged_tiles.clone(),
+        );
+
+        SkyModellerCpu {
+            beam: self.beam.deref(),
+            phase_centre: self.phase_centre,
+            array_longitude: self.array_longitude_rad,
+            array_latitude: self.array_latitude_rad,
+            dut1: Duration::from_total_nanoseconds(0),
+            precess: true,
+            unflagged_fine_chan_freqs: &self.freqs,
+            unflagged_tile_xyzs: &self.xyzs,
+            flagged_tiles: &self.flagged_tiles,
+            unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+            components,
+        }
     }
 
     #[cfg(feature = "cuda")]
+    #[track_caller]
     fn get_gpu_modeller(&self, srclist: &SourceList) -> SkyModellerCuda {
         unsafe {
-            super::new_cuda_sky_modeller_inner(
+            let mut m = SkyModellerCuda::new(
                 self.beam.deref(),
                 srclist,
                 &self.xyzs,
@@ -227,13 +302,24 @@ impl ObsParams {
                 Duration::from_total_nanoseconds(0),
                 true,
             )
-            .unwrap()
+            .unwrap();
+            let cuda_uvws = self
+                .uvws
+                .iter()
+                .map(|&uvw| crate::cuda::UVW {
+                    u: uvw.u as crate::cuda::CudaFloat,
+                    v: uvw.v as crate::cuda::CudaFloat,
+                    w: uvw.w as crate::cuda::CudaFloat,
+                })
+                .collect::<Vec<_>>();
+            m.set_uvws(&cuda_uvws).unwrap();
+            m
         }
     }
 }
 
 #[track_caller]
-fn assert_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
@@ -253,7 +339,7 @@ fn assert_list_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -329,7 +415,7 @@ fn assert_list_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
@@ -406,7 +492,7 @@ fn assert_list_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -482,7 +568,7 @@ fn assert_list_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
@@ -540,7 +626,7 @@ fn assert_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -616,7 +702,7 @@ fn assert_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
@@ -693,7 +779,7 @@ fn assert_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -769,7 +855,7 @@ fn assert_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density.
@@ -827,7 +913,7 @@ fn assert_curved_power_law_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
 }
 
 #[track_caller]
-fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -903,7 +989,7 @@ fn assert_curved_power_law_off_zenith_visibilities(vis: ArrayView2<Jones<f32>>) 
 }
 
 #[track_caller]
-fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // All LMN values are (0, 0, 1). This means that the Fourier transform to
     // make a visibility from LMN and UVW will always just be the input flux
     // density *multiplied by the beam response*.
@@ -980,7 +1066,7 @@ fn assert_curved_power_law_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) 
 }
 
 #[track_caller]
-fn assert_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
+fn test_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32>>) {
     // This time, all LMN values should be close to, but not the same as, (0, 0,
     // 1). This means that the visibilities should be somewhat close to the
     // input flux densities.
@@ -1053,4 +1139,183 @@ fn assert_curved_power_law_off_zenith_visibilities_fee(vis: ArrayView2<Jones<f32
     ];
     let result = vis.slice(s![2, ..]);
     assert_abs_diff_eq!(expected_3rd_row, result);
+}
+
+#[track_caller]
+fn test_multiple_gaussian_components(vis: ArrayView2<Jones<f32>>, epsilon: f32) {
+    let expected = array![
+        [
+            Jones::from([
+                Complex::new(1.9894463e0, 2.0495814e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9894463e0, 2.0495814e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.997311e0, 1.03556715e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.997311e0, 1.03556715e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.9974082e0, -1.0167356e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9974082e0, -1.0167356e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(5.9569197e0, 7.1689516e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9569197e0, 7.1689516e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.989021e0, 3.6238956e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.989021e0, 3.6238956e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.9894176e0, -3.5580167e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9894176e0, -3.5580167e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(3.9625018e0, 5.4580307e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9625018e0, 5.4580307e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9904408e0, 2.760545e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9904408e0, 2.760545e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9907863e0, -2.7103797e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9907863e0, -2.7103797e-1),
+            ]),
+        ]
+    ];
+    assert_abs_diff_eq!(expected, vis, epsilon = epsilon);
+}
+
+#[track_caller]
+fn test_multiple_shapelet_components(
+    vis: ArrayView2<Jones<f32>>,
+    shapelet_uvws: ArrayView2<UVW>,
+    epsilon1: f32,
+    epsilon2: f64,
+) {
+    let expected = array![
+        [
+            Jones::from([
+                Complex::new(1.9894463e0, 2.0495814e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9894463e0, 2.0495814e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.997311e0, 1.03556715e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.997311e0, 1.03556715e-1),
+            ]),
+            Jones::from([
+                Complex::new(1.9974082e0, -1.0167356e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(1.9974082e0, -1.0167356e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(5.9569197e0, 7.1689516e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9569197e0, 7.1689516e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.989021e0, 3.6238956e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.989021e0, 3.6238956e-1),
+            ]),
+            Jones::from([
+                Complex::new(5.9894176e0, -3.5580167e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(5.9894176e0, -3.5580167e-1),
+            ]),
+        ],
+        [
+            Jones::from([
+                Complex::new(3.9625018e0, 5.4580307e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9625018e0, 5.4580307e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9904408e0, 2.760545e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9904408e0, 2.760545e-1),
+            ]),
+            Jones::from([
+                Complex::new(3.9907863e0, -2.7103797e-1),
+                Complex::new(0e0, 0e0),
+                Complex::new(0e0, 0e0),
+                Complex::new(3.9907863e0, -2.7103797e-1),
+            ]),
+        ]
+    ];
+    assert_abs_diff_eq!(expected, vis, epsilon = epsilon1);
+
+    let expected = array![
+        [
+            UVW {
+                u: 1.9996953903127825,
+                v: 0.01584645344024005,
+                w: 0.0,
+            },
+            UVW {
+                u: 1.9996314242432884,
+                v: 0.017430912937512553,
+                w: 0.0,
+            }
+        ],
+        [
+            UVW {
+                u: 1.0173001015936747,
+                v: -0.44599812806736405,
+                w: 0.0,
+            },
+            UVW {
+                u: 1.019013154521334,
+                v: -0.4451913783247998,
+                w: 0.0,
+            }
+        ],
+        [
+            UVW {
+                u: -0.9823952887191078,
+                v: -0.4618445815076041,
+                w: 0.0,
+            },
+            UVW {
+                u: -0.9806182697219545,
+                v: -0.46262229126231236,
+                w: 0.0,
+            }
+        ]
+    ];
+    assert_abs_diff_eq!(expected, shapelet_uvws, epsilon = epsilon2);
 }
