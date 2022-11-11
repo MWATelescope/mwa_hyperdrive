@@ -37,6 +37,32 @@ fn test_di_no_stderr() {
 }
 
 #[test]
+fn test_peel_no_stderr() {
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let output = tmp_dir.path().join("out.uvfits");
+    let Files { data, srclist } = get_reduced_1090008640(false);
+
+    #[rustfmt::skip]
+    let cmd = hyperdrive()
+        .args([
+            "peel",
+            "--data", &data[0], &data[1],
+            "--source-list", &srclist,
+            "--sub", "1",
+            "--iono-sub", "1",
+            "--outputs", &format!("{}", output.display()),
+        ])
+        .ok();
+    assert!(
+        cmd.is_ok(),
+        "peel failed on simple test data: {}",
+        cmd.err().unwrap()
+    );
+    let (_, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
+}
+
+#[test]
 fn test_solutions_apply_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output = tmp_dir.path().join("out.uvfits");

@@ -489,7 +489,8 @@ pub(super) fn parse_freq_average_factor(
             // Scale the quantity by the unit, if required.
             let quantity = match time_format {
                 FreqFormat::Hz => quantity,
-                FreqFormat::kHz => 1000.0 * quantity,
+                FreqFormat::kHz => 1e3 * quantity,
+                FreqFormat::MHz => 1e6 * quantity,
             };
             let factor = quantity / freq_res;
             // Reject non-integer floats.
@@ -625,4 +626,96 @@ fn vis_average_weights_non_zero(
         *jones_to = Jones::from(jones_weighted_sum / weight_sum);
     }
     *weight_to = weight_sum as f32;
+}
+
+/// This function is the same as `vis_average`, except it assumes that any
+/// flagged visibilities are indicated by weights equal to 0.0 (or -0.0). This
+/// allows the code to be more efficient.
+pub(crate) fn vis_average_no_negative_weights(
+    jones_from_tfb: ArrayView3<Jones<f32>>,
+    mut jones_to_fb: ArrayViewMut2<Jones<f32>>,
+    weight_from_tfb: ArrayView3<f32>,
+    mut weight_to_fb: ArrayViewMut2<f32>,
+    flagged_chan_indices: &HashSet<u16>,
+) {
+    let avg_time = jones_from_tfb.len_of(Axis(0));
+    let avg_freq = (jones_from_tfb.len_of(Axis(1)) as f64 / jones_to_fb.len_of(Axis(0)) as f64)
+        .ceil() as usize;
+
+    // iterate along time axis in chunks of avg_time
+    jones_from_tfb
+        .axis_chunks_iter(Axis(0), avg_time)
+        .zip(weight_from_tfb.axis_chunks_iter(Axis(0), avg_time))
+        .for_each(|(jones_chunk_tfb, weight_chunk_tfb)| {
+            jones_chunk_tfb
+                .axis_iter(Axis(2))
+                .zip(weight_chunk_tfb.axis_iter(Axis(2)))
+                .zip(jones_to_fb.axis_iter_mut(Axis(1)))
+                .zip(weight_to_fb.axis_iter_mut(Axis(1)))
+                .for_each(
+                    |(((jones_chunk_tf, weight_chunk_tf), mut jones_to_f), mut weight_to_f)| {
+                        jones_chunk_tf
+                            .axis_chunks_iter(Axis(1), avg_freq)
+                            .zip(weight_chunk_tf.axis_chunks_iter(Axis(1), avg_freq))
+                            .enumerate()
+                            .filter(|(i, _)| !flagged_chan_indices.contains(&(*i as u16)))
+                            .map(|(_, d)| d)
+                            .zip(jones_to_f.iter_mut())
+                            .zip(weight_to_f.iter_mut())
+                            .for_each(
+                                |(((jones_chunk_tf, weight_chunk_tf), jones_to), weight_to)| {
+                                    vis_average_weights_are_zero(
+                                        jones_chunk_tf,
+                                        weight_chunk_tf,
+                                        jones_to,
+                                        weight_to,
+                                    );
+                                },
+                            );
+                    },
+                );
+        });
+}
+
+/// Average a chunk of visibilities and weights (both must have the same
+/// dimensions) into an output vis and weight. This function needs the input
+/// weights to be 0 or greater; this allows the averaging algorithm to be
+/// simpler (as well as hopefully being faster), while also allowing further
+/// averaging of the output visibilities without complicated logic.
+#[inline]
+fn vis_average_weights_are_zero(
+    jones_chunk_tf: ArrayView2<Jones<f32>>,
+    weight_chunk_tf: ArrayView2<f32>,
+    jones_to: &mut Jones<f32>,
+    weight_to: &mut f32,
+) {
+    let mut jones_weighted_sum = Jones::default();
+    let mut weight_sum = 0.0;
+
+    // iterate through time chunks
+    jones_chunk_tf
+        .outer_iter()
+        .zip_eq(weight_chunk_tf.outer_iter())
+        .for_each(|(jones_chunk_f, weights_chunk_f)| {
+            jones_chunk_f
+                .iter()
+                .zip_eq(weights_chunk_f.iter())
+                .for_each(|(jones, weight)| {
+                    // Any flagged visibilities would have a weight <= 0, but
+                    // we've already capped them to 0. This means we don't need
+                    // to check the value of the weight when accumulating
+                    // unflagged visibilities; the flagged ones contribute
+                    // nothing.
+
+                    let jones = Jones::<f64>::from(*jones);
+                    let weight = *weight as f64;
+                    jones_weighted_sum += jones * weight;
+                    weight_sum += weight;
+                });
+        });
+
+    if weight_sum > 0.0 {
+        *jones_to = Jones::from(jones_weighted_sum / weight_sum);
+        *weight_to = weight_sum as f32;
+    }
 }

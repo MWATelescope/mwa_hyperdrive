@@ -27,7 +27,6 @@ use crate::{
         MsReader, VisRead,
     },
     math::TileBaselineFlags,
-    params::CalVis,
     tests::{
         get_reduced_1090008640_ms, get_reduced_1090008640_raw, get_reduced_1090008640_uvfits,
         DataAsStrings,
@@ -946,14 +945,11 @@ fn test_1090008640_calibration_quality_raw() {
     };
 
     let params = args.parse().unwrap();
-    let CalVis {
-        vis_data,
-        vis_model,
-        ..
-    } = params
+    let mut cal_vis = params
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
-    test_1090008640_quality(params, vis_data.view(), vis_model.view());
+    cal_vis.scale_by_weights(Some(&params.baseline_weights));
+    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
 }
 
 #[test]
@@ -990,14 +986,11 @@ fn test_1090008640_calibration_quality_ms() {
     };
 
     let params = args.parse().unwrap();
-    let CalVis {
-        vis_data,
-        vis_model,
-        ..
-    } = params
+    let mut cal_vis = params
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
-    test_1090008640_quality(params, vis_data.view(), vis_model.view());
+    cal_vis.scale_by_weights(Some(&params.baseline_weights));
+    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
 }
 
 #[test]
@@ -1033,12 +1026,9 @@ fn test_1090008640_calibration_quality_uvfits() {
     };
 
     let params = args.parse().unwrap();
-    let CalVis {
-        vis_data,
-        vis_model,
-        ..
-    } = params
+    let mut cal_vis = params
         .get_cal_vis()
         .expect("Couldn't read data and generate a model");
-    test_1090008640_quality(params, vis_data.view(), vis_model.view());
+    cal_vis.scale_by_weights(Some(&params.baseline_weights));
+    test_1090008640_quality(params, cal_vis.vis_data.view(), cal_vis.vis_model.view());
 }
