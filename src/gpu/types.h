@@ -30,6 +30,39 @@ extern "C" {
 #endif // __cplusplus
 
 /**
+ * (right ascension, declination) coordinates. Each is in units of radians.
+ */
+typedef struct RADec {
+    // right ascension coordinate [radians]
+    FLOAT ra;
+    // declination coordinate [radians]
+    FLOAT dec;
+} RADec;
+
+/**
+ * (hour angle, declination) coordinates. Each is in units of radians.
+ */
+typedef struct HADec {
+    // hour angle coordinate [radians]
+    FLOAT ha;
+    // declination coordinate [radians]
+    FLOAT dec;
+} HADec;
+
+/**
+ * The (x,y,z) coordinates of an antenna/tile/station. They are in units of
+ * metres.
+ */
+typedef struct XYZ {
+    // x coordinate [metres]
+    FLOAT x;
+    // y coordinate [metres]
+    FLOAT y;
+    // z coordinate [metres]
+    FLOAT z;
+} XYZ;
+
+/**
  * The (u,v,w) coordinates of a baseline. They are in units of metres.
  */
 typedef struct UVW {
@@ -240,6 +273,18 @@ typedef struct Shapelets {
     const ShapeletCoeff *list_shapelet_coeffs;
     const int *list_num_shapelet_coeffs;
 } Shapelets;
+
+/**
+ * Ionospheric constants.
+ */
+typedef struct IonoConsts {
+    /// The constant proportional to u.
+    double alpha;
+    /// The constant proportional to u.
+    double beta;
+    /// ... how do I describe this?
+    double gain;
+} IonoConsts;
 
 #ifdef __cplusplus
 } // extern "C"

@@ -28,42 +28,42 @@ use crate::{
     constants::*,
     context::Polarisations,
     model::mask_pols,
-    srclist::{ComponentList, GaussianParams, PerComponentParams, SourceList},
+    srclist::{ComponentList, GaussianParams, PerComponentParams, Source, SourceList},
 };
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 const SHAPELET_CONST: f64 = SQRT_FRAC_PI_SQ_2_LN_2 / shapelets::SBF_DX;
 
 pub struct SkyModellerCpu<'a> {
-    pub(super) beam: &'a dyn Beam,
+    pub(crate) beam: &'a dyn Beam,
 
     /// The phase centre used for all modelling.
-    pub(super) phase_centre: RADec,
+    pub(crate) phase_centre: RADec,
     /// The longitude of the array we're using \[radians\].
-    pub(super) array_longitude: f64,
+    pub(crate) array_longitude: f64,
     /// The latitude of the array we're using \[radians\].
-    pub(super) array_latitude: f64,
+    pub(crate) array_latitude: f64,
     /// The UT1 - UTC offset. If this is 0, effectively UT1 == UTC, which is a
     /// wrong assumption by up to 0.9s. We assume the this value does not change
     /// over the timestamps given to this `SkyModellerCpu`.
-    pub(super) dut1: Duration,
+    pub(crate) dut1: Duration,
     /// Shift baselines and LSTs back to J2000.
-    pub(super) precess: bool,
+    pub(crate) precess: bool,
 
-    pub(super) unflagged_fine_chan_freqs: &'a [f64],
+    pub(crate) unflagged_fine_chan_freqs: &'a [f64],
 
     /// The [`XyzGeodetic`] positions of each of the unflagged tiles.
-    pub(super) unflagged_tile_xyzs: &'a [XyzGeodetic],
-    pub(super) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    pub(crate) unflagged_tile_xyzs: &'a [XyzGeodetic],
+    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
-    pub(super) components: ComponentList,
+    pub(crate) components: ComponentList,
 
     tile_index_to_array_index_map: Vec<usize>,
     freq_map: Vec<usize>,
     unique_tiles: Vec<usize>,
     unique_freqs: Vec<f64>,
 
-    pub(super) pols: Polarisations,
+    pub(crate) pols: Polarisations,
 }
 
 impl<'a> SkyModellerCpu<'a> {
@@ -81,7 +81,14 @@ impl<'a> SkyModellerCpu<'a> {
         dut1: Duration,
         apply_precession: bool,
     ) -> SkyModellerCpu<'a> {
-        let components = ComponentList::new(source_list, unflagged_fine_chan_freqs, phase_centre);
+        let components = ComponentList::new(
+            source_list
+                .values()
+                .rev()
+                .flat_map(|src| src.components.iter()),
+            unflagged_fine_chan_freqs,
+            phase_centre,
+        );
         let maps = crate::math::TileBaselineFlags::new(
             unflagged_tile_xyzs.len() + flagged_tiles.len(),
             flagged_tiles.clone(),
@@ -794,6 +801,20 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         mask_pols(vis_fb, self.pols);
 
         Ok(uvws)
+    }
+
+    fn update_with_a_source(
+        &mut self,
+        source: &Source,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError> {
+        self.phase_centre = phase_centre;
+        self.components = ComponentList::new(
+            source.components.iter(),
+            self.unflagged_fine_chan_freqs,
+            phase_centre,
+        );
+        Ok(())
     }
 }
 

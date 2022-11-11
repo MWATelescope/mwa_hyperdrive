@@ -18,6 +18,7 @@ mod beam;
 mod di_calibrate;
 mod dipole_gains;
 mod error;
+mod peel;
 mod solutions;
 mod srclist;
 mod vis_convert;
@@ -94,6 +95,9 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/di_cal/intro.html"#
     )]
     DiCalibrate(di_calibrate::DiCalArgs),
 
+    #[clap(about = r#"Peeling!"#)]
+    Peel(peel::PeelArgs),
+
     #[clap(alias = "convert-vis")]
     #[clap(about = r#"Convert visibilities from one type to another.
 https://mwatelescope.github.io/mwa_hyperdrive/user/vis_convert/intro.html"#)]
@@ -158,6 +162,7 @@ impl Hyperdrive {
         // Print the version of hyperdrive and its build-time information.
         let sub_command = match &self.command {
             Command::DiCalibrate(_) => "di-calibrate",
+            Command::Peel(_) => "peel",
             Command::VisConvert(_) => "vis-convert",
             Command::VisSimulate(_) => "vis-simulate",
             Command::VisSubtract(_) => "vis-subtract",
@@ -193,6 +198,10 @@ impl Hyperdrive {
 
         match self.command {
             Command::DiCalibrate(args) => {
+                merge_save_run!(args)
+            }
+
+            Command::Peel(args) => {
                 merge_save_run!(args)
             }
 

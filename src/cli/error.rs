@@ -10,6 +10,7 @@ use thiserror::Error;
 use super::{
     common::InputVisArgsError,
     di_calibrate::DiCalArgsError,
+    peel::PeelArgsError,
     solutions::{SolutionsApplyArgsError, SolutionsPlotError},
     srclist::SrclistByBeamError,
     vis_convert::VisConvertArgsError,
@@ -24,7 +25,7 @@ use crate::{
         GlobError,
     },
     model::ModelError,
-    params::{DiCalibrateError, VisConvertError, VisSimulateError, VisSubtractError},
+    params::{DiCalibrateError, PeelError, VisConvertError, VisSimulateError, VisSubtractError},
     solutions::{SolutionsReadError, SolutionsWriteError},
     srclist::{ReadSourceListError, SrclistError, WriteSourceListError},
 };
@@ -38,6 +39,10 @@ pub enum HyperdriveError {
     /// An error related to di-calibrate.
     #[error("{0}\n\nSee for more info: {URL}/user/di_cal/intro.html")]
     DiCalibrate(String),
+
+    /// An error related to peeling.
+    #[error("{0}\n\nSee for more info: {URL}/*****.html")]
+    Peel(String),
 
     /// An error related to solutions-apply.
     #[error("{0}\n\nSee for more info: {URL}/user/solutions_apply/intro.html")]
@@ -160,6 +165,50 @@ impl From<DiCalibrateError> for HyperdriveError {
             DiCalibrateError::VisRead(e) => Self::from(e),
             DiCalibrateError::VisWrite(_) => Self::VisWrite(s),
             DiCalibrateError::Model(_) | DiCalibrateError::IO(_) => Self::Generic(s),
+        }
+    }
+}
+
+impl From<PeelArgsError> for HyperdriveError {
+    fn from(e: PeelArgsError) -> Self {
+        match e {
+            PeelArgsError::NoOutput
+            | PeelArgsError::NoChannels
+            | PeelArgsError::ZeroPasses
+            | PeelArgsError::ParseIonoTimeAverageFactor(_)
+            | PeelArgsError::ParseIonoFreqAverageFactor(_)
+            | PeelArgsError::IonoTimeFactorNotInteger
+            | PeelArgsError::IonoFreqFactorNotInteger
+            | PeelArgsError::IonoTimeResNotMultiple { .. }
+            | PeelArgsError::IonoFreqResNotMultiple { .. }
+            | PeelArgsError::IonoTimeFactorZero
+            | PeelArgsError::IonoFreqFactorZero
+            | PeelArgsError::ParseUvwMin(_)
+            | PeelArgsError::ParseUvwMax(_) => Self::Generic(e.to_string()),
+            PeelArgsError::Glob(e) => Self::from(e),
+            PeelArgsError::VisRead(e) => Self::from(e),
+            PeelArgsError::FileWrite(e) => Self::from(e),
+            PeelArgsError::SourceList(e) => Self::from(e),
+            PeelArgsError::Beam(e) => Self::from(e),
+            PeelArgsError::Model(e) => Self::from(e),
+            PeelArgsError::IO(e) => Self::from(e),
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            PeelArgsError::Gpu(e) => Self::from(e),
+        }
+    }
+}
+
+impl From<PeelError> for HyperdriveError {
+    fn from(e: PeelError) -> Self {
+        match e {
+            PeelError::VisRead(e) => Self::from(e),
+            PeelError::VisWrite(e) => Self::from(e),
+            PeelError::FileWrite(e) => Self::from(e),
+            PeelError::Beam(e) => Self::from(e),
+            PeelError::Model(e) => Self::from(e),
+            PeelError::IO(e) => Self::from(e),
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            PeelError::Gpu(e) => Self::from(e),
         }
     }
 }
