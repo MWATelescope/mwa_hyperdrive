@@ -12,15 +12,15 @@
 
 mod di_calibration;
 mod input_vis;
+mod peel;
 mod solutions_apply;
 mod vis_convert;
 mod vis_simulate;
 mod vis_subtract;
 
-#[cfg(test)]
-pub(crate) use di_calibration::CalVis;
 pub(crate) use di_calibration::{DiCalParams, DiCalibrateError};
 pub(crate) use input_vis::InputVisParams;
+pub(crate) use peel::{PeelError, PeelParams};
 pub(crate) use solutions_apply::SolutionsApplyParams;
 pub(crate) use vis_convert::{VisConvertError, VisConvertParams};
 pub(crate) use vis_simulate::{VisSimulateError, VisSimulateParams};

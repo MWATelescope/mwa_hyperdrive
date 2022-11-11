@@ -31,6 +31,7 @@ cfg_if::cfg_if! {
 
         include!("types_single.rs");
         include!("model_single.rs");
+        include!("peel_single.rs");
     } else if #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))] {
         /// f64 (not using "gpu-single")
         pub(crate) type GpuFloat = f64;
@@ -38,6 +39,7 @@ cfg_if::cfg_if! {
 
         include!("types_double.rs");
         include!("model_double.rs");
+        include!("peel_double.rs");
     }
 }
 
@@ -47,6 +49,7 @@ use cuda_runtime_sys::{
     cudaDeviceSynchronize as gpuDeviceSynchronize, cudaError::cudaSuccess as gpuSuccess,
     cudaFree as gpuFree, cudaGetErrorString as gpuGetErrorString,
     cudaGetLastError as gpuGetLastError, cudaMalloc as gpuMalloc, cudaMemcpy as gpuMemcpy,
+    cudaMemcpyKind::cudaMemcpyDeviceToDevice as gpuMemcpyDeviceToDevice,
     cudaMemcpyKind::cudaMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
     cudaMemcpyKind::cudaMemcpyHostToDevice as gpuMemcpyHostToDevice,
 };
@@ -55,6 +58,7 @@ use hip_sys::hiprt::{
     hipDeviceSynchronize as gpuDeviceSynchronize, hipError_t::hipSuccess as gpuSuccess,
     hipFree as gpuFree, hipGetErrorString as gpuGetErrorString, hipGetLastError as gpuGetLastError,
     hipMalloc as gpuMalloc, hipMemcpy as gpuMemcpy,
+    hipMemcpyKind::hipMemcpyDeviceToDevice as gpuMemcpyDeviceToDevice,
     hipMemcpyKind::hipMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
     hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
 };
@@ -177,7 +181,7 @@ unsafe fn check_for_errors(gpu_call: GpuCall) -> Result<(), GpuError> {
 /// [`gpuFree`] is called on the pointer.
 #[derive(Debug)]
 pub(crate) struct DevicePointer<T> {
-    ptr: *mut T,
+    pub(crate) ptr: *mut T,
 
     /// The number of bytes allocated against `ptr`.
     size: usize,
@@ -202,6 +206,11 @@ impl<T> DevicePointer<T> {
     /// Get a mutable pointer to the device memory.
     pub(crate) fn get_mut(&mut self) -> *mut T {
         self.ptr
+    }
+
+    /// The the number of bytes allocated in this [`DevicePointer`].
+    pub(crate) fn get_size(&self) -> usize {
+        self.size
     }
 
     /// Allocate a number of bytes on the device.
@@ -319,8 +328,27 @@ impl<T> DevicePointer<T> {
         }
     }
 
+    /// Copy the contents of a [`DevicePointer`] to another one. The other one is realloc'd if necessary.
+    #[track_caller]
+    pub(crate) fn copy_to(&self, other: &mut DevicePointer<T>) -> Result<(), GpuError> {
+        // Nothing to do if self is empty.
+        if self.size == 0 {
+            return Ok(());
+        }
+
+        other.realloc(self.size)?;
+        unsafe {
+            gpuMemcpy(
+                other.get_mut().cast(),
+                self.get().cast(),
+                self.size,
+                gpuMemcpyDeviceToDevice,
+            );
+            check_for_errors(GpuCall::CopyToDevice)
+        }
+    }
+
     /// Clear all of the bytes in the buffer by writing zeros.
-    #[cfg(test)]
     pub(crate) fn clear(&mut self) {
         #[cfg(feature = "cuda")]
         use cuda_runtime_sys::cudaMemset as gpuMemset;

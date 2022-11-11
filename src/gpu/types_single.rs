@@ -4,6 +4,81 @@ pub const SBF_C: f32 = 5000.0;
 pub const SBF_L: ::std::os::raw::c_int = 10001;
 pub const SBF_N: ::std::os::raw::c_int = 101;
 pub const SBF_DX: f32 = 0.009999999776482582;
+#[doc = " (right ascension, declination) coordinates. Each is in units of radians."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct RADec {
+    pub ra: f32,
+    pub dec: f32,
+}
+#[test]
+fn bindgen_test_layout_RADec() {
+    const UNINIT: ::std::mem::MaybeUninit<RADec> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<RADec>(),
+        8usize,
+        concat!("Size of: ", stringify!(RADec))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<RADec>(),
+        4usize,
+        concat!("Alignment of ", stringify!(RADec))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ra) as usize - ptr as usize },
+        0usize,
+        concat!("Offset of field: ", stringify!(RADec), "::", stringify!(ra))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).dec) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(RADec),
+            "::",
+            stringify!(dec)
+        )
+    );
+}
+#[doc = " The (x,y,z) coordinates of an antenna/tile/station. They are in units of\n metres."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct XYZ {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+#[test]
+fn bindgen_test_layout_XYZ() {
+    const UNINIT: ::std::mem::MaybeUninit<XYZ> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<XYZ>(),
+        12usize,
+        concat!("Size of: ", stringify!(XYZ))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<XYZ>(),
+        4usize,
+        concat!("Alignment of ", stringify!(XYZ))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).x) as usize - ptr as usize },
+        0usize,
+        concat!("Offset of field: ", stringify!(XYZ), "::", stringify!(x))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).y) as usize - ptr as usize },
+        4usize,
+        concat!("Offset of field: ", stringify!(XYZ), "::", stringify!(y))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).z) as usize - ptr as usize },
+        8usize,
+        concat!("Offset of field: ", stringify!(XYZ), "::", stringify!(z))
+    );
+}
 #[doc = " The (u,v,w) coordinates of a baseline. They are in units of metres."]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -1291,4 +1366,60 @@ impl Default for Shapelets {
             s.assume_init()
         }
     }
+}
+#[doc = " Ionospheric constants."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct IonoConsts {
+    #[doc = " The constant proportional to u."]
+    pub alpha: f64,
+    #[doc = " The constant proportional to u."]
+    pub beta: f64,
+    #[doc = " ... how do I describe this?"]
+    pub gain: f64,
+}
+#[test]
+fn bindgen_test_layout_IonoConsts() {
+    const UNINIT: ::std::mem::MaybeUninit<IonoConsts> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<IonoConsts>(),
+        24usize,
+        concat!("Size of: ", stringify!(IonoConsts))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<IonoConsts>(),
+        8usize,
+        concat!("Alignment of ", stringify!(IonoConsts))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).alpha) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(IonoConsts),
+            "::",
+            stringify!(alpha)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).beta) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(IonoConsts),
+            "::",
+            stringify!(beta)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).gain) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(IonoConsts),
+            "::",
+            stringify!(gain)
+        )
+    );
 }
