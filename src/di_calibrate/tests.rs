@@ -1044,6 +1044,7 @@ fn test_multiple_timeblocks_behave() {
 /// Given calibration parameters and visibilities, this function tests that
 /// everything matches an expected quality. The values may change over time but
 /// they should be consistent with whatever tests use this test code.
+#[track_caller]
 pub(crate) fn test_1090008640_quality(params: DiCalParams, cal_vis: CalVis) {
     let (_, cal_results) = calibrate_timeblocks(
         cal_vis.vis_data.view(),
@@ -1078,7 +1079,7 @@ pub(crate) fn test_1090008640_quality(params: DiCalParams, cal_vis: CalVis) {
             0 => panic!("0 iterations? Something is wrong."),
             _ => {
                 if cal_result.num_iterations % 2 == 1 {
-                    panic!("An odd number of iterations shouldn't be possible; at the time of writing, only even numbers are allowed.");
+                    panic!("An odd number of iterations ({}) shouldn't be possible; at the time of writing, only even numbers are allowed.", cal_result.num_iterations);
                 }
                 fewest_iterations = fewest_iterations.min(cal_result.num_iterations);
             }

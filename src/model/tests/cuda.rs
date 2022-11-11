@@ -10,8 +10,6 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
-#[cfg(not(feature = "cuda-single"))]
-use serial_test::serial;
 use vec1::vec1;
 
 use super::*;
@@ -231,7 +229,6 @@ fn shapelet_off_zenith_gpu() {
 
 // Put a single point source at zenith.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn point_zenith_gpu_fee() {
     let obs = ObsParams::new(false);
@@ -267,7 +264,6 @@ fn point_zenith_gpu_fee() {
 }
 
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn point_off_zenith_gpu_fee() {
     let obs = ObsParams::new(false);
@@ -304,7 +300,6 @@ fn point_off_zenith_gpu_fee() {
 
 // Put a single Gaussian source at zenith.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn gaussian_zenith_gpu_fee() {
     let obs = ObsParams::new(false);
@@ -341,7 +336,6 @@ fn gaussian_zenith_gpu_fee() {
 
 // Put a single Gaussian source just off zenith.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn gaussian_off_zenith_gpu_fee() {
     let obs = ObsParams::new(false);
@@ -378,7 +372,6 @@ fn gaussian_off_zenith_gpu_fee() {
 
 // Put a single shapelet source at zenith.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn shapelet_zenith_gpu_fee() {
     let obs = ObsParams::new(false);
@@ -415,7 +408,6 @@ fn shapelet_zenith_gpu_fee() {
 
 // Put a single shapelet source just off zenith.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn shapelet_off_zenith_gpu_fee() {
     let obs = ObsParams::new(false);
@@ -455,7 +447,6 @@ fn shapelet_off_zenith_gpu_fee() {
 /// to the wrong component. Put multiple components with different flux types in
 /// a source list and model it.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn beam_responses_apply_properly_power_law_and_list() {
     let obs = ObsParams::new(false);
@@ -469,7 +460,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_points(obs.lst, obs.array_latitude_rad);
@@ -503,7 +494,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_gaussians(obs.lst, obs.array_latitude_rad);
@@ -532,7 +523,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_shapelets(obs.lst, obs.array_latitude_rad);
@@ -555,7 +546,6 @@ fn beam_responses_apply_properly_power_law_and_list() {
 
 /// Similar to above.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn beam_responses_apply_properly_power_law_and_curved_power_law() {
     let obs = ObsParams::new(false);
@@ -569,7 +559,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_points(obs.lst, obs.array_latitude_rad);
@@ -603,7 +593,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_gaussians(obs.lst, obs.array_latitude_rad);
@@ -632,7 +622,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_shapelets(obs.lst, obs.array_latitude_rad);
@@ -655,7 +645,6 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
 
 /// Similar to above.
 #[test]
-#[serial]
 #[cfg(not(feature = "cuda-single"))]
 fn beam_responses_apply_properly_curved_power_law_and_list() {
     let obs = ObsParams::new(false);
@@ -669,7 +658,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_points(obs.lst, obs.array_latitude_rad);
@@ -703,7 +692,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_gaussians(obs.lst, obs.array_latitude_rad);
@@ -732,7 +721,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
             ],
         },
     );
-    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    let mut visibilities = Array2::zeros((obs.uvws.len(), obs.freqs.len()));
     let mut modeller = obs.get_gpu_modeller(&srclist);
     unsafe {
         let result = modeller.model_shapelets(obs.lst, obs.array_latitude_rad);

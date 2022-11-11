@@ -1153,11 +1153,13 @@ impl DiCalParams {
             panic!("Frequency averaging isn't working right now. Sorry!");
         }
 
+        let mut cal_vis = get_cal_vis(self, !self.no_progress_bars)?;
+        cal_vis.scale_by_weights(Some(&self.baseline_weights));
         let CalVis {
             vis_data,
             vis_weights,
             vis_model,
-        } = get_cal_vis(self, !self.no_progress_bars)?;
+        } = cal_vis;
         assert_eq!(vis_weights.len_of(Axis(2)), self.baseline_weights.len());
 
         // The shape of the array containing output Jones matrices.

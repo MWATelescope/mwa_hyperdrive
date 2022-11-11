@@ -1551,6 +1551,7 @@ dependencies = [
  "mwalib",
  "ndarray",
  "num-complex",
+ "num-traits",
  "plotters",
  "rayon",
  "regex",
