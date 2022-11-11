@@ -10,6 +10,7 @@ use thiserror::Error;
 use crate::{
     cli::{
         di_calibrate::DiCalArgsError,
+        peel::PeelError,
         solutions::{apply::SolutionsApplyError, plot::SolutionsPlotError},
         vis_utils::{simulate::VisSimulateError, subtract::VisSubtractError},
     },
@@ -29,6 +30,10 @@ pub enum HyperdriveError {
     /// An error related to di-calibrate.
     #[error("{0}\n\nSee for more info: {URL}/user/di_cal/intro.html")]
     DiCalibrate(String),
+
+    /// An error related to di-calibrate.
+    #[error("{0}\n\nSee for more info: {URL}/*****.html")]
+    Peel(String),
 
     /// An error related to solutions-apply.
     #[error("{0}\n\nSee for more info: {URL}/user/solutions_apply/intro.html")]
@@ -133,6 +138,14 @@ impl From<DiCalibrateError> for HyperdriveError {
             DiCalibrateError::VisWrite(_) => Self::VisWrite(s),
             DiCalibrateError::Model(_) | DiCalibrateError::IO(_) => Self::Generic(s),
         }
+    }
+}
+
+impl From<PeelError> for HyperdriveError {
+    fn from(e: PeelError) -> Self {
+        let s = e.to_string();
+        // TODO
+        Self::Peel(s)
     }
 }
 

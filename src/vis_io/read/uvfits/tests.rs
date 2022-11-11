@@ -627,7 +627,8 @@ fn test_1090008640_calibration_quality() {
         Err(e) => panic!("{}", e),
     };
 
-    let cal_vis = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
+    let mut cal_vis = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
+    cal_vis.scale_by_weights(Some(&params.baseline_weights));
     test_1090008640_quality(params, cal_vis);
 }
 

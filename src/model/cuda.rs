@@ -26,6 +26,8 @@ use crate::{
     },
 };
 
+use super::SkyModeller;
+
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
 /// second is the source component. The length of `hadecs`, `lmns`,
 /// `*_list_fds`'s second axis are the same.
@@ -49,7 +51,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     precess: bool,
 
     /// The buffer for UVW coordinates.
-    d_uvws: DevicePointer<cuda::UVW>,
+    pub(crate) d_uvws: DevicePointer<cuda::UVW>,
     /// The [`XyzGeodetic`] positions of each of the unflagged tiles.
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     num_baselines: i32,
@@ -70,6 +72,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     sbf_dx: CudaFloat,
 
     d_vis: DevicePointer<Jones<f32>>,
+    freqs: &'a [f64],
     d_freqs: DevicePointer<CudaFloat>,
     d_shapelet_basis_values: DevicePointer<CudaFloat>,
 
@@ -157,7 +160,7 @@ impl<'a> SkyModellerCuda<'a> {
         beam: &dyn Beam,
         source_list: &SourceList,
         unflagged_tile_xyzs: &'a [XyzGeodetic],
-        unflagged_fine_chan_freqs: &[f64],
+        unflagged_fine_chan_freqs: &'a [f64],
         flagged_tiles: &HashSet<usize>,
         phase_centre: RADec,
         array_longitude_rad: f64,
@@ -165,232 +168,6 @@ impl<'a> SkyModellerCuda<'a> {
         dut1: Duration,
         apply_precession: bool,
     ) -> Result<SkyModellerCuda<'a>, ModelError> {
-        let mut point_power_law_radecs: Vec<RADec> = vec![];
-        let mut point_power_law_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut point_power_law_fds: Vec<_> = vec![];
-        let mut point_power_law_sis: Vec<_> = vec![];
-
-        let mut point_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut point_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut point_curved_power_law_fds: Vec<_> = vec![];
-        let mut point_curved_power_law_sis: Vec<_> = vec![];
-        let mut point_curved_power_law_qs: Vec<_> = vec![];
-
-        let mut point_list_radecs: Vec<RADec> = vec![];
-        let mut point_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut point_list_fds: Vec<&FluxDensityType> = vec![];
-
-        let mut gaussian_power_law_radecs: Vec<RADec> = vec![];
-        let mut gaussian_power_law_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut gaussian_power_law_fds: Vec<_> = vec![];
-        let mut gaussian_power_law_sis: Vec<_> = vec![];
-        let mut gaussian_power_law_gps: Vec<cuda::GaussianParams> = vec![];
-
-        let mut gaussian_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut gaussian_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut gaussian_curved_power_law_fds: Vec<_> = vec![];
-        let mut gaussian_curved_power_law_sis: Vec<_> = vec![];
-        let mut gaussian_curved_power_law_qs: Vec<_> = vec![];
-        let mut gaussian_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
-
-        let mut gaussian_list_radecs: Vec<RADec> = vec![];
-        let mut gaussian_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut gaussian_list_fds: Vec<&FluxDensityType> = vec![];
-        let mut gaussian_list_gps: Vec<cuda::GaussianParams> = vec![];
-
-        let mut shapelet_power_law_radecs: Vec<RADec> = vec![];
-        let mut shapelet_power_law_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut shapelet_power_law_fds: Vec<_> = vec![];
-        let mut shapelet_power_law_sis: Vec<_> = vec![];
-        let mut shapelet_power_law_gps: Vec<cuda::GaussianParams> = vec![];
-        let mut shapelet_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
-
-        let mut shapelet_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut shapelet_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut shapelet_curved_power_law_fds: Vec<_> = vec![];
-        let mut shapelet_curved_power_law_sis: Vec<_> = vec![];
-        let mut shapelet_curved_power_law_qs: Vec<_> = vec![];
-        let mut shapelet_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
-        let mut shapelet_curved_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
-
-        let mut shapelet_list_radecs: Vec<RADec> = vec![];
-        let mut shapelet_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut shapelet_list_fds: Vec<&FluxDensityType> = vec![];
-        let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
-        let mut shapelet_list_coeffs: Vec<&[ShapeletCoeff]> = vec![];
-
-        let jones_to_cuda_jones = |j: Jones<f64>| -> CudaJones {
-            CudaJones {
-                j00_re: j[0].re as CudaFloat,
-                j00_im: j[0].im as CudaFloat,
-                j01_re: j[1].re as CudaFloat,
-                j01_im: j[1].im as CudaFloat,
-                j10_re: j[2].re as CudaFloat,
-                j10_im: j[2].im as CudaFloat,
-                j11_re: j[3].re as CudaFloat,
-                j11_im: j[3].im as CudaFloat,
-            }
-        };
-
-        // Reverse the source list; if the source list has been sorted
-        // (brightest sources first), reversing makes the dimmest sources get
-        // used first. This is good because floating-point precision errors are
-        // smaller when similar values are accumulated. Accumulating into a
-        // float starting from the brightest component means that the
-        // floating-point precision errors are greater as we work through the
-        // source list.
-        for comp in source_list
-            .iter()
-            .rev()
-            .flat_map(|(_, src)| &src.components)
-        {
-            let radec = comp.radec;
-            let LmnRime { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
-            let lmn = cuda::LmnRime {
-                l: l as CudaFloat,
-                m: m as CudaFloat,
-                n: n as CudaFloat,
-            };
-            match &comp.comp_type {
-                ComponentType::Point => match comp.flux_type {
-                    FluxDensityType::PowerLaw { si, .. } => {
-                        point_power_law_radecs.push(radec);
-                        point_power_law_lmns.push(lmn);
-                        let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                        let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                        point_power_law_fds.push(cuda_inst_fd);
-                        point_power_law_sis.push(si as CudaFloat);
-                    }
-
-                    FluxDensityType::CurvedPowerLaw { si, q, .. } => {
-                        point_curved_power_law_radecs.push(radec);
-                        point_curved_power_law_lmns.push(lmn);
-                        let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                        let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                        point_curved_power_law_fds.push(cuda_inst_fd);
-                        point_curved_power_law_qs.push(q as CudaFloat);
-                        point_curved_power_law_sis.push(si as CudaFloat);
-                    }
-
-                    FluxDensityType::List { .. } => {
-                        point_list_radecs.push(radec);
-                        point_list_lmns.push(lmn);
-                        point_list_fds.push(&comp.flux_type);
-                    }
-                },
-
-                ComponentType::Gaussian { maj, min, pa } => {
-                    let gp = cuda::GaussianParams {
-                        maj: *maj as CudaFloat,
-                        min: *min as CudaFloat,
-                        pa: *pa as CudaFloat,
-                    };
-                    match comp.flux_type {
-                        FluxDensityType::PowerLaw { si, .. } => {
-                            gaussian_power_law_radecs.push(radec);
-                            gaussian_power_law_lmns.push(lmn);
-                            let fd_at_150mhz =
-                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            gaussian_power_law_fds.push(cuda_inst_fd);
-                            gaussian_power_law_sis.push(si as CudaFloat);
-                            gaussian_power_law_gps.push(gp);
-                        }
-
-                        FluxDensityType::CurvedPowerLaw { si, q, .. } => {
-                            gaussian_curved_power_law_radecs.push(radec);
-                            gaussian_curved_power_law_lmns.push(lmn);
-                            let fd_at_150mhz =
-                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            gaussian_curved_power_law_fds.push(cuda_inst_fd);
-                            gaussian_curved_power_law_qs.push(q as CudaFloat);
-                            gaussian_curved_power_law_sis.push(si as CudaFloat);
-                            gaussian_curved_power_law_gps.push(gp);
-                        }
-
-                        FluxDensityType::List { .. } => {
-                            gaussian_list_radecs.push(radec);
-                            gaussian_list_lmns.push(lmn);
-                            gaussian_list_fds.push(&comp.flux_type);
-                            gaussian_list_gps.push(gp);
-                        }
-                    };
-                }
-
-                ComponentType::Shapelet {
-                    maj,
-                    min,
-                    pa,
-                    coeffs,
-                } => {
-                    let gp = cuda::GaussianParams {
-                        maj: *maj as CudaFloat,
-                        min: *min as CudaFloat,
-                        pa: *pa as CudaFloat,
-                    };
-                    match comp.flux_type {
-                        FluxDensityType::PowerLaw { si, .. } => {
-                            shapelet_power_law_radecs.push(radec);
-                            shapelet_power_law_lmns.push(lmn);
-                            let fd_at_150mhz = comp
-                                .flux_type
-                                .estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            shapelet_power_law_fds.push(cuda_inst_fd);
-                            shapelet_power_law_sis.push(si as CudaFloat);
-                            shapelet_power_law_gps.push(gp);
-                            shapelet_power_law_coeffs.push(coeffs);
-                        }
-
-                        FluxDensityType::CurvedPowerLaw { si, q, .. } => {
-                            shapelet_curved_power_law_radecs.push(radec);
-                            shapelet_curved_power_law_lmns.push(lmn);
-                            let fd_at_150mhz =
-                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            shapelet_curved_power_law_fds.push(cuda_inst_fd);
-                            shapelet_curved_power_law_qs.push(q as CudaFloat);
-                            shapelet_curved_power_law_sis.push(si as CudaFloat);
-                            shapelet_curved_power_law_gps.push(gp);
-                            shapelet_curved_power_law_coeffs.push(coeffs);
-                        }
-
-                        FluxDensityType::List { .. } => {
-                            shapelet_list_radecs.push(radec);
-                            shapelet_list_lmns.push(lmn);
-                            shapelet_list_fds.push(&comp.flux_type);
-                            shapelet_list_gps.push(gp);
-                            shapelet_list_coeffs.push(coeffs);
-                        }
-                    }
-                }
-            }
-        }
-
-        let point_list_fds =
-            get_instrumental_flux_densities(&point_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_cuda_jones);
-        let gaussian_list_fds =
-            get_instrumental_flux_densities(&gaussian_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_cuda_jones);
-        let shapelet_list_fds =
-            get_instrumental_flux_densities(&shapelet_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_cuda_jones);
-
-        let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
-            get_flattened_coeffs(shapelet_power_law_coeffs);
-        let (shapelet_curved_power_law_coeffs, shapelet_curved_power_law_coeff_lens) =
-            get_flattened_coeffs(shapelet_curved_power_law_coeffs);
-        let (shapelet_list_coeffs, shapelet_list_coeff_lens) =
-            get_flattened_coeffs(shapelet_list_coeffs);
-
         // Variables for CUDA. They're made flexible in their types for
         // whichever precision is being used in the CUDA code.
         let (unflagged_fine_chan_freqs_ints, unflagged_fine_chan_freqs_floats): (Vec<_>, Vec<_>) =
@@ -426,7 +203,7 @@ impl<'a> SkyModellerCuda<'a> {
         let d_tile_index_to_unflagged_tile_index_map =
             DevicePointer::copy_to_device(&tile_index_to_unflagged_tile_index_map)?;
 
-        Ok(SkyModellerCuda {
+        let mut modeller = SkyModellerCuda {
             cuda_beam: beam.prepare_cuda_beam(&unflagged_fine_chan_freqs_ints)?,
             d_beam_jones: DevicePointer::default(),
 
@@ -453,100 +230,69 @@ impl<'a> SkyModellerCuda<'a> {
             sbf_dx: shapelets::SBF_DX as CudaFloat,
 
             d_vis,
+            freqs: unflagged_fine_chan_freqs,
             d_freqs,
             d_shapelet_basis_values: DevicePointer::copy_to_device(&shapelet_basis_values)?,
 
-            point_power_law_radecs,
-            point_power_law_lmns: DevicePointer::copy_to_device(&point_power_law_lmns)?,
-            point_power_law_fds: DevicePointer::copy_to_device(&point_power_law_fds)?,
-            point_power_law_sis: DevicePointer::copy_to_device(&point_power_law_sis)?,
+            point_power_law_radecs: vec![],
+            point_power_law_lmns: DevicePointer::default(),
+            point_power_law_fds: DevicePointer::default(),
+            point_power_law_sis: DevicePointer::default(),
 
-            point_curved_power_law_radecs,
-            point_curved_power_law_lmns: DevicePointer::copy_to_device(
-                &point_curved_power_law_lmns,
-            )?,
-            point_curved_power_law_fds: DevicePointer::copy_to_device(&point_curved_power_law_fds)?,
-            point_curved_power_law_sis: DevicePointer::copy_to_device(&point_curved_power_law_sis)?,
-            point_curved_power_law_qs: DevicePointer::copy_to_device(&point_curved_power_law_qs)?,
+            point_curved_power_law_radecs: vec![],
+            point_curved_power_law_lmns: DevicePointer::default(),
+            point_curved_power_law_fds: DevicePointer::default(),
+            point_curved_power_law_sis: DevicePointer::default(),
+            point_curved_power_law_qs: DevicePointer::default(),
 
-            point_list_radecs,
-            point_list_lmns: DevicePointer::copy_to_device(&point_list_lmns)?,
-            point_list_fds: DevicePointer::copy_to_device(
-                point_list_fds.as_slice().expect("is contiguous"),
-            )?,
+            point_list_radecs: vec![],
+            point_list_lmns: DevicePointer::default(),
+            point_list_fds: DevicePointer::default(),
 
-            gaussian_power_law_radecs,
-            gaussian_power_law_lmns: DevicePointer::copy_to_device(&gaussian_power_law_lmns)?,
-            gaussian_power_law_fds: DevicePointer::copy_to_device(&gaussian_power_law_fds)?,
-            gaussian_power_law_sis: DevicePointer::copy_to_device(&gaussian_power_law_sis)?,
-            gaussian_power_law_gps: DevicePointer::copy_to_device(&gaussian_power_law_gps)?,
+            gaussian_power_law_radecs: vec![],
+            gaussian_power_law_lmns: DevicePointer::default(),
+            gaussian_power_law_fds: DevicePointer::default(),
+            gaussian_power_law_sis: DevicePointer::default(),
+            gaussian_power_law_gps: DevicePointer::default(),
 
-            gaussian_curved_power_law_radecs,
-            gaussian_curved_power_law_lmns: DevicePointer::copy_to_device(
-                &gaussian_curved_power_law_lmns,
-            )?,
-            gaussian_curved_power_law_fds: DevicePointer::copy_to_device(
-                &gaussian_curved_power_law_fds,
-            )?,
-            gaussian_curved_power_law_sis: DevicePointer::copy_to_device(
-                &gaussian_curved_power_law_sis,
-            )?,
-            gaussian_curved_power_law_qs: DevicePointer::copy_to_device(
-                &gaussian_curved_power_law_qs,
-            )?,
-            gaussian_curved_power_law_gps: DevicePointer::copy_to_device(
-                &gaussian_curved_power_law_gps,
-            )?,
+            gaussian_curved_power_law_radecs: vec![],
+            gaussian_curved_power_law_lmns: DevicePointer::default(),
+            gaussian_curved_power_law_fds: DevicePointer::default(),
+            gaussian_curved_power_law_sis: DevicePointer::default(),
+            gaussian_curved_power_law_qs: DevicePointer::default(),
+            gaussian_curved_power_law_gps: DevicePointer::default(),
 
-            gaussian_list_radecs,
-            gaussian_list_lmns: DevicePointer::copy_to_device(&gaussian_list_lmns)?,
-            gaussian_list_fds: DevicePointer::copy_to_device(
-                gaussian_list_fds.as_slice().expect("is contiguous"),
-            )?,
-            gaussian_list_gps: DevicePointer::copy_to_device(&gaussian_list_gps)?,
+            gaussian_list_radecs: vec![],
+            gaussian_list_lmns: DevicePointer::default(),
+            gaussian_list_fds: DevicePointer::default(),
+            gaussian_list_gps: DevicePointer::default(),
 
-            shapelet_power_law_radecs,
-            shapelet_power_law_lmns: DevicePointer::copy_to_device(&shapelet_power_law_lmns)?,
-            shapelet_power_law_fds: DevicePointer::copy_to_device(&shapelet_power_law_fds)?,
-            shapelet_power_law_sis: DevicePointer::copy_to_device(&shapelet_power_law_sis)?,
-            shapelet_power_law_gps: DevicePointer::copy_to_device(&shapelet_power_law_gps)?,
-            shapelet_power_law_coeffs: DevicePointer::copy_to_device(&shapelet_power_law_coeffs)?,
-            shapelet_power_law_coeff_lens: DevicePointer::copy_to_device(
-                &shapelet_power_law_coeff_lens,
-            )?,
+            shapelet_power_law_radecs: vec![],
+            shapelet_power_law_lmns: DevicePointer::default(),
+            shapelet_power_law_fds: DevicePointer::default(),
+            shapelet_power_law_sis: DevicePointer::default(),
+            shapelet_power_law_gps: DevicePointer::default(),
+            shapelet_power_law_coeffs: DevicePointer::default(),
+            shapelet_power_law_coeff_lens: DevicePointer::default(),
 
-            shapelet_curved_power_law_radecs,
-            shapelet_curved_power_law_lmns: DevicePointer::copy_to_device(
-                &shapelet_curved_power_law_lmns,
-            )?,
-            shapelet_curved_power_law_fds: DevicePointer::copy_to_device(
-                &shapelet_curved_power_law_fds,
-            )?,
-            shapelet_curved_power_law_sis: DevicePointer::copy_to_device(
-                &shapelet_curved_power_law_sis,
-            )?,
-            shapelet_curved_power_law_qs: DevicePointer::copy_to_device(
-                &shapelet_curved_power_law_qs,
-            )?,
-            shapelet_curved_power_law_gps: DevicePointer::copy_to_device(
-                &shapelet_curved_power_law_gps,
-            )?,
-            shapelet_curved_power_law_coeffs: DevicePointer::copy_to_device(
-                &shapelet_curved_power_law_coeffs,
-            )?,
-            shapelet_curved_power_law_coeff_lens: DevicePointer::copy_to_device(
-                &shapelet_curved_power_law_coeff_lens,
-            )?,
+            shapelet_curved_power_law_radecs: vec![],
+            shapelet_curved_power_law_lmns: DevicePointer::default(),
+            shapelet_curved_power_law_fds: DevicePointer::default(),
+            shapelet_curved_power_law_sis: DevicePointer::default(),
+            shapelet_curved_power_law_qs: DevicePointer::default(),
+            shapelet_curved_power_law_gps: DevicePointer::default(),
+            shapelet_curved_power_law_coeffs: DevicePointer::default(),
+            shapelet_curved_power_law_coeff_lens: DevicePointer::default(),
 
-            shapelet_list_radecs,
-            shapelet_list_lmns: DevicePointer::copy_to_device(&shapelet_list_lmns)?,
-            shapelet_list_fds: DevicePointer::copy_to_device(
-                shapelet_list_fds.as_slice().expect("is contiguous"),
-            )?,
-            shapelet_list_gps: DevicePointer::copy_to_device(&shapelet_list_gps)?,
-            shapelet_list_coeffs: DevicePointer::copy_to_device(&shapelet_list_coeffs)?,
-            shapelet_list_coeff_lens: DevicePointer::copy_to_device(&shapelet_list_coeff_lens)?,
-        })
+            shapelet_list_radecs: vec![],
+            shapelet_list_lmns: DevicePointer::default(),
+            shapelet_list_fds: DevicePointer::default(),
+            shapelet_list_gps: DevicePointer::default(),
+            shapelet_list_coeffs: DevicePointer::default(),
+            shapelet_list_coeff_lens: DevicePointer::default(),
+        };
+        modeller.update_source_list(source_list, phase_centre)?;
+        Ok(modeller)
     }
 
     /// This function is mostly used for testing. For a single timestep, over
@@ -910,6 +656,317 @@ impl<'a> SkyModellerCuda<'a> {
 }
 
 impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
+    fn update_source_list(
+        &mut self,
+        source_list: &SourceList,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError> {
+        self.phase_centre = phase_centre;
+
+        self.point_power_law_radecs.clear();
+        let mut point_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut point_power_law_fds: Vec<_> = vec![];
+        let mut point_power_law_sis: Vec<_> = vec![];
+
+        self.point_curved_power_law_radecs.clear();
+        let mut point_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut point_curved_power_law_fds: Vec<_> = vec![];
+        let mut point_curved_power_law_sis: Vec<_> = vec![];
+        let mut point_curved_power_law_qs: Vec<_> = vec![];
+
+        self.point_list_radecs.clear();
+        let mut point_list_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut point_list_fds: Vec<&FluxDensityType> = vec![];
+
+        self.gaussian_power_law_radecs.clear();
+        let mut gaussian_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut gaussian_power_law_fds: Vec<_> = vec![];
+        let mut gaussian_power_law_sis: Vec<_> = vec![];
+        let mut gaussian_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+
+        self.gaussian_curved_power_law_radecs.clear();
+        let mut gaussian_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut gaussian_curved_power_law_fds: Vec<_> = vec![];
+        let mut gaussian_curved_power_law_sis: Vec<_> = vec![];
+        let mut gaussian_curved_power_law_qs: Vec<_> = vec![];
+        let mut gaussian_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+
+        self.gaussian_list_radecs.clear();
+        let mut gaussian_list_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut gaussian_list_fds: Vec<&FluxDensityType> = vec![];
+        let mut gaussian_list_gps: Vec<cuda::GaussianParams> = vec![];
+
+        self.shapelet_power_law_radecs.clear();
+        let mut shapelet_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut shapelet_power_law_fds: Vec<_> = vec![];
+        let mut shapelet_power_law_sis: Vec<_> = vec![];
+        let mut shapelet_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
+
+        self.shapelet_curved_power_law_radecs.clear();
+        let mut shapelet_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut shapelet_curved_power_law_fds: Vec<_> = vec![];
+        let mut shapelet_curved_power_law_sis: Vec<_> = vec![];
+        let mut shapelet_curved_power_law_qs: Vec<_> = vec![];
+        let mut shapelet_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_curved_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
+
+        self.shapelet_list_radecs.clear();
+        let mut shapelet_list_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut shapelet_list_fds: Vec<&FluxDensityType> = vec![];
+        let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_list_coeffs: Vec<&[ShapeletCoeff]> = vec![];
+
+        let jones_to_cuda_jones = |j: Jones<f64>| -> CudaJones {
+            CudaJones {
+                j00_re: j[0].re as CudaFloat,
+                j00_im: j[0].im as CudaFloat,
+                j01_re: j[1].re as CudaFloat,
+                j01_im: j[1].im as CudaFloat,
+                j10_re: j[2].re as CudaFloat,
+                j10_im: j[2].im as CudaFloat,
+                j11_re: j[3].re as CudaFloat,
+                j11_im: j[3].im as CudaFloat,
+            }
+        };
+
+        // Reverse the source list; if the source list has been sorted
+        // (brightest sources first), reversing makes the dimmest sources get
+        // used first. This is good because floating-point precision errors are
+        // smaller when similar values are accumulated. Accumulating into a
+        // float starting from the brightest component means that the
+        // floating-point precision errors are greater as we work through the
+        // source list.
+        for comp in source_list
+            .iter()
+            .rev()
+            .flat_map(|(_, src)| &src.components)
+        {
+            let radec = comp.radec;
+            let LmnRime { l, m, n } = radec.to_lmn(phase_centre).prepare_for_rime();
+            let lmn = cuda::LmnRime {
+                l: l as CudaFloat,
+                m: m as CudaFloat,
+                n: n as CudaFloat,
+            };
+            match &comp.comp_type {
+                ComponentType::Point => match comp.flux_type {
+                    FluxDensityType::PowerLaw { si, .. } => {
+                        self.point_power_law_radecs.push(radec);
+                        point_power_law_lmns.push(lmn);
+                        let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                        let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                        point_power_law_fds.push(cuda_inst_fd);
+                        point_power_law_sis.push(si as CudaFloat);
+                    }
+
+                    FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                        self.point_curved_power_law_radecs.push(radec);
+                        point_curved_power_law_lmns.push(lmn);
+                        let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                        let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                        point_curved_power_law_fds.push(cuda_inst_fd);
+                        point_curved_power_law_qs.push(q as CudaFloat);
+                        point_curved_power_law_sis.push(si as CudaFloat);
+                    }
+
+                    FluxDensityType::List { .. } => {
+                        self.point_list_radecs.push(radec);
+                        point_list_lmns.push(lmn);
+                        point_list_fds.push(&comp.flux_type);
+                    }
+                },
+
+                ComponentType::Gaussian { maj, min, pa } => {
+                    let gp = cuda::GaussianParams {
+                        maj: *maj as CudaFloat,
+                        min: *min as CudaFloat,
+                        pa: *pa as CudaFloat,
+                    };
+                    match comp.flux_type {
+                        FluxDensityType::PowerLaw { si, .. } => {
+                            self.gaussian_power_law_radecs.push(radec);
+                            gaussian_power_law_lmns.push(lmn);
+                            let fd_at_150mhz =
+                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                            gaussian_power_law_fds.push(cuda_inst_fd);
+                            gaussian_power_law_sis.push(si as CudaFloat);
+                            gaussian_power_law_gps.push(gp);
+                        }
+
+                        FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                            self.gaussian_curved_power_law_radecs.push(radec);
+                            gaussian_curved_power_law_lmns.push(lmn);
+                            let fd_at_150mhz =
+                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                            gaussian_curved_power_law_fds.push(cuda_inst_fd);
+                            gaussian_curved_power_law_qs.push(q as CudaFloat);
+                            gaussian_curved_power_law_sis.push(si as CudaFloat);
+                            gaussian_curved_power_law_gps.push(gp);
+                        }
+
+                        FluxDensityType::List { .. } => {
+                            self.gaussian_list_radecs.push(radec);
+                            gaussian_list_lmns.push(lmn);
+                            gaussian_list_fds.push(&comp.flux_type);
+                            gaussian_list_gps.push(gp);
+                        }
+                    };
+                }
+
+                ComponentType::Shapelet {
+                    maj,
+                    min,
+                    pa,
+                    coeffs,
+                } => {
+                    let gp = cuda::GaussianParams {
+                        maj: *maj as CudaFloat,
+                        min: *min as CudaFloat,
+                        pa: *pa as CudaFloat,
+                    };
+                    match comp.flux_type {
+                        FluxDensityType::PowerLaw { si, .. } => {
+                            self.shapelet_power_law_radecs.push(radec);
+                            shapelet_power_law_lmns.push(lmn);
+                            let fd_at_150mhz = comp
+                                .flux_type
+                                .estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                            shapelet_power_law_fds.push(cuda_inst_fd);
+                            shapelet_power_law_sis.push(si as CudaFloat);
+                            shapelet_power_law_gps.push(gp);
+                            shapelet_power_law_coeffs.push(coeffs);
+                        }
+
+                        FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                            self.shapelet_curved_power_law_radecs.push(radec);
+                            shapelet_curved_power_law_lmns.push(lmn);
+                            let fd_at_150mhz =
+                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                            shapelet_curved_power_law_fds.push(cuda_inst_fd);
+                            shapelet_curved_power_law_qs.push(q as CudaFloat);
+                            shapelet_curved_power_law_sis.push(si as CudaFloat);
+                            shapelet_curved_power_law_gps.push(gp);
+                            shapelet_curved_power_law_coeffs.push(coeffs);
+                        }
+
+                        FluxDensityType::List { .. } => {
+                            self.shapelet_list_radecs.push(radec);
+                            shapelet_list_lmns.push(lmn);
+                            shapelet_list_fds.push(&comp.flux_type);
+                            shapelet_list_gps.push(gp);
+                            shapelet_list_coeffs.push(coeffs);
+                        }
+                    }
+                }
+            }
+        }
+
+        let point_list_fds =
+            get_instrumental_flux_densities(&point_list_fds, &self.freqs).mapv(jones_to_cuda_jones);
+        let gaussian_list_fds = get_instrumental_flux_densities(&gaussian_list_fds, &self.freqs)
+            .mapv(jones_to_cuda_jones);
+        let shapelet_list_fds = get_instrumental_flux_densities(&shapelet_list_fds, &self.freqs)
+            .mapv(jones_to_cuda_jones);
+
+        let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
+            get_flattened_coeffs(shapelet_power_law_coeffs);
+        let (shapelet_curved_power_law_coeffs, shapelet_curved_power_law_coeff_lens) =
+            get_flattened_coeffs(shapelet_curved_power_law_coeffs);
+        let (shapelet_list_coeffs, shapelet_list_coeff_lens) =
+            get_flattened_coeffs(shapelet_list_coeffs);
+
+        self.point_power_law_lmns.overwrite(&point_power_law_lmns)?;
+        self.point_power_law_fds.overwrite(&point_power_law_fds)?;
+        self.point_power_law_sis.overwrite(&point_power_law_sis)?;
+
+        self.point_curved_power_law_lmns
+            .overwrite(&point_curved_power_law_lmns)?;
+        self.point_curved_power_law_fds
+            .overwrite(&point_curved_power_law_fds)?;
+        self.point_curved_power_law_sis
+            .overwrite(&point_curved_power_law_sis)?;
+        self.point_curved_power_law_qs
+            .overwrite(&point_curved_power_law_qs)?;
+
+        self.point_list_lmns.overwrite(&point_list_lmns)?;
+        self.point_list_fds
+            .overwrite(point_list_fds.as_slice().unwrap())?;
+
+        self.gaussian_power_law_lmns
+            .overwrite(&gaussian_power_law_lmns)?;
+        self.gaussian_power_law_fds
+            .overwrite(&gaussian_power_law_fds)?;
+        self.gaussian_power_law_sis
+            .overwrite(&gaussian_power_law_sis)?;
+        self.gaussian_power_law_gps
+            .overwrite(&gaussian_power_law_gps)?;
+
+        self.gaussian_curved_power_law_lmns
+            .overwrite(&gaussian_curved_power_law_lmns)?;
+        self.gaussian_curved_power_law_fds
+            .overwrite(&gaussian_curved_power_law_fds)?;
+        self.gaussian_curved_power_law_sis
+            .overwrite(&gaussian_curved_power_law_sis)?;
+        self.gaussian_curved_power_law_qs
+            .overwrite(&gaussian_curved_power_law_qs)?;
+        self.gaussian_curved_power_law_gps
+            .overwrite(&gaussian_curved_power_law_gps)?;
+
+        self.gaussian_list_lmns.overwrite(&gaussian_list_lmns)?;
+        self.gaussian_list_fds
+            .overwrite(gaussian_list_fds.as_slice().unwrap())?;
+        self.gaussian_list_gps.overwrite(&gaussian_list_gps)?;
+
+        self.shapelet_power_law_lmns
+            .overwrite(&shapelet_power_law_lmns)?;
+        self.shapelet_power_law_fds
+            .overwrite(&shapelet_power_law_fds)?;
+        self.shapelet_power_law_sis
+            .overwrite(&shapelet_power_law_sis)?;
+        self.shapelet_power_law_gps
+            .overwrite(&shapelet_power_law_gps)?;
+        self.shapelet_power_law_coeffs
+            .overwrite(&shapelet_power_law_coeffs)?;
+        self.shapelet_power_law_coeff_lens
+            .overwrite(&shapelet_power_law_coeff_lens)?;
+
+        self.shapelet_curved_power_law_lmns
+            .overwrite(&shapelet_curved_power_law_lmns)?;
+        self.shapelet_curved_power_law_fds
+            .overwrite(&shapelet_curved_power_law_fds)?;
+        self.shapelet_curved_power_law_sis
+            .overwrite(&shapelet_curved_power_law_sis)?;
+        self.shapelet_curved_power_law_qs
+            .overwrite(&shapelet_curved_power_law_qs)?;
+        self.shapelet_curved_power_law_gps
+            .overwrite(&shapelet_curved_power_law_gps)?;
+        self.shapelet_curved_power_law_coeffs
+            .overwrite(&shapelet_curved_power_law_coeffs)?;
+        self.shapelet_curved_power_law_coeff_lens
+            .overwrite(&shapelet_curved_power_law_coeff_lens)?;
+
+        self.shapelet_list_lmns.overwrite(&shapelet_list_lmns)?;
+        self.shapelet_list_fds
+            .overwrite(shapelet_list_fds.as_slice().unwrap())?;
+        self.shapelet_list_gps.overwrite(&shapelet_list_gps)?;
+        self.shapelet_list_coeffs.overwrite(&shapelet_list_coeffs)?;
+        self.shapelet_list_coeff_lens
+            .overwrite(&shapelet_list_coeff_lens)?;
+
+        Ok(())
+    }
+
     fn model_timestep(
         &mut self,
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,

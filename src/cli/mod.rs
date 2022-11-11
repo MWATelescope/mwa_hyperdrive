@@ -4,6 +4,7 @@
 
 pub(crate) mod di_calibrate;
 pub(crate) mod dipole_gains;
+pub(crate) mod peel;
 pub(crate) mod solutions;
 pub(crate) mod srclist;
 pub(crate) mod vis_utils;

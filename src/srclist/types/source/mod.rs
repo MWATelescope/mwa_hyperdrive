@@ -7,6 +7,7 @@
 #[cfg(test)]
 mod tests;
 
+use marlu::RADec;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
@@ -30,4 +31,14 @@ impl Source {
             .map(|comp| comp.flux_type.estimate_at_freq(freq_hz))
             .collect()
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct IonoSource {
+    /// The components associated with the source.
+    pub(crate) source: Source,
+    /// Constants of proportionality for ionospheric offset in l,m
+    pub(crate) iono_consts: (f64, f64),
+    /// The Stokes-I-weighted mean position of the source components.
+    pub(crate) weighted_radec: RADec,
 }

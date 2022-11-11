@@ -46,6 +46,12 @@ pub(crate) enum ModellerInfo {
 
 /// An object that simulates sky-model visibilities.
 pub trait SkyModeller<'a> {
+    fn update_source_list(
+        &mut self,
+        source_list: &SourceList,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError>;
+
     /// Generate sky-model visibilities for a single timestep. The [`UVW`]
     /// coordinates used in generating the visibilities are returned.
     ///
