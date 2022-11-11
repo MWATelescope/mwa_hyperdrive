@@ -20,6 +20,8 @@ for PRECISION in SINGLE DOUBLE; do
     bindgen "${SCRIPTPATH}"/types.h \
             --ignore-functions \
             --blocklist-type "__int8_t" \
+            --allowlist-type "RADec" \
+            --allowlist-type "XYZ" \
             --allowlist-type "UVW" \
             --allowlist-type "LmnRime" \
             --allowlist-type "ShapeletCoeff" \
@@ -38,4 +40,14 @@ for PRECISION in SINGLE DOUBLE; do
             --blocklist-type ".*" \
             -- -D "${PRECISION}" \
             > "${SCRIPTPATH}/model_${LOWER_CASE}.rs"
+
+    bindgen "${SCRIPTPATH}"/peel.h \
+            --allowlist-function "rotate_average" \
+            --allowlist-function "xyzs_to_uvws" \
+            --allowlist-function "iono_loop" \
+            --allowlist-function "subtract_iono" \
+            --allowlist-function "add_model" \
+            --blocklist-type ".*" \
+            -- -D "${PRECISION}" \
+            > "${SCRIPTPATH}/peel_${LOWER_CASE}.rs"
 done

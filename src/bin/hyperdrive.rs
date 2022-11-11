@@ -58,6 +58,25 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/di_cal/intro.html"#
         dry_run: bool,
     },
 
+    #[clap(about = r#"Peeling!"#)]
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
+    Peel {
+        // Share the arguments that could be passed in via a parameter file.
+        #[clap(flatten)]
+        cli_args: Box<mwa_hyperdrive::PeelArgs>,
+
+        /// The verbosity of the program. Increase by specifying multiple times
+        /// (e.g. -vv). The default is to print only high-level information.
+        #[clap(short, long, parse(from_occurrences))]
+        verbosity: u8,
+
+        /// Don't actually do calibration; just verify that arguments were
+        /// correctly ingested and print out high-level information.
+        #[clap(long)]
+        dry_run: bool,
+    },
+
     #[clap(alias = "simulate-vis")]
     #[clap(about = r#"Simulate visibilities of a sky-model source list.
 https://mwatelescope.github.io/mwa_hyperdrive/user/vis_simulate/intro.html"#)]
@@ -217,6 +236,7 @@ fn cli() -> Result<(), HyperdriveError> {
     // Set up logging.
     let (verbosity, sub_command) = match &args {
         Args::DiCalibrate { verbosity, .. } => (verbosity, "di-calibrate"),
+        Args::Peel { verbosity, .. } => (verbosity, "peel"),
         Args::VisSimulate { verbosity, .. } => (verbosity, "vis-simulate"),
         Args::VisSubtract { verbosity, .. } => (verbosity, "vis-subtract"),
         Args::SolutionsApply { verbosity, .. } => (verbosity, "solutions-apply"),
@@ -236,6 +256,14 @@ fn cli() -> Result<(), HyperdriveError> {
 
     match Args::parse() {
         Args::DiCalibrate {
+            cli_args,
+            verbosity: _,
+            dry_run,
+        } => {
+            cli_args.run(dry_run)?;
+        }
+
+        Args::Peel {
             cli_args,
             verbosity: _,
             dry_run,

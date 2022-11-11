@@ -39,6 +39,7 @@ mod tests;
 pub use cli::{
     di_calibrate::DiCalArgs,
     dipole_gains::DipoleGainsArgs,
+    peel::PeelArgs,
     solutions::{
         apply::SolutionsApplyArgs, convert::SolutionsConvertArgs, plot::SolutionsPlotArgs,
     },

@@ -69,6 +69,13 @@ inline __device__ COMPLEX operator*(const COMPLEX a, const COMPLEX b) {
     };
 }
 
+inline __device__ C32 operator*(const C32 a, const C64 b) {
+    return C32{
+        .x = a.x * (float)b.x - a.y * (float)b.y,
+        .y = a.x * (float)b.y + a.y * (float)b.x,
+    };
+}
+
 inline __device__ void operator*=(COMPLEX &a, const COMPLEX b) {
     a = COMPLEX{
         .x = a.x * b.x - a.y * b.y,
@@ -88,8 +95,8 @@ inline __device__ void operator+=(COMPLEX &a, const COMPLEX b) {
     a.y += b.y;
 }
 
-inline __device__ JONES operator*(const JONES a, const FLOAT b) {
-    return JONES{
+inline __device__ JonesF32 operator*(const JonesF32 a, const float b) {
+    return JonesF32{
         .j00_re = a.j00_re * b,
         .j00_im = a.j00_im * b,
         .j01_re = a.j01_re * b,
@@ -101,8 +108,60 @@ inline __device__ JONES operator*(const JONES a, const FLOAT b) {
     };
 }
 
-inline __device__ JONES operator*(const JONES a, const COMPLEX b) {
-    return JONES{
+inline __device__ JonesF64 operator*(const JonesF64 a, const double b) {
+    return JonesF64{
+        .j00_re = a.j00_re * b,
+        .j00_im = a.j00_im * b,
+        .j01_re = a.j01_re * b,
+        .j01_im = a.j01_im * b,
+        .j10_re = a.j10_re * b,
+        .j10_im = a.j10_im * b,
+        .j11_re = a.j11_re * b,
+        .j11_im = a.j11_im * b,
+    };
+}
+
+inline __device__ JonesF32 operator*(const JonesF32 a, const C32 b) {
+    return JonesF32{
+        .j00_re = a.j00_re * b.x - a.j00_im * b.y,
+        .j00_im = a.j00_re * b.y + a.j00_im * b.x,
+        .j01_re = a.j01_re * b.x - a.j01_im * b.y,
+        .j01_im = a.j01_re * b.y + a.j01_im * b.x,
+        .j10_re = a.j10_re * b.x - a.j10_im * b.y,
+        .j10_im = a.j10_re * b.y + a.j10_im * b.x,
+        .j11_re = a.j11_re * b.x - a.j11_im * b.y,
+        .j11_im = a.j11_re * b.y + a.j11_im * b.x,
+    };
+}
+
+inline __device__ JonesF32 operator*(const JonesF32 a, const C64 b) {
+    return JonesF32{
+        .j00_re = a.j00_re * (float)b.x - a.j00_im * (float)b.y,
+        .j00_im = a.j00_re * (float)b.y + a.j00_im * (float)b.x,
+        .j01_re = a.j01_re * (float)b.x - a.j01_im * (float)b.y,
+        .j01_im = a.j01_re * (float)b.y + a.j01_im * (float)b.x,
+        .j10_re = a.j10_re * (float)b.x - a.j10_im * (float)b.y,
+        .j10_im = a.j10_re * (float)b.y + a.j10_im * (float)b.x,
+        .j11_re = a.j11_re * (float)b.x - a.j11_im * (float)b.y,
+        .j11_im = a.j11_re * (float)b.y + a.j11_im * (float)b.x,
+    };
+}
+
+inline __device__ JonesF64 operator*(const JonesF64 a, const C32 b) {
+    return JonesF64{
+        .j00_re = a.j00_re * b.x - a.j00_im * b.y,
+        .j00_im = a.j00_re * b.y + a.j00_im * b.x,
+        .j01_re = a.j01_re * b.x - a.j01_im * b.y,
+        .j01_im = a.j01_re * b.y + a.j01_im * b.x,
+        .j10_re = a.j10_re * b.x - a.j10_im * b.y,
+        .j10_im = a.j10_re * b.y + a.j10_im * b.x,
+        .j11_re = a.j11_re * b.x - a.j11_im * b.y,
+        .j11_im = a.j11_re * b.y + a.j11_im * b.x,
+    };
+}
+
+inline __device__ JonesF64 operator*(const JonesF64 a, const C64 b) {
+    return JonesF64{
         .j00_re = a.j00_re * b.x - a.j00_im * b.y,
         .j00_im = a.j00_re * b.y + a.j00_im * b.x,
         .j01_re = a.j01_re * b.x - a.j01_im * b.y,
@@ -125,6 +184,32 @@ inline __device__ void operator+=(JONES &a, const JONES b) {
     a.j11_im += b.j11_im;
 }
 
+inline __device__ JonesF32 operator+(JonesF32 a, JonesF32 b) {
+    return JonesF32{
+        .j00_re = a.j00_re + b.j00_re,
+        .j00_im = a.j00_im + b.j00_im,
+        .j01_re = a.j01_re + b.j01_re,
+        .j01_im = a.j01_im + b.j01_im,
+        .j10_re = a.j10_re + b.j10_re,
+        .j10_im = a.j10_im + b.j10_im,
+        .j11_re = a.j11_re + b.j11_re,
+        .j11_im = a.j11_im + b.j11_im,
+    };
+}
+
+inline __device__ JonesF64 operator+(JonesF64 a, JonesF64 b) {
+    return JonesF64{
+        .j00_re = a.j00_re + b.j00_re,
+        .j00_im = a.j00_im + b.j00_im,
+        .j01_re = a.j01_re + b.j01_re,
+        .j01_im = a.j01_im + b.j01_im,
+        .j10_re = a.j10_re + b.j10_re,
+        .j10_im = a.j10_im + b.j10_im,
+        .j11_re = a.j11_re + b.j11_re,
+        .j11_im = a.j11_im + b.j11_im,
+    };
+}
+
 inline __device__ void operator+=(JonesF32 &a, const JonesF64 b) {
     a.j00_re += (float)b.j00_re;
     a.j00_im += (float)b.j00_im;
@@ -134,6 +219,107 @@ inline __device__ void operator+=(JonesF32 &a, const JonesF64 b) {
     a.j10_im += (float)b.j10_im;
     a.j11_re += (float)b.j11_re;
     a.j11_im += (float)b.j11_im;
+}
+
+inline __device__ JONES operator/(JONES a, FLOAT b) {
+    return JONES{
+        .j00_re = a.j00_re / b,
+        .j00_im = a.j00_im / b,
+        .j01_re = a.j01_re / b,
+        .j01_im = a.j01_im / b,
+        .j10_re = a.j10_re / b,
+        .j10_im = a.j10_im / b,
+        .j11_re = a.j11_re / b,
+        .j11_im = a.j11_im / b,
+    };
+}
+
+inline __device__ void operator/=(JonesF64 &a, double b) {
+    a.j00_re /= b;
+    a.j00_im /= b;
+    a.j01_re /= b;
+    a.j01_im /= b;
+    a.j10_re /= b;
+    a.j10_im /= b;
+    a.j11_re /= b;
+    a.j11_im /= b;
+}
+
+inline __device__ void operator+=(volatile JonesF32 &a, volatile JonesF32 b) {
+    a.j00_re += b.j00_re;
+    a.j00_im += b.j00_im;
+    a.j01_re += b.j01_re;
+    a.j01_im += b.j01_im;
+    a.j10_re += b.j10_re;
+    a.j10_im += b.j10_im;
+    a.j11_re += b.j11_re;
+    a.j11_im += b.j11_im;
+}
+
+inline __device__ void operator+=(volatile JonesF64 &a, volatile JonesF64 b) {
+    a.j00_re += b.j00_re;
+    a.j00_im += b.j00_im;
+    a.j01_re += b.j01_re;
+    a.j01_im += b.j01_im;
+    a.j10_re += b.j10_re;
+    a.j10_im += b.j10_im;
+    a.j11_re += b.j11_re;
+    a.j11_im += b.j11_im;
+}
+
+inline __device__ void operator+=(JonesF64 &a, JonesF32 b) {
+    a.j00_re += (double)b.j00_re;
+    a.j00_im += (double)b.j00_im;
+    a.j01_re += (double)b.j01_re;
+    a.j01_im += (double)b.j01_im;
+    a.j10_re += (double)b.j10_re;
+    a.j10_im += (double)b.j10_im;
+    a.j11_re += (double)b.j11_re;
+    a.j11_im += (double)b.j11_im;
+}
+
+inline __device__ void operator-=(JonesF32 &a, JonesF32 b) {
+    a.j00_re -= b.j00_re;
+    a.j00_im -= b.j00_im;
+    a.j01_re -= b.j01_re;
+    a.j01_im -= b.j01_im;
+    a.j10_re -= b.j10_re;
+    a.j10_im -= b.j10_im;
+    a.j11_re -= b.j11_re;
+    a.j11_im -= b.j11_im;
+}
+
+inline __device__ void operator-=(JonesF64 &a, JonesF64 b) {
+    a.j00_re -= b.j00_re;
+    a.j00_im -= b.j00_im;
+    a.j01_re -= b.j01_re;
+    a.j01_im -= b.j01_im;
+    a.j10_re -= b.j10_re;
+    a.j10_im -= b.j10_im;
+    a.j11_re -= b.j11_re;
+    a.j11_im -= b.j11_im;
+}
+
+inline __device__ void operator-=(JonesF32 &a, JonesF64 b) {
+    a.j00_re -= (float)b.j00_re;
+    a.j00_im -= (float)b.j00_im;
+    a.j01_re -= (float)b.j01_re;
+    a.j01_im -= (float)b.j01_im;
+    a.j10_re -= (float)b.j10_re;
+    a.j10_im -= (float)b.j10_im;
+    a.j11_re -= (float)b.j11_re;
+    a.j11_im -= (float)b.j11_im;
+}
+
+inline __device__ void operator-=(JonesF64 &a, JonesF32 b) {
+    a.j00_re -= (double)b.j00_re;
+    a.j00_im -= (double)b.j00_im;
+    a.j01_re -= (double)b.j01_re;
+    a.j01_im -= (double)b.j01_im;
+    a.j10_re -= (double)b.j10_re;
+    a.j10_im -= (double)b.j10_im;
+    a.j11_re -= (double)b.j11_re;
+    a.j11_im -= (double)b.j11_im;
 }
 
 inline __device__ UVW operator*(const UVW a, const FLOAT b) {

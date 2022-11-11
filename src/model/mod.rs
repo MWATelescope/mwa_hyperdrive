@@ -13,9 +13,9 @@ mod integration_tests;
 #[cfg(test)]
 mod tests;
 
-use cpu::SkyModellerCpu;
+pub(crate) use cpu::SkyModellerCpu;
 #[cfg(feature = "cuda")]
-use cuda::SkyModellerCuda;
+pub(crate) use cuda::SkyModellerCuda;
 pub(crate) use error::ModelError;
 
 use std::collections::HashSet;
@@ -26,7 +26,7 @@ use ndarray::ArrayViewMut2;
 
 use crate::{
     beam::Beam,
-    srclist::{ComponentList, SourceList},
+    srclist::{ComponentList, Source, SourceList},
 };
 
 #[derive(Debug, Clone)]
@@ -45,7 +45,31 @@ pub(crate) enum ModellerInfo {
 }
 
 /// An object that simulates sky-model visibilities.
-pub trait SkyModeller<'a> {
+pub trait SkyModeller<'a>: Send {
+    /// Update the sky model associated with the `SkyModeller`. All old source
+    /// information is destroyed.
+    /// TODO(dev): something like impl IntoIterator<Item = &SourceComponent>
+    fn update_source_list(
+        &mut self,
+        source_list: &SourceList,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError>;
+
+    /// Update the sky model associated with the `SkyModeller`, with only a
+    /// single source. All old source information is destroyed. This is mostly
+    /// useful for peeling.
+    fn update_with_a_source(
+        &mut self,
+        source: &Source,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError> {
+        use indexmap::indexmap;
+        let source_list = SourceList::from(indexmap! {
+            "source".into() => source.clone(),
+        });
+        self.update_source_list(&source_list, phase_centre)
+    }
+
     /// Generate sky-model visibilities for a single timestep. The [`UVW`]
     /// coordinates used in generating the visibilities are returned.
     ///

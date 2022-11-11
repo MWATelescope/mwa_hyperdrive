@@ -11,9 +11,8 @@ use crate::srclist::{
 /// Errors associated with reading in any kind of source list.
 #[derive(Error, Debug)]
 pub(crate) enum ReadSourceListError {
-    #[error("Source list error: Attempted to use RA {0}, but this is out of range (0 < RA < 360)")]
-    InvalidRa(f64),
-
+    // #[error("Source list error: Attempted to use RA {0}, but this is out of range (0 < RA < 360)")]
+    // InvalidRa(f64),
     #[error("Source list error: Attempted to use HA {0}, but this is out of range (0 < HA < 24)")]
     InvalidHa(f64),
 
@@ -32,17 +31,16 @@ pub(crate) enum ReadSourceListError {
     #[error("Source {source_name}: A component contains NaNs for its flux densities. This is not allowed.")]
     NaNsInComponent { source_name: String },
 
-    #[error("{comp_type} component of source {name} at RA {ra} Dec {dec} has no flux density information")]
-    MissingFluxes {
-        name: String,
-        comp_type: &'static str,
-        ra: f64,
-        dec: f64,
-    },
+    // #[error("{comp_type} component of source {name} at RA {ra} Dec {dec} has no flux density information")]
+    // MissingFluxes {
+    //     name: String,
+    //     comp_type: &'static str,
+    //     ra: f64,
+    //     dec: f64,
+    // },
 
-    #[error("Source list error: Source {0} has no components")]
-    NoComponents(String),
-
+    // #[error("Source list error: Source {0} has no components")]
+    // NoComponents(String),
     #[error("Could not interpret the contents of the source list. Specify which style source list it is, and a more specific error can be shown.")]
     FailedToReadAsAnyType,
 

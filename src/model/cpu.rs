@@ -30,29 +30,29 @@ use crate::{
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 
 pub(crate) struct SkyModellerCpu<'a> {
-    pub(super) beam: &'a dyn Beam,
+    pub(crate) beam: &'a dyn Beam,
 
     /// The phase centre used for all modelling.
-    pub(super) phase_centre: RADec,
+    pub(crate) phase_centre: RADec,
     /// The longitude of the array we're using \[radians\].
-    pub(super) array_longitude: f64,
+    pub(crate) array_longitude: f64,
     /// The latitude of the array we're using \[radians\].
-    pub(super) array_latitude: f64,
+    pub(crate) array_latitude: f64,
     /// The UT1 - UTC offset. If this is 0, effectively UT1 == UTC, which is a
     /// wrong assumption by up to 0.9s. We assume the this value does not change
     /// over the timestamps given to this `SkyModellerCpu`.
-    pub(super) dut1: Duration,
+    pub(crate) dut1: Duration,
     /// Shift baselines and LSTs back to J2000.
-    pub(super) precess: bool,
+    pub(crate) precess: bool,
 
-    pub(super) unflagged_fine_chan_freqs: &'a [f64],
+    pub(crate) unflagged_fine_chan_freqs: &'a [f64],
 
     /// The [XyzGeodetic] positions of each of the unflagged tiles.
-    pub(super) unflagged_tile_xyzs: &'a [XyzGeodetic],
-    pub(super) flagged_tiles: &'a HashSet<usize>,
-    pub(super) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    pub(crate) unflagged_tile_xyzs: &'a [XyzGeodetic],
+    pub(crate) flagged_tiles: &'a HashSet<usize>,
+    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
-    pub(super) components: ComponentList,
+    pub(crate) components: ComponentList,
 }
 
 impl<'a> SkyModellerCpu<'a> {
@@ -586,6 +586,17 @@ impl<'a> SkyModellerCpu<'a> {
 }
 
 impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
+    fn update_source_list(
+        &mut self,
+        source_list: &crate::srclist::SourceList,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError> {
+        self.phase_centre = phase_centre;
+        self.components =
+            ComponentList::new(source_list, self.unflagged_fine_chan_freqs, phase_centre);
+        Ok(())
+    }
+
     fn model_timestep(
         &mut self,
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
