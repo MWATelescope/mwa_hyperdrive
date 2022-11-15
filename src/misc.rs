@@ -5,9 +5,10 @@
 //! Miscellaneous things.
 
 use hifitime::{Duration, Epoch, Unit};
+use is_terminal::IsTerminal;
 
 pub(crate) fn is_a_tty() -> bool {
-    atty::is(atty::Stream::Stdout) || atty::is(atty::Stream::Stderr)
+    std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
 }
 
 /// Some timestamps may be read in ever so slightly off from their true values
@@ -18,7 +19,7 @@ pub(crate) fn is_a_tty() -> bool {
 /// e.g. The GPS time 1090008639.999405 should be 1090008634.0. Other examples
 /// of usage are in the tests alongside this function.
 pub(crate) fn round_hundredths_of_a_second(e: Epoch) -> Epoch {
-    let e_gps = e.as_gpst_seconds() * 100.0;
+    let e_gps = e.to_gpst_seconds() * 100.0;
     if (e_gps.round() - e_gps).abs() < 0.1 {
         Epoch::from_gpst_seconds(e_gps.round() / 100.0)
     } else {
@@ -28,7 +29,7 @@ pub(crate) fn round_hundredths_of_a_second(e: Epoch) -> Epoch {
 
 /// Quantize a duration to the nearest multiple of q nanoseconds
 pub(crate) fn quantize_duration(d: Duration, q_nanos: f64) -> Duration {
-    let d_nanos = d.in_unit(Unit::Nanosecond);
+    let d_nanos = d.to_unit(Unit::Nanosecond);
     let d_nanos = (d_nanos / q_nanos).round() * q_nanos;
     Duration::from_f64(d_nanos, Unit::Nanosecond)
 }
@@ -43,26 +44,26 @@ mod tests {
     fn test_round_seconds() {
         let e = Epoch::from_gpst_seconds(1090008639.999405);
         assert_abs_diff_eq!(
-            round_hundredths_of_a_second(e).as_gpst_seconds(),
+            round_hundredths_of_a_second(e).to_gpst_seconds(),
             1090008640.0
         );
 
         let e = Epoch::from_gpst_seconds(1090008640.251);
         assert_abs_diff_eq!(
-            round_hundredths_of_a_second(e).as_gpst_seconds(),
+            round_hundredths_of_a_second(e).to_gpst_seconds(),
             1090008640.25
         );
 
         let e = Epoch::from_gpst_seconds(1090008640.24999);
         assert_abs_diff_eq!(
-            round_hundredths_of_a_second(e).as_gpst_seconds(),
+            round_hundredths_of_a_second(e).to_gpst_seconds(),
             1090008640.25
         );
 
         // No rounding.
         let e = Epoch::from_gpst_seconds(1090008640.26);
         assert_abs_diff_eq!(
-            round_hundredths_of_a_second(e).as_gpst_seconds(),
+            round_hundredths_of_a_second(e).to_gpst_seconds(),
             1090008640.26
         );
     }

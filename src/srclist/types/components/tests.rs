@@ -41,7 +41,7 @@ fn get_srclist() -> SourceList {
 #[test]
 fn test_split_components() {
     let freqs = [180e6];
-    let phase_centre = RADec::new_degrees(0.0, -27.0);
+    let phase_centre = RADec::from_degrees(0.0, -27.0);
     let srclist = get_srclist();
 
     let num_point_components = srclist.values().fold(0, |a, src| {

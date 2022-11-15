@@ -95,8 +95,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
-    let array_pos = LatLngHeight::new_mwa();
-    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
     #[rustfmt::skip]
     let tile_xyzs = [
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -206,8 +206,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
             obs_context.timestamps,
             expected,
             "\ngot (GPS): {:?}\nexpected:  {:?}",
-            obs_context.timestamps.mapped_ref(|t| t.as_gpst_seconds()),
-            expected.mapped_ref(|t| t.as_gpst_seconds())
+            obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
+            expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
         assert_eq!(obs_context.time_res, Some(time_res));
@@ -293,8 +293,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
-    let array_pos = LatLngHeight::new_mwa();
-    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
     #[rustfmt::skip]
     let tile_xyzs = [
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -404,8 +404,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             obs_context.timestamps,
             expected,
             "\ngot (GPS): {:?}\nexpected:  {:?}",
-            obs_context.timestamps.mapped_ref(|t| t.as_gpst_seconds()),
-            expected.mapped_ref(|t| t.as_gpst_seconds())
+            obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
+            expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
         // Without the metafits file, the uvfits reader guesses the time
@@ -501,8 +501,8 @@ fn test_vis_output_time_averaging() {
         (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
-    let array_pos = LatLngHeight::new_mwa();
-    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
     #[rustfmt::skip]
     let tile_xyzs = [
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -614,8 +614,8 @@ fn test_vis_output_time_averaging() {
             obs_context.timestamps,
             expected,
             "\ngot (GPS): {:?}\nexpected:  {:?}",
-            obs_context.timestamps.mapped_ref(|t| t.as_gpst_seconds()),
-            expected.mapped_ref(|t| t.as_gpst_seconds())
+            obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
+            expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
         // Without the metafits file, the uvfits reader guesses the time

@@ -9,7 +9,7 @@ mod tests;
 
 use std::borrow::Borrow;
 
-use marlu::{pos::xyz::xyzs_to_cross_uvws_parallel, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
+use marlu::{pos::xyz::xyzs_to_cross_uvws, AzEl, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -265,7 +265,7 @@ impl ShapeletComponentParams {
             .zip(self.radecs.par_iter())
             .for_each(|(mut baseline_uvws, radec)| {
                 let hadec = radec.to_hadec(lst_rad);
-                let uvws_row = xyzs_to_cross_uvws_parallel(tile_xyzs, hadec);
+                let uvws_row = xyzs_to_cross_uvws(tile_xyzs, hadec);
                 baseline_uvws.assign(&Array1::from(uvws_row));
             });
         shapelet_uvws

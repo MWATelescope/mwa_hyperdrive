@@ -82,17 +82,17 @@ fn test_1090008640_woden() {
         Some(1)
     );
     assert_abs_diff_eq!(
-        bin_sols.start_timestamps.unwrap()[0].as_gpst_seconds(),
+        bin_sols.start_timestamps.unwrap()[0].to_gpst_seconds(),
         // output_band01 lists the start time as 1090008640, but it should
         // probably be 1090008642.
         1090008640.0
     );
     assert_abs_diff_eq!(
-        bin_sols.end_timestamps.unwrap()[0].as_gpst_seconds(),
+        bin_sols.end_timestamps.unwrap()[0].to_gpst_seconds(),
         1090008640.0
     );
     assert_abs_diff_eq!(
-        bin_sols.average_timestamps.unwrap()[0].as_gpst_seconds(),
+        bin_sols.average_timestamps.unwrap()[0].to_gpst_seconds(),
         1090008640.0,
     );
     assert!(!bin_sols.di_jones.iter().any(|jones| jones.any_nan()));
@@ -143,15 +143,15 @@ fn test_1090008640_woden() {
         Some(1)
     );
     assert_abs_diff_eq!(
-        hyp_sols.start_timestamps.unwrap()[0].as_gpst_seconds(),
+        hyp_sols.start_timestamps.unwrap()[0].to_gpst_seconds(),
         1090008640.0
     );
     assert_abs_diff_eq!(
-        hyp_sols.end_timestamps.unwrap()[0].as_gpst_seconds(),
+        hyp_sols.end_timestamps.unwrap()[0].to_gpst_seconds(),
         1090008640.0
     );
     assert_abs_diff_eq!(
-        hyp_sols.average_timestamps.unwrap()[0].as_gpst_seconds(),
+        hyp_sols.average_timestamps.unwrap()[0].to_gpst_seconds(),
         1090008640.0
     );
     assert!(!hyp_sols.di_jones.iter().any(|jones| jones.any_nan()));

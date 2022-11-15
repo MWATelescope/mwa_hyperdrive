@@ -829,7 +829,7 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
                 hdu.write_col(
                     &mut fptr,
                     key_name,
-                    &timestamps.mapped_ref(|e| e.as_gpst_seconds()),
+                    &timestamps.mapped_ref(|e| e.to_gpst_seconds()),
                 )?;
             }
         }

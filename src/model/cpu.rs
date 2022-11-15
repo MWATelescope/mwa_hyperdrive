@@ -12,7 +12,7 @@ use std::{
 use hifitime::{Duration, Epoch};
 use marlu::{
     c64,
-    pos::xyz::xyzs_to_cross_uvws_parallel,
+    pos::xyz::xyzs_to_cross_uvws,
     precession::{get_lmst, precess_time},
     Jones, LmnRime, RADec, XyzGeodetic, UVW,
 };
@@ -600,9 +600,8 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 self.dut1,
             );
             // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs =
-                precession_info.precess_xyz_parallel(self.unflagged_tile_xyzs);
-            let uvws = xyzs_to_cross_uvws_parallel(
+            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+            let uvws = xyzs_to_cross_uvws(
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
@@ -613,10 +612,8 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             )
         } else {
             let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                self.unflagged_tile_xyzs,
-                self.phase_centre.to_hadec(lst),
-            );
+            let uvws =
+                xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
             (uvws, lst, self.array_latitude)
         };
         let shapelet_uvws = self

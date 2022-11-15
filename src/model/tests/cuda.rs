@@ -465,7 +465,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
         Source {
             components: vec1![
                 get_simple_point(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_point(RADec::new_degrees(45.0, 18.0), FluxType::List)
+                get_simple_point(RADec::from_degrees(45.0, 18.0), FluxType::List)
             ],
         },
     );
@@ -499,7 +499,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
             components: vec1![
                 // Every component type needs to be checked.
                 get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_gaussian(RADec::new_degrees(45.0, 18.0), FluxType::List)
+                get_simple_gaussian(RADec::from_degrees(45.0, 18.0), FluxType::List)
             ],
         },
     );
@@ -528,7 +528,7 @@ fn beam_responses_apply_properly_power_law_and_list() {
         Source {
             components: vec1![
                 get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_shapelet(RADec::new_degrees(45.0, 18.0), FluxType::List)
+                get_simple_shapelet(RADec::from_degrees(45.0, 18.0), FluxType::List)
             ],
         },
     );
@@ -565,7 +565,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
         Source {
             components: vec1![
                 get_simple_point(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_point(RADec::new_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
+                get_simple_point(RADec::from_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
             ],
         },
     );
@@ -599,7 +599,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
             components: vec1![
                 // Every component type needs to be checked.
                 get_simple_gaussian(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_gaussian(RADec::new_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
+                get_simple_gaussian(RADec::from_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
             ],
         },
     );
@@ -628,7 +628,7 @@ fn beam_responses_apply_properly_power_law_and_curved_power_law() {
         Source {
             components: vec1![
                 get_simple_shapelet(obs.phase_centre, FluxType::PowerLaw),
-                get_simple_shapelet(RADec::new_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
+                get_simple_shapelet(RADec::from_degrees(45.0, 18.0), FluxType::CurvedPowerLaw)
             ],
         },
     );
@@ -665,7 +665,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
         Source {
             components: vec1![
                 get_simple_point(obs.phase_centre, FluxType::CurvedPowerLaw),
-                get_simple_point(RADec::new_degrees(45.0, 18.0), FluxType::List)
+                get_simple_point(RADec::from_degrees(45.0, 18.0), FluxType::List)
             ],
         },
     );
@@ -699,7 +699,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
             components: vec1![
                 // Every component type needs to be checked.
                 get_simple_gaussian(obs.phase_centre, FluxType::CurvedPowerLaw),
-                get_simple_gaussian(RADec::new_degrees(45.0, 18.0), FluxType::List)
+                get_simple_gaussian(RADec::from_degrees(45.0, 18.0), FluxType::List)
             ],
         },
     );
@@ -728,7 +728,7 @@ fn beam_responses_apply_properly_curved_power_law_and_list() {
         Source {
             components: vec1![
                 get_simple_shapelet(obs.phase_centre, FluxType::CurvedPowerLaw),
-                get_simple_shapelet(RADec::new_degrees(45.0, 18.0), FluxType::List)
+                get_simple_shapelet(RADec::from_degrees(45.0, 18.0), FluxType::List)
             ],
         },
     );
@@ -761,8 +761,8 @@ fn shapelet_multiple_components() {
         "shapelet".to_string(),
         Source {
             components: vec1![
-                get_simple_shapelet(RADec::new_degrees(1.0, -27.0), FluxType::List),
-                get_simple_shapelet(RADec::new_degrees(1.1, -27.0), FluxType::List)
+                get_simple_shapelet(RADec::from_degrees(1.0, -27.0), FluxType::List),
+                get_simple_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List)
             ],
         },
     );

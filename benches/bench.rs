@@ -30,7 +30,7 @@ fn model_benchmarks(c: &mut Criterion) {
 
     let num_tiles = 128;
     let num_bls = (num_tiles * (num_tiles - 1)) / 2;
-    let phase_centre = RADec::new_degrees(0.0, -27.0);
+    let phase_centre = RADec::from_degrees(0.0, -27.0);
     let dut1 = Duration::from_total_nanoseconds(0);
     let apply_precession = true;
     let timestamp = Epoch::from_gpst_seconds(1065880128.0);
@@ -53,7 +53,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         format!("source{i}"),
                         Source {
                             components: vec1![SourceComponent {
-                                radec: RADec::new_degrees(0.0, -27.0),
+                                radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Point,
                                 flux_type: FluxDensityType::PowerLaw {
                                     si: -0.7,
@@ -105,7 +105,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         format!("source{i}"),
                         Source {
                             components: vec1![SourceComponent {
-                                radec: RADec::new_degrees(0.0, -27.0),
+                                radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Point,
                                 flux_type: FluxDensityType::PowerLaw {
                                     si: -0.7,
@@ -162,7 +162,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         format!("source{i}"),
                         Source {
                             components: vec1![SourceComponent {
-                                radec: RADec::new_degrees(0.0, -27.0),
+                                radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Point,
                                 flux_type: FluxDensityType::List {
                                     fds: vec1![
@@ -227,7 +227,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 format!("source{i}"),
                 Source {
                     components: vec1![SourceComponent {
-                        radec: RADec::new_degrees(0.0, -27.0),
+                        radec: RADec::from_degrees(0.0, -27.0),
                         comp_type: ComponentType::Gaussian {
                             maj: 1.0,
                             min: 0.5,
@@ -280,7 +280,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 format!("source{i}"),
                 Source {
                     components: vec1![SourceComponent {
-                        radec: RADec::new_degrees(0.0, -27.0),
+                        radec: RADec::from_degrees(0.0, -27.0),
                         comp_type: ComponentType::Gaussian {
                             maj: 1.0,
                             min: 0.5,
@@ -331,7 +331,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 format!("source{i}"),
                 Source {
                     components: vec1![SourceComponent {
-                        radec: RADec::new_degrees(0.0, -27.0),
+                        radec: RADec::from_degrees(0.0, -27.0),
                         comp_type: ComponentType::Gaussian {
                             maj: 1.0,
                             min: 0.5,
@@ -385,7 +385,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     format!("source{i}"),
                     Source {
                         components: vec1![SourceComponent {
-                            radec: RADec::new_degrees(0.0, -27.0),
+                            radec: RADec::from_degrees(0.0, -27.0),
                             comp_type: ComponentType::Shapelet {
                                 maj: 1.0,
                                 min: 0.5,
@@ -449,7 +449,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     format!("source{i}"),
                     Source {
                         components: vec1![SourceComponent {
-                            radec: RADec::new_degrees(0.0, -27.0),
+                            radec: RADec::from_degrees(0.0, -27.0),
                             comp_type: ComponentType::Shapelet {
                                 maj: 1.0,
                                 min: 0.5,
@@ -511,7 +511,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     format!("source{i}"),
                     Source {
                         components: vec1![SourceComponent {
-                            radec: RADec::new_degrees(0.0, -27.0),
+                            radec: RADec::from_degrees(0.0, -27.0),
                             comp_type: ComponentType::Shapelet {
                                 maj: 1.0,
                                 min: 0.5,

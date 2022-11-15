@@ -55,19 +55,19 @@ jobs:
           curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
           cp .github/workflows/releases-readme.md README.md
 
-          cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static
+          cargo build --release --locked --no-default-features --features=hdf5-static,cfitsio-static
           mv target/release/hyperdrive .
           tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3.tar.gz \
           LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
           hyperdrive
 
-          cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static,cuda
+          cargo build --release --locked --no-default-features --features=hdf5-static,cfitsio-static,cuda
           mv target/release/hyperdrive .
           tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-double.tar.gz \
           LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
           hyperdrive
 
-          cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static,cuda-single
+          cargo build --release --locked --no-default-features --features=hdf5-static,cfitsio-static,cuda-single
           mv target/release/hyperdrive .
           tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-single.tar.gz \
           LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \

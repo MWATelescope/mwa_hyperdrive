@@ -39,7 +39,7 @@ fn test_1090008640_cross_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -103,7 +103,7 @@ fn read_1090008640_auto_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -197,7 +197,7 @@ fn read_1090008640_auto_vis_with_flags() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, tile_flags);
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -292,12 +292,12 @@ fn read_1090008640_cross_and_auto_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -454,8 +454,8 @@ fn test_timestep_reading() {
 
     let weight_data = Array3::<f32>::from_elem(shape, 1.);
 
-    let phase_centre = RADec::new_degrees(0., -27.);
-    let array_pos = LatLngHeight::new_mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
     #[rustfmt::skip]
     let tile_xyzs = vec![
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -509,11 +509,11 @@ fn test_timestep_reading() {
         ms_ctx
             .timestamps
             .iter()
-            .map(|t| t.as_gpst_seconds())
+            .map(|t| t.to_gpst_seconds())
             .collect::<Vec<_>>(),
         expected_timestamps
             .iter()
-            .map(|t| t.as_gpst_seconds())
+            .map(|t| t.to_gpst_seconds())
             .collect::<Vec<_>>()
     );
 }

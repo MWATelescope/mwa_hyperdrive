@@ -16,7 +16,7 @@ use crate::srclist::{
 fn get_list_source_1() -> Source {
     Source {
         components: vec1![SourceComponent {
-            radec: RADec::new(PI, FRAC_PI_4),
+            radec: RADec::from_radians(PI, FRAC_PI_4),
             comp_type: ComponentType::Point,
             flux_type: FluxDensityType::List {
                 fds: vec1![
@@ -52,7 +52,7 @@ fn get_list_source_1() -> Source {
 fn get_list_source_2() -> Source {
     Source {
         components: vec1![SourceComponent {
-            radec: RADec::new(PI - 0.82, -FRAC_PI_4),
+            radec: RADec::from_radians(PI - 0.82, -FRAC_PI_4),
             comp_type: ComponentType::Point,
             flux_type: FluxDensityType::List {
                 fds: vec1![

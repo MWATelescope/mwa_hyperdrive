@@ -931,7 +931,7 @@ fn test_1090008640_calibrate_model_ms() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     let sols = result.unwrap();
 
-    let array_pos = LatLngHeight::new_mwa();
+    let array_pos = LatLngHeight::mwa();
     let ms_m = MsReader::new(&model, Some(metafits), Some(array_pos)).unwrap();
     let ctx_m = ms_m.get_obs_context();
     let ms_c = MsReader::new(&cal_model, Some(metafits), Some(array_pos)).unwrap();

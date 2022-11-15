@@ -476,7 +476,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     // If the array position wasn't user defined, try the input data.
     let array_pos = array_position.unwrap_or_else(|| {
         trace!("The array position was not specified in the input data; assuming MWA");
-        LatLngHeight::new_mwa()
+        LatLngHeight::mwa()
     });
 
     let timesteps = match timesteps {
@@ -884,7 +884,7 @@ fn read_vis(
     // write it all out.
     for &timestep in timesteps {
         let timestamp = obs_context.timestamps[timestep];
-        debug!("Reading timestamp {}", timestamp.as_gpst_seconds());
+        debug!("Reading timestamp {}", timestamp.to_gpst_seconds());
 
         let mut cross_data: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
         let mut cross_weights: ArcArray2<f32> = ArcArray2::zeros(vis_shape);
@@ -978,7 +978,7 @@ fn model_vis_and_subtract(
         timestamp,
     } in rx.iter()
     {
-        debug!("Modelling timestamp {}", timestamp.as_gpst_seconds());
+        debug!("Modelling timestamp {}", timestamp.to_gpst_seconds());
         modeller.model_timestep(vis_model.view_mut(), timestamp)?;
         vis_data
             .iter_mut()

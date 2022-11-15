@@ -146,20 +146,20 @@ fn test_write_and_read_hyperdrive_solutions() {
     assert!(sols_from_disk.start_timestamps.is_some());
     let disk_start_timestamps = sols_from_disk.start_timestamps.unwrap();
     assert_eq!(disk_start_timestamps.len(), 2);
-    assert_abs_diff_eq!(disk_start_timestamps[0].as_gpst_seconds(), 1090008640.0);
-    assert_abs_diff_eq!(disk_start_timestamps[1].as_gpst_seconds(), 1090008650.0);
+    assert_abs_diff_eq!(disk_start_timestamps[0].to_gpst_seconds(), 1090008640.0);
+    assert_abs_diff_eq!(disk_start_timestamps[1].to_gpst_seconds(), 1090008650.0);
 
     assert!(sols_from_disk.end_timestamps.is_some());
     let disk_end_timestamps = sols_from_disk.end_timestamps.unwrap();
     assert_eq!(disk_end_timestamps.len(), 2);
-    assert_abs_diff_eq!(disk_end_timestamps[0].as_gpst_seconds(), 1090008650.0);
-    assert_abs_diff_eq!(disk_end_timestamps[1].as_gpst_seconds(), 1090008660.0);
+    assert_abs_diff_eq!(disk_end_timestamps[0].to_gpst_seconds(), 1090008650.0);
+    assert_abs_diff_eq!(disk_end_timestamps[1].to_gpst_seconds(), 1090008660.0);
 
     assert!(sols_from_disk.average_timestamps.is_some());
     let disk_average_timestamps = sols_from_disk.average_timestamps.unwrap();
     assert_eq!(disk_average_timestamps.len(), 2);
-    assert_abs_diff_eq!(disk_average_timestamps[0].as_gpst_seconds(), 1090008645.0);
-    assert_abs_diff_eq!(disk_average_timestamps[1].as_gpst_seconds(), 1090008655.0);
+    assert_abs_diff_eq!(disk_average_timestamps[0].to_gpst_seconds(), 1090008645.0);
+    assert_abs_diff_eq!(disk_average_timestamps[1].to_gpst_seconds(), 1090008655.0);
 
     assert!(sols_from_disk.chanblock_freqs.is_some());
     let disk_freqs = sols_from_disk.chanblock_freqs.unwrap();
@@ -307,16 +307,16 @@ fn test_write_and_read_ao_solutions() {
     let disk_start_timestamps = sols_from_disk.start_timestamps.unwrap();
     // Only one start and end; limited by the format.
     assert_eq!(disk_start_timestamps.len(), 1);
-    assert_abs_diff_eq!(disk_start_timestamps[0].as_gpst_seconds(), 1090008640.0);
+    assert_abs_diff_eq!(disk_start_timestamps[0].to_gpst_seconds(), 1090008640.0);
 
     assert!(sols_from_disk.end_timestamps.is_some());
     let disk_end_timestamps = sols_from_disk.end_timestamps.unwrap();
     assert_eq!(disk_end_timestamps.len(), 1);
-    assert_abs_diff_eq!(disk_end_timestamps[0].as_gpst_seconds(), 1090008660.0);
+    assert_abs_diff_eq!(disk_end_timestamps[0].to_gpst_seconds(), 1090008660.0);
 
     // Not technically part of the format, but hyperdrive populates it.
     assert!(sols_from_disk.average_timestamps.is_some());
     let disk_average_timestamps = sols_from_disk.average_timestamps.unwrap();
     assert_eq!(disk_average_timestamps.len(), 1);
-    assert_abs_diff_eq!(disk_average_timestamps[0].as_gpst_seconds(), 1090008650.0);
+    assert_abs_diff_eq!(disk_average_timestamps[0].to_gpst_seconds(), 1090008650.0);
 }

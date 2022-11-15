@@ -37,7 +37,7 @@ fn test_1090008640_vis_subtract() {
         "src1".to_string(),
         Source {
             components: vec1![SourceComponent {
-                radec: RADec::new_degrees(0.0, -27.0),
+                radec: RADec::from_degrees(0.0, -27.0),
                 comp_type: ComponentType::Point,
                 flux_type: FluxDensityType::List {
                     fds: vec1![FluxDensity {
@@ -60,7 +60,7 @@ fn test_1090008640_vis_subtract() {
         "src2".to_string(),
         Source {
             components: vec1![SourceComponent {
-                radec: RADec::new_degrees(1.0, -27.0),
+                radec: RADec::from_degrees(1.0, -27.0),
                 comp_type: ComponentType::Point,
                 flux_type: FluxDensityType::List {
                     fds: vec1![FluxDensity {

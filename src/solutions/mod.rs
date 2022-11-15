@@ -214,7 +214,7 @@ impl CalibrationSolutions {
         if num_timeblocks == 1 {
             debug!(
                 "Using solutions timeblock 0 for timestamp {}",
-                timestamp.as_gpst_seconds()
+                timestamp.to_gpst_seconds()
             );
             return self.di_jones.slice(s![0, .., ..]);
         }
@@ -243,7 +243,7 @@ impl CalibrationSolutions {
                     if timestamp >= start && timestamp <= end {
                         debug!(
                             "Using solutions timeblock {i_timeblock} for timestamp {}",
-                            timestamp.as_gpst_seconds()
+                            timestamp.to_gpst_seconds()
                         );
                         return self.di_jones.slice(s![i_timeblock, .., ..]);
                     }
@@ -253,7 +253,7 @@ impl CalibrationSolutions {
             // Try using averages.
             let mut smallest_diff = (f64::INFINITY, 0);
             for (i_timeblock, &average) in a.iter().enumerate() {
-                let diff = (average - timestamp).in_seconds().abs();
+                let diff = (average - timestamp).to_seconds().abs();
                 if diff < smallest_diff.0 {
                     smallest_diff = (diff, i_timeblock);
                 }
@@ -262,7 +262,7 @@ impl CalibrationSolutions {
                 debug!(
                     "Using solutions timeblock {} for timestamp {}",
                     smallest_diff.1,
-                    timestamp.as_gpst_seconds()
+                    timestamp.to_gpst_seconds()
                 );
                 return self.di_jones.slice(s![smallest_diff.1, .., ..]);
             }
@@ -274,7 +274,7 @@ impl CalibrationSolutions {
             let i_timeblock = (timestamp_fraction * num_timeblocks as f64).floor() as usize;
             debug!(
                 "Using solutions timeblock {i_timeblock} for timestamp {}",
-                timestamp.as_gpst_seconds()
+                timestamp.to_gpst_seconds()
             );
             return self.di_jones.slice(s![i_timeblock, .., ..]);
         }
@@ -282,7 +282,7 @@ impl CalibrationSolutions {
         // All else has somehow failed; just return the first timeblock.
         debug!(
             "Using solutions timeblock 0 for timestamp {}",
-            timestamp.as_gpst_seconds()
+            timestamp.to_gpst_seconds()
         );
         self.di_jones.slice(s![0, .., ..])
     }

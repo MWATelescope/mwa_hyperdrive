@@ -141,9 +141,9 @@ pub(crate) fn write_vis<'a>(
         let diff = (t - *timestamps.first()).total_nanoseconds();
         if diff % time_res.total_nanoseconds() > 0 {
             return Err(VisWriteError::IrregularTimestamps {
-                first: timestamps.first().as_gpst_seconds(),
-                bad: t.as_gpst_seconds(),
-                time_res: time_res.in_seconds(),
+                first: timestamps.first().to_gpst_seconds(),
+                bad: t.to_gpst_seconds(),
+                time_res: time_res.to_seconds(),
             });
         }
     }
@@ -276,7 +276,7 @@ pub(crate) fn write_vis<'a>(
     {
         debug!(
             "Received timestep {i_timestep} (GPS {})",
-            timestamp.as_gpst_seconds()
+            timestamp.to_gpst_seconds()
         );
         if this_average_timestamp.is_none() {
             this_average_timestamp = Some(

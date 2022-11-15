@@ -383,7 +383,7 @@ impl VisSimParams {
                 if !(-90.0..=90.0).contains(dec) {
                     return Err(VisSimulateError::DecInvalid);
                 }
-                RADec::new_degrees(*ra, *dec)
+                RADec::from_degrees(*ra, *dec)
             }
             (Some(_), None, _) => return Err(VisSimulateError::OnlyOneRAOrDec),
             (None, Some(_), _) => return Err(VisSimulateError::OnlyOneRAOrDec),
@@ -391,9 +391,9 @@ impl VisSimParams {
                 // The phase centre in a metafits file may not be present. If not,
                 // we have to use the pointing centre.
                 match (m.ra_phase_center_degrees, m.dec_phase_center_degrees) {
-                    (Some(ra), Some(dec)) => RADec::new_degrees(ra, dec),
+                    (Some(ra), Some(dec)) => RADec::from_degrees(ra, dec),
                     (None, None) => {
-                        RADec::new_degrees(m.ra_tile_pointing_degrees, m.dec_tile_pointing_degrees)
+                        RADec::from_degrees(m.ra_tile_pointing_degrees, m.dec_tile_pointing_degrees)
                     }
                     _ => unreachable!(),
                 }
@@ -432,7 +432,7 @@ impl VisSimParams {
         };
 
         let array_position = match array_position {
-            None => LatLngHeight::new_mwa(),
+            None => LatLngHeight::mwa(),
             Some(pos) => {
                 if pos.len() != 3 {
                     return Err(VisSimulateError::BadArrayPosition {
@@ -790,7 +790,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                     .len(),
             );
             let weight_factor =
-                (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR);
+                (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.to_seconds() / TIME_WEIGHT_FACTOR);
             let result = model_thread(
                 modeller.deref_mut(),
                 &timestamps,

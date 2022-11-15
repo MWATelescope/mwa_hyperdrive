@@ -156,13 +156,13 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         sols.average_timestamps.as_ref().map(|v| v.as_slice()),
     ) {
         // One start and end time.
-        (Some([s, ..]), Some([.., e]), _) => (s.as_gpst_seconds(), e.as_gpst_seconds()),
+        (Some([s, ..]), Some([.., e]), _) => (s.to_gpst_seconds(), e.to_gpst_seconds()),
         // No start and end times, but averages. Sure, why not.
-        (Some([]), Some([]), Some([a0, .., an])) => (a0.as_gpst_seconds(), an.as_gpst_seconds()),
-        (Some([]), Some([]), Some([a0])) => (a0.as_gpst_seconds(), a0.as_gpst_seconds()),
+        (Some([]), Some([]), Some([a0, .., an])) => (a0.to_gpst_seconds(), an.to_gpst_seconds()),
+        (Some([]), Some([]), Some([a0])) => (a0.to_gpst_seconds(), a0.to_gpst_seconds()),
         // Less-than-ideal amount of info.
-        (Some([s, ..]), Some([]), _) => (s.as_gpst_seconds(), 0.0),
-        (Some([]), Some([.., e]), _) => (0.0, e.as_gpst_seconds()),
+        (Some([s, ..]), Some([]), _) => (s.to_gpst_seconds(), 0.0),
+        (Some([]), Some([.., e]), _) => (0.0, e.to_gpst_seconds()),
         // Nothing, nothing.
         _ => (0.0, 0.0),
     };

@@ -58,7 +58,8 @@ fn fee_beam_values_are_sensible() {
     // Compare these with the hyperdrive `Beam` trait.
     let gains = array![amps];
     let hyperdrive =
-        super::FEEBeam::new_from_env(1, Delays::Partial(delays.to_vec()), Some(gains)).unwrap();
+        super::fee::FEEBeam::new_from_env(1, Delays::Partial(delays.to_vec()), Some(gains))
+            .unwrap();
     let hyperdrive_values: Vec<Jones<f64>> = azels
         .iter()
         .map(|&azel| {
@@ -97,7 +98,8 @@ fn fee_cuda_beam_values_are_sensible() {
         .unwrap();
 
     // Compare these with the hyperdrive `Beam` trait.
-    let hyperdrive = super::FEEBeam::new_from_env(1, Delays::Full(delays), Some(amps)).unwrap();
+    let hyperdrive =
+        super::fee::FEEBeam::new_from_env(1, Delays::Full(delays), Some(amps)).unwrap();
     let hyperdrive = unsafe { hyperdrive.prepare_cuda_beam(&freqs).unwrap() };
     let hyperdrive_values_device = unsafe {
         let mut hyperdrive_values_device: DevicePointer<Jones<CudaFloat>> = DevicePointer::malloc(

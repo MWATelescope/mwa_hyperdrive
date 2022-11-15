@@ -19,7 +19,7 @@ fn test_get_azel_mwa() {
     let mut sl = SourceList::new();
     // Use a common component. Only the `radec` part needs to be modified.
     let comp = SourceComponent {
-        radec: RADec::new(PI, FRAC_PI_4),
+        radec: RADec::from_radians(PI, FRAC_PI_4),
         comp_type: ComponentType::Point,
         flux_type: FluxDensityType::PowerLaw {
             si: -0.8,
@@ -39,10 +39,10 @@ fn test_get_azel_mwa() {
 
     // Modify the coordinates of other components.
     s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::new(PI - 0.1, FRAC_PI_4 + 0.1);
+    s.components.last_mut().radec = RADec::from_radians(PI - 0.1, FRAC_PI_4 + 0.1);
 
     s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::new(PI + 0.1, FRAC_PI_4 - 0.1);
+    s.components.last_mut().radec = RADec::from_radians(PI + 0.1, FRAC_PI_4 - 0.1);
 
     // Push "source_1".
     sl.insert("source_1".to_string(), s);
@@ -52,20 +52,20 @@ fn test_get_azel_mwa() {
     };
 
     s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::new(PI - 0.1, FRAC_PI_4 + 0.1);
+    s.components.last_mut().radec = RADec::from_radians(PI - 0.1, FRAC_PI_4 + 0.1);
 
     s.components.push(comp.clone());
-    s.components.last_mut().radec = RADec::new(PI + 0.1, FRAC_PI_4 - 0.1);
+    s.components.last_mut().radec = RADec::from_radians(PI + 0.1, FRAC_PI_4 - 0.1);
 
     sl.insert("source_2".to_string(), s);
 
     let mut s = Source {
         components: vec1![comp.clone()],
     };
-    s.components.last_mut().radec = RADec::new(FRAC_PI_2, PI);
+    s.components.last_mut().radec = RADec::from_radians(FRAC_PI_2, PI);
 
     s.components.push(comp);
-    s.components.last_mut().radec = RADec::new(FRAC_PI_2 - 0.1, PI + 0.2);
+    s.components.last_mut().radec = RADec::from_radians(FRAC_PI_2 - 0.1, PI + 0.2);
 
     sl.insert("source_3".to_string(), s);
 

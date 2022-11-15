@@ -542,8 +542,8 @@ fn shapelet_multiple_components() {
         "shapelet".to_string(),
         Source {
             components: vec1![
-                get_simple_shapelet(RADec::new_degrees(1.0, -27.0), FluxType::List),
-                get_simple_shapelet(RADec::new_degrees(1.1, -27.0), FluxType::List)
+                get_simple_shapelet(RADec::from_degrees(1.0, -27.0), FluxType::List),
+                get_simple_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List)
             ],
         },
     );

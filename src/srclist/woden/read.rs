@@ -266,7 +266,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 if !(-90.0..=90.0).contains(&declination) {
                     return Err(ReadSourceListError::InvalidDec(declination));
                 }
-                let radec = RADec::new(hour_angle * DH2R, declination.to_radians());
+                let radec = RADec::from_radians(hour_angle * DH2R, declination.to_radians());
 
                 components.push(SourceComponent {
                     radec,

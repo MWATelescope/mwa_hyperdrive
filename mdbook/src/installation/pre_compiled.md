@@ -17,7 +17,7 @@ install CUDA are on [the next page](from_source.md#cuda).
 ~~~admonish
 The pre-compiled binaries are made by GitHub actions using:
 ```shell
-cargo build --release --locked --no-default-features --features=hdf5-static,erfa-static,cfitsio-static
+cargo build --release --locked --no-default-features --features=hdf5-static,cfitsio-static
 ```
 This means they cannot plot calibration solutions.
 "CUDA-double" binaries have the `cuda` feature and "CUDA-single" binaries have
