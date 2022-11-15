@@ -175,7 +175,7 @@ fn hyperdrive_conversion_works() {
         "gaussian".to_string(),
         Source {
             components: vec1![SourceComponent {
-                radec: RADec::new_degrees(61.0, -28.0),
+                radec: RADec::from_degrees(61.0, -28.0),
                 comp_type: ComponentType::Gaussian {
                     maj: 1.0,
                     min: 0.5,
@@ -198,7 +198,7 @@ fn hyperdrive_conversion_works() {
         "point".to_string(),
         Source {
             components: vec1![SourceComponent {
-                radec: RADec::new_degrees(60.0, -27.0),
+                radec: RADec::from_degrees(60.0, -27.0),
                 comp_type: ComponentType::Point,
                 flux_type: FluxDensityType::PowerLaw {
                     si: DEFAULT_SPEC_INDEX,
@@ -217,7 +217,7 @@ fn hyperdrive_conversion_works() {
         "shapelet".to_string(),
         Source {
             components: vec1![SourceComponent {
-                radec: RADec::new_degrees(59.0, -26.0),
+                radec: RADec::from_degrees(59.0, -26.0),
                 comp_type: ComponentType::Shapelet {
                     maj: 1.0,
                     min: 0.5,
@@ -617,7 +617,7 @@ fn woden_write_throws_away_unsupported_things() {
 fn get_example_sl() -> SourceList {
     let source1 = Source {
         components: vec1![SourceComponent {
-            radec: RADec::new_degrees(10.0, -27.0),
+            radec: RADec::from_degrees(10.0, -27.0),
             comp_type: ComponentType::Point,
             flux_type: FluxDensityType::List {
                 fds: vec1![
@@ -642,7 +642,7 @@ fn get_example_sl() -> SourceList {
     let source2 = Source {
         components: vec1![
             SourceComponent {
-                radec: RADec::new_degrees(0.0, -35.0),
+                radec: RADec::from_degrees(0.0, -35.0),
                 comp_type: ComponentType::Gaussian {
                     maj: 20.0_f64.to_radians() / 3600.0,
                     min: 10.0_f64.to_radians() / 3600.0,
@@ -660,7 +660,7 @@ fn get_example_sl() -> SourceList {
                 },
             },
             SourceComponent {
-                radec: RADec::new_degrees(155.0, -10.0),
+                radec: RADec::from_degrees(155.0, -10.0),
                 comp_type: ComponentType::Shapelet {
                     maj: 20.0_f64.to_radians() / 3600.0,
                     min: 10.0_f64.to_radians() / 3600.0,

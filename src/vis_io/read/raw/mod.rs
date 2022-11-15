@@ -19,11 +19,13 @@ use std::{
 };
 
 use birli::PreprocessContext;
-use hifitime::{Duration, Epoch, Unit};
+use hifitime::{Duration, Epoch};
 use itertools::Itertools;
 use log::{debug, trace, warn};
 use marlu::{math::baseline_to_tiles, Jones, LatLngHeight, RADec, VisSelection, XyzGeodetic};
-use mwalib::{CorrelatorContext, GeometricDelaysApplied, MWAVersion, Pol};
+use mwalib::{
+    CorrelatorContext, GeometricDelaysApplied, GpuboxError, MWAVersion, MwalibError, Pol,
+};
 use ndarray::prelude::*;
 use vec1::Vec1;
 
@@ -73,6 +75,16 @@ impl RawDataCorrections {
             cable_length,
             geometric,
         })
+    }
+
+    fn nothing_to_do(self) -> bool {
+        let Self {
+            pfb_flavour,
+            digital_gains,
+            cable_length,
+            geometric,
+        } = self;
+        matches!(pfb_flavour, PfbFlavour::None) && !digital_gains && !cable_length && !geometric
     }
 }
 
@@ -200,28 +212,7 @@ impl RawDataReader {
             }
         }
 
-        let flagged_fine_chans_per_coarse_chan = get_80khz_fine_chan_flags_per_coarse_chan(
-            metafits_context.corr_fine_chan_width_hz,
-            metafits_context.num_corr_fine_chans_per_coarse,
-            is_mwax,
-        );
-        let flagged_fine_chans = {
-            let mut flagged_fine_chans = Vec::with_capacity(
-                flagged_fine_chans_per_coarse_chan.len() * mwalib_context.num_coarse_chans,
-            );
-            for i_cc in 0..mwalib_context.num_provided_coarse_chans {
-                for &f in &flagged_fine_chans_per_coarse_chan {
-                    flagged_fine_chans
-                        .push(i_cc * metafits_context.num_corr_fine_chans_per_coarse + f);
-                }
-            }
-            flagged_fine_chans
-        };
-
-        let time_res = Some(Duration::from_f64(
-            metafits_context.corr_int_time_ms as f64,
-            Unit::Millisecond,
-        ));
+        let time_res = Duration::from_milliseconds(metafits_context.corr_int_time_ms as f64);
 
         let all_timesteps = Vec1::try_from_vec(mwalib_context.provided_timestep_indices.clone())
             .map_err(|_| RawReadError::NoTimesteps)?;
@@ -254,31 +245,74 @@ impl RawDataReader {
             coarse_chan_freqs
         );
 
+        let flagged_fine_chans_per_coarse_chan = get_80khz_fine_chan_flags_per_coarse_chan(
+            metafits_context.corr_fine_chan_width_hz,
+            metafits_context.num_corr_fine_chans_per_coarse,
+            is_mwax,
+        );
+        // Given the provided "common good" coarse channels, find the missing
+        // coarse channels and flag their channels.
+        let mut missing_coarse_chans = Vec::with_capacity(24);
+        let coarse_chan_span = *coarse_chan_indices
+            .first()
+            .expect("at least one coarse channel provided")
+            ..=*coarse_chan_indices
+                .last()
+                .expect("at least one coarse channel provided");
+        for i_cc in coarse_chan_span.clone() {
+            if !coarse_chan_indices.contains(&i_cc) {
+                missing_coarse_chans.push(i_cc);
+            }
+        }
+
+        let mut flagged_fine_chans = Vec::with_capacity(
+            flagged_fine_chans_per_coarse_chan.len() * coarse_chan_indices.len()
+                + missing_coarse_chans.len() * metafits_context.num_corr_fine_chans_per_coarse,
+        );
+        for i_cc in coarse_chan_span.clone() {
+            if missing_coarse_chans.contains(&i_cc) {
+                for f in 0..metafits_context.num_corr_fine_chans_per_coarse {
+                    // The flagged channels are relative to the start of the
+                    // frequency band we're interested in. So if this is the
+                    // first coarse channel we're interested in, the flags
+                    // should start from 0, not wherever the coarse channel sits
+                    // within the whole observation band.
+                    flagged_fine_chans.push(
+                        (i_cc - *coarse_chan_span.start())
+                            * metafits_context.num_corr_fine_chans_per_coarse
+                            + f,
+                    );
+                }
+            } else {
+                for &f in &flagged_fine_chans_per_coarse_chan {
+                    flagged_fine_chans.push(
+                        (i_cc - *coarse_chan_span.start())
+                            * metafits_context.num_corr_fine_chans_per_coarse
+                            + f,
+                    );
+                }
+            }
+        }
+
         let fine_chan_freqs = mwalib_context
-            .get_fine_chan_freqs_hz_array(coarse_chan_indices)
+            .get_fine_chan_freqs_hz_array(&coarse_chan_span.collect::<Vec<_>>())
             .into_iter()
             .map(|f| f.round() as u64)
             .collect();
         let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
-        let phase_centre = RADec::new(
-            metafits_context
-                .ra_phase_center_degrees
-                .unwrap_or_else(|| {
-                    warn!(
-                        "No phase centre specified; using the pointing centre as the phase centre"
-                    );
-                    metafits_context.ra_tile_pointing_degrees
-                })
-                .to_radians(),
+        let phase_centre = RADec::from_degrees(
+            metafits_context.ra_phase_center_degrees.unwrap_or_else(|| {
+                warn!("No phase centre specified; using the pointing centre as the phase centre");
+                metafits_context.ra_tile_pointing_degrees
+            }),
             metafits_context
                 .dec_phase_center_degrees
-                .unwrap_or(metafits_context.dec_tile_pointing_degrees)
-                .to_radians(),
+                .unwrap_or(metafits_context.dec_tile_pointing_degrees),
         );
-        let pointing_centre = Some(RADec::new(
-            metafits_context.ra_tile_pointing_degrees.to_radians(),
-            metafits_context.dec_tile_pointing_degrees.to_radians(),
+        let pointing_centre = Some(RADec::from_degrees(
+            metafits_context.ra_tile_pointing_degrees,
+            metafits_context.dec_tile_pointing_degrees,
         ));
         let tile_xyzs = XyzGeodetic::get_tiles_mwa(metafits_context);
         let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
@@ -322,22 +356,18 @@ impl RawDataReader {
             // cotter has a nasty bug that can cause the start time listed in
             // mwaf files to be offset from data HDUs. Warn the user if this is
             // noticed.
-            let time_res = Duration::from_f64(
-                mwalib_context.metafits_context.corr_int_time_ms as f64,
-                Unit::Millisecond,
-            );
             let data_start =
                 Epoch::from_gpst_seconds(mwalib_context.common_start_gps_time_ms as f64 / 1e3)
-                    + time_res / 2.0;
+                    + time_res / 2;
             let data_end =
                 Epoch::from_gpst_seconds(mwalib_context.common_end_gps_time_ms as f64 / 1e3)
-                    + time_res / 2.0;
+                    + time_res / 2;
             let flags_start = f.start_time;
             let flags_end = flags_start + f.num_time_steps as f64 * time_res;
-            let diff = (flags_start - data_start).in_seconds() / time_res.in_seconds();
-            debug!("Data start time (GPS): {}", data_start.as_gpst_seconds());
-            debug!("Flag start time (GPS): {}", flags_start.as_gpst_seconds());
-            debug!("(flags_start - data_start).in_seconds() / time_res.in_seconds(): {diff}");
+            let diff = (flags_start - data_start).to_seconds() / time_res.to_seconds();
+            debug!("Data start time (GPS): {}", data_start.to_gpst_seconds());
+            debug!("Flag start time (GPS): {}", flags_start.to_gpst_seconds());
+            debug!("(flags_start - data_start).to_seconds() / time_res.to_seconds(): {diff}");
             if diff.fract().abs() > 0.0 {
                 warn!("These mwaf files do not have times corresponding to the data they were created from.");
                 match f.software {
@@ -353,9 +383,9 @@ impl RawDataReader {
             // user that attempting to use data timesteps without flag timesteps
             // will be a problem.
             let mut start_offset =
-                ((data_start - flags_start).in_seconds() / time_res.in_seconds()).ceil();
+                ((data_start - flags_start).to_seconds() / time_res.to_seconds()).ceil();
             let mut end_offset =
-                ((data_end - flags_end).in_seconds() / time_res.in_seconds()).ceil();
+                ((data_end - flags_end).to_seconds() / time_res.to_seconds()).ceil();
             if f.offset_bug {
                 start_offset -= 1.0;
                 end_offset -= 1.0;
@@ -390,10 +420,8 @@ impl RawDataReader {
             unflagged_timesteps: mwalib_context.common_good_timestep_indices.clone(),
             phase_centre,
             pointing_centre,
-            array_position: Some(LatLngHeight::new_mwa()),
-            dut1: metafits_context
-                .dut1
-                .map(|dut1| Duration::from_f64(dut1, Unit::Second)),
+            array_position: Some(LatLngHeight::mwa()),
+            dut1: metafits_context.dut1.map(Duration::from_seconds),
             tile_names,
             tile_xyzs,
             flagged_tiles,
@@ -401,7 +429,7 @@ impl RawDataReader {
             autocorrelations_present: true,
             dipole_delays: Some(dipole_delays),
             dipole_gains: Some(dipole_gains),
-            time_res,
+            time_res: Some(time_res),
             coarse_chan_nums,
             coarse_chan_freqs,
             num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
@@ -482,8 +510,6 @@ impl RawDataReader {
         timestep: usize,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
-        // TODO: Handle non-contiguous coarse channels.
-
         // Check that mwaf flags are available for this timestep.
         let mwaf_timestep = match &self.mwaf_flags {
             Some(mwaf_flags) => {
@@ -495,12 +521,12 @@ impl RawDataReader {
                 if !(flags_start..flags_end).contains(&timestamp) {
                     return Err(VisReadError::MwafFlagsMissingForTimestep {
                         timestep,
-                        gps: timestamp.as_gpst_seconds(),
+                        gps: timestamp.to_gpst_seconds(),
                     });
                 }
                 // Find the flags timestep index corresponding to the data
                 // timestep index.
-                let offset = (timestamp - flags_start).in_seconds() / time_res.in_seconds();
+                let offset = (timestamp - flags_start).to_seconds() / time_res.to_seconds();
                 let offset = if mwaf_flags.offset_bug {
                     offset.floor() as usize
                 } else {
@@ -513,88 +539,132 @@ impl RawDataReader {
             None => None,
         };
 
-        // We checked mwalib has some common good coarse channels in the new
-        // method, so it is safe to unwrap `first` and `last`.
-        let coarse_chan_indices = &self.mwalib_context.common_good_coarse_chan_indices;
-        let vis_sel = VisSelection {
-            timestep_range: timestep..timestep + 1,
-            coarse_chan_range: *coarse_chan_indices.first().unwrap()
-                ..*coarse_chan_indices.last().unwrap() + 1,
-            baseline_idxs: (0..self.all_baseline_tile_pairs.len()).collect(),
-        };
-
         let gpubox_channels = self.mwalib_context.gpubox_batches[0]
             .gpubox_files
             .first()
-            .unwrap()
+            .expect("at least one coarse channel provided")
             .channel_identifier
             ..self.mwalib_context.gpubox_batches[0]
                 .gpubox_files
                 .last()
-                .unwrap()
+                .expect("at least one coarse channel provided")
                 .channel_identifier
                 + 1;
+        let coarse_chan_indices = &self.mwalib_context.common_good_coarse_chan_indices;
+        let coarse_chan_range = *coarse_chan_indices
+            .first()
+            .expect("at least one coarse channel provided")
+            ..*coarse_chan_indices
+                .last()
+                .expect("at least one coarse channel provided")
+                + 1;
 
-        // Read in the data via Birli.
-        let fine_chans_per_coarse = self
-            .mwalib_context
-            .metafits_context
-            .num_corr_fine_chans_per_coarse;
-        let mut jones_array_tfb = vis_sel.allocate_jones(fine_chans_per_coarse)?;
-        let mut flag_array_tfb = vis_sel.allocate_flags(fine_chans_per_coarse)?;
-        let mut weight_array_tfb = vis_sel.allocate_weights(fine_chans_per_coarse)?;
-        vis_sel.read_mwalib(
-            &self.mwalib_context,
-            jones_array_tfb.view_mut(),
-            flag_array_tfb.view_mut(),
-            false,
-        )?;
+        // Read in the data via mwalib.
+        let metafits_context = &self.mwalib_context.metafits_context;
+        let fine_chans_per_coarse = metafits_context.num_corr_fine_chans_per_coarse;
+        let size = fine_chans_per_coarse * metafits_context.num_baselines;
+        let full_size = size * gpubox_channels.len();
+        let mut jones_array_tfb = vec![Jones::default(); full_size];
+        let mut flag_array_tfb = vec![false; full_size];
 
-        let weight_factor = birli::flags::get_weight_factor(&self.mwalib_context);
-        // populate weights
-        weight_array_tfb.fill(weight_factor as _);
+        for ((jones_array_fb, flag_array_fb), i_cc) in jones_array_tfb
+            .chunks_exact_mut(size)
+            .zip_eq(flag_array_tfb.chunks_exact_mut(size))
+            .zip_eq(coarse_chan_range.clone())
+        {
+            // Skip unavailable coarse channels.
+            if !coarse_chan_indices.contains(&i_cc) {
+                continue;
+            }
+
+            // Cast the Jones slice to a float slice so mwalib can use it.
+            let jones_array_fb = unsafe {
+                let ptr = jones_array_fb.as_mut_ptr();
+                std::slice::from_raw_parts_mut(ptr.cast(), jones_array_fb.len() * 8)
+            };
+
+            match self
+                .mwalib_context
+                .read_by_frequency_into_buffer(timestep, i_cc, jones_array_fb)
+            {
+                Ok(()) => (),
+
+                Err(GpuboxError::NoDataForTimeStepCoarseChannel {
+                    timestep_index,
+                    coarse_chan_index,
+                }) => {
+                    warn!(
+                        "Flagging missing data at timestep {timestep_index}, coarse channel {coarse_chan_index}"
+                    );
+                    flag_array_fb.fill(true);
+                }
+
+                Err(e) => return Err(RawReadError::from(MwalibError::from(e)).into()),
+            }
+        }
+
+        let shape = (
+            1,
+            fine_chans_per_coarse * gpubox_channels.len(),
+            metafits_context.num_baselines,
+        );
+        let mut jones_array_tfb =
+            Array3::from_shape_vec(shape, jones_array_tfb).expect("correct shape");
+        let mut flag_array_tfb =
+            Array3::from_shape_vec(shape, flag_array_tfb).expect("correct shape");
+        let mut weight_array_tfb = Array3::from_elem(
+            shape,
+            birli::flags::get_weight_factor(&self.mwalib_context) as f32,
+        );
 
         // Correct the raw data.
-        let metafits_context = &self.mwalib_context.metafits_context;
+        if !self.corrections.nothing_to_do() {
+            let prep_ctx = PreprocessContext {
+                array_pos: self
+                    .obs_context
+                    .array_position
+                    .unwrap_or_else(LatLngHeight::mwa),
+                phase_centre: self.obs_context.phase_centre,
+                correct_cable_lengths: self.corrections.cable_length
+                    && match metafits_context.cable_delays_applied {
+                        mwalib::CableDelaysApplied::NoCableDelaysApplied => true,
+                        mwalib::CableDelaysApplied::CableAndRecClock
+                        | mwalib::CableDelaysApplied::CableAndRecClockAndBeamformerDipoleDelays => {
+                            false
+                        }
+                    },
+                correct_digital_gains: self.corrections.digital_gains,
+                passband_gains: self.pfb_gains,
+                correct_geometry: self.corrections.geometric
+                    && matches!(
+                        metafits_context.geometric_delays_applied,
+                        GeometricDelaysApplied::No
+                    ),
+                ..PreprocessContext::default()
+            };
+            let vis_sel = VisSelection {
+                timestep_range: timestep..timestep + 1,
+                coarse_chan_range,
+                baseline_idxs: (0..self.all_baseline_tile_pairs.len()).collect(),
+            };
+            prep_ctx.preprocess(
+                &self.mwalib_context,
+                jones_array_tfb.view_mut(),
+                weight_array_tfb.view_mut(),
+                flag_array_tfb.view_mut(),
+                &vis_sel,
+            )?;
+        }
 
-        let prep_ctx = PreprocessContext {
-            array_pos: self
-                .obs_context
-                .array_position
-                .unwrap_or_else(LatLngHeight::new_mwa),
-            phase_centre: self.obs_context.phase_centre,
-            correct_cable_lengths: self.corrections.cable_length
-                && match metafits_context.cable_delays_applied {
-                    mwalib::CableDelaysApplied::NoCableDelaysApplied => true,
-                    mwalib::CableDelaysApplied::CableAndRecClock
-                    | mwalib::CableDelaysApplied::CableAndRecClockAndBeamformerDipoleDelays => {
-                        false
-                    }
-                },
-            correct_digital_gains: self.corrections.digital_gains,
-            passband_gains: self.pfb_gains,
-            correct_geometry: self.corrections.geometric
-                && matches!(
-                    metafits_context.geometric_delays_applied,
-                    GeometricDelaysApplied::No
-                ),
-            ..PreprocessContext::default()
-        };
-
-        prep_ctx.preprocess(
-            &self.mwalib_context,
-            jones_array_tfb.view_mut(),
-            weight_array_tfb.view_mut(),
-            flag_array_tfb.view_mut(),
-            &vis_sel,
-        )?;
-
-        // Remove the extraneous time dimension; there's only ever one timestep.
-        let data_vis_fb = jones_array_tfb.remove_axis(Axis(0));
+        // Convert the data array into a vector so we can use `chunks_exact`
+        // below (this is 0 cost). This is measurably faster than using
+        // `outer_iter` on an `ndarray`. Ignore the time dimension; there's only
+        // ever one timestep.
+        let data_vis_fb = jones_array_tfb.into_raw_vec();
 
         // bake flags into weights
-        for (weight, flag) in weight_array_tfb.iter_mut().zip_eq(flag_array_tfb.iter()) {
-            *weight = if *flag {
+        for (weight, flag) in weight_array_tfb.iter_mut().zip_eq(flag_array_tfb) {
+            *weight = if flag {
                 -(*weight).abs()
             } else {
                 (*weight).abs()
@@ -604,6 +674,7 @@ impl RawDataReader {
         let mut data_weights_fb = weight_array_tfb.remove_axis(Axis(0));
 
         self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, data_weights_fb.view_mut());
+        let data_weights_fb = data_weights_fb.into_raw_vec();
 
         // If applicable, write the cross-correlation visibilities to our
         // `data_array`, ignoring any flagged baselines.
@@ -614,8 +685,8 @@ impl RawDataReader {
         }) = crosses
         {
             data_vis_fb
-                .outer_iter()
-                .zip_eq(data_weights_fb.outer_iter())
+                .chunks_exact(metafits_context.num_baselines)
+                .zip_eq(data_weights_fb.chunks_exact(metafits_context.num_baselines))
                 .enumerate()
                 // Let only unflagged channels proceed.
                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
@@ -659,8 +730,8 @@ impl RawDataReader {
         }) = autos
         {
             data_vis_fb
-                .outer_iter()
-                .zip(data_weights_fb.outer_iter())
+                .chunks_exact(metafits_context.num_baselines)
+                .zip(data_weights_fb.chunks_exact(metafits_context.num_baselines))
                 .enumerate()
                 // Let only unflagged channels proceed.
                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))

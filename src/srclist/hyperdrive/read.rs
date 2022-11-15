@@ -39,7 +39,7 @@ fn source_list_from_tmp_sl(
             if tmp_comp.dec < -90.0 || tmp_comp.dec > 90.0 {
                 return Err(ReadSourceListError::InvalidDec(tmp_comp.dec));
             }
-            let radec = RADec::new_degrees(tmp_comp.ra, tmp_comp.dec);
+            let radec = RADec::from_degrees(tmp_comp.ra, tmp_comp.dec);
 
             let comp_type = match tmp_comp.comp_type {
                 ComponentType::Point => ComponentType::Point,

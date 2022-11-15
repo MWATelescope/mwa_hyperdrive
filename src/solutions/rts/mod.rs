@@ -52,7 +52,7 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
             return Err(RtsReadSolsError::NotADir(dir.to_path_buf()));
         }
 
-        let context = mwalib::MetafitsContext::new(metafits, None)?;
+        let context = MetafitsContext::new(metafits, None)?;
 
         // Search `dir` for DI_JonesMatrices_node???.dat and
         // BandpassCalibration_node???.dat files.
@@ -449,7 +449,7 @@ fn read_no_files(
 //             })?;
 //         }
 
-//         let context = mwalib::MetafitsContext::new(metafits, None)?;
+//         let context = MetafitsContext::new(metafits, None)?;
 //         let num_fine_chans_per_coarse_chan = context.num_corr_fine_chans_per_coarse;
 //         let freq_res = context.corr_fine_chan_width_hz as f64;
 

@@ -13,7 +13,7 @@ pub(crate) mod tests;
 
 pub(crate) use error::DiCalibrateError;
 
-use std::{ops::Deref, thread};
+use std::thread;
 
 use crossbeam_channel::{unbounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
@@ -387,7 +387,7 @@ fn model_vis(
     let modeller = model::new_sky_modeller(
         #[cfg(feature = "cuda")]
         use_cpu_for_modelling,
-        params.beam.deref(),
+        &*params.beam,
         &params.source_list,
         &params.unflagged_tile_xyzs,
         &params.unflagged_fine_chan_freqs,
@@ -400,7 +400,7 @@ fn model_vis(
     )?;
 
     let weight_factor =
-        ((freq_res / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR)) as f32;
+        ((freq_res / FREQ_WEIGHT_FACTOR) * (time_res.to_seconds() / TIME_WEIGHT_FACTOR)) as f32;
 
     // Iterate over all calibration timesteps and write to the model slices.
     for (&timestep, mut vis_model_slice) in params.timesteps.iter().zip(vis_model_slices_fb) {
@@ -1266,7 +1266,7 @@ pub(super) fn calibrate(
 
                     antenna_precision
                         .iter_mut()
-                        .zip(jones_diff_sum.into_iter())
+                        .zip(jones_diff_sum)
                         .for_each(|(a, d)| {
                             // As above, the following line should be used if
                             // multiple frequencies are present.

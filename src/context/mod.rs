@@ -9,7 +9,7 @@ mod tests;
 
 use std::{collections::HashSet, fmt::Write};
 
-use hifitime::{Duration, Epoch, Unit};
+use hifitime::{Duration, Epoch};
 use log::{debug, error, info, trace, warn};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
@@ -178,7 +178,7 @@ impl ObsContext {
             Some(t) => t,
             None => {
                 warn!("No integration time specified; assuming {TIME_WEIGHT_FACTOR} second");
-                Duration::from_f64(TIME_WEIGHT_FACTOR, Unit::Second)
+                Duration::from_seconds(TIME_WEIGHT_FACTOR)
             }
         }
     }

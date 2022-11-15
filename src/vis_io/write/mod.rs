@@ -141,9 +141,9 @@ pub(crate) fn write_vis<'a>(
         let diff = (t - *timestamps.first()).total_nanoseconds();
         if diff % time_res.total_nanoseconds() > 0 {
             return Err(VisWriteError::IrregularTimestamps {
-                first: timestamps.first().as_gpst_seconds(),
-                bad: t.as_gpst_seconds(),
-                time_res: time_res.in_seconds(),
+                first: timestamps.first().to_gpst_seconds(),
+                bad: t.to_gpst_seconds(),
+                time_res: time_res.to_seconds(),
             });
         }
     }
@@ -215,6 +215,7 @@ pub(crate) fn write_vis<'a>(
                     marlu_obs_ctx.name.as_deref(),
                     tile_names.to_vec(),
                     tile_positions.to_vec(),
+                    true,
                     Some(&history),
                 )?;
                 Box::new(uvfits)
@@ -227,6 +228,7 @@ pub(crate) fn write_vis<'a>(
                     array_pos,
                     tile_positions.to_vec(),
                     dut1,
+                    true,
                 );
                 if let Some((marlu_mwa_obs_context, coarse_chan_range)) =
                     marlu_mwa_obs_context.as_ref()
@@ -276,7 +278,7 @@ pub(crate) fn write_vis<'a>(
     {
         debug!(
             "Received timestep {i_timestep} (GPS {})",
-            timestamp.as_gpst_seconds()
+            timestamp.to_gpst_seconds()
         );
         if this_average_timestamp.is_none() {
             this_average_timestamp = Some(
@@ -402,7 +404,6 @@ pub(crate) fn write_vis<'a>(
                     out_data.slice(s![0..this_timeblock.range.len(), .., ..]),
                     out_weights.slice(s![0..this_timeblock.range.len(), .., ..]),
                     &chunk_vis_ctx,
-                    false,
                 )?;
                 // Should we continue?
                 if error.load() {

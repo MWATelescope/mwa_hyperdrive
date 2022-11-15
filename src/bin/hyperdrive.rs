@@ -324,17 +324,18 @@ fn setup_logging(verbosity: u8) -> Result<(), log::SetLoggerError> {
 
 /// Write many info-level log lines of how this executable was compiled.
 fn display_build_info() {
-    match GIT_HEAD_REF {
-        Some(hr) => {
-            let dirty = GIT_DIRTY.unwrap_or(false);
-            info!(
-                "Compiled on git commit hash: {}{}",
-                GIT_COMMIT_HASH.unwrap(),
-                if dirty { " (dirty)" } else { "" }
-            );
-            info!("            git head ref: {}", hr);
+    let dirty = match GIT_DIRTY {
+        Some(true) => " (dirty)",
+        _ => "",
+    };
+    match GIT_COMMIT_HASH_SHORT {
+        Some(hash) => {
+            info!("Compiled on git commit hash: {hash}{dirty}");
         }
         None => info!("Compiled on git commit hash: <no git info>"),
+    }
+    if let Some(hr) = GIT_HEAD_REF {
+        info!("            git head ref: {}", hr);
     }
     info!("            {}", BUILT_TIME_UTC);
     info!("         with compiler {}", RUSTC_VERSION);

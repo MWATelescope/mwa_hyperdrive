@@ -229,15 +229,14 @@ fn test_to_jones() {
         u: -0.3899498110659575,
         v: -0.058562589895788,
     };
-    let fd2 = fd.clone();
     let result = fd.to_inst_stokes();
     assert_abs_diff_eq!(
         result,
         Jones::from([
-            c64::new(fd2.i - fd2.q, 0.0),
-            c64::new(fd2.u, -fd2.v),
-            c64::new(fd2.u, fd2.v),
-            c64::new(fd2.i + fd2.q, 0.0),
+            c64::new(fd.i - fd.q, 0.0),
+            c64::new(fd.u, -fd.v),
+            c64::new(fd.u, fd.v),
+            c64::new(fd.i + fd.q, 0.0),
         ])
     );
 }

@@ -262,7 +262,7 @@ impl ObservationDetails<'_> {
         }
 
         if let Some(dut1) = self.dut1 {
-            info!("DUT1: {} seconds", dut1.in_seconds());
+            info!("DUT1: {} seconds", dut1.to_seconds());
         }
         match (self.lmst, self.lmst_j2000) {
             (Some(l), Some(l2)) => {
@@ -301,14 +301,14 @@ impl ObservationDetails<'_> {
             self.first_timestamp.or(self.last_timestamp),
         ) {
             (Some(f), Some(l), _) => {
-                info!("First timestamp (GPS): {:.2}", f.as_gpst_seconds());
-                info!("Last timestamp  (GPS): {:.2}", l.as_gpst_seconds());
+                info!("First timestamp (GPS): {:.2}", f.to_gpst_seconds());
+                info!("Last timestamp  (GPS): {:.2}", l.to_gpst_seconds());
             }
-            (_, _, Some(f)) => info!("Only timestamp (GPS): {:.2}", f.as_gpst_seconds()),
+            (_, _, Some(f)) => info!("Only timestamp (GPS): {:.2}", f.to_gpst_seconds()),
             _ => (),
         }
         match self.time_res {
-            Some(r) => info!("Input data time resolution: {:.2} seconds", r.in_seconds()),
+            Some(r) => info!("Input data time resolution: {:.2} seconds", r.to_seconds()),
             None => info!("Input data time resolution unknown"),
         }
 
@@ -535,7 +535,7 @@ impl OutputFileDetails<'_> {
                     info!(
                         "  {}x in time  ({}s)",
                         self.output_vis_time_average_factor,
-                        tr.in_seconds() * self.output_vis_time_average_factor as f64
+                        tr.to_seconds() * self.output_vis_time_average_factor as f64
                     );
                 } else {
                     info!(

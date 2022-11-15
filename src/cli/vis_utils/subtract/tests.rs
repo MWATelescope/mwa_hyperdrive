@@ -2,13 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+};
 
 use approx::assert_abs_diff_eq;
 use clap::Parser;
 use marlu::RADec;
-use mwalib::{fitsio_sys, *};
+use mwalib::{_open_fits, _open_hdu, fits_open, fits_open_hdu};
 use tempfile::TempDir;
 use vec1::vec1;
 
@@ -37,7 +39,7 @@ fn test_1090008640_vis_subtract() {
         "src1".to_string(),
         Source {
             components: vec1![SourceComponent {
-                radec: RADec::new_degrees(0.0, -27.0),
+                radec: RADec::from_degrees(0.0, -27.0),
                 comp_type: ComponentType::Point,
                 flux_type: FluxDensityType::List {
                     fds: vec1![FluxDensity {
@@ -60,7 +62,7 @@ fn test_1090008640_vis_subtract() {
         "src2".to_string(),
         Source {
             components: vec1![SourceComponent {
-                radec: RADec::new_degrees(1.0, -27.0),
+                radec: RADec::from_degrees(1.0, -27.0),
                 comp_type: ComponentType::Point,
                 flux_type: FluxDensityType::List {
                     fds: vec1![FluxDensity {

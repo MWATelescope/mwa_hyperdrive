@@ -338,7 +338,7 @@ pub(crate) enum SrclistError {
     Beam(#[from] crate::beam::BeamError),
 
     #[error(transparent)]
-    Mwalib(#[from] marlu::mwalib::MwalibError),
+    Mwalib(#[from] mwalib::MwalibError),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

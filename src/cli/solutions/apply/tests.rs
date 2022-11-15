@@ -68,8 +68,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         input_data,
         &sols,
         &timesteps,
-        LatLngHeight::new_mwa(),
-        Duration::from_total_nanoseconds(0),
+        LatLngHeight::mwa(),
+        Duration::default(),
         false,
         &tile_baseline_flags,
         &flagged_fine_chans,
@@ -111,8 +111,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         input_data,
         &sols,
         &timesteps,
-        LatLngHeight::new_mwa(),
-        Duration::from_total_nanoseconds(0),
+        LatLngHeight::mwa(),
+        Duration::default(),
         false,
         &tile_baseline_flags,
         &flagged_fine_chans,
@@ -159,8 +159,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         input_data,
         &sols,
         &timesteps,
-        LatLngHeight::new_mwa(),
-        Duration::from_total_nanoseconds(0),
+        LatLngHeight::mwa(),
+        Duration::default(),
         false,
         &tile_baseline_flags,
         &flagged_fine_chans,
@@ -255,8 +255,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         input_data,
         &sols,
         &timesteps,
-        LatLngHeight::new_mwa(),
-        Duration::from_total_nanoseconds(0),
+        LatLngHeight::mwa(),
+        Duration::default(),
         false,
         &tile_baseline_flags,
         &flagged_fine_chans,
@@ -333,8 +333,8 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
         input_data,
         &sols,
         &timesteps,
-        LatLngHeight::new_mwa(),
-        Duration::from_total_nanoseconds(0),
+        LatLngHeight::mwa(),
+        Duration::default(),
         false,
         &tile_baseline_flags,
         &flagged_fine_chans,
@@ -420,7 +420,7 @@ fn test_solutions_apply_trivial_raw() {
     )
     .unwrap();
 
-    test_solutions_apply_trivial(Box::new(input_data).deref(), &metafits)
+    test_solutions_apply_trivial(&input_data, &metafits)
 }
 
 // If all data-reading routines are working correctly, these extra tests are
@@ -435,7 +435,7 @@ fn test_solutions_apply_trivial_ms() {
     let ms = data.next().unwrap();
     let input_data = MsReader::new(ms, Some(&metafits), None).unwrap();
 
-    test_solutions_apply_trivial(Box::new(input_data).deref(), &metafits)
+    test_solutions_apply_trivial(&input_data, &metafits)
 }
 
 #[test]
@@ -446,7 +446,7 @@ fn test_solutions_apply_trivial_uvfits() {
     let uvfits = data.next().unwrap();
     let input_data = UvfitsReader::new(uvfits, Some(&metafits)).unwrap();
 
-    test_solutions_apply_trivial(Box::new(input_data).deref(), &metafits)
+    test_solutions_apply_trivial(&input_data, &metafits)
 }
 
 pub(crate) fn get_1090008640_identity_solutions_file(tmp_dir: &Path) -> PathBuf {
@@ -632,7 +632,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_and_ms() {
     assert_eq!(uvfits_ctx.obsid, ms_ctx.obsid);
     assert_eq!(uvfits_ctx.timestamps, ms_ctx.timestamps);
     assert_eq!(uvfits_ctx.timestamps.len(), 1);
-    assert_abs_diff_eq!(uvfits_ctx.timestamps[0].as_gpst_seconds(), 1090008658.);
+    assert_abs_diff_eq!(uvfits_ctx.timestamps[0].to_gpst_seconds(), 1090008658.);
     assert_eq!(uvfits_ctx.all_timesteps, ms_ctx.all_timesteps);
     assert_eq!(uvfits_ctx.all_timesteps.len(), exp_timesteps);
     assert_eq!(uvfits_ctx.fine_chan_freqs, ms_ctx.fine_chan_freqs);

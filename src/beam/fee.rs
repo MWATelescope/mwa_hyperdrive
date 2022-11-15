@@ -13,7 +13,7 @@ use ndarray::prelude::*;
 use super::{Beam, BeamError, BeamType, Delays};
 
 #[cfg(feature = "cuda")]
-use super::{BeamCUDA, CudaFloat};
+use super::{BeamCUDA, CudaFloat, DevicePointer};
 
 /// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [`Beam`]
 /// trait.
@@ -315,7 +315,7 @@ impl Beam for FEEBeam {
     #[cfg(feature = "cuda")]
     fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
         let cuda_beam = unsafe {
-            self.hyperbeam_object.cuda_prepare(
+            self.hyperbeam_object.gpu_prepare(
                 freqs_hz,
                 self.delays.view(),
                 self.gains.view(),
@@ -330,7 +330,7 @@ impl Beam for FEEBeam {
 
 #[cfg(feature = "cuda")]
 pub(crate) struct FEEBeamCUDA {
-    hyperbeam_object: mwa_hyperbeam::fee::FEEBeamCUDA,
+    hyperbeam_object: mwa_hyperbeam::fee::FEEBeamGpu,
 }
 
 #[cfg(feature = "cuda")]
@@ -342,10 +342,14 @@ impl BeamCUDA for FEEBeamCUDA {
         latitude_rad: f64,
         d_jones: *mut std::ffi::c_void,
     ) -> Result<(), BeamError> {
+        let d_az_rad = DevicePointer::copy_to_device(az_rad)?;
+        let d_za_rad = DevicePointer::copy_to_device(za_rad)?;
+        let d_array_latitude_rad = DevicePointer::copy_to_device(&[latitude_rad as CudaFloat])?;
         self.hyperbeam_object.calc_jones_device_pair_inner(
-            az_rad,
-            za_rad,
-            Some(latitude_rad),
+            d_az_rad.get(),
+            d_za_rad.get(),
+            az_rad.len().try_into().expect("not bigger than i32::MAX"),
+            d_array_latitude_rad.get(),
             false,
             d_jones,
         )?;

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use hifitime::{Duration, Epoch, Unit};
+use hifitime::{Duration, Epoch};
 use marlu::{RADec, XyzGeodetic};
 use vec1::vec1;
 
@@ -44,23 +44,17 @@ fn test_guess_time_res() {
     obs_ctx.time_res = None;
     obs_ctx.timestamps = vec1![Epoch::from_gpst_seconds(1090000000.0)];
 
-    assert_eq!(
-        obs_ctx.guess_time_res(),
-        Duration::from_f64(1., Unit::Second)
-    );
+    assert_eq!(obs_ctx.guess_time_res(), Duration::from_seconds(1.));
 
     // test use direct time_res over min_delta
-    obs_ctx.time_res = Some(Duration::from_f64(2., Unit::Second));
+    obs_ctx.time_res = Some(Duration::from_seconds(2.));
     obs_ctx.timestamps = vec1![
         Epoch::from_gpst_seconds(1090000000.0),
         Epoch::from_gpst_seconds(1090000010.0),
         Epoch::from_gpst_seconds(1090000013.0),
     ];
 
-    assert_eq!(
-        obs_ctx.guess_time_res(),
-        Duration::from_f64(2., Unit::Second)
-    );
+    assert_eq!(obs_ctx.guess_time_res(), Duration::from_seconds(2.));
 }
 
 #[test]

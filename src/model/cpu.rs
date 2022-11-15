@@ -701,11 +701,10 @@ impl<'a> SkyModellerCpu<'a> {
                 self.dut1,
             );
             // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs =
-                precession_info.precess_xyz_parallel(self.unflagged_tile_xyzs);
+            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
             debug!(
                 "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
-                timestamp.as_gpst_seconds(),
+                timestamp.to_gpst_seconds(),
                 precession_info.lmst.to_degrees(),
                 precession_info.lmst_j2000.to_degrees()
             );
@@ -718,7 +717,7 @@ impl<'a> SkyModellerCpu<'a> {
             let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             debug!(
                 "Modelling GPS timestamp {}, LMST {}°",
-                timestamp.as_gpst_seconds(),
+                timestamp.to_gpst_seconds(),
                 lst.to_degrees()
             );
             (

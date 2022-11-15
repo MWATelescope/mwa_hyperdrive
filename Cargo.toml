@@ -6,7 +6,7 @@ authors = [
     "Dev Null <dev.null@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.65"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -35,7 +35,7 @@ cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys"]
 # Use CUDA code with single-precision floats.
 cuda-single = [
     "cuda",
-    "mwa_hyperbeam/cuda-single",
+    "mwa_hyperbeam/gpu-single",
 ]
 
 # Enable plotting.
@@ -47,9 +47,6 @@ fontconfig-dlopen = ["plotters/fontconfig-dlopen"]
 # Compile cfitsio statically and link it
 cfitsio-static = ["fitsio-sys/fitsio-src"]
 
-# Compile cfitsio statically and link it
-erfa-static = ["erfa-sys/static"]
-
 # Compile HDF5 statically and link it
 hdf5-static = ["mwa_hyperbeam/hdf5-static"]
 
@@ -57,36 +54,36 @@ hdf5-static = ["mwa_hyperbeam/hdf5-static"]
 cuda-static = ["mwa_hyperbeam/cuda-static"]
 
 # Link all C dependencies statically
-all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
+all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-atty = "0.2.11"
-birli = { version = "0.8.0", default_features = false }
+birli = { version = "0.10.0", default_features = false }
 bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
 chrono = "0.4.0"
 clap = { version = "3.1.0", features = ["derive", "wrap_help"] }
 console = "0.15.0"
-crossbeam-channel = "0.5.0"
-crossbeam-utils = "0.8.7"
-env_logger = "0.9.1"
-erfa-sys = "0.2.0"
-fitsio = "0.19.0"
+crossbeam-channel = "0.5.8"
+crossbeam-utils = "0.8.15"
+env_logger = "0.10.0"
+fitsio = "0.20.0"
 fitsio-sys = "0.4.0"
 flate2 = "1.0.13"
 glob = "0.3.0"
-hifitime = "3.0.0"
+hifitime = "3.8.2"
 indexmap = { version = "1.8.0", features = ["rayon"] }
+is-terminal = "0.4.0"
 itertools = "0.10.0"
-indicatif = { version = "0.17.0", features = ["rayon"] }
+indicatif = { version = "0.17.5", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
-marlu = "0.8.0"
-mwa_hyperbeam = "0.5.1"
-mwalib = "0.15.0"
+marlu = "0.10.1"
+mwa_hyperbeam = "0.6.0"
+mwalib = "0.16.0"
 ndarray = { version = "0.15.4", features = ["rayon"] }
 num-complex = "0.4.1"
+num-traits = "0.2.15"
 rayon = "1.5.0"
 regex = "1.4.6"
 scopeguard = "1.1.0"
@@ -97,32 +94,33 @@ static_assertions = "1.1.0"
 strum = "0.24.0"
 strum_macros = "0.24.0"
 thiserror = "1.0.7"
-toml = "0.5.2"
+toml = "0.7.2"
 vec1 = "1.5.0"
 
 # "cuda" feature
 cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
 
 # "plotting" feature
-plotters = { version = "0.3.1", default-features = false, features = [
+plotters = { version = "0.3.5", default-features = false, features = [
     "bitmap_backend",
     "bitmap_encoder",
     "point_series",
+    "ttf",
 ], optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
 assert_cmd = "2.0.0"
-criterion = "0.4.0"
-indoc = "1.0.0"
-marlu = { version = "0.8.0", features = ["approx"] }
+criterion = { version = "0.4.0", default_features = false }
+indoc = "2.0.1"
+marlu = { version = "0.10.0", features = ["approx"] }
 ndarray = { version = "0.15.4", features = ["approx-0_5"] }
-serial_test = "0.9.0"
+serial_test = "2.0.0"
 tar = "0.4.38"
-tempfile = "3.3.0"
+tempfile = "3.6.0"
 
 [build-dependencies]
-built = { version = "0.5.0", features = ["chrono", "git2"] }
+built = { version = "0.6.0", features = ["chrono", "git2"] }
 cc = { version = "1.0.72", features = ["parallel"] }
 
 [[bench]]
@@ -133,7 +131,7 @@ harness = false
 # birli = { path = "../Birli" }
 # birli = { git = "https://github.com/MWATelescope/Birli" }
 # marlu = { path = "../Marlu" }
-# marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "DUT1" }
+# marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }

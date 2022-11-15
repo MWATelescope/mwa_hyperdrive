@@ -17,8 +17,8 @@ mod fee;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use error::*;
-pub use fee::*;
+pub(crate) use error::BeamError;
+pub use fee::create_fee_beam_object;
 
 use std::path::Path;
 
@@ -116,9 +116,9 @@ pub trait Beam: Sync + Send {
 /// A trait abstracting beam code functions on a CUDA-capable device.
 #[cfg(feature = "cuda")]
 pub trait BeamCUDA {
-    /// Calculate the Jones matrices for an [`AzEl`] direction. The pointing
-    /// information is not needed because it was provided when `self` was
-    /// created.
+    /// Calculate the Jones matrices for each `az` and `za` direction. The
+    /// pointing information is not needed because it was provided when `self`
+    /// was created.
     ///
     /// # Safety
     ///
@@ -345,6 +345,6 @@ impl BeamCUDA for NoBeamCUDA {
 }
 
 /// Create a "no beam" object.
-pub(crate) fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
+pub fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
     Box::new(NoBeam { num_tiles })
 }

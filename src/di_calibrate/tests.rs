@@ -325,7 +325,7 @@ fn get_default_params() -> DiCalParams {
             latitude_rad: 0.0,
             height_metres: 0.0,
         },
-        dut1: Duration::from_total_nanoseconds(0),
+        dut1: Duration::from_seconds(0.0),
         apply_precession: false,
         max_iterations: 50,
         stop_threshold: 1e-6,
@@ -792,6 +792,8 @@ fn test_1090008640_calibrate_model_uvfits() {
     let jd_zero_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "PZERO5").unwrap();
     let ptype4_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "PTYPE4").unwrap();
 
+    let pcount: usize = pcount_m.parse().unwrap();
+    assert_eq!(pcount, 7);
     assert_eq!(gcount_m, gcount_c);
     assert_eq!(pcount_m, pcount_c);
     assert_eq!(floats_per_pol_m, floats_per_pol_c);
@@ -810,8 +812,8 @@ fn test_1090008640_calibrate_model_uvfits() {
 
     // Test visibility values.
     fits_open_hdu!(&mut uvfits_m, 0).unwrap();
-    let mut group_params_m = Array1::zeros(5);
-    let mut vis_m = Array1::zeros(10 * 4 * 3);
+    let mut group_params_m = Array1::zeros(pcount);
+    let mut vis_m = Array1::zeros(num_chans * 4 * 3);
     fits_open_hdu!(&mut uvfits_c, 0).unwrap();
     let mut group_params_c = group_params_m.clone();
     let mut vis_c = vis_m.clone();
@@ -924,7 +926,7 @@ fn test_1090008640_calibrate_model_ms() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     let sols = result.unwrap();
 
-    let array_pos = LatLngHeight::new_mwa();
+    let array_pos = LatLngHeight::mwa();
     let ms_m = MsReader::new(&model, Some(metafits), Some(array_pos)).unwrap();
     let ctx_m = ms_m.get_obs_context();
     let ms_c = MsReader::new(&cal_model, Some(metafits), Some(array_pos)).unwrap();

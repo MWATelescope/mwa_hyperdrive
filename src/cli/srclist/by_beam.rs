@@ -7,7 +7,6 @@
 use std::{
     fs::File,
     io::{BufWriter, Write},
-    ops::Deref,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -229,7 +228,7 @@ fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         let dec_phase_centre = meta
             .dec_phase_center_degrees
             .unwrap_or(meta.dec_tile_pointing_degrees);
-        let phase_centre = RADec::new_degrees(ra_phase_centre, dec_phase_centre);
+        let phase_centre = RADec::from_degrees(ra_phase_centre, dec_phase_centre);
         debug!("Using {} as the phase centre", phase_centre);
         let lst = meta.lst_rad;
         debug!("Using {}° as the LST", lst.to_degrees());
@@ -272,7 +271,7 @@ fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
             lst,
             marlu::constants::MWA_LAT_RAD,
             &coarse_chan_freqs,
-            beam.deref(),
+            &*beam,
             None,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),

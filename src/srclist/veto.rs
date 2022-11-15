@@ -219,8 +219,6 @@ pub(crate) enum VetoError {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-
     use approx::assert_abs_diff_eq;
     use marlu::{constants::MWA_LAT_RAD, AzEl};
     use serial_test::*;
@@ -238,10 +236,10 @@ mod tests {
     fn test_beam_attenuated_flux_density_no_beam() {
         let beam = create_no_beam_object(1);
         let jones_pointing_centre = beam
-            .calc_jones(AzEl::new_degrees(0.0, 90.0), 180e6, None, MWA_LAT_RAD)
+            .calc_jones(AzEl::from_degrees(0.0, 90.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let jones_null = beam
-            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, None, MWA_LAT_RAD)
+            .calc_jones(AzEl::from_degrees(10.0, 10.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let fd = FluxDensity {
             freq: 180e6,
@@ -264,10 +262,10 @@ mod tests {
         let beam =
             create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         let jones_pointing_centre = beam
-            .calc_jones(AzEl::new_degrees(0.0, 89.0), 180e6, None, MWA_LAT_RAD)
+            .calc_jones(AzEl::from_degrees(0.0, 89.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let jones_null = beam
-            .calc_jones(AzEl::new_degrees(10.0, 10.0), 180e6, None, MWA_LAT_RAD)
+            .calc_jones(AzEl::from_degrees(10.0, 10.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
         let fd = FluxDensity {
             freq: 180e6,
@@ -311,7 +309,7 @@ mod tests {
             "bad_source1".to_string(),
             Source {
                 components: vec1![SourceComponent {
-                    radec: RADec::new_degrees(330.0, -80.0),
+                    radec: RADec::from_degrees(330.0, -80.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
                         si: -0.8,
@@ -330,7 +328,7 @@ mod tests {
             "bad_source2".to_string(),
             Source {
                 components: vec1![SourceComponent {
-                    radec: RADec::new_degrees(30.0, -80.0),
+                    radec: RADec::from_degrees(30.0, -80.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
                         si: -0.8,
@@ -349,7 +347,7 @@ mod tests {
             "bad_source3".to_string(),
             Source {
                 components: vec1![SourceComponent {
-                    radec: RADec::new_degrees(285.0, 40.0),
+                    radec: RADec::from_degrees(285.0, 40.0),
                     comp_type: ComponentType::Point,
                     flux_type: FluxDensityType::PowerLaw {
                         si: -0.8,
@@ -365,14 +363,14 @@ mod tests {
             },
         );
 
-        let phase_centre = RADec::new_degrees(0.0, -27.0);
+        let phase_centre = RADec::from_degrees(0.0, -27.0);
         let result = veto_sources(
             &mut source_list,
             phase_centre,
             0.0,
             MWA_LAT_RAD,
             &[167.68e6, 197.12e6],
-            beam.deref(),
+            &*beam,
             None,
             180.0,
             0.1,
@@ -410,14 +408,14 @@ mod tests {
             }
         }
 
-        let phase_centre = RADec::new_degrees(0.0, -27.0);
+        let phase_centre = RADec::from_degrees(0.0, -27.0);
         let result = veto_sources(
             &mut source_list,
             phase_centre,
             0.0,
             MWA_LAT_RAD,
             &[167.68e6, 197.12e6],
-            beam.deref(),
+            &*beam,
             Some(3),
             180.0,
             0.1,
@@ -437,14 +435,14 @@ mod tests {
         let beam = create_no_beam_object(1);
         let (mut source_list, _) = read_source_list_file("test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
-        let phase_centre = RADec::new_degrees(0.0, -27.0);
+        let phase_centre = RADec::from_degrees(0.0, -27.0);
         let result = veto_sources(
             &mut source_list,
             phase_centre,
             0.0,
             MWA_LAT_RAD,
             &[167.68e6, 197.12e6],
-            beam.deref(),
+            &*beam,
             None,
             180.0,
             0.1,

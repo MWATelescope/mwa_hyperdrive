@@ -5,10 +5,11 @@
 use std::{collections::HashSet, ffi::CString};
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
-use birli::marlu::XyzGeodetic;
 use fitsio::errors::check_status as fits_check_status;
-use hifitime::{Duration, Unit};
-use marlu::{Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWrite};
+use hifitime::Duration;
+use marlu::{
+    Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWrite, XyzGeodetic,
+};
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
 use tempfile::tempdir;
 
@@ -39,7 +40,7 @@ fn test_1090008640_cross_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -103,7 +104,7 @@ fn read_1090008640_auto_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -197,7 +198,7 @@ fn read_1090008640_auto_vis_with_flags() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, tile_flags);
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -292,12 +293,12 @@ fn read_1090008640_cross_and_auto_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -435,7 +436,7 @@ fn test_timestep_reading() {
     let vis_ctx = VisContext {
         num_sel_timesteps: num_timesteps,
         start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
-        int_time: Duration::from_f64(1., Unit::Second),
+        int_time: Duration::from_seconds(1.),
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
         freq_resolution_hz: 10_000.,
@@ -454,8 +455,8 @@ fn test_timestep_reading() {
 
     let weight_data = Array3::<f32>::from_elem(shape, 1.);
 
-    let phase_centre = RADec::new_degrees(0., -27.);
-    let array_pos = LatLngHeight::new_mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
     #[rustfmt::skip]
     let tile_xyzs = vec![
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -491,12 +492,13 @@ fn test_timestep_reading() {
         phase_centre,
         array_pos,
         ant_positions_xyz,
-        Duration::from_total_nanoseconds(0),
+        Duration::from_seconds(0.0),
+        true,
     );
     writer.initialize(&vis_ctx, &marlu_obs_ctx, None).unwrap();
 
     writer
-        .write_vis(vis_data.view(), weight_data.view(), &vis_ctx, false)
+        .write_vis(vis_data.view(), weight_data.view(), &vis_ctx)
         .unwrap();
 
     let ms_reader = MsReader::new::<&PathBuf, &PathBuf>(&vis_path, None, None).unwrap();
@@ -509,11 +511,11 @@ fn test_timestep_reading() {
         ms_ctx
             .timestamps
             .iter()
-            .map(|t| t.as_gpst_seconds())
+            .map(|t| t.to_gpst_seconds())
             .collect::<Vec<_>>(),
         expected_timestamps
             .iter()
-            .map(|t| t.as_gpst_seconds())
+            .map(|t| t.to_gpst_seconds())
             .collect::<Vec<_>>()
     );
 }

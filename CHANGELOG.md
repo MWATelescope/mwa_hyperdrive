@@ -16,6 +16,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - More CUDA benchmarks for the modelling code.
 
 ### Fixed
+- When raw MWA data is missing gpubox files in what is otherwise a contiguous
+  spectral window, it is no longer treated as a "picket fence" situation.
 - Flux densities were not being correctly estimated for curved-power-law
   components with GPU code.
 

@@ -295,7 +295,7 @@ macro_rules! test_beam_applies_to_first_component {
             Source {
                 components: vec1![
                     get_point(obs.phase_centre, $flux_type1),
-                    get_point(RADec::new_degrees(45.0, 18.0), $flux_type2)
+                    get_point(RADec::from_degrees(45.0, 18.0), $flux_type2)
                 ],
             },
         );
@@ -341,7 +341,7 @@ macro_rules! test_beam_applies_to_first_component {
                 components: vec1![
                     // Every component type needs to be checked.
                     get_gaussian(obs.phase_centre, $flux_type1),
-                    get_gaussian(RADec::new_degrees(45.0, 18.0), $flux_type2)
+                    get_gaussian(RADec::from_degrees(45.0, 18.0), $flux_type2)
                 ],
             },
         );
@@ -378,7 +378,7 @@ macro_rules! test_beam_applies_to_first_component {
             Source {
                 components: vec1![
                     get_shapelet(obs.phase_centre, $flux_type1),
-                    get_shapelet(RADec::new_degrees(45.0, 18.0), $flux_type2)
+                    get_shapelet(RADec::from_degrees(45.0, 18.0), $flux_type2)
                 ],
             },
         );
@@ -465,8 +465,8 @@ fn gaussian_multiple_components() {
         "gaussians".to_string(),
         Source {
             components: vec1![
-                get_gaussian(RADec::new_degrees(1.0, -27.0), FluxType::List),
-                get_gaussian(RADec::new_degrees(1.1, -27.0), FluxType::List)
+                get_gaussian(RADec::from_degrees(1.0, -27.0), FluxType::List),
+                get_gaussian(RADec::from_degrees(1.1, -27.0), FluxType::List)
             ],
         },
     );
@@ -505,8 +505,8 @@ fn shapelet_multiple_components() {
         "shapelets".to_string(),
         Source {
             components: vec1![
-                get_shapelet(RADec::new_degrees(1.0, -27.0), FluxType::List),
-                get_shapelet(RADec::new_degrees(1.1, -27.0), FluxType::List)
+                get_shapelet(RADec::from_degrees(1.0, -27.0), FluxType::List),
+                get_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List)
             ],
         },
     );

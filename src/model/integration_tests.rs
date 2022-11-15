@@ -8,7 +8,10 @@
 use approx::assert_abs_diff_eq;
 use clap::Parser;
 use marlu::{XyzGeodetic, ENH};
-use mwalib::{fitsio_sys, *};
+use mwalib::{
+    _get_required_fits_key, _open_fits, _open_hdu, fits_open, fits_open_hdu, get_required_fits_key,
+    Pol, _get_fits_col, get_fits_col, MetafitsContext,
+};
 use serial_test::serial;
 use tempfile::TempDir;
 
@@ -96,8 +99,10 @@ fn test_1090008640_vis_simulate() {
     let jd_zero: String = get_required_fits_key!(&mut uvfits, &hdu, "PZERO5").unwrap();
     let ptype4: String = get_required_fits_key!(&mut uvfits, &hdu, "PTYPE4").unwrap();
 
+    let pcount: usize = pcount.parse().unwrap();
+    assert_eq!(pcount, 7);
+
     assert_eq!(gcount.parse::<i32>().unwrap(), 16256);
-    assert_eq!(pcount.parse::<i32>().unwrap(), 5);
     assert_eq!(floats_per_pol.parse::<i32>().unwrap(), 3);
     assert_eq!(num_pols.parse::<i32>().unwrap(), 4);
     assert_eq!(num_fine_freq_chans.parse::<i32>().unwrap(), 10);
@@ -157,7 +162,7 @@ fn test_1090008640_vis_simulate() {
 
     // Test visibility values.
     fits_open_hdu!(&mut uvfits, 0).unwrap();
-    let mut group_params = [0.0; 5];
+    let mut group_params = vec![0.0; pcount];
     let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
     let mut status = 0;
     unsafe {
@@ -192,7 +197,9 @@ fn test_1090008640_vis_simulate() {
             -1.6595452e-8,
             -4.7857687e-9,
             258.0,
-            -0.15939815
+            -0.15939815,
+            5.276111e-9,
+            8.0
         ]
     );
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406018466);
@@ -276,7 +283,9 @@ fn test_1090008640_vis_simulate() {
             -1.6547578e-8,
             -4.691462e-9,
             258.0,
-            -0.15930556
+            -0.15930556,
+            2.053044e-9,
+            8.0
         ]
     );
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406944424);

@@ -125,6 +125,19 @@ mod cuda {
                 },
                 None,
             );
+        // If $CXX is not set but $CUDA_PATH is, search for $CUDA_PATH/bin/g++
+        // and if it exists, set that as $CXX.
+        if env::var_os("CXX").is_none() {
+            // Unlike above, we care about $CUDA_PATH being unicode.
+            if let Ok(cuda_path) = env::var("CUDA_PATH") {
+                // Look for the g++ that CUDA wants.
+                let compiler = std::path::PathBuf::from(cuda_path).join("bin/g++");
+                if compiler.exists() {
+                    println!("cargo:warning=Setting $CXX to {}", compiler.display());
+                    env::set_var("CXX", compiler.into_os_string());
+                }
+            }
+        }
 
         // Loop over each arch and sm
         for arch in arches {

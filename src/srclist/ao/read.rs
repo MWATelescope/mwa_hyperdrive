@@ -542,7 +542,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                             }
                         };
                         out_components.push(SourceComponent {
-                            radec: RADec::new(comp.ra, comp.dec),
+                            radec: RADec::from_radians(comp.ra, comp.dec),
                             comp_type: comp.comp_type,
                             flux_type,
                         })

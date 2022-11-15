@@ -13,7 +13,7 @@ pub(crate) use error::AverageFactorError;
 use std::collections::HashSet;
 use std::ops::Range;
 
-use hifitime::{Duration, Epoch, Unit};
+use hifitime::{Duration, Epoch};
 use vec1::Vec1;
 
 use crate::unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat};
@@ -132,7 +132,7 @@ pub(super) fn timesteps_to_timeblocks(
 ) -> Vec1<Timeblock> {
     let time_res = all_timestamps
         .windows(2)
-        .fold(Duration::from_f64(f64::INFINITY, Unit::Second), |a, t| {
+        .fold(Duration::from_seconds(f64::INFINITY), |a, t| {
             a.min(t[1] - t[0])
         });
     let timestamps_to_use = timesteps_to_use.mapped_ref(
@@ -399,12 +399,12 @@ pub(super) fn parse_time_average_factor(
                 TimeFormat::s => quantity,
                 TimeFormat::ms => quantity / 1e3,
             };
-            let factor = quantity / time_res.in_seconds();
+            let factor = quantity / time_res.to_seconds();
             // Reject non-integer floats.
             if factor.fract().abs() > 1e-6 {
                 return Err(AverageFactorError::NotIntegerMultiple {
                     out: quantity,
-                    inp: time_res.in_seconds(),
+                    inp: time_res.to_seconds(),
                 });
             }
 

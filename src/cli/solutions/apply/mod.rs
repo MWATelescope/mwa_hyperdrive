@@ -11,7 +11,7 @@ mod tests;
 
 pub(crate) use error::SolutionsApplyError;
 
-use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr, thread};
+use std::{collections::HashSet, path::PathBuf, str::FromStr, thread};
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -478,7 +478,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
     // If the array position wasn't user defined, try the input data.
     let array_position = array_position.unwrap_or_else(|| {
         trace!("The array position was not specified in the input data; assuming MWA");
-        LatLngHeight::new_mwa()
+        LatLngHeight::mwa()
     });
     messages::ArrayDetails {
         array_position: Some(array_position),
@@ -627,11 +627,11 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
     }
 
     apply_solutions_inner(
-        input_data.deref(),
+        &*input_data,
         &sols,
         &timesteps,
         array_position,
-        dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
+        dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
         no_autos,
         &tile_baseline_flags,
         // TODO: Provide CLI options
@@ -875,7 +875,7 @@ fn read_vis(
         let timestamp = obs_context.timestamps[timestep];
         debug!(
             "Reading timestep {timestep} (GPS {})",
-            timestamp.as_gpst_seconds()
+            timestamp.to_gpst_seconds()
         );
 
         let mut cross_data_fb: ArcArray2<Jones<f32>> = ArcArray2::zeros(cross_vis_shape);
@@ -963,8 +963,8 @@ fn apply_solutions_thread(
         }
 
         let span = *obs_context.timestamps.last() - *obs_context.timestamps.first();
-        let timestamp_fraction = ((timestamp - *obs_context.timestamps.first()).in_seconds()
-            / span.in_seconds())
+        let timestamp_fraction = ((timestamp - *obs_context.timestamps.first()).to_seconds()
+            / span.to_seconds())
         // Stop stupid values.
         .clamp(0.0, 0.99);
 

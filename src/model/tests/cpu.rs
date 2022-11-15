@@ -308,8 +308,8 @@ fn gaussian_multiple_components() {
         "gaussians".to_string(),
         Source {
             components: vec1![
-                get_gaussian(RADec::new_degrees(1.0, -27.0), FluxType::List),
-                get_gaussian(RADec::new_degrees(1.1, -27.0), FluxType::List)
+                get_gaussian(RADec::from_degrees(1.0, -27.0), FluxType::List),
+                get_gaussian(RADec::from_degrees(1.1, -27.0), FluxType::List)
             ],
         },
     );
@@ -333,8 +333,8 @@ fn shapelet_multiple_components() {
         "shapelets".to_string(),
         Source {
             components: vec1![
-                get_shapelet(RADec::new_degrees(1.0, -27.0), FluxType::List),
-                get_shapelet(RADec::new_degrees(1.1, -27.0), FluxType::List)
+                get_shapelet(RADec::from_degrees(1.0, -27.0), FluxType::List),
+                get_shapelet(RADec::from_degrees(1.1, -27.0), FluxType::List)
             ],
         },
     );

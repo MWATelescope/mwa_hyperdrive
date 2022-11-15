@@ -309,31 +309,31 @@ mod plotting {
                 (Some(s), Some(e), Some(a)) => {
                     format!(
                         "GPS start {}, end {}, average {}",
-                        s.as_gpst_seconds(),
-                        e.as_gpst_seconds(),
-                        a.as_gpst_seconds()
+                        s.to_gpst_seconds(),
+                        e.to_gpst_seconds(),
+                        a.to_gpst_seconds()
                     )
                 }
                 (Some(s), Some(e), None) => format!(
                     "GPS start {}, end {}",
-                    s.as_gpst_seconds(),
-                    e.as_gpst_seconds()
+                    s.to_gpst_seconds(),
+                    e.to_gpst_seconds()
                 ),
-                (Some(s), None, None) => format!("GPS start {}, end unknown", s.as_gpst_seconds()),
-                (None, Some(e), None) => format!("GPS start unknown, end {}", e.as_gpst_seconds()),
+                (Some(s), None, None) => format!("GPS start {}, end unknown", s.to_gpst_seconds()),
+                (None, Some(e), None) => format!("GPS start unknown, end {}", e.to_gpst_seconds()),
                 (Some(s), None, Some(a)) => format!(
                     "GPS start {}, end unknown, average {}",
-                    s.as_gpst_seconds(),
-                    a.as_gpst_seconds()
+                    s.to_gpst_seconds(),
+                    a.to_gpst_seconds()
                 ),
                 (None, Some(e), Some(a)) => format!(
                     "GPS start unknown, end {}, average {}",
-                    e.as_gpst_seconds(),
-                    a.as_gpst_seconds()
+                    e.to_gpst_seconds(),
+                    a.to_gpst_seconds()
                 ),
                 (None, None, Some(a)) => format!(
                     "GPS start unknown, end unknown, average {}",
-                    a.as_gpst_seconds()
+                    a.to_gpst_seconds()
                 ),
                 (None, None, None) => String::new(),
             };
@@ -444,10 +444,8 @@ mod plotting {
                 }
             };
 
-            for (i_tile, (amps, amp_tile_plot)) in amps
-                .outer_iter()
-                .zip(amps_tile_plots.into_iter())
-                .enumerate()
+            for (i_tile, (amps, amp_tile_plot)) in
+                amps.outer_iter().zip(amps_tile_plots).enumerate()
             {
                 let tile_name = match tile_names {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile]),
@@ -463,10 +461,8 @@ mod plotting {
                     ignore_cross_pols,
                 )?;
             }
-            for (i_tile, (phases, phase_tile_plot)) in phases
-                .outer_iter()
-                .zip(phase_tile_plots.into_iter())
-                .enumerate()
+            for (i_tile, (phases, phase_tile_plot)) in
+                phases.outer_iter().zip(phase_tile_plots).enumerate()
             {
                 let tile_name = match tile_names {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile]),

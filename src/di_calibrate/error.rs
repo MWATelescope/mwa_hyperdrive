@@ -4,7 +4,6 @@
 
 //! Error type for all calibration-related errors.
 
-use mwalib::fitsio;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

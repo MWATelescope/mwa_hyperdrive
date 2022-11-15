@@ -14,12 +14,10 @@ mod cpu;
 #[cfg(feature = "cuda")]
 mod cuda;
 
-use std::ops::Deref;
-
 use approx::assert_abs_diff_eq;
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
-    pos::xyz::xyzs_to_cross_uvws_parallel,
+    pos::xyz::xyzs_to_cross_uvws,
     Jones, RADec, XyzGeodetic,
 };
 use ndarray::prelude::*;
@@ -40,8 +38,8 @@ use crate::{
 };
 
 lazy_static::lazy_static! {
-    static ref PHASE_CENTRE: RADec = RADec::new_degrees(0.0, -27.0);
-    static ref OFF_PHASE_CENTRE: RADec = RADec::new_degrees(1.0, -27.0);
+    static ref PHASE_CENTRE: RADec = RADec::from_degrees(0.0, -27.0);
+    static ref OFF_PHASE_CENTRE: RADec = RADec::from_degrees(1.0, -27.0);
 
     static ref POINT_ZENITH_LIST: SourceList = SourceList::from([
         ("zenith".to_string(),
@@ -255,7 +253,7 @@ struct ObsParams {
 
 impl ObsParams {
     fn new(no_beam: bool) -> ObsParams {
-        let phase_centre = RADec::new_degrees(0.0, -27.0);
+        let phase_centre = RADec::from_degrees(0.0, -27.0);
         let freqs = vec![150e6, 175e6, 200e6];
 
         let lst = 0.0;
@@ -276,7 +274,7 @@ impl ObsParams {
                 z: 0.0,
             },
         ];
-        let uvws = xyzs_to_cross_uvws_parallel(&xyzs, phase_centre.to_hadec(lst));
+        let uvws = xyzs_to_cross_uvws(&xyzs, phase_centre.to_hadec(lst));
         let beam = if no_beam {
             create_no_beam_object(xyzs.len())
         } else {
@@ -303,7 +301,7 @@ impl ObsParams {
 
     fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu {
         SkyModellerCpu::new(
-            self.beam.deref(),
+            &*self.beam,
             srclist,
             &self.xyzs,
             &self.freqs,
@@ -311,7 +309,7 @@ impl ObsParams {
             self.phase_centre,
             self.array_longitude_rad,
             self.array_latitude_rad,
-            Duration::from_total_nanoseconds(0),
+            Duration::default(),
             true,
         )
     }
@@ -323,7 +321,7 @@ impl ObsParams {
         srclist: &SourceList,
     ) -> (SkyModellerCuda, DevicePointer<crate::cuda::UVW>) {
         let m = SkyModellerCuda::new(
-            self.beam.deref(),
+            &*self.beam,
             srclist,
             &self.xyzs,
             &self.freqs,
@@ -331,7 +329,7 @@ impl ObsParams {
             self.phase_centre,
             self.array_longitude_rad,
             self.array_latitude_rad,
-            Duration::from_total_nanoseconds(0),
+            Duration::default(),
             true,
         )
         .unwrap();

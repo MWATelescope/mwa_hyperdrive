@@ -4,8 +4,6 @@
 
 //! Errors associated with reading or writing calibration solutions.
 
-use marlu::mwalib;
-use mwalib::{fitsio, FitsError};
 use thiserror::Error;
 
 use super::rts::RtsReadSolsError;
@@ -48,7 +46,7 @@ pub(crate) enum SolutionsReadError {
     Rts(#[from] RtsReadSolsError),
 
     #[error(transparent)]
-    Fits(#[from] FitsError),
+    Fits(#[from] mwalib::FitsError),
 
     #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
@@ -66,7 +64,7 @@ pub(crate) enum SolutionsWriteError {
     Fitsio(#[from] fitsio::errors::Error),
 
     #[error(transparent)]
-    Fits(#[from] FitsError),
+    Fits(#[from] mwalib::FitsError),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
