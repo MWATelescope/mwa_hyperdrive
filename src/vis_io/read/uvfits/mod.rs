@@ -138,7 +138,7 @@ impl UvfitsReader {
                         if let Some(itrf_frame_warning) = itrf_frame_warning {
                             warn!("{itrf_frame_warning}");
                         }
-                        Some(XyzGeocentric { x, y, z }.to_earth_wgs84()?)
+                        Some(XyzGeocentric { x, y, z }.to_earth_wgs84())
                     }
                     (None, None, None) => None,
                     _ => {
@@ -188,7 +188,7 @@ impl UvfitsReader {
                     &hdu,
                     &format!("CRVAL{}", metadata.indices.dec)
                 )?;
-                RADec::new_degrees(ra, dec)
+                RADec::from_degrees(ra, dec)
             };
 
             // Populate the dipole delays, gains and the pointing centre if we
@@ -200,7 +200,7 @@ impl UvfitsReader {
                 debug!("Using metafits for dipole delays, gains and pointing centre");
                 let delays = get_dipole_delays(context);
                 let gains = get_dipole_gains(context);
-                pointing_centre = Some(RADec::new_degrees(
+                pointing_centre = Some(RADec::from_degrees(
                     context.ra_tile_pointing_degrees,
                     context.dec_tile_pointing_degrees,
                 ));
@@ -319,7 +319,7 @@ impl UvfitsReader {
                 match int_time {
                     Some(t) => {
                         let d = Duration::from_f64(t, Unit::Second);
-                        trace!("Time resolution from INTTIM: {}s", d.in_seconds());
+                        trace!("Time resolution from INTTIM: {}s", d.to_seconds());
                         Some(d)
                     }
                     None => {
@@ -335,7 +335,7 @@ impl UvfitsReader {
                             );
                             trace!(
                                 "Time resolution from smallest gap: {}s",
-                                time_res.in_seconds()
+                                time_res.to_seconds()
                             );
                             Some(time_res)
                         }
@@ -345,10 +345,10 @@ impl UvfitsReader {
             match timestamps.as_slice() {
                 // Handled above; uvfits files aren't allowed to be empty.
                 [] => unreachable!(),
-                [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
+                [t] => debug!("Only timestep (GPS): {:.2}", t.to_gpst_seconds()),
                 [t0, .., tn] => {
-                    debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
-                    debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
+                    debug!("First good timestep (GPS): {:.2}", t0.to_gpst_seconds());
+                    debug!("Last good timestep  (GPS): {:.2}", tn.to_gpst_seconds());
                 }
             }
 

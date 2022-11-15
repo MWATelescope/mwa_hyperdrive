@@ -9,7 +9,7 @@ use std::{collections::HashSet, ffi::CStr};
 use hifitime::{Duration, Epoch};
 use log::debug;
 use marlu::{
-    pos::xyz::xyzs_to_cross_uvws_parallel,
+    pos::xyz::xyzs_to_cross_uvws,
     precession::{get_lmst, precess_time},
     Jones, LmnRime, RADec, XyzGeodetic, UVW,
 };
@@ -927,15 +927,14 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                 self.dut1,
             );
             // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs =
-                precession_info.precess_xyz_parallel(self.unflagged_tile_xyzs);
-            let uvws = xyzs_to_cross_uvws_parallel(
+            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+            let uvws = xyzs_to_cross_uvws(
                 &precessed_tile_xyzs,
                 self.phase_centre.to_hadec(precession_info.lmst_j2000),
             );
             debug!(
                 "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
-                timestamp.as_gpst_seconds(),
+                timestamp.to_gpst_seconds(),
                 precession_info.lmst.to_degrees(),
                 precession_info.lmst_j2000.to_degrees()
             );
@@ -946,13 +945,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
             )
         } else {
             let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            let uvws = xyzs_to_cross_uvws_parallel(
-                self.unflagged_tile_xyzs,
-                self.phase_centre.to_hadec(lst),
-            );
+            let uvws =
+                xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
             debug!(
                 "Modelling GPS timestamp {}, LMST {}°",
-                timestamp.as_gpst_seconds(),
+                timestamp.to_gpst_seconds(),
                 lst.to_degrees()
             );
             (uvws, lst, self.array_latitude)
@@ -1014,7 +1011,7 @@ fn get_shapelet_uvs_inner(
         .zip(radecs.par_iter())
         .for_each(|(mut baseline_uv, radec)| {
             let hadec = radec.to_hadec(lst_rad);
-            let shapelet_uvs: Vec<cuda::ShapeletUV> = xyzs_to_cross_uvws_parallel(tile_xyzs, hadec)
+            let shapelet_uvs: Vec<cuda::ShapeletUV> = xyzs_to_cross_uvws(tile_xyzs, hadec)
                 .into_iter()
                 .map(|uvw| cuda::ShapeletUV {
                     u: uvw.u as CudaFloat,

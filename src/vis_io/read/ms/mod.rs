@@ -181,7 +181,7 @@ impl MsReader {
                     (Some(p), _) => p,
                     (None, MsFlavour::Hyperdrive | MsFlavour::Birli | MsFlavour::Marlu) => {
                         warn!("Assuming that this measurement set's array position is the MWA");
-                        LatLngHeight::new_mwa()
+                        LatLngHeight::mwa()
                     }
                     (None, MsFlavour::Cotter) => {
                         warn!("Assuming that this measurement set's array position is cotter's MWA position");
@@ -194,8 +194,7 @@ impl MsReader {
                     (None, MsFlavour::Casa) => todo!(),
                 };
 
-                let vec = XyzGeocentric::get_geocentric_vector(array_pos)
-                    .map_err(|_| MsReadError::Geodetic2Geocentric)?;
+                let vec = XyzGeocentric::get_geocentric_vector(array_pos);
                 let (s_long, c_long) = array_pos.longitude_rad.sin_cos();
                 let tile_xyzs = casacore_positions
                     .par_iter()
@@ -371,10 +370,10 @@ impl MsReader {
             match timestamps.as_slice() {
                 // Handled above; measurement sets aren't allowed to be empty.
                 [] => unreachable!(),
-                [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
+                [t] => debug!("Only timestep (GPS): {:.2}", t.to_gpst_seconds()),
                 [t0, .., tn] => {
-                    debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
-                    debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
+                    debug!("First good timestep (GPS): {:.2}", t0.to_gpst_seconds());
+                    debug!("Last good timestep  (GPS): {:.2}", tn.to_gpst_seconds());
                 }
             }
 
@@ -389,7 +388,7 @@ impl MsReader {
                     Duration::from_f64(f64::INFINITY, Unit::Second),
                     |acc, ts| acc.min(ts[1] - ts[0]),
                 );
-                trace!("Time resolution: {}s", time_res.in_seconds());
+                trace!("Time resolution: {}s", time_res.to_seconds());
                 Some(time_res)
             };
 
@@ -469,7 +468,7 @@ impl MsReader {
             let phase_centre = {
                 let mut field_table = read_table(ms, Some("FIELD"))?;
                 let phase_vec = field_table.get_cell_as_vec("PHASE_DIR", 0).unwrap();
-                RADec::new(phase_vec[0], phase_vec[1])
+                RADec::from_radians(phase_vec[0], phase_vec[1])
             };
 
             // Populate the dipole delays, gains and the pointing centre if we
@@ -495,7 +494,7 @@ impl MsReader {
                     debug!("Using metafits for dipole delays, dipole gains and pointing centre");
                     let delays = metafits::get_dipole_delays(context);
                     let gains = metafits::get_dipole_gains(context);
-                    pointing_centre = Some(RADec::new_degrees(
+                    pointing_centre = Some(RADec::from_degrees(
                         context.ra_tile_pointing_degrees,
                         context.dec_tile_pointing_degrees,
                     ));
@@ -551,7 +550,7 @@ impl MsReader {
                     let pointing_vec: Vec<f64> = mwa_tile_pointing_table
                         .get_cell_as_vec("DIRECTION", 0)
                         .unwrap();
-                    pointing_centre = Some(RADec::new(pointing_vec[0], pointing_vec[1]));
+                    pointing_centre = Some(RADec::from_radians(pointing_vec[0], pointing_vec[1]));
                 }
             }
 

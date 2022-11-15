@@ -400,12 +400,12 @@ pub(super) fn parse_time_average_factor(
                 TimeFormat::s => quantity,
                 TimeFormat::ms => quantity / 1e3,
             };
-            let factor = quantity / time_res.in_seconds();
+            let factor = quantity / time_res.to_seconds();
             // Reject non-integer floats.
             if factor.fract().abs() > 1e-6 {
                 return Err(AverageFactorError::NotIntegerMultiple {
                     out: quantity,
-                    inp: time_res.in_seconds(),
+                    inp: time_res.to_seconds(),
                 });
             }
 

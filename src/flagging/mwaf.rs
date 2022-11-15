@@ -461,7 +461,7 @@ impl Mwaf {
             }
             fitsio::errors::check_status(status).map_err(|e| FitsError::Fitsio {
                 fits_error: e,
-                fits_filename: file.as_ref().to_str().unwrap().to_string(),
+                fits_filename: file.as_ref().to_path_buf(),
                 hdu_num: 1,
                 source_file: file!(),
                 source_line: line!(),

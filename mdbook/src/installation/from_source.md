@@ -14,15 +14,6 @@
   - Requires a C compiler and `autoconf`.
 ```
 
-```admonish example title="[ERFA](https://github.com/liberfa/erfa)"
-- Ubuntu: `liberfa-dev`
-- Arch: AUR package `erfa`
-- The library dir can be specified manually with `ERFA_LIB`
-  - If not specified, `pkg-config` is used to find the library.
-- Can compile statically; use the `erfa-static` or `all-static` features.
-  - Requires a C compiler and `autoconf`.
-```
-
 ```admonish example title="[hdf5](https://www.hdfgroup.org/hdf5)"
 - Ubuntu: `libhdf5-dev`
 - Arch: `hdf5`
@@ -164,3 +155,8 @@ and try compiling again. If you're still having problems, raise a [GitHub
 issue](https://github.com/MWATelescope/mwa_hyperdrive/issues) describing your
 system and what you've tried.
 ~~~
+
+```admonish info title="Changes from older versions"
+`hyperdrive` used to depend on the [ERFA](https://github.com/liberfa/erfa) C
+library. It now uses a pure-Rust equivalent.
+```

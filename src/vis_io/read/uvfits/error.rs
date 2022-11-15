@@ -29,7 +29,7 @@ pub(crate) enum UvfitsReadError {
     Empty(PathBuf),
 
     #[error("No timesteps were in file {file}")]
-    NoTimesteps { file: String },
+    NoTimesteps { file: PathBuf },
 
     #[error("No antenna names were in the ANNAME column")]
     AnnameEmpty,
@@ -58,10 +58,6 @@ pub(crate) enum UvfitsReadError {
         row_num: usize,
         err: fitsio::errors::Error,
     },
-
-    /// A generic error associated with ERFA.
-    #[error(transparent)]
-    Erfa(#[from] marlu::pos::ErfaError),
 
     /// A generic error associated with fitsio.
     #[error(transparent)]

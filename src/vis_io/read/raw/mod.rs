@@ -261,24 +261,18 @@ impl RawDataReader {
             .collect();
         let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
-        let phase_centre = RADec::new(
-            metafits_context
-                .ra_phase_center_degrees
-                .unwrap_or_else(|| {
-                    warn!(
-                        "No phase centre specified; using the pointing centre as the phase centre"
-                    );
-                    metafits_context.ra_tile_pointing_degrees
-                })
-                .to_radians(),
+        let phase_centre = RADec::from_degrees(
+            metafits_context.ra_phase_center_degrees.unwrap_or_else(|| {
+                warn!("No phase centre specified; using the pointing centre as the phase centre");
+                metafits_context.ra_tile_pointing_degrees
+            }),
             metafits_context
                 .dec_phase_center_degrees
-                .unwrap_or(metafits_context.dec_tile_pointing_degrees)
-                .to_radians(),
+                .unwrap_or(metafits_context.dec_tile_pointing_degrees),
         );
-        let pointing_centre = Some(RADec::new(
-            metafits_context.ra_tile_pointing_degrees.to_radians(),
-            metafits_context.dec_tile_pointing_degrees.to_radians(),
+        let pointing_centre = Some(RADec::from_degrees(
+            metafits_context.ra_tile_pointing_degrees,
+            metafits_context.dec_tile_pointing_degrees,
         ));
         let tile_xyzs = XyzGeodetic::get_tiles_mwa(metafits_context);
         let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
@@ -334,10 +328,10 @@ impl RawDataReader {
                     + time_res / 2.0;
             let flags_start = f.start_time;
             let flags_end = flags_start + f.num_time_steps as f64 * time_res;
-            let diff = (flags_start - data_start).in_seconds() / time_res.in_seconds();
-            debug!("Data start time (GPS): {}", data_start.as_gpst_seconds());
-            debug!("Flag start time (GPS): {}", flags_start.as_gpst_seconds());
-            debug!("(flags_start - data_start).in_seconds() / time_res.in_seconds(): {diff}");
+            let diff = (flags_start - data_start).to_seconds() / time_res.to_seconds();
+            debug!("Data start time (GPS): {}", data_start.to_gpst_seconds());
+            debug!("Flag start time (GPS): {}", flags_start.to_gpst_seconds());
+            debug!("(flags_start - data_start).to_seconds() / time_res.to_seconds(): {diff}");
             if diff.fract().abs() > 0.0 {
                 warn!("These mwaf files do not have times corresponding to the data they were created from.");
                 match f.software {
@@ -353,9 +347,9 @@ impl RawDataReader {
             // user that attempting to use data timesteps without flag timesteps
             // will be a problem.
             let mut start_offset =
-                ((data_start - flags_start).in_seconds() / time_res.in_seconds()).ceil();
+                ((data_start - flags_start).to_seconds() / time_res.to_seconds()).ceil();
             let mut end_offset =
-                ((data_end - flags_end).in_seconds() / time_res.in_seconds()).ceil();
+                ((data_end - flags_end).to_seconds() / time_res.to_seconds()).ceil();
             if f.offset_bug {
                 start_offset -= 1.0;
                 end_offset -= 1.0;
@@ -390,7 +384,7 @@ impl RawDataReader {
             unflagged_timesteps: mwalib_context.common_good_timestep_indices.clone(),
             phase_centre,
             pointing_centre,
-            array_position: Some(LatLngHeight::new_mwa()),
+            array_position: Some(LatLngHeight::mwa()),
             dut1: metafits_context
                 .dut1
                 .map(|dut1| Duration::from_f64(dut1, Unit::Second)),
@@ -495,12 +489,12 @@ impl RawDataReader {
                 if !(flags_start..flags_end).contains(&timestamp) {
                     return Err(VisReadError::MwafFlagsMissingForTimestep {
                         timestep,
-                        gps: timestamp.as_gpst_seconds(),
+                        gps: timestamp.to_gpst_seconds(),
                     });
                 }
                 // Find the flags timestep index corresponding to the data
                 // timestep index.
-                let offset = (timestamp - flags_start).in_seconds() / time_res.in_seconds();
+                let offset = (timestamp - flags_start).to_seconds() / time_res.to_seconds();
                 let offset = if mwaf_flags.offset_bug {
                     offset.floor() as usize
                 } else {
@@ -561,7 +555,7 @@ impl RawDataReader {
             array_pos: self
                 .obs_context
                 .array_position
-                .unwrap_or_else(LatLngHeight::new_mwa),
+                .unwrap_or_else(LatLngHeight::mwa),
             phase_centre: self.obs_context.phase_centre,
             correct_cable_lengths: self.corrections.cable_length
                 && match metafits_context.cable_delays_applied {

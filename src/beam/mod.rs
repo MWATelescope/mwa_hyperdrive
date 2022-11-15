@@ -17,8 +17,8 @@ mod fee;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use error::*;
-pub use fee::*;
+pub(crate) use error::BeamError;
+pub use fee::create_fee_beam_object;
 
 use std::path::Path;
 
@@ -350,6 +350,6 @@ impl BeamCUDA for NoBeamCUDA {
 }
 
 /// Create a "no beam" object.
-pub(crate) fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
+pub fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
     Box::new(NoBeam { num_tiles })
 }

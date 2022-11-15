@@ -46,9 +46,6 @@ fontconfig-dlopen = ["plotters/fontconfig-dlopen"]
 # Compile cfitsio statically and link it
 cfitsio-static = ["fitsio-sys/fitsio-src"]
 
-# Compile cfitsio statically and link it
-erfa-static = ["erfa-sys/static"]
-
 # Compile HDF5 statically and link it
 hdf5-static = ["mwa_hyperbeam/hdf5-static"]
 
@@ -56,11 +53,12 @@ hdf5-static = ["mwa_hyperbeam/hdf5-static"]
 cuda-static = ["mwa_hyperbeam/cuda-static"]
 
 # Link all C dependencies statically
-all-static = ["erfa-static", "hdf5-static", "cfitsio-static", "cuda-static"]
+all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
 atty = "0.2.11"
-birli = { version = "0.8.0", default_features = false }
+# birli = { version = "0.8.0", default_features = false }
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "v0.9.0", default_features = false }
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
 chrono = "0.4.0"
@@ -68,22 +66,22 @@ clap = { version = "3.1.0", features = ["derive", "wrap_help"] }
 console = "0.15.0"
 crossbeam-channel = "0.5.6"
 crossbeam-utils = "0.8.12"
-env_logger = "0.9.1"
-erfa-sys = "0.2.0"
-fitsio = "0.19.0"
+env_logger = "0.10.0"
+fitsio = "0.20.0"
 fitsio-sys = "0.4.0"
 flate2 = "1.0.13"
 glob = "0.3.0"
-hifitime = "3.0.0"
+hifitime = "3.6.0"
 indexmap = { version = "1.8.0", features = ["rayon"] }
 itertools = "0.10.0"
 indicatif = { version = "0.17.0", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
-marlu = "0.8.0"
+# marlu = "0.8.0"
+marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
 # mwa_hyperbeam = "0.5.0"
 mwa_hyperbeam = { git = "https://github.com/cjordan/mwa_hyperbeam", branch = "devel" }
-mwalib = "0.15.0"
+mwalib = "0.16.0"
 ndarray = { version = "0.15.4", features = ["rayon"] }
 num-complex = "0.4.1"
 rayon = "1.5.0"
@@ -113,9 +111,10 @@ approx = "0.5.1"
 assert_cmd = "2.0.0"
 criterion = "0.4.0"
 indoc = "1.0.0"
-marlu = { version = "0.8.0", features = ["approx"] }
+# marlu = { version = "0.8.0", features = ["approx"] }
+marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0", features = ["approx"] }
 ndarray = { version = "0.15.4", features = ["approx-0_5"] }
-serial_test = "0.9.0"
+serial_test = "0.10.0"
 tar = "0.4.38"
 tempfile = "3.3.0"
 
@@ -131,7 +130,7 @@ harness = false
 # birli = { path = "../Birli" }
 # birli = { git = "https://github.com/MWATelescope/Birli" }
 # marlu = { path = "../Marlu" }
-# marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "DUT1" }
+# marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }

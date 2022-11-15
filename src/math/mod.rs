@@ -36,9 +36,9 @@ pub(crate) fn is_prime(n: usize) -> bool {
 /// times.
 pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
     let duration_sum = es.iter().fold(Epoch::from_gpst_seconds(0.0), |acc, t| {
-        acc + t.as_gpst_seconds()
+        acc + t.to_gpst_seconds()
     });
-    let average = duration_sum.as_gpst_seconds() / es.len() as f64;
+    let average = duration_sum.to_gpst_seconds() / es.len() as f64;
     round_hundredths_of_a_second(Epoch::from_gpst_seconds(average))
 }
 

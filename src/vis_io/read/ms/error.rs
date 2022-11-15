@@ -32,9 +32,6 @@ pub(crate) enum MsReadError {
     #[error("No timesteps were in file {file}")]
     NoTimesteps { file: String },
 
-    #[error("When reading in measurement set, ERFA function eraGd2gc failed to convert geocentric coordinates to geodetic. Is something wrong with your ANTENNA/POSITION column?")]
-    Geodetic2Geocentric,
-
     #[error("MS {array_type} from {row_index} did not have expected {expected_len} elements on axis {axis_num}!")]
     BadArraySize {
         array_type: &'static str,
