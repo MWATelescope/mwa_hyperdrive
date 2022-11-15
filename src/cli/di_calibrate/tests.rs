@@ -28,7 +28,7 @@ fn test_new_params_defaults() {
     let params = args.into_params().unwrap();
     let obs_context = params.get_obs_context();
     // The default time resolution should be 2.0s, as per the metafits.
-    assert_abs_diff_eq!(obs_context.time_res.unwrap().in_seconds(), 2.0);
+    assert_abs_diff_eq!(obs_context.time_res.unwrap().to_seconds(), 2.0);
     // The default freq resolution should be 40kHz, as per the metafits.
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
     // No tiles are flagged in the input data, and no additional flags were
@@ -53,7 +53,7 @@ fn test_new_params_no_input_flags() {
     args.ignore_input_data_fine_channel_flags = true;
     let params = args.into_params().unwrap();
     let obs_context = params.get_obs_context();
-    assert_abs_diff_eq!(obs_context.time_res.unwrap().in_seconds(), 2.0);
+    assert_abs_diff_eq!(obs_context.time_res.unwrap().to_seconds(), 2.0);
     assert_abs_diff_eq!(obs_context.freq_res.unwrap(), 40e3);
     assert_eq!(
         obs_context.get_total_num_tiles(),

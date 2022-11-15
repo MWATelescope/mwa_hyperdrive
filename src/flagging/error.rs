@@ -6,7 +6,6 @@
 
 use std::path::PathBuf;
 
-use mwalib::FitsError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -19,7 +18,7 @@ pub(crate) enum MwafError {
     BirliVersion { file: PathBuf },
 
     #[error(transparent)]
-    FitsError(#[from] FitsError),
+    FitsError(#[from] mwalib::FitsError),
 }
 
 #[derive(Error, Debug)]

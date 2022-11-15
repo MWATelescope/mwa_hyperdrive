@@ -309,31 +309,31 @@ mod plotting {
                 (Some(s), Some(e), Some(a)) => {
                     format!(
                         "GPS start {}, end {}, average {}",
-                        s.as_gpst_seconds(),
-                        e.as_gpst_seconds(),
-                        a.as_gpst_seconds()
+                        s.to_gpst_seconds(),
+                        e.to_gpst_seconds(),
+                        a.to_gpst_seconds()
                     )
                 }
                 (Some(s), Some(e), None) => format!(
                     "GPS start {}, end {}",
-                    s.as_gpst_seconds(),
-                    e.as_gpst_seconds()
+                    s.to_gpst_seconds(),
+                    e.to_gpst_seconds()
                 ),
-                (Some(s), None, None) => format!("GPS start {}, end unknown", s.as_gpst_seconds()),
-                (None, Some(e), None) => format!("GPS start unknown, end {}", e.as_gpst_seconds()),
+                (Some(s), None, None) => format!("GPS start {}, end unknown", s.to_gpst_seconds()),
+                (None, Some(e), None) => format!("GPS start unknown, end {}", e.to_gpst_seconds()),
                 (Some(s), None, Some(a)) => format!(
                     "GPS start {}, end unknown, average {}",
-                    s.as_gpst_seconds(),
-                    a.as_gpst_seconds()
+                    s.to_gpst_seconds(),
+                    a.to_gpst_seconds()
                 ),
                 (None, Some(e), Some(a)) => format!(
                     "GPS start unknown, end {}, average {}",
-                    e.as_gpst_seconds(),
-                    a.as_gpst_seconds()
+                    e.to_gpst_seconds(),
+                    a.to_gpst_seconds()
                 ),
                 (None, None, Some(a)) => format!(
                     "GPS start unknown, end unknown, average {}",
-                    a.as_gpst_seconds()
+                    a.to_gpst_seconds()
                 ),
                 (None, None, None) => String::new(),
             };

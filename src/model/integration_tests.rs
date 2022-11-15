@@ -8,7 +8,10 @@
 use approx::assert_abs_diff_eq;
 use clap::Parser;
 use marlu::{XyzGeodetic, ENH};
-use mwalib::{fitsio_sys, *};
+use mwalib::{
+    _get_required_fits_key, _open_fits, _open_hdu, fits_open, fits_open_hdu, get_required_fits_key,
+    Pol, _get_fits_col, get_fits_col, MetafitsContext,
+};
 use serial_test::serial;
 use tempfile::TempDir;
 

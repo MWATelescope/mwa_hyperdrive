@@ -5,7 +5,6 @@
 use approx::assert_abs_diff_eq;
 use crossbeam_channel::bounded;
 use crossbeam_utils::{atomic::AtomicCell, thread};
-use hifitime::Unit;
 use marlu::{Jones, LatLngHeight};
 use ndarray::prelude::*;
 use scopeguard::defer_on_unwind;
@@ -57,11 +56,10 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     let obsid = 1090000000;
     let start_timestamp = Epoch::from_gpst_seconds(obsid as f64);
 
-    let time_res = Duration::from_f64(1., Unit::Second);
+    let time_res = Duration::from_seconds(1.);
     let timesteps = vec1![0, 1, 2, 3, 4];
     let timestamps = Vec1::try_from_vec(
         (0..num_timesteps)
-            .into_iter()
             .map(|i| start_timestamp + time_res * i as f64)
             .collect(),
     )
@@ -71,7 +69,6 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
         (0..num_channels)
-            .into_iter()
             .map(|i| 150e6 + freq_res * i as f64)
             .collect(),
     )
@@ -95,8 +92,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
-    let array_pos = LatLngHeight::new_mwa();
-    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
     #[rustfmt::skip]
     let tile_xyzs = [
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -151,7 +148,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 &timesteps,
                 &timeblocks,
                 time_res,
-                Duration::from_total_nanoseconds(0),
+                Duration::from_seconds(0.0),
                 freq_res,
                 &fine_chan_freqs,
                 &ant_pairs,
@@ -206,8 +203,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
             obs_context.timestamps,
             expected,
             "\ngot (GPS): {:?}\nexpected:  {:?}",
-            obs_context.timestamps.mapped_ref(|t| t.as_gpst_seconds()),
-            expected.mapped_ref(|t| t.as_gpst_seconds())
+            obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
+            expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
         assert_eq!(obs_context.time_res, Some(time_res));
@@ -255,11 +252,10 @@ fn test_vis_output_no_time_averaging_with_gaps() {
     let obsid = 1090000000;
     let start_timestamp = Epoch::from_gpst_seconds(obsid as f64);
 
-    let time_res = Duration::from_f64(1., Unit::Second);
+    let time_res = Duration::from_seconds(1.);
     let timesteps = vec1![1, 3, 9];
     let timestamps = Vec1::try_from_vec(
         (0..num_timestamps)
-            .into_iter()
             .map(|i| start_timestamp + time_res * i as f64)
             .collect(),
     )
@@ -269,7 +265,6 @@ fn test_vis_output_no_time_averaging_with_gaps() {
     let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
         (0..num_channels)
-            .into_iter()
             .map(|i| 150e6 + freq_res * i as f64)
             .collect(),
     )
@@ -293,8 +288,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
-    let array_pos = LatLngHeight::new_mwa();
-    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
     #[rustfmt::skip]
     let tile_xyzs = [
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -349,7 +344,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 &timesteps,
                 &timeblocks,
                 time_res,
-                Duration::from_total_nanoseconds(0),
+                Duration::from_seconds(0.0),
                 freq_res,
                 &fine_chan_freqs,
                 &ant_pairs,
@@ -404,8 +399,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             obs_context.timestamps,
             expected,
             "\ngot (GPS): {:?}\nexpected:  {:?}",
-            obs_context.timestamps.mapped_ref(|t| t.as_gpst_seconds()),
-            expected.mapped_ref(|t| t.as_gpst_seconds())
+            obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
+            expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
         // Without the metafits file, the uvfits reader guesses the time
@@ -413,10 +408,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         // resolution will be reported as 2s, but it should be 1s. This will be
         // fixed in the next version of Marlu.
         assert_ne!(obs_context.time_res, Some(time_res));
-        assert_eq!(
-            obs_context.time_res,
-            Some(Duration::from_f64(2.0, Unit::Second))
-        );
+        assert_eq!(obs_context.time_res, Some(Duration::from_seconds(2.0)));
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
@@ -461,13 +453,12 @@ fn test_vis_output_time_averaging() {
     let obsid = 1090000000;
     let start_timestamp = Epoch::from_gpst_seconds(obsid as f64);
 
-    let time_res = Duration::from_f64(1., Unit::Second);
+    let time_res = Duration::from_seconds(1.);
     // we start at timestep index 1, with averaging 3. Averaged timesteps look like this:
     // [[1, _, 3], [_, _, _], [_, _, 9]]
     let timesteps = vec1![1, 3, 9];
     let timestamps = Vec1::try_from_vec(
         (0..num_timestamps)
-            .into_iter()
             .map(|i| start_timestamp + time_res * i as f64)
             .collect(),
     )
@@ -477,7 +468,6 @@ fn test_vis_output_time_averaging() {
     let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
         (0..num_channels)
-            .into_iter()
             .map(|i| 150e6 + freq_res * i as f64)
             .collect(),
     )
@@ -501,8 +491,8 @@ fn test_vis_output_time_averaging() {
         (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
     ];
 
-    let array_pos = LatLngHeight::new_mwa();
-    let phase_centre = RADec::new_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
     #[rustfmt::skip]
     let tile_xyzs = [
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -560,7 +550,7 @@ fn test_vis_output_time_averaging() {
                 &timesteps,
                 &timeblocks,
                 time_res,
-                Duration::from_total_nanoseconds(0),
+                Duration::from_seconds(0.0),
                 freq_res,
                 &fine_chan_freqs,
                 &ant_pairs,
@@ -614,8 +604,8 @@ fn test_vis_output_time_averaging() {
             obs_context.timestamps,
             expected,
             "\ngot (GPS): {:?}\nexpected:  {:?}",
-            obs_context.timestamps.mapped_ref(|t| t.as_gpst_seconds()),
-            expected.mapped_ref(|t| t.as_gpst_seconds())
+            obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
+            expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
         // Without the metafits file, the uvfits reader guesses the time
@@ -623,10 +613,7 @@ fn test_vis_output_time_averaging() {
         // resolution will be reported as 6s, but it should be 3s. This will be
         // fixed in the next version of Marlu.
         assert_ne!(obs_context.time_res, Some(time_res));
-        assert_eq!(
-            obs_context.time_res,
-            Some(Duration::from_f64(6.0, Unit::Second))
-        );
+        assert_eq!(obs_context.time_res, Some(Duration::from_seconds(6.0)));
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (

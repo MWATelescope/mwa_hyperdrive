@@ -12,16 +12,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use fitsio::{
+    errors::check_status as fits_check_status,
+    images::{ImageDescription, ImageType},
+    tables::{ColumnDataType, ColumnDescription},
+    FitsFile,
+};
 use hifitime::Epoch;
 use marlu::{constants::VEL_C, Jones};
 use mwalib::{
-    fitsio::{
-        errors::check_status as fits_check_status,
-        images::{ImageDescription, ImageType},
-        tables::{ColumnDataType, ColumnDescription},
-        FitsFile,
-    },
-    *,
+    _get_fits_image, _get_optional_fits_key, _get_optional_fits_key_long_string,
+    _get_required_fits_key, _open_fits, _open_hdu, fits_open, fits_open_hdu, get_fits_image,
+    get_optional_fits_key, get_optional_fits_key_long_string, get_required_fits_key,
 };
 use ndarray::prelude::*;
 use rayon::prelude::*;
@@ -31,7 +33,7 @@ use super::{error::*, CalibrationSolutions};
 use crate::{pfb_gains::PfbFlavour, vis_io::read::RawDataCorrections};
 
 pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
-    let mut fptr = fits_open!(&file)?;
+    let mut fptr = fits_open!(file)?;
     let hdu = fits_open_hdu!(&mut fptr, 0)?;
     let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
 
@@ -545,7 +547,7 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
     if file.exists() {
         std::fs::remove_file(file)?;
     }
-    let mut fptr = FitsFile::create(&file).open()?;
+    let mut fptr = FitsFile::create(file).open()?;
     let hdu = fits_open_hdu!(&mut fptr, 0)?;
     let mut status = 0;
 
@@ -829,7 +831,7 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
                 hdu.write_col(
                     &mut fptr,
                     key_name,
-                    &timestamps.mapped_ref(|e| e.as_gpst_seconds()),
+                    &timestamps.mapped_ref(|e| e.to_gpst_seconds()),
                 )?;
             }
         }

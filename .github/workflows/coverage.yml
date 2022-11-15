@@ -34,7 +34,6 @@ jobs:
             git \
             lcov \
             libcfitsio-dev \
-            liberfa-dev \
             libhdf5-dev \
             libfreetype-dev \
             libexpat1-dev \

@@ -412,7 +412,7 @@ fn model_vis(
     )?;
 
     let weight_factor =
-        ((freq_res / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR)) as f32;
+        ((freq_res / FREQ_WEIGHT_FACTOR) * (time_res.to_seconds() / TIME_WEIGHT_FACTOR)) as f32;
 
     // Iterate over all calibration timesteps and write to the model slices.
     for (&timestep, mut vis_model_slice) in params.timesteps.iter().zip(vis_model_slices) {

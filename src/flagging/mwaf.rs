@@ -12,7 +12,10 @@ use std::path::Path;
 
 use hifitime::Epoch;
 use log::trace;
-use mwalib::*;
+use mwalib::{
+    _get_optional_fits_key, _get_required_fits_key, _open_fits, _open_hdu, fits_open,
+    fits_open_hdu, get_optional_fits_key, get_required_fits_key, FitsError,
+};
 use ndarray::prelude::*;
 
 use super::error::*;
@@ -102,7 +105,7 @@ pub(crate) struct MwafFlags {
 impl MwafFlags {
     /// Create an [`MwafFlags`] struct from an mwaf file.
     pub(crate) fn new_from_mwaf<P: AsRef<Path>>(file: P) -> Result<MwafFlags, MwafError> {
-        let m = Mwaf::unpack(&file)?;
+        let m = Mwaf::unpack(file)?;
 
         // Check that things are consistent.
         let num_baselines = m.num_antennas * (m.num_antennas + 1) / 2;
@@ -347,9 +350,10 @@ impl Mwaf {
     /// not exposed publicly; use `MwafFlags::new_from_mwaf` to perform additional
     /// checks on the contents before returning to the caller.
     fn unpack<P: AsRef<Path>>(file: P) -> Result<Mwaf, MwafError> {
+        let file = file.as_ref();
         // Get the metadata written with the flags.
-        trace!("Reading in {}", file.as_ref().display());
-        let mut fptr = fits_open!(&file)?;
+        trace!("Reading in {}", file.display());
+        let mut fptr = fits_open!(file)?;
         let hdu = fits_open_hdu!(&mut fptr, 0)?;
 
         // Handle versions 1.0 and 2.0.
@@ -391,7 +395,7 @@ impl Mwaf {
                 }
                 _ => {
                     return Err(MwafError::UnhandledVersion {
-                        file: file.as_ref().to_path_buf(),
+                        file: file.to_path_buf(),
                         version: mwaf_version,
                     })
                 }
@@ -408,7 +412,7 @@ impl Mwaf {
                     // Birli writes its version into the software key, separated
                     // by a dash.
                     let birli_version = ver.split('-').nth(1).ok_or(MwafError::BirliVersion {
-                        file: file.as_ref().to_path_buf(),
+                        file: file.to_path_buf(),
                     })?;
                     (MwafProducer::Birli, Some(birli_version.to_string()))
                 } else {
@@ -433,7 +437,7 @@ impl Mwaf {
 
         // Visibility flags are encoded as bits. rust-fitsio currently doesn't
         // read this data in correctly, so use cfitsio via fitsio-sys.
-        trace!("Reading the FLAGS column in {}", file.as_ref().display());
+        trace!("Reading the FLAGS column in {}", file.display());
         let flags = {
             let mut flags: Array3<u8> =
                 Array3::zeros((num_time_steps, num_baselines, bytes_per_row));
@@ -461,7 +465,7 @@ impl Mwaf {
             }
             fitsio::errors::check_status(status).map_err(|e| FitsError::Fitsio {
                 fits_error: e,
-                fits_filename: file.as_ref().to_str().unwrap().to_string(),
+                fits_filename: file.to_path_buf(),
                 hdu_num: 1,
                 source_file: file!(),
                 source_line: line!(),

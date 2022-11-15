@@ -229,7 +229,7 @@ fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
         let dec_phase_centre = meta
             .dec_phase_center_degrees
             .unwrap_or(meta.dec_tile_pointing_degrees);
-        let phase_centre = RADec::new_degrees(ra_phase_centre, dec_phase_centre);
+        let phase_centre = RADec::from_degrees(ra_phase_centre, dec_phase_centre);
         debug!("Using {} as the phase centre", phase_centre);
         let lst = meta.lst_rad;
         debug!("Using {}° as the LST", lst.to_degrees());

@@ -10,7 +10,7 @@ use hifitime::Duration;
 use itertools::Itertools;
 use log::{debug, log_enabled, trace, warn, Level::Debug};
 use marlu::{
-    pos::{precession::precess_time, xyz::xyzs_to_cross_uvws_parallel},
+    pos::{precession::precess_time, xyz::xyzs_to_cross_uvws},
     Jones, LatLngHeight, XyzGeodetic,
 };
 use ndarray::prelude::*;
@@ -433,7 +433,7 @@ impl DiCalParams {
         // If the array position wasn't user defined, try the input data.
         let array_position = array_position.unwrap_or_else(|| {
             trace!("The array position was not specified in the input data; assuming MWA");
-            LatLngHeight::new_mwa()
+            LatLngHeight::mwa()
         });
         let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
 
@@ -470,7 +470,7 @@ impl DiCalParams {
             array_position.latitude_rad,
             obs_context.phase_centre,
             obs_context.timestamps[*timesteps_to_use.first()],
-            dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
+            dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
         );
         let (lmst, latitude) = if no_precession {
             (precession_info.lmst, array_position.latitude_rad)
@@ -874,7 +874,7 @@ impl DiCalParams {
                     .len()
             ])
             .map_err(|_| DiCalArgsError::NoTiles)?;
-            let uvws = xyzs_to_cross_uvws_parallel(
+            let uvws = xyzs_to_cross_uvws(
                 &unflagged_tile_xyzs,
                 obs_context.phase_centre.to_hadec(lmst),
             );
@@ -1085,7 +1085,7 @@ impl DiCalParams {
             tile_baseline_flags: tile_index_maps,
             unflagged_tile_xyzs,
             array_position,
-            dut1: dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
+            dut1: dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
             apply_precession: !no_precession,
             max_iterations,
             stop_threshold,

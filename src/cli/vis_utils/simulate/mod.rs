@@ -19,7 +19,7 @@ use std::{
 use clap::Parser;
 use crossbeam_channel::{bounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
-use hifitime::{Duration, Epoch, Unit};
+use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, warn};
@@ -383,7 +383,7 @@ impl VisSimParams {
                 if !(-90.0..=90.0).contains(dec) {
                     return Err(VisSimulateError::DecInvalid);
                 }
-                RADec::new_degrees(*ra, *dec)
+                RADec::from_degrees(*ra, *dec)
             }
             (Some(_), None, _) => return Err(VisSimulateError::OnlyOneRAOrDec),
             (None, Some(_), _) => return Err(VisSimulateError::OnlyOneRAOrDec),
@@ -391,9 +391,9 @@ impl VisSimParams {
                 // The phase centre in a metafits file may not be present. If not,
                 // we have to use the pointing centre.
                 match (m.ra_phase_center_degrees, m.dec_phase_center_degrees) {
-                    (Some(ra), Some(dec)) => RADec::new_degrees(ra, dec),
+                    (Some(ra), Some(dec)) => RADec::from_degrees(ra, dec),
                     (None, None) => {
-                        RADec::new_degrees(m.ra_tile_pointing_degrees, m.dec_tile_pointing_degrees)
+                        RADec::from_degrees(m.ra_tile_pointing_degrees, m.dec_tile_pointing_degrees)
                     }
                     _ => unreachable!(),
                 }
@@ -419,12 +419,12 @@ impl VisSimParams {
         };
 
         // Populate the timestamps.
-        let time_res = Duration::from_f64(*time_res, Unit::Second);
+        let time_res = Duration::from_seconds(*time_res);
         let timestamps = {
             let mut timestamps = Vec::with_capacity(*num_timesteps);
             let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3)
                 + time_res / 2
-                + Duration::from_f64(*time_offset, Unit::Second);
+                + Duration::from_seconds(*time_offset);
             for i in 0..*num_timesteps {
                 timestamps.push(start + time_res * i as i64);
             }
@@ -432,7 +432,7 @@ impl VisSimParams {
         };
 
         let array_position = match array_position {
-            None => LatLngHeight::new_mwa(),
+            None => LatLngHeight::mwa(),
             Some(pos) => {
                 if pos.len() != 3 {
                     return Err(VisSimulateError::BadArrayPosition {
@@ -542,16 +542,14 @@ impl VisSimParams {
         let dut1 = if *ignore_dut1 {
             None
         } else {
-            metafits
-                .dut1
-                .map(|dut1| Duration::from_f64(dut1, Unit::Second))
+            metafits.dut1.map(Duration::from_seconds)
         };
         let precession_info = precess_time(
             array_position.longitude_rad,
             array_position.latitude_rad,
             phase_centre,
             *timestamps.first(),
-            dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
+            dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
         );
         let (lmst, latitude) = if *no_precession {
             (precession_info.lmst, array_position.latitude_rad)
@@ -688,7 +686,7 @@ impl VisSimParams {
             time_res,
             beam,
             array_position,
-            dut1: dut1.unwrap_or_else(|| Duration::from_total_nanoseconds(0)),
+            dut1: dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
             apply_precession: !no_precession,
         })
     }
@@ -790,7 +788,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                     .len(),
             );
             let weight_factor =
-                (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.in_seconds() / TIME_WEIGHT_FACTOR);
+                (freq_res_hz / FREQ_WEIGHT_FACTOR) * (time_res.to_seconds() / TIME_WEIGHT_FACTOR);
             let result = model_thread(
                 modeller.deref_mut(),
                 &timestamps,

@@ -15,7 +15,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use hifitime::{Duration, Epoch, Unit};
+use hifitime::{Duration, Epoch};
 use log::{debug, trace, warn};
 use marlu::{
     c32,
@@ -50,13 +50,45 @@ pub(crate) enum MsFlavour {
 /// Open a measurement set table read only. If `table` is `None`, then open the
 /// base table.
 pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, MsReadError> {
-    match Table::open(
+    let t = Table::open(
         format!("{}/{}", ms.display(), table.unwrap_or("")),
         TableOpenMode::Read,
-    ) {
-        Ok(t) => Ok(t),
-        Err(e) => Err(MsReadError::RubblError(e.to_string())),
+    )?;
+    Ok(t)
+}
+
+/// Attempt to determine who/what created this measurement set.
+fn get_ms_flavour(history_table: &mut Table) -> Result<MsFlavour, MsReadError> {
+    let app = history_table
+        .get_cell::<String>("APPLICATION", 0)?
+        .to_uppercase();
+    if app.starts_with("MWA_HYPERDRIVE") {
+        return Ok(MsFlavour::Hyperdrive);
+    } else if app.starts_with("BIRLI") {
+        return Ok(MsFlavour::Birli);
+    } else if app.starts_with("MARLU") {
+        return Ok(MsFlavour::Marlu);
+    } else if app.starts_with("COTTER") {
+        return Ok(MsFlavour::Cotter);
+    };
+
+    // If there wasn't an app in the "APPLICATION" column, see if we
+    // can get more information out of the "MESSAGE" column.
+    let messages: Vec<String> = history_table.get_col_as_vec("MESSAGE")?;
+    for message in messages {
+        let upper = message.to_uppercase();
+        if upper.contains("HYPERDRIVE") {
+            return Ok(MsFlavour::Hyperdrive);
+        } else if upper.contains("MARLU") {
+            return Ok(MsFlavour::Marlu);
+        } else if upper.contains("BIRLI") {
+            return Ok(MsFlavour::Birli);
+        }
     }
+
+    // If we *still* don't know what the app is, fallback on
+    // "Casa".
+    Ok(MsFlavour::Casa)
 }
 
 pub(crate) struct MsReader {
@@ -114,74 +146,34 @@ impl MsReader {
             }
 
             // What created this measurement set?
-            let flavour = {
-                let mut history_table = read_table(ms, Some("HISTORY"))?;
-                let app: String = history_table.get_cell("APPLICATION", 0).unwrap();
-                let app = app.to_uppercase();
-                let app_name = if app.starts_with("MWA_HYPERDRIVE") {
-                    Some(MsFlavour::Hyperdrive)
-                } else if app.starts_with("BIRLI") {
-                    Some(MsFlavour::Birli)
-                } else if app.starts_with("MARLU") {
-                    Some(MsFlavour::Marlu)
-                } else if app.starts_with("COTTER") {
-                    Some(MsFlavour::Cotter)
-                } else {
-                    None
-                };
-
-                // If there wasn't an app in the "APPLICATION" column, see if we
-                // can get more information out of the "MESSAGE" column.
-                app_name.unwrap_or_else(|| {
-                    let messages: Vec<String> = history_table.get_col_as_vec("MESSAGE").unwrap();
-                    let mut app = None;
-                    for message in messages {
-                        let upper = message.to_uppercase();
-                        if upper.contains("HYPERDRIVE") {
-                            app = Some(MsFlavour::Hyperdrive);
-                            break;
-                        } else if upper.contains("MARLU") {
-                            app = Some(MsFlavour::Marlu);
-                            break;
-                        } else if upper.contains("BIRLI") {
-                            app = Some(MsFlavour::Birli);
-                            break;
-                        }
-                    }
-                    // If we *still* don't know what the app is, fallback on
-                    // "Casa".
-                    app.unwrap_or(MsFlavour::Casa)
-                })
-            };
+            let mut history_table = read_table(ms, Some("HISTORY"))?;
+            let flavour = get_ms_flavour(&mut history_table)?;
 
             // Get the tile names and XYZ positions.
             let mut antenna_table = read_table(ms, Some("ANTENNA"))?;
-            let tile_names: Vec<String> = antenna_table.get_col_as_vec("NAME").unwrap();
+            let tile_names: Vec<String> = antenna_table.get_col_as_vec("NAME")?;
             trace!("There are {} tile names", tile_names.len());
             let tile_names =
                 Vec1::try_from_vec(tile_names).map_err(|_| MsReadError::AntennaTableEmpty)?;
 
             let (tile_xyzs, array_pos): (Vec<marlu::XyzGeodetic>, LatLngHeight) = {
                 let mut casacore_positions = Vec::with_capacity(antenna_table.n_rows() as usize);
-                antenna_table
-                    .for_each_row(|row| {
-                        // TODO: Kill the failure crate, and all unwraps!!
-                        let pos: Vec<f64> = row.get_cell("POSITION").unwrap();
-                        let pos_xyz = XyzGeocentric {
-                            x: pos[0],
-                            y: pos[1],
-                            z: pos[2],
-                        };
-                        casacore_positions.push(pos_xyz);
-                        Ok(())
-                    })
-                    .unwrap();
+                antenna_table.for_each_row(|row| {
+                    let pos: Vec<f64> = row.get_cell("POSITION")?;
+                    let pos_xyz = XyzGeocentric {
+                        x: pos[0],
+                        y: pos[1],
+                        z: pos[2],
+                    };
+                    casacore_positions.push(pos_xyz);
+                    Ok(())
+                })?;
                 // XXX(Dev): no way to get array_pos from MS AFAIK
                 let array_pos = match (array_pos, flavour) {
                     (Some(p), _) => p,
                     (None, MsFlavour::Hyperdrive | MsFlavour::Birli | MsFlavour::Marlu) => {
                         warn!("Assuming that this measurement set's array position is the MWA");
-                        LatLngHeight::new_mwa()
+                        LatLngHeight::mwa()
                     }
                     (None, MsFlavour::Cotter) => {
                         warn!("Assuming that this measurement set's array position is cotter's MWA position");
@@ -194,8 +186,7 @@ impl MsReader {
                     (None, MsFlavour::Casa) => todo!(),
                 };
 
-                let vec = XyzGeocentric::get_geocentric_vector(array_pos)
-                    .map_err(|_| MsReadError::Geodetic2Geocentric)?;
+                let vec = XyzGeocentric::get_geocentric_vector(array_pos);
                 let (s_long, c_long) = array_pos.longitude_rad.sin_cos();
                 let tile_xyzs = casacore_positions
                     .par_iter()
@@ -220,8 +211,8 @@ impl MsReader {
             // (i.e. main table rows) until we've seen all available antennas.
             let mut autocorrelations_present = false;
             let (tile_map, unavailable_tiles): (HashMap<i32, usize>, Vec<usize>) = {
-                let antenna1: Vec<i32> = main_table.get_col_as_vec("ANTENNA1").unwrap();
-                let antenna2: Vec<i32> = main_table.get_col_as_vec("ANTENNA2").unwrap();
+                let antenna1: Vec<i32> = main_table.get_col_as_vec("ANTENNA1")?;
+                let antenna2: Vec<i32> = main_table.get_col_as_vec("ANTENNA2")?;
 
                 let mut present_tiles = HashSet::with_capacity(total_num_tiles);
                 for (&antenna1, &antenna2) in antenna1.iter().zip(antenna2.iter()) {
@@ -294,9 +285,8 @@ impl MsReader {
                     trace!("Reading timestep {i_step}");
                     let mut all_rows_for_step_flagged = true;
                     for i_row in 0..step {
-                        let vis_flags: Vec<bool> = main_table
-                            .get_cell_as_vec("FLAG", (i_step * step + i_row) as u64)
-                            .unwrap();
+                        let vis_flags: Vec<bool> =
+                            main_table.get_cell_as_vec("FLAG", (i_step * step + i_row) as u64)?;
                         let all_flagged = vis_flags.into_iter().all(|f| f);
                         if !all_flagged {
                             all_rows_for_step_flagged = false;
@@ -343,7 +333,7 @@ impl MsReader {
             debug!("Flagged tiles in the MS: {:?}", flagged_tiles);
 
             // Get the unique times in the MS.
-            let utc_times: Vec<f64> = main_table.get_col_as_vec("TIME").unwrap();
+            let utc_times: Vec<f64> = main_table.get_col_as_vec("TIME")?;
             let mut utc_time_set: BTreeSet<u64> = BTreeSet::new();
             let mut timestamps = vec![];
             for utc_time in utc_times {
@@ -370,10 +360,10 @@ impl MsReader {
             match timestamps.as_slice() {
                 // Handled above; measurement sets aren't allowed to be empty.
                 [] => unreachable!(),
-                [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
+                [t] => debug!("Only timestep (GPS): {:.2}", t.to_gpst_seconds()),
                 [t0, .., tn] => {
-                    debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
-                    debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
+                    debug!("First good timestep (GPS): {:.2}", t0.to_gpst_seconds());
+                    debug!("Last good timestep  (GPS): {:.2}", tn.to_gpst_seconds());
                 }
             }
 
@@ -384,11 +374,12 @@ impl MsReader {
                 None
             } else {
                 // Find the minimum gap between two consecutive timestamps.
-                let time_res = timestamps.windows(2).fold(
-                    Duration::from_f64(f64::INFINITY, Unit::Second),
-                    |acc, ts| acc.min(ts[1] - ts[0]),
-                );
-                trace!("Time resolution: {}s", time_res.in_seconds());
+                let time_res = timestamps
+                    .windows(2)
+                    .fold(Duration::from_seconds(f64::INFINITY), |acc, ts| {
+                        acc.min(ts[1] - ts[0])
+                    });
+                trace!("Time resolution: {}s", time_res.to_seconds());
                 Some(time_res)
             };
 
@@ -401,9 +392,8 @@ impl MsReader {
             // Get the frequency information.
             let mut spectral_window_table = read_table(ms, Some("SPECTRAL_WINDOW"))?;
             let fine_chan_freqs = {
-                let fine_chan_freqs_hz: Vec<f64> = spectral_window_table
-                    .get_cell_as_vec("CHAN_FREQ", 0)
-                    .unwrap();
+                let fine_chan_freqs_hz: Vec<f64> =
+                    spectral_window_table.get_cell_as_vec("CHAN_FREQ", 0)?;
                 let fine_chan_freqs = fine_chan_freqs_hz
                     .into_iter()
                     .map(|f| f.round() as u64)
@@ -412,9 +402,7 @@ impl MsReader {
             };
             // Assume that `total_bandwidth_hz` is the total bandwidth inside the
             // measurement set, which is not necessarily the whole observation.
-            let total_bandwidth_hz: f64 = spectral_window_table
-                .get_cell("TOTAL_BANDWIDTH", 0)
-                .unwrap();
+            let total_bandwidth_hz: f64 = spectral_window_table.get_cell("TOTAL_BANDWIDTH", 0)?;
             debug!("MS total bandwidth: {} Hz", total_bandwidth_hz);
 
             // Note the "subband" is CASA nomenclature. MWA tends to use "coarse
@@ -426,7 +414,7 @@ impl MsReader {
                     Err(_) => vec![1],
                     Ok(mut mwa_subband_table) => {
                         let zero_indexed_coarse_chans: Vec<i32> =
-                            mwa_subband_table.get_col_as_vec("NUMBER").unwrap();
+                            mwa_subband_table.get_col_as_vec("NUMBER")?;
                         let one_indexed_coarse_chans: Vec<u32> = zero_indexed_coarse_chans
                             .into_iter()
                             .map(|cc_num| {
@@ -467,8 +455,8 @@ impl MsReader {
             // Get the observation phase centre.
             let phase_centre = {
                 let mut field_table = read_table(ms, Some("FIELD"))?;
-                let phase_vec = field_table.get_cell_as_vec("PHASE_DIR", 0).unwrap();
-                RADec::new(phase_vec[0], phase_vec[1])
+                let phase_vec = field_table.get_cell_as_vec("PHASE_DIR", 0)?;
+                RADec::from_radians(phase_vec[0], phase_vec[1])
             };
 
             // Populate the dipole delays, gains and the pointing centre if we
@@ -494,7 +482,7 @@ impl MsReader {
                     debug!("Using metafits for dipole delays, dipole gains and pointing centre");
                     let delays = metafits::get_dipole_delays(context);
                     let gains = metafits::get_dipole_gains(context);
-                    pointing_centre = Some(RADec::new_degrees(
+                    pointing_centre = Some(RADec::from_degrees(
                         context.ra_tile_pointing_degrees,
                         context.dec_tile_pointing_degrees,
                     ));
@@ -527,9 +515,8 @@ impl MsReader {
                 // MWA_TILE_POINTING exists.
                 (_, Ok(mut mwa_tile_pointing_table)) => {
                     debug!("Using MWA_TILE_POINTING for dipole delays and pointing centre");
-                    let table_delays: Vec<i32> = mwa_tile_pointing_table
-                        .get_cell_as_vec("DELAYS", 0)
-                        .unwrap();
+                    let table_delays: Vec<i32> =
+                        mwa_tile_pointing_table.get_cell_as_vec("DELAYS", 0)?;
                     if table_delays.len() != 16 {
                         return Err(MsReadError::WrongNumDipoleDelays {
                             num: table_delays.len(),
@@ -547,10 +534,9 @@ impl MsReader {
                         .collect::<Result<_, MsReadError>>()?;
                     dipole_delays = Some(Delays::Partial(delays));
 
-                    let pointing_vec: Vec<f64> = mwa_tile_pointing_table
-                        .get_cell_as_vec("DIRECTION", 0)
-                        .unwrap();
-                    pointing_centre = Some(RADec::new(pointing_vec[0], pointing_vec[1]));
+                    let pointing_vec: Vec<f64> =
+                        mwa_tile_pointing_table.get_cell_as_vec("DIRECTION", 0)?;
+                    pointing_centre = Some(RADec::from_radians(pointing_vec[0], pointing_vec[1]));
                 }
             }
 
@@ -558,9 +544,8 @@ impl MsReader {
             // component, for some reason. We're unlikely to ever have a fraction of
             // a Hz as the channel resolution.
             let freq_res = {
-                let all_widths: Vec<f64> = spectral_window_table
-                    .get_cell_as_vec("CHAN_WIDTH", 0)
-                    .unwrap();
+                let all_widths: Vec<f64> =
+                    spectral_window_table.get_cell_as_vec("CHAN_WIDTH", 0)?;
                 let width = *all_widths.first().ok_or(MsReadError::NoChanWidths)?;
                 // Make sure all the widths all the same.
                 for w in all_widths.iter().skip(1) {
@@ -632,25 +617,23 @@ impl MsReader {
                     // each pol. We don't care about individual pol flags; if any
                     // are flagged, flag the whole channel.
                     let flagged_fine_chans: Vec<bool> =
-                        main_table.get_cell_as_vec("FLAG", row_range.start).unwrap();
+                        main_table.get_cell_as_vec("FLAG", row_range.start)?;
                     flagged_fine_chans
                         .chunks_exact(4)
                         .map(|pol_flags| pol_flags.iter().any(|f| *f))
                         .collect()
                 };
-                main_table
-                    .for_each_row_in_range(row_range, |row| {
-                        let row_flagged_fine_chans: Array2<bool> = row.get_cell("FLAG").unwrap();
-                        flagged_fine_chans
-                            .iter_mut()
-                            .zip(row_flagged_fine_chans.outer_iter())
-                            .for_each(|(f1, f2)| {
-                                let any_flagged = f2.iter().any(|f| *f);
-                                *f1 &= any_flagged;
-                            });
-                        Ok(())
-                    })
-                    .unwrap();
+                main_table.for_each_row_in_range(row_range, |row| {
+                    let row_flagged_fine_chans: Array2<bool> = row.get_cell("FLAG")?;
+                    flagged_fine_chans
+                        .iter_mut()
+                        .zip(row_flagged_fine_chans.outer_iter())
+                        .for_each(|(f1, f2)| {
+                            let any_flagged = f2.iter().any(|f| *f);
+                            *f1 &= any_flagged;
+                        });
+                    Ok(())
+                })?;
                 flagged_fine_chans
             };
 
@@ -677,20 +660,42 @@ impl MsReader {
                 .map(|(i, _)| i)
                 .collect();
 
-            // Can measurement sets supply DUT1?
-            let dut1 = match mwalib_context.as_ref() {
+            // Measurement sets don't appear to have an official way to supply
+            // the DUT1. Marlu 0.9.0 writes UT1UTC into the main table's
+            // keywords, so pick it up if it's there, otherwise use the
+            // metafits.
+            let dut1 = match (
+                main_table
+                    .get_keyword_record()?
+                    .get_field::<f64>("UT1UTC")
+                    .ok(),
+                mwalib_context.as_ref(),
+            ) {
+                // If the MS has the key, then use it, even if we have a
+                // metafits.
+                (Some(dut1), _) => {
+                    debug!("MS has no UT1UTC");
+                    Some(dut1)
+                }
+
                 // Use the value in the metafits.
-                Some(c) => {
+                (None, Some(c)) => {
+                    debug!("MS has no UT1UTC");
                     match c.dut1 {
                         Some(dut1) => debug!("metafits DUT1: {dut1}"),
                         None => debug!("metafits has no DUT1"),
                     }
-                    c.dut1.map(|dut1| Duration::from_f64(dut1, Unit::Second))
+                    c.dut1
                 }
 
                 // We have no DUT1.
-                None => None,
-            };
+                (None, None) => {
+                    debug!("MS has no UT1UTC");
+                    debug!("metafits has no DUT1");
+                    None
+                }
+            }
+            .map(Duration::from_seconds);
 
             let obs_context = ObsContext {
                 obsid,
@@ -752,13 +757,13 @@ impl MsReader {
         let row_range_end = (timestep + 1) * self.step;
         let row_range = row_range_start as u64..row_range_end as u64;
 
-        let mut main_table = read_table(&self.ms, None).unwrap();
+        let mut main_table = read_table(&self.ms, None)?;
         let mut row_index = row_range.start;
         main_table
             .for_each_row_in_range(row_range, |row| {
                 // Antenna numbers are zero indexed.
-                let ant1: i32 = row.get_cell("ANTENNA1").unwrap();
-                let ant2: i32 = row.get_cell("ANTENNA2").unwrap();
+                let ant1: i32 = row.get_cell("ANTENNA1")?;
+                let ant2: i32 = row.get_cell("ANTENNA2")?;
                 // Use our map.
                 let ant1 = self.tile_map[&ant1];
                 let ant2 = self.tile_map[&ant2];
@@ -772,17 +777,17 @@ impl MsReader {
                         .cloned()
                     {
                         // The data array is arranged [frequency][instrumental_pol].
-                        let ms_data: Array2<c32> = row.get_cell("DATA").unwrap();
+                        let ms_data: Array2<c32> = row.get_cell("DATA")?;
                         // The weight array is arranged
                         // [frequency][instrumental_pol], however, we assume the
                         // weights for all instrumental visibility polarisations
                         // are all the same. There isn't a way to just read one
                         // axis of the data.
-                        let ms_weights: Array2<f32> = row.get_cell("WEIGHT_SPECTRUM").unwrap();
+                        let ms_weights: Array2<f32> = row.get_cell("WEIGHT_SPECTRUM")?;
                         // The flag array is arranged
                         // [frequency][instrumental_pol]. As with the weights,
                         // the polarisation doesn't matter.
-                        let flags: Array2<bool> = row.get_cell("FLAG").unwrap();
+                        let flags: Array2<bool> = row.get_cell("FLAG")?;
 
                         // Ensure that all arrays have appropriate sizes. We
                         // have to panic here because of the way Rubbl does
@@ -883,9 +888,9 @@ impl MsReader {
                             .get(&ant1)
                             .copied()
                         {
-                            let ms_data: Array2<c32> = row.get_cell("DATA").unwrap();
-                            let ms_weights: Array2<f32> = row.get_cell("WEIGHT_SPECTRUM").unwrap();
-                            let flags: Array2<bool> = row.get_cell("FLAG").unwrap();
+                            let ms_data: Array2<c32> = row.get_cell("DATA")?;
+                            let ms_weights: Array2<f32> = row.get_cell("WEIGHT_SPECTRUM")?;
+                            let flags: Array2<bool> = row.get_cell("FLAG")?;
 
                             if ms_data.len_of(Axis(1)) != 4 {
                                 panic!(
@@ -974,7 +979,7 @@ impl MsReader {
                 row_index += 1;
                 Ok(())
             })
-            .unwrap();
+            .map_err(MsReadError::from)?;
 
         Ok(())
     }

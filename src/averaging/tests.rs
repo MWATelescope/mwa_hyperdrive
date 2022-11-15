@@ -34,10 +34,10 @@ fn test_timesteps_to_timeblocks() {
         }
 
         assert_eq!(
-            average_epoch(&timeblock.timestamps).as_gpst_seconds(),
+            average_epoch(&timeblock.timestamps).to_gpst_seconds(),
             expected_timestamp
         );
-        assert_eq!(timeblock.median.as_gpst_seconds(), expected_timestamp);
+        assert_eq!(timeblock.median.to_gpst_seconds(), expected_timestamp);
     }
 
     let time_average_factor = 2;
@@ -57,10 +57,10 @@ fn test_timesteps_to_timeblocks() {
         }
 
         assert_eq!(
-            average_epoch(&timeblock.timestamps).as_gpst_seconds(),
+            average_epoch(&timeblock.timestamps).to_gpst_seconds(),
             expected_timestamp
         );
-        assert_eq!(timeblock.median.as_gpst_seconds(), expected_timestamp);
+        assert_eq!(timeblock.median.to_gpst_seconds(), expected_timestamp);
     }
 
     let time_average_factor = 3;
@@ -80,14 +80,14 @@ fn test_timesteps_to_timeblocks() {
         }
 
         assert_eq!(
-            average_epoch(&timeblock.timestamps).as_gpst_seconds(),
+            average_epoch(&timeblock.timestamps).to_gpst_seconds(),
             expected_timestamp
         );
         // The median is different from the average for the second timeblock.
         if timeblock.range.len() == 3 {
-            assert_eq!(timeblock.median.as_gpst_seconds(), expected_timestamp);
+            assert_eq!(timeblock.median.to_gpst_seconds(), expected_timestamp);
         } else {
-            assert_eq!(timeblock.median.as_gpst_seconds(), expected_timestamp + 2.0);
+            assert_eq!(timeblock.median.to_gpst_seconds(), expected_timestamp + 2.0);
         }
     }
 
@@ -108,12 +108,12 @@ fn test_timesteps_to_timeblocks() {
         }
 
         assert_eq!(
-            average_epoch(&timeblock.timestamps).as_gpst_seconds(),
+            average_epoch(&timeblock.timestamps).to_gpst_seconds(),
             expected_timestamp
         );
         // (2 + 16) / 2 = 9 is the median timestep
         // 1065880128.0 + (2 * 9) = 1065880146.0
-        assert_eq!(timeblock.median.as_gpst_seconds(), 1065880146.0);
+        assert_eq!(timeblock.median.to_gpst_seconds(), 1065880146.0);
     }
 }
 

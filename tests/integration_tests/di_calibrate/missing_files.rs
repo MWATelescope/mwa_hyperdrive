@@ -144,9 +144,9 @@ fn missing_mwafs() {
 #[test]
 fn arg_file_missing_mwafs() {
     let args = get_reduced_1090008640(false, false);
-    let args_str = toml::to_vec(&args).unwrap();
+    let args_str = toml::to_string(&args).unwrap();
     let mut args_file = Builder::new().suffix(".toml").tempfile().unwrap();
-    args_file.write_all(&args_str).unwrap();
+    args_file.write_all(args_str.as_bytes()).unwrap();
 
     // Don't include an mwaf file; we expect a warning to be logged for this
     // reason.
@@ -161,9 +161,9 @@ fn arg_file_missing_mwafs() {
 
     // Include an mwaf file; we don't expect a warning this time.
     let args = get_reduced_1090008640(false, true);
-    let args_str = toml::to_vec(&args).unwrap();
+    let args_str = toml::to_string(&args).unwrap();
     let mut args_file = Builder::new().suffix(".toml").tempfile().unwrap();
-    args_file.write_all(&args_str).unwrap();
+    args_file.write_all(args_str.as_bytes()).unwrap();
 
     let cmd = hyperdrive()
         .arg("di-calibrate")

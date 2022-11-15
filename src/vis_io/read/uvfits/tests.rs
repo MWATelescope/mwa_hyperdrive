@@ -6,7 +6,7 @@ use std::{collections::HashSet, ffi::CString, path::PathBuf};
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
-use hifitime::{Duration, Unit};
+use hifitime::Duration;
 use itertools::Itertools;
 use marlu::{c32, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWrite, XyzGeodetic};
 use ndarray::prelude::*;
@@ -22,7 +22,7 @@ use crate::{
 // TODO(dev): move these to Marlu
 fn write_then_read_uvfits(autos: bool) {
     let output = NamedTempFile::new().expect("Couldn't create temporary file");
-    let phase_centre = RADec::new_degrees(0.0, -27.0);
+    let phase_centre = RADec::from_degrees(0.0, -27.0);
     let timesteps = [Epoch::from_gpst_seconds(1065880128.0)];
     let num_timesteps = timesteps.len();
     let num_tiles = 128;
@@ -81,7 +81,7 @@ fn write_then_read_uvfits(autos: bool) {
     let flagged_fine_chans = HashSet::new();
     let tile_baseline_flags = TileBaselineFlags::new(num_tiles, flagged_tiles);
 
-    let array_pos = LatLngHeight::new_mwa();
+    let array_pos = LatLngHeight::mwa();
 
     // Just in case this gets accidentally changed.
     assert_eq!(
@@ -92,7 +92,7 @@ fn write_then_read_uvfits(autos: bool) {
     let vis_ctx = VisContext {
         num_sel_timesteps: num_timesteps,
         start_timestamp: timesteps[0],
-        int_time: Duration::from_f64(1., Unit::Second),
+        int_time: Duration::from_seconds(1.),
         num_sel_chans: num_chans,
         start_freq_hz: fine_chan_freqs_hz[0],
         freq_resolution_hz: fine_chan_width_hz,
@@ -124,7 +124,7 @@ fn write_then_read_uvfits(autos: bool) {
         &vis_ctx,
         array_pos,
         phase_centre,
-        Duration::from_total_nanoseconds(0),
+        Duration::from_seconds(0.0),
         None,
         tile_names,
         xyzs,
@@ -164,7 +164,6 @@ fn write_then_read_uvfits(autos: bool) {
     let mut auto_weights_read = Array2::zeros((num_chans, num_tiles));
 
     for ((timestep, vis_written), weights_written) in (0..num_timesteps)
-        .into_iter()
         .zip_eq(sel_vis.outer_iter())
         .zip_eq(sel_weights.outer_iter())
     {
@@ -257,7 +256,7 @@ fn test_1090008640_cross_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -320,7 +319,7 @@ fn test_1090008640_auto_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -413,7 +412,7 @@ fn test_1090008640_auto_vis_with_flags() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -507,7 +506,7 @@ fn read_1090008640_cross_and_auto_vis() {
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
-        obs_context.timestamps.first().as_gpst_seconds(),
+        obs_context.timestamps.first().to_gpst_seconds(),
         1090008658.0
     );
 
@@ -645,7 +644,7 @@ fn test_timestep_reading() {
     let vis_ctx = VisContext {
         num_sel_timesteps: num_timesteps,
         start_timestamp: Epoch::from_gpst_seconds(obsid as f64),
-        int_time: Duration::from_f64(1., Unit::Second),
+        int_time: Duration::from_seconds(1.),
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
         freq_resolution_hz: 10_000.,
@@ -664,8 +663,8 @@ fn test_timestep_reading() {
 
     let weight_data = Array3::<f32>::from_elem(shape, 1.);
 
-    let phase_centre = RADec::new_degrees(0., -27.);
-    let array_pos = LatLngHeight::new_mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
+    let array_pos = LatLngHeight::mwa();
     #[rustfmt::skip]
     let tile_xyzs = vec![
         XyzGeodetic { x: 0., y: 0., z: 0., },
@@ -679,7 +678,7 @@ fn test_timestep_reading() {
         &vis_ctx,
         array_pos,
         phase_centre,
-        Duration::from_total_nanoseconds(0),
+        Duration::from_seconds(0.0),
         Some(&format!("synthesized test data {obsid}")),
         tile_names,
         tile_xyzs,
@@ -703,11 +702,11 @@ fn test_timestep_reading() {
         uvfits_ctx
             .timestamps
             .iter()
-            .map(|t| t.as_gpst_seconds())
+            .map(|t| t.to_gpst_seconds())
             .collect::<Vec<_>>(),
         expected_timestamps
             .iter()
-            .map(|t| t.as_gpst_seconds())
+            .map(|t| t.to_gpst_seconds())
             .collect::<Vec<_>>()
     );
 }

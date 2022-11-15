@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use marlu::mwalib::MwalibError;
+use marlu::rubbl_casatables;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -31,9 +31,6 @@ pub(crate) enum MsReadError {
 
     #[error("No timesteps were in file {file}")]
     NoTimesteps { file: String },
-
-    #[error("When reading in measurement set, ERFA function eraGd2gc failed to convert geocentric coordinates to geodetic. Is something wrong with your ANTENNA/POSITION column?")]
-    Geodetic2Geocentric,
 
     #[error("MS {array_type} from {row_index} did not have expected {expected_len} elements on axis {axis_num}!")]
     BadArraySize {
@@ -65,14 +62,14 @@ pub(crate) enum MsReadError {
     NegativeSubband { num: i32 },
 
     #[error("Error when trying to interface with measurement set: {0}")]
-    RubblError(String),
+    Table(#[from] rubbl_casatables::TableError),
 
-    // // TODO: Kill failure
-    // #[error(transparent)]
-    // Casacore(#[from] rubbl_casatables::CasacoreError),
+    #[error("Error from casacore: {0}")]
+    Casacore(#[from] rubbl_casatables::CasacoreError),
+
     #[error(transparent)]
     Glob(#[from] crate::glob::GlobError),
 
     #[error(transparent)]
-    Mwalib(#[from] MwalibError),
+    Mwalib(#[from] mwalib::MwalibError),
 }

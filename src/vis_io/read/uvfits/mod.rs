@@ -14,12 +14,14 @@ use std::collections::{HashMap, HashSet};
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 
-use hifitime::{Duration, Epoch, Unit};
+use fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile};
+use hifitime::{Duration, Epoch};
 use log::{debug, trace, warn};
 use marlu::{io::uvfits::decode_uvfits_baseline, Jones, RADec, XyzGeocentric, XyzGeodetic};
 use mwalib::{
-    fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile},
-    *,
+    _get_fits_col, _open_fits, fits_open, fits_open_hdu, get_fits_col, MetafitsContext,
+    _get_optional_fits_key, _get_required_fits_key, _open_hdu, get_optional_fits_key,
+    get_required_fits_key,
 };
 use ndarray::prelude::*;
 
@@ -71,7 +73,7 @@ impl UvfitsReader {
             // TODO: Let the user supply the MWA version.
             let mwalib_context = match metafits {
                 None => None,
-                Some(m) => Some(mwalib::MetafitsContext::new(m, None)?),
+                Some(m) => Some(MetafitsContext::new(m, None)?),
             };
 
             debug!("Using uvfits file: {}", uvfits.display());
@@ -80,7 +82,7 @@ impl UvfitsReader {
             }
 
             // Get the tile names, XYZ positions and antenna numbers.
-            let mut uvfits_fptr = fits_open!(&uvfits)?;
+            let mut uvfits_fptr = fits_open!(uvfits)?;
             let antenna_table_hdu = fits_open_hdu!(&mut uvfits_fptr, 1)?;
 
             let tile_names: Vec<String> =
@@ -138,7 +140,7 @@ impl UvfitsReader {
                         if let Some(itrf_frame_warning) = itrf_frame_warning {
                             warn!("{itrf_frame_warning}");
                         }
-                        Some(XyzGeocentric { x, y, z }.to_earth_wgs84()?)
+                        Some(XyzGeocentric { x, y, z }.to_earth_wgs84())
                     }
                     (None, None, None) => None,
                     _ => {
@@ -188,7 +190,7 @@ impl UvfitsReader {
                     &hdu,
                     &format!("CRVAL{}", metadata.indices.dec)
                 )?;
-                RADec::new_degrees(ra, dec)
+                RADec::from_degrees(ra, dec)
             };
 
             // Populate the dipole delays, gains and the pointing centre if we
@@ -200,7 +202,7 @@ impl UvfitsReader {
                 debug!("Using metafits for dipole delays, gains and pointing centre");
                 let delays = get_dipole_delays(context);
                 let gains = get_dipole_gains(context);
-                pointing_centre = Some(RADec::new_degrees(
+                pointing_centre = Some(RADec::from_degrees(
                     context.ra_tile_pointing_degrees,
                     context.dec_tile_pointing_degrees,
                 ));
@@ -291,7 +293,7 @@ impl UvfitsReader {
                 .iter()
                 .enumerate()
                 .map(|(i, &frac)| {
-                    let jd_offset = Duration::from_f64(frac, Unit::Day);
+                    let jd_offset = Duration::from_days(frac);
                     (i, jd_zero + quantize_duration(jd_offset, q))
                 })
                 .unzip();
@@ -318,8 +320,8 @@ impl UvfitsReader {
                     get_optional_fits_key!(&mut uvfits_fptr, &hdu, "INTTIM")?;
                 match int_time {
                     Some(t) => {
-                        let d = Duration::from_f64(t, Unit::Second);
-                        trace!("Time resolution from INTTIM: {}s", d.in_seconds());
+                        let d = Duration::from_seconds(t);
+                        trace!("Time resolution from INTTIM: {}s", d.to_seconds());
                         Some(d)
                     }
                     None => {
@@ -329,13 +331,14 @@ impl UvfitsReader {
                         } else {
                             // Find the minimum gap between two consecutive
                             // timestamps.
-                            let time_res = timestamps.windows(2).fold(
-                                Duration::from_f64(f64::INFINITY, Unit::Second),
-                                |acc, ts| acc.min(ts[1] - ts[0]),
-                            );
+                            let time_res = timestamps
+                                .windows(2)
+                                .fold(Duration::from_seconds(f64::INFINITY), |acc, ts| {
+                                    acc.min(ts[1] - ts[0])
+                                });
                             trace!(
                                 "Time resolution from smallest gap: {}s",
-                                time_res.in_seconds()
+                                time_res.to_seconds()
                             );
                             Some(time_res)
                         }
@@ -345,10 +348,10 @@ impl UvfitsReader {
             match timestamps.as_slice() {
                 // Handled above; uvfits files aren't allowed to be empty.
                 [] => unreachable!(),
-                [t] => debug!("Only timestep (GPS): {:.2}", t.as_gpst_seconds()),
+                [t] => debug!("Only timestep (GPS): {:.2}", t.to_gpst_seconds()),
                 [t0, .., tn] => {
-                    debug!("First good timestep (GPS): {:.2}", t0.as_gpst_seconds());
-                    debug!("Last good timestep  (GPS): {:.2}", tn.as_gpst_seconds());
+                    debug!("First good timestep (GPS): {:.2}", t0.to_gpst_seconds());
+                    debug!("Last good timestep  (GPS): {:.2}", tn.to_gpst_seconds());
                 }
             }
 
@@ -477,9 +480,7 @@ impl UvfitsReader {
                 if metafits_dut1.is_some() && uvfits_dut1.is_some() {
                     debug!("Preferring metafits DUT1 over uvfits DUT1");
                 }
-                metafits_dut1
-                    .or(uvfits_dut1)
-                    .map(|dut1| Duration::from_f64(dut1, Unit::Second))
+                metafits_dut1.or(uvfits_dut1).map(Duration::from_seconds)
             };
 
             let obs_context = ObsContext {
