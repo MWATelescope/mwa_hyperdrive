@@ -21,6 +21,10 @@ lto = "thin"
 [profile.dev]
 opt-level = 2
 
+# This speeds up compilation time in the "dev" profile (e.g. testing)
+[profile.dev.package.clap]
+opt-level = 0
+
 [features]
 default = ["plotting"]
 
