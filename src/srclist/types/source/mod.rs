@@ -34,7 +34,7 @@ impl Source {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct IonoSource {
+pub struct IonoSource {
     /// The components associated with the source.
     pub(crate) source: Source,
     /// Constants of proportionality for ionospheric offset in l,m

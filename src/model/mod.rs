@@ -26,7 +26,7 @@ use ndarray::ArrayViewMut2;
 
 use crate::{
     beam::Beam,
-    srclist::{ComponentList, SourceList},
+    srclist::{ComponentList, IonoSource, SourceList},
 };
 
 #[derive(Debug, Clone)]
@@ -46,9 +46,20 @@ pub(crate) enum ModellerInfo {
 
 /// An object that simulates sky-model visibilities.
 pub trait SkyModeller<'a> {
+    /// Update the sky model associated with the `SkyModeller`. All old source
+    /// information is destroyed.
     fn update_source_list(
         &mut self,
         source_list: &SourceList,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError>;
+
+    /// Update the sky model associated with the `SkyModeller`, with only a
+    /// single source. All old source information is destroyed. This is mostly
+    /// useful for peeling.
+    fn update_with_a_source(
+        &mut self,
+        source: &IonoSource,
         phase_centre: RADec,
     ) -> Result<(), ModelError>;
 
