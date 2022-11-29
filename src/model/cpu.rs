@@ -594,6 +594,14 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         todo!()
     }
 
+    fn update_with_a_source(
+        &mut self,
+        _source: &crate::srclist::IonoSource,
+        _phase_centre: RADec,
+    ) -> Result<(), ModelError> {
+        todo!()
+    }
+
     fn model_timestep(
         &mut self,
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
