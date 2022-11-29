@@ -14,13 +14,14 @@ use clap::Parser;
 use crossbeam_channel::bounded;
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use log::info;
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR, VEL_C},
     math::num_tiles_from_num_cross_correlation_baselines,
     precession::precess_time,
-    HADec, Jones, MwaObsContext, RADec, VisContext, XyzGeodetic,
+    HADec, Jones, MwaObsContext, RADec, XyzGeodetic,
 };
 use ndarray::{prelude::*, Zip};
 use num_complex::Complex;
@@ -30,7 +31,7 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use crate::{
-    averaging::timesteps_to_timeblocks,
+    averaging::{channels_to_chanblocks, timesteps_to_timeblocks},
     di_calibrate::{get_cal_vis, CalVis},
     help_texts::*,
     math::average_epoch,
@@ -354,9 +355,24 @@ impl PeelArgs {
         let di_cal_params = di_cal_args.into_params().unwrap();
         let input_data = &di_cal_params.input_data;
         let obs_context = input_data.get_obs_context();
-        // let total_num_tiles = obs_context.get_total_num_tiles();
         let num_tiles = di_cal_params.unflagged_tile_xyzs.len();
-        dbg!(num_tiles);
+        let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
+        dbg!(num_tiles, num_cross_baselines);
+        let fences = channels_to_chanblocks(
+            &obs_context.fine_chan_freqs,
+            obs_context.freq_res,
+            32,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            fences.len(),
+            1,
+            "Picket fence observations are not supported!"
+        );
+        let low_res_freqs_hz = fences
+            .into_iter()
+            .flat_map(|f| f.chanblocks.into_iter().map(|c| c._freq))
+            .collect::<Vec<_>>();
 
         // Create an "iono source list" from our existing source list. This
         // involves finding the Stokes-I-weighted `RADec` of each source.
@@ -538,7 +554,7 @@ impl PeelArgs {
             });
 
         // Temporary visibility array, re-used for each timestep
-        let mut vis_tmp = vis_residual.clone();
+        let mut vis_residual_tmp = vis_residual.clone();
 
         let mut source_list = SourceList::new();
         for (source_name, iono_source) in iono_srclist.iter_mut() {
@@ -564,9 +580,9 @@ impl PeelArgs {
                 .outer_iter_mut()
                 .zip(timestamps.iter())
                 .for_each(|(mut vis_residual, epoch)| {
-                    // model into vis_slice: (bl, ch), a 2d slice of vis_tmp: (1, bl, ch)
-                    // vis slice for modelling needs to be 2d, so we take a slice of vis_tmp
-                    let mut vis_slice = vis_tmp.slice_mut(s![0, .., ..]);
+                    // model into vis_slice: (bl, ch), a 2d slice of vis_residual_tmp: (1, bl, ch)
+                    // vis slice for modelling needs to be 2d, so we take a slice of vis_residual_tmp
+                    let mut vis_slice = vis_residual_tmp.slice_mut(s![0, .., ..]);
                     eprintln!(
                         "modelling epoch {:?} {:?} with consts {:?}",
                         epoch.to_gregorian_utc_str(),
@@ -589,15 +605,15 @@ impl PeelArgs {
                     //         array_pos,
                     //         tile_xyzs,
                     //     );
-                    //     _apply_iono(
-                    //         vis_tmp.view_mut(),
+                    //     apply_iono(
+                    //         vis_residual_tmp.view_mut(),
                     //         part_uvws,
                     //         iono_source.iono_consts,
                     //         fine_chan_freqs,
                     //     );
                     // }
                     // after apply iono, copy to residual array
-                    vis_residual -= &vis_tmp.slice(s![0, .., ..]);
+                    vis_residual -= &vis_residual_tmp.slice(s![0, .., ..]);
                 });
         }
         // rotate back to original phase centre
@@ -612,44 +628,7 @@ impl PeelArgs {
             true,
         );
 
-        let vis_ctx = VisContext {
-            num_sel_timesteps: time_average_factor,
-            start_timestamp: *timestamps.first(),
-            int_time: obs_context.guess_time_res(),
-            num_sel_chans: obs_context.fine_chan_freqs.len(),
-            start_freq_hz: *obs_context.fine_chan_freqs.first() as f64,
-            freq_resolution_hz: obs_context.guess_freq_res(),
-            sel_baselines: di_cal_params
-                .tile_baseline_flags
-                .unflagged_cross_baseline_to_tile_map
-                .values()
-                .copied()
-                .sorted()
-                .collect::<Vec<_>>(),
-            avg_time: 1,
-            avg_freq: 1,
-            num_vis_pols: 4,
-        };
-        // vis context at higher resolution that allows for averaging when writing
-        // TODO: Adjust the average time.
         // TODO: Do we allow multiple timesteps in the low-res data?
-        let avg_vis_ctx = VisContext {
-            avg_time: 4,
-            avg_freq: vis_ctx.num_sel_chans / 24,
-            ..vis_ctx.clone()
-        };
-        // shape of the averaged visibilities
-        let avg_shape = avg_vis_ctx.avg_dims();
-        // vis context at the averaged resolution with no output averaging
-        let low_vis_ctx = VisContext {
-            avg_time: 1,
-            avg_freq: 1,
-            freq_resolution_hz: avg_vis_ctx.avg_freq_resolution_hz(),
-            int_time: avg_vis_ctx.avg_int_time(),
-            num_sel_timesteps: avg_shape.0,
-            num_sel_chans: avg_shape.1,
-            ..vis_ctx.clone()
-        };
 
         let average_timestamp = average_epoch(&timestamps);
         let average_precession_info = precess_time(
@@ -665,46 +644,22 @@ impl PeelArgs {
             average_precession_info.lmst_j2000
         };
         let average_precessed_tile_xyzs = Array2::from_shape_vec(
-            (1, di_cal_params.unflagged_tile_xyzs.len()),
+            (1, num_tiles),
             average_precession_info.precess_xyz(&di_cal_params.unflagged_tile_xyzs),
         )
         .expect("correct shape");
 
         // temporary arrays for accumulation
-        let mut vis_residual_avg: Array3<Jones<f32>> =
-            Array3::zeros((avg_shape.0, avg_shape.2, avg_shape.1));
-        let mut weight_residual_avg: Array3<f32> =
-            Array3::zeros((avg_shape.0, avg_shape.2, avg_shape.1));
-        // model, with current ionospheric rotation, averaged
-        let mut vis_model_iono_avg: Array3<Jones<f32>> =
-            Array3::zeros((avg_shape.0, avg_shape.2, avg_shape.1));
-        let mut vis_unpeeled_avg: Array3<Jones<f32>> =
-            Array3::zeros((avg_shape.0, avg_shape.2, avg_shape.1));
-
-        // /////////// //
-        // UNPEEL LOOP //
-        // /////////// //
-
-        let f = low_vis_ctx.frequencies_hz();
-        let mut low_res_modeller = new_sky_modeller(
-            matches!(di_cal_params.modeller_info, ModellerInfo::Cpu),
-            di_cal_params.beam.deref(),
-            &SourceList::new(),
-            &di_cal_params.unflagged_tile_xyzs,
-            &f,
-            &di_cal_params.tile_baseline_flags.flagged_tiles,
-            RADec::default(),
-            di_cal_params.array_position.longitude_rad,
-            di_cal_params.array_position.latitude_rad,
-            di_cal_params.dut1,
-            // TODO: Allow the user to turn off precession.
-            true,
-        )
-        .unwrap();
-
         // TODO: Do a stocktake of arrays that are lying around!
         // These are time, bl, channel
+        let mut vis_residual_low_res: Array3<Jones<f32>> =
+            Array3::zeros((1, num_cross_baselines, low_res_freqs_hz.len()));
+        let mut weight_residual_low_res: Array3<f32> = Array3::zeros(vis_residual_low_res.dim());
+        let mut vis_model_low_res = vis_residual_low_res.clone();
+        let mut vis_model_low_res_tmp: Array3<Jones<f32>> = vis_model_low_res.clone();
         let mut tile_uvs_high_res = Array2::default((timestamps.len(), num_tiles));
+        let mut tile_uvs_low_res = Array2::default((1, num_tiles));
+
         // Pre-compute tile UVs.
         tile_uvs_high_res
             .outer_iter_mut()
@@ -719,8 +674,27 @@ impl PeelArgs {
                 );
             });
 
-        let mut vis_model_low_res = Array3::zeros((avg_shape.0, avg_shape.2, avg_shape.1));
-        let mut tile_uvs_low_res = Array2::default((1, num_tiles));
+        // Set up the low-resolution modeller object.
+        let mut low_res_modeller = new_sky_modeller(
+            matches!(di_cal_params.modeller_info, ModellerInfo::Cpu),
+            di_cal_params.beam.deref(),
+            &SourceList::new(),
+            &di_cal_params.unflagged_tile_xyzs,
+            &low_res_freqs_hz,
+            &di_cal_params.tile_baseline_flags.flagged_tiles,
+            RADec::default(),
+            di_cal_params.array_position.longitude_rad,
+            di_cal_params.array_position.latitude_rad,
+            di_cal_params.dut1,
+            // TODO: Allow the user to turn off precession.
+            true,
+        )
+        .unwrap();
+
+        // /////////// //
+        // UNPEEL LOOP //
+        // /////////// //
+
         for (source_name, iono_source) in iono_srclist.iter_mut() {
             let start = std::time::Instant::now();
 
@@ -744,7 +718,6 @@ impl PeelArgs {
             // ////////////// //
 
             // generate model again at higher resolution, obs phase centre
-            // TODO: dedup from above
             dbg!(std::time::Instant::now() - start, "get new model vis");
             simulate_write(modeller.deref_mut(), &timestamps, vis_model.view_mut());
 
@@ -752,11 +725,12 @@ impl PeelArgs {
             // ROTATE, AVERAGE VIS //
             // /////////////////// //
 
-            // rotate the residual visibilities to the model phase centre and average into vis_residual_avg
+            // Rotate the residual visibilities to the source phase centre and
+            // average into vis_residual_low_res.
             dbg!(std::time::Instant::now() - start, "vis_rotate2");
             vis_rotate2(
                 vis_residual.view(),
-                vis_tmp.view_mut(),
+                vis_residual_tmp.view_mut(),
                 source_phase_centre,
                 precessed_tile_xyzs.view(),
                 &mut tile_ws_from,
@@ -767,11 +741,10 @@ impl PeelArgs {
             );
             dbg!(std::time::Instant::now() - start, "vis_average");
             vis_average(
-                vis_tmp.view(),
-                vis_residual_avg.view_mut(),
+                vis_residual_tmp.view(),
+                vis_residual_low_res.view_mut(),
                 weight_synth.view(),
-                weight_residual_avg.view_mut(),
-                &avg_vis_ctx,
+                weight_residual_low_res.view_mut(),
             );
             dbg!(std::time::Instant::now() - start, "get low-res model");
 
@@ -795,10 +768,9 @@ impl PeelArgs {
             // ///////////// //
             // at lower resolution
 
-            Zip::from(&mut vis_unpeeled_avg)
-                .and(&vis_residual_avg)
+            Zip::from(&mut vis_residual_low_res)
                 .and(&vis_model_low_res)
-                .for_each(|u, r, s| *u = *r + *s);
+                .for_each(|r, m| *r += *m);
             dbg!(std::time::Instant::now() - start, "alpha/beta loop");
 
             // ///////////////// //
@@ -810,7 +782,7 @@ impl PeelArgs {
             while iteration != 10 {
                 iteration += 1;
 
-                vis_model_iono_avg.assign(&vis_model_low_res);
+                vis_model_low_res_tmp.assign(&vis_model_low_res);
                 // iono rotate model using existing iono consts (if they're
                 // non-zero)
                 if iono_source.iono_consts.0.abs() > f64::EPSILON
@@ -830,26 +802,19 @@ impl PeelArgs {
                         });
 
                     apply_iono(
-                        vis_model_iono_avg.view_mut(),
-                        // source_phase_centre,
-                        &low_vis_ctx,
-                        // average_precessed_tile_xyzs.view(),
-                        // &[if no_precession {
-                        //     average_precession_info.lmst
-                        // } else {
-                        //     average_precession_info.lmst_j2000
-                        // }],
+                        vis_model_low_res_tmp.view_mut(),
                         tile_uvs_low_res.view(),
                         iono_source.iono_consts,
+                        &low_res_freqs_hz,
                     );
                 }
 
                 let offsets_rts = get_offsets_rts(
-                    vis_unpeeled_avg.view(),
-                    weight_residual_avg.view(),
-                    vis_model_iono_avg.view(),
+                    vis_residual_low_res.view(),
+                    weight_residual_low_res.view(),
+                    vis_model_low_res_tmp.view(),
                     average_precessed_tile_xyzs.as_slice().unwrap(),
-                    &low_vis_ctx,
+                    &low_res_freqs_hz,
                     tile_uvs_low_res.as_slice_mut().unwrap(),
                     source_phase_centre.to_hadec(average_precession_info.lmst_j2000),
                 );
@@ -876,26 +841,33 @@ impl PeelArgs {
             // UPDATE RESIDUAL //
             // /////////////// //
             // at higher resolution, unpeel old model, then re-peel correctly rotated model.
-            Zip::from(&mut vis_residual)
-                .and(&vis_model)
-                .for_each(|r, s| *r += *s);
+            vis_residual
+                .outer_iter_mut()
+                // Doing this in parallel is only slightly faster, but it is
+                // faster.
+                .into_par_iter()
+                .zip(vis_model.outer_iter())
+                .for_each(|(mut vis_residual, vis_model)| {
+                    vis_residual += &vis_model;
+                });
             dbg!(std::time::Instant::now() - start, "apply_iono");
             apply_iono(
                 vis_model.view_mut(),
-                // obs_context.phase_centre,
-                &vis_ctx,
-                // precessed_tile_xyzs.view(),
-                // &lmsts,
                 tile_uvs_high_res.view(),
                 iono_source.iono_consts,
+                &di_cal_params.unflagged_fine_chan_freqs,
             );
             dbg!(
                 std::time::Instant::now() - start,
                 "remove high-res model source"
             );
-            Zip::from(&mut vis_residual)
-                .and(&vis_model)
-                .for_each(|r, s| *r -= *s);
+            vis_residual
+                .outer_iter_mut()
+                .into_par_iter()
+                .zip(vis_model.outer_iter())
+                .for_each(|(mut vis_residual, vis_model)| {
+                    vis_residual -= &vis_model;
+                });
             dbg!(std::time::Instant::now() - start, "end source loop");
 
             // ////// //
@@ -957,8 +929,16 @@ impl PeelArgs {
                         0..obs_context.coarse_chan_freqs.len(),
                     )
                 });
+                let pb = ProgressBar::new(timeblocks.len() as _)
+                .with_style(
+                    ProgressStyle::default_bar()
+                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})").unwrap()
+                        .progress_chars("=> "),
+                )
+                .with_position(0)
+                .with_message("Writing peeled visibilities");
+                pb.tick();
 
-                info!("outputs: {outputs:?}");
                 let result = write_vis(
                     &outputs,
                     di_cal_params.array_position,
@@ -987,15 +967,22 @@ impl PeelArgs {
                     marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
                     rx_write,
                     &error,
-                    None,
+                    Some(pb),
                 );
-                if result.is_err() {
-                    error.store(true);
+                match result {
+                    Ok(m) => {
+                        info!("{m}");
+                        Ok(())
+                    },
+                    Err(e) => {
+                        error.store(true);
+                        Err(e)
+                    }
                 }
             });
 
             consume_handle.join().unwrap();
-            write_handle.join().unwrap();
+            write_handle.join().unwrap().unwrap();
         });
 
         Ok(())
@@ -1227,11 +1214,12 @@ fn vis_average(
     mut jones_to: ArrayViewMut3<Jones<f32>>,
     weight_from: ArrayView3<f32>,
     mut weight_to: ArrayViewMut3<f32>,
-    vis_ctx: &VisContext,
 ) {
     let from_dims = jones_from.dim();
-    let avg_time = vis_ctx.avg_time;
-    let avg_freq = vis_ctx.avg_freq;
+    let time_axis = Axis(0);
+    let freq_axis = Axis(2);
+    let avg_time = jones_from.len_of(time_axis) / jones_to.len_of(time_axis);
+    let avg_freq = jones_from.len_of(freq_axis) / jones_to.len_of(freq_axis);
 
     // assert_eq!(
     //     from_dims,
@@ -1252,7 +1240,7 @@ fn vis_average(
     );
     assert_eq!(to_dims, weight_to.dim());
 
-    let num_tiles = num_tiles_from_num_cross_correlation_baselines(vis_ctx.sel_baselines.len());
+    let num_tiles = num_tiles_from_num_cross_correlation_baselines(jones_from.len_of(Axis(1)));
 
     // iterate along time axis in chunks of avg_time
     jones_from
@@ -1477,49 +1465,9 @@ fn vis_rotate2(
     }
 }
 
-// apply ionospheric rotation of exp(-2πi(αu+βv)λ²)
+/// Rotate the supplied visibilities according to the `λ²` constants of
+/// proportionality with `exp(-2πi(αu+βv)λ²)`.
 fn apply_iono(
-    jones: ArrayViewMut3<Jones<f32>>,
-    // phase_centre: RADec,
-    vis_ctx: &VisContext,
-    // tile_xyzs: ArrayView2<XyzGeodetic>,
-    // lmsts: &[f64],
-    // mut tile_uvs: ArrayViewMut2<UV>,
-    tile_uvs: ArrayView2<UV>,
-    // constants of proportionality for ionospheric offset in l,m
-    const_lm: (f64, f64),
-) {
-    let freqs_hz = vis_ctx.frequencies_hz();
-    let timestamps = vis_ctx.timeseries(false, true);
-
-    assert_eq!(
-        jones.dim(),
-        (
-            timestamps.len(),
-            vis_ctx.sel_baselines.len(),
-            freqs_hz.len()
-        ),
-        "jones.dim()!=vis_ctx.{{ts,bl,ch}}"
-    );
-
-    // // pre-compute partial uvws:
-    // tile_uvs
-    //     .outer_iter_mut()
-    //     .zip(tile_xyzs.outer_iter())
-    //     .zip(lmsts.iter())
-    //     .for_each(|((mut tile_uvs, tile_xyzs), lmst)| {
-    //         let phase_centre = phase_centre.to_hadec(*lmst);
-    //         setup_uvs(
-    //             tile_uvs.as_slice_mut().unwrap(),
-    //             tile_xyzs.as_slice().unwrap(),
-    //             phase_centre,
-    //         );
-    //     });
-
-    _apply_iono(jones, tile_uvs.view(), const_lm, &freqs_hz);
-}
-
-fn _apply_iono(
     mut jones: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
     const_lm: (f64, f64),
@@ -1640,11 +1588,10 @@ fn get_offsets_rts(
     weights: ArrayView3<f32>,
     model: ArrayView3<Jones<f32>>,
     tile_xyzs: &[XyzGeodetic],
-    vis_ctx: &VisContext,
+    freqs_hz: &[f64],
     tile_uvs_low_res: &mut [UV],
     phase_centre_hadec: HADec,
 ) -> [f64; 2] {
-    let freqs_hz = vis_ctx.frequencies_hz();
     let num_tiles = tile_xyzs.len();
 
     setup_uvs(tile_uvs_low_res, tile_xyzs, phase_centre_hadec);
@@ -1728,35 +1675,6 @@ fn get_offsets_rts(
     offsets
 }
 
-// // calculate partial uvw components for each antenna. uvw = part_uvw[ant1] - part_uvw[ant2]
-// fn calc_part_uvws(
-//     num_tiles: usize,
-//     centroid_timestamps: &[Epoch],
-//     phase_centre: RADec,
-//     array_pos: LatLngHeight,
-//     tile_xyzs: &[XyzGeodetic],
-// ) -> Array2<UVW> {
-//     // TODO: Use tile_xyzs.len() instead of needing to pass in num_tiles
-//     assert_eq!(num_tiles, tile_xyzs.len());
-
-//     let mut part_uvws = Array2::from_elem((centroid_timestamps.len(), num_tiles), UVW::default());
-//     for (t, &epoch) in centroid_timestamps.iter().enumerate() {
-//         let prec = precess_time(
-//             array_pos.longitude_rad,
-//             array_pos.latitude_rad,
-//             phase_centre,
-//             epoch,
-//             *DUT1,
-//         );
-//         let tiles_xyz_prec = prec.precess_xyz(tile_xyzs);
-//         for (a, &xyz) in tiles_xyz_prec.iter().enumerate() {
-//             let uvw = UVW::from_xyz(xyz, prec.hadec_j2000);
-//             part_uvws[[t, a]] = uvw;
-//         }
-//     }
-//     part_uvws
-// }
-
 fn setup_ws(
     mut tile_ws: ArrayViewMut1<W>,
     tile_xyzs: ArrayView1<XyzGeodetic>,
@@ -1790,17 +1708,10 @@ fn simulate_write(
 ) {
     vis_result
         .outer_iter_mut()
-        .zip(timestamps.iter().copied())
+        .zip(timestamps.iter())
         .for_each(|(mut vis_result, epoch)| {
-            eprintln!(
-                "modelling epoch {:?} {:?}",
-                epoch.to_gregorian_utc_str(),
-                vis_result.dim()
-            );
-
-            vis_result.fill(Jones::default());
             modeller
-                .model_timestep(vis_result.view_mut(), epoch)
+                .model_timestep(vis_result.view_mut(), *epoch)
                 .unwrap();
         });
 }
