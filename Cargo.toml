@@ -16,10 +16,15 @@ exclude = [".github/*", "test_files/*"]
 
 [profile.release]
 panic = "abort"
-lto = "thin"
+codegen-units = 256
 
-[profile.dev]
-opt-level = 2
+[profile.production]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "production"
 
 [features]
 default = ["plotting"]

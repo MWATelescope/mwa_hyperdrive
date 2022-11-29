@@ -62,17 +62,17 @@ jobs:
       # Test that building works. Build statically first so less compiling is
       # needed when running tests.
       - name: Debug build with static features
-        run: cargo test --locked --features=cuda,all-static --no-run
+        run: cargo test --locked --release --features=cuda,all-static --no-run
 
       - name: Debug build
-        run: cargo test --locked --features=cuda --no-run
+        run: cargo test --locked --release --features=cuda --no-run
 
       # Can't test with CUDA, no GPUs available in CI
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --locked --release
 
       - name: Run ignored tests
-        run: cargo test --locked -- --ignored
+        run: cargo test --locked --release -- --ignored
 
       - name: Minimum-specified Rust version works
         run: |

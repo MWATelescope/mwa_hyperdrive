@@ -60,7 +60,7 @@ jobs:
       - name: Generate test lcov coverage into coverage/ dir
         run: |
           export MWA_BEAM_FILE=$(realpath mwa_full_embedded_element_pattern.h5)
-          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          cargo llvm-cov --workspace --release --lcov --output-path lcov.info
 
       - name: Upload reports to codecov.io
         uses: codecov/codecov-action@v3

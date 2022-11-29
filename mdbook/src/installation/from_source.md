@@ -78,27 +78,24 @@ cargo install mwa_hyperdrive --locked
 
 If you want to download the source code and install it yourself, read on.
 
-## Cloning the `hyperdrive` repo
+## Manually installing from the `hyperdrive` repo
+
+Clone the git repo and point `cargo` to it:
 
 ```shell
 git clone https://github.com/MWATelescope/mwa_hyperdrive
-```
-
-Don't forget to `cd` into the repo:
-
-```shell
-cd mwa_hyperdrive
-```
-
-## Compiling `hyperdrive`
-
-```shell
-cargo install --path . --locked
+cargo install --path mwa_hyperdrive --locked
 ```
 
 This will install `hyperdrive` to `~/.cargo/bin/hyperdrive`. This binary can be
 moved anywhere and it will still work. The installation destination can be
 changed by setting `CARGO_HOME`.
+
+~~~admonish danger title="Further optimisation"
+It is possible to compile with more optimisations if you give `--profile
+production` to the `cargo install` command. This may make things a few percent
+faster, but compilation will take much longer.
+~~~
 
 ~~~admonish danger title="CUDA"
 Do you have a CUDA-capable NVIDIA GPU? Ensure you have installed
