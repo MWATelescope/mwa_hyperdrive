@@ -13,9 +13,9 @@ mod integration_tests;
 #[cfg(test)]
 mod tests;
 
-use cpu::SkyModellerCpu;
+pub(crate) use cpu::SkyModellerCpu;
 #[cfg(feature = "cuda")]
-use cuda::SkyModellerCuda;
+pub(crate) use cuda::SkyModellerCuda;
 pub(crate) use error::ModelError;
 
 use std::collections::HashSet;
@@ -26,7 +26,7 @@ use ndarray::ArrayViewMut2;
 
 use crate::{
     beam::Beam,
-    srclist::{ComponentList, IonoSource, SourceList},
+    srclist::{ComponentList, Source, SourceList},
 };
 
 #[derive(Debug, Clone)]
@@ -59,7 +59,7 @@ pub trait SkyModeller<'a> {
     /// useful for peeling.
     fn update_with_a_source(
         &mut self,
-        source: &IonoSource,
+        source: &Source,
         phase_centre: RADec,
     ) -> Result<(), ModelError>;
 
