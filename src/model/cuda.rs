@@ -22,7 +22,8 @@ use crate::{
     cuda::{self, CudaError, CudaFloat, CudaJones, DevicePointer},
     shapelets,
     srclist::{
-        get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
+        get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, Source,
+        SourceList,
     },
 };
 
@@ -156,7 +157,7 @@ impl<'a> SkyModellerCuda<'a> {
     /// This function interfaces directly with the CUDA API. Rust errors attempt
     /// to catch problems but there are no guarantees.
     #[allow(clippy::too_many_arguments)]
-    pub(super) unsafe fn new(
+    pub(crate) unsafe fn new(
         beam: &dyn Beam,
         source_list: &SourceList,
         unflagged_tile_xyzs: &'a [XyzGeodetic],
@@ -653,6 +654,25 @@ impl<'a> SkyModellerCuda<'a> {
     pub(super) fn set_uvws(&mut self, uvws: &[cuda::UVW]) -> Result<(), CudaError> {
         self.d_uvws.overwrite(uvws)
     }
+
+    pub(crate) fn model_with_uvws(
+        &mut self,
+        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        d_uvws: &DevicePointer<cuda::UVW>,
+        lst: f64,
+        latitude: f64,
+    ) -> Result<(), ModelError> {
+        self.d_uvws.ptr = d_uvws.ptr;
+        unsafe {
+            self.model_points(lst, latitude)?;
+            self.model_gaussians(lst, latitude)?;
+            self.model_shapelets(lst, latitude)?;
+
+            self.d_vis
+                .copy_from_device(vis_model_slice.as_slice_mut().expect("is contiguous"))?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
@@ -970,7 +990,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
     // Ugh, is there a way to merge this with the above?
     fn update_with_a_source(
         &mut self,
-        source: &crate::srclist::IonoSource,
+        source: &Source,
         phase_centre: RADec,
     ) -> Result<(), ModelError> {
         self.phase_centre = phase_centre;
@@ -988,7 +1008,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
 
         self.point_list_radecs.clear();
         let mut point_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut point_list_fds: Vec<FluxDensityType> = vec![];
+        let mut point_list_fds: Vec<&FluxDensityType> = vec![];
 
         self.gaussian_power_law_radecs.clear();
         let mut gaussian_power_law_lmns: Vec<cuda::LmnRime> = vec![];
@@ -1005,7 +1025,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
 
         self.gaussian_list_radecs.clear();
         let mut gaussian_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut gaussian_list_fds: Vec<FluxDensityType> = vec![];
+        let mut gaussian_list_fds: Vec<&FluxDensityType> = vec![];
         let mut gaussian_list_gps: Vec<cuda::GaussianParams> = vec![];
 
         self.shapelet_power_law_radecs.clear();
@@ -1025,7 +1045,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
 
         self.shapelet_list_radecs.clear();
         let mut shapelet_list_lmns: Vec<cuda::LmnRime> = vec![];
-        let mut shapelet_list_fds: Vec<FluxDensityType> = vec![];
+        let mut shapelet_list_fds: Vec<&FluxDensityType> = vec![];
         let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_list_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
@@ -1042,7 +1062,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
             }
         };
 
-        for comp in &source.source.components {
+        for comp in &source.components {
             let radec = comp.radec;
             let LmnRime { l, m, n } = radec.to_lmn(phase_centre).prepare_for_rime();
             let lmn = cuda::LmnRime {
@@ -1076,7 +1096,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                     FluxDensityType::List { .. } => {
                         self.point_list_radecs.push(radec);
                         point_list_lmns.push(lmn);
-                        point_list_fds.push(comp.flux_type.clone());
+                        point_list_fds.push(&comp.flux_type);
                     }
                 },
 
@@ -1115,7 +1135,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                         FluxDensityType::List { .. } => {
                             self.gaussian_list_radecs.push(radec);
                             gaussian_list_lmns.push(lmn);
-                            gaussian_list_fds.push(comp.flux_type.clone());
+                            gaussian_list_fds.push(&comp.flux_type);
                             gaussian_list_gps.push(gp);
                         }
                     };
@@ -1144,7 +1164,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                             shapelet_power_law_fds.push(cuda_inst_fd);
                             shapelet_power_law_sis.push(si as CudaFloat);
                             shapelet_power_law_gps.push(gp);
-                            shapelet_power_law_coeffs.push(&coeffs);
+                            shapelet_power_law_coeffs.push(coeffs);
                         }
 
                         FluxDensityType::CurvedPowerLaw { si, q, .. } => {
@@ -1158,15 +1178,15 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
                             shapelet_curved_power_law_qs.push(q as CudaFloat);
                             shapelet_curved_power_law_sis.push(si as CudaFloat);
                             shapelet_curved_power_law_gps.push(gp);
-                            shapelet_curved_power_law_coeffs.push(&coeffs);
+                            shapelet_curved_power_law_coeffs.push(coeffs);
                         }
 
                         FluxDensityType::List { .. } => {
                             self.shapelet_list_radecs.push(radec);
                             shapelet_list_lmns.push(lmn);
-                            shapelet_list_fds.push(comp.flux_type.clone());
+                            shapelet_list_fds.push(&comp.flux_type);
                             shapelet_list_gps.push(gp);
-                            shapelet_list_coeffs.push(&coeffs);
+                            shapelet_list_coeffs.push(coeffs);
                         }
                     }
                 }
@@ -1187,85 +1207,83 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         let (shapelet_list_coeffs, shapelet_list_coeff_lens) =
             get_flattened_coeffs(shapelet_list_coeffs);
 
-        unsafe {
-            self.point_power_law_lmns.overwrite(&point_power_law_lmns)?;
-            self.point_power_law_fds.overwrite(&point_power_law_fds)?;
-            self.point_power_law_sis.overwrite(&point_power_law_sis)?;
+        self.point_power_law_lmns.overwrite(&point_power_law_lmns)?;
+        self.point_power_law_fds.overwrite(&point_power_law_fds)?;
+        self.point_power_law_sis.overwrite(&point_power_law_sis)?;
 
-            self.point_curved_power_law_lmns
-                .overwrite(&point_curved_power_law_lmns)?;
-            self.point_curved_power_law_fds
-                .overwrite(&point_curved_power_law_fds)?;
-            self.point_curved_power_law_sis
-                .overwrite(&point_curved_power_law_sis)?;
-            self.point_curved_power_law_qs
-                .overwrite(&point_curved_power_law_qs)?;
+        self.point_curved_power_law_lmns
+            .overwrite(&point_curved_power_law_lmns)?;
+        self.point_curved_power_law_fds
+            .overwrite(&point_curved_power_law_fds)?;
+        self.point_curved_power_law_sis
+            .overwrite(&point_curved_power_law_sis)?;
+        self.point_curved_power_law_qs
+            .overwrite(&point_curved_power_law_qs)?;
 
-            self.point_list_lmns.overwrite(&point_list_lmns)?;
-            self.point_list_fds
-                .overwrite(point_list_fds.as_slice().unwrap())?;
+        self.point_list_lmns.overwrite(&point_list_lmns)?;
+        self.point_list_fds
+            .overwrite(point_list_fds.as_slice().unwrap())?;
 
-            self.gaussian_power_law_lmns
-                .overwrite(&gaussian_power_law_lmns)?;
-            self.gaussian_power_law_fds
-                .overwrite(&gaussian_power_law_fds)?;
-            self.gaussian_power_law_sis
-                .overwrite(&gaussian_power_law_sis)?;
-            self.gaussian_power_law_gps
-                .overwrite(&gaussian_power_law_gps)?;
+        self.gaussian_power_law_lmns
+            .overwrite(&gaussian_power_law_lmns)?;
+        self.gaussian_power_law_fds
+            .overwrite(&gaussian_power_law_fds)?;
+        self.gaussian_power_law_sis
+            .overwrite(&gaussian_power_law_sis)?;
+        self.gaussian_power_law_gps
+            .overwrite(&gaussian_power_law_gps)?;
 
-            self.gaussian_curved_power_law_lmns
-                .overwrite(&gaussian_curved_power_law_lmns)?;
-            self.gaussian_curved_power_law_fds
-                .overwrite(&gaussian_curved_power_law_fds)?;
-            self.gaussian_curved_power_law_sis
-                .overwrite(&gaussian_curved_power_law_sis)?;
-            self.gaussian_curved_power_law_qs
-                .overwrite(&gaussian_curved_power_law_qs)?;
-            self.gaussian_curved_power_law_gps
-                .overwrite(&gaussian_curved_power_law_gps)?;
+        self.gaussian_curved_power_law_lmns
+            .overwrite(&gaussian_curved_power_law_lmns)?;
+        self.gaussian_curved_power_law_fds
+            .overwrite(&gaussian_curved_power_law_fds)?;
+        self.gaussian_curved_power_law_sis
+            .overwrite(&gaussian_curved_power_law_sis)?;
+        self.gaussian_curved_power_law_qs
+            .overwrite(&gaussian_curved_power_law_qs)?;
+        self.gaussian_curved_power_law_gps
+            .overwrite(&gaussian_curved_power_law_gps)?;
 
-            self.gaussian_list_lmns.overwrite(&gaussian_list_lmns)?;
-            self.gaussian_list_fds
-                .overwrite(gaussian_list_fds.as_slice().unwrap())?;
-            self.gaussian_list_gps.overwrite(&gaussian_list_gps)?;
+        self.gaussian_list_lmns.overwrite(&gaussian_list_lmns)?;
+        self.gaussian_list_fds
+            .overwrite(gaussian_list_fds.as_slice().unwrap())?;
+        self.gaussian_list_gps.overwrite(&gaussian_list_gps)?;
 
-            self.shapelet_power_law_lmns
-                .overwrite(&shapelet_power_law_lmns)?;
-            self.shapelet_power_law_fds
-                .overwrite(&shapelet_power_law_fds)?;
-            self.shapelet_power_law_sis
-                .overwrite(&shapelet_power_law_sis)?;
-            self.shapelet_power_law_gps
-                .overwrite(&shapelet_power_law_gps)?;
-            self.shapelet_power_law_coeffs
-                .overwrite(&shapelet_power_law_coeffs)?;
-            self.shapelet_power_law_coeff_lens
-                .overwrite(&shapelet_power_law_coeff_lens)?;
+        self.shapelet_power_law_lmns
+            .overwrite(&shapelet_power_law_lmns)?;
+        self.shapelet_power_law_fds
+            .overwrite(&shapelet_power_law_fds)?;
+        self.shapelet_power_law_sis
+            .overwrite(&shapelet_power_law_sis)?;
+        self.shapelet_power_law_gps
+            .overwrite(&shapelet_power_law_gps)?;
+        self.shapelet_power_law_coeffs
+            .overwrite(&shapelet_power_law_coeffs)?;
+        self.shapelet_power_law_coeff_lens
+            .overwrite(&shapelet_power_law_coeff_lens)?;
 
-            self.shapelet_curved_power_law_lmns
-                .overwrite(&shapelet_curved_power_law_lmns)?;
-            self.shapelet_curved_power_law_fds
-                .overwrite(&shapelet_curved_power_law_fds)?;
-            self.shapelet_curved_power_law_sis
-                .overwrite(&shapelet_curved_power_law_sis)?;
-            self.shapelet_curved_power_law_qs
-                .overwrite(&shapelet_curved_power_law_qs)?;
-            self.shapelet_curved_power_law_gps
-                .overwrite(&shapelet_curved_power_law_gps)?;
-            self.shapelet_curved_power_law_coeffs
-                .overwrite(&shapelet_curved_power_law_coeffs)?;
-            self.shapelet_curved_power_law_coeff_lens
-                .overwrite(&shapelet_curved_power_law_coeff_lens)?;
+        self.shapelet_curved_power_law_lmns
+            .overwrite(&shapelet_curved_power_law_lmns)?;
+        self.shapelet_curved_power_law_fds
+            .overwrite(&shapelet_curved_power_law_fds)?;
+        self.shapelet_curved_power_law_sis
+            .overwrite(&shapelet_curved_power_law_sis)?;
+        self.shapelet_curved_power_law_qs
+            .overwrite(&shapelet_curved_power_law_qs)?;
+        self.shapelet_curved_power_law_gps
+            .overwrite(&shapelet_curved_power_law_gps)?;
+        self.shapelet_curved_power_law_coeffs
+            .overwrite(&shapelet_curved_power_law_coeffs)?;
+        self.shapelet_curved_power_law_coeff_lens
+            .overwrite(&shapelet_curved_power_law_coeff_lens)?;
 
-            self.shapelet_list_lmns.overwrite(&shapelet_list_lmns)?;
-            self.shapelet_list_fds
-                .overwrite(shapelet_list_fds.as_slice().unwrap())?;
-            self.shapelet_list_gps.overwrite(&shapelet_list_gps)?;
-            self.shapelet_list_coeffs.overwrite(&shapelet_list_coeffs)?;
-            self.shapelet_list_coeff_lens
-                .overwrite(&shapelet_list_coeff_lens)?;
-        }
+        self.shapelet_list_lmns.overwrite(&shapelet_list_lmns)?;
+        self.shapelet_list_fds
+            .overwrite(shapelet_list_fds.as_slice().unwrap())?;
+        self.shapelet_list_gps.overwrite(&shapelet_list_gps)?;
+        self.shapelet_list_coeffs.overwrite(&shapelet_list_coeffs)?;
+        self.shapelet_list_coeff_lens
+            .overwrite(&shapelet_list_coeff_lens)?;
 
         Ok(())
     }

@@ -86,7 +86,7 @@ pub(crate) unsafe fn peek_and_sync(cuda_call: CudaCall) -> Result<(), CudaError>
 /// [`cuda_runtime_sys::cudaFree`] is called on the pointer.
 #[derive(Debug)]
 pub(crate) struct DevicePointer<T> {
-    ptr: *mut T,
+    pub(crate) ptr: *mut T,
 
     /// The number of bytes allocated against `ptr`.
     size: usize,
