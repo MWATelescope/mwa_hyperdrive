@@ -3,8 +3,9 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     f64::consts::TAU,
+    io::Write,
     ops::{Deref, DerefMut, Div, Sub},
     path::PathBuf,
     str::FromStr,
@@ -12,7 +13,7 @@ use std::{
 };
 
 use clap::Parser;
-use crossbeam_channel::bounded;
+use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
@@ -53,6 +54,7 @@ use crate::{
 };
 
 pub(crate) const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
+pub(crate) const DEFAULT_OUTPUT_IONO_CONSTS: &str = "hyperdrive_iono_consts.json";
 
 lazy_static::lazy_static! {
     static ref DUT1: Duration = Duration::from_seconds(0.0);
@@ -363,8 +365,10 @@ impl PeelArgs {
             no_progress_bars,
         } = self;
 
-        let outputs = {
-            let outputs = match outputs {
+        let (vis_outputs, iono_outputs) = {
+            let mut vis_outputs = vec![];
+            let mut iono_outputs = vec![];
+            match outputs {
                 // Defaults.
                 None => {
                     let pb = PathBuf::from(DEFAULT_OUTPUT_PEEL_FILENAME);
@@ -374,28 +378,38 @@ impl PeelArgs {
                         .and_then(|s| VisOutputType::from_str(s).ok())
                         // Tests should pick up a bad default filename.
                         .expect("DEFAULT_OUTPUT_PEEL_FILENAME has an unhandled extension!");
-                    vec![(pb, vis_type)]
+                    vis_outputs.push((pb, vis_type));
+                    // TODO: Type this and clean up
+                    let pb = PathBuf::from(DEFAULT_OUTPUT_IONO_CONSTS);
+                    if pb.extension().and_then(|os_str| os_str.to_str()) != Some("json") {
+                        // Tests should pick up a bad default filename.
+                        panic!("DEFAULT_OUTPUT_IONO_CONSTS has an unhandled extension!");
+                    }
+                    iono_outputs.push(pb);
                 }
                 Some(os) => {
-                    let mut outputs = vec![];
                     for file in os {
                         // Is the output file type supported?
                         let ext = file.extension().and_then(|os_str| os_str.to_str());
-                        match ext.and_then(|s| VisOutputType::from_str(s).ok()) {
-                            Some(vis_type) => {
+                        match (
+                            ext.and_then(|s| VisOutputType::from_str(s).ok()),
+                            ext.map(|s| s == "json"),
+                        ) {
+                            (Some(vis_type), _) => {
                                 crate::vis_io::write::can_write_to_file(&file).unwrap();
-                                outputs.push((file, vis_type));
+                                vis_outputs.push((file, vis_type));
                             }
-                            None => {
-                                panic!("Unhandled output file extension '{ext:?}'");
+                            (None, Some(true)) => {
+                                iono_outputs.push(file);
                             }
+                            (None, _) => panic!("Unhandled output file extension '{ext:?}'"),
                         }
                     }
-                    outputs
                 }
             };
-            Vec1::try_from_vec(outputs).unwrap()
+            (vis_outputs, iono_outputs)
         };
+        assert!(vis_outputs.len() + iono_outputs.len() > 0);
 
         let di_cal_params = di_cal_args.into_params().unwrap();
         let obs_context = di_cal_params.get_obs_context();
@@ -477,6 +491,7 @@ impl PeelArgs {
         let error = AtomicCell::new(false);
         let (tx_data, rx_data) = bounded(2);
         let (tx_write, rx_write) = bounded(2);
+        let (tx_iono_consts, rx_iono_consts) = unbounded();
 
         // Progress bars. Courtesy Dev.
         let multi_progress = MultiProgress::with_draw_target(if no_progress_bars {
@@ -629,14 +644,18 @@ impl PeelArgs {
                         .unwrap();
 
                         if i == 0 {
-                            source_list.keys().zip(iono_consts.into_iter()).for_each(
-                                |(name, iono_consts)| {
+                            source_list
+                                .keys()
+                                .take(10)
+                                .zip(iono_consts.iter())
+                                .for_each(|(name, iono_consts)| {
                                     multi_progress
                                         .println(format!("{name}: {iono_consts:?}"))
                                         .unwrap();
-                                },
-                            );
+                                });
                         }
+
+                        tx_iono_consts.send(iono_consts).unwrap();
 
                         let CalVis {
                             vis_data: cross_data,
@@ -666,6 +685,7 @@ impl PeelArgs {
                     }
                 });
                 overall_peel_progress.abandon_with_message("Finished peeling");
+                drop(tx_iono_consts);
             });
 
             let write_handle = scope.spawn(|| {
@@ -679,46 +699,76 @@ impl PeelArgs {
                         )
                     });
 
-                let result = write_vis(
-                    &outputs,
-                    di_cal_params.array_position,
-                    obs_context.phase_centre,
-                    obs_context.pointing_centre,
-                    &obs_context.tile_xyzs,
-                    &obs_context.tile_names,
-                    obs_context.obsid,
-                    &timestamps,
-                    &di_cal_params.timesteps,
-                    &timeblocks,
-                    obs_context.guess_time_res(),
-                    di_cal_params.dut1,
-                    obs_context.guess_freq_res(),
-                    &obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64),
-                    &di_cal_params
-                        .tile_baseline_flags
-                        .unflagged_cross_baseline_to_tile_map
-                        .values()
-                        .copied()
-                        .sorted()
-                        .collect::<Vec<_>>(),
-                    &HashSet::new(),
-                    time_average_factor,
-                    1,
-                    marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
-                    rx_write,
-                    &error,
-                    Some(write_progress),
-                );
-                match result {
-                    Ok(m) => {
-                        info!("{m}");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        error.store(true);
-                        Err(e)
+                if !vis_outputs.is_empty() {
+                    let vis_outputs = Vec1::try_from_vec(vis_outputs).unwrap();
+                    let result = write_vis(
+                        &vis_outputs,
+                        di_cal_params.array_position,
+                        obs_context.phase_centre,
+                        obs_context.pointing_centre,
+                        &obs_context.tile_xyzs,
+                        &obs_context.tile_names,
+                        obs_context.obsid,
+                        &timestamps,
+                        &di_cal_params.timesteps,
+                        &timeblocks,
+                        obs_context.guess_time_res(),
+                        di_cal_params.dut1,
+                        obs_context.guess_freq_res(),
+                        &obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64),
+                        &di_cal_params
+                            .tile_baseline_flags
+                            .unflagged_cross_baseline_to_tile_map
+                            .values()
+                            .copied()
+                            .sorted()
+                            .collect::<Vec<_>>(),
+                        &HashSet::new(),
+                        time_average_factor,
+                        1,
+                        marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
+                        rx_write,
+                        &error,
+                        Some(write_progress),
+                    );
+                    match result {
+                        Ok(m) => info!("{m}"),
+                        Err(e) => {
+                            error.store(true);
+                            return Err(e);
+                        }
                     }
                 }
+
+                // Write out the iono consts.
+                let mut output_iono_consts: HashMap<_, _> = source_list
+                    .keys()
+                    .take(num_sources_to_iono_subtract)
+                    .map(|name| {
+                        (
+                            name,
+                            (
+                                Vec::with_capacity(timeblocks.len()),
+                                Vec::with_capacity(timeblocks.len()),
+                            ),
+                        )
+                    })
+                    .collect();
+                while let Ok(iono_consts) = rx_iono_consts.recv() {
+                    output_iono_consts.iter_mut().zip_eq(iono_consts).for_each(
+                        |((_, (output_alphas, output_betas)), iono_consts)| {
+                            output_alphas.push(iono_consts.0);
+                            output_betas.push(iono_consts.1);
+                        },
+                    );
+                }
+                let output_json_string = serde_json::to_string_pretty(&output_iono_consts).unwrap();
+                for iono_output in iono_outputs {
+                    let mut file = std::fs::File::create(iono_output).unwrap();
+                    file.write_all(output_json_string.as_bytes()).unwrap();
+                }
+
+                Ok(())
             });
 
             read_handle.join().unwrap().unwrap();
