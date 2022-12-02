@@ -77,6 +77,10 @@ pub(crate) enum FreqFormat {
     /// kiloHertz
     #[strum(serialize = "kHz")]
     kHz,
+
+    /// MegaHertz
+    #[strum(serialize = "MHz")]
+    MHz,
 }
 
 /// Parse a string that may have a unit of frequency attached to it.
