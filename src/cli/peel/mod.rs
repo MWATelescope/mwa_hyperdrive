@@ -35,11 +35,11 @@ use vec1::Vec1;
 
 use crate::{
     averaging::{
-        channels_to_chanblocks, parse_time_average_factor, timesteps_to_timeblocks, Timeblock,
+        channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
+        timesteps_to_timeblocks, Timeblock,
     },
     beam::{Beam, BeamError},
     context::ObsContext,
-    di_calibrate::CalVis,
     help_texts::*,
     math::average_epoch,
     model::{
@@ -55,11 +55,26 @@ use crate::{
 
 pub(crate) const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
 pub(crate) const DEFAULT_OUTPUT_IONO_CONSTS: &str = "hyperdrive_iono_consts.json";
+pub(crate) const DEFAULT_TIME_AVERAGE_FACTOR: &str = "8s";
+pub(crate) const DEFAULT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
+pub(crate) const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
+pub(crate) const DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR: &str = "8s";
+pub(crate) const DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR: usize = 1;
 
 lazy_static::lazy_static! {
     static ref DUT1: Duration = Duration::from_seconds(0.0);
 
     static ref VIS_OUTPUTS_HELP: String = format!("The paths to the files where the peeled visibilities are written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
+
+    static ref TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timesteps to use per timeblock *during* peeling. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then peeling is performed with 4 timesteps per timeblock. If the variable is instead 4s, then each timeblock contains up to 4s worth of data.");
+
+    static ref FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together *before* peeling. Also supports a target time resolution (e.g. 80kHz). If this is 0, then all data is averaged together. Default: {DEFAULT_FREQ_AVERAGE_FACTOR}. e.g. If the input data is in 20kHz resolution and this variable was 2, then we average 40kHz worth of data into a chanblock before peeling. If the variable is instead 40kHz, then each chanblock contains up to 40kHz worth of data.");
+
+    static ref IONO_FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together *during* peeling. Also supports a target time resolution (e.g. 1.28MHz). Cannot be 0. Default: {DEFAULT_IONO_FREQ_AVERAGE_FACTOR}. e.g. If the input data is in 40kHz resolution and this variable was 2, then we average 80kHz worth of data into a chanblock during peeling. If the variable is instead 1.28MHz, then each chanblock contains 32 fine channels.");
+
+    static ref OUTPUT_TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timeblocks to average together when writing out visibilities. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then 8 timesteps are averaged together as a timeblock in the output visibilities.");
+
+    static ref OUTPUT_FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together when writing out visibilities. Also supports a target time resolution (e.g. 80kHz). If this is 0, then all data are averaged together. Default: {DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR}. This is multiplicative with the freq average factor; e.g. If this variable is 4, and the freq average factor is 2, then 8 fine-frequency channels are averaged together as a chanblock in the output visibilities.");
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -85,31 +100,6 @@ pub struct PeelArgs {
     #[clap(short, long, multiple_values(true), help = VIS_OUTPUTS_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub outputs: Option<Vec<PathBuf>>,
 
-    // #[clap(short, long, multiple_values(true), help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
-    // pub model_filenames: Option<Vec<PathBuf>>,
-    /// When writing out model visibilities, average this many timesteps
-    /// together. Also supports a target time resolution (e.g. 8s). The value
-    /// must be a multiple of the input data's time resolution. The default is
-    /// to preserve the input data's time resolution. e.g. If the input data is
-    /// in 0.5s resolution and this variable is 4, then we average 2s worth of
-    /// model data together before writing the data out. If the variable is
-    /// instead 4s, then 8 model timesteps are averaged together before writing
-    /// the data out.
-    #[clap(long, help_heading = "OUTPUT FILES")]
-    pub output_model_time_average: Option<String>,
-
-    /// When writing out model visibilities, average this many fine freq.
-    /// channels together. Also supports a target freq. resolution (e.g. 80kHz).
-    /// The value must be a multiple of the input data's freq. resolution. The
-    /// default is to preserve the input data's freq. resolution multiplied by
-    /// the frequency average factor. e.g. If the input data is in 40kHz
-    /// resolution, the frequency average factor is 2 and this variable is 4,
-    /// then we average 320kHz worth of model data together before writing the
-    /// data out. If the variable is instead 80kHz, then 4 model fine freq.
-    /// channels are averaged together before writing the data out.
-    #[clap(long, help_heading = "OUTPUT FILES")]
-    pub output_model_freq_average: Option<String>,
-
     /// The number of sources to "ionospherically subtract". That is, a λ²
     /// dependence is found for each of these sources and removed. The number of
     /// iono subtract sources cannot be more than the number of sources to
@@ -132,6 +122,12 @@ pub struct PeelArgs {
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY-MODEL SOURCES")]
     pub veto_threshold: Option<f64>,
 
+    #[cfg(feature = "cuda")]
+    /// Use the CPU for visibility generation. This is deliberately made
+    /// non-default because using a GPU is much faster.
+    #[clap(long, help_heading = "SKY-MODEL SOURCES")]
+    pub cpu: bool,
+
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided by the MWA_BEAM_FILE environment variable.
     #[clap(long, help_heading = "BEAM")]
@@ -150,23 +146,20 @@ pub struct PeelArgs {
     #[clap(long, help_heading = "BEAM")]
     pub no_beam: bool,
 
-    /// The number of timesteps to average together during calibration. Also
-    /// supports a target time resolution (e.g. 8s). If this is 0, then all data
-    /// are averaged together. Default: 0. e.g. If this variable is 4, then we
-    /// produce calibration solutions in timeblocks with up to 4 timesteps each.
-    /// If the variable is instead 4s, then each timeblock contains up to 4s
-    /// worth of data.
-    #[clap(short, long, help_heading = "CALIBRATION")]
-    pub timesteps_per_timeblock: Option<String>,
+    #[clap(short, long, help = TIME_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
+    pub time_average_factor: Option<String>,
 
-    /// The number of fine-frequency channels to average together before
-    /// calibration. If this is 0, then all data is averaged together. Default:
-    /// 1. e.g. If the input data is in 20kHz resolution and this variable was
-    /// 2, then we average 40kHz worth of data into a chanblock before
-    /// calibration. If the variable is instead 40kHz, then each chanblock
-    /// contains up to 40kHz worth of data.
-    #[clap(short, long, help_heading = "CALIBRATION")]
+    #[clap(short, long, help = FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
     pub freq_average_factor: Option<String>,
+
+    #[clap(short, long, help = IONO_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
+    pub iono_freq_average_factor: Option<String>,
+
+    #[clap(short, long, help = OUTPUT_TIME_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
+    pub output_time_average_factor: Option<String>,
+
+    #[clap(short, long, help = OUTPUT_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
+    pub output_freq_average_factor: Option<String>,
 
     /// The timesteps to use from the input data. The timesteps will be
     /// ascendingly sorted for calibration. No duplicates are allowed. The
@@ -194,7 +187,7 @@ pub struct PeelArgs {
     // #[clap(long, help = MIN_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     // pub min_thresh: Option<f64>,
     #[clap(
-        long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "CALIBRATION",
+        long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "ARRAY",
         number_of_values = 3,
         allow_hyphen_values = true,
         value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
@@ -203,14 +196,8 @@ pub struct PeelArgs {
 
     /// If specified, don't precess the array to J2000. We assume that sky-model
     /// sources are specified in the J2000 epoch.
-    #[clap(long, help_heading = "CALIBRATION")]
+    #[clap(long, help_heading = "ARRAY")]
     pub no_precession: bool,
-
-    #[cfg(feature = "cuda")]
-    /// Use the CPU for visibility generation. This is deliberately made
-    /// non-default because using a GPU is much faster.
-    #[clap(long, help_heading = "CALIBRATION")]
-    pub cpu: bool,
 
     /// Additional tiles to be flagged. These values correspond to either the
     /// values in the "Antenna" column of HDU 2 in the metafits file (e.g. 0 3
@@ -297,8 +284,8 @@ impl PeelArgs {
             ignore_dut1: self.ignore_dut1,
             outputs: Some(vec![PathBuf::from("/tmp/hyp_peel_di_sols.fits")]),
             model_filenames: None,
-            output_model_time_average: self.output_model_time_average.clone(),
-            output_model_freq_average: self.output_model_freq_average.clone(),
+            output_model_time_average: None,
+            output_model_freq_average: None,
             num_sources: max_num_sources,
             source_dist_cutoff: self.source_dist_cutoff,
             veto_threshold: self.veto_threshold,
@@ -306,7 +293,7 @@ impl PeelArgs {
             unity_dipole_gains: self.unity_dipole_gains,
             delays: self.delays.clone(),
             no_beam: self.no_beam,
-            timesteps_per_timeblock: self.timesteps_per_timeblock.clone(),
+            timesteps_per_timeblock: None,
             freq_average_factor: self.freq_average_factor.clone(),
             timesteps: self.timesteps.clone(),
             use_all_timesteps: self.use_all_timesteps,
@@ -336,23 +323,24 @@ impl PeelArgs {
             source_list_type: _,
             ignore_dut1: _,
             outputs,
-            output_model_time_average: _,
-            output_model_freq_average: _,
             num_sources_to_iono_subtract,
             num_sources_to_subtract: _,
             source_dist_cutoff: _,
             veto_threshold: _,
+            cpu: _,
             beam_file: _,
             unity_dipole_gains: _,
             delays: _,
             no_beam: _,
-            timesteps_per_timeblock: _,
-            freq_average_factor: _,
+            time_average_factor,
+            freq_average_factor,
+            iono_freq_average_factor,
+            output_time_average_factor,
+            output_freq_average_factor,
             timesteps: _,
             use_all_timesteps: _,
             array_position: _,
             no_precession,
-            cpu: _,
             tile_flags: _,
             ignore_input_data_tile_flags: _,
             ignore_input_data_fine_channel_flags: _,
@@ -413,18 +401,25 @@ impl PeelArgs {
 
         let di_cal_params = di_cal_args.into_params().unwrap();
         let obs_context = di_cal_params.get_obs_context();
-        let time_average_factor = parse_time_average_factor(
-            obs_context.time_res,
-            // TODO: Not just 8s.
-            Some("8s"),
-            *di_cal_params.timesteps.last() - *di_cal_params.timesteps.first() + 1,
-        )
-        .unwrap();
+        let time_average_factor = {
+            let default_time_average_factor = parse_time_average_factor(
+                obs_context.time_res,
+                Some(DEFAULT_TIME_AVERAGE_FACTOR),
+                1,
+            )
+            .expect("default is sensible");
+
+            parse_time_average_factor(
+                obs_context.time_res,
+                time_average_factor.as_deref(),
+                default_time_average_factor,
+            )
+            .unwrap()
+        };
         // Check that the factor is not too big.
         let time_average_factor = if time_average_factor > di_cal_params.timesteps.len() {
             warn!(
-                "Cannot average {} timesteps during calibration; only {} are being used. Capping.",
-                time_average_factor,
+                "Cannot average {time_average_factor} timesteps; only {} are being used. Capping.",
                 di_cal_params.timesteps.len()
             );
             di_cal_params.timesteps.len()
@@ -436,13 +431,29 @@ impl PeelArgs {
             time_average_factor,
             &di_cal_params.timesteps,
         );
+        let timestamps = di_cal_params
+            .timesteps
+            .mapped_ref(|i| obs_context.timestamps[*i]);
 
-        let num_tiles = di_cal_params.unflagged_tile_xyzs.len();
-        let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
+        let freq_average_factor = {
+            let default_freq_average_factor = parse_freq_average_factor(
+                obs_context.freq_res,
+                Some(DEFAULT_FREQ_AVERAGE_FACTOR),
+                1,
+            )
+            .expect("default is sensible");
+
+            parse_freq_average_factor(
+                obs_context.freq_res,
+                freq_average_factor.as_deref(),
+                default_freq_average_factor,
+            )
+            .unwrap()
+        };
         let fences = channels_to_chanblocks(
             &obs_context.fine_chan_freqs,
             obs_context.freq_res,
-            32,
+            freq_average_factor,
             &HashSet::new(),
         );
         assert_eq!(
@@ -450,18 +461,71 @@ impl PeelArgs {
             1,
             "Picket fence observations are not supported!"
         );
-        let low_res_freqs_hz = fences
+        let all_fine_chan_freqs_hz =
+            Vec1::try_from_vec(fences[0].chanblocks.iter().map(|c| c._freq).collect()).unwrap();
+
+        let iono_freq_average_factor = {
+            let default_iono_freq_average_factor = parse_freq_average_factor(
+                obs_context.freq_res,
+                Some(DEFAULT_IONO_FREQ_AVERAGE_FACTOR),
+                1,
+            )
+            .expect("default is sensible");
+
+            parse_freq_average_factor(
+                obs_context.freq_res,
+                iono_freq_average_factor.as_deref(),
+                default_iono_freq_average_factor,
+            )
+            .unwrap()
+        };
+        let low_res_fences = channels_to_chanblocks(
+            &obs_context.fine_chan_freqs,
+            obs_context.freq_res,
+            iono_freq_average_factor,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            low_res_fences.len(),
+            1,
+            "Picket fence observations are not supported!"
+        );
+        let low_res_freqs_hz = low_res_fences
             .into_iter()
             .flat_map(|f| f.chanblocks.into_iter().map(|c| c._freq))
             .collect::<Vec<_>>();
 
-        // Create an "iono source list" from our existing source list. This
-        // involves finding the Stokes-I-weighted `RADec` of each source.
+        let output_time_average_factor = {
+            let default_output_time_average_factor = parse_time_average_factor(
+                obs_context.time_res,
+                Some(DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR),
+                1,
+            )
+            .expect("default is sensible");
 
-        // TODO: Sort the sources such that the brightest come first, dimmest last.
+            parse_time_average_factor(
+                obs_context.time_res,
+                output_time_average_factor.as_deref(),
+                default_output_time_average_factor,
+            )
+            .unwrap()
+        };
+        let output_freq_average_factor = parse_freq_average_factor(
+            obs_context.freq_res,
+            output_freq_average_factor.as_deref(),
+            DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR,
+        )
+        .unwrap();
+
+        let num_tiles = di_cal_params.unflagged_tile_xyzs.len();
+        let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
+
+        // TODO: Ensure that the order of the sources are brightest first,
+        // dimmest last.
         let source_list = &di_cal_params.source_list;
         let num_sources_to_iono_subtract =
             num_sources_to_iono_subtract.unwrap_or(source_list.len());
+        // Finding the Stokes-I-weighted `RADec` of each source.
         let source_weighted_positions = {
             let mut component_radecs = vec![];
             let mut component_stokes_is = vec![];
@@ -483,13 +547,14 @@ impl PeelArgs {
             source_weighted_positions
         };
 
-        let timestamps = di_cal_params
-            .timesteps
-            .mapped_ref(|i| obs_context.timestamps[*i]);
-        let all_fine_chan_freqs_hz = obs_context.fine_chan_freqs.mapped_ref(|f| *f as f64);
+        if dry_run {
+            info!("Dry run -- exiting now.");
+            return Ok(());
+        }
 
         let error = AtomicCell::new(false);
-        let (tx_data, rx_data) = bounded(2);
+        let (tx_data, rx_data) = bounded(1);
+        let (tx_residual, rx_residual) = bounded(1);
         let (tx_write, rx_write) = bounded(2);
         let (tx_iono_consts, rx_iono_consts) = unbounded();
 
@@ -508,6 +573,16 @@ impl PeelArgs {
                 )
                 .with_position(0)
                 .with_message("Reading data"),
+        );
+        let model_progress = multi_progress.add(
+            ProgressBar::new(timestamps.len() as _)
+                .with_style(
+                    ProgressStyle::default_bar()
+                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
+                        .progress_chars("=> "),
+                )
+                .with_position(0)
+                .with_message("Sky modelling"),
         );
         let overall_peel_progress = multi_progress.add(
             ProgressBar::new(timeblocks.len() as _)
@@ -530,6 +605,7 @@ impl PeelArgs {
                 .with_message("Writing visibilities"),
         );
         read_progress.tick();
+        model_progress.tick();
         overall_peel_progress.tick();
         write_progress.tick();
 
@@ -537,10 +613,85 @@ impl PeelArgs {
             let read_handle: ScopedJoinHandle<Result<(), VisReadError>> = scope.spawn(|| {
                 defer_on_unwind! { error.store(true); }
 
+                let mut vis_data_full_res =
+                    Array3::zeros((1, num_cross_baselines, obs_context.fine_chan_freqs.len()));
+                let mut vis_weights_full_res = Array3::zeros(vis_data_full_res.dim());
+                for timeblock in &timeblocks {
+                    // Make a new block of data to be passed along; this
+                    // contains the target number of timesteps per peel cadence
+                    // but is averaged to the `freq_average_factor`.
+                    let mut out_data = Array3::zeros((
+                        timeblock.timestamps.len(),
+                        num_cross_baselines,
+                        all_fine_chan_freqs_hz.len(),
+                    ));
+                    let mut out_weights = Array3::zeros(out_data.dim());
+
+                    for (i_timestep, timestep) in timeblock.range.clone().enumerate() {
+                        // Should we continue?
+                        if error.load() {
+                            return Ok(());
+                        }
+
+                        let result = di_cal_params.input_data.read_crosses(
+                            vis_data_full_res.slice_mut(s![0, .., ..]),
+                            vis_weights_full_res.slice_mut(s![0, .., ..]),
+                            timestep,
+                            &di_cal_params.tile_baseline_flags,
+                            // Do *not* pass flagged channels to the reader; we
+                            // want all of the visibilities so we can do
+                            // averaging.
+                            &HashSet::new(),
+                        );
+                        if let Err(e) = result {
+                            error.store(true);
+                            return Err(e);
+                        }
+
+                        // Apply flagged channels.
+                        vis_weights_full_res
+                            .axis_iter_mut(Axis(1))
+                            .enumerate()
+                            .filter(|(i_chan, _)| di_cal_params.flagged_fine_chans.contains(i_chan))
+                            .for_each(|(_, mut vis_weights)| {
+                                vis_weights.mapv_inplace(|w| -(w.abs()))
+                            });
+
+                        // Average the full-res data into the averaged data.
+                        if freq_average_factor != 1 {
+                            vis_average(
+                                vis_data_full_res.view(),
+                                out_data.slice_mut(s![i_timestep..i_timestep + 1, .., ..]),
+                                vis_weights_full_res.view(),
+                                out_weights.slice_mut(s![i_timestep..i_timestep + 1, .., ..]),
+                            );
+                        } else {
+                            out_data
+                                .slice_mut(s![i_timestep..i_timestep + 1, .., ..])
+                                .assign(&vis_data_full_res);
+                            out_weights
+                                .slice_mut(s![i_timestep..i_timestep + 1, .., ..])
+                                .assign(&vis_weights_full_res);
+                        }
+
+                        read_progress.inc(1);
+                    }
+
+                    tx_data.send((out_data, out_weights, timeblock)).unwrap();
+                }
+
+                read_progress.abandon_with_message("Finished reading input data");
+                drop(tx_data);
+                Ok(())
+            });
+
+            let model_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
+                defer_on_unwind! { error.store(true); }
+
                 let mut modeller = new_sky_modeller(
                     matches!(di_cal_params.modeller_info, ModellerInfo::Cpu),
                     di_cal_params.beam.deref(),
-                    &di_cal_params.source_list,
+                    source_list,
                     &di_cal_params.unflagged_tile_xyzs,
                     &all_fine_chan_freqs_hz,
                     &di_cal_params.tile_baseline_flags.flagged_tiles,
@@ -552,78 +703,125 @@ impl PeelArgs {
                 )
                 .unwrap();
 
+                let mut vis_model = Array3::zeros((
+                    time_average_factor,
+                    num_cross_baselines,
+                    all_fine_chan_freqs_hz.len(),
+                ));
                 for timeblock in &timeblocks {
-                    // Make a new block of data to be passed along; this
-                    // contains the target number of timesteps per peel cadence.
-                    let mut vis_data = Array3::zeros((
-                        timeblock.timestamps.len(),
-                        num_cross_baselines,
-                        all_fine_chan_freqs_hz.len(),
-                    ));
-                    let mut vis_weights = Array3::zeros(vis_data.dim());
-                    let mut vis_model = Array3::zeros(vis_data.dim());
-
-                    for (
-                        (((vis_data_slice, vis_weight_slice), vis_model_slice), timestep),
-                        timestamp,
-                    ) in vis_data
-                        .outer_iter_mut()
-                        .zip(vis_weights.outer_iter_mut())
-                        .zip(vis_model.outer_iter_mut())
-                        .zip(timeblock.range.clone().into_iter())
-                        .zip(timeblock.timestamps.iter())
+                    for (vis_model_slice, timestamp) in
+                        vis_model.outer_iter_mut().zip(timeblock.timestamps.iter())
                     {
                         // Should we continue?
                         if error.load() {
                             return Ok(());
                         }
 
-                        let result = di_cal_params.input_data.read_crosses(
-                            vis_data_slice,
-                            vis_weight_slice,
-                            timestep,
-                            &di_cal_params.tile_baseline_flags,
-                            &HashSet::new(),
-                        );
-                        if result.is_err() {
+                        let result = modeller.model_timestep(vis_model_slice, *timestamp);
+                        if let Err(e) = result {
                             error.store(true);
+                            return Err(e);
                         }
 
-                        result?;
-                        read_progress.inc(1);
-
-                        // TODO: Move elsewhere
-                        modeller
-                            .model_timestep(vis_model_slice, *timestamp)
-                            .unwrap();
+                        model_progress.inc(1);
                     }
 
-                    tx_data
-                        .send((
-                            CalVis {
-                                vis_data,
-                                vis_weights,
-                                vis_model,
-                            },
-                            timeblock,
-                        ))
+                    // We call the received data "residual", but the model needs
+                    // to be subtracted for this to be a true "residual". That's
+                    // happens next.
+                    let (mut vis_residual, vis_weights, timeblock) = rx_data.recv().unwrap();
+
+                    // TODO: Make this available behind a flag.
+                    // // for each source in the sourcelist, rotate to it and
+                    // // subtract the model
+                    // for (source_name, source) in srclist.iter() {
+                    //     info!("Rotating to {source_name} and subtracting its model");
+                    //     modeller
+                    //         .update_with_a_source(source, source.weighted_radec)
+                    //         .unwrap();
+
+                    //     vis_rotate(
+                    //         vis_residual.view_mut(),
+                    //         source.weighted_radec,
+                    //         precessed_tile_xyzs.view(),
+                    //         &mut tile_ws_from,
+                    //         &mut tile_ws_to,
+                    //         &lmsts,
+                    //         all_fine_chan_freqs_hz,
+                    //         true,
+                    //     );
+
+                    //     vis_residual
+                    //         .outer_iter_mut()
+                    //         .zip(timestamps.iter())
+                    //         .for_each(|(mut vis_residual, epoch)| {
+                    //             // model into vis_slice: (bl, ch), a 2d slice of vis_residual_tmp: (1, bl, ch)
+                    //             // vis slice for modelling needs to be 2d, so we take a slice of vis_residual_tmp
+                    //             let mut vis_slice = vis_residual_tmp.slice_mut(s![0, .., ..]);
+                    //             modeller
+                    //                 .model_timestep(vis_slice.view_mut(), *epoch)
+                    //                 .unwrap();
+
+                    //             // TODO: This is currently useful as simulate_accumulate_iono is only in
+                    //             // one place. But it might be useful in Shintaro feedback when the
+                    //             // source already has constants?
+                    //             // // apply iono to temp model
+                    //             // if source.iono_consts.0.abs() > 1e-9 || source.iono_consts.1.abs() > 1e-9 {
+                    //             //     let part_uvws = calc_part_uvws(
+                    //             //         unflagged_tile_xyzs.len(),
+                    //             //         timestamps,
+                    //             //         source_pos,
+                    //             //         array_pos,
+                    //             //         unflagged_tile_xyzs,
+                    //             //     );
+                    //             //     apply_iono(
+                    //             //         vis_residual_tmp.view_mut(),
+                    //             //         part_uvws,
+                    //             //         source.iono_consts,
+                    //             //         all_fine_chan_freqs_hz,
+                    //             //     );
+                    //             // }
+                    //             // after apply iono, copy to residual array
+                    //             vis_residual -= &vis_residual_tmp.slice(s![0, .., ..]);
+                    //         });
+                    // }
+                    // // rotate back to original phase centre
+                    // vis_rotate(
+                    //     vis_residual.view_mut(),
+                    //     obs_context.phase_centre,
+                    //     precessed_tile_xyzs.view(),
+                    //     &mut tile_ws_from,
+                    //     &mut tile_ws_to,
+                    //     &lmsts,
+                    //     all_fine_chan_freqs_hz,
+                    //     true,
+                    // );
+
+                    // Don't rotate to each source and subtract; just subtract
+                    // the full model.
+                    vis_residual -= &vis_model;
+
+                    tx_residual
+                        .send((vis_residual, vis_weights, timeblock))
                         .unwrap();
                 }
 
-                read_progress.abandon_with_message("Finished reading input data");
-                drop(tx_data);
+                drop(tx_residual);
+                model_progress.abandon_with_message("Finished generating sky model");
                 Ok(())
             });
 
             let peel_handle = scope.spawn(|| {
                 defer_on_unwind! { error.store(true); }
 
-                // timeblocks.par_iter().for_each(|_| {
-                (0..4).into_par_iter().for_each(|i| {
-                    for (mut cal_vis, timeblock) in rx_data.iter() {
-                        let mut iono_consts = vec![(0.0, 0.0); num_sources_to_iono_subtract];
+                for (i, (mut vis_residual, vis_weights, timeblock)) in
+                    rx_residual.iter().enumerate()
+                {
+                    let mut iono_consts = vec![(0.0, 0.0); num_sources_to_iono_subtract];
+                    if num_sources_to_iono_subtract > 0 {
                         peel(
-                            &mut cal_vis,
+                            vis_residual.view_mut(),
+                            vis_weights.view(),
                             timeblock,
                             source_list,
                             &mut iono_consts,
@@ -654,23 +852,19 @@ impl PeelArgs {
                                         .unwrap();
                                 });
                         }
+                    }
 
-                        tx_iono_consts.send(iono_consts).unwrap();
+                    tx_iono_consts.send(iono_consts).unwrap();
 
-                        let CalVis {
-                            vis_data: cross_data,
-                            vis_weights: cross_weights,
-                            vis_model: _,
-                        } = cal_vis;
-
-                        for ((cross_data, cross_weights), timestamp) in cross_data
-                            .outer_iter()
-                            .zip(cross_weights.outer_iter())
-                            .zip(timeblock.timestamps.iter())
-                        {
-                            // TODO: Puke.
-                            let cross_data = cross_data.to_owned().into_shared();
-                            let cross_weights = cross_weights.to_owned().into_shared();
+                    for ((cross_data, cross_weights), timestamp) in vis_residual
+                        .outer_iter()
+                        .zip(vis_weights.outer_iter())
+                        .zip(timeblock.timestamps.iter())
+                    {
+                        // TODO: Puke.
+                        let cross_data = cross_data.to_owned().into_shared();
+                        let cross_weights = cross_weights.to_owned().into_shared();
+                        if !vis_outputs.is_empty() {
                             tx_write
                                 .send(VisTimestep {
                                     cross_data,
@@ -680,11 +874,12 @@ impl PeelArgs {
                                 })
                                 .unwrap();
                         }
-
-                        overall_peel_progress.inc(1);
                     }
-                });
+
+                    overall_peel_progress.inc(1);
+                }
                 overall_peel_progress.abandon_with_message("Finished peeling");
+                drop(tx_write);
                 drop(tx_iono_consts);
             });
 
@@ -700,7 +895,17 @@ impl PeelArgs {
                     });
 
                 if !vis_outputs.is_empty() {
-                    let vis_outputs = Vec1::try_from_vec(vis_outputs).unwrap();
+                    let vis_outputs = Vec1::try_from_vec(vis_outputs.clone()).unwrap();
+                    let time_res = obs_context.guess_time_res();
+                    let freq_res = obs_context.guess_freq_res() * freq_average_factor as f64;
+
+                    let timesteps = &di_cal_params.timesteps;
+                    let output_timeblocks = timesteps_to_timeblocks(
+                        &obs_context.timestamps,
+                        output_time_average_factor,
+                        timesteps,
+                    );
+
                     let result = write_vis(
                         &vis_outputs,
                         di_cal_params.array_position,
@@ -709,13 +914,13 @@ impl PeelArgs {
                         &obs_context.tile_xyzs,
                         &obs_context.tile_names,
                         obs_context.obsid,
-                        &timestamps,
-                        &di_cal_params.timesteps,
-                        &timeblocks,
-                        obs_context.guess_time_res(),
+                        &obs_context.timestamps,
+                        timesteps,
+                        &output_timeblocks,
+                        time_res,
                         di_cal_params.dut1,
-                        obs_context.guess_freq_res(),
-                        &obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64),
+                        freq_res,
+                        &all_fine_chan_freqs_hz,
                         &di_cal_params
                             .tile_baseline_flags
                             .unflagged_cross_baseline_to_tile_map
@@ -724,8 +929,8 @@ impl PeelArgs {
                             .sorted()
                             .collect::<Vec<_>>(),
                         &HashSet::new(),
-                        time_average_factor,
-                        1,
+                        time_average_factor * output_time_average_factor,
+                        output_freq_average_factor,
                         marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
                         rx_write,
                         &error,
@@ -772,6 +977,7 @@ impl PeelArgs {
             });
 
             read_handle.join().unwrap().unwrap();
+            model_handle.join().unwrap().unwrap();
             peel_handle.join().unwrap();
             write_handle.join().unwrap().unwrap();
         });
@@ -836,13 +1042,7 @@ fn vis_average(
     let avg_time = jones_from.len_of(time_axis) / jones_to.len_of(time_axis);
     let avg_freq = jones_from.len_of(freq_axis) / jones_to.len_of(freq_axis);
 
-    // assert_eq!(
-    //     from_dims,
-    //     (centroid_timestamps.len(), ant_pairs.len(), freqs_hz.len()),
-    //     "jones_from.dim()!=vis_ctx.{{ts,bl,ch}}"
-    // );
     assert_eq!(from_dims, weight_from.dim());
-
     let to_dims = jones_to.dim();
     assert_eq!(
         to_dims,
@@ -850,8 +1050,7 @@ fn vis_average(
             (from_dims.0 as f64 / avg_time as f64).floor() as usize,
             from_dims.1,
             (from_dims.2 as f64 / avg_freq as f64).floor() as usize,
-        ),
-        "jones_to.dim()!=vis_ctx.av{{ts,bl,ch}}"
+        )
     );
     assert_eq!(to_dims, weight_to.dim());
 
@@ -911,8 +1110,14 @@ fn vis_average(
                                                     });
                                             });
 
-                                        *jones_to = Jones::from(jones_weighted_sum / weight_sum);
-                                        *weight_to = weight_sum as f32;
+                                        if weight_sum > 0.0 {
+                                            *jones_to =
+                                                Jones::from(jones_weighted_sum / weight_sum);
+                                            *weight_to = weight_sum as f32;
+                                        } else {
+                                            *jones_to = Jones::default();
+                                            *weight_to = 0.0;
+                                        }
                                     },
                                 );
                         },
@@ -921,85 +1126,85 @@ fn vis_average(
         );
 }
 
-/// Rotate the provided visibilities to the given phase centre. This function
-/// expects:
-///
-/// 1) `tile_xyzs` to have already been precessed,
-/// 2) `tile_ws_from` to already be populated with the correct [`W`]s for where
-///    the data is currently phased,
-/// 3) An equal number of timesteps in `jones_array`, `tile_xyzs`,
-///    `tile_ws_from`, `tile_ws_to` and `lmsts`.
-///
-/// After the visibilities have been "rotated", the memory of `tile_ws_from` and
-/// `tile_ws_to` is swapped. This allows this function to be called again with
-/// the same arrays and a new phase centre without new allocations.
-#[allow(clippy::too_many_arguments)]
-fn vis_rotate(
-    mut jones_array: ArrayViewMut3<Jones<f32>>,
-    phase_to: RADec,
-    tile_xyzs: ArrayView2<XyzGeodetic>,
-    tile_ws_from: &mut Array2<W>,
-    tile_ws_to: &mut Array2<W>,
-    lmsts: &[f64],
-    fine_chan_freqs: &[f64],
-    swap: bool,
-) {
-    let num_tiles = tile_xyzs.len_of(Axis(1));
-    assert_eq!(tile_ws_from.len_of(Axis(1)), num_tiles);
-    assert_eq!(tile_ws_to.len_of(Axis(1)), num_tiles);
+// /// Rotate the provided visibilities to the given phase centre. This function
+// /// expects:
+// ///
+// /// 1) `tile_xyzs` to have already been precessed,
+// /// 2) `tile_ws_from` to already be populated with the correct [`W`]s for where
+// ///    the data is currently phased,
+// /// 3) An equal number of timesteps in `jones_array`, `tile_xyzs`,
+// ///    `tile_ws_from`, `tile_ws_to` and `lmsts`.
+// ///
+// /// After the visibilities have been "rotated", the memory of `tile_ws_from` and
+// /// `tile_ws_to` is swapped. This allows this function to be called again with
+// /// the same arrays and a new phase centre without new allocations.
+// #[allow(clippy::too_many_arguments)]
+// fn vis_rotate(
+//     mut jones_array: ArrayViewMut3<Jones<f32>>,
+//     phase_to: RADec,
+//     tile_xyzs: ArrayView2<XyzGeodetic>,
+//     tile_ws_from: &mut Array2<W>,
+//     tile_ws_to: &mut Array2<W>,
+//     lmsts: &[f64],
+//     fine_chan_freqs: &[f64],
+//     swap: bool,
+// ) {
+//     let num_tiles = tile_xyzs.len_of(Axis(1));
+//     assert_eq!(tile_ws_from.len_of(Axis(1)), num_tiles);
+//     assert_eq!(tile_ws_to.len_of(Axis(1)), num_tiles);
 
-    // iterate along time axis in chunks of avg_time
-    jones_array
-        .outer_iter_mut()
-        .into_par_iter()
-        .zip(tile_ws_from.outer_iter())
-        .zip(tile_ws_to.outer_iter_mut())
-        .zip(tile_xyzs.outer_iter())
-        .zip(lmsts.par_iter())
-        .for_each(
-            |((((mut jones_array, tile_ws_from), mut tile_ws_to), tile_xyzs), lmst)| {
-                assert_eq!(tile_ws_from.len(), num_tiles);
-                // Generate the "to" Ws.
-                let phase_to = phase_to.to_hadec(*lmst);
-                setup_ws(tile_ws_to.view_mut(), tile_xyzs.view(), phase_to);
+//     // iterate along time axis in chunks of avg_time
+//     jones_array
+//         .outer_iter_mut()
+//         .into_par_iter()
+//         .zip(tile_ws_from.outer_iter())
+//         .zip(tile_ws_to.outer_iter_mut())
+//         .zip(tile_xyzs.outer_iter())
+//         .zip(lmsts.par_iter())
+//         .for_each(
+//             |((((mut jones_array, tile_ws_from), mut tile_ws_to), tile_xyzs), lmst)| {
+//                 assert_eq!(tile_ws_from.len(), num_tiles);
+//                 // Generate the "to" Ws.
+//                 let phase_to = phase_to.to_hadec(*lmst);
+//                 setup_ws(tile_ws_to.view_mut(), tile_xyzs.view(), phase_to);
 
-                // iterate along baseline axis
-                let mut i_tile1 = 0;
-                let mut i_tile2 = 0;
-                let mut tile1_w_from = tile_ws_from[i_tile1];
-                let mut tile2_w_from = tile_ws_from[i_tile2];
-                let mut tile1_w_to = tile_ws_to[i_tile1];
-                let mut tile2_w_to = tile_ws_to[i_tile2];
-                jones_array.outer_iter_mut().for_each(|mut jones_array| {
-                    i_tile2 += 1;
-                    if i_tile2 == num_tiles {
-                        i_tile1 += 1;
-                        i_tile2 = i_tile1 + 1;
-                        tile1_w_from = tile_ws_from[i_tile1];
-                        tile1_w_to = tile_ws_to[i_tile1];
-                    }
-                    tile2_w_from = tile_ws_from[i_tile2];
-                    tile2_w_to = tile_ws_to[i_tile2];
+//                 // iterate along baseline axis
+//                 let mut i_tile1 = 0;
+//                 let mut i_tile2 = 0;
+//                 let mut tile1_w_from = tile_ws_from[i_tile1];
+//                 let mut tile2_w_from = tile_ws_from[i_tile2];
+//                 let mut tile1_w_to = tile_ws_to[i_tile1];
+//                 let mut tile2_w_to = tile_ws_to[i_tile2];
+//                 jones_array.outer_iter_mut().for_each(|mut jones_array| {
+//                     i_tile2 += 1;
+//                     if i_tile2 == num_tiles {
+//                         i_tile1 += 1;
+//                         i_tile2 = i_tile1 + 1;
+//                         tile1_w_from = tile_ws_from[i_tile1];
+//                         tile1_w_to = tile_ws_to[i_tile1];
+//                     }
+//                     tile2_w_from = tile_ws_from[i_tile2];
+//                     tile2_w_to = tile_ws_to[i_tile2];
 
-                    let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
-                    let arg = -TAU * w_diff / VEL_C;
-                    // iterate along frequency axis
-                    jones_array.iter_mut().zip(fine_chan_freqs.iter()).for_each(
-                        |(jones, &freq_hz)| {
-                            let rotation = Complex::cis(arg * freq_hz);
-                            *jones = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
-                        },
-                    );
-                });
-            },
-        );
+//                     let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
+//                     let arg = -TAU * w_diff / VEL_C;
+//                     // iterate along frequency axis
+//                     jones_array.iter_mut().zip(fine_chan_freqs.iter()).for_each(
+//                         |(jones, &freq_hz)| {
+//                             let rotation = Complex::cis(arg * freq_hz);
+//                             *jones = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
+//                         },
+//                     );
+//                 });
+//             },
+//         );
 
-    if swap {
-        // Swap the arrays, so that for the next source, the "from" Ws are our "to"
-        // Ws.
-        std::mem::swap(tile_ws_from, tile_ws_to);
-    }
-}
+//     if swap {
+//         // Swap the arrays, so that for the next source, the "from" Ws are our "to"
+//         // Ws.
+//         std::mem::swap(tile_ws_from, tile_ws_to);
+//     }
+// }
 
 #[allow(clippy::too_many_arguments)]
 fn vis_rotate2(
@@ -1007,11 +1212,10 @@ fn vis_rotate2(
     mut jones_array2: ArrayViewMut3<Jones<f32>>,
     phase_to: RADec,
     tile_xyzs: ArrayView2<XyzGeodetic>,
-    tile_ws_from: &mut Array2<W>,
-    tile_ws_to: &mut Array2<W>,
+    tile_ws_from: ArrayView2<W>,
+    mut tile_ws_to: ArrayViewMut2<W>,
     lmsts: &[f64],
     fine_chan_freqs: &[f64],
-    swap: bool,
 ) {
     let num_tiles = tile_xyzs.len_of(Axis(1));
     assert_eq!(tile_ws_from.len_of(Axis(1)), num_tiles);
@@ -1071,12 +1275,6 @@ fn vis_rotate2(
                     });
             },
         );
-
-    if swap {
-        // Swap the arrays, so that for the next source, the "from" Ws are our "to"
-        // Ws.
-        std::mem::swap(tile_ws_from, tile_ws_to);
-    }
 }
 
 /// Rotate the supplied visibilities according to the `λ²` constants of
@@ -1255,37 +1453,34 @@ fn apply_iono2(
 // the offsets as defined by the RTS code
 // TODO: Assume there's only 1 timestep, because this is low res data?
 fn get_offsets_rts(
-    unpeeled: ArrayView3<Jones<f32>>,
+    residual: ArrayView3<Jones<f32>>,
     weights: ArrayView3<f32>,
     model: ArrayView3<Jones<f32>>,
     tile_xyzs: &[XyzGeodetic],
     freqs_hz: &[f64],
-    tile_uvs_low_res: &mut [UV],
-    phase_centre_hadec: HADec,
-) -> [f64; 2] {
+    tile_uvs_low_res: &[UV],
+) -> (f64, f64) {
     let num_tiles = tile_xyzs.len();
-
-    setup_uvs(tile_uvs_low_res, tile_xyzs, phase_centre_hadec);
     assert_eq!(tile_uvs_low_res.len(), num_tiles);
 
     // a-terms used in least-squares estimator
-    let (mut a_uu, mut a_uv, mut a_vv) = (0., 0., 0.);
+    let (mut a_uu, mut a_uv, mut a_vv) = (0.0, 0.0, 0.0);
     // A-terms used in least-squares estimator
-    let (mut aa_u, mut aa_v) = (0., 0.);
+    let (mut aa_u, mut aa_v) = (0.0, 0.0);
 
     // iterate over time
-    unpeeled
+    residual
         .outer_iter()
         .zip(weights.outer_iter())
         .zip(model.outer_iter())
-        .for_each(|((unpeeled, weights), model)| {
+        .for_each(|((residual, weights), model)| {
             // iterate over frequency
-            unpeeled
+            residual
                 .axis_iter(Axis(1))
                 .zip(weights.axis_iter(Axis(1)))
                 .zip(model.axis_iter(Axis(1)))
                 .zip(freqs_hz.iter())
-                .for_each(|(((unpeeled, weights), model), freq_hz)| {
+                .for_each(|(((residual, weights), model), freq_hz)| {
                     let lambda = VEL_C / freq_hz;
                     // lambda^2
                     let lambda_2 = lambda * lambda;
@@ -1294,56 +1489,71 @@ fn get_offsets_rts(
 
                     let mut i_tile1 = 0;
                     let mut i_tile2 = 0;
-                    let mut uvw_tile1 = tile_uvs_low_res[i_tile1];
-                    let mut uvw_tile2 = tile_uvs_low_res[i_tile2];
+                    let mut uv_tile1 = tile_uvs_low_res[i_tile1];
+                    let mut uv_tile2 = tile_uvs_low_res[i_tile2];
+
+                    let mut a_uu_bl = 0.0;
+                    let mut a_uv_bl = 0.0;
+                    let mut a_vv_bl = 0.0;
+                    let mut aa_u_bl = 0.0;
+                    let mut aa_v_bl = 0.0;
 
                     // iterate over baseline
-                    unpeeled
+                    residual
                         .iter()
                         .zip(weights.iter())
                         .zip(model.iter())
-                        .for_each(|((unpeeled, weight), model)| {
+                        .for_each(|((residual, weight), model)| {
                             i_tile2 += 1;
                             if i_tile2 == num_tiles {
                                 i_tile1 += 1;
                                 i_tile2 = i_tile1 + 1;
-                                uvw_tile1 = tile_uvs_low_res[i_tile1];
+                                uv_tile1 = tile_uvs_low_res[i_tile1];
                             }
 
-                            if *weight > 0. {
-                                uvw_tile2 = tile_uvs_low_res[i_tile2];
-                                let uvw = uvw_tile1 - uvw_tile2;
+                            if *weight > 0.0 {
+                                uv_tile2 = tile_uvs_low_res[i_tile2];
+                                // Divide by λ to get dimensionless UV.
+                                let UV { u, v } = (uv_tile1 - uv_tile2) / lambda;
 
-                                // stokes I power of the unpeeled visibilities (Data)
-                                let unpeeled_i = 0.5 * (unpeeled[0] + unpeeled[3]);
-                                // stokes I power of the model visibilities (Model)
-                                let model_i = 0.5 * (model[0] + model[3]);
+                                // Stokes I of the residual visibilities and
+                                // model visibilities. It doesn't matter if the
+                                // convention is to divide by 2 or not; the
+                                // algorithm's result is algebraically the same.
+                                let residual_i = residual[0] + residual[3];
+                                let model_i = model[0] + model[3];
 
-                                let mr = (model_i.re as f64) * (unpeeled_i - model_i).im as f64;
-                                let mm = (model_i.re as f64) * model_i.re as f64;
+                                let model_i_re = model_i.re as f64;
+                                let mr = model_i_re * (residual_i.im as f64 - model_i.im as f64);
+                                let mm = model_i_re * model_i_re;
 
-                                let weight_f64 = *weight as f64;
+                                let weight = *weight as f64;
 
-                                // to convert to RTS uvw (wavelengths) from PAL uvw (meters), divide by λ.
-                                let (u, v) = (uvw.u / lambda, uvw.v / lambda);
-                                a_uu += weight_f64 * mm * u * u * lambda_4;
-                                a_uv += weight_f64 * mm * u * v * lambda_4;
-                                a_vv += weight_f64 * mm * v * v * lambda_4;
-                                aa_u += weight_f64 * mr * u * -lambda_2;
-                                aa_v += weight_f64 * mr * v * -lambda_2;
+                                // To avoid accumulating floating-point errors
+                                // (and save some multiplies), multiplications
+                                // with powers of lambda are done outside the
+                                // loop.
+                                a_uu_bl += weight * mm * u * u;
+                                a_uv_bl += weight * mm * u * v;
+                                a_vv_bl += weight * mm * v * v;
+                                aa_u_bl += weight * mr * u;
+                                aa_v_bl += weight * mr * v;
                             }
                         });
+
+                    a_uu += a_uu_bl * lambda_4;
+                    a_uv += a_uv_bl * lambda_4;
+                    a_vv += a_vv_bl * lambda_4;
+                    aa_u += aa_u_bl * -lambda_2;
+                    aa_v += aa_v_bl * -lambda_2;
                 });
         });
-    let delta = TAU * (a_uu * a_vv - a_uv * a_uv);
 
-    let offsets = [
+    let delta = TAU * (a_uu * a_vv - a_uv * a_uv);
+    (
         (aa_u * a_vv - aa_v * a_uv) / delta,
         (aa_v * a_uu - aa_u * a_uv) / delta,
-    ];
-
-    trace!("offsets: {offsets:?}");
-    offsets
+    )
 }
 
 fn setup_ws(
@@ -1436,8 +1646,10 @@ fn model_timesteps(
 //     });
 // }
 
+#[allow(clippy::too_many_arguments)]
 fn peel(
-    cal_vis: &mut CalVis,
+    mut vis_residual: ArrayViewMut3<Jones<f32>>,
+    vis_weights: ArrayView3<f32>,
     timeblock: &Timeblock,
     source_list: &SourceList,
     iono_consts: &mut [(f64, f64)],
@@ -1469,12 +1681,6 @@ fn peel(
             .with_message(format!("Peeling timeblock {}", timeblock.index + 1)),
     );
     peel_progress.tick();
-
-    let CalVis {
-        vis_data: vis_residual,
-        vis_weights,
-        vis_model,
-    } = cal_vis;
 
     let num_tiles = unflagged_tile_xyzs.len();
     let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
@@ -1541,9 +1747,6 @@ fn peel(
             * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
     );
 
-    // CHJ: Rotate to each source and remove its model from the data. Is
-    // this better than just removing the full model without rotation?
-
     let mut tile_ws_from = Array2::default((timestamps.len(), unflagged_tile_xyzs.len()));
     let mut tile_ws_to = tile_ws_from.clone();
     // Set up the first set of Ws at the phase centre.
@@ -1562,97 +1765,8 @@ fn peel(
         });
 
     // Temporary visibility array, re-used for each timestep
-    let mut vis_residual_tmp = vis_residual.clone();
-
-    // ////////////////// //
-    // subtract model vis //
-    // ////////////////// //
-
-    // // for each source in the sourcelist:
-    // // - rotate the accumulated visibilities to the model phase centre
-    // // - simulate the visibilities and do not apply an ionospheric offset
-    // let mut modeller = new_sky_modeller(
-    //     matches!(modeller_info, ModellerInfo::Cpu),
-    //     beam.deref(),
-    //     &SourceList::new(),
-    //     unflagged_tile_xyzs,
-    //     all_fine_chan_freqs_hz,
-    //     flagged_tiles,
-    //     RADec::default(),
-    //     array_position.longitude_rad,
-    //     array_position.latitude_rad,
-    //     dut1,
-    //     !no_precession,
-    // )
-    // .unwrap();
-    // for (source_name, iono_source) in iono_srclist.iter() {
-    //     info!("Rotating to {source_name} and subtracting its model");
-    //     modeller
-    //         .update_with_a_source(iono_source, iono_source.weighted_radec)
-    //         .unwrap();
-
-    //     vis_rotate(
-    //         vis_residual.view_mut(),
-    //         iono_source.weighted_radec,
-    //         precessed_tile_xyzs.view(),
-    //         &mut tile_ws_from,
-    //         &mut tile_ws_to,
-    //         &lmsts,
-    //         all_fine_chan_freqs_hz,
-    //         true,
-    //     );
-
-    //     vis_residual
-    //         .outer_iter_mut()
-    //         .zip(timestamps.iter())
-    //         .for_each(|(mut vis_residual, epoch)| {
-    //             // model into vis_slice: (bl, ch), a 2d slice of vis_residual_tmp: (1, bl, ch)
-    //             // vis slice for modelling needs to be 2d, so we take a slice of vis_residual_tmp
-    //             let mut vis_slice = vis_residual_tmp.slice_mut(s![0, .., ..]);
-    //             modeller
-    //                 .model_timestep(vis_slice.view_mut(), *epoch)
-    //                 .unwrap();
-
-    //             // TODO: This is currently useful as simulate_accumulate_iono is only in
-    //             // one place. But it might be useful in Shintaro feedback when the
-    //             // source already has constants?
-    //             // // apply iono to temp model
-    //             // if iono_source.iono_consts.0.abs() > 1e-9 || iono_source.iono_consts.1.abs() > 1e-9 {
-    //             //     let part_uvws = calc_part_uvws(
-    //             //         unflagged_tile_xyzs.len(),
-    //             //         timestamps,
-    //             //         source_pos,
-    //             //         array_pos,
-    //             //         unflagged_tile_xyzs,
-    //             //     );
-    //             //     apply_iono(
-    //             //         vis_residual_tmp.view_mut(),
-    //             //         part_uvws,
-    //             //         iono_source.iono_consts,
-    //             //         all_fine_chan_freqs_hz,
-    //             //     );
-    //             // }
-    //             // after apply iono, copy to residual array
-    //             vis_residual -= &vis_residual_tmp.slice(s![0, .., ..]);
-    //         });
-    // }
-    // // rotate back to original phase centre
-    // vis_rotate(
-    //     vis_residual.view_mut(),
-    //     obs_context.phase_centre,
-    //     precessed_tile_xyzs.view(),
-    //     &mut tile_ws_from,
-    //     &mut tile_ws_to,
-    //     &lmsts,
-    //     all_fine_chan_freqs_hz,
-    //     true,
-    // );
-
-    // ////////////////// //
-    // subtract model vis //
-    // ////////////////// //
-    *vis_residual -= vis_model;
-    let high_res_vis_dims = vis_model.dim();
+    let mut vis_residual_tmp = vis_residual.to_owned();
+    let high_res_vis_dims = vis_residual.dim();
 
     // TODO: Do we allow multiple timesteps in the low-res data?
 
@@ -1889,11 +2003,10 @@ fn peel(
                     vis_residual_tmp.view_mut(),
                     source_phase_centre,
                     precessed_tile_xyzs.view(),
-                    &mut tile_ws_from,
-                    &mut tile_ws_to,
+                    tile_ws_from.view(),
+                    tile_ws_to.view_mut(),
                     &lmsts,
                     all_fine_chan_freqs_hz,
-                    false,
                 );
                 trace!("{:?}: vis_average", std::time::Instant::now() - start);
                 vis_average(
@@ -1958,20 +2071,25 @@ fn peel(
                         );
                     }
 
-                    let offsets_rts = get_offsets_rts(
+                    setup_uvs(
+                        tile_uvs_low_res.as_slice_mut().unwrap(),
+                        average_precessed_tile_xyzs.as_slice().unwrap(),
+                        source_phase_centre.to_hadec(average_lmst),
+                    );
+                    let offsets = get_offsets_rts(
                         vis_residual_low_res.view(),
                         weight_residual_low_res.view(),
                         vis_model_low_res_tmp.view(),
                         average_precessed_tile_xyzs.as_slice().unwrap(),
                         low_res_freqs_hz,
                         tile_uvs_low_res.as_slice_mut().unwrap(),
-                        source_phase_centre.to_hadec(average_precession_info.lmst_j2000),
                     );
+                    trace!("offsets: {offsets:?}");
 
                     // if the offset is small, we've converged.
-                    iono_consts.0 += offsets_rts[0];
-                    iono_consts.1 += offsets_rts[1];
-                    if offsets_rts[0].abs() < 1e-12 && offsets_rts[1].abs() < 1e-12 {
+                    iono_consts.0 += offsets.0;
+                    iono_consts.1 += offsets.1;
+                    if offsets.0.abs() < 1e-12 && offsets.1.abs() < 1e-12 {
                         debug!("iter {iteration}, consts: {:?}, finished", iono_consts);
                         break;
                     }

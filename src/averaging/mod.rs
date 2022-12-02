@@ -461,7 +461,8 @@ pub(super) fn parse_freq_average_factor(
             // Scale the quantity by the unit, if required.
             let quantity = match time_format {
                 FreqFormat::Hz => quantity,
-                FreqFormat::kHz => 1000.0 * quantity,
+                FreqFormat::kHz => 1e3 * quantity,
+                FreqFormat::MHz => 1e6 * quantity,
             };
             let factor = quantity / freq_res;
             // Reject non-integer floats.
