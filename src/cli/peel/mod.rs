@@ -38,7 +38,7 @@ use crate::{
         channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
         timesteps_to_timeblocks, AverageFactorError, Timeblock,
     },
-    beam::{create_fee_beam_object, create_no_beam_object, Beam, BeamError, Delays},
+    beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
     filenames::{InputDataTypes, SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS},
@@ -50,7 +50,8 @@ use crate::{
         new_sky_modeller, ModelError, ModellerInfo, SkyModeller, SkyModellerCpu, SkyModellerCuda,
     },
     srclist::{
-        read::read_source_list_file, veto_sources, ComponentList, SourceList, SourceListType,
+        read::read_source_list_file, veto_sources, ComponentList, Source, SourceList,
+        SourceListType,
     },
     unit_parsing::WAVELENGTH_FORMATS,
     vis_io::{
@@ -130,6 +131,16 @@ pub struct PeelArgs {
     #[clap(long = "iono-sub", help_heading = "SKY-MODEL SOURCES")]
     pub num_sources_to_iono_subtract: Option<usize>,
 
+    /// The number of sources to "ionospherically subtract" in serial, not
+    /// parallel. The larger this number is, the better the quality of iono
+    /// subtraction, but the slower the whole process takes.
+    #[clap(
+        long = "iono-sub-serial",
+        help_heading = "PEELING",
+        default_value = "10"
+    )]
+    pub num_sources_to_iono_subtract_in_serial: usize,
+
     /// The number of sources to subtract. This subtraction just uses the sky
     /// model directly; no peeling or ionospheric λ² is found. There must be at
     /// least as many sources subtracted as there are ionospherically
@@ -147,25 +158,25 @@ pub struct PeelArgs {
     #[cfg(feature = "cuda")]
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
-    #[clap(long, help_heading = "SKY-MODEL SOURCES")]
+    #[clap(long, help_heading = "MODELLING")]
     pub cpu: bool,
 
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided by the MWA_BEAM_FILE environment variable.
-    #[clap(long, help_heading = "BEAM")]
+    #[clap(long, help_heading = "MODELLING")]
     pub beam_file: Option<PathBuf>,
 
     /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
     /// the metafits file.
-    #[clap(long, help_heading = "BEAM")]
+    #[clap(long, help_heading = "MODELLING")]
     pub unity_dipole_gains: bool,
 
-    #[clap(long, multiple_values(true), help = DIPOLE_DELAYS_HELP.as_str(), help_heading = "BEAM")]
+    #[clap(long, multiple_values(true), help = DIPOLE_DELAYS_HELP.as_str(), help_heading = "MODELLING")]
     pub delays: Option<Vec<u32>>,
 
     /// Don't apply a beam response when generating a sky model. The default is
     /// to use the FEE beam.
-    #[clap(long, help_heading = "BEAM")]
+    #[clap(long, help_heading = "MODELLING")]
     pub no_beam: bool,
 
     #[clap(short, long, help = TIME_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
@@ -177,10 +188,10 @@ pub struct PeelArgs {
     #[clap(short, long, help = IONO_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
     pub iono_freq_average_factor: Option<String>,
 
-    #[clap(short, long, help = OUTPUT_TIME_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
+    #[clap(long, help = OUTPUT_TIME_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
     pub output_time_average_factor: Option<String>,
 
-    #[clap(short, long, help = OUTPUT_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
+    #[clap(long, help = OUTPUT_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "AVERAGING")]
     pub output_freq_average_factor: Option<String>,
 
     /// The timesteps to use from the input data. The timesteps will be
@@ -287,6 +298,7 @@ impl PeelArgs {
             outputs,
             num_sources_to_peel,
             num_sources_to_iono_subtract,
+            num_sources_to_iono_subtract_in_serial,
             num_sources_to_subtract,
             source_dist_cutoff,
             veto_threshold,
@@ -937,6 +949,7 @@ impl PeelArgs {
         let fences = Vec1::try_from_vec(fences).map_err(|_| PeelError::NoChannels)?;
         let all_fine_chan_freqs_hz =
             Vec1::try_from_vec(fences[0].chanblocks.iter().map(|c| c._freq).collect()).unwrap();
+        let all_fine_chan_lambdas_m = all_fine_chan_freqs_hz.mapped_ref(|f| VEL_C / *f);
 
         let output_time_average_factor = {
             let default_output_time_average_factor = parse_time_average_factor(
@@ -1151,7 +1164,7 @@ impl PeelArgs {
                 input_vis_time_res: obs_context.time_res,
                 input_vis_freq_res: obs_context.freq_res,
                 output_vis_time_average_factor: output_time_average_factor,
-                output_vis_freq_average_factor: output_freq_average_factor,
+                output_vis_freq_average_factor: output_freq_average_factor * freq_average_factor,
             }
             .print();
         }
@@ -1182,10 +1195,11 @@ impl PeelArgs {
             1,
             "Picket fence observations are not supported!"
         );
-        let low_res_freqs_hz = low_res_fences
+        let (low_res_freqs_hz, low_res_lambdas_m): (Vec<_>, Vec<_>) = low_res_fences
             .into_iter()
             .flat_map(|f| f.chanblocks.into_iter().map(|c| c._freq))
-            .collect::<Vec<_>>();
+            .map(|f| (f, VEL_C / f))
+            .unzip();
 
         // TODO: Ensure that the order of the sources are brightest first,
         // dimmest last.
@@ -1317,13 +1331,20 @@ impl PeelArgs {
                             return Err(e);
                         }
 
-                        // Apply flagged channels.
+                        // Apply flagged channels and cap flagged weights at 0.
                         vis_weights_full_res
                             .axis_iter_mut(Axis(1))
                             .enumerate()
-                            .filter(|(i_chan, _)| flagged_fine_chans.contains(i_chan))
-                            .for_each(|(_, mut vis_weights)| {
-                                vis_weights.mapv_inplace(|w| -(w.abs()))
+                            .for_each(|(i_chan, mut vis_weights_full_res)| {
+                                if flagged_fine_chans.contains(&i_chan) {
+                                    vis_weights_full_res.mapv_inplace(|_| 0.0);
+                                } else {
+                                    vis_weights_full_res.iter_mut().for_each(|w| {
+                                        if *w < 0.0 {
+                                            *w = 0.0;
+                                        }
+                                    });
+                                }
                             });
 
                         // Average the full-res data into the averaged data.
@@ -1496,8 +1517,11 @@ impl PeelArgs {
                             &mut iono_consts,
                             &source_weighted_positions,
                             num_sources_to_iono_subtract,
+                            num_sources_to_iono_subtract_in_serial,
                             &all_fine_chan_freqs_hz,
                             &low_res_freqs_hz,
+                            &all_fine_chan_lambdas_m,
+                            &low_res_lambdas_m,
                             obs_context,
                             array_position,
                             &unflagged_tile_xyzs,
@@ -1653,14 +1677,14 @@ impl PeelArgs {
 
 fn get_weights_rts(
     tile_uvs: ArrayView2<UV>,
-    freqs_hz: &[f64],
+    lambdas_m: &[f64],
     short_sigma: f64,
     weight_factor: f64,
 ) -> Array3<f32> {
     let (num_timesteps, num_tiles) = tile_uvs.dim();
     let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
 
-    let mut weights = Array3::zeros((num_timesteps, num_cross_baselines, freqs_hz.len()));
+    let mut weights = Array3::zeros((num_timesteps, num_cross_baselines, lambdas_m.len()));
     weights
         .outer_iter_mut()
         .into_par_iter()
@@ -1680,14 +1704,16 @@ fn get_weights_rts(
                 tile2_uv = tile_uvs[i_tile2];
                 let uv = tile1_uv - tile2_uv;
 
-                weights.iter_mut().zip(freqs_hz).for_each(|(weight, freq)| {
-                    let lambda = VEL_C / *freq;
-                    let uv = uv / lambda;
-                    let uv_sq = uv.u * uv.u + uv.v * uv.v;
-                    *weight = (weight_factor
-                        * (1.0 - (-uv_sq / (2.0 * short_sigma * short_sigma).exp())))
-                        as f32;
-                });
+                weights
+                    .iter_mut()
+                    .zip(lambdas_m)
+                    .for_each(|(weight, lambda_m)| {
+                        let UV { u, v } = uv / *lambda_m;
+                        // 1 - exp(-(u*u+v*v)/(2*sig^2))
+                        let uv_sq = u * u + v * v;
+                        let exp = (-uv_sq / (2.0 * short_sigma * short_sigma)).exp();
+                        *weight = (weight_factor * (1.0 - exp)) as f32;
+                    });
             });
         });
     weights
@@ -1701,8 +1727,7 @@ fn vis_average(
     mut weight_to: ArrayViewMut3<f32>,
 ) {
     let from_dims = jones_from.dim();
-    let time_axis = Axis(0);
-    let freq_axis = Axis(2);
+    let (time_axis, baseline_axis, freq_axis) = (Axis(0), Axis(1), Axis(2));
     let avg_time = jones_from.len_of(time_axis) / jones_to.len_of(time_axis);
     let avg_freq = jones_from.len_of(freq_axis) / jones_to.len_of(freq_axis);
 
@@ -1718,12 +1743,17 @@ fn vis_average(
     );
     assert_eq!(to_dims, weight_to.dim());
 
-    let num_tiles = num_tiles_from_num_cross_correlation_baselines(jones_from.len_of(Axis(1)));
+    let num_tiles =
+        num_tiles_from_num_cross_correlation_baselines(jones_from.len_of(baseline_axis));
+    assert_eq!(
+        (num_tiles * (num_tiles - 1)) / 2,
+        jones_from.len_of(baseline_axis)
+    );
 
     // iterate along time axis in chunks of avg_time
     jones_from
-        .axis_chunks_iter(Axis(0), avg_time)
-        .zip(weight_from.axis_chunks_iter(Axis(0), avg_time))
+        .axis_chunks_iter(time_axis, avg_time)
+        .zip(weight_from.axis_chunks_iter(time_axis, avg_time))
         .zip(jones_to.outer_iter_mut())
         .zip(weight_to.outer_iter_mut())
         .for_each(
@@ -1763,14 +1793,24 @@ fn vis_average(
                                                     .iter()
                                                     .zip(weights_chunk.iter())
                                                     .for_each(|(jones, weight)| {
-                                                        // Ignore any flagged
-                                                        // vis.
-                                                        if *weight > 0.0 {
-                                                            let jones = Jones::<f64>::from(*jones);
-                                                            let weight = *weight as f64;
-                                                            jones_weighted_sum += jones * weight;
-                                                            weight_sum += weight;
-                                                        }
+                                                        // Any flagged
+                                                        // visibilities would
+                                                        // have a weight <= 0,
+                                                        // but we've already
+                                                        // capped them to 0.
+                                                        // This means we don't
+                                                        // need to check the
+                                                        // value of the weight
+                                                        // when accumulating
+                                                        // unflagged
+                                                        // visibilities; the
+                                                        // flagged ones
+                                                        // contribute nothing.
+
+                                                        let jones = Jones::<f64>::from(*jones);
+                                                        let weight = *weight as f64;
+                                                        jones_weighted_sum += jones * weight;
+                                                        weight_sum += weight;
                                                     });
                                             });
 
@@ -1778,9 +1818,6 @@ fn vis_average(
                                             *jones_to =
                                                 Jones::from(jones_weighted_sum / weight_sum);
                                             *weight_to = weight_sum as f32;
-                                        } else {
-                                            *jones_to = Jones::default();
-                                            *weight_to = 0.0;
                                         }
                                     },
                                 );
@@ -1788,6 +1825,171 @@ fn vis_average(
                     );
             },
         );
+}
+
+fn vis_average2(
+    jones_from: ArrayView3<Jones<f32>>,
+    mut jones_to: ArrayViewMut3<Jones<f32>>,
+    weight_from: ArrayView3<f32>,
+) {
+    let from_dims = jones_from.dim();
+    let (time_axis, baseline_axis, freq_axis) = (Axis(0), Axis(1), Axis(2));
+    let avg_time = jones_from.len_of(time_axis) / jones_to.len_of(time_axis);
+    let avg_freq = jones_from.len_of(freq_axis) / jones_to.len_of(freq_axis);
+
+    assert_eq!(from_dims, weight_from.dim());
+    let to_dims = jones_to.dim();
+    assert_eq!(
+        to_dims,
+        (
+            (from_dims.0 as f64 / avg_time as f64).floor() as usize,
+            from_dims.1,
+            (from_dims.2 as f64 / avg_freq as f64).floor() as usize,
+        )
+    );
+
+    let num_tiles =
+        num_tiles_from_num_cross_correlation_baselines(jones_from.len_of(baseline_axis));
+    assert_eq!(
+        (num_tiles * (num_tiles - 1)) / 2,
+        jones_from.len_of(baseline_axis)
+    );
+
+    // iterate along time axis in chunks of avg_time
+    jones_from
+        .axis_chunks_iter(time_axis, avg_time)
+        .zip(weight_from.axis_chunks_iter(time_axis, avg_time))
+        .zip(jones_to.outer_iter_mut())
+        .for_each(|((jones_chunk, weight_chunk), mut jones_to)| {
+            // iterate along baseline axis
+            let mut i_tile1 = 0;
+            let mut i_tile2 = 0;
+            jones_chunk
+                .axis_iter(Axis(1))
+                .zip(weight_chunk.axis_iter(Axis(1)))
+                .zip(jones_to.outer_iter_mut())
+                .for_each(|((jones_chunk, weight_chunk), mut jones_to)| {
+                    i_tile2 += 1;
+                    if i_tile2 == num_tiles {
+                        i_tile1 += 1;
+                        i_tile2 = i_tile1 + 1;
+                    }
+
+                    jones_chunk
+                        .axis_chunks_iter(Axis(1), avg_freq)
+                        .zip(weight_chunk.axis_chunks_iter(Axis(1), avg_freq))
+                        .zip(jones_to.iter_mut())
+                        .for_each(|((jones_chunk, weight_chunk), jones_to)| {
+                            let mut jones_weighted_sum = Jones::default();
+                            let mut weight_sum = 0.0;
+
+                            // iterate through time chunks
+                            jones_chunk
+                                .outer_iter()
+                                .zip(weight_chunk.outer_iter())
+                                .for_each(|(jones_chunk, weights_chunk)| {
+                                    jones_chunk.iter().zip(weights_chunk.iter()).for_each(
+                                        |(jones, weight)| {
+                                            // Any flagged
+                                            // visibilities would
+                                            // have a weight <= 0,
+                                            // but we've already
+                                            // capped them to 0.
+                                            // This means we don't
+                                            // need to check the
+                                            // value of the weight
+                                            // when accumulating
+                                            // unflagged
+                                            // visibilities; the
+                                            // flagged ones
+                                            // contribute nothing.
+
+                                            let jones = Jones::<f64>::from(*jones);
+                                            let weight = *weight as f64;
+                                            jones_weighted_sum += jones * weight;
+                                            weight_sum += weight;
+                                        },
+                                    );
+                                });
+
+                            if weight_sum > 0.0 {
+                                *jones_to = Jones::from(jones_weighted_sum / weight_sum);
+                            }
+                        });
+                });
+        });
+}
+
+fn weights_average(weight_from: ArrayView3<f32>, mut weight_to: ArrayViewMut3<f32>) {
+    let from_dims = weight_from.dim();
+    let (time_axis, baseline_axis, freq_axis) = (Axis(0), Axis(1), Axis(2));
+    let avg_time = weight_from.len_of(time_axis) / weight_to.len_of(time_axis);
+    let avg_freq = weight_from.len_of(freq_axis) / weight_to.len_of(freq_axis);
+
+    assert_eq!(from_dims, weight_from.dim());
+    let to_dims = weight_to.dim();
+    assert_eq!(
+        to_dims,
+        (
+            (from_dims.0 as f64 / avg_time as f64).floor() as usize,
+            from_dims.1,
+            (from_dims.2 as f64 / avg_freq as f64).floor() as usize,
+        )
+    );
+    assert_eq!(to_dims, weight_to.dim());
+
+    let num_tiles =
+        num_tiles_from_num_cross_correlation_baselines(weight_from.len_of(baseline_axis));
+    assert_eq!(
+        (num_tiles * (num_tiles - 1)) / 2,
+        weight_from.len_of(baseline_axis)
+    );
+
+    // iterate along time axis in chunks of avg_time
+    weight_from
+        .axis_chunks_iter(time_axis, avg_time)
+        .zip(weight_to.outer_iter_mut())
+        .for_each(|(weight_chunk, mut weight_to)| {
+            // iterate along baseline axis
+            let mut i_tile1 = 0;
+            let mut i_tile2 = 0;
+            weight_chunk
+                .axis_iter(Axis(1))
+                .zip(weight_to.outer_iter_mut())
+                .for_each(|(weight_chunk, mut weight_to)| {
+                    i_tile2 += 1;
+                    if i_tile2 == num_tiles {
+                        i_tile1 += 1;
+                        i_tile2 = i_tile1 + 1;
+                    }
+
+                    weight_chunk
+                        .axis_chunks_iter(Axis(1), avg_freq)
+                        .zip(weight_to.iter_mut())
+                        .for_each(|(weight_chunk, weight_to)| {
+                            let mut weight_sum = 0.0;
+
+                            // iterate through time chunks
+                            weight_chunk.outer_iter().for_each(|weights_chunk| {
+                                weights_chunk.iter().for_each(|weight| {
+                                    // Any flagged visibilities would have a
+                                    // weight <= 0, but we've already capped
+                                    // them to 0. This means we don't need to
+                                    // check the value of the weight when
+                                    // accumulating unflagged visibilities; the
+                                    // flagged ones contribute nothing.
+
+                                    let weight = *weight as f64;
+                                    weight_sum += weight;
+                                });
+                            });
+
+                            if weight_sum > 0.0 {
+                                *weight_to = weight_sum as f32;
+                            }
+                        });
+                });
+        });
 }
 
 // /// Rotate the provided visibilities to the given phase centre. This function
@@ -1879,7 +2081,7 @@ fn vis_rotate2(
     tile_ws_from: ArrayView2<W>,
     mut tile_ws_to: ArrayViewMut2<W>,
     lmsts: &[f64],
-    fine_chan_freqs: &[f64],
+    fine_chan_lambdas_m: &[f64],
 ) {
     let num_tiles = tile_xyzs.len_of(Axis(1));
     assert_eq!(tile_ws_from.len_of(Axis(1)), num_tiles);
@@ -1926,14 +2128,84 @@ fn vis_rotate2(
                         tile2_w_to = tile_ws_to[i_tile2];
 
                         let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
-                        let arg = -TAU * w_diff / VEL_C;
+                        let arg = -TAU * w_diff;
                         // iterate along frequency axis
                         jones_array
                             .iter()
                             .zip(jones_array2.iter_mut())
-                            .zip(fine_chan_freqs.iter())
-                            .for_each(|((jones, jones2), &freq_hz)| {
-                                let rotation = Complex::cis(arg * freq_hz);
+                            .zip(fine_chan_lambdas_m.iter())
+                            .for_each(|((jones, jones2), lambda_m)| {
+                                let rotation = Complex::cis(arg / *lambda_m);
+                                *jones2 = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
+                            });
+                    });
+            },
+        );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn vis_rotate2_serial(
+    jones_array: ArrayView3<Jones<f32>>,
+    mut jones_array2: ArrayViewMut3<Jones<f32>>,
+    phase_to: RADec,
+    tile_xyzs: ArrayView2<XyzGeodetic>,
+    tile_ws_from: ArrayView2<W>,
+    mut tile_ws_to: ArrayViewMut2<W>,
+    lmsts: &[f64],
+    fine_chan_lambdas_m: &[f64],
+) {
+    let num_tiles = tile_xyzs.len_of(Axis(1));
+    assert_eq!(tile_ws_from.len_of(Axis(1)), num_tiles);
+    assert_eq!(tile_ws_to.len_of(Axis(1)), num_tiles);
+
+    // iterate along time axis in chunks of avg_time
+    jones_array
+        .outer_iter()
+        .zip(jones_array2.outer_iter_mut())
+        .zip(tile_ws_from.outer_iter())
+        .zip(tile_ws_to.outer_iter_mut())
+        .zip(tile_xyzs.outer_iter())
+        .zip(lmsts.iter())
+        .for_each(
+            |(
+                ((((jones_array, mut jones_array2), tile_ws_from), mut tile_ws_to), tile_xyzs),
+                lmst,
+            )| {
+                assert_eq!(tile_ws_from.len(), num_tiles);
+                // Generate the "to" Ws.
+                let phase_to = phase_to.to_hadec(*lmst);
+                setup_ws(tile_ws_to.view_mut(), tile_xyzs.view(), phase_to);
+
+                // iterate along baseline axis
+                let mut i_tile1 = 0;
+                let mut i_tile2 = 0;
+                let mut tile1_w_from = tile_ws_from[i_tile1];
+                let mut tile2_w_from = tile_ws_from[i_tile2];
+                let mut tile1_w_to = tile_ws_to[i_tile1];
+                let mut tile2_w_to = tile_ws_to[i_tile2];
+                jones_array
+                    .outer_iter()
+                    .zip(jones_array2.outer_iter_mut())
+                    .for_each(|(jones_array, mut jones_array2)| {
+                        i_tile2 += 1;
+                        if i_tile2 == num_tiles {
+                            i_tile1 += 1;
+                            i_tile2 = i_tile1 + 1;
+                            tile1_w_from = tile_ws_from[i_tile1];
+                            tile1_w_to = tile_ws_to[i_tile1];
+                        }
+                        tile2_w_from = tile_ws_from[i_tile2];
+                        tile2_w_to = tile_ws_to[i_tile2];
+
+                        let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
+                        let arg = -TAU * w_diff;
+                        // iterate along frequency axis
+                        jones_array
+                            .iter()
+                            .zip(jones_array2.iter_mut())
+                            .zip(fine_chan_lambdas_m.iter())
+                            .for_each(|((jones, jones2), lambda_m)| {
+                                let rotation = Complex::cis(arg / *lambda_m);
                                 *jones2 = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
                             });
                     });
@@ -1947,7 +2219,7 @@ fn apply_iono(
     mut jones: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
     const_lm: (f64, f64),
-    freqs_hz: &[f64],
+    lambdas_m: &[f64],
 ) {
     let num_tiles = tile_uvs.len_of(Axis(1));
 
@@ -1971,18 +2243,20 @@ fn apply_iono(
                     i_tile2 = i_tile1 + 1;
                 }
 
-                let uv = tile_uvs[i_tile1] - tile_uvs[i_tile2];
-                let arg = -TAU * (uv.u * const_lm.0 + uv.v * const_lm.1) * VEL_C;
+                let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
+                let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
                 // iterate along frequency axis
-                jones.iter_mut().zip(freqs_hz).for_each(|(jones, freq_hz)| {
-                    // The baseline UV is in units of metres, so we need to
-                    // divide by λ to use it in an exponential. But we're also
-                    // multiplying by λ², so just multiply by λ (divide by
-                    // frequency).
-                    let rotation = Complex::cis(arg / *freq_hz);
-                    let rotation = Complex::new(rotation.re as f32, rotation.im as f32);
-                    *jones *= rotation;
-                });
+                jones
+                    .iter_mut()
+                    .zip(lambdas_m.iter())
+                    .for_each(|(jones, lambda_m)| {
+                        let j = Jones::<f64>::from(*jones);
+                        // The baseline UV is in units of metres, so we need to
+                        // divide by λ to use it in an exponential. But we're
+                        // also multiplying by λ², so just multiply by λ.
+                        let rotation = Complex::cis(arg * *lambda_m);
+                        *jones = Jones::from(j * rotation);
+                    });
             });
         });
 }
@@ -1994,14 +2268,13 @@ fn apply_iono2(
     mut jones_to: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
     const_lm: (f64, f64),
-    freqs_hz: &[f64],
+    lambdas_m: &[f64],
 ) {
     let num_tiles = tile_uvs.len_of(Axis(1));
 
     // iterate along time axis
     jones_from
         .outer_iter()
-        .into_par_iter()
         .zip(jones_to.outer_iter_mut())
         .zip(tile_uvs.outer_iter())
         .for_each(|((jones_from, mut jones_to), tile_uvs)| {
@@ -2022,21 +2295,78 @@ fn apply_iono2(
                         i_tile2 = i_tile1 + 1;
                     }
 
-                    let uv = tile_uvs[i_tile1] - tile_uvs[i_tile2];
-                    let arg = -TAU * (uv.u * const_lm.0 + uv.v * const_lm.1) * VEL_C;
+                    let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
+                    let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
                     // iterate along frequency axis
                     jones_from
                         .iter()
                         .zip(jones_to.iter_mut())
-                        .zip(freqs_hz)
-                        .for_each(|((jones_from, jones_to), freq_hz)| {
-                            // The baseline UV is in units of metres, so we need to
-                            // divide by λ to use it in an exponential. But we're also
-                            // multiplying by λ², so just multiply by λ (divide by
-                            // frequency).
-                            let rotation = Complex::cis(arg / *freq_hz);
-                            let rotation = Complex::new(rotation.re as f32, rotation.im as f32);
-                            *jones_to = *jones_from * rotation;
+                        .zip(lambdas_m.iter())
+                        .for_each(|((jones_from, jones_to), lambda_m)| {
+                            let j = Jones::<f64>::from(*jones_from);
+                            // The baseline UV is in units of metres, so we need
+                            // to divide by λ to use it in an exponential. But
+                            // we're also multiplying by λ², so just multiply by
+                            // λ.
+                            let rotation = Complex::cis(arg * *lambda_m);
+                            *jones_to = Jones::from(j * rotation);
+                        });
+                });
+        });
+}
+
+fn apply_iono3(
+    vis_model: ArrayView3<Jones<f32>>,
+    mut vis_residual: ArrayViewMut3<Jones<f32>>,
+    tile_uvs: ArrayView2<UV>,
+    const_lm: (f64, f64),
+    lambdas_m: &[f64],
+) {
+    let num_tiles = tile_uvs.len_of(Axis(1));
+
+    // iterate along time axis
+    vis_model
+        .outer_iter()
+        .into_par_iter()
+        .zip(vis_residual.outer_iter_mut())
+        .zip(tile_uvs.outer_iter())
+        .for_each(|((vis_model, mut vis_residual), tile_uvs)| {
+            // Just in case the compiler can't understand how an ndarray is laid
+            // out.
+            assert_eq!(tile_uvs.len(), num_tiles);
+
+            // iterate along baseline axis
+            let mut i_tile1 = 0;
+            let mut i_tile2 = 0;
+            vis_model
+                .outer_iter()
+                .zip(vis_residual.outer_iter_mut())
+                .for_each(|(vis_model, mut vis_residual)| {
+                    i_tile2 += 1;
+                    if i_tile2 == num_tiles {
+                        i_tile1 += 1;
+                        i_tile2 = i_tile1 + 1;
+                    }
+
+                    let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
+                    let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
+                    // iterate along frequency axis
+                    vis_model
+                        .iter()
+                        .zip(vis_residual.iter_mut())
+                        .zip(lambdas_m.iter())
+                        .for_each(|((vis_model, vis_residual), lambda_m)| {
+                            let mut j = Jones::<f64>::from(*vis_residual);
+                            let mut m = Jones::<f64>::from(*vis_model);
+                            j += m;
+
+                            // The baseline UV is in units of metres, so we need
+                            // to divide by λ to use it in an exponential. But
+                            // we're also multiplying by λ², so just multiply by
+                            // λ.
+                            let rotation = Complex::cis(arg * *lambda_m);
+                            m *= rotation;
+                            *vis_residual = Jones::from(j - m);
                         });
                 });
         });
@@ -2121,7 +2451,7 @@ fn get_offsets_rts(
     weights: ArrayView3<f32>,
     model: ArrayView3<Jones<f32>>,
     tile_xyzs: &[XyzGeodetic],
-    freqs_hz: &[f64],
+    lambdas_m: &[f64],
     tile_uvs_low_res: &[UV],
 ) -> (f64, f64) {
     let num_tiles = tile_xyzs.len();
@@ -2143,9 +2473,8 @@ fn get_offsets_rts(
                 .axis_iter(Axis(1))
                 .zip(weights.axis_iter(Axis(1)))
                 .zip(model.axis_iter(Axis(1)))
-                .zip(freqs_hz.iter())
-                .for_each(|(((residual, weights), model), freq_hz)| {
-                    let lambda = VEL_C / freq_hz;
+                .zip(lambdas_m.iter())
+                .for_each(|(((residual, weights), model), &lambda)| {
                     // lambda^2
                     let lambda_2 = lambda * lambda;
                     // lambda^4
@@ -2319,8 +2648,11 @@ fn peel(
     iono_consts: &mut [(f64, f64)],
     source_weighted_positions: &[RADec],
     num_sources_to_iono_subtract: usize,
+    num_sources_to_iono_subtract_in_serial: usize,
     all_fine_chan_freqs_hz: &[f64],
     low_res_freqs_hz: &[f64],
+    all_fine_chan_lambdas_m: &[f64],
+    low_res_lambdas_m: &[f64],
     obs_context: &ObsContext,
     array_position: LatLngHeight,
     unflagged_tile_xyzs: &[XyzGeodetic],
@@ -2331,7 +2663,8 @@ fn peel(
     no_precession: bool,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
-    // TODO: Overhaul ObsContext.
+    let num_threads = rayon::current_num_threads();
+    // let n_threads = 12;
 
     let timestamps = &timeblock.timestamps;
     let peel_progress = multi_progress_bar.add(
@@ -2371,10 +2704,8 @@ fn peel(
             }
         })
         .unzip();
-    let mut precessed_tile_xyzs = Array2::from_elem(
-        (timestamps.len(), unflagged_tile_xyzs.len()),
-        XyzGeodetic::default(),
-    );
+    let mut precessed_tile_xyzs =
+        Array2::from_elem((timestamps.len(), num_tiles), XyzGeodetic::default());
     precessed_tile_xyzs
         .outer_iter_mut()
         .zip(precession_infos.into_iter())
@@ -2403,15 +2734,19 @@ fn peel(
     // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
     let short_baseline_sigma = 20.;
     // TODO: Do we care about weights changing over time?
-    let weight_synth = get_weights_rts(
-        tile_uvs_high_res.view(),
-        all_fine_chan_freqs_hz,
-        short_baseline_sigma,
-        (obs_context.guess_freq_res() / FREQ_WEIGHT_FACTOR)
-            * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
-    );
+    let iono_taper_weights = {
+        let mut iono_taper = get_weights_rts(
+            tile_uvs_high_res.view(),
+            all_fine_chan_lambdas_m,
+            short_baseline_sigma,
+            (obs_context.guess_freq_res() / FREQ_WEIGHT_FACTOR)
+                * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
+        );
+        iono_taper *= &vis_weights;
+        iono_taper
+    };
 
-    let mut tile_ws_from = Array2::default((timestamps.len(), unflagged_tile_xyzs.len()));
+    let mut tile_ws_from = Array2::default((timestamps.len(), num_tiles));
     let mut tile_ws_to = tile_ws_from.clone();
     // Set up the first set of Ws at the phase centre.
     tile_ws_from
@@ -2461,18 +2796,64 @@ fn peel(
     let mut weight_residual_low_res: Array3<f32> = Array3::zeros(vis_residual_low_res.dim());
     let low_res_vis_dims = vis_residual_low_res.dim();
 
+    // The low-res weights only need to be populated once.
+    weights_average(vis_weights.view(), weight_residual_low_res.view_mut());
+
     // ///////// //
     // PEEL LOOP //
     // ///////// //
 
     let error = AtomicCell::new(false);
-    let (tx_high_res_model, rx_high_res_model) = bounded(2);
+    let (tx_high_res_model, rx_high_res_model) = bounded(num_threads);
     let (tx_low_res_model, rx_low_res_model) = bounded(2);
     thread::scope(|scope| {
-        let model_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
+        let low_res_model_handle: ScopedJoinHandle<Result<(), ModelError>> = scope.spawn(|| {
             defer_on_unwind! { error.store(true); }
 
-            // Set up the modeller objects.
+            let mut low_res_modeller = new_sky_modeller(
+                matches!(modeller_info, ModellerInfo::Cpu),
+                beam.deref(),
+                &SourceList::new(),
+                unflagged_tile_xyzs,
+                low_res_freqs_hz,
+                flagged_tiles,
+                RADec::default(),
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                dut1,
+                !no_precession,
+            )?;
+
+            for ((source_name, source), source_phase_centre) in source_list
+                .iter()
+                .take(num_sources_to_iono_subtract)
+                .zip_eq(source_weighted_positions.iter())
+            {
+                // Should we continue?
+                if error.load() {
+                    return Ok(());
+                }
+
+                trace!(
+                    "Modelling '{source_name}' in low res, weighted position {source_phase_centre}"
+                );
+                let mut vis_model_low_res = Array3::zeros(low_res_vis_dims);
+                low_res_modeller.update_with_a_source(source, *source_phase_centre)?;
+                model_timesteps(
+                    low_res_modeller.deref_mut(),
+                    &[average_timestamp],
+                    vis_model_low_res.view_mut(),
+                )?;
+                tx_low_res_model.send(vis_model_low_res).unwrap();
+            }
+
+            drop(tx_low_res_model);
+            Ok(())
+        });
+
+        let high_res_model_handle: ScopedJoinHandle<Result<(), ModelError>> = scope.spawn(|| {
+            defer_on_unwind! { error.store(true); }
+
             let mut high_res_modeller = match modeller_info {
                 ModellerInfo::Cpu => {
                     let phase_centre = RADec::default();
@@ -2518,25 +2899,14 @@ fn peel(
                 },
             };
 
-            let mut low_res_modeller = new_sky_modeller(
-                matches!(modeller_info, ModellerInfo::Cpu),
-                beam.deref(),
-                &SourceList::new(),
-                unflagged_tile_xyzs,
-                low_res_freqs_hz,
-                flagged_tiles,
-                RADec::default(),
-                array_position.longitude_rad,
-                array_position.latitude_rad,
-                dut1,
-                !no_precession,
-            )
-            .unwrap();
-
             // Set up the high-res model UVWs once and re-use them.
+            // The UVWs for every timestep will be the same (because the phase
+            // centres are always the same). Make these ahead of time for
+            // efficiency.
             let high_res_uvws = {
                 let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
-                let mut tile_uvws = vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
+                let mut tile_uvws =
+                    vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
                 uvws.outer_iter_mut()
                     .zip(precessed_tile_xyzs.outer_iter())
                     .zip(lmsts.iter())
@@ -2562,23 +2932,37 @@ fn peel(
                     });
                 uvws
             };
-            // If we're modelling with CUDA, we can allocate to the device
-            // now and re-use the pointers.
+
+            // If we're modelling with CUDA, we can allocate UVWs to the device
+            // once, now, and re-use the pointers.
             #[cfg(feature = "cuda")]
             match high_res_modeller.as_mut() {
                 Either::Right((_, d_uvws)) => {
+                    // One pointer per timestep.
                     *d_uvws = Vec::with_capacity(high_res_uvws.len_of(Axis(0)));
+                    // Temp vector to store results.
+                    let mut cuda_uvws = vec![
+                        crate::cuda::UVW {
+                            u: 0.0,
+                            v: 0.0,
+                            w: 0.0
+                        };
+                        high_res_uvws.len_of(Axis(1))
+                    ];
                     for uvws in high_res_uvws.outer_iter() {
-                        let uvws = uvws
-                            .iter()
-                            .map(|uvw| crate::cuda::UVW {
-                                u: uvw.u as _,
-                                v: uvw.v as _,
-                                w: uvw.w as _,
-                            })
-                            .collect::<Vec<_>>();
+                        // Convert the type and push the results to the device,
+                        // saving the resulting pointer.
+                        uvws.iter()
+                            .zip_eq(cuda_uvws.iter_mut())
+                            .for_each(|(uvw, cuda_uvw)| {
+                                *cuda_uvw = crate::cuda::UVW {
+                                    u: uvw.u as _,
+                                    v: uvw.v as _,
+                                    w: uvw.w as _,
+                                }
+                            });
                         unsafe {
-                            d_uvws.push(crate::cuda::DevicePointer::copy_to_device(&uvws)?);
+                            d_uvws.push(crate::cuda::DevicePointer::copy_to_device(&cuda_uvws)?);
                         }
                     }
                 }
@@ -2591,25 +2975,16 @@ fn peel(
                 .take(num_sources_to_iono_subtract)
                 .zip_eq(source_weighted_positions.iter())
             {
-                trace!("Modelling '{source_name}', weighted position {source_phase_centre}");
-                let mut vis_model_low_res = Array3::zeros(low_res_vis_dims);
-                low_res_modeller
-                    .update_with_a_source(source, *source_phase_centre)
-                    .unwrap();
-                model_timesteps(
-                    low_res_modeller.deref_mut(),
-                    &[average_timestamp],
-                    vis_model_low_res.view_mut(),
-                )
-                .unwrap();
-                tx_low_res_model.send(vis_model_low_res).unwrap();
+                // Should we continue?
+                if error.load() {
+                    return Ok(());
+                }
 
+                trace!("Modelling '{source_name}' in high res, weighted position {source_phase_centre}");
                 let mut vis_model_high_res = Array3::zeros(high_res_vis_dims);
                 match high_res_modeller.as_mut() {
                     Either::Left(high_res_modeller) => {
-                        high_res_modeller
-                            .update_with_a_source(source, obs_context.phase_centre)
-                            .unwrap();
+                        high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
                         model_timesteps(
                             high_res_modeller,
                             timestamps,
@@ -2619,8 +2994,7 @@ fn peel(
                     }
                     Either::Right((high_res_cuda_modeller, d_uvws)) => {
                         high_res_cuda_modeller
-                            .update_with_a_source(source, obs_context.phase_centre)
-                            .unwrap();
+                            .update_with_a_source(source, obs_context.phase_centre)?;
                         vis_model_high_res
                             .outer_iter_mut()
                             .zip(d_uvws.iter())
@@ -2636,19 +3010,27 @@ fn peel(
                 tx_high_res_model.send(vis_model_high_res).unwrap();
             }
 
+            drop(tx_high_res_model);
             Ok(())
         });
 
-        let peel_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
+        let peel_handle: ScopedJoinHandle<Result<(), ModelError>> = scope.spawn(|| {
             defer_on_unwind! { error.store(true); }
 
             let mut vis_model_low_res_tmp: Array3<Jones<f32>> = vis_residual_low_res.clone();
+            let n_serial = num_sources_to_iono_subtract_in_serial.min(num_sources_to_iono_subtract);
+
             for ((source_name, iono_consts), source_phase_centre) in source_list
                 .keys()
-                .take(num_sources_to_iono_subtract)
-                .zip_eq(iono_consts.iter_mut())
-                .zip_eq(source_weighted_positions.iter().copied())
+                .take(n_serial)
+                .zip_eq(iono_consts.iter_mut().take(n_serial))
+                .zip_eq(source_weighted_positions.iter().take(n_serial).copied())
             {
+                // Should we continue?
+                if error.load() {
+                    return Ok(());
+                }
+
                 let start = std::time::Instant::now();
 
                 debug!(
@@ -2670,14 +3052,13 @@ fn peel(
                     tile_ws_from.view(),
                     tile_ws_to.view_mut(),
                     &lmsts,
-                    all_fine_chan_freqs_hz,
+                    all_fine_chan_lambdas_m,
                 );
                 trace!("{:?}: vis_average", std::time::Instant::now() - start);
-                vis_average(
+                vis_average2(
                     vis_residual_tmp.view(),
                     vis_residual_low_res.view_mut(),
-                    weight_synth.view(),
-                    weight_residual_low_res.view_mut(),
+                    iono_taper_weights.view(),
                 );
                 trace!("{:?}: add low-res model", std::time::Instant::now() - start);
 
@@ -2731,7 +3112,7 @@ fn peel(
                             vis_model_low_res_tmp.view_mut(),
                             tile_uvs_low_res.view(),
                             *iono_consts,
-                            low_res_freqs_hz,
+                            low_res_lambdas_m,
                         );
                     }
 
@@ -2740,7 +3121,7 @@ fn peel(
                         weight_residual_low_res.view(),
                         vis_model_low_res_tmp.view(),
                         average_precessed_tile_xyzs.as_slice().unwrap(),
-                        low_res_freqs_hz,
+                        low_res_lambdas_m,
                         tile_uvs_low_res.as_slice().unwrap(),
                     );
                     trace!("offsets: {offsets:?}");
@@ -2753,43 +3134,20 @@ fn peel(
                         break;
                     }
                 }
-                trace!(
-                    "{:?}: add high-res model source",
-                    std::time::Instant::now() - start
-                );
+                trace!("{:?}: apply_iono3", std::time::Instant::now() - start);
 
                 // /////////////// //
                 // UPDATE RESIDUAL //
                 // /////////////// //
                 // at higher resolution, unpeel old model, then re-peel correctly rotated model.
-                let mut vis_model = rx_high_res_model.recv().unwrap();
-                vis_residual
-                    .outer_iter_mut()
-                    // // Doing this in parallel is only slightly faster, but it is
-                    // // faster.
-                    // .into_par_iter()
-                    .zip(vis_model.outer_iter())
-                    .for_each(|(mut vis_residual, vis_model)| {
-                        vis_residual += &vis_model;
-                    });
-                trace!("{:?}: apply_iono", std::time::Instant::now() - start);
-                apply_iono(
-                    vis_model.view_mut(),
+                let vis_model = rx_high_res_model.recv().unwrap();
+                apply_iono3(
+                    vis_model.view(),
+                    vis_residual.view_mut(),
                     tile_uvs_high_res.view(),
                     *iono_consts,
-                    all_fine_chan_freqs_hz,
+                    all_fine_chan_lambdas_m,
                 );
-                trace!(
-                    "{:?}: remove high-res model source",
-                    std::time::Instant::now() - start
-                );
-                vis_residual
-                    .outer_iter_mut()
-                    // .into_par_iter()
-                    .zip(vis_model.outer_iter())
-                    .for_each(|(mut vis_residual, vis_model)| {
-                        vis_residual -= &vis_model;
-                    });
                 trace!("{:?}: end source loop", std::time::Instant::now() - start);
 
                 // ////// //
@@ -2809,11 +3167,213 @@ fn peel(
 
                 peel_progress.inc(1);
             }
+            drop(vis_residual_tmp);
+            drop(vis_residual_low_res);
+            drop(tile_ws_to);
+
+            // Parallel iono subtraction.
+            let mut n_skip = n_serial;
+
+            // Prepare temp arrays and modellers for each thread.
+            let mut vis_residual_tmps: Vec<Array3<Jones<f32>>> = (0..num_threads)
+                .into_iter()
+                .map(|_| Array3::zeros(vis_residual.dim()))
+                .collect();
+            let mut vis_residual_low_ress: Vec<Array3<Jones<f32>>> = (0..num_threads)
+                .into_iter()
+                .map(|_| Array3::zeros(low_res_vis_dims))
+                .collect();
+            let mut vis_model_low_ress: Vec<Array3<Jones<f32>>> = (0..num_threads)
+                .into_iter()
+                .map(|_| Array3::zeros(low_res_vis_dims))
+                .collect();
+            let mut vis_model_low_res_tmps: Vec<Array3<Jones<f32>>> = (0..num_threads)
+                .into_iter()
+                .map(|_| Array3::zeros(low_res_vis_dims))
+                .collect();
+            let mut tile_uvs_low_ress: Vec<Array2<UV>> = (0..num_threads)
+                .into_iter()
+                .map(|_| Array2::default((1, num_tiles)))
+                .collect();
+            let mut tile_ws_tos: Vec<Array2<W>> = (0..num_threads)
+                .into_iter()
+                .map(|_| Array2::default((timestamps.len(), num_tiles)))
+                .collect();
+            let mut low_res_modellers: Vec<Box<dyn SkyModeller>> = (0..num_threads)
+                .into_iter()
+                .map(|_| {
+                    new_sky_modeller(
+                        matches!(modeller_info, ModellerInfo::Cpu),
+                        beam.deref(),
+                        &SourceList::new(),
+                        unflagged_tile_xyzs,
+                        low_res_freqs_hz,
+                        flagged_tiles,
+                        RADec::default(),
+                        array_position.longitude_rad,
+                        array_position.latitude_rad,
+                        dut1,
+                        !no_precession,
+                    )
+                    .unwrap()
+                })
+                .collect();
+
+            for source_list_chunk in &source_list.iter().skip(n_skip).chunks(num_threads) {
+                // TODO: clean this mess up.
+                let source_list_chunk: Vec<(&String, &Source)> =
+                    source_list_chunk.into_iter().collect();
+                source_list_chunk
+                    .par_iter()
+                    .zip_eq(
+                        iono_consts
+                            .par_iter_mut()
+                            .skip(n_skip)
+                            .take(source_list_chunk.len()),
+                    )
+                    .zip_eq(
+                        source_weighted_positions
+                            .par_iter()
+                            .skip(n_skip)
+                            .take(source_list_chunk.len())
+                            .copied(),
+                    )
+                    .zip_eq(
+                        vis_residual_tmps
+                            .par_iter_mut()
+                            .take(source_list_chunk.len()),
+                    )
+                    .zip_eq(
+                        vis_residual_low_ress
+                            .par_iter_mut()
+                            .take(source_list_chunk.len()),
+                    )
+                    .zip_eq(
+                        vis_model_low_ress
+                            .par_iter_mut()
+                            .take(source_list_chunk.len()),
+                    )
+                    .zip_eq(
+                        vis_model_low_res_tmps
+                            .par_iter_mut()
+                            .take(source_list_chunk.len()),
+                    )
+                    .zip_eq(
+                        tile_uvs_low_ress
+                            .par_iter_mut()
+                            .take(source_list_chunk.len()),
+                    )
+                    .zip_eq(tile_ws_tos.par_iter_mut().take(source_list_chunk.len()))
+                    .zip_eq(
+                        low_res_modellers
+                            .par_iter_mut()
+                            .take(source_list_chunk.len()),
+                    )
+                    .for_each(
+                        |(
+                            (
+                                (
+                                    (
+                                        (
+                                            (
+                                                (
+                                                    (
+                                                        ((source_name, source), iono_consts),
+                                                        source_phase_centre,
+                                                    ),
+                                                    vis_residual_tmp,
+                                                ),
+                                                vis_residual_low_res,
+                                            ),
+                                            vis_model_low_res,
+                                        ),
+                                        vis_model_low_res_tmp,
+                                    ),
+                                    tile_uvs_low_res,
+                                ),
+                                tile_ws_to,
+                            ),
+                            low_res_modeller,
+                        )| {
+                            low_res_modeller
+                                .update_with_a_source(source, source_phase_centre)
+                                .unwrap();
+                            low_res_modeller
+                                .model_timestep(
+                                    vis_model_low_res.slice_mut(s![0, .., ..]),
+                                    average_timestamp,
+                                )
+                                .unwrap();
+
+                            // Pre-compute tile UVs.
+                            tile_uvs_low_res
+                                .outer_iter_mut()
+                                .zip(average_precessed_tile_xyzs.outer_iter())
+                                .for_each(|(mut tile_uvs, tile_xyzs)| {
+                                    let phase_centre = source_phase_centre.to_hadec(average_lmst);
+                                    setup_uvs(
+                                        tile_uvs.as_slice_mut().unwrap(),
+                                        tile_xyzs.as_slice().unwrap(),
+                                        phase_centre,
+                                    );
+                                });
+
+                            let start = std::time::Instant::now();
+                            iono_sub_parallel(
+                                vis_residual.view(),
+                                vis_residual_low_res.view_mut(),
+                                weight_residual_low_res.view(),
+                                iono_taper_weights.view(),
+                                vis_residual_tmp.view_mut(),
+                                vis_model_low_res.view(),
+                                vis_model_low_res_tmp.view_mut(),
+                                iono_consts,
+                                source_phase_centre,
+                                precessed_tile_xyzs.view(),
+                                &lmsts,
+                                average_precessed_tile_xyzs.view(),
+                                tile_ws_from.view(),
+                                tile_ws_to.view_mut(),
+                                tile_uvs_low_res.view(),
+                                all_fine_chan_lambdas_m,
+                                low_res_lambdas_m,
+                            );
+                            trace!(
+                                "iono subbed {source_name} in {:?}",
+                                std::time::Instant::now() - start
+                            );
+
+                            peel_progress.inc(1);
+                        },
+                    );
+
+                // /////////////// //
+                // UPDATE RESIDUAL //
+                // /////////////// //
+                // at higher resolution, unpeel old model, then re-peel correctly rotated model.
+                for iono_consts in iono_consts
+                    .iter()
+                    .skip(n_skip)
+                    .take(source_list_chunk.len())
+                {
+                    let vis_model = rx_high_res_model.recv().unwrap();
+                    apply_iono3(
+                        vis_model.view(),
+                        vis_residual.view_mut(),
+                        tile_uvs_high_res.view(),
+                        *iono_consts,
+                        all_fine_chan_lambdas_m,
+                    );
+                }
+
+                n_skip += source_list_chunk.len();
+            }
 
             Ok(())
         });
 
-        model_handle.join().unwrap().unwrap();
+        low_res_model_handle.join().unwrap().unwrap();
+        high_res_model_handle.join().unwrap().unwrap();
         peel_handle.join().unwrap().unwrap();
     });
 
@@ -3020,4 +3580,97 @@ pub(crate) enum PeelError {
     #[cfg(feature = "cuda")]
     #[error(transparent)]
     Cuda(#[from] crate::cuda::CudaError),
+}
+
+fn iono_sub_parallel(
+    vis_residual: ArrayView3<Jones<f32>>,
+    mut vis_residual_low_res: ArrayViewMut3<Jones<f32>>,
+    weight_residual_low_res: ArrayView3<f32>,
+    iono_taper_weights: ArrayView3<f32>,
+    mut vis_residual_tmp: ArrayViewMut3<Jones<f32>>,
+    vis_model_low_res: ArrayView3<Jones<f32>>,
+    mut vis_model_low_res_tmp: ArrayViewMut3<Jones<f32>>,
+    iono_consts: &mut (f64, f64),
+    source_phase_centre: RADec,
+    tile_xyzs: ArrayView2<XyzGeodetic>,
+    lmsts: &[f64],
+    average_tile_xyzs: ArrayView2<XyzGeodetic>,
+    tile_ws_from: ArrayView2<W>,
+    mut tile_ws_to: ArrayViewMut2<W>,
+    tile_uvs_low_res: ArrayView2<UV>,
+    all_fine_chan_lambdas_m: &[f64],
+    low_res_lambdas_m: &[f64],
+) {
+    // /////////////////// //
+    // ROTATE, AVERAGE VIS //
+    // /////////////////// //
+
+    // Rotate the residual visibilities to the source phase centre and
+    // average into vis_residual_low_res.
+    vis_rotate2_serial(
+        vis_residual.view(),
+        vis_residual_tmp.view_mut(),
+        source_phase_centre,
+        tile_xyzs,
+        tile_ws_from.view(),
+        tile_ws_to.view_mut(),
+        lmsts,
+        all_fine_chan_lambdas_m,
+    );
+    vis_average2(
+        vis_residual_tmp.view(),
+        vis_residual_low_res.view_mut(),
+        iono_taper_weights,
+    );
+
+    // ///////////// //
+    // UNPEEL SOURCE //
+    // ///////////// //
+    // at lower resolution
+
+    Zip::from(&mut vis_residual_low_res)
+        .and(&mut vis_model_low_res_tmp)
+        .and(&vis_model_low_res)
+        .for_each(|r, t, m| {
+            *r += *m;
+            *t = *m;
+        });
+
+    // ///////////////// //
+    // CALCULATE OFFSETS //
+    // ///////////////// //
+    // iterate towards a convergent solution for ɑ, β
+
+    let mut iteration = 0;
+    while iteration != 10 {
+        iteration += 1;
+
+        // iono rotate model using existing iono consts (if they're
+        // non-zero)
+        if iono_consts.0.abs() > 0.0 || iono_consts.1.abs() > 0.0 {
+            apply_iono2(
+                vis_model_low_res.view(),
+                vis_model_low_res_tmp.view_mut(),
+                tile_uvs_low_res.view(),
+                *iono_consts,
+                low_res_lambdas_m,
+            );
+        }
+
+        let offsets = get_offsets_rts(
+            vis_residual_low_res.view(),
+            weight_residual_low_res.view(),
+            vis_model_low_res_tmp.view(),
+            average_tile_xyzs.as_slice().unwrap(),
+            low_res_lambdas_m,
+            tile_uvs_low_res.as_slice().unwrap(),
+        );
+
+        // if the offset is small, we've converged.
+        iono_consts.0 += offsets.0;
+        iono_consts.1 += offsets.1;
+        if offsets.0.abs() < 1e-12 && offsets.1.abs() < 1e-12 {
+            break;
+        }
+    }
 }

@@ -144,6 +144,10 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_list_coeff_lens: DevicePointer<i32>,
 }
 
+// You're not re-using pointers after they've been sent to another thread,
+// right?
+unsafe impl<'a> Send for SkyModellerCuda<'a> {}
+
 impl<'a> SkyModellerCuda<'a> {
     /// Given a source list, split the components into each component type (e.g.
     /// points, shapelets) and by each flux density type (e.g. list, power law),
