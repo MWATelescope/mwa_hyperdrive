@@ -45,7 +45,7 @@ pub(crate) enum ModellerInfo {
 }
 
 /// An object that simulates sky-model visibilities.
-pub trait SkyModeller<'a> {
+pub trait SkyModeller<'a>: Send {
     /// Update the sky model associated with the `SkyModeller`. All old source
     /// information is destroyed.
     fn update_source_list(
