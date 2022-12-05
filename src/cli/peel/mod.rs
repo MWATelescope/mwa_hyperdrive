@@ -19,7 +19,7 @@ use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Either;
 use itertools::Itertools;
-use log::{debug, info, trace, warn};
+use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR, VEL_C},
     math::num_tiles_from_num_cross_correlation_baselines,
@@ -36,18 +36,28 @@ use vec1::Vec1;
 use crate::{
     averaging::{
         channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
-        timesteps_to_timeblocks, Timeblock,
+        timesteps_to_timeblocks, AverageFactorError, Timeblock,
     },
-    beam::{Beam, BeamError},
+    beam::{create_fee_beam_object, create_no_beam_object, Beam, BeamError, Delays},
+    constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
+    filenames::{InputDataTypes, SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS},
+    glob::get_single_match_from_glob,
     help_texts::*,
-    math::average_epoch,
+    math::{average_epoch, TileBaselineFlags},
+    messages,
     model::{
         new_sky_modeller, ModelError, ModellerInfo, SkyModeller, SkyModellerCpu, SkyModellerCuda,
     },
-    srclist::{ComponentList, SourceList},
+    srclist::{
+        read::read_source_list_file, veto_sources, ComponentList, SourceList, SourceListType,
+    },
+    unit_parsing::WAVELENGTH_FORMATS,
     vis_io::{
-        read::VisReadError,
+        read::{
+            MsReader, RawDataCorrections, RawDataReader, UvfitsReader, VisInputType, VisRead,
+            VisReadError,
+        },
         write::{write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
     HyperdriveError,
@@ -59,7 +69,8 @@ pub(crate) const DEFAULT_TIME_AVERAGE_FACTOR: &str = "8s";
 pub(crate) const DEFAULT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
 pub(crate) const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
 pub(crate) const DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR: &str = "8s";
-pub(crate) const DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR: usize = 1;
+pub(crate) const DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
+pub(crate) const DEFAULT_UVW_MIN: &str = "0λ";
 
 lazy_static::lazy_static! {
     static ref DUT1: Duration = Duration::from_seconds(0.0);
@@ -75,6 +86,10 @@ lazy_static::lazy_static! {
     static ref OUTPUT_TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timeblocks to average together when writing out visibilities. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then 8 timesteps are averaged together as a timeblock in the output visibilities.");
 
     static ref OUTPUT_FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together when writing out visibilities. Also supports a target time resolution (e.g. 80kHz). If this is 0, then all data are averaged together. Default: {DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR}. This is multiplicative with the freq average factor; e.g. If this variable is 4, and the freq average factor is 2, then 8 fine-frequency channels are averaged together as a chanblock in the output visibilities.");
+
+    static ref UVW_MIN_HELP: String = format!("The minimum UVW length to use. This value must have a unit annotated. Allowed units: {}. Default: {DEFAULT_UVW_MIN}", *WAVELENGTH_FORMATS);
+
+    static ref UVW_MAX_HELP: String = format!("The maximum UVW length to use. This value must have a unit annotated. Allowed units: {}. No default.", *WAVELENGTH_FORMATS);
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -99,6 +114,13 @@ pub struct PeelArgs {
 
     #[clap(short, long, multiple_values(true), help = VIS_OUTPUTS_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub outputs: Option<Vec<PathBuf>>,
+
+    /// The number of sources to peel. Peel sources are treated the same as
+    /// "ionospherically subtracted" sources, except before subtracting, a "DI
+    /// calibration" is done between the iono-rotated model and the data. This
+    /// allows for scintillation and any other phase shift to be corrected.
+    #[clap(long = "peel", help_heading = "SKY-MODEL SOURCES", default_value = "0")]
+    pub num_sources_to_peel: usize,
 
     /// The number of sources to "ionospherically subtract". That is, a λ²
     /// dependence is found for each of these sources and removed. The number of
@@ -172,11 +194,11 @@ pub struct PeelArgs {
     #[clap(long, conflicts_with("timesteps"), help_heading = "CALIBRATION")]
     pub use_all_timesteps: bool,
 
-    // #[clap(long, help = UVW_MIN_HELP.as_str(), help_heading = "CALIBRATION")]
-    // pub uvw_min: Option<String>,
+    #[clap(long, help = UVW_MIN_HELP.as_str(), help_heading = "CALIBRATION")]
+    pub uvw_min: Option<String>,
 
-    // #[clap(long, help = UVW_MAX_HELP.as_str(), help_heading = "CALIBRATION")]
-    // pub uvw_max: Option<String>,
+    #[clap(long, help = UVW_MAX_HELP.as_str(), help_heading = "CALIBRATION")]
+    pub uvw_max: Option<String>,
 
     // #[clap(long, help = MAX_ITERATIONS_HELP.as_str(), help_heading = "CALIBRATION")]
     // pub max_iterations: Option<u32>,
@@ -257,13 +279,53 @@ impl PeelArgs {
     }
 
     fn run_inner(self, dry_run: bool) -> Result<(), PeelError> {
+        let PeelArgs {
+            data,
+            source_list,
+            source_list_type,
+            ignore_dut1,
+            outputs,
+            num_sources_to_peel,
+            num_sources_to_iono_subtract,
+            num_sources_to_subtract,
+            source_dist_cutoff,
+            veto_threshold,
+            cpu,
+            beam_file,
+            unity_dipole_gains,
+            delays,
+            no_beam,
+            time_average_factor,
+            freq_average_factor,
+            iono_freq_average_factor,
+            output_time_average_factor,
+            output_freq_average_factor,
+            timesteps,
+            use_all_timesteps,
+            uvw_min,
+            uvw_max,
+            array_position,
+            no_precession,
+            tile_flags,
+            ignore_input_data_tile_flags,
+            ignore_input_data_fine_channel_flags,
+            fine_chan_flags_per_coarse_chan,
+            fine_chan_flags,
+            pfb_flavour,
+            no_digital_gains,
+            no_cable_length_correction,
+            no_geometric_correction,
+            no_progress_bars,
+        } = self;
+
+        if num_sources_to_peel > 0 {
+            warn!("User requested to peel {num_sources_to_peel} source, but source peeling is not implemented yet");
+        }
+
         // Check that the number of sources to peel, iono subtract and subtract
         // are sensible. When that's done, veto up to the maximum number of
         // sources to subtract.
-        let max_num_sources = match (
-            self.num_sources_to_iono_subtract,
-            self.num_sources_to_subtract,
-        ) {
+        let max_num_sources = match (num_sources_to_iono_subtract, num_sources_to_subtract) {
             (Some(is), Some(s)) => {
                 if s < is {
                     panic!("The number of sources to subtract ({s}) must be at least equal to the number of sources to iono subtract ({is})");
@@ -275,84 +337,449 @@ impl PeelArgs {
             (None, None) => None,
         };
 
-        // TODO: Dirty hack
-        let di_cal_args = crate::DiCalArgs {
-            args_file: None,
-            data: self.data.clone(),
-            source_list: self.source_list.clone(),
-            source_list_type: self.source_list_type.clone(),
-            ignore_dut1: self.ignore_dut1,
-            outputs: Some(vec![PathBuf::from("/tmp/hyp_peel_di_sols.fits")]),
-            model_filenames: None,
-            output_model_time_average: None,
-            output_model_freq_average: None,
-            num_sources: max_num_sources,
-            source_dist_cutoff: self.source_dist_cutoff,
-            veto_threshold: self.veto_threshold,
-            beam_file: self.beam_file.clone(),
-            unity_dipole_gains: self.unity_dipole_gains,
-            delays: self.delays.clone(),
-            no_beam: self.no_beam,
-            timesteps_per_timeblock: None,
-            freq_average_factor: self.freq_average_factor.clone(),
-            timesteps: self.timesteps.clone(),
-            use_all_timesteps: self.use_all_timesteps,
-            uvw_min: Some("0L".to_string()),
-            uvw_max: None,
-            max_iterations: None,
-            stop_thresh: None,
-            min_thresh: None,
-            array_position: self.array_position.clone(),
-            no_precession: self.no_precession,
-            cpu: self.cpu,
-            tile_flags: self.tile_flags.clone(),
-            ignore_input_data_tile_flags: self.ignore_input_data_tile_flags,
-            ignore_input_data_fine_channel_flags: self.ignore_input_data_fine_channel_flags,
-            fine_chan_flags_per_coarse_chan: self.fine_chan_flags_per_coarse_chan.clone(),
-            fine_chan_flags: self.fine_chan_flags.clone(),
-            pfb_flavour: self.pfb_flavour.clone(),
-            no_digital_gains: self.no_digital_gains,
-            no_cable_length_correction: self.no_cable_length_correction,
-            no_geometric_correction: self.no_geometric_correction,
-            no_progress_bars: self.no_progress_bars,
+        // If we're going to use a GPU for modelling, get the device info so we
+        // can ensure a CUDA-capable device is available, and so we can report
+        // it to the user later.
+        #[cfg(feature = "cuda")]
+        let modeller_info = if cpu {
+            ModellerInfo::Cpu
+        } else {
+            let (device_info, driver_info) = crate::cuda::get_device_info()?;
+            ModellerInfo::Cuda {
+                device_info,
+                driver_info,
+            }
+        };
+        #[cfg(not(feature = "cuda"))]
+        let modeller_info = ModellerInfo::Cpu;
+
+        // If the user supplied the array position, unpack it here.
+        let array_position = match array_position {
+            Some(pos) => {
+                if pos.len() != 3 {
+                    return Err(PeelError::BadArrayPosition { pos });
+                }
+                Some(LatLngHeight {
+                    longitude_rad: pos[0].to_radians(),
+                    latitude_rad: pos[1].to_radians(),
+                    height_metres: pos[2],
+                })
+            }
+            None => None,
         };
 
-        let PeelArgs {
-            data: _,
-            source_list: _,
-            source_list_type: _,
-            ignore_dut1: _,
-            outputs,
-            num_sources_to_iono_subtract,
-            num_sources_to_subtract: _,
-            source_dist_cutoff: _,
-            veto_threshold: _,
-            cpu: _,
-            beam_file: _,
-            unity_dipole_gains: _,
-            delays: _,
-            no_beam: _,
-            time_average_factor,
-            freq_average_factor,
-            iono_freq_average_factor,
-            output_time_average_factor,
-            output_freq_average_factor,
-            timesteps: _,
-            use_all_timesteps: _,
-            array_position: _,
-            no_precession,
-            tile_flags: _,
-            ignore_input_data_tile_flags: _,
-            ignore_input_data_fine_channel_flags: _,
-            fine_chan_flags_per_coarse_chan: _,
-            fine_chan_flags: _,
-            pfb_flavour: _,
-            no_digital_gains: _,
-            no_cable_length_correction: _,
-            no_geometric_correction: _,
-            no_progress_bars,
-        } = self;
+        // Handle input data. We expect one of three possibilities:
+        // - gpubox files, a metafits file (and maybe mwaf files),
+        // - a measurement set (and maybe a metafits file), or
+        // - uvfits files.
+        // If none or multiple of these possibilities are met, then we must fail.
+        let input_data_types = match data {
+            Some(strings) => InputDataTypes::new(&strings)?,
+            None => return Err(PeelError::NoInputData),
+        };
+        let (input_data, raw_data_corrections): (Box<dyn VisRead>, Option<RawDataCorrections>) =
+            match (
+                input_data_types.metafits,
+                input_data_types.gpuboxes,
+                input_data_types.mwafs,
+                input_data_types.ms,
+                input_data_types.uvfits,
+            ) {
+                // Valid input for reading raw data.
+                (Some(meta), Some(gpuboxes), mwafs, None, None) => {
+                    todo!("need user to supply calibration solutions");
 
+                    // Ensure that there's only one metafits.
+                    let meta = if meta.len() > 1 {
+                        return Err(PeelError::MultipleMetafits(meta));
+                    } else {
+                        meta.first()
+                    };
+
+                    debug!("gpubox files: {:?}", &gpuboxes);
+                    debug!("mwaf files: {:?}", &mwafs);
+
+                    let corrections = RawDataCorrections::new(
+                        pfb_flavour.as_deref(),
+                        !no_digital_gains,
+                        !no_cable_length_correction,
+                        !no_geometric_correction,
+                    )?;
+                    let input_data =
+                        RawDataReader::new(meta, &gpuboxes, mwafs.as_deref(), corrections)?;
+
+                    messages::InputFileDetails::Raw {
+                        obsid: input_data.mwalib_context.metafits_context.obs_id,
+                        gpubox_count: gpuboxes.len(),
+                        metafits_file_name: meta.display().to_string(),
+                        mwaf: input_data.get_flags(),
+                        raw_data_corrections: corrections,
+                    }
+                    .print("Peeling");
+
+                    (Box::new(input_data), Some(corrections))
+                }
+
+                // Valid input for reading a measurement set.
+                (meta, None, None, Some(ms), None) => {
+                    // Only one MS is supported at the moment.
+                    let ms: PathBuf = if ms.len() > 1 {
+                        return Err(PeelError::MultipleMeasurementSets(ms));
+                    } else {
+                        ms.first().clone()
+                    };
+
+                    // Ensure that there's only one metafits.
+                    let meta: Option<&PathBuf> = match meta.as_ref() {
+                        None => None,
+                        Some(m) => {
+                            if m.len() > 1 {
+                                return Err(PeelError::MultipleMetafits(m.clone()));
+                            } else {
+                                Some(m.first())
+                            }
+                        }
+                    };
+
+                    let input_data = MsReader::new(&ms, meta, array_position)?;
+
+                    messages::InputFileDetails::MeasurementSet {
+                        obsid: input_data.get_obs_context().obsid,
+                        file_name: ms.display().to_string(),
+                        metafits_file_name: meta.map(|m| m.display().to_string()),
+                    }
+                    .print("Peeling");
+
+                    (Box::new(input_data), None)
+                }
+
+                // Valid input for reading uvfits files.
+                (meta, None, None, None, Some(uvfits)) => {
+                    // Only one uvfits is supported at the moment.
+                    let uvfits: PathBuf = if uvfits.len() > 1 {
+                        return Err(PeelError::MultipleUvfits(uvfits));
+                    } else {
+                        uvfits.first().clone()
+                    };
+
+                    // Ensure that there's only one metafits.
+                    let meta: Option<&PathBuf> = match meta.as_ref() {
+                        None => None,
+                        Some(m) => {
+                            if m.len() > 1 {
+                                return Err(PeelError::MultipleMetafits(m.clone()));
+                            } else {
+                                Some(m.first())
+                            }
+                        }
+                    };
+
+                    let input_data = UvfitsReader::new(&uvfits, meta)?;
+
+                    messages::InputFileDetails::UvfitsFile {
+                        obsid: input_data.get_obs_context().obsid,
+                        file_name: uvfits.display().to_string(),
+                        metafits_file_name: meta.map(|m| m.display().to_string()),
+                    }
+                    .print("Peeling");
+
+                    (Box::new(input_data), None)
+                }
+
+                // The following matches are for invalid combinations of input
+                // files. Make an error message for the user.
+                (Some(_), _, None, None, None) => {
+                    let msg = "Received only a metafits file; a uvfits file, a measurement set or gpubox files are required.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (Some(_), _, Some(_), None, None) => {
+                    let msg =
+                        "Received only a metafits file and mwaf files; gpubox files are required.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (None, Some(_), _, None, None) => {
+                    let msg = "Received gpuboxes without a metafits file; this is not supported.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (None, None, Some(_), None, None) => {
+                    let msg = "Received mwaf files without gpuboxes and a metafits file; this is not supported.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (_, Some(_), _, Some(_), None) => {
+                    let msg = "Received gpuboxes and measurement set files; this is not supported.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (_, Some(_), _, None, Some(_)) => {
+                    let msg = "Received gpuboxes and uvfits files; this is not supported.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (_, _, _, Some(_), Some(_)) => {
+                    let msg = "Received uvfits and measurement set files; this is not supported.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (_, _, Some(_), Some(_), _) => {
+                    let msg = "Received mwafs and measurement set files; this is not supported.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (_, _, Some(_), _, Some(_)) => {
+                    let msg = "Received mwafs and uvfits files; this is not supported.";
+                    return Err(PeelError::InvalidDataInput(msg));
+                }
+                (None, None, None, None, None) => return Err(PeelError::NoInputData),
+            };
+
+        let obs_context = input_data.get_obs_context();
+
+        // If the array position wasn't user defined, try the input data.
+        let array_position = array_position.unwrap_or_else(|| {
+            trace!("The array position was not specified in the input data; assuming MWA");
+            LatLngHeight::mwa()
+        });
+        let dut1 = if ignore_dut1 { None } else { obs_context.dut1 }
+            .unwrap_or_else(|| Duration::from_seconds(0.0));
+
+        let timesteps_to_use = {
+            match (use_all_timesteps, timesteps) {
+                (true, _) => obs_context.all_timesteps.clone(),
+                (false, None) => Vec1::try_from_vec(obs_context.unflagged_timesteps.clone())
+                    .map_err(|_| PeelError::NoTimesteps)?,
+                (false, Some(mut ts)) => {
+                    // Make sure there are no duplicates.
+                    let timesteps_hashset: HashSet<&usize> = ts.iter().collect();
+                    if timesteps_hashset.len() != ts.len() {
+                        return Err(PeelError::DuplicateTimesteps);
+                    }
+
+                    // Ensure that all specified timesteps are actually available.
+                    for t in &ts {
+                        if !(0..obs_context.timestamps.len()).contains(t) {
+                            return Err(PeelError::UnavailableTimestep {
+                                got: *t,
+                                last: obs_context.timestamps.len() - 1,
+                            });
+                        }
+                    }
+
+                    ts.sort_unstable();
+                    Vec1::try_from_vec(ts).map_err(|_| PeelError::NoTimesteps)?
+                }
+            }
+        };
+        let timestamps = timesteps_to_use.mapped_ref(|i| obs_context.timestamps[*i]);
+
+        let precession_info = precess_time(
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+            obs_context.phase_centre,
+            obs_context.timestamps[*timesteps_to_use.first()],
+            dut1,
+        );
+        let (lmst, latitude) = if no_precession {
+            (precession_info.lmst, array_position.latitude_rad)
+        } else {
+            (
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
+        };
+
+        // The length of the tile XYZ collection is the total number of tiles in
+        // the array, even if some tiles are flagged.
+        let total_num_tiles = obs_context.get_total_num_tiles();
+
+        // Assign the tile flags.
+        let flagged_tiles =
+            obs_context.get_tile_flags(ignore_input_data_tile_flags, tile_flags.as_deref())?;
+        let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
+        let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
+        if log_enabled!(Debug) {
+            obs_context.print_debug_tile_statuses();
+        }
+        if num_unflagged_tiles == 0 {
+            return Err(PeelError::NoTiles);
+        }
+        messages::ArrayDetails {
+            array_position: Some(array_position),
+            array_latitude_j2000: if no_precession {
+                None
+            } else {
+                Some(precession_info.array_latitude_j2000)
+            },
+            total_num_tiles,
+            num_unflagged_tiles,
+            flagged_tiles: &flagged_tiles
+                .iter()
+                .sorted()
+                .map(|&i| (obs_context.tile_names[i].as_str(), i))
+                .collect::<Vec<_>>(),
+        }
+        .print();
+
+        let dipole_delays = match delays {
+            // We have user-provided delays; check that they're are sensible,
+            // regardless of whether we actually need them.
+            Some(d) => {
+                if d.len() != 16 || d.iter().any(|&v| v > 32) {
+                    return Err(PeelError::BadDelays);
+                }
+                Some(Delays::Partial(d))
+            }
+
+            // No delays were provided; use whatever was in the input data.
+            None => obs_context.dipole_delays.as_ref().cloned(),
+        };
+
+        let beam: Box<dyn Beam> = if no_beam {
+            create_no_beam_object(total_num_tiles)
+        } else {
+            let mut dipole_delays = dipole_delays.ok_or(PeelError::NoDelays)?;
+            let dipole_gains = if unity_dipole_gains {
+                None
+            } else {
+                // If we don't have dipole gains from the input data, then
+                // we issue a warning that we must assume no dead dipoles.
+                if obs_context.dipole_gains.is_none() {
+                    match input_data.get_input_data_type() {
+                        VisInputType::MeasurementSet => {
+                            warn!("Measurement sets cannot supply dead dipole information.");
+                            warn!("Without a metafits file, we must assume all dipoles are alive.");
+                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                        }
+                        VisInputType::Uvfits => {
+                            warn!("uvfits files cannot supply dead dipole information.");
+                            warn!("Without a metafits file, we must assume all dipoles are alive.");
+                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                        }
+                        VisInputType::Raw => unreachable!(),
+                    }
+                }
+                obs_context.dipole_gains.clone()
+            };
+            if dipole_gains.is_none() {
+                // If we don't have dipole gains, we must assume all dipoles are
+                // "alive". But, if any dipole delays are 32, then the beam code
+                // will still ignore those dipoles. So use ideal dipole delays
+                // for all tiles.
+                let ideal_delays = dipole_delays.get_ideal_delays();
+
+                // Warn the user if they wanted unity dipole gains but the ideal
+                // dipole delays contain 32.
+                if unity_dipole_gains && ideal_delays.iter().any(|&v| v == 32) {
+                    warn!(
+                        "Some ideal dipole delays are 32; these dipoles will not have unity gains"
+                    );
+                }
+                dipole_delays.set_to_ideal_delays();
+            }
+
+            create_fee_beam_object(beam_file, total_num_tiles, dipole_delays, dipole_gains)?
+        };
+        let beam_file = beam.get_beam_file();
+        debug!("Beam file: {beam_file:?}");
+
+        // Set up frequency information. Determine all of the fine-channel flags.
+        let mut flagged_fine_chans: HashSet<usize> = match fine_chan_flags {
+            Some(flags) => flags.into_iter().collect(),
+            None => HashSet::new(),
+        };
+        if !ignore_input_data_fine_channel_flags {
+            for &f in &obs_context.flagged_fine_chans {
+                flagged_fine_chans.insert(f);
+            }
+        }
+        // Assign the per-coarse-channel fine-channel flags.
+        let fine_chan_flags_per_coarse_chan: HashSet<usize> = {
+            let mut out_flags = match fine_chan_flags_per_coarse_chan {
+                Some(flags) => flags.into_iter().collect(),
+                None => HashSet::new(),
+            };
+            if !ignore_input_data_fine_channel_flags {
+                for &obs_fine_chan_flag in &obs_context.flagged_fine_chans_per_coarse_chan {
+                    out_flags.insert(obs_fine_chan_flag);
+                }
+            }
+            out_flags
+        };
+        if !ignore_input_data_fine_channel_flags {
+            for (i, _) in obs_context.coarse_chan_nums.iter().enumerate() {
+                for f in &fine_chan_flags_per_coarse_chan {
+                    flagged_fine_chans.insert(f + obs_context.num_fine_chans_per_coarse_chan * i);
+                }
+            }
+        }
+        let mut unflagged_fine_chan_freqs = vec![];
+        for (i_chan, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
+            if !flagged_fine_chans.contains(&i_chan) {
+                unflagged_fine_chan_freqs.push(freq as f64);
+            }
+        }
+        if log_enabled!(Debug) {
+            let unflagged_fine_chans: Vec<_> = (0..obs_context.fine_chan_freqs.len())
+                .into_iter()
+                .filter(|i_chan| !flagged_fine_chans.contains(i_chan))
+                .collect();
+            match unflagged_fine_chans.as_slice() {
+                [] => (),
+                [f] => debug!("Only unflagged fine-channel: {}", f),
+                [f_0, .., f_n] => {
+                    debug!("First unflagged fine-channel: {}", f_0);
+                    debug!("Last unflagged fine-channel:  {}", f_n);
+                }
+            }
+
+            let fine_chan_flags_vec = flagged_fine_chans.iter().sorted().collect::<Vec<_>>();
+            debug!("Flagged fine-channels: {:?}", fine_chan_flags_vec);
+        }
+        if unflagged_fine_chan_freqs.is_empty() {
+            return Err(PeelError::NoChannels);
+        }
+
+        messages::ObservationDetails {
+            dipole_delays: beam.get_ideal_dipole_delays(),
+            beam_file,
+            num_tiles_with_dead_dipoles: if unity_dipole_gains {
+                None
+            } else {
+                obs_context.dipole_gains.as_ref().map(|array| {
+                    array
+                        .outer_iter()
+                        .filter(|tile_dipole_gains| {
+                            tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
+                        })
+                        .count()
+                })
+            },
+            phase_centre: obs_context.phase_centre,
+            pointing_centre: obs_context.pointing_centre,
+            dut1: obs_context.dut1,
+            lmst: Some(precession_info.lmst),
+            lmst_j2000: if no_precession {
+                Some(precession_info.lmst_j2000)
+            } else {
+                None
+            },
+            available_timesteps: Some(&obs_context.all_timesteps),
+            unflagged_timesteps: Some(&obs_context.unflagged_timesteps),
+            using_timesteps: Some(&timesteps_to_use),
+            first_timestamp: Some(obs_context.timestamps[*timesteps_to_use.first()]),
+            last_timestamp: if timesteps_to_use.len() > 1 {
+                Some(obs_context.timestamps[*timesteps_to_use.last()])
+            } else {
+                None
+            },
+            time_res: obs_context.time_res,
+            total_num_channels: obs_context.fine_chan_freqs.len(),
+            num_unflagged_channels: Some(unflagged_fine_chan_freqs.len()),
+            flagged_chans_per_coarse_chan: Some(&obs_context.flagged_fine_chans_per_coarse_chan),
+            first_freq_hz: Some(*obs_context.fine_chan_freqs.first() as f64),
+            last_freq_hz: Some(*obs_context.fine_chan_freqs.last() as f64),
+            first_unflagged_freq_hz: unflagged_fine_chan_freqs.first().copied(),
+            last_unflagged_freq_hz: unflagged_fine_chan_freqs.last().copied(),
+            freq_res_hz: obs_context.freq_res,
+        }
+        .print();
+
+        // Parse vis and iono const outputs.
         let (vis_outputs, iono_outputs) = {
             let mut vis_outputs = vec![];
             let mut iono_outputs = vec![];
@@ -390,17 +817,23 @@ impl PeelArgs {
                             (None, Some(true)) => {
                                 iono_outputs.push(file);
                             }
-                            (None, _) => panic!("Unhandled output file extension '{ext:?}'"),
+                            (None, _) => {
+                                return Err(PeelError::VisFileType {
+                                    ext: ext.unwrap_or("<no extension>").to_string(),
+                                })
+                            }
                         }
                     }
                 }
             };
             (vis_outputs, iono_outputs)
         };
-        assert!(vis_outputs.len() + iono_outputs.len() > 0);
+        if vis_outputs.len() + iono_outputs.len() == 0 {
+            return Err(PeelError::NoOutput);
+        }
+        let vis_outputs = Vec1::try_from_vec(vis_outputs).ok();
 
-        let di_cal_params = di_cal_args.into_params().unwrap();
-        let obs_context = di_cal_params.get_obs_context();
+        // Set up the timeblocks.
         let time_average_factor = {
             let default_time_average_factor = parse_time_average_factor(
                 obs_context.time_res,
@@ -414,27 +847,32 @@ impl PeelArgs {
                 time_average_factor.as_deref(),
                 default_time_average_factor,
             )
-            .unwrap()
+            .map_err(|e| match e {
+                AverageFactorError::Zero => PeelError::CalTimeFactorZero,
+                AverageFactorError::NotInteger => PeelError::CalTimeFactorNotInteger,
+                AverageFactorError::NotIntegerMultiple { out, inp } => {
+                    PeelError::CalTimeResNotMultiple { out, inp }
+                }
+                AverageFactorError::Parse(e) => PeelError::ParseCalTimeAverageFactor(e),
+            })?
         };
         // Check that the factor is not too big.
-        let time_average_factor = if time_average_factor > di_cal_params.timesteps.len() {
+        let time_average_factor = if time_average_factor > timesteps_to_use.len() {
             warn!(
                 "Cannot average {time_average_factor} timesteps; only {} are being used. Capping.",
-                di_cal_params.timesteps.len()
+                timesteps_to_use.len()
             );
-            di_cal_params.timesteps.len()
+            timesteps_to_use.len()
         } else {
             time_average_factor
         };
         let timeblocks = timesteps_to_timeblocks(
             &obs_context.timestamps,
             time_average_factor,
-            &di_cal_params.timesteps,
+            &timesteps_to_use,
         );
-        let timestamps = di_cal_params
-            .timesteps
-            .mapped_ref(|i| obs_context.timestamps[*i]);
 
+        // Set up the chanblocks.
         let freq_average_factor = {
             let default_freq_average_factor = parse_freq_average_factor(
                 obs_context.freq_res,
@@ -448,21 +886,275 @@ impl PeelArgs {
                 freq_average_factor.as_deref(),
                 default_freq_average_factor,
             )
-            .unwrap()
+            .map_err(|e| match e {
+                AverageFactorError::Zero => PeelError::CalFreqFactorZero,
+                AverageFactorError::NotInteger => PeelError::CalFreqFactorNotInteger,
+                AverageFactorError::NotIntegerMultiple { out, inp } => {
+                    PeelError::CalFreqResNotMultiple { out, inp }
+                }
+                AverageFactorError::Parse(e) => PeelError::ParseCalFreqAverageFactor(e),
+            })?
         };
+        // Check that the factor is not too big.
+        let freq_average_factor = if freq_average_factor > unflagged_fine_chan_freqs.len() {
+            warn!(
+                "Cannot average {} channels; only {} are being used. Capping.",
+                freq_average_factor,
+                unflagged_fine_chan_freqs.len()
+            );
+            unflagged_fine_chan_freqs.len()
+        } else {
+            freq_average_factor
+        };
+
         let fences = channels_to_chanblocks(
             &obs_context.fine_chan_freqs,
             obs_context.freq_res,
             freq_average_factor,
             &HashSet::new(),
         );
-        assert_eq!(
-            fences.len(),
-            1,
-            "Picket fence observations are not supported!"
-        );
+        // There must be at least one chanblock for calibration.
+        match fences.as_slice() {
+            // No fences is the same as no chanblocks.
+            [] => return Err(PeelError::NoChannels),
+            [f] => {
+                // Check that the chanblocks aren't all flagged.
+                if f.chanblocks.is_empty() {
+                    return Err(PeelError::NoChannels);
+                }
+            }
+            [f, ..] => {
+                // Check that the chanblocks aren't all flagged.
+                if f.chanblocks.is_empty() {
+                    return Err(PeelError::NoChannels);
+                }
+                // TODO: Allow picket fence.
+                eprintln!("\"Picket fence\" data detected. hyperdrive does not support this right now -- exiting.");
+                eprintln!("See for more info: https://MWATelescope.github.io/mwa_hyperdrive/defs/mwa/picket_fence.html");
+                std::process::exit(1);
+            }
+        }
+        let fences = Vec1::try_from_vec(fences).map_err(|_| PeelError::NoChannels)?;
         let all_fine_chan_freqs_hz =
             Vec1::try_from_vec(fences[0].chanblocks.iter().map(|c| c._freq).collect()).unwrap();
+
+        let output_time_average_factor = {
+            let default_output_time_average_factor = parse_time_average_factor(
+                obs_context.time_res,
+                Some(DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR),
+                1,
+            )
+            .expect("default is sensible");
+
+            parse_time_average_factor(
+                obs_context.time_res,
+                output_time_average_factor.as_deref(),
+                default_output_time_average_factor,
+            )
+            .map_err(|e| match e {
+                AverageFactorError::Zero => PeelError::OutputVisTimeAverageFactorZero,
+                AverageFactorError::NotInteger => PeelError::OutputVisTimeFactorNotInteger,
+                AverageFactorError::NotIntegerMultiple { out, inp } => {
+                    PeelError::OutputVisTimeResNotMultiple { out, inp }
+                }
+                AverageFactorError::Parse(e) => PeelError::ParseOutputVisTimeAverageFactor(e),
+            })?
+        };
+        let output_freq_average_factor = {
+            let default_output_freq_average_factor = parse_freq_average_factor(
+                obs_context.freq_res.map(|f| f * freq_average_factor as f64),
+                Some(DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR),
+                1,
+            )
+            .expect("default is sensible");
+
+            parse_freq_average_factor(
+                obs_context.freq_res,
+                output_freq_average_factor.as_deref(),
+                default_output_freq_average_factor,
+            )
+            .map_err(|e| match e {
+                AverageFactorError::Zero => PeelError::OutputVisFreqAverageFactorZero,
+                AverageFactorError::NotInteger => PeelError::OutputVisFreqFactorNotInteger,
+                AverageFactorError::NotIntegerMultiple { out, inp } => {
+                    PeelError::OutputVisFreqResNotMultiple { out, inp }
+                }
+                AverageFactorError::Parse(e) => PeelError::ParseOutputVisFreqAverageFactor(e),
+            })?
+        };
+
+        let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, flagged_tiles);
+        let flagged_tiles = &tile_baseline_flags.flagged_tiles;
+
+        let unflagged_tile_xyzs: Vec<XyzGeodetic> = obs_context
+            .tile_xyzs
+            .par_iter()
+            .enumerate()
+            .filter(|(tile_index, _)| !flagged_tiles.contains(tile_index))
+            .map(|(_, xyz)| *xyz)
+            .collect();
+
+        // // Set baseline weights from UVW cuts. Use a lambda from the centroid
+        // // frequency if UVW cutoffs are specified as wavelengths.
+        // let freq_centroid = obs_context
+        //     .fine_chan_freqs
+        //     .iter()
+        //     .map(|&u| u as f64)
+        //     .sum::<f64>()
+        //     / obs_context.fine_chan_freqs.len() as f64;
+        // let lambda = marlu::constants::VEL_C / freq_centroid;
+        // let (uvw_min, uvw_min_metres) = {
+        //     let (quantity, unit) = parse_wavelength(
+        //         uvw_min
+        //             .as_deref()
+        //             .unwrap_or(crate::cli::di_calibrate::DEFAULT_UVW_MIN),
+        //     )
+        //     .map_err(PeelError::ParseUvwMin)?;
+        //     match unit {
+        //         WavelengthUnit::M => ((quantity, unit), quantity),
+        //         WavelengthUnit::L => ((quantity, unit), quantity * lambda),
+        //     }
+        // };
+        // let (uvw_max, uvw_max_metres) = match uvw_max {
+        //     None => ((f64::INFINITY, WavelengthUnit::M), f64::INFINITY),
+        //     Some(s) => {
+        //         let (quantity, unit) = parse_wavelength(&s).map_err(PeelError::ParseUvwMax)?;
+        //         match unit {
+        //             WavelengthUnit::M => ((quantity, unit), quantity),
+        //             WavelengthUnit::L => ((quantity, unit), quantity * lambda),
+        //         }
+        //     }
+        // };
+
+        // let (baseline_weights, num_flagged_baselines) = {
+        //     let mut baseline_weights = Vec1::try_from_vec(vec![
+        //         1.0;
+        //         tile_baseline_flags
+        //             .unflagged_cross_baseline_to_tile_map
+        //             .len()
+        //     ])
+        //     .map_err(|_| PeelError::NoTiles)?;
+        //     let uvws = xyzs_to_cross_uvws(
+        //         &unflagged_tile_xyzs,
+        //         obs_context.phase_centre.to_hadec(lmst),
+        //     );
+        //     assert_eq!(baseline_weights.len(), uvws.len());
+        //     let uvw_min = uvw_min_metres.powi(2);
+        //     let uvw_max = uvw_max_metres.powi(2);
+        //     let mut num_flagged_baselines = 0;
+        //     for (uvw, baseline_weight) in uvws.into_iter().zip(baseline_weights.iter_mut()) {
+        //         let uvw_length = uvw.u.powi(2) + uvw.v.powi(2) + uvw.w.powi(2);
+        //         if uvw_length < uvw_min || uvw_length > uvw_max {
+        //             *baseline_weight = 0.0;
+        //             num_flagged_baselines += 1;
+        //         }
+        //     }
+        //     (baseline_weights, num_flagged_baselines)
+        // };
+
+        // // Make sure the calibration thresholds are sensible.
+        // let mut stop_threshold =
+        //     stop_thresh.unwrap_or(crate::cli::di_calibrate::DEFAULT_STOP_THRESHOLD);
+        // let min_threshold = min_thresh.unwrap_or(crate::cli::di_calibrate::DEFAULT_MIN_THRESHOLD);
+        // if stop_threshold > min_threshold {
+        //     warn!("Specified stop threshold ({}) is bigger than the min. threshold ({}); capping stop threshold.", stop_threshold, min_threshold);
+        //     stop_threshold = min_threshold;
+        // }
+        // let max_iterations =
+        //     max_iterations.unwrap_or(crate::cli::di_calibrate::DEFAULT_MAX_ITERATIONS);
+
+        // messages::CalibrationDetails {
+        //     timesteps_per_timeblock: time_average_factor,
+        //     channels_per_chanblock: freq_average_factor,
+        //     num_timeblocks: timeblocks.len(),
+        //     num_chanblocks: fences.first().chanblocks.len(),
+        //     uvw_min,
+        //     uvw_max,
+        //     num_calibration_baselines: baseline_weights.len() - num_flagged_baselines,
+        //     total_num_baselines: baseline_weights.len(),
+        //     lambda,
+        //     freq_centroid,
+        //     min_threshold,
+        //     stop_threshold,
+        //     max_iterations,
+        // }
+        // .print();
+
+        let mut source_list: SourceList = {
+            // Handle the source list argument.
+            let sl_pb: PathBuf = match source_list {
+                None => return Err(PeelError::NoSourceList),
+                Some(sl) => {
+                    // If the specified source list file can't be found, treat
+                    // it as a glob and expand it to find a match.
+                    let pb = PathBuf::from(&sl);
+                    if pb.exists() {
+                        pb
+                    } else {
+                        get_single_match_from_glob(&sl)?
+                    }
+                }
+            };
+
+            // Read the source list file. If the type was manually specified,
+            // use that, otherwise the reading code will try all available
+            // kinds.
+            let sl_type_specified = source_list_type.is_none();
+            let sl_type = source_list_type.and_then(|t| SourceListType::from_str(t.as_ref()).ok());
+            let (sl, sl_type) = match read_source_list_file(sl_pb, sl_type) {
+                Ok((sl, sl_type)) => (sl, sl_type),
+                Err(e) => return Err(PeelError::from(e)),
+            };
+
+            // If the user didn't specify the source list type, then print out
+            // what we found.
+            if sl_type_specified {
+                trace!("Successfully parsed {}-style source list", sl_type);
+            }
+
+            sl
+        };
+        trace!("Found {} sources in the source list", source_list.len());
+        // Veto any sources that may be troublesome, and/or cap the total number
+        // of sources. If the user doesn't specify how many source-list sources
+        // to use, then all sources are used.
+        if source_list.is_empty() {
+            return Err(PeelError::NoSources);
+        }
+        veto_sources(
+            &mut source_list,
+            obs_context.phase_centre,
+            lmst,
+            latitude,
+            &obs_context.coarse_chan_freqs,
+            beam.deref(),
+            num_sources_to_subtract,
+            source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
+            veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
+        )?;
+        if source_list.is_empty() {
+            return Err(PeelError::NoSourcesAfterVeto);
+        }
+
+        messages::SkyModelDetails {
+            source_list: &source_list,
+        }
+        .print();
+
+        messages::print_modeller_info(&modeller_info);
+
+        {
+            messages::OutputFileDetails {
+                output_solutions: &[],
+                vis_type: "peeled",
+                output_vis: vis_outputs.as_ref(),
+                input_vis_time_res: obs_context.time_res,
+                input_vis_freq_res: obs_context.freq_res,
+                output_vis_time_average_factor: output_time_average_factor,
+                output_vis_freq_average_factor: output_freq_average_factor,
+            }
+            .print();
+        }
 
         let iono_freq_average_factor = {
             let default_iono_freq_average_factor = parse_freq_average_factor(
@@ -495,34 +1187,8 @@ impl PeelArgs {
             .flat_map(|f| f.chanblocks.into_iter().map(|c| c._freq))
             .collect::<Vec<_>>();
 
-        let output_time_average_factor = {
-            let default_output_time_average_factor = parse_time_average_factor(
-                obs_context.time_res,
-                Some(DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR),
-                1,
-            )
-            .expect("default is sensible");
-
-            parse_time_average_factor(
-                obs_context.time_res,
-                output_time_average_factor.as_deref(),
-                default_output_time_average_factor,
-            )
-            .unwrap()
-        };
-        let output_freq_average_factor = parse_freq_average_factor(
-            obs_context.freq_res,
-            output_freq_average_factor.as_deref(),
-            DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR,
-        )
-        .unwrap();
-
-        let num_tiles = di_cal_params.unflagged_tile_xyzs.len();
-        let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
-
         // TODO: Ensure that the order of the sources are brightest first,
         // dimmest last.
-        let source_list = &di_cal_params.source_list;
         let num_sources_to_iono_subtract =
             num_sources_to_iono_subtract.unwrap_or(source_list.len());
         // Finding the Stokes-I-weighted `RADec` of each source.
@@ -613,8 +1279,11 @@ impl PeelArgs {
             let read_handle: ScopedJoinHandle<Result<(), VisReadError>> = scope.spawn(|| {
                 defer_on_unwind! { error.store(true); }
 
-                let mut vis_data_full_res =
-                    Array3::zeros((1, num_cross_baselines, obs_context.fine_chan_freqs.len()));
+                let mut vis_data_full_res = Array3::zeros((
+                    1,
+                    num_unflagged_cross_baselines,
+                    obs_context.fine_chan_freqs.len(),
+                ));
                 let mut vis_weights_full_res = Array3::zeros(vis_data_full_res.dim());
                 for timeblock in &timeblocks {
                     // Make a new block of data to be passed along; this
@@ -622,7 +1291,7 @@ impl PeelArgs {
                     // but is averaged to the `freq_average_factor`.
                     let mut out_data = Array3::zeros((
                         timeblock.timestamps.len(),
-                        num_cross_baselines,
+                        num_unflagged_cross_baselines,
                         all_fine_chan_freqs_hz.len(),
                     ));
                     let mut out_weights = Array3::zeros(out_data.dim());
@@ -633,11 +1302,11 @@ impl PeelArgs {
                             return Ok(());
                         }
 
-                        let result = di_cal_params.input_data.read_crosses(
+                        let result = input_data.read_crosses(
                             vis_data_full_res.slice_mut(s![0, .., ..]),
                             vis_weights_full_res.slice_mut(s![0, .., ..]),
                             timestep,
-                            &di_cal_params.tile_baseline_flags,
+                            &tile_baseline_flags,
                             // Do *not* pass flagged channels to the reader; we
                             // want all of the visibilities so we can do
                             // averaging.
@@ -652,7 +1321,7 @@ impl PeelArgs {
                         vis_weights_full_res
                             .axis_iter_mut(Axis(1))
                             .enumerate()
-                            .filter(|(i_chan, _)| di_cal_params.flagged_fine_chans.contains(i_chan))
+                            .filter(|(i_chan, _)| flagged_fine_chans.contains(i_chan))
                             .for_each(|(_, mut vis_weights)| {
                                 vis_weights.mapv_inplace(|w| -(w.abs()))
                             });
@@ -685,27 +1354,27 @@ impl PeelArgs {
                 Ok(())
             });
 
-            let model_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
+            let model_handle: ScopedJoinHandle<Result<(), ModelError>> = scope.spawn(|| {
                 defer_on_unwind! { error.store(true); }
 
                 let mut modeller = new_sky_modeller(
-                    matches!(di_cal_params.modeller_info, ModellerInfo::Cpu),
-                    di_cal_params.beam.deref(),
-                    source_list,
-                    &di_cal_params.unflagged_tile_xyzs,
+                    matches!(modeller_info, ModellerInfo::Cpu),
+                    beam.deref(),
+                    &source_list,
+                    &unflagged_tile_xyzs,
                     &all_fine_chan_freqs_hz,
-                    &di_cal_params.tile_baseline_flags.flagged_tiles,
+                    &tile_baseline_flags.flagged_tiles,
                     obs_context.phase_centre,
-                    di_cal_params.array_position.longitude_rad,
-                    di_cal_params.array_position.latitude_rad,
-                    di_cal_params.dut1,
+                    array_position.longitude_rad,
+                    array_position.latitude_rad,
+                    dut1,
                     !no_precession,
                 )
                 .unwrap();
 
                 let mut vis_model = Array3::zeros((
                     time_average_factor,
-                    num_cross_baselines,
+                    num_unflagged_cross_baselines,
                     all_fine_chan_freqs_hz.len(),
                 ));
                 for timeblock in &timeblocks {
@@ -823,19 +1492,19 @@ impl PeelArgs {
                             vis_residual.view_mut(),
                             vis_weights.view(),
                             timeblock,
-                            source_list,
+                            &source_list,
                             &mut iono_consts,
                             &source_weighted_positions,
                             num_sources_to_iono_subtract,
                             &all_fine_chan_freqs_hz,
                             &low_res_freqs_hz,
                             obs_context,
-                            di_cal_params.array_position,
-                            &di_cal_params.unflagged_tile_xyzs,
-                            &di_cal_params.tile_baseline_flags.flagged_tiles,
-                            di_cal_params.beam.deref(),
-                            di_cal_params.dut1,
-                            &di_cal_params.modeller_info,
+                            array_position,
+                            &unflagged_tile_xyzs,
+                            &tile_baseline_flags.flagged_tiles,
+                            beam.deref(),
+                            dut1,
+                            &modeller_info,
                             no_precession,
                             &multi_progress,
                         )
@@ -864,7 +1533,7 @@ impl PeelArgs {
                         // TODO: Puke.
                         let cross_data = cross_data.to_owned().into_shared();
                         let cross_weights = cross_weights.to_owned().into_shared();
-                        if !vis_outputs.is_empty() {
+                        if vis_outputs.is_some() {
                             tx_write
                                 .send(VisTimestep {
                                     cross_data,
@@ -886,43 +1555,39 @@ impl PeelArgs {
             let write_handle = scope.spawn(|| {
                 defer_on_unwind! { error.store(true); }
 
-                let marlu_mwa_obs_context =
-                    di_cal_params.input_data.get_metafits_context().map(|c| {
-                        (
-                            MwaObsContext::from_mwalib(c),
-                            0..obs_context.coarse_chan_freqs.len(),
-                        )
-                    });
+                let marlu_mwa_obs_context = input_data.get_metafits_context().map(|c| {
+                    (
+                        MwaObsContext::from_mwalib(c),
+                        0..obs_context.coarse_chan_freqs.len(),
+                    )
+                });
 
-                if !vis_outputs.is_empty() {
-                    let vis_outputs = Vec1::try_from_vec(vis_outputs.clone()).unwrap();
+                if let Some(vis_outputs) = vis_outputs.as_ref() {
                     let time_res = obs_context.guess_time_res();
                     let freq_res = obs_context.guess_freq_res() * freq_average_factor as f64;
 
-                    let timesteps = &di_cal_params.timesteps;
                     let output_timeblocks = timesteps_to_timeblocks(
                         &obs_context.timestamps,
                         output_time_average_factor,
-                        timesteps,
+                        &timesteps_to_use,
                     );
 
                     let result = write_vis(
-                        &vis_outputs,
-                        di_cal_params.array_position,
+                        vis_outputs,
+                        array_position,
                         obs_context.phase_centre,
                         obs_context.pointing_centre,
                         &obs_context.tile_xyzs,
                         &obs_context.tile_names,
                         obs_context.obsid,
                         &obs_context.timestamps,
-                        timesteps,
+                        &timesteps_to_use,
                         &output_timeblocks,
                         time_res,
-                        di_cal_params.dut1,
+                        dut1,
                         freq_res,
                         &all_fine_chan_freqs_hz,
-                        &di_cal_params
-                            .tile_baseline_flags
+                        &tile_baseline_flags
                             .unflagged_cross_baseline_to_tile_map
                             .values()
                             .copied()
@@ -1029,7 +1694,6 @@ fn get_weights_rts(
 }
 
 /// Average "high-res" data to "low-res" data.
-/// TODO: Do we only ever want 1 timestep in the low-res data?
 fn vis_average(
     jones_from: ArrayView3<Jones<f32>>,
     mut jones_to: ArrayViewMut3<Jones<f32>>,
@@ -2057,7 +2721,7 @@ fn peel(
                 let mut iteration = 0;
                 while iteration != 10 {
                     iteration += 1;
-                    debug!("iter {iteration}, consts: {:?}", iono_consts);
+                    debug!("iter {iteration}, consts: {iono_consts:?}");
 
                     // iono rotate model using existing iono consts (if they're
                     // non-zero)
@@ -2071,18 +2735,13 @@ fn peel(
                         );
                     }
 
-                    setup_uvs(
-                        tile_uvs_low_res.as_slice_mut().unwrap(),
-                        average_precessed_tile_xyzs.as_slice().unwrap(),
-                        source_phase_centre.to_hadec(average_lmst),
-                    );
                     let offsets = get_offsets_rts(
                         vis_residual_low_res.view(),
                         weight_residual_low_res.view(),
                         vis_model_low_res_tmp.view(),
                         average_precessed_tile_xyzs.as_slice().unwrap(),
                         low_res_freqs_hz,
-                        tile_uvs_low_res.as_slice_mut().unwrap(),
+                        tile_uvs_low_res.as_slice().unwrap(),
                     );
                     trace!("offsets: {offsets:?}");
 
@@ -2090,7 +2749,7 @@ fn peel(
                     iono_consts.0 += offsets.0;
                     iono_consts.1 += offsets.1;
                     if offsets.0.abs() < 1e-12 && offsets.1.abs() < 1e-12 {
-                        debug!("iter {iteration}, consts: {:?}, finished", iono_consts);
+                        debug!("iter {iteration}, consts: {iono_consts:?}, finished");
                         break;
                     }
                 }
@@ -2219,149 +2878,146 @@ impl Div<f64> for UV {
 
 #[derive(Error, Debug)]
 pub(crate) enum PeelError {
-    // #[error("No input data was given!")]
-    // NoInputData,
+    #[error("No input data was given!")]
+    NoInputData,
 
-    // #[error("{0}\n\nSupported combinations of file formats:\n{SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS}")]
-    // InvalidDataInput(&'static str),
+    #[error("{0}\n\nSupported combinations of file formats:\n{SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS}")]
+    InvalidDataInput(&'static str),
 
-    // #[error("Multiple metafits files were specified: {0:?}\nThis is unsupported.")]
-    // MultipleMetafits(Vec1<PathBuf>),
+    #[error("Multiple metafits files were specified: {0:?}\nThis is unsupported.")]
+    MultipleMetafits(Vec1<PathBuf>),
 
-    // #[error("Multiple measurement sets were specified: {0:?}\nThis is currently unsupported.")]
-    // MultipleMeasurementSets(Vec1<PathBuf>),
+    #[error("Multiple measurement sets were specified: {0:?}\nThis is currently unsupported.")]
+    MultipleMeasurementSets(Vec1<PathBuf>),
 
-    // #[error("Multiple uvfits files were specified: {0:?}\nThis is currently unsupported.")]
-    // MultipleUvfits(Vec1<PathBuf>),
+    #[error("Multiple uvfits files were specified: {0:?}\nThis is currently unsupported.")]
+    MultipleUvfits(Vec1<PathBuf>),
 
-    // #[error("No calibration output was specified. There must be at least one calibration solution file.")]
-    // NoOutput,
+    #[error("No calibration output was specified. There must be at least one calibration solution file.")]
+    NoOutput,
 
-    // #[error("No sky-model source list file supplied")]
-    // NoSourceList,
+    #[error("No sky-model source list file supplied")]
+    NoSourceList,
 
-    // #[error("Tried to create a beam object, but MWA dipole delay information isn't available!")]
-    // NoDelays,
+    #[error("Tried to create a beam object, but MWA dipole delay information isn't available!")]
+    NoDelays,
 
-    // #[error(
-    //     "The specified MWA dipole delays aren't valid; there should be 16 values between 0 and 32"
-    // )]
-    // BadDelays,
+    #[error(
+        "The specified MWA dipole delays aren't valid; there should be 16 values between 0 and 32"
+    )]
+    BadDelays,
 
-    // #[error("The data either contains no tiles or all tiles are flagged")]
-    // NoTiles,
+    #[error("The data either contains no tiles or all tiles are flagged")]
+    NoTiles,
 
-    // #[error("The data either contains no frequency channels or all channels are flagged")]
-    // NoChannels,
+    #[error("The data either contains no frequency channels or all channels are flagged")]
+    NoChannels,
 
-    // #[error("The data either contains no timesteps or no timesteps are being used")]
-    // NoTimesteps,
+    #[error("The data either contains no timesteps or no timesteps are being used")]
+    NoTimesteps,
 
-    // #[error("The number of specified sources was 0, or the size of the source list was 0")]
-    // NoSources,
+    #[error("The number of specified sources was 0, or the size of the source list was 0")]
+    NoSources,
 
-    // #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
-    // NoSourcesAfterVeto,
+    #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
+    NoSourcesAfterVeto,
 
-    // #[error("Duplicate timesteps were specified; this is invalid")]
-    // DuplicateTimesteps,
+    #[error("Duplicate timesteps were specified; this is invalid")]
+    DuplicateTimesteps,
 
-    // #[error("Timestep {got} was specified but it isn't available; the last timestep is {last}")]
-    // UnavailableTimestep { got: usize, last: usize },
+    #[error("Timestep {got} was specified but it isn't available; the last timestep is {last}")]
+    UnavailableTimestep { got: usize, last: usize },
 
-    // #[error(
-    //     "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::vis_io::write::VIS_OUTPUT_EXTENSIONS
-    // )]
-    // VisFileType { ext: String },
+    #[error(
+        "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::vis_io::write::VIS_OUTPUT_EXTENSIONS
+    )]
+    VisFileType { ext: String },
 
-    // #[error(transparent)]
-    // TileFlag(#[from] crate::context::InvalidTileFlag),
+    #[error(transparent)]
+    TileFlag(#[from] crate::context::InvalidTileFlag),
 
-    // #[error("Cannot write calibration solutions to a file type '{ext}'.\nSupported formats are: {}", *crate::solutions::CAL_SOLUTION_EXTENSIONS)]
-    // CalibrationOutputFile { ext: String },
+    #[error(transparent)]
+    ParsePfbFlavour(#[from] crate::pfb_gains::PfbParseError),
 
-    // #[error(transparent)]
-    // ParsePfbFlavour(#[from] crate::pfb_gains::PfbParseError),
+    #[error("Error when parsing time average factor: {0}")]
+    ParseCalTimeAverageFactor(crate::unit_parsing::UnitParseError),
 
-    // #[error("Error when parsing time average factor: {0}")]
-    // ParseCalTimeAverageFactor(crate::unit_parsing::UnitParseError),
+    #[error("Error when parsing freq. average factor: {0}")]
+    ParseCalFreqAverageFactor(crate::unit_parsing::UnitParseError),
 
-    // #[error("Error when parsing freq. average factor: {0}")]
-    // ParseCalFreqAverageFactor(crate::unit_parsing::UnitParseError),
+    #[error("Calibration time average factor isn't an integer")]
+    CalTimeFactorNotInteger,
 
-    // #[error("Calibration time average factor isn't an integer")]
-    // CalTimeFactorNotInteger,
+    #[error("Calibration freq. average factor isn't an integer")]
+    CalFreqFactorNotInteger,
 
-    // #[error("Calibration freq. average factor isn't an integer")]
-    // CalFreqFactorNotInteger,
+    #[error("Calibration time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
+    CalTimeResNotMultiple { out: f64, inp: f64 },
 
-    // #[error("Calibration time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
-    // CalTimeResNotMultiple { out: f64, inp: f64 },
+    #[error("Calibration freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
+    CalFreqResNotMultiple { out: f64, inp: f64 },
 
-    // #[error("Calibration freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
-    // CalFreqResNotMultiple { out: f64, inp: f64 },
+    #[error("Calibration time average factor cannot be 0")]
+    CalTimeFactorZero,
 
-    // #[error("Calibration time average factor cannot be 0")]
-    // CalTimeFactorZero,
+    #[error("Calibration freq. average factor cannot be 0")]
+    CalFreqFactorZero,
 
-    // #[error("Calibration freq. average factor cannot be 0")]
-    // CalFreqFactorZero,
+    #[error("Error when parsing output vis. time average factor: {0}")]
+    ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),
 
-    // #[error("Error when parsing output vis. time average factor: {0}")]
-    // ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),
+    #[error("Error when parsing output vis. freq. average factor: {0}")]
+    ParseOutputVisFreqAverageFactor(crate::unit_parsing::UnitParseError),
 
-    // #[error("Error when parsing output vis. freq. average factor: {0}")]
-    // ParseOutputVisFreqAverageFactor(crate::unit_parsing::UnitParseError),
+    #[error("Output vis. time average factor isn't an integer")]
+    OutputVisTimeFactorNotInteger,
 
-    // #[error("Output vis. time average factor isn't an integer")]
-    // OutputVisTimeFactorNotInteger,
+    #[error("Output vis. freq. average factor isn't an integer")]
+    OutputVisFreqFactorNotInteger,
 
-    // #[error("Output vis. freq. average factor isn't an integer")]
-    // OutputVisFreqFactorNotInteger,
+    #[error("Output vis. time average factor cannot be 0")]
+    OutputVisTimeAverageFactorZero,
 
-    // #[error("Output vis. time average factor cannot be 0")]
-    // OutputVisTimeAverageFactorZero,
+    #[error("Output vis. freq. average factor cannot be 0")]
+    OutputVisFreqAverageFactorZero,
 
-    // #[error("Output vis. freq. average factor cannot be 0")]
-    // OutputVisFreqAverageFactorZero,
+    #[error("Output vis. time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
+    OutputVisTimeResNotMultiple { out: f64, inp: f64 },
 
-    // #[error("Output vis. time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
-    // OutputVisTimeResNotMultiple { out: f64, inp: f64 },
+    #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
+    OutputVisFreqResNotMultiple { out: f64, inp: f64 },
 
-    // #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
-    // OutputVisFreqResNotMultiple { out: f64, inp: f64 },
+    #[error("Error when parsing minimum UVW cutoff: {0}")]
+    ParseUvwMin(crate::unit_parsing::UnitParseError),
 
-    // #[error("Error when parsing minimum UVW cutoff: {0}")]
-    // ParseUvwMin(crate::unit_parsing::UnitParseError),
+    #[error("Error when parsing maximum UVW cutoff: {0}")]
+    ParseUvwMax(crate::unit_parsing::UnitParseError),
 
-    // #[error("Error when parsing maximum UVW cutoff: {0}")]
-    // ParseUvwMax(crate::unit_parsing::UnitParseError),
+    #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
+    BadArrayPosition { pos: Vec<f64> },
 
-    // #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
-    // BadArrayPosition { pos: Vec<f64> },
+    #[error(transparent)]
+    Glob(#[from] crate::glob::GlobError),
 
-    // #[cfg(feature = "cuda")]
-    // #[error("CUDA error: {0}")]
-    // CudaError(String),
+    #[error(transparent)]
+    VisRead(#[from] crate::vis_io::read::VisReadError),
 
-    // #[error(transparent)]
-    // Glob(#[from] crate::glob::GlobError),
+    #[error(transparent)]
+    FileWrite(#[from] crate::vis_io::write::FileWriteError),
 
-    // #[error(transparent)]
-    // VisRead(#[from] crate::vis_io::read::VisReadError),
+    #[error(transparent)]
+    Veto(#[from] crate::srclist::VetoError),
 
-    // #[error(transparent)]
-    // FileWrite(#[from] crate::vis_io::write::FileWriteError),
+    #[error("Error when trying to read source list: {0}")]
+    SourceList(#[from] crate::srclist::ReadSourceListError),
 
-    // #[error(transparent)]
-    // Veto(#[from] crate::srclist::VetoError),
+    #[error(transparent)]
+    Beam(#[from] crate::beam::BeamError),
 
-    // #[error("Error when trying to read source list: {0}")]
-    // SourceList(#[from] crate::srclist::ReadSourceListError),
+    #[error(transparent)]
+    IO(#[from] std::io::Error),
 
-    // #[error(transparent)]
-    // Beam(#[from] crate::beam::BeamError),
-
-    // #[error(transparent)]
-    // IO(#[from] std::io::Error),
+    #[cfg(feature = "cuda")]
+    #[error(transparent)]
+    Cuda(#[from] crate::cuda::CudaError),
 }
