@@ -887,7 +887,7 @@ fn make_calibration_progress_bar(
 
 /// Worker function to do calibration.
 #[allow(clippy::too_many_arguments)]
-fn calibrate_timeblock(
+pub(crate) fn calibrate_timeblock(
     vis_data: ArrayView3<Jones<f32>>,
     vis_model: ArrayView3<Jones<f32>>,
     mut di_jones: ArrayViewMut3<Jones<f64>>,
