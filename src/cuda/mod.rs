@@ -30,12 +30,14 @@ cfg_if::cfg_if! {
         pub(crate) type CudaJones = JonesF32;
 
         include!("model_single.rs");
+        include!("peel_single.rs");
     } else if #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] {
         /// f64 (using the "cuda" feature and not "cuda-single")
         pub(crate) type CudaFloat = f64;
         pub(crate) type CudaJones = JonesF64;
 
         include!("model_double.rs");
+        include!("peel_double.rs");
     }
 }
 
