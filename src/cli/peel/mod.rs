@@ -6,7 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     f64::consts::TAU,
     io::Write,
-    ops::{Deref, DerefMut, Div, Sub},
+    ops::{Deref, Div, Sub},
     path::PathBuf,
     str::FromStr,
     thread::{self, ScopedJoinHandle},
@@ -17,12 +17,12 @@ use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Either;
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR, VEL_C},
     math::num_tiles_from_num_cross_correlation_baselines,
+    pos::xyz::xyzs_to_cross_uvws,
     precession::precess_time,
     HADec, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic, UVW,
 };
@@ -41,6 +41,7 @@ use crate::{
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
+    cuda,
     di_calibrate::calibrate_timeblock,
     filenames::{InputDataTypes, SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS},
     glob::get_single_match_from_glob,
@@ -1535,12 +1536,15 @@ impl PeelArgs {
 
                         if i == 0 {
                             source_list
-                                .keys()
+                                .iter()
                                 .take(10)
                                 .zip(iono_consts.iter())
-                                .for_each(|(name, iono_consts)| {
+                                .for_each(|((name, src), iono_consts)| {
                                     multi_progress
-                                        .println(format!("{name}: {iono_consts:?}"))
+                                        .println(format!(
+                                            "{name}: {iono_consts:?} ({})",
+                                            src.components.first().radec
+                                        ))
                                         .unwrap();
                                 });
                         }
@@ -2449,12 +2453,10 @@ fn iono_fit(
     residual: ArrayView3<Jones<f32>>,
     weights: ArrayView3<f32>,
     model: ArrayView3<Jones<f32>>,
-    tile_xyzs: &[XyzGeodetic],
     lambdas_m: &[f64],
     tile_uvs_low_res: &[UV],
 ) -> [f64; 4] {
-    let num_tiles = tile_xyzs.len();
-    assert_eq!(tile_uvs_low_res.len(), num_tiles);
+    let num_tiles = tile_uvs_low_res.len();
 
     // a-terms used in least-squares estimator
     let (mut a_uu, mut a_uv, mut a_vv) = (0.0, 0.0, 0.0);
@@ -2692,8 +2694,10 @@ fn peel(
     );
     peel_progress.tick();
 
+    let num_timesteps = vis_residual.len_of(Axis(0));
     let num_tiles = unflagged_tile_xyzs.len();
     let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
+
     let precession_infos = timestamps
         .iter()
         .copied()
@@ -2728,7 +2732,7 @@ fn peel(
         });
 
     let mut tile_uvs_high_res = Array2::default((timestamps.len(), num_tiles));
-    let mut tile_uvs_low_res = Array2::default((1, num_tiles));
+    let mut tile_uvs_low_res: Array2<UV> = Array2::default((1, num_tiles));
 
     // Pre-compute tile UVs.
     tile_uvs_high_res
@@ -2795,6 +2799,11 @@ fn peel(
     } else {
         average_precession_info.lmst_j2000
     };
+    let average_latitude = if no_precession {
+        array_position.latitude_rad
+    } else {
+        average_precession_info.array_latitude_j2000
+    };
     let average_precessed_tile_xyzs = Array2::from_shape_vec(
         (1, num_tiles),
         average_precession_info.precess_xyz(unflagged_tile_xyzs),
@@ -2812,665 +2821,1094 @@ fn peel(
     // The low-res weights only need to be populated once.
     weights_average(vis_weights.view(), weight_residual_low_res.view_mut());
 
-    let mut di_jones = if num_sources_to_peel > 0 {
-        Array3::from_elem(
-            (1, num_tiles, all_fine_chan_lambdas_m.len()),
-            Jones::identity(),
+    // let mut di_jones = if num_sources_to_peel > 0 {
+    //     Array3::from_elem(
+    //         (1, num_tiles, all_fine_chan_lambdas_m.len()),
+    //         Jones::identity(),
+    //     )
+    // } else {
+    //     Array3::default((0, 0, 0))
+    // };
+
+    unsafe {
+        use cuda::{CudaFloat, DevicePointer};
+
+        let cuda_xyzs: Vec<_> = precessed_tile_xyzs
+            .iter()
+            .copied()
+            .map(|XyzGeodetic { x, y, z }| cuda::XYZ {
+                x: x as _,
+                y: y as _,
+                z: z as _,
+            })
+            .collect();
+        let mut cuda_uvws = Array2::from_elem(
+            (num_timesteps, num_cross_baselines),
+            cuda::UVW {
+                u: 0.0,
+                v: 0.0,
+                w: 0.0,
+            },
+        );
+        cuda_uvws
+            .outer_iter_mut()
+            .zip(precessed_tile_xyzs.outer_iter())
+            .zip(lmsts.iter())
+            .for_each(|((mut cuda_uvws, xyzs), lmst)| {
+                let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+                let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
+                    .into_iter()
+                    .map(|uvw| cuda::UVW {
+                        u: uvw.u as CudaFloat,
+                        v: uvw.v as CudaFloat,
+                        w: uvw.w as CudaFloat,
+                    })
+                    .collect::<Vec<_>>();
+                cuda_uvws.assign(&ArrayView1::from(&v));
+            });
+        let cuda_lmsts: Vec<CudaFloat> = lmsts.iter().map(|l| *l as CudaFloat).collect();
+        let cuda_lambdas: Vec<CudaFloat> = all_fine_chan_lambdas_m
+            .iter()
+            .map(|l| *l as CudaFloat)
+            .collect();
+        let cuda_xyzs_low_res: Vec<_> = average_precessed_tile_xyzs
+            .iter()
+            .copied()
+            .map(|XyzGeodetic { x, y, z }| cuda::XYZ {
+                x: x as _,
+                y: y as _,
+                z: z as _,
+            })
+            .collect();
+        let cuda_low_res_lambdas: Vec<CudaFloat> =
+            low_res_lambdas_m.iter().map(|l| *l as CudaFloat).collect();
+
+        let d_xyzs = DevicePointer::copy_to_device(&cuda_xyzs).unwrap();
+        let d_uvws_from = DevicePointer::copy_to_device(cuda_uvws.as_slice().unwrap()).unwrap();
+        let mut d_uvws_to =
+            DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
+        let d_lmsts = DevicePointer::copy_to_device(&cuda_lmsts).unwrap();
+        let d_lambdas = DevicePointer::copy_to_device(&cuda_lambdas).unwrap();
+        let d_xyzs_low_res = DevicePointer::copy_to_device(&cuda_xyzs_low_res).unwrap();
+        let d_average_lmsts = DevicePointer::copy_to_device(&[average_lmst as CudaFloat]).unwrap();
+        let mut d_uvws_low_res: DevicePointer<cuda::UVW> =
+            DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
+        let d_low_res_lambdas = DevicePointer::copy_to_device(&cuda_low_res_lambdas).unwrap();
+
+        // let mut d_low_res_vis = DevicePointer::malloc(
+        //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<CudaFloat>>(),
+        // );
+        // let mut d_low_res_weights = DevicePointer::malloc(
+        //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<CudaFloat>(),
+        // );
+
+        // Transpose the baseline and frequency axes for the GPU.
+        let mut vis_residual_gpu: Array3<Jones<CudaFloat>> = Array3::default((
+            num_timesteps,
+            all_fine_chan_freqs_hz.len(),
+            num_cross_baselines,
+        ));
+        let mut vis_weights_gpu: Array3<CudaFloat> = Array3::default((
+            num_timesteps,
+            all_fine_chan_freqs_hz.len(),
+            num_cross_baselines,
+        ));
+        for (mut vis_residual_gpu, vis_residual) in vis_residual_gpu
+            .outer_iter_mut()
+            .zip(vis_residual.outer_iter())
+        {
+            for (mut vis_residual_gpu, vis_residual) in vis_residual_gpu
+                .outer_iter_mut()
+                .zip(vis_residual.axis_iter(Axis(1)))
+            {
+                for (vg, v) in vis_residual_gpu.iter_mut().zip(vis_residual.iter()) {
+                    *vg = Jones::from(*v);
+                }
+            }
+        }
+        for (mut vis_weights_gpu, vis_weights) in vis_weights_gpu
+            .outer_iter_mut()
+            .zip(vis_weights.outer_iter())
+        {
+            for (mut vis_weights_gpu, vis_weights) in vis_weights_gpu
+                .outer_iter_mut()
+                .zip(vis_weights.axis_iter(Axis(1)))
+            {
+                for (wg, w) in vis_weights_gpu.iter_mut().zip(vis_weights.iter()) {
+                    *wg = *w as CudaFloat;
+                }
+            }
+        }
+        let mut d_high_res_vis =
+            DevicePointer::copy_to_device(vis_residual_gpu.as_slice().unwrap()).unwrap();
+        let d_high_res_weights =
+            DevicePointer::copy_to_device(vis_weights_gpu.as_slice().unwrap()).unwrap();
+
+        let mut vis_residual_low_res_gpu: Array3<Jones<CudaFloat>> =
+            Array3::default((1, low_res_freqs_hz.len(), num_cross_baselines));
+        let mut vis_weights_low_res_gpu: Array3<CudaFloat> =
+            Array3::default((1, low_res_freqs_hz.len(), num_cross_baselines));
+        for (mut vis_residual_low_res_gpu, vis_residual_low_res) in vis_residual_low_res_gpu
+            .outer_iter_mut()
+            .zip(vis_residual_low_res.outer_iter())
+        {
+            for (mut vis_residual_low_res_gpu, vis_residual_low_res) in vis_residual_low_res_gpu
+                .outer_iter_mut()
+                .zip(vis_residual_low_res.axis_iter(Axis(1)))
+            {
+                for (vg, v) in vis_residual_low_res_gpu
+                    .iter_mut()
+                    .zip(vis_residual_low_res.iter())
+                {
+                    *vg = Jones::from(*v);
+                }
+            }
+        }
+        for (mut vis_weights_low_res_gpu, vis_weights_low_res) in vis_weights_low_res_gpu
+            .outer_iter_mut()
+            .zip(weight_residual_low_res.outer_iter())
+        {
+            for (mut vis_weights_low_res_gpu, vis_weights_low_res) in vis_weights_low_res_gpu
+                .outer_iter_mut()
+                .zip(vis_weights_low_res.axis_iter(Axis(1)))
+            {
+                for (wg, w) in vis_weights_low_res_gpu
+                    .iter_mut()
+                    .zip(vis_weights_low_res.iter())
+                {
+                    *wg = *w as CudaFloat;
+                }
+            }
+        }
+        let mut d_low_res_vis =
+            DevicePointer::copy_to_device(vis_residual_low_res_gpu.as_slice().unwrap()).unwrap();
+        let d_low_res_weights =
+            DevicePointer::copy_to_device(vis_weights_low_res_gpu.as_slice().unwrap()).unwrap();
+        let mut d_low_res_model_rotated =
+            DevicePointer::copy_to_device(vis_residual_low_res_gpu.as_slice().unwrap()).unwrap();
+
+        // dbg!(vis_residual.dim(), vis_residual_gpu.dim());
+        // dbg!(
+        //     vis_residual.slice(s![0, 0, 0..3]),
+        //     vis_residual_gpu.slice(s![0, 0..3, 0]),
+        //     vis_weights.slice(s![0, 0, 0..3]),
+        //     vis_weights_gpu.slice(s![0, 0..3, 0])
+        // );
+
+        let freq_average_factor = all_fine_chan_freqs_hz.len() / low_res_freqs_hz.len();
+        let n_serial = num_sources_to_iono_subtract;
+
+        let mut high_res_modeller = SkyModellerCuda::new(
+            beam.deref(),
+            &SourceList::new(),
+            unflagged_tile_xyzs,
+            all_fine_chan_freqs_hz,
+            flagged_tiles,
+            RADec::default(),
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+            dut1,
+            !no_precession,
+        )?;
+        let mut d_high_res_model: DevicePointer<Jones<f32>> = DevicePointer::malloc(
+            timestamps.len()
+                * num_cross_baselines
+                * all_fine_chan_freqs_hz.len()
+                * std::mem::size_of::<Jones<f32>>(),
         )
-    } else {
-        Array3::default((0, 0, 0))
-    };
+        .unwrap();
+
+        // The UVWs for every timestep will be the same (because the phase
+        // centres are always the same). Make these ahead of time for
+        // efficiency.
+        let high_res_uvws = {
+            let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
+            let mut tile_uvws = vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
+            uvws.outer_iter_mut()
+                .zip(precessed_tile_xyzs.outer_iter())
+                .zip(lmsts.iter())
+                .for_each(|((mut uvws, precessed_tile_xyzs), lmst)| {
+                    let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+                    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
+                    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
+                    // Get a UVW for each tile.
+                    tile_uvws
+                        .iter_mut()
+                        .zip(precessed_tile_xyzs.iter())
+                        .for_each(|(uvw, xyz)| {
+                            *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec)
+                        });
+                    // Take the difference of every pair of UVWs.
+                    let mut count = 0;
+                    for (i, t1) in tile_uvws.iter().enumerate() {
+                        for t2 in tile_uvws.iter().skip(i + 1) {
+                            uvws[count] = *t1 - *t2;
+                            count += 1;
+                        }
+                    }
+                });
+            uvws
+        };
+        // One pointer per timestep.
+        let mut d_uvws = Vec::with_capacity(high_res_uvws.len_of(Axis(0)));
+        // Temp vector to store results.
+        let mut cuda_uvws = vec![
+            cuda::UVW {
+                u: 0.0,
+                v: 0.0,
+                w: 0.0
+            };
+            high_res_uvws.len_of(Axis(1))
+        ];
+        for uvws in high_res_uvws.outer_iter() {
+            // Convert the type and push the results to the device,
+            // saving the resulting pointer.
+            uvws.iter()
+                .zip_eq(cuda_uvws.iter_mut())
+                .for_each(|(uvw, cuda_uvw)| {
+                    *cuda_uvw = cuda::UVW {
+                        u: uvw.u as _,
+                        v: uvw.v as _,
+                        w: uvw.w as _,
+                    }
+                });
+            d_uvws.push(cuda::DevicePointer::copy_to_device(&cuda_uvws).unwrap());
+        }
+
+        let mut low_res_modeller = SkyModellerCuda::new(
+            beam.deref(),
+            &SourceList::new(),
+            unflagged_tile_xyzs,
+            low_res_freqs_hz,
+            flagged_tiles,
+            RADec::default(),
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+            dut1,
+            !no_precession,
+        )?;
+
+        for (i_source, (((source_name, source), iono_consts), source_phase_centre)) in source_list
+            .iter()
+            .take(n_serial)
+            .zip_eq(iono_consts.iter_mut().take(n_serial))
+            .zip_eq(source_weighted_positions.iter().take(n_serial).copied())
+            .enumerate()
+        {
+            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})",);
+            let start = std::time::Instant::now();
+            let status = cuda::rotate_average(
+                d_high_res_vis.get().cast(),
+                d_high_res_weights.get(),
+                d_low_res_vis.get_mut().cast(),
+                d_low_res_weights.get(),
+                cuda::RADec {
+                    ra: source_phase_centre.ra as _,
+                    dec: source_phase_centre.dec as _,
+                },
+                timestamps.len().try_into().unwrap(),
+                num_tiles.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                all_fine_chan_freqs_hz.len().try_into().unwrap(),
+                freq_average_factor.try_into().unwrap(),
+                d_lmsts.get(),
+                d_xyzs.get(),
+                d_uvws_from.get(),
+                d_uvws_to.get_mut(),
+                d_lambdas.get(),
+            );
+            assert_eq!(status, 0);
+            trace!("{:?}: rotate_average", std::time::Instant::now() - start);
+
+            low_res_modeller.update_with_a_source(source, source_phase_centre)?;
+            low_res_modeller.clear_vis();
+            trace!(
+                "{:?}: low res update and clear",
+                std::time::Instant::now() - start
+            );
+
+            let status = cuda::xyzs_to_uvws(
+                d_xyzs_low_res.get(),
+                d_average_lmsts.get(),
+                d_uvws_low_res.get_mut(),
+                cuda::RADec {
+                    ra: source_phase_centre.ra as CudaFloat,
+                    dec: source_phase_centre.dec as CudaFloat,
+                },
+                num_tiles.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                1,
+            );
+            assert_eq!(status, 0);
+            trace!(
+                "{:?}: low res xyzs_to_uvws",
+                std::time::Instant::now() - start
+            );
+
+            low_res_modeller.model_with_uvws2(&d_uvws_low_res, average_lmst, average_latitude)?;
+            trace!("{:?}: low res model", std::time::Instant::now() - start);
+
+            let status = cuda::iono_loop(
+                d_low_res_vis.get().cast(),
+                d_low_res_weights.get(),
+                low_res_modeller.d_vis.get_mut().cast(),
+                d_low_res_model_rotated.get_mut().cast(),
+                &mut iono_consts.0,
+                &mut iono_consts.1,
+                num_timesteps.try_into().unwrap(),
+                num_tiles.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                low_res_freqs_hz.len().try_into().unwrap(),
+                10,
+                d_average_lmsts.get(),
+                d_uvws_low_res.get(),
+                d_low_res_lambdas.get(),
+            );
+            assert_eq!(status, 0);
+            // dbg!(iono_consts);
+            trace!("{:?}: iono_loop", std::time::Instant::now() - start);
+
+            high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+            // high_res_modeller.clear_vis();
+            // Clear the old memory before reusing the buffer.
+            cuda_runtime_sys::cudaMemset(
+                d_high_res_model.get_mut().cast(),
+                0,
+                timestamps.len()
+                    * num_cross_baselines
+                    * all_fine_chan_freqs_hz.len()
+                    * std::mem::size_of::<Jones<f32>>(),
+            );
+            d_uvws
+                .iter()
+                .zip(lmsts.iter())
+                .zip(latitudes.iter())
+                .enumerate()
+                .try_for_each(|(i_time, ((d_uvws, lmst), latitude))| {
+                    high_res_modeller.model_with_uvws3(
+                        d_high_res_model
+                            .get_mut()
+                            .add(i_time * num_cross_baselines * all_fine_chan_freqs_hz.len()),
+                        d_uvws,
+                        *lmst,
+                        *latitude,
+                    )
+                })?;
+            trace!("{:?}: high res model", std::time::Instant::now() - start);
+
+            let status = cuda::subtract_iono(
+                d_high_res_vis.get_mut().cast(),
+                d_high_res_model.get().cast(),
+                iono_consts.0,
+                iono_consts.1,
+                d_uvws_from.get(),
+                d_lambdas.get(),
+                num_timesteps.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                all_fine_chan_freqs_hz.len().try_into().unwrap(),
+            );
+            assert_eq!(status, 0);
+            trace!("{:?}: subtract_iono", std::time::Instant::now() - start);
+
+            peel_progress.inc(1);
+        }
+
+        d_high_res_vis
+            .copy_from_device(vis_residual_gpu.as_slice_mut().unwrap())
+            .unwrap();
+        for (vis_residual_gpu, mut vis_residual) in vis_residual_gpu
+            .outer_iter()
+            .zip_eq(vis_residual.outer_iter_mut())
+        {
+            for (vis_residual_gpu, mut vis_residual) in vis_residual_gpu
+                .outer_iter()
+                .zip_eq(vis_residual.axis_iter_mut(Axis(1)))
+            {
+                for (vg, v) in vis_residual_gpu.iter().zip_eq(vis_residual.iter_mut()) {
+                    *v = Jones::from(*vg);
+                }
+            }
+        }
+
+        // d_low_res_vis
+        //     .copy_from_device(vis_residual_low_res_gpu.as_slice_mut().unwrap())
+        //     .unwrap();
+        // info!("{:?}: copy from device", std::time::Instant::now() - start);
+        // dbg!(
+        //     vis_residual_low_res.slice(s![0, 0, 0..3]),
+        //     vis_residual_low_res_gpu.slice(s![0, 0..3, 0])
+        // );
+        // let mut d = 0.0_f32;
+        // dbg!(vis_residual_low_res.dim(), vis_residual_low_res_gpu.dim());
+        // vis_residual_low_res
+        //     .outer_iter()
+        //     .zip(vis_residual_low_res_gpu.outer_iter())
+        //     .for_each(|(v, v2)| {
+        //         v.outer_iter()
+        //             .zip_eq(v2.axis_iter(Axis(1)))
+        //             .for_each(|(v, v2)| {
+        //                 v.iter().zip_eq(v2.iter()).for_each(|(v, v2)| {
+        //                     let d2 = *v - v2;
+        //                     d = d
+        //                         .max(d2[0].re)
+        //                         .max(d2[0].im)
+        //                         .max(d2[1].re)
+        //                         .max(d2[1].im)
+        //                         .max(d2[2].re)
+        //                         .max(d2[2].im)
+        //                         .max(d2[3].re)
+        //                         .max(d2[3].im);
+        //                 });
+        //             });
+        //     });
+        // dbg!(d);
+    }
 
     // ///////// //
     // PEEL LOOP //
     // ///////// //
 
-    let error = AtomicCell::new(false);
-    let (tx_high_res_model, rx_high_res_model) = bounded(num_threads);
-    let (tx_low_res_model, rx_low_res_model) = bounded(2);
-    thread::scope(|scope| {
-        let low_res_model_handle: ScopedJoinHandle<Result<(), ModelError>> = scope.spawn(|| {
-            defer_on_unwind! { error.store(true); }
+    // let error = AtomicCell::new(false);
+    // let (tx_high_res_model, rx_high_res_model) = bounded(num_threads);
+    // let (tx_low_res_model, rx_low_res_model) = bounded(2);
+    // thread::scope(|scope| {
+    //     let low_res_model_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
+    //         defer_on_unwind! { error.store(true); }
 
-            let mut low_res_modeller = new_sky_modeller(
-                matches!(modeller_info, ModellerInfo::Cpu),
-                beam.deref(),
-                &SourceList::new(),
-                unflagged_tile_xyzs,
-                low_res_freqs_hz,
-                flagged_tiles,
-                RADec::default(),
-                array_position.longitude_rad,
-                array_position.latitude_rad,
-                dut1,
-                !no_precession,
-            )?;
+    //         let mut low_res_modeller = new_sky_modeller(
+    //             matches!(modeller_info, ModellerInfo::Cpu),
+    //             beam.deref(),
+    //             &SourceList::new(),
+    //             unflagged_tile_xyzs,
+    //             low_res_freqs_hz,
+    //             flagged_tiles,
+    //             RADec::default(),
+    //             array_position.longitude_rad,
+    //             array_position.latitude_rad,
+    //             dut1,
+    //             !no_precession,
+    //         )?;
 
-            for ((source_name, source), source_phase_centre) in source_list
-                .iter()
-                .take(num_sources_to_iono_subtract)
-                .zip_eq(source_weighted_positions.iter())
-            {
-                // Should we continue?
-                if error.load() {
-                    return Ok(());
-                }
+    //         for ((source_name, source), source_phase_centre) in source_list
+    //             .iter()
+    //             .take(num_sources_to_iono_subtract)
+    //             .zip_eq(source_weighted_positions.iter())
+    //         {
+    //             // Should we continue?
+    //             if error.load() {
+    //                 return Ok(());
+    //             }
 
-                trace!(
-                    "Modelling '{source_name}' in low res, weighted position {source_phase_centre}"
-                );
-                let mut vis_model_low_res = Array3::zeros(low_res_vis_dims);
-                low_res_modeller.update_with_a_source(source, *source_phase_centre)?;
-                model_timesteps(
-                    low_res_modeller.deref_mut(),
-                    &[average_timestamp],
-                    vis_model_low_res.view_mut(),
-                )?;
-                tx_low_res_model.send(vis_model_low_res).unwrap();
-            }
+    //             trace!(
+    //                 "Modelling '{source_name}' in low res, weighted position {source_phase_centre}"
+    //             );
+    //             let mut vis_model_low_res = Array3::zeros(low_res_vis_dims);
+    //             low_res_modeller.update_with_a_source(source, *source_phase_centre)?;
+    //             model_timesteps(
+    //                 low_res_modeller.deref_mut(),
+    //                 &[average_timestamp],
+    //                 vis_model_low_res.view_mut(),
+    //             )?;
+    //             tx_low_res_model.send(vis_model_low_res).unwrap();
+    //         }
 
-            drop(tx_low_res_model);
-            Ok(())
-        });
+    //         drop(tx_low_res_model);
+    //         Ok(())
+    //     });
 
-        let high_res_model_handle: ScopedJoinHandle<Result<(), ModelError>> = scope.spawn(|| {
-            defer_on_unwind! { error.store(true); }
+    //     let high_res_model_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
+    //         defer_on_unwind! { error.store(true); }
 
-            let mut high_res_modeller = match modeller_info {
-                ModellerInfo::Cpu => {
-                    let phase_centre = RADec::default();
-                    let components =
-                        ComponentList::new(source_list, all_fine_chan_freqs_hz, phase_centre);
-                    let maps = crate::math::TileBaselineFlags::new(
-                        unflagged_tile_xyzs.len() + flagged_tiles.len(),
-                        flagged_tiles.clone(),
-                    );
+    // let mut high_res_modeller = match modeller_info {
+    //     ModellerInfo::Cpu => {
+    //         let phase_centre = RADec::default();
+    //         let components =
+    //             ComponentList::new(source_list, all_fine_chan_freqs_hz, phase_centre);
+    //         let maps = crate::math::TileBaselineFlags::new(
+    //             unflagged_tile_xyzs.len() + flagged_tiles.len(),
+    //             flagged_tiles.clone(),
+    //         );
 
-                    let modeller = SkyModellerCpu {
-                        beam,
-                        phase_centre,
-                        array_longitude: array_position.longitude_rad,
-                        array_latitude: array_position.latitude_rad,
-                        dut1,
-                        precess: !no_precession,
-                        unflagged_fine_chan_freqs: all_fine_chan_freqs_hz,
-                        unflagged_tile_xyzs,
-                        flagged_tiles,
-                        unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
-                        components,
-                    };
-                    Either::Left(modeller)
-                }
+    //         let modeller = SkyModellerCpu {
+    //             beam,
+    //             phase_centre,
+    //             array_longitude: array_position.longitude_rad,
+    //             array_latitude: array_position.latitude_rad,
+    //             dut1,
+    //             precess: !no_precession,
+    //             unflagged_fine_chan_freqs: all_fine_chan_freqs_hz,
+    //             unflagged_tile_xyzs,
+    //             flagged_tiles,
+    //             unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+    //             components,
+    //         };
+    //         Either::Left(modeller)
+    //     }
 
-                #[cfg(feature = "cuda")]
-                ModellerInfo::Cuda { .. } => unsafe {
-                    let modeller = SkyModellerCuda::new(
-                        beam,
-                        &SourceList::new(),
-                        unflagged_tile_xyzs,
-                        all_fine_chan_freqs_hz,
-                        flagged_tiles,
-                        RADec::default(),
-                        array_position.longitude_rad,
-                        array_position.latitude_rad,
-                        dut1,
-                        !no_precession,
-                    )
-                    .unwrap();
-                    Either::Right((modeller, vec![]))
-                },
-            };
+    //     #[cfg(feature = "cuda")]
+    //     ModellerInfo::Cuda { .. } => unsafe {
+    //         let modeller = SkyModellerCuda::new(
+    //             beam,
+    //             &SourceList::new(),
+    //             unflagged_tile_xyzs,
+    //             all_fine_chan_freqs_hz,
+    //             flagged_tiles,
+    //             RADec::default(),
+    //             array_position.longitude_rad,
+    //             array_position.latitude_rad,
+    //             dut1,
+    //             !no_precession,
+    //         )?;
+    //         Either::Right((modeller, vec![]))
+    //     },
+    // };
 
-            // Set up the high-res model UVWs once and re-use them.
-            // The UVWs for every timestep will be the same (because the phase
-            // centres are always the same). Make these ahead of time for
-            // efficiency.
-            let high_res_uvws = {
-                let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
-                let mut tile_uvws =
-                    vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
-                uvws.outer_iter_mut()
-                    .zip(precessed_tile_xyzs.outer_iter())
-                    .zip(lmsts.iter())
-                    .for_each(|((mut uvws, precessed_tile_xyzs), lmst)| {
-                        let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-                        let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-                        let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-                        // Get a UVW for each tile.
-                        tile_uvws
-                            .iter_mut()
-                            .zip(precessed_tile_xyzs.iter())
-                            .for_each(|(uvw, xyz)| {
-                                *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec)
-                            });
-                        // Take the difference of every pair of UVWs.
-                        let mut count = 0;
-                        for (i, t1) in tile_uvws.iter().enumerate() {
-                            for t2 in tile_uvws.iter().skip(i + 1) {
-                                uvws[count] = *t1 - *t2;
-                                count += 1;
-                            }
-                        }
-                    });
-                uvws
-            };
+    //         // The UVWs for every timestep will be the same (because the phase
+    //         // centres are always the same). Make these ahead of time for
+    //         // efficiency.
+    //         let high_res_uvws = {
+    //             let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
+    //             let mut tile_uvws =
+    //                 vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
+    //             uvws.outer_iter_mut()
+    //                 .zip(precessed_tile_xyzs.outer_iter())
+    //                 .zip(lmsts.iter())
+    //                 .for_each(|((mut uvws, precessed_tile_xyzs), lmst)| {
+    //                     let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+    //                     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
+    //                     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
+    //                     // Get a UVW for each tile.
+    //                     tile_uvws
+    //                         .iter_mut()
+    //                         .zip(precessed_tile_xyzs.iter())
+    //                         .for_each(|(uvw, xyz)| {
+    //                             *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec)
+    //                         });
+    //                     // Take the difference of every pair of UVWs.
+    //                     let mut count = 0;
+    //                     for (i, t1) in tile_uvws.iter().enumerate() {
+    //                         for t2 in tile_uvws.iter().skip(i + 1) {
+    //                             uvws[count] = *t1 - *t2;
+    //                             count += 1;
+    //                         }
+    //                     }
+    //                 });
+    //             uvws
+    //         };
 
-            // If we're modelling with CUDA, we can allocate UVWs to the device
-            // once, now, and re-use the pointers.
-            #[cfg(feature = "cuda")]
-            match high_res_modeller.as_mut() {
-                Either::Right((_, d_uvws)) => {
-                    // One pointer per timestep.
-                    *d_uvws = Vec::with_capacity(high_res_uvws.len_of(Axis(0)));
-                    // Temp vector to store results.
-                    let mut cuda_uvws = vec![
-                        crate::cuda::UVW {
-                            u: 0.0,
-                            v: 0.0,
-                            w: 0.0
-                        };
-                        high_res_uvws.len_of(Axis(1))
-                    ];
-                    for uvws in high_res_uvws.outer_iter() {
-                        // Convert the type and push the results to the device,
-                        // saving the resulting pointer.
-                        uvws.iter()
-                            .zip_eq(cuda_uvws.iter_mut())
-                            .for_each(|(uvw, cuda_uvw)| {
-                                *cuda_uvw = crate::cuda::UVW {
-                                    u: uvw.u as _,
-                                    v: uvw.v as _,
-                                    w: uvw.w as _,
-                                }
-                            });
-                        unsafe {
-                            d_uvws.push(crate::cuda::DevicePointer::copy_to_device(&cuda_uvws)?);
-                        }
-                    }
-                }
+    //         // If we're modelling with CUDA, we can allocate UVWs to the device
+    //         // once, now, and re-use the pointers.
+    //         #[cfg(feature = "cuda")]
+    //         match high_res_modeller.as_mut() {
+    //             Either::Right((_, d_uvws)) => {
+    //                 // One pointer per timestep.
+    //                 *d_uvws = Vec::with_capacity(high_res_uvws.len_of(Axis(0)));
+    //                 // Temp vector to store results.
+    //                 let mut cuda_uvws = vec![
+    //                     cuda::UVW {
+    //                         u: 0.0,
+    //                         v: 0.0,
+    //                         w: 0.0
+    //                     };
+    //                     high_res_uvws.len_of(Axis(1))
+    //                 ];
+    //                 for uvws in high_res_uvws.outer_iter() {
+    //                     // Convert the type and push the results to the device,
+    //                     // saving the resulting pointer.
+    //                     uvws.iter()
+    //                         .zip_eq(cuda_uvws.iter_mut())
+    //                         .for_each(|(uvw, cuda_uvw)| {
+    //                             *cuda_uvw = cuda::UVW {
+    //                                 u: uvw.u as _,
+    //                                 v: uvw.v as _,
+    //                                 w: uvw.w as _,
+    //                             }
+    //                         });
+    //                     unsafe {
+    //                         d_uvws.push(cuda::DevicePointer::copy_to_device(&cuda_uvws)?);
+    //                     }
+    //                 }
+    //             }
 
-                Either::Left(_) => (),
-            };
+    //             Either::Left(_) => (),
+    //         };
 
-            for ((source_name, source), source_phase_centre) in source_list
-                .iter()
-                .take(num_sources_to_iono_subtract)
-                .zip_eq(source_weighted_positions.iter())
-            {
-                // Should we continue?
-                if error.load() {
-                    return Ok(());
-                }
+    //         for ((source_name, source), source_phase_centre) in source_list
+    //             .iter()
+    //             .take(num_sources_to_iono_subtract)
+    //             .zip_eq(source_weighted_positions.iter())
+    //         {
+    //             // Should we continue?
+    //             if error.load() {
+    //                 return Ok(());
+    //             }
 
-                trace!("Modelling '{source_name}' in high res, weighted position {source_phase_centre}");
-                let mut vis_model_high_res = Array3::zeros(high_res_vis_dims);
-                match high_res_modeller.as_mut() {
-                    Either::Left(high_res_modeller) => {
-                        high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
-                        model_timesteps(
-                            high_res_modeller,
-                            timestamps,
-                            vis_model_high_res.view_mut(),
-                        )
-                        .unwrap();
-                    }
-                    Either::Right((high_res_cuda_modeller, d_uvws)) => {
-                        high_res_cuda_modeller
-                            .update_with_a_source(source, obs_context.phase_centre)?;
-                        vis_model_high_res
-                            .outer_iter_mut()
-                            .zip(d_uvws.iter())
-                            .zip(lmsts.iter())
-                            .zip(latitudes.iter())
-                            .try_for_each(|(((vis_model, d_uvws), lmst), latitude)| {
-                                high_res_cuda_modeller
-                                    .model_with_uvws(vis_model, d_uvws, *lmst, *latitude)
-                            })
-                            .unwrap();
-                    }
-                }
-                tx_high_res_model.send(vis_model_high_res).unwrap();
-            }
+    //             trace!("Modelling '{source_name}' in high res, weighted position {source_phase_centre}");
+    //             let mut vis_model_high_res = Array3::zeros(high_res_vis_dims);
+    //             match high_res_modeller.as_mut() {
+    //                 Either::Left(high_res_modeller) => {
+    //                     high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+    //                     model_timesteps(
+    //                         high_res_modeller,
+    //                         timestamps,
+    //                         vis_model_high_res.view_mut(),
+    //                     )?;
+    //                 }
+    //                 Either::Right((high_res_cuda_modeller, d_uvws)) => {
+    //                     high_res_cuda_modeller
+    //                         .update_with_a_source(source, obs_context.phase_centre)?;
+    //                     vis_model_high_res
+    //                         .outer_iter_mut()
+    //                         .zip(d_uvws.iter())
+    //                         .zip(lmsts.iter())
+    //                         .zip(latitudes.iter())
+    //                         .try_for_each(|(((vis_model, d_uvws), lmst), latitude)| {
+    //                             high_res_cuda_modeller
+    //                                 .model_with_uvws(vis_model, d_uvws, *lmst, *latitude)
+    //                         })?;
+    //                 }
+    //             }
+    //             tx_high_res_model.send(vis_model_high_res).unwrap();
+    //         }
 
-            drop(tx_high_res_model);
-            Ok(())
-        });
+    //         drop(tx_high_res_model);
+    //         Ok(())
+    //     });
 
-        let peel_handle: ScopedJoinHandle<Result<(), ModelError>> = scope.spawn(|| {
-            defer_on_unwind! { error.store(true); }
+    //     let peel_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
+    //         defer_on_unwind! { error.store(true); }
 
-            let mut vis_model_low_res_tmp: Array3<Jones<f32>> = vis_residual_low_res.clone();
-            // let n_serial = num_sources_to_iono_subtract_in_serial.min(num_sources_to_iono_subtract);
-            let n_serial = num_sources_to_iono_subtract;
+    //         let mut vis_model_low_res_tmp: Array3<Jones<f32>> = vis_residual_low_res.clone();
+    //         // let n_serial = num_sources_to_iono_subtract_in_serial.min(num_sources_to_iono_subtract);
+    //         let n_serial = num_sources_to_iono_subtract;
 
-            for (i_source, ((source_name, iono_consts), source_phase_centre)) in source_list
-                .keys()
-                .take(n_serial)
-                .zip_eq(iono_consts.iter_mut().take(n_serial))
-                .zip_eq(source_weighted_positions.iter().take(n_serial).copied())
-                .enumerate()
-            {
-                // Should we continue?
-                if error.load() {
-                    return Ok(());
-                }
+    //         for (i_source, ((source_name, iono_consts), source_phase_centre)) in source_list
+    //             .keys()
+    //             .take(n_serial)
+    //             .zip_eq(iono_consts.iter_mut().take(n_serial))
+    //             .zip_eq(source_weighted_positions.iter().take(n_serial).copied())
+    //             .enumerate()
+    //         {
+    //             // Should we continue?
+    //             if error.load() {
+    //                 return Ok(());
+    //             }
 
-                let start = std::time::Instant::now();
+    //             let start = std::time::Instant::now();
 
-                debug!(
-                    "peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})",
-                );
+    //             debug!(
+    //                 "peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})",
+    //             );
 
-                // /////////////////// //
-                // ROTATE, AVERAGE VIS //
-                // /////////////////// //
+    //             // /////////////////// //
+    //             // ROTATE, AVERAGE VIS //
+    //             // /////////////////// //
 
-                // Rotate the residual visibilities to the source phase centre and
-                // average into vis_residual_low_res.
-                trace!("{:?}: vis_rotate2", std::time::Instant::now() - start);
-                vis_rotate2(
-                    vis_residual.view(),
-                    vis_residual_tmp.view_mut(),
-                    source_phase_centre,
-                    precessed_tile_xyzs.view(),
-                    tile_ws_from.view(),
-                    tile_ws_to.view_mut(),
-                    &lmsts,
-                    all_fine_chan_lambdas_m,
-                );
-                trace!("{:?}: vis_average", std::time::Instant::now() - start);
-                vis_average2(
-                    vis_residual_tmp.view(),
-                    vis_residual_low_res.view_mut(),
-                    iono_taper_weights.view(),
-                );
-                trace!("{:?}: add low-res model", std::time::Instant::now() - start);
+    //             // Rotate the residual visibilities to the source phase centre and
+    //             // average into vis_residual_low_res.
+    //             trace!("{:?}: vis_rotate2", std::time::Instant::now() - start);
+    //             vis_rotate2(
+    //                 vis_residual.view(),
+    //                 vis_residual_tmp.view_mut(),
+    //                 source_phase_centre,
+    //                 precessed_tile_xyzs.view(),
+    //                 tile_ws_from.view(),
+    //                 tile_ws_to.view_mut(),
+    //                 &lmsts,
+    //                 all_fine_chan_lambdas_m,
+    //             );
+    //             trace!("{:?}: vis_average", std::time::Instant::now() - start);
+    //             vis_average2(
+    //                 vis_residual_tmp.view(),
+    //                 vis_residual_low_res.view_mut(),
+    //                 iono_taper_weights.view(),
+    //             );
+    //             trace!("{:?}: add low-res model", std::time::Instant::now() - start);
 
-                // ///////////// //
-                // UNPEEL SOURCE //
-                // ///////////// //
-                // at lower resolution
+    //             // ///////////// //
+    //             // UNPEEL SOURCE //
+    //             // ///////////// //
+    //             // at lower resolution
 
-                let mut vis_model_low_res = rx_low_res_model.recv().unwrap();
-                Zip::from(&mut vis_residual_low_res)
-                    .and(&mut vis_model_low_res_tmp)
-                    .and(&vis_model_low_res)
-                    .for_each(|r, t, m| {
-                        *r += *m;
-                        *t = *m;
-                    });
-                trace!(
-                    "{:?}: pre-compute tile UVs",
-                    std::time::Instant::now() - start
-                );
+    //             let mut vis_model_low_res = rx_low_res_model.recv().unwrap();
+    //             Zip::from(&mut vis_residual_low_res)
+    //                 .and(&mut vis_model_low_res_tmp)
+    //                 .and(&vis_model_low_res)
+    //                 .for_each(|r, t, m| {
+    //                     *r += *m;
+    //                     *t = *m;
+    //                 });
+    //             trace!(
+    //                 "{:?}: pre-compute tile UVs",
+    //                 std::time::Instant::now() - start
+    //             );
 
-                // Pre-compute tile UVs.
-                tile_uvs_low_res
-                    .outer_iter_mut()
-                    .zip(average_precessed_tile_xyzs.outer_iter())
-                    .for_each(|(mut tile_uvs, tile_xyzs)| {
-                        let phase_centre = source_phase_centre.to_hadec(average_lmst);
-                        setup_uvs(
-                            tile_uvs.as_slice_mut().unwrap(),
-                            tile_xyzs.as_slice().unwrap(),
-                            phase_centre,
-                        );
-                    });
-                trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start);
+    //             // Pre-compute tile UVs.
+    //             tile_uvs_low_res
+    //                 .outer_iter_mut()
+    //                 .zip(average_precessed_tile_xyzs.outer_iter())
+    //                 .for_each(|(mut tile_uvs, tile_xyzs)| {
+    //                     let phase_centre = source_phase_centre.to_hadec(average_lmst);
+    //                     setup_uvs(
+    //                         tile_uvs.as_slice_mut().unwrap(),
+    //                         tile_xyzs.as_slice().unwrap(),
+    //                         phase_centre,
+    //                     );
+    //                 });
+    //             trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start);
 
-                // ///////////////// //
-                // CALCULATE OFFSETS //
-                // ///////////////// //
-                // iterate towards a convergent solution for ɑ, β
-                let mut gain_update = 1.0;
+    //             // ///////////////// //
+    //             // CALCULATE OFFSETS //
+    //             // ///////////////// //
+    //             // iterate towards a convergent solution for ɑ, β
+    //             let mut gain_update = 1.0;
 
-                let mut iteration = 0;
-                while iteration != 10 {
-                    iteration += 1;
-                    debug!("iter {iteration}, consts: {iono_consts:?}");
+    //             let mut iteration = 0;
+    //             while iteration != 10 {
+    //                 iteration += 1;
+    //                 debug!("iter {iteration}, consts: {iono_consts:?}");
 
-                    // iono rotate model using existing iono consts (if they're
-                    // non-zero)
-                    if iono_consts.0.abs() > 0.0 || iono_consts.1.abs() > 0.0 {
-                        apply_iono2(
-                            vis_model_low_res.view(),
-                            vis_model_low_res_tmp.view_mut(),
-                            tile_uvs_low_res.view(),
-                            *iono_consts,
-                            low_res_lambdas_m,
-                        );
-                    }
+    //                 // iono rotate model using existing iono consts (if they're
+    //                 // non-zero)
+    //                 if iono_consts.0.abs() > 0.0 || iono_consts.1.abs() > 0.0 {
+    //                     apply_iono2(
+    //                         vis_model_low_res.view(),
+    //                         vis_model_low_res_tmp.view_mut(),
+    //                         tile_uvs_low_res.view(),
+    //                         *iono_consts,
+    //                         low_res_lambdas_m,
+    //                     );
+    //                 }
 
-                    let iono_fits = iono_fit(
-                        vis_residual_low_res.view(),
-                        weight_residual_low_res.view(),
-                        vis_model_low_res_tmp.view(),
-                        average_precessed_tile_xyzs.as_slice().unwrap(),
-                        low_res_lambdas_m,
-                        tile_uvs_low_res.as_slice().unwrap(),
-                    );
-                    trace!("iono_fits: {iono_fits:?}");
+    //                 let iono_fits = iono_fit(
+    //                     vis_residual_low_res.view(),
+    //                     weight_residual_low_res.view(),
+    //                     vis_model_low_res_tmp.view(),
+    //                     low_res_lambdas_m,
+    //                     tile_uvs_low_res.as_slice().unwrap(),
+    //                 );
+    //                 trace!("iono_fits: {iono_fits:?}");
 
-                    iono_consts.0 += iono_fits[0];
-                    iono_consts.1 += iono_fits[1];
-                    gain_update *= iono_fits[2] / iono_fits[3];
-                    vis_model_low_res
-                        .iter_mut()
-                        .for_each(|v| *v *= gain_update as f32);
+    //                 iono_consts.0 += iono_fits[0];
+    //                 iono_consts.1 += iono_fits[1];
+    //                 gain_update *= iono_fits[2] / iono_fits[3];
+    //                 vis_model_low_res
+    //                     .iter_mut()
+    //                     .for_each(|v| *v *= gain_update as f32);
 
-                    // if the offset is small, we've converged.
-                    if iono_fits[0].abs() < 1e-12 && iono_fits[1].abs() < 1e-12 {
-                        debug!("iter {iteration}, consts: {iono_consts:?}, finished");
-                        break;
-                    }
-                }
+    //                 // if the offset is small, we've converged.
+    //                 if iono_fits[0].abs() < 1e-12 && iono_fits[1].abs() < 1e-12 {
+    //                     debug!("iter {iteration}, consts: {iono_consts:?}, finished");
+    //                     break;
+    //                 }
+    //             }
 
-                // /////////////// //
-                // UPDATE RESIDUAL //
-                // /////////////// //
-                // at higher resolution, unpeel old model, then re-peel correctly rotated model.
-                let mut vis_model = rx_high_res_model.recv().unwrap();
+    //             // /////////////// //
+    //             // UPDATE RESIDUAL //
+    //             // /////////////// //
+    //             // at higher resolution, unpeel old model, then re-peel correctly rotated model.
+    //             let mut vis_model = rx_high_res_model.recv().unwrap();
 
-                if i_source < num_sources_to_peel {
-                    trace!("{:?}: apply_iono", std::time::Instant::now() - start);
-                    apply_iono(
-                        vis_model.view_mut(),
-                        tile_uvs_high_res.view(),
-                        *iono_consts,
-                        all_fine_chan_lambdas_m,
-                    );
+    //             if i_source < num_sources_to_peel {
+    //                 trace!("{:?}: apply_iono", std::time::Instant::now() - start);
+    //                 apply_iono(
+    //                     vis_model.view_mut(),
+    //                     tile_uvs_high_res.view(),
+    //                     *iono_consts,
+    //                     all_fine_chan_lambdas_m,
+    //                 );
 
-                    trace!(
-                        "{:?}: calibrate_timeblock",
-                        std::time::Instant::now() - start
-                    );
-                    let pb = ProgressBar::with_draw_target(
-                        Some(chanblocks.len() as _),
-                        ProgressDrawTarget::hidden(),
-                    )
-                    .with_position(0)
-                    .with_message("DI cal {}");
+    //                 trace!(
+    //                     "{:?}: calibrate_timeblock",
+    //                     std::time::Instant::now() - start
+    //                 );
+    //                 let pb = ProgressBar::with_draw_target(
+    //                     Some(chanblocks.len() as _),
+    //                     ProgressDrawTarget::hidden(),
+    //                 )
+    //                 .with_position(0)
+    //                 .with_message("DI cal {}");
 
-                    let results = calibrate_timeblock(
-                        vis_residual.view(),
-                        vis_model.view(),
-                        di_jones.view_mut(),
-                        timeblock,
-                        chanblocks,
-                        50,
-                        1e-8,
-                        1e-2,
-                        pb,
-                        false,
-                    );
-                    // Apply the solutions.
-                    trace!("{:?}: apply solutions", std::time::Instant::now() - start);
+    //                 let results = calibrate_timeblock(
+    //                     vis_residual.view(),
+    //                     vis_model.view(),
+    //                     di_jones.view_mut(),
+    //                     timeblock,
+    //                     chanblocks,
+    //                     50,
+    //                     1e-8,
+    //                     1e-2,
+    //                     pb,
+    //                     false,
+    //                 );
+    //                 // Apply the solutions.
+    //                 trace!("{:?}: apply solutions", std::time::Instant::now() - start);
 
-                    vis_residual
-                        .outer_iter_mut()
-                        .zip(vis_model.outer_iter())
-                        .for_each(|(mut vis_residual, vis_model)| {
-                            let mut i_tile1 = 0;
-                            let mut i_tile2 = 0;
+    //                 vis_residual
+    //                     .outer_iter_mut()
+    //                     .zip(vis_model.outer_iter())
+    //                     .for_each(|(mut vis_residual, vis_model)| {
+    //                         let mut i_tile1 = 0;
+    //                         let mut i_tile2 = 0;
 
-                            vis_residual
-                                .outer_iter_mut()
-                                .zip(vis_model.outer_iter())
-                                .for_each(|(mut vis_residual, vis_model)| {
-                                    i_tile2 += 1;
-                                    if i_tile2 == num_tiles {
-                                        i_tile1 += 1;
-                                        i_tile2 = i_tile1 + 1;
-                                    }
-                                    let sol_tile1 = di_jones.slice(s![0, i_tile1, ..]);
-                                    let sol_tile2 = di_jones.slice(s![0, i_tile2, ..]);
+    //                         vis_residual
+    //                             .outer_iter_mut()
+    //                             .zip(vis_model.outer_iter())
+    //                             .for_each(|(mut vis_residual, vis_model)| {
+    //                                 i_tile2 += 1;
+    //                                 if i_tile2 == num_tiles {
+    //                                     i_tile1 += 1;
+    //                                     i_tile2 = i_tile1 + 1;
+    //                                 }
+    //                                 let sol_tile1 = di_jones.slice(s![0, i_tile1, ..]);
+    //                                 let sol_tile2 = di_jones.slice(s![0, i_tile2, ..]);
 
-                                    vis_residual
-                                        .iter_mut()
-                                        .zip(vis_model.iter())
-                                        .zip(sol_tile1.iter())
-                                        .zip(sol_tile2.iter())
-                                        .for_each(
-                                            |(
-                                                ((vis_residual, vis_model), sol_tile1),
-                                                sol_tile2,
-                                            )| {
-                                                if !sol_tile1.any_nan() && !sol_tile2.any_nan() {
-                                                    *vis_residual -= Jones::<f32>::from(
-                                                        *sol_tile1
-                                                            * Jones::<f64>::from(vis_model)
-                                                            * sol_tile2.h(),
-                                                    );
-                                                }
-                                            },
-                                        );
-                                });
-                        });
-                } else {
-                    vis_model.iter_mut().for_each(|v| *v *= gain_update as f32);
+    //                                 vis_residual
+    //                                     .iter_mut()
+    //                                     .zip(vis_model.iter())
+    //                                     .zip(sol_tile1.iter())
+    //                                     .zip(sol_tile2.iter())
+    //                                     .for_each(
+    //                                         |(
+    //                                             ((vis_residual, vis_model), sol_tile1),
+    //                                             sol_tile2,
+    //                                         )| {
+    //                                             if !sol_tile1.any_nan() && !sol_tile2.any_nan() {
+    //                                                 *vis_residual -= Jones::<f32>::from(
+    //                                                     *sol_tile1
+    //                                                         * Jones::<f64>::from(vis_model)
+    //                                                         * sol_tile2.h(),
+    //                                                 );
+    //                                             }
+    //                                         },
+    //                                     );
+    //                             });
+    //                     });
+    //             } else {
+    //                 vis_model.iter_mut().for_each(|v| *v *= gain_update as f32);
 
-                    trace!("{:?}: apply_iono3", std::time::Instant::now() - start);
-                    apply_iono3(
-                        vis_model.view(),
-                        vis_residual.view_mut(),
-                        tile_uvs_high_res.view(),
-                        *iono_consts,
-                        all_fine_chan_lambdas_m,
-                    );
-                }
-                trace!("{:?}: end source loop", std::time::Instant::now() - start);
+    //                 trace!("{:?}: apply_iono3", std::time::Instant::now() - start);
+    //                 apply_iono3(
+    //                     vis_model.view(),
+    //                     vis_residual.view_mut(),
+    //                     tile_uvs_high_res.view(),
+    //                     *iono_consts,
+    //                     all_fine_chan_lambdas_m,
+    //                 );
+    //             }
+    //             trace!("{:?}: end source loop", std::time::Instant::now() - start);
 
-                peel_progress.inc(1);
-            }
-            // drop(vis_residual_tmp);
-            // drop(vis_residual_low_res);
-            // drop(tile_ws_to);
+    //             peel_progress.inc(1);
+    //         }
+    //         // drop(vis_residual_tmp);
+    //         // drop(vis_residual_low_res);
+    //         // drop(tile_ws_to);
 
-            // // Parallel iono subtraction.
-            // let mut n_skip = n_serial;
+    //         // // Parallel iono subtraction.
+    //         // let mut n_skip = n_serial;
 
-            // // Prepare temp arrays and modellers for each thread.
-            // let mut vis_residual_tmps: Vec<Array3<Jones<f32>>> = (0..num_threads)
-            //     .into_iter()
-            //     .map(|_| Array3::zeros(vis_residual.dim()))
-            //     .collect();
-            // let mut vis_residual_low_ress: Vec<Array3<Jones<f32>>> = (0..num_threads)
-            //     .into_iter()
-            //     .map(|_| Array3::zeros(low_res_vis_dims))
-            //     .collect();
-            // let mut vis_model_low_ress: Vec<Array3<Jones<f32>>> = (0..num_threads)
-            //     .into_iter()
-            //     .map(|_| Array3::zeros(low_res_vis_dims))
-            //     .collect();
-            // let mut vis_model_low_res_tmps: Vec<Array3<Jones<f32>>> = (0..num_threads)
-            //     .into_iter()
-            //     .map(|_| Array3::zeros(low_res_vis_dims))
-            //     .collect();
-            // let mut tile_uvs_low_ress: Vec<Array2<UV>> = (0..num_threads)
-            //     .into_iter()
-            //     .map(|_| Array2::default((1, num_tiles)))
-            //     .collect();
-            // let mut tile_ws_tos: Vec<Array2<W>> = (0..num_threads)
-            //     .into_iter()
-            //     .map(|_| Array2::default((timestamps.len(), num_tiles)))
-            //     .collect();
-            // let mut low_res_modellers: Vec<Box<dyn SkyModeller>> = (0..num_threads)
-            //     .into_iter()
-            //     .map(|_| {
-            //         new_sky_modeller(
-            //             matches!(modeller_info, ModellerInfo::Cpu),
-            //             beam.deref(),
-            //             &SourceList::new(),
-            //             unflagged_tile_xyzs,
-            //             low_res_freqs_hz,
-            //             flagged_tiles,
-            //             RADec::default(),
-            //             array_position.longitude_rad,
-            //             array_position.latitude_rad,
-            //             dut1,
-            //             !no_precession,
-            //         )
-            //         .unwrap()
-            //     })
-            //     .collect();
+    //         // // Prepare temp arrays and modellers for each thread.
+    //         // let mut vis_residual_tmps: Vec<Array3<Jones<f32>>> = (0..num_threads)
+    //         //     .into_iter()
+    //         //     .map(|_| Array3::zeros(vis_residual.dim()))
+    //         //     .collect();
+    //         // let mut vis_residual_low_ress: Vec<Array3<Jones<f32>>> = (0..num_threads)
+    //         //     .into_iter()
+    //         //     .map(|_| Array3::zeros(low_res_vis_dims))
+    //         //     .collect();
+    //         // let mut vis_model_low_ress: Vec<Array3<Jones<f32>>> = (0..num_threads)
+    //         //     .into_iter()
+    //         //     .map(|_| Array3::zeros(low_res_vis_dims))
+    //         //     .collect();
+    //         // let mut vis_model_low_res_tmps: Vec<Array3<Jones<f32>>> = (0..num_threads)
+    //         //     .into_iter()
+    //         //     .map(|_| Array3::zeros(low_res_vis_dims))
+    //         //     .collect();
+    //         // let mut tile_uvs_low_ress: Vec<Array2<UV>> = (0..num_threads)
+    //         //     .into_iter()
+    //         //     .map(|_| Array2::default((1, num_tiles)))
+    //         //     .collect();
+    //         // let mut tile_ws_tos: Vec<Array2<W>> = (0..num_threads)
+    //         //     .into_iter()
+    //         //     .map(|_| Array2::default((timestamps.len(), num_tiles)))
+    //         //     .collect();
+    //         // let mut low_res_modellers: Vec<Box<dyn SkyModeller>> = (0..num_threads)
+    //         //     .into_iter()
+    //         //     .map(|_| {
+    //         //         new_sky_modeller(
+    //         //             matches!(modeller_info, ModellerInfo::Cpu),
+    //         //             beam.deref(),
+    //         //             &SourceList::new(),
+    //         //             unflagged_tile_xyzs,
+    //         //             low_res_freqs_hz,
+    //         //             flagged_tiles,
+    //         //             RADec::default(),
+    //         //             array_position.longitude_rad,
+    //         //             array_position.latitude_rad,
+    //         //             dut1,
+    //         //             !no_precession,
+    //         //         )
+    //         //         .unwrap()
+    //         //     })
+    //         //     .collect();
 
-            // for source_list_chunk in &source_list.iter().skip(n_skip).chunks(num_threads) {
-            //     // TODO: clean this mess up.
-            //     let source_list_chunk: Vec<(&String, &Source)> =
-            //         source_list_chunk.into_iter().collect();
-            //     source_list_chunk
-            //         .par_iter()
-            //         .zip_eq(
-            //             iono_consts
-            //                 .par_iter_mut()
-            //                 .skip(n_skip)
-            //                 .take(source_list_chunk.len()),
-            //         )
-            //         .zip_eq(
-            //             source_weighted_positions
-            //                 .par_iter()
-            //                 .skip(n_skip)
-            //                 .take(source_list_chunk.len())
-            //                 .copied(),
-            //         )
-            //         .zip_eq(
-            //             vis_residual_tmps
-            //                 .par_iter_mut()
-            //                 .take(source_list_chunk.len()),
-            //         )
-            //         .zip_eq(
-            //             vis_residual_low_ress
-            //                 .par_iter_mut()
-            //                 .take(source_list_chunk.len()),
-            //         )
-            //         .zip_eq(
-            //             vis_model_low_ress
-            //                 .par_iter_mut()
-            //                 .take(source_list_chunk.len()),
-            //         )
-            //         .zip_eq(
-            //             vis_model_low_res_tmps
-            //                 .par_iter_mut()
-            //                 .take(source_list_chunk.len()),
-            //         )
-            //         .zip_eq(
-            //             tile_uvs_low_ress
-            //                 .par_iter_mut()
-            //                 .take(source_list_chunk.len()),
-            //         )
-            //         .zip_eq(tile_ws_tos.par_iter_mut().take(source_list_chunk.len()))
-            //         .zip_eq(
-            //             low_res_modellers
-            //                 .par_iter_mut()
-            //                 .take(source_list_chunk.len()),
-            //         )
-            //         .for_each(
-            //             |(
-            //                 (
-            //                     (
-            //                         (
-            //                             (
-            //                                 (
-            //                                     (
-            //                                         (
-            //                                             ((source_name, source), iono_consts),
-            //                                             source_phase_centre,
-            //                                         ),
-            //                                         vis_residual_tmp,
-            //                                     ),
-            //                                     vis_residual_low_res,
-            //                                 ),
-            //                                 vis_model_low_res,
-            //                             ),
-            //                             vis_model_low_res_tmp,
-            //                         ),
-            //                         tile_uvs_low_res,
-            //                     ),
-            //                     tile_ws_to,
-            //                 ),
-            //                 low_res_modeller,
-            //             )| {
-            //                 low_res_modeller
-            //                     .update_with_a_source(source, source_phase_centre)
-            //                     .unwrap();
-            //                 low_res_modeller
-            //                     .model_timestep(
-            //                         vis_model_low_res.slice_mut(s![0, .., ..]),
-            //                         average_timestamp,
-            //                     )
-            //                     .unwrap();
+    //         // for source_list_chunk in &source_list.iter().skip(n_skip).chunks(num_threads) {
+    //         //     // TODO: clean this mess up.
+    //         //     let source_list_chunk: Vec<(&String, &Source)> =
+    //         //         source_list_chunk.into_iter().collect();
+    //         //     source_list_chunk
+    //         //         .par_iter()
+    //         //         .zip_eq(
+    //         //             iono_consts
+    //         //                 .par_iter_mut()
+    //         //                 .skip(n_skip)
+    //         //                 .take(source_list_chunk.len()),
+    //         //         )
+    //         //         .zip_eq(
+    //         //             source_weighted_positions
+    //         //                 .par_iter()
+    //         //                 .skip(n_skip)
+    //         //                 .take(source_list_chunk.len())
+    //         //                 .copied(),
+    //         //         )
+    //         //         .zip_eq(
+    //         //             vis_residual_tmps
+    //         //                 .par_iter_mut()
+    //         //                 .take(source_list_chunk.len()),
+    //         //         )
+    //         //         .zip_eq(
+    //         //             vis_residual_low_ress
+    //         //                 .par_iter_mut()
+    //         //                 .take(source_list_chunk.len()),
+    //         //         )
+    //         //         .zip_eq(
+    //         //             vis_model_low_ress
+    //         //                 .par_iter_mut()
+    //         //                 .take(source_list_chunk.len()),
+    //         //         )
+    //         //         .zip_eq(
+    //         //             vis_model_low_res_tmps
+    //         //                 .par_iter_mut()
+    //         //                 .take(source_list_chunk.len()),
+    //         //         )
+    //         //         .zip_eq(
+    //         //             tile_uvs_low_ress
+    //         //                 .par_iter_mut()
+    //         //                 .take(source_list_chunk.len()),
+    //         //         )
+    //         //         .zip_eq(tile_ws_tos.par_iter_mut().take(source_list_chunk.len()))
+    //         //         .zip_eq(
+    //         //             low_res_modellers
+    //         //                 .par_iter_mut()
+    //         //                 .take(source_list_chunk.len()),
+    //         //         )
+    //         //         .for_each(
+    //         //             |(
+    //         //                 (
+    //         //                     (
+    //         //                         (
+    //         //                             (
+    //         //                                 (
+    //         //                                     (
+    //         //                                         (
+    //         //                                             ((source_name, source), iono_consts),
+    //         //                                             source_phase_centre,
+    //         //                                         ),
+    //         //                                         vis_residual_tmp,
+    //         //                                     ),
+    //         //                                     vis_residual_low_res,
+    //         //                                 ),
+    //         //                                 vis_model_low_res,
+    //         //                             ),
+    //         //                             vis_model_low_res_tmp,
+    //         //                         ),
+    //         //                         tile_uvs_low_res,
+    //         //                     ),
+    //         //                     tile_ws_to,
+    //         //                 ),
+    //         //                 low_res_modeller,
+    //         //             )| {
+    //         //                 low_res_modeller
+    //         //                     .update_with_a_source(source, source_phase_centre)
+    //         //                     .unwrap();
+    //         //                 low_res_modeller
+    //         //                     .model_timestep(
+    //         //                         vis_model_low_res.slice_mut(s![0, .., ..]),
+    //         //                         average_timestamp,
+    //         //                     )
+    //         //                     .unwrap();
 
-            //                 // Pre-compute tile UVs.
-            //                 tile_uvs_low_res
-            //                     .outer_iter_mut()
-            //                     .zip(average_precessed_tile_xyzs.outer_iter())
-            //                     .for_each(|(mut tile_uvs, tile_xyzs)| {
-            //                         let phase_centre = source_phase_centre.to_hadec(average_lmst);
-            //                         setup_uvs(
-            //                             tile_uvs.as_slice_mut().unwrap(),
-            //                             tile_xyzs.as_slice().unwrap(),
-            //                             phase_centre,
-            //                         );
-            //                     });
+    //         //                 // Pre-compute tile UVs.
+    //         //                 tile_uvs_low_res
+    //         //                     .outer_iter_mut()
+    //         //                     .zip(average_precessed_tile_xyzs.outer_iter())
+    //         //                     .for_each(|(mut tile_uvs, tile_xyzs)| {
+    //         //                         let phase_centre = source_phase_centre.to_hadec(average_lmst);
+    //         //                         setup_uvs(
+    //         //                             tile_uvs.as_slice_mut().unwrap(),
+    //         //                             tile_xyzs.as_slice().unwrap(),
+    //         //                             phase_centre,
+    //         //                         );
+    //         //                     });
 
-            //                 let start = std::time::Instant::now();
-            //                 iono_sub_parallel(
-            //                     vis_residual.view(),
-            //                     vis_residual_low_res.view_mut(),
-            //                     weight_residual_low_res.view(),
-            //                     iono_taper_weights.view(),
-            //                     vis_residual_tmp.view_mut(),
-            //                     vis_model_low_res.view(),
-            //                     vis_model_low_res_tmp.view_mut(),
-            //                     iono_consts,
-            //                     source_phase_centre,
-            //                     precessed_tile_xyzs.view(),
-            //                     &lmsts,
-            //                     average_precessed_tile_xyzs.view(),
-            //                     tile_ws_from.view(),
-            //                     tile_ws_to.view_mut(),
-            //                     tile_uvs_low_res.view(),
-            //                     all_fine_chan_lambdas_m,
-            //                     low_res_lambdas_m,
-            //                 );
-            //                 trace!(
-            //                     "iono subbed {source_name} in {:?}",
-            //                     std::time::Instant::now() - start
-            //                 );
+    //         //                 let start = std::time::Instant::now();
+    //         //                 iono_sub_parallel(
+    //         //                     vis_residual.view(),
+    //         //                     vis_residual_low_res.view_mut(),
+    //         //                     weight_residual_low_res.view(),
+    //         //                     iono_taper_weights.view(),
+    //         //                     vis_residual_tmp.view_mut(),
+    //         //                     vis_model_low_res.view(),
+    //         //                     vis_model_low_res_tmp.view_mut(),
+    //         //                     iono_consts,
+    //         //                     source_phase_centre,
+    //         //                     precessed_tile_xyzs.view(),
+    //         //                     &lmsts,
+    //         //                     average_precessed_tile_xyzs.view(),
+    //         //                     tile_ws_from.view(),
+    //         //                     tile_ws_to.view_mut(),
+    //         //                     tile_uvs_low_res.view(),
+    //         //                     all_fine_chan_lambdas_m,
+    //         //                     low_res_lambdas_m,
+    //         //                 );
+    //         //                 trace!(
+    //         //                     "iono subbed {source_name} in {:?}",
+    //         //                     std::time::Instant::now() - start
+    //         //                 );
 
-            //                 peel_progress.inc(1);
-            //             },
-            //         );
+    //         //                 peel_progress.inc(1);
+    //         //             },
+    //         //         );
 
-            //     // /////////////// //
-            //     // UPDATE RESIDUAL //
-            //     // /////////////// //
-            //     // at higher resolution, unpeel old model, then re-peel correctly rotated model.
-            //     for iono_consts in iono_consts
-            //         .iter()
-            //         .skip(n_skip)
-            //         .take(source_list_chunk.len())
-            //     {
-            //         let vis_model = rx_high_res_model.recv().unwrap();
-            //         apply_iono3(
-            //             vis_model.view(),
-            //             vis_residual.view_mut(),
-            //             tile_uvs_high_res.view(),
-            //             *iono_consts,
-            //             all_fine_chan_lambdas_m,
-            //         );
-            //     }
+    //         //     // /////////////// //
+    //         //     // UPDATE RESIDUAL //
+    //         //     // /////////////// //
+    //         //     // at higher resolution, unpeel old model, then re-peel correctly rotated model.
+    //         //     for iono_consts in iono_consts
+    //         //         .iter()
+    //         //         .skip(n_skip)
+    //         //         .take(source_list_chunk.len())
+    //         //     {
+    //         //         let vis_model = rx_high_res_model.recv().unwrap();
+    //         //         apply_iono3(
+    //         //             vis_model.view(),
+    //         //             vis_residual.view_mut(),
+    //         //             tile_uvs_high_res.view(),
+    //         //             *iono_consts,
+    //         //             all_fine_chan_lambdas_m,
+    //         //         );
+    //         //     }
 
-            //     n_skip += source_list_chunk.len();
-            // }
+    //         //     n_skip += source_list_chunk.len();
+    //         // }
 
-            Ok(())
-        });
+    //         Ok(())
+    //     });
 
-        low_res_model_handle.join().unwrap().unwrap();
-        high_res_model_handle.join().unwrap().unwrap();
-        peel_handle.join().unwrap().unwrap();
-    });
+    //     low_res_model_handle.join().unwrap().unwrap();
+    //     high_res_model_handle.join().unwrap().unwrap();
+    //     peel_handle.join().unwrap().unwrap();
+    // });
 
     Ok(())
 }
@@ -3670,6 +4108,9 @@ pub(crate) enum PeelError {
     Beam(#[from] crate::beam::BeamError),
 
     #[error(transparent)]
+    Model(#[from] crate::model::ModelError),
+
+    #[error(transparent)]
     IO(#[from] std::io::Error),
 
     #[cfg(feature = "cuda")]
@@ -3756,7 +4197,6 @@ fn iono_sub_parallel(
             vis_residual_low_res.view(),
             weight_residual_low_res.view(),
             vis_model_low_res_tmp.view(),
-            average_tile_xyzs.as_slice().unwrap(),
             low_res_lambdas_m,
             tile_uvs_low_res.as_slice().unwrap(),
         );

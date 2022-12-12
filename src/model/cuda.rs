@@ -72,7 +72,7 @@ pub(crate) struct SkyModellerCuda<'a> {
     sbf_c: CudaFloat,
     sbf_dx: CudaFloat,
 
-    d_vis: DevicePointer<Jones<f32>>,
+    pub(crate) d_vis: DevicePointer<Jones<f32>>,
     freqs: &'a [f64],
     d_freqs: DevicePointer<CudaFloat>,
     d_shapelet_basis_values: DevicePointer<CudaFloat>,
@@ -676,6 +676,49 @@ impl<'a> SkyModellerCuda<'a> {
                 .copy_from_device(vis_model_slice.as_slice_mut().expect("is contiguous"))?;
         }
         Ok(())
+    }
+
+    pub(crate) fn model_with_uvws2(
+        &mut self,
+        d_uvws: &DevicePointer<cuda::UVW>,
+        lst: f64,
+        latitude: f64,
+    ) -> Result<(), ModelError> {
+        let tmp = self.d_uvws.ptr;
+        self.d_uvws.ptr = d_uvws.ptr;
+        unsafe {
+            self.model_points(lst, latitude)?;
+            self.model_gaussians(lst, latitude)?;
+            self.model_shapelets(lst, latitude)?;
+        }
+        self.d_uvws.ptr = tmp;
+        Ok(())
+    }
+
+    pub(crate) fn model_with_uvws3(
+        &mut self,
+        d_vis: *mut Jones<f32>,
+        d_uvws: &DevicePointer<cuda::UVW>,
+        lst: f64,
+        latitude: f64,
+    ) -> Result<(), ModelError> {
+        let tmp = self.d_vis.ptr;
+        let tmp2 = self.d_uvws.ptr;
+        self.d_vis.ptr = d_vis;
+        self.d_uvws.ptr = d_uvws.ptr;
+        unsafe {
+            self.model_points(lst, latitude)?;
+            self.model_gaussians(lst, latitude)?;
+            self.model_shapelets(lst, latitude)?;
+        }
+        self.d_vis.ptr = tmp;
+        self.d_uvws.ptr = tmp2;
+        Ok(())
+    }
+
+    /// Clear the device visibilities.
+    pub(crate) fn clear_vis(&mut self) {
+        self.d_vis.clear();
     }
 }
 
