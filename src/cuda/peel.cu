@@ -131,25 +131,70 @@ __device__ void apply_iono(const JONES *vis, JONES *vis_out, const FLOAT iono_co
 }
 
 // https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
-template <unsigned int blockSize> __device__ void warpReduce(volatile JonesF64 *sdata, unsigned int tid) {
-    if (blockSize >= 64)
-        sdata[tid] += sdata[tid + 32];
-    if (blockSize >= 32)
-        sdata[tid] += sdata[tid + 16];
-    if (blockSize >= 16)
-        sdata[tid] += sdata[tid + 8];
-    if (blockSize >= 8)
-        sdata[tid] += sdata[tid + 4];
-    if (blockSize >= 4)
-        sdata[tid] += sdata[tid + 2];
-    if (blockSize >= 2)
-        sdata[tid] += sdata[tid + 1];
+// template <unsigned int blockSize> __device__ void warpReduce(volatile JonesF64 *sdata, unsigned int tid) {
+__device__ void warpReduce(volatile JonesF64 *sdata, unsigned int tid) {
+    sdata[tid] += sdata[tid + 32];
+    sdata[tid] += sdata[tid + 16];
+    sdata[tid] += sdata[tid + 8];
+    sdata[tid] += sdata[tid + 4];
+    sdata[tid] += sdata[tid + 2];
+    sdata[tid] += sdata[tid + 1];
 }
-template <unsigned int blockSize> __global__ void reduce_jones(JonesF64 *data, const int n) {
+// template <unsigned int blockSize> __global__ void reduce_jones(JonesF64 *data, const int n) {
+//     extern __shared__ JonesF64 sdata[];
+//     unsigned int tid = threadIdx.x;
+//     unsigned int i = blockIdx.x * (blockSize * 2) + tid;
+//     unsigned int gridSize = blockSize * 2 * gridDim.x;
+//     sdata[tid] = JonesF64{
+//         .j00_re = 0.0,
+//         .j00_im = 0.0,
+//         .j01_re = 0.0,
+//         .j01_im = 0.0,
+//         .j10_re = 0.0,
+//         .j10_im = 0.0,
+//         .j11_re = 0.0,
+//         .j11_im = 0.0,
+//     };
+
+//     while (i < n + gridSize) {
+//         sdata[tid] += data[i] + data[i + blockSize];
+//         i += gridSize;
+//     }
+//     __syncthreads();
+//     if (blockSize >= 512) {
+//         if (tid < 256) {
+//             sdata[tid] += sdata[tid + 256];
+//         }
+//         __syncthreads();
+//     }
+//     if (blockSize >= 256) {
+//         if (tid < 128) {
+//             sdata[tid] += sdata[tid + 128];
+//         }
+//         __syncthreads();
+//     }
+//     if (blockSize >= 128) {
+//         if (tid < 64) {
+//             sdata[tid] += sdata[tid + 64];
+//         }
+//         __syncthreads();
+//     }
+//     if (tid < 32)
+//         warpReduce<blockSize>(sdata, tid);
+//     if (tid == 0)
+//         data[blockIdx.x] = sdata[0];
+//     if (tid == 0) {
+//         printf("reduce %f %d\n", sdata[0].j11_im, blockIdx.x);
+//     }
+// }
+
+// For each frequency, add up all of the data across baselines, dumping the
+// results back into the data according to block index.
+__global__ void reduce_jones(JonesF64 *data, const int num_baselines) {
     extern __shared__ JonesF64 sdata[];
-    unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockSize * 2) + tid;
-    unsigned int gridSize = blockSize * 2 * gridDim.x;
+    const int tid = threadIdx.x;
+    const int offset = blockIdx.x * num_baselines;
+
     sdata[tid] = JonesF64{
         .j00_re = 0.0,
         .j00_im = 0.0,
@@ -160,78 +205,62 @@ template <unsigned int blockSize> __global__ void reduce_jones(JonesF64 *data, c
         .j11_re = 0.0,
         .j11_im = 0.0,
     };
-
-    while (i < n) {
-        sdata[tid] += data[i] + data[i + blockSize];
-        i += gridSize;
+    int i = tid;
+    while (i + blockDim.x < num_baselines) {
+        sdata[tid] += data[i + offset] + data[i + offset + blockDim.x];
+        i += 2 * blockDim.x;
     }
     __syncthreads();
-    if (blockSize >= 512) {
+    // Get the last few values.
+    if (i < num_baselines) {
+        sdata[tid] += data[i + offset];
+    }
+    __syncthreads();
+
+    if (blockDim.x >= 512) {
         if (tid < 256) {
             sdata[tid] += sdata[tid + 256];
         }
         __syncthreads();
     }
-    if (blockSize >= 256) {
+    if (blockDim.x >= 256) {
         if (tid < 128) {
             sdata[tid] += sdata[tid + 128];
         }
         __syncthreads();
     }
-    if (blockSize >= 128) {
+    if (blockDim.x >= 128) {
         if (tid < 64) {
             sdata[tid] += sdata[tid + 64];
         }
         __syncthreads();
     }
-    if (tid < 32)
-        warpReduce<blockSize>(sdata, tid);
-    if (tid == 0)
+
+    if (tid < 32) {
+        warpReduce(sdata, tid);
+    }
+    if (tid == 0) {
         data[blockIdx.x] = sdata[0];
+        // printf("reduce %f %d\n", sdata[0].j11_im, blockIdx.x);
+        // printf("");
+    }
 }
 
-// This is designed to only take a single block and add everything.
-template <unsigned int blockSize> __global__ void reduce_jones2(JonesF64 *data, const int n, double *iono_consts) {
+// This is designed to take only a single block and add everything.
+__global__ void reduce_jones2(JonesF64 *data, const int n, double *iono_consts) {
     extern __shared__ JonesF64 sdata[];
-    unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * (blockSize * 2) + tid;
-    unsigned int gridSize = blockSize * 2 * gridDim.x;
-    sdata[tid] = JonesF64{
-        .j00_re = 0.0,
-        .j00_im = 0.0,
-        .j01_re = 0.0,
-        .j01_im = 0.0,
-        .j10_re = 0.0,
-        .j10_im = 0.0,
-        .j11_re = 0.0,
-        .j11_im = 0.0,
-    };
+    int tid = threadIdx.x;
 
-    while (i < n) {
-        sdata[tid] += data[i] + data[i + blockSize];
-        i += gridSize;
+    if (tid < n) {
+        sdata[tid] = data[tid];
     }
     __syncthreads();
-    if (blockSize >= 512) {
-        if (tid < 256) {
-            sdata[tid] += sdata[tid + 256];
+    for (int i = n - 1; i > 0; i -= 1) {
+        if (tid == i) {
+            sdata[tid - 1] += sdata[tid];
         }
         __syncthreads();
     }
-    if (blockSize >= 256) {
-        if (tid < 128) {
-            sdata[tid] += sdata[tid + 128];
-        }
-        __syncthreads();
-    }
-    if (blockSize >= 128) {
-        if (tid < 64) {
-            sdata[tid] += sdata[tid + 64];
-        }
-        __syncthreads();
-    }
-    if (tid < 32)
-        warpReduce<blockSize>(sdata, tid);
     if (tid == 0) {
         const double a_uu = sdata[0].j00_re;
         const double a_uv = sdata[0].j00_im;
@@ -240,6 +269,7 @@ template <unsigned int blockSize> __global__ void reduce_jones2(JonesF64 *data, 
         const double aa_v = sdata[0].j10_re;
         // const double s_vm = sdata[0].j10_im;
         // const double s_mm = sdata[0].j11_re;
+        // printf("reduce2 %f\n", sdata[0].j11_im);
         const double denom = TAU * (a_uu * a_vv - a_uv * a_uv);
         iono_consts[0] += (aa_u * a_vv - aa_v * a_uv) / denom;
         iono_consts[1] += (aa_v * a_uu - aa_u * a_uv) / denom;
@@ -287,14 +317,17 @@ __global__ void iono_loop_kernel(const JONES *vis_residual, const FLOAT *vis_wei
         const double mr = model_i_re * (residual_i_im - model_i_im);
         const double mm = model_i_re * model_i_re;
 
-        iono_fits[step].j00_re = lambda_2 * weight * mm * u * u;      // a_uu
-        iono_fits[step].j00_im = lambda_2 * weight * mm * u * v;      // a_uv
-        iono_fits[step].j01_re = lambda_2 * weight * mm * v * v;      // a_vv
-        iono_fits[step].j01_im = -lambda * weight * mr * u;           // aa_u
-        iono_fits[step].j10_re = -lambda * weight * mr * v;           // aa_v
-        iono_fits[step].j10_im = weight * model_i_re * residual_i_re; // s_vm
-        iono_fits[step].j11_re = weight * mm;                         // s_mm
-        // model->j11_im = 0.0;
+        JonesF64 j = JonesF64{
+            .j00_re = lambda_2 * weight * mm * u * u,      // a_uu
+            .j00_im = lambda_2 * weight * mm * u * v,      // a_uv
+            .j01_re = lambda_2 * weight * mm * v * v,      // a_vv
+            .j01_im = -lambda * weight * mr * u,           // aa_u
+            .j10_re = -lambda * weight * mr * v,           // aa_v
+            .j10_im = weight * model_i_re * residual_i_re, // s_vm
+            .j11_re = weight * mm,                         // s_mm
+            .j11_im = 1.0,
+        };
+        iono_fits[step] = j;
     }
 }
 
@@ -376,9 +409,10 @@ extern "C" int rotate_average(const JONES *d_high_res_vis, const FLOAT *d_high_r
 }
 
 extern "C" int iono_loop(const JONES *d_vis_residual, const FLOAT *d_vis_weights, const JONES *d_vis_model,
-                         JONES *d_vis_model_rotated, double *iono_const_alpha, double *iono_const_beta,
-                         const int num_timesteps, const int num_tiles, const int num_baselines, const int num_freqs,
-                         const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m) {
+                         JONES *d_vis_model_rotated, JonesF64 *d_iono_fits, double *iono_const_alpha,
+                         double *iono_const_beta, const int num_timesteps, const int num_tiles, const int num_baselines,
+                         const int num_freqs, const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws,
+                         const FLOAT *d_lambdas_m) {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
@@ -389,21 +423,20 @@ extern "C" int iono_loop(const JONES *d_vis_residual, const FLOAT *d_vis_weights
     gridDim.z = 1;
     // These are used to do ionospheric fit adding.
     dim3 gridDimAdd, blockDimAdd;
-    const unsigned int n = 256;
-    blockDimAdd.x = n;
+    blockDimAdd.x = 256;
     blockDimAdd.y = 1;
     blockDimAdd.z = 1;
-    gridDimAdd.x = (int)ceil((double)num_baselines / (double)blockDim.x);
+    gridDimAdd.x = num_freqs;
     gridDimAdd.y = 1;
     gridDimAdd.z = 1;
     // And one final ionospheric fit adding.
-    dim3 gridDimAdd2;
+    dim3 gridDimAdd2, blockDimAdd2;
+    blockDimAdd2.x = num_freqs;
+    blockDimAdd2.y = 1;
+    blockDimAdd2.z = 1;
     gridDimAdd2.x = 1;
     gridDimAdd2.y = 1;
     gridDimAdd2.z = 1;
-
-    JonesF64 *d_iono_fits;
-    cudaMalloc(&d_iono_fits, num_freqs * num_baselines * sizeof(JonesF64));
 
     double *d_iono_consts;
     cudaMalloc(&d_iono_consts, 2 * sizeof(double));
@@ -417,9 +450,10 @@ extern "C" int iono_loop(const JONES *d_vis_residual, const FLOAT *d_vis_weights
                                                 d_lmsts, d_uvws, d_lambdas_m);
         cudaCheck(cudaPeekAtLastError());
         // Sum the iono fits.
-        reduce_jones<n><<<gridDimAdd, blockDimAdd, n * sizeof(JonesF64)>>>(d_iono_fits, num_freqs * num_baselines);
+        reduce_jones<<<gridDimAdd, blockDimAdd, blockDimAdd.x * sizeof(JonesF64)>>>(d_iono_fits, num_baselines);
         cudaCheck(cudaPeekAtLastError());
-        reduce_jones2<1><<<gridDimAdd2, blockDimAdd, n * sizeof(JonesF64)>>>(d_iono_fits, gridDim.x, d_iono_consts);
+        reduce_jones2<<<gridDimAdd2, blockDimAdd2, num_freqs * sizeof(JonesF64)>>>(d_iono_fits, num_freqs,
+                                                                                   d_iono_consts);
         cudaCheck(cudaPeekAtLastError());
 
         // // Sane?
@@ -432,7 +466,6 @@ extern "C" int iono_loop(const JONES *d_vis_residual, const FLOAT *d_vis_weights
     cudaMemcpy(iono_const_alpha, d_iono_consts, sizeof(double), cudaMemcpyDeviceToHost);
     cudaMemcpy(iono_const_beta, d_iono_consts + 1, sizeof(double), cudaMemcpyDeviceToHost);
     cudaFree(d_iono_consts);
-    cudaFree(d_iono_fits);
     // printf("%.4e %.4e\n", *iono_const_alpha, *iono_const_beta);
 
     return 0;

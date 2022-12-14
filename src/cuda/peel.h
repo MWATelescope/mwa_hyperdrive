@@ -19,9 +19,9 @@ int rotate_average(const JONES *d_high_res_vis, const FLOAT *d_high_res_weights,
                    const XYZ *d_xyzs, const UVW *d_uvws_from, UVW *d_uvws_to, const FLOAT *d_lambdas);
 
 int iono_loop(const JONES *d_vis_residual, const FLOAT *d_vis_weights, const JONES *d_vis_model,
-              JONES *d_vis_model_rotated, double *iono_const_alpha, double *iono_const_beta, const int num_timesteps,
-              const int num_tiles, const int num_baselines, const int num_freqs, const int num_iterations,
-              const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m);
+              JONES *d_vis_model_rotated, JonesF64 *d_iono_fits, double *iono_const_alpha, double *iono_const_beta,
+              const int num_timesteps, const int num_tiles, const int num_baselines, const int num_freqs,
+              const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m);
 
 int subtract_iono(JONES *d_vis_residual, const JONES *d_vis_model, double iono_const_alpha, double iono_const_beta,
                   const UVW *d_uvws, const FLOAT *d_lambdas_m, const int num_timesteps, const int num_baselines,

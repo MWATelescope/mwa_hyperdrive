@@ -36,6 +36,7 @@ extern "C" {
         d_vis_weights: *const f64,
         d_vis_model: *const JonesF64,
         d_vis_model_rotated: *mut JonesF64,
+        d_iono_fits: *mut JonesF64,
         iono_const_alpha: *mut f64,
         iono_const_beta: *mut f64,
         num_timesteps: ::std::os::raw::c_int,
