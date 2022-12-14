@@ -2894,6 +2894,18 @@ fn peel(
         let mut d_uvws_low_res: DevicePointer<cuda::UVW> =
             DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
         let d_low_res_lambdas = DevicePointer::copy_to_device(&cuda_low_res_lambdas).unwrap();
+        // Make the amount of elements in `d_iono_fits` a power of 2, for
+        // efficiency.
+        let mut d_iono_fits = {
+            let min_size =
+                num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<f64>>();
+            let n = (min_size as f64).log2().ceil() as u32;
+            let size = 2_usize.pow(n);
+            // dbg!(min_size, size);
+            let mut d: DevicePointer<Jones<f64>> = DevicePointer::malloc(size).unwrap();
+            d.clear();
+            d
+        };
 
         // let mut d_low_res_vis = DevicePointer::malloc(
         //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<CudaFloat>>(),
@@ -3153,6 +3165,7 @@ fn peel(
                 d_low_res_weights.get(),
                 low_res_modeller.d_vis.get_mut().cast(),
                 d_low_res_model_rotated.get_mut().cast(),
+                d_iono_fits.get_mut().cast(),
                 &mut iono_consts.0,
                 &mut iono_consts.1,
                 num_timesteps.try_into().unwrap(),
