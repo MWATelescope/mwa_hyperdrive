@@ -16,7 +16,6 @@ extern "C" {
         d_high_res_vis: *const JonesF32,
         d_high_res_weights: *const f32,
         d_low_res_vis: *mut JonesF32,
-        d_low_res_weights: *const f32,
         pointing_centre: RADec,
         num_timesteps: ::std::os::raw::c_int,
         num_tiles: ::std::os::raw::c_int,
