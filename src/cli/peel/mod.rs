@@ -2920,7 +2920,7 @@ fn peel(
             all_fine_chan_freqs_hz.len(),
             num_cross_baselines,
         ));
-        let mut vis_weights_gpu: Array3<CudaFloat> = Array3::default((
+        let mut vis_weights_gpu: Array3<f32> = Array3::default((
             num_timesteps,
             all_fine_chan_freqs_hz.len(),
             num_cross_baselines,
@@ -2947,7 +2947,7 @@ fn peel(
                 .zip(vis_weights.axis_iter(Axis(1)))
             {
                 for (wg, w) in vis_weights_gpu.iter_mut().zip(vis_weights.iter()) {
-                    *wg = *w as CudaFloat;
+                    *wg = *w;
                 }
             }
         }
@@ -2958,7 +2958,7 @@ fn peel(
 
         let mut vis_residual_low_res_gpu: Array3<Jones<CudaFloat>> =
             Array3::default((1, low_res_freqs_hz.len(), num_cross_baselines));
-        let mut vis_weights_low_res_gpu: Array3<CudaFloat> =
+        let mut vis_weights_low_res_gpu: Array3<f32> =
             Array3::default((1, low_res_freqs_hz.len(), num_cross_baselines));
         for (mut vis_residual_low_res_gpu, vis_residual_low_res) in vis_residual_low_res_gpu
             .outer_iter_mut()
@@ -2988,7 +2988,7 @@ fn peel(
                     .iter_mut()
                     .zip(vis_weights_low_res.iter())
                 {
-                    *wg = *w as CudaFloat;
+                    *wg = *w;
                 }
             }
         }
@@ -3113,7 +3113,6 @@ fn peel(
                 d_high_res_vis.get().cast(),
                 d_high_res_weights.get(),
                 d_low_res_vis.get_mut().cast(),
-                d_low_res_weights.get(),
                 cuda::RADec {
                     ra: source_phase_centre.ra as _,
                     dec: source_phase_centre.dec as _,

@@ -14,9 +14,8 @@ extern "C" {
 extern "C" {
     pub fn rotate_average(
         d_high_res_vis: *const JonesF64,
-        d_high_res_weights: *const f64,
+        d_high_res_weights: *const f32,
         d_low_res_vis: *mut JonesF64,
-        d_low_res_weights: *const f64,
         pointing_centre: RADec,
         num_timesteps: ::std::os::raw::c_int,
         num_tiles: ::std::os::raw::c_int,
@@ -33,8 +32,8 @@ extern "C" {
 extern "C" {
     pub fn iono_loop(
         d_vis_residual: *const JonesF64,
-        d_vis_weights: *const f64,
-        d_vis_model: *const JonesF64,
+        d_vis_weights: *const f32,
+        d_vis_model: *const JonesF32,
         d_vis_model_rotated: *mut JonesF64,
         d_iono_fits: *mut JonesF64,
         iono_const_alpha: *mut f64,
@@ -52,7 +51,7 @@ extern "C" {
 extern "C" {
     pub fn subtract_iono(
         d_vis_residual: *mut JonesF64,
-        d_vis_model: *const JonesF64,
+        d_vis_model: *const JonesF32,
         iono_const_alpha: f64,
         iono_const_beta: f64,
         d_uvws: *const UVW,
