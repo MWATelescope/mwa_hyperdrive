@@ -33,34 +33,26 @@ use scopeguard::defer_on_unwind;
 use thiserror::Error;
 use vec1::Vec1;
 
+#[cfg(feature = "cuda")]
+use crate::cuda::{self, CudaFloat, DevicePointer};
 use crate::{
     averaging::{
         channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
-        timesteps_to_timeblocks, AverageFactorError, Chanblock, Timeblock,
+        timesteps_to_timeblocks, AverageFactorError, Timeblock,
     },
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
-    cuda,
-    di_calibrate::calibrate_timeblock,
     filenames::{InputDataTypes, SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS},
     glob::get_single_match_from_glob,
     help_texts::*,
     math::{average_epoch, TileBaselineFlags},
     messages,
-    model::{
-        new_sky_modeller, ModelError, ModellerInfo, SkyModeller, SkyModellerCpu, SkyModellerCuda,
-    },
-    srclist::{
-        read::read_source_list_file, veto_sources, ComponentList, Source, SourceList,
-        SourceListType,
-    },
+    model::{new_sky_modeller, ModelError, ModellerInfo, SkyModeller, SkyModellerCuda},
+    srclist::{read::read_source_list_file, veto_sources, SourceList, SourceListType},
     unit_parsing::WAVELENGTH_FORMATS,
     vis_io::{
-        read::{
-            MsReader, RawDataCorrections, RawDataReader, UvfitsReader, VisInputType, VisRead,
-            VisReadError,
-        },
+        read::{MsReader, RawDataCorrections, UvfitsReader, VisInputType, VisRead, VisReadError},
         write::{write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
     HyperdriveError,
@@ -133,15 +125,11 @@ pub struct PeelArgs {
     #[clap(long = "iono-sub", help_heading = "SKY-MODEL SOURCES")]
     pub num_sources_to_iono_subtract: Option<usize>,
 
-    /// The number of sources to "ionospherically subtract" in serial, not
-    /// parallel. The larger this number is, the better the quality of iono
-    /// subtraction, but the slower the whole process takes.
-    #[clap(
-        long = "iono-sub-serial",
-        help_heading = "PEELING",
-        default_value = "10"
-    )]
-    pub num_sources_to_iono_subtract_in_serial: usize,
+    #[cfg(feature = "cuda")]
+    /// Use the CPU for peeling and ionospheric subraction. This is deliberately
+    /// made non-default because using a GPU is much faster.
+    #[clap(long, help_heading = "PEELING")]
+    pub cpu_peel: bool,
 
     /// The number of sources to subtract. This subtraction just uses the sky
     /// model directly; no peeling or ionospheric λ² is found. There must be at
@@ -161,7 +149,7 @@ pub struct PeelArgs {
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
     #[clap(long, help_heading = "MODELLING")]
-    pub cpu: bool,
+    pub cpu_vis: bool,
 
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided by the MWA_BEAM_FILE environment variable.
@@ -298,13 +286,13 @@ impl PeelArgs {
             source_list_type,
             ignore_dut1,
             outputs,
-            num_sources_to_peel,
+            num_sources_to_peel: _,
             num_sources_to_iono_subtract,
-            num_sources_to_iono_subtract_in_serial,
+            cpu_peel,
             num_sources_to_subtract,
             source_dist_cutoff,
             veto_threshold,
-            cpu,
+            cpu_vis,
             beam_file,
             unity_dipole_gains,
             delays,
@@ -316,8 +304,8 @@ impl PeelArgs {
             output_freq_average_factor,
             timesteps,
             use_all_timesteps,
-            uvw_min,
-            uvw_max,
+            uvw_min: _,
+            uvw_max: _,
             array_position,
             no_precession,
             tile_flags,
@@ -325,17 +313,17 @@ impl PeelArgs {
             ignore_input_data_fine_channel_flags,
             fine_chan_flags_per_coarse_chan,
             fine_chan_flags,
-            pfb_flavour,
-            no_digital_gains,
-            no_cable_length_correction,
-            no_geometric_correction,
+            pfb_flavour: _,
+            no_digital_gains: _,
+            no_cable_length_correction: _,
+            no_geometric_correction: _,
             no_progress_bars,
         } = self;
 
         // Check that the number of sources to peel, iono subtract and subtract
         // are sensible. When that's done, veto up to the maximum number of
         // sources to subtract.
-        let max_num_sources = match (num_sources_to_iono_subtract, num_sources_to_subtract) {
+        let _max_num_sources = match (num_sources_to_iono_subtract, num_sources_to_subtract) {
             (Some(is), Some(s)) => {
                 if s < is {
                     panic!("The number of sources to subtract ({s}) must be at least equal to the number of sources to iono subtract ({is})");
@@ -351,7 +339,7 @@ impl PeelArgs {
         // can ensure a CUDA-capable device is available, and so we can report
         // it to the user later.
         #[cfg(feature = "cuda")]
-        let modeller_info = if cpu {
+        let modeller_info = if cpu_vis {
             ModellerInfo::Cpu
         } else {
             let (device_info, driver_info) = crate::cuda::get_device_info()?;
@@ -387,7 +375,7 @@ impl PeelArgs {
             Some(strings) => InputDataTypes::new(&strings)?,
             None => return Err(PeelError::NoInputData),
         };
-        let (input_data, raw_data_corrections): (Box<dyn VisRead>, Option<RawDataCorrections>) =
+        let (input_data, _raw_data_corrections): (Box<dyn VisRead>, Option<RawDataCorrections>) =
             match (
                 input_data_types.metafits,
                 input_data_types.gpuboxes,
@@ -396,38 +384,38 @@ impl PeelArgs {
                 input_data_types.uvfits,
             ) {
                 // Valid input for reading raw data.
-                (Some(meta), Some(gpuboxes), mwafs, None, None) => {
+                (Some(_meta), Some(_gpuboxes), _mwafs, None, None) => {
                     todo!("need user to supply calibration solutions");
 
-                    // Ensure that there's only one metafits.
-                    let meta = if meta.len() > 1 {
-                        return Err(PeelError::MultipleMetafits(meta));
-                    } else {
-                        meta.first()
-                    };
+                    // // Ensure that there's only one metafits.
+                    // let meta = if meta.len() > 1 {
+                    //     return Err(PeelError::MultipleMetafits(meta));
+                    // } else {
+                    //     meta.first()
+                    // };
 
-                    debug!("gpubox files: {:?}", &gpuboxes);
-                    debug!("mwaf files: {:?}", &mwafs);
+                    // debug!("gpubox files: {:?}", &gpuboxes);
+                    // debug!("mwaf files: {:?}", &mwafs);
 
-                    let corrections = RawDataCorrections::new(
-                        pfb_flavour.as_deref(),
-                        !no_digital_gains,
-                        !no_cable_length_correction,
-                        !no_geometric_correction,
-                    )?;
-                    let input_data =
-                        RawDataReader::new(meta, &gpuboxes, mwafs.as_deref(), corrections)?;
+                    // let corrections = RawDataCorrections::new(
+                    //     pfb_flavour.as_deref(),
+                    //     !no_digital_gains,
+                    //     !no_cable_length_correction,
+                    //     !no_geometric_correction,
+                    // )?;
+                    // let input_data =
+                    //     RawDataReader::new(meta, &gpuboxes, mwafs.as_deref(), corrections)?;
 
-                    messages::InputFileDetails::Raw {
-                        obsid: input_data.mwalib_context.metafits_context.obs_id,
-                        gpubox_count: gpuboxes.len(),
-                        metafits_file_name: meta.display().to_string(),
-                        mwaf: input_data.get_flags(),
-                        raw_data_corrections: corrections,
-                    }
-                    .print("Peeling");
+                    // messages::InputFileDetails::Raw {
+                    //     obsid: input_data.mwalib_context.metafits_context.obs_id,
+                    //     gpubox_count: gpuboxes.len(),
+                    //     metafits_file_name: meta.display().to_string(),
+                    //     mwaf: input_data.get_flags(),
+                    //     raw_data_corrections: corrections,
+                    // }
+                    // .print("Peeling");
 
-                    (Box::new(input_data), Some(corrections))
+                    // (Box::new(input_data), Some(corrections))
                 }
 
                 // Valid input for reading a measurement set.
@@ -1290,97 +1278,90 @@ impl PeelArgs {
         thread::scope(|scope| {
             let read_handle: ScopedJoinHandle<Result<(), VisReadError>> = thread::Builder::new()
                 .name("read".to_string())
-                .spawn_scoped(
-                    scope,
-                    (|| {
-                        defer_on_unwind! { error.store(true); }
+                .spawn_scoped(scope, || {
+                    defer_on_unwind! { error.store(true); }
 
-                        let mut vis_data_full_res = Array3::zeros((
-                            1,
-                            obs_context.fine_chan_freqs.len(),
+                    let mut vis_data_full_res = Array3::zeros((
+                        1,
+                        obs_context.fine_chan_freqs.len(),
+                        num_unflagged_cross_baselines,
+                    ));
+                    let mut vis_weights_full_res = Array3::zeros(vis_data_full_res.dim());
+                    for timeblock in &timeblocks {
+                        // Make a new block of data to be passed along; this
+                        // contains the target number of timesteps per peel cadence
+                        // but is averaged to the `freq_average_factor`.
+                        let mut out_data = Array3::zeros((
+                            timeblock.timestamps.len(),
+                            all_fine_chan_freqs_hz.len(),
                             num_unflagged_cross_baselines,
                         ));
-                        let mut vis_weights_full_res = Array3::zeros(vis_data_full_res.dim());
-                        for timeblock in &timeblocks {
-                            // Make a new block of data to be passed along; this
-                            // contains the target number of timesteps per peel cadence
-                            // but is averaged to the `freq_average_factor`.
-                            let mut out_data = Array3::zeros((
-                                timeblock.timestamps.len(),
-                                all_fine_chan_freqs_hz.len(),
-                                num_unflagged_cross_baselines,
-                            ));
-                            let mut out_weights = Array3::zeros(out_data.dim());
+                        let mut out_weights = Array3::zeros(out_data.dim());
 
-                            for (i_timestep, timestep) in timeblock.range.clone().enumerate() {
-                                // Should we continue?
-                                if error.load() {
-                                    return Ok(());
-                                }
-
-                                let result = input_data.read_crosses(
-                                    vis_data_full_res.slice_mut(s![0, .., ..]),
-                                    vis_weights_full_res.slice_mut(s![0, .., ..]),
-                                    timestep,
-                                    &tile_baseline_flags,
-                                    // Do *not* pass flagged channels to the reader; we
-                                    // want all of the visibilities so we can do
-                                    // averaging.
-                                    &HashSet::new(),
-                                );
-                                if let Err(e) = result {
-                                    error.store(true);
-                                    return Err(e);
-                                }
-
-                                // Apply flagged channels and cap flagged weights at 0.
-                                vis_weights_full_res
-                                    .axis_iter_mut(Axis(1))
-                                    .enumerate()
-                                    .for_each(|(i_chan, mut vis_weights_full_res)| {
-                                        if flagged_fine_chans.contains(&i_chan) {
-                                            vis_weights_full_res.mapv_inplace(|_| 0.0);
-                                        } else {
-                                            vis_weights_full_res.iter_mut().for_each(|w| {
-                                                if *w < 0.0 {
-                                                    *w = 0.0;
-                                                }
-                                            });
-                                        }
-                                    });
-
-                                // Average the full-res data into the averaged data.
-                                if freq_average_factor != 1 {
-                                    vis_average(
-                                        vis_data_full_res.view(),
-                                        out_data.slice_mut(s![i_timestep..i_timestep + 1, .., ..]),
-                                        vis_weights_full_res.view(),
-                                        out_weights.slice_mut(s![
-                                            i_timestep..i_timestep + 1,
-                                            ..,
-                                            ..
-                                        ]),
-                                    );
-                                } else {
-                                    out_data
-                                        .slice_mut(s![i_timestep..i_timestep + 1, .., ..])
-                                        .assign(&vis_data_full_res);
-                                    out_weights
-                                        .slice_mut(s![i_timestep..i_timestep + 1, .., ..])
-                                        .assign(&vis_weights_full_res);
-                                }
-
-                                read_progress.inc(1);
+                        for (i_timestep, timestep) in timeblock.range.clone().enumerate() {
+                            // Should we continue?
+                            if error.load() {
+                                return Ok(());
                             }
 
-                            tx_data.send((out_data, out_weights, timeblock)).unwrap();
+                            let result = input_data.read_crosses(
+                                vis_data_full_res.slice_mut(s![0, .., ..]),
+                                vis_weights_full_res.slice_mut(s![0, .., ..]),
+                                timestep,
+                                &tile_baseline_flags,
+                                // Do *not* pass flagged channels to the reader; we
+                                // want all of the visibilities so we can do
+                                // averaging.
+                                &HashSet::new(),
+                            );
+                            if let Err(e) = result {
+                                error.store(true);
+                                return Err(e);
+                            }
+
+                            // Apply flagged channels and cap flagged weights at 0.
+                            vis_weights_full_res
+                                .axis_iter_mut(Axis(1))
+                                .enumerate()
+                                .for_each(|(i_chan, mut vis_weights_full_res)| {
+                                    if flagged_fine_chans.contains(&i_chan) {
+                                        vis_weights_full_res.mapv_inplace(|_| 0.0);
+                                    } else {
+                                        vis_weights_full_res.iter_mut().for_each(|w| {
+                                            if *w < 0.0 {
+                                                *w = 0.0;
+                                            }
+                                        });
+                                    }
+                                });
+
+                            // Average the full-res data into the averaged data.
+                            if freq_average_factor != 1 {
+                                vis_average(
+                                    vis_data_full_res.view(),
+                                    out_data.slice_mut(s![i_timestep..i_timestep + 1, .., ..]),
+                                    vis_weights_full_res.view(),
+                                    out_weights.slice_mut(s![i_timestep..i_timestep + 1, .., ..]),
+                                );
+                            } else {
+                                out_data
+                                    .slice_mut(s![i_timestep..i_timestep + 1, .., ..])
+                                    .assign(&vis_data_full_res);
+                                out_weights
+                                    .slice_mut(s![i_timestep..i_timestep + 1, .., ..])
+                                    .assign(&vis_weights_full_res);
+                            }
+
+                            read_progress.inc(1);
                         }
 
-                        read_progress.abandon_with_message("Finished reading input data");
-                        drop(tx_data);
-                        Ok(())
-                    }),
-                )
+                        tx_data.send((out_data, out_weights, timeblock)).unwrap();
+                    }
+
+                    read_progress.abandon_with_message("Finished reading input data");
+                    drop(tx_data);
+                    Ok(())
+                })
                 .expect("OS can create threads");
 
             let model_handle: ScopedJoinHandle<Result<(), ModelError>> = thread::Builder::new()
@@ -1512,42 +1493,95 @@ impl PeelArgs {
                 })
                 .expect("OS can create threads");
 
-            let peel_handle = thread::Builder::new()
+            let peel_handle: ScopedJoinHandle<Result<(), PeelError>> = thread::Builder::new()
                 .name("peel".to_string())
                 .spawn_scoped(scope, || {
                     defer_on_unwind! { error.store(true); }
 
+                    let (mut low_res_modeller, mut high_res_modeller) = unsafe {
+                        let low_res_modeller = SkyModellerCuda::new(
+                            beam.deref(),
+                            &SourceList::new(),
+                            &unflagged_tile_xyzs,
+                            &low_res_freqs_hz,
+                            flagged_tiles,
+                            RADec::default(),
+                            array_position.longitude_rad,
+                            array_position.latitude_rad,
+                            dut1,
+                            !no_precession,
+                        )?;
+                        let high_res_modeller = SkyModellerCuda::new(
+                            beam.deref(),
+                            &SourceList::new(),
+                            &unflagged_tile_xyzs,
+                            &all_fine_chan_freqs_hz,
+                            flagged_tiles,
+                            RADec::default(),
+                            array_position.longitude_rad,
+                            array_position.latitude_rad,
+                            dut1,
+                            !no_precession,
+                        )?;
+                        (low_res_modeller, high_res_modeller)
+                    };
+
                     for (i, (mut vis_residual, vis_weights, timeblock)) in
                         rx_residual.iter().enumerate()
                     {
+                        // Should we continue?
+                        if error.load() {
+                            return Ok(());
+                        }
+
                         let mut iono_consts = vec![(0.0, 0.0); num_sources_to_iono_subtract];
                         if num_sources_to_iono_subtract > 0 {
-                            peel(
-                                vis_residual.view_mut(),
-                                vis_weights.view(),
-                                timeblock,
-                                &fences[0].chanblocks,
-                                &source_list,
-                                &mut iono_consts,
-                                &source_weighted_positions,
-                                num_sources_to_peel,
-                                num_sources_to_iono_subtract,
-                                num_sources_to_iono_subtract_in_serial,
-                                &all_fine_chan_freqs_hz,
-                                &low_res_freqs_hz,
-                                &all_fine_chan_lambdas_m,
-                                &low_res_lambdas_m,
-                                obs_context,
-                                array_position,
-                                &unflagged_tile_xyzs,
-                                &tile_baseline_flags.flagged_tiles,
-                                beam.deref(),
-                                dut1,
-                                &modeller_info,
-                                no_precession,
-                                &multi_progress,
-                            )
-                            .unwrap();
+                            if cpu_peel {
+                                peel_cpu(
+                                    vis_residual.view_mut(),
+                                    vis_weights.view(),
+                                    timeblock,
+                                    &source_list,
+                                    &mut iono_consts,
+                                    &source_weighted_positions,
+                                    num_sources_to_iono_subtract,
+                                    &low_res_freqs_hz,
+                                    &all_fine_chan_lambdas_m,
+                                    &low_res_lambdas_m,
+                                    obs_context,
+                                    array_position,
+                                    &unflagged_tile_xyzs,
+                                    &mut low_res_modeller,
+                                    &mut high_res_modeller,
+                                    dut1,
+                                    no_precession,
+                                    &multi_progress,
+                                )
+                                .unwrap();
+                            } else {
+                                peel_cuda(
+                                    vis_residual.view_mut(),
+                                    vis_weights.view(),
+                                    timeblock,
+                                    &source_list,
+                                    &mut iono_consts,
+                                    &source_weighted_positions,
+                                    num_sources_to_iono_subtract,
+                                    &all_fine_chan_freqs_hz,
+                                    &low_res_freqs_hz,
+                                    &all_fine_chan_lambdas_m,
+                                    &low_res_lambdas_m,
+                                    obs_context,
+                                    array_position,
+                                    &unflagged_tile_xyzs,
+                                    &mut low_res_modeller,
+                                    &mut high_res_modeller,
+                                    dut1,
+                                    no_precession,
+                                    &multi_progress,
+                                )
+                                .unwrap();
+                            }
 
                             if i == 0 {
                                 source_list
@@ -1592,6 +1626,8 @@ impl PeelArgs {
                     overall_peel_progress.abandon_with_message("Finished peeling");
                     drop(tx_write);
                     drop(tx_iono_consts);
+
+                    Ok(())
                 })
                 .expect("OS can create threads");
 
@@ -1690,7 +1726,7 @@ impl PeelArgs {
 
             read_handle.join().unwrap().unwrap();
             model_handle.join().unwrap().unwrap();
-            peel_handle.join().unwrap();
+            peel_handle.join().unwrap().unwrap();
             write_handle.join().unwrap().unwrap();
         });
 
@@ -1776,19 +1812,19 @@ fn vis_average(
     // iterate along time axis in chunks of avg_time
     jones_from
         .axis_chunks_iter(time_axis, avg_time)
-        .zip(weight_from.axis_chunks_iter(time_axis, avg_time))
-        .zip(jones_to.outer_iter_mut())
-        .zip(weight_to.outer_iter_mut())
+        .zip_eq(weight_from.axis_chunks_iter(time_axis, avg_time))
+        .zip_eq(jones_to.outer_iter_mut())
+        .zip_eq(weight_to.outer_iter_mut())
         .for_each(
             |(((jones_chunk, weight_chunk), mut jones_to), mut weight_to)| {
                 // iterate along baseline axis
                 let mut i_tile1 = 0;
                 let mut i_tile2 = 0;
                 jones_chunk
-                    .axis_iter(Axis(1))
-                    .zip(weight_chunk.axis_iter(Axis(1)))
-                    .zip(jones_to.outer_iter_mut())
-                    .zip(weight_to.outer_iter_mut())
+                    .axis_iter(Axis(2))
+                    .zip_eq(weight_chunk.axis_iter(Axis(2)))
+                    .zip_eq(jones_to.axis_iter_mut(Axis(1)))
+                    .zip_eq(weight_to.axis_iter_mut(Axis(1)))
                     .for_each(
                         |(((jones_chunk, weight_chunk), mut jones_to), mut weight_to)| {
                             i_tile2 += 1;
@@ -1799,9 +1835,9 @@ fn vis_average(
 
                             jones_chunk
                                 .axis_chunks_iter(Axis(1), avg_freq)
-                                .zip(weight_chunk.axis_chunks_iter(Axis(1), avg_freq))
-                                .zip(jones_to.iter_mut())
-                                .zip(weight_to.iter_mut())
+                                .zip_eq(weight_chunk.axis_chunks_iter(Axis(1), avg_freq))
+                                .zip_eq(jones_to.iter_mut())
+                                .zip_eq(weight_to.iter_mut())
                                 .for_each(
                                     |(((jones_chunk, weight_chunk), jones_to), weight_to)| {
                                         let mut jones_weighted_sum = Jones::default();
@@ -1810,11 +1846,11 @@ fn vis_average(
                                         // iterate through time chunks
                                         jones_chunk
                                             .outer_iter()
-                                            .zip(weight_chunk.outer_iter())
+                                            .zip_eq(weight_chunk.outer_iter())
                                             .for_each(|(jones_chunk, weights_chunk)| {
                                                 jones_chunk
                                                     .iter()
-                                                    .zip(weights_chunk.iter())
+                                                    .zip_eq(weights_chunk.iter())
                                                     .for_each(|(jones, weight)| {
                                                         // Any flagged
                                                         // visibilities would
@@ -1856,7 +1892,7 @@ fn vis_average2(
     weight_from: ArrayView3<f32>,
 ) {
     let from_dims = jones_from.dim();
-    let (time_axis, baseline_axis, freq_axis) = (Axis(0), Axis(1), Axis(2));
+    let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
     let avg_time = jones_from.len_of(time_axis) / jones_to.len_of(time_axis);
     let avg_freq = jones_from.len_of(freq_axis) / jones_to.len_of(freq_axis);
 
@@ -1881,16 +1917,16 @@ fn vis_average2(
     // iterate along time axis in chunks of avg_time
     jones_from
         .axis_chunks_iter(time_axis, avg_time)
-        .zip(weight_from.axis_chunks_iter(time_axis, avg_time))
-        .zip(jones_to.outer_iter_mut())
+        .zip_eq(weight_from.axis_chunks_iter(time_axis, avg_time))
+        .zip_eq(jones_to.outer_iter_mut())
         .for_each(|((jones_chunk, weight_chunk), mut jones_to)| {
             // iterate along baseline axis
             let mut i_tile1 = 0;
             let mut i_tile2 = 0;
             jones_chunk
                 .axis_iter(Axis(1))
-                .zip(weight_chunk.axis_iter(Axis(1)))
-                .zip(jones_to.outer_iter_mut())
+                .zip_eq(weight_chunk.axis_iter(Axis(1)))
+                .zip_eq(jones_to.outer_iter_mut())
                 .for_each(|((jones_chunk, weight_chunk), mut jones_to)| {
                     i_tile2 += 1;
                     if i_tile2 == num_tiles {
@@ -1900,8 +1936,8 @@ fn vis_average2(
 
                     jones_chunk
                         .axis_chunks_iter(Axis(1), avg_freq)
-                        .zip(weight_chunk.axis_chunks_iter(Axis(1), avg_freq))
-                        .zip(jones_to.iter_mut())
+                        .zip_eq(weight_chunk.axis_chunks_iter(Axis(1), avg_freq))
+                        .zip_eq(jones_to.iter_mut())
                         .for_each(|((jones_chunk, weight_chunk), jones_to)| {
                             let mut jones_weighted_sum = Jones::default();
                             let mut weight_sum = 0.0;
@@ -1909,9 +1945,9 @@ fn vis_average2(
                             // iterate through time chunks
                             jones_chunk
                                 .outer_iter()
-                                .zip(weight_chunk.outer_iter())
+                                .zip_eq(weight_chunk.outer_iter())
                                 .for_each(|(jones_chunk, weights_chunk)| {
-                                    jones_chunk.iter().zip(weights_chunk.iter()).for_each(
+                                    jones_chunk.iter().zip_eq(weights_chunk.iter()).for_each(
                                         |(jones, weight)| {
                                             // Any flagged
                                             // visibilities would
@@ -2167,7 +2203,7 @@ fn vis_rotate2(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn vis_rotate2_serial(
+fn _vis_rotate2_serial(
     jones_array: ArrayView3<Jones<f32>>,
     mut jones_array2: ArrayViewMut3<Jones<f32>>,
     phase_to: RADec,
@@ -2238,7 +2274,7 @@ fn vis_rotate2_serial(
 
 /// Rotate the supplied visibilities according to the `λ²` constants of
 /// proportionality with `exp(-2πi(αu+βv)λ²)`.
-fn apply_iono(
+fn _apply_iono(
     mut jones: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
     const_lm: (f64, f64),
@@ -2673,33 +2709,27 @@ fn model_timesteps(
 // }
 
 #[allow(clippy::too_many_arguments)]
-fn peel(
+fn peel_cpu(
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
     vis_weights: ArrayView3<f32>,
     timeblock: &Timeblock,
-    chanblocks: &[Chanblock],
     source_list: &SourceList,
     iono_consts: &mut [(f64, f64)],
     source_weighted_positions: &[RADec],
-    num_sources_to_peel: usize,
     num_sources_to_iono_subtract: usize,
-    num_sources_to_iono_subtract_in_serial: usize,
-    all_fine_chan_freqs_hz: &[f64],
     low_res_freqs_hz: &[f64],
     all_fine_chan_lambdas_m: &[f64],
     low_res_lambdas_m: &[f64],
     obs_context: &ObsContext,
     array_position: LatLngHeight,
     unflagged_tile_xyzs: &[XyzGeodetic],
-    flagged_tiles: &HashSet<usize>,
-    beam: &dyn Beam,
+    low_res_modeller: &mut SkyModellerCuda,
+    high_res_modeller: &mut SkyModellerCuda,
     dut1: Duration,
-    modeller_info: &ModellerInfo,
     no_precession: bool,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
-    let num_threads = rayon::current_num_threads();
-    // let n_threads = 12;
+    // TODO: Do we allow multiple timesteps in the low-res data?
 
     let timestamps = &timeblock.timestamps;
     let peel_progress = multi_progress_bar.add(
@@ -2714,7 +2744,6 @@ fn peel(
     );
     peel_progress.tick();
 
-    let num_timesteps = vis_residual.len_of(Axis(0));
     let num_tiles = unflagged_tile_xyzs.len();
     let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
 
@@ -2803,8 +2832,7 @@ fn peel(
     // Temporary visibility array, re-used for each timestep
     let mut vis_residual_tmp = vis_residual.to_owned();
     let high_res_vis_dims = vis_residual.dim();
-
-    // TODO: Do we allow multiple timesteps in the low-res data?
+    let mut vis_model_high_res = Array3::default(high_res_vis_dims);
 
     let average_timestamp = average_epoch(timestamps);
     let average_precession_info = precess_time(
@@ -2835,593 +2863,140 @@ fn peel(
     // These are time, bl, channel
     let mut vis_residual_low_res: Array3<Jones<f32>> =
         Array3::zeros((1, low_res_freqs_hz.len(), num_cross_baselines));
+    let mut vis_model_low_res = vis_residual_low_res.clone();
+    let mut vis_model_low_res_tmp = vis_residual_low_res.clone();
     let mut vis_weights_low_res: Array3<f32> = Array3::zeros(vis_residual_low_res.dim());
-    let low_res_vis_dims = vis_residual_low_res.dim();
 
     // The low-res weights only need to be populated once.
     weights_average(vis_weights.view(), vis_weights_low_res.view_mut());
 
-    // let mut di_jones = if num_sources_to_peel > 0 {
-    //     Array3::from_elem(
-    //         (1, num_tiles, all_fine_chan_lambdas_m.len()),
-    //         Jones::identity(),
-    //     )
-    // } else {
-    //     Array3::default((0, 0, 0))
-    // };
-
-    unsafe {
-        use cuda::{CudaFloat, DevicePointer};
-
-        let cuda_xyzs: Vec<_> = precessed_tile_xyzs
-            .iter()
-            .copied()
-            .map(|XyzGeodetic { x, y, z }| cuda::XYZ {
-                x: x as _,
-                y: y as _,
-                z: z as _,
-            })
-            .collect();
-        let mut cuda_uvws = Array2::from_elem(
-            (num_timesteps, num_cross_baselines),
-            cuda::UVW {
-                u: 0.0,
-                v: 0.0,
-                w: 0.0,
-            },
+    for (((source_name, source), iono_consts), source_phase_centre) in source_list
+        .iter()
+        .take(num_sources_to_iono_subtract)
+        .zip_eq(iono_consts.iter_mut())
+        .zip_eq(source_weighted_positions.iter().copied())
+    {
+        debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
+        let start = std::time::Instant::now();
+        trace!("{:?}: rotate_average", std::time::Instant::now() - start);
+        vis_rotate2(
+            vis_residual.view(),
+            vis_residual_tmp.view_mut(),
+            source_phase_centre,
+            precessed_tile_xyzs.view(),
+            tile_ws_from.view(),
+            tile_ws_to.view_mut(),
+            &lmsts,
+            all_fine_chan_lambdas_m,
         );
-        cuda_uvws
-            .outer_iter_mut()
-            .zip(precessed_tile_xyzs.outer_iter())
-            .zip(lmsts.iter())
-            .for_each(|((mut cuda_uvws, xyzs), lmst)| {
-                let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-                let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
-                    .into_iter()
-                    .map(|uvw| cuda::UVW {
-                        u: uvw.u as CudaFloat,
-                        v: uvw.v as CudaFloat,
-                        w: uvw.w as CudaFloat,
-                    })
-                    .collect::<Vec<_>>();
-                cuda_uvws.assign(&ArrayView1::from(&v));
+
+        trace!("{:?}: vis_average", std::time::Instant::now() - start);
+        vis_average2(
+            vis_residual_tmp.view(),
+            vis_residual_low_res.view_mut(),
+            iono_taper_weights.view(),
+        );
+
+        trace!("{:?}: low-res model", std::time::Instant::now() - start);
+        low_res_modeller.update_with_a_source(source, source_phase_centre)?;
+        model_timesteps(
+            low_res_modeller,
+            &[average_timestamp],
+            vis_model_low_res.view_mut(),
+        )?;
+
+        trace!("{:?}: add low-res model", std::time::Instant::now() - start);
+        Zip::from(&mut vis_residual_low_res)
+            .and(&mut vis_model_low_res_tmp)
+            .and(&vis_model_low_res)
+            .for_each(|r, t, m| {
+                *r += *m;
+                *t = *m;
             });
-        let cuda_lmsts: Vec<CudaFloat> = lmsts.iter().map(|l| *l as CudaFloat).collect();
-        let cuda_lambdas: Vec<CudaFloat> = all_fine_chan_lambdas_m
-            .iter()
-            .map(|l| *l as CudaFloat)
-            .collect();
-        let cuda_xyzs_low_res: Vec<_> = average_precessed_tile_xyzs
-            .iter()
-            .copied()
-            .map(|XyzGeodetic { x, y, z }| cuda::XYZ {
-                x: x as _,
-                y: y as _,
-                z: z as _,
-            })
-            .collect();
-        let cuda_low_res_lambdas: Vec<CudaFloat> =
-            low_res_lambdas_m.iter().map(|l| *l as CudaFloat).collect();
 
-        let d_xyzs = DevicePointer::copy_to_device(&cuda_xyzs).unwrap();
-        let d_uvws_from = DevicePointer::copy_to_device(cuda_uvws.as_slice().unwrap()).unwrap();
-        let mut d_uvws_to =
-            DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
-        let d_lmsts = DevicePointer::copy_to_device(&cuda_lmsts).unwrap();
-        let d_lambdas = DevicePointer::copy_to_device(&cuda_lambdas).unwrap();
-        let d_xyzs_low_res = DevicePointer::copy_to_device(&cuda_xyzs_low_res).unwrap();
-        let d_average_lmsts = DevicePointer::copy_to_device(&[average_lmst as CudaFloat]).unwrap();
-        let mut d_uvws_low_res: DevicePointer<cuda::UVW> =
-            DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
-        let d_low_res_lambdas = DevicePointer::copy_to_device(&cuda_low_res_lambdas).unwrap();
-        // Make the amount of elements in `d_iono_fits` a power of 2, for
-        // efficiency.
-        let mut d_iono_fits = {
-            let min_size =
-                num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<f64>>();
-            let n = (min_size as f64).log2().ceil() as u32;
-            let size = 2_usize.pow(n);
-            // dbg!(min_size, size);
-            let mut d: DevicePointer<Jones<f64>> = DevicePointer::malloc(size).unwrap();
-            d.clear();
-            d
-        };
+        trace!(
+            "{:?}: pre-compute tile UVs",
+            std::time::Instant::now() - start
+        );
+        tile_uvs_low_res
+            .outer_iter_mut()
+            .zip(average_precessed_tile_xyzs.outer_iter())
+            .for_each(|(mut tile_uvs, tile_xyzs)| {
+                let phase_centre = source_phase_centre.to_hadec(average_lmst);
+                setup_uvs(
+                    tile_uvs.as_slice_mut().unwrap(),
+                    tile_xyzs.as_slice().unwrap(),
+                    phase_centre,
+                );
+            });
 
-        // let mut d_low_res_vis = DevicePointer::malloc(
-        //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<CudaFloat>>(),
-        // );
-        // let mut d_low_res_weights = DevicePointer::malloc(
-        //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<CudaFloat>(),
-        // );
+        trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start);
+        // let mut gain_update = 1.0;
+        let mut iteration = 0;
+        while iteration != 10 {
+            iteration += 1;
+            debug!("iter {iteration}, consts: {iono_consts:?}");
 
-        let mut d_high_res_vis =
-            DevicePointer::copy_to_device(vis_residual.as_slice().unwrap()).unwrap();
-        let d_high_res_weights =
-            DevicePointer::copy_to_device(vis_weights.as_slice().unwrap()).unwrap();
+            // iono rotate model using existing iono consts (if they're
+            // non-zero)
+            if iono_consts.0.abs() > 0.0 || iono_consts.1.abs() > 0.0 {
+                apply_iono2(
+                    vis_model_low_res.view(),
+                    vis_model_low_res_tmp.view_mut(),
+                    tile_uvs_low_res.view(),
+                    *iono_consts,
+                    low_res_lambdas_m,
+                );
+            }
 
-        let mut d_low_res_vis =
-            DevicePointer::copy_to_device(vis_residual_low_res.as_slice().unwrap()).unwrap();
-        let d_low_res_weights =
-            DevicePointer::copy_to_device(vis_weights_low_res.as_slice().unwrap()).unwrap();
-        let mut d_low_res_model_rotated =
-            DevicePointer::copy_to_device(vis_residual_low_res.as_slice().unwrap()).unwrap();
+            let iono_fits = iono_fit(
+                vis_residual_low_res.view(),
+                vis_weights_low_res.view(),
+                vis_model_low_res_tmp.view(),
+                low_res_lambdas_m,
+                tile_uvs_low_res.as_slice().unwrap(),
+            );
+            trace!("iono_fits: {iono_fits:?}");
 
-        let freq_average_factor = all_fine_chan_freqs_hz.len() / low_res_freqs_hz.len();
-        let n_serial = num_sources_to_iono_subtract;
+            iono_consts.0 += iono_fits[0];
+            iono_consts.1 += iono_fits[1];
+            // gain_update *= iono_fits[2] / iono_fits[3];
+            // vis_model_low_res
+            //     .iter_mut()
+            //     .for_each(|v| *v *= gain_update as f32);
 
-        let mut high_res_modeller = SkyModellerCuda::new(
-            beam.deref(),
-            &SourceList::new(),
-            unflagged_tile_xyzs,
-            all_fine_chan_freqs_hz,
-            flagged_tiles,
-            RADec::default(),
-            array_position.longitude_rad,
-            array_position.latitude_rad,
-            dut1,
-            !no_precession,
-        )?;
-        let mut d_high_res_model: DevicePointer<Jones<f32>> = DevicePointer::malloc(
-            timestamps.len()
-                * num_cross_baselines
-                * all_fine_chan_freqs_hz.len()
-                * std::mem::size_of::<Jones<f32>>(),
-        )
-        .unwrap();
-
-        // The UVWs for every timestep will be the same (because the phase
-        // centres are always the same). Make these ahead of time for
-        // efficiency.
-        let high_res_uvws = {
-            let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
-            let mut tile_uvws = vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
-            uvws.outer_iter_mut()
-                .zip(precessed_tile_xyzs.outer_iter())
-                .zip(lmsts.iter())
-                .for_each(|((mut uvws, precessed_tile_xyzs), lmst)| {
-                    let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-                    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-                    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-                    // Get a UVW for each tile.
-                    tile_uvws
-                        .iter_mut()
-                        .zip(precessed_tile_xyzs.iter())
-                        .for_each(|(uvw, xyz)| {
-                            *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec)
-                        });
-                    // Take the difference of every pair of UVWs.
-                    let mut count = 0;
-                    for (i, t1) in tile_uvws.iter().enumerate() {
-                        for t2 in tile_uvws.iter().skip(i + 1) {
-                            uvws[count] = *t1 - *t2;
-                            count += 1;
-                        }
-                    }
-                });
-            uvws
-        };
-        // One pointer per timestep.
-        let mut d_uvws = Vec::with_capacity(high_res_uvws.len_of(Axis(0)));
-        // Temp vector to store results.
-        let mut cuda_uvws = vec![
-            cuda::UVW {
-                u: 0.0,
-                v: 0.0,
-                w: 0.0
-            };
-            high_res_uvws.len_of(Axis(1))
-        ];
-        for uvws in high_res_uvws.outer_iter() {
-            // Convert the type and push the results to the device,
-            // saving the resulting pointer.
-            uvws.iter()
-                .zip_eq(cuda_uvws.iter_mut())
-                .for_each(|(uvw, cuda_uvw)| {
-                    *cuda_uvw = cuda::UVW {
-                        u: uvw.u as _,
-                        v: uvw.v as _,
-                        w: uvw.w as _,
-                    }
-                });
-            d_uvws.push(cuda::DevicePointer::copy_to_device(&cuda_uvws).unwrap());
+            // if the offset is small, we've converged.
+            if iono_fits[0].abs() < 1e-12 && iono_fits[1].abs() < 1e-12 {
+                debug!("iter {iteration}, consts: {iono_consts:?}, finished");
+                break;
+            }
         }
 
-        let mut low_res_modeller = SkyModellerCuda::new(
-            beam.deref(),
-            &SourceList::new(),
-            unflagged_tile_xyzs,
-            low_res_freqs_hz,
-            flagged_tiles,
-            RADec::default(),
-            array_position.longitude_rad,
-            array_position.latitude_rad,
-            dut1,
-            !no_precession,
-        )?;
+        trace!("{:?}: high res model", std::time::Instant::now() - start);
+        high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+        model_timesteps(high_res_modeller, timestamps, vis_model_high_res.view_mut())?;
 
-        for (i_source, (((source_name, source), iono_consts), source_phase_centre)) in source_list
-            .iter()
-            .take(n_serial)
-            .zip_eq(iono_consts.iter_mut().take(n_serial))
-            .zip_eq(source_weighted_positions.iter().take(n_serial).copied())
-            .enumerate()
-        {
-            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
-            let start = std::time::Instant::now();
-            let status = cuda::rotate_average(
-                d_high_res_vis.get().cast(),
-                d_high_res_weights.get(),
-                d_low_res_vis.get_mut().cast(),
-                cuda::RADec {
-                    ra: source_phase_centre.ra as _,
-                    dec: source_phase_centre.dec as _,
-                },
-                timestamps.len().try_into().unwrap(),
-                num_tiles.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                all_fine_chan_freqs_hz.len().try_into().unwrap(),
-                freq_average_factor.try_into().unwrap(),
-                d_lmsts.get(),
-                d_xyzs.get(),
-                d_uvws_from.get(),
-                d_uvws_to.get_mut(),
-                d_lambdas.get(),
-            );
-            assert_eq!(status, 0);
-            trace!("{:?}: rotate_average", std::time::Instant::now() - start);
+        trace!("{:?}: apply_iono3", std::time::Instant::now() - start);
+        apply_iono3(
+            vis_model_high_res.view(),
+            vis_residual.view_mut(),
+            tile_uvs_high_res.view(),
+            *iono_consts,
+            all_fine_chan_lambdas_m,
+        );
 
-            low_res_modeller.update_with_a_source(source, source_phase_centre)?;
-            low_res_modeller.clear_vis();
-            trace!(
-                "{:?}: low res update and clear",
-                std::time::Instant::now() - start
-            );
-
-            let status = cuda::xyzs_to_uvws(
-                d_xyzs_low_res.get(),
-                d_average_lmsts.get(),
-                d_uvws_low_res.get_mut(),
-                cuda::RADec {
-                    ra: source_phase_centre.ra as CudaFloat,
-                    dec: source_phase_centre.dec as CudaFloat,
-                },
-                num_tiles.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                1,
-            );
-            assert_eq!(status, 0);
-            trace!(
-                "{:?}: low res xyzs_to_uvws",
-                std::time::Instant::now() - start
-            );
-
-            low_res_modeller.model_with_uvws2(&d_uvws_low_res, average_lmst, average_latitude)?;
-            trace!("{:?}: low res model", std::time::Instant::now() - start);
-
-            let status = cuda::iono_loop(
-                d_low_res_vis.get().cast(),
-                d_low_res_weights.get(),
-                low_res_modeller.d_vis.get_mut().cast(),
-                d_low_res_model_rotated.get_mut().cast(),
-                d_iono_fits.get_mut().cast(),
-                &mut iono_consts.0,
-                &mut iono_consts.1,
-                num_timesteps.try_into().unwrap(),
-                num_tiles.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                low_res_freqs_hz.len().try_into().unwrap(),
-                10,
-                d_average_lmsts.get(),
-                d_uvws_low_res.get(),
-                d_low_res_lambdas.get(),
-            );
-            assert_eq!(status, 0);
-            // dbg!(iono_consts);
-            trace!("{:?}: iono_loop", std::time::Instant::now() - start);
-
-            high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
-            // high_res_modeller.clear_vis();
-            // Clear the old memory before reusing the buffer.
-            cuda_runtime_sys::cudaMemset(
-                d_high_res_model.get_mut().cast(),
-                0,
-                timestamps.len()
-                    * num_cross_baselines
-                    * all_fine_chan_freqs_hz.len()
-                    * std::mem::size_of::<Jones<f32>>(),
-            );
-            d_uvws
-                .iter()
-                .zip(lmsts.iter())
-                .zip(latitudes.iter())
-                .enumerate()
-                .try_for_each(|(i_time, ((d_uvws, lmst), latitude))| {
-                    high_res_modeller.model_with_uvws3(
-                        d_high_res_model
-                            .get_mut()
-                            .add(i_time * num_cross_baselines * all_fine_chan_freqs_hz.len()),
-                        d_uvws,
-                        *lmst,
-                        *latitude,
-                    )
-                })?;
-            trace!("{:?}: high res model", std::time::Instant::now() - start);
-
-            let status = cuda::subtract_iono(
-                d_high_res_vis.get_mut().cast(),
-                d_high_res_model.get().cast(),
-                iono_consts.0,
-                iono_consts.1,
-                d_uvws_from.get(),
-                d_lambdas.get(),
-                num_timesteps.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                all_fine_chan_freqs_hz.len().try_into().unwrap(),
-            );
-            assert_eq!(status, 0);
-            trace!("{:?}: subtract_iono", std::time::Instant::now() - start);
-            debug!("peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
-
-            peel_progress.inc(1);
-        }
-
-        // d_low_res_vis
-        //     .copy_from_device(vis_residual_low_res_gpu.as_slice_mut().unwrap())
-        //     .unwrap();
-        // info!("{:?}: copy from device", std::time::Instant::now() - start);
-        // dbg!(
-        //     vis_residual_low_res.slice(s![0, 0, 0..3]),
-        //     vis_residual_low_res_gpu.slice(s![0, 0..3, 0])
-        // );
-        // let mut d = 0.0_f32;
-        // dbg!(vis_residual_low_res.dim(), vis_residual_low_res_gpu.dim());
-        // vis_residual_low_res
-        //     .outer_iter()
-        //     .zip(vis_residual_low_res_gpu.outer_iter())
-        //     .for_each(|(v, v2)| {
-        //         v.outer_iter()
-        //             .zip_eq(v2.axis_iter(Axis(1)))
-        //             .for_each(|(v, v2)| {
-        //                 v.iter().zip_eq(v2.iter()).for_each(|(v, v2)| {
-        //                     let d2 = *v - v2;
-        //                     d = d
-        //                         .max(d2[0].re)
-        //                         .max(d2[0].im)
-        //                         .max(d2[1].re)
-        //                         .max(d2[1].im)
-        //                         .max(d2[2].re)
-        //                         .max(d2[2].im)
-        //                         .max(d2[3].re)
-        //                         .max(d2[3].im);
-        //                 });
-        //             });
-        //     });
-        // dbg!(d);
+        debug!(
+            "peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})"
+        );
+        peel_progress.inc(1);
     }
 
-    // ///////// //
-    // PEEL LOOP //
-    // ///////// //
-
-    // let error = AtomicCell::new(false);
-    // let (tx_high_res_model, rx_high_res_model) = bounded(num_threads);
-    // let (tx_low_res_model, rx_low_res_model) = bounded(2);
-    // thread::scope(|scope| {
-    //     let low_res_model_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
-    //         defer_on_unwind! { error.store(true); }
-
-    //         let mut low_res_modeller = new_sky_modeller(
-    //             matches!(modeller_info, ModellerInfo::Cpu),
-    //             beam.deref(),
-    //             &SourceList::new(),
-    //             unflagged_tile_xyzs,
-    //             low_res_freqs_hz,
-    //             flagged_tiles,
-    //             RADec::default(),
-    //             array_position.longitude_rad,
-    //             array_position.latitude_rad,
-    //             dut1,
-    //             !no_precession,
-    //         )?;
-
-    //         for ((source_name, source), source_phase_centre) in source_list
-    //             .iter()
-    //             .take(num_sources_to_iono_subtract)
-    //             .zip_eq(source_weighted_positions.iter())
-    //         {
-    //             // Should we continue?
-    //             if error.load() {
-    //                 return Ok(());
-    //             }
-
-    //             trace!(
-    //                 "Modelling '{source_name}' in low res, weighted position {source_phase_centre}"
-    //             );
-    //             let mut vis_model_low_res = Array3::zeros(low_res_vis_dims);
-    //             low_res_modeller.update_with_a_source(source, *source_phase_centre)?;
-    //             model_timesteps(
-    //                 low_res_modeller.deref_mut(),
-    //                 &[average_timestamp],
-    //                 vis_model_low_res.view_mut(),
-    //             )?;
-    //             tx_low_res_model.send(vis_model_low_res).unwrap();
-    //         }
-
-    //         drop(tx_low_res_model);
-    //         Ok(())
-    //     });
-
-    //     let high_res_model_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
-    //         defer_on_unwind! { error.store(true); }
-
-    // let mut high_res_modeller = match modeller_info {
-    //     ModellerInfo::Cpu => {
-    //         let phase_centre = RADec::default();
-    //         let components =
-    //             ComponentList::new(source_list, all_fine_chan_freqs_hz, phase_centre);
-    //         let maps = crate::math::TileBaselineFlags::new(
-    //             unflagged_tile_xyzs.len() + flagged_tiles.len(),
-    //             flagged_tiles.clone(),
-    //         );
-
-    //         let modeller = SkyModellerCpu {
-    //             beam,
-    //             phase_centre,
-    //             array_longitude: array_position.longitude_rad,
-    //             array_latitude: array_position.latitude_rad,
-    //             dut1,
-    //             precess: !no_precession,
-    //             unflagged_fine_chan_freqs: all_fine_chan_freqs_hz,
-    //             unflagged_tile_xyzs,
-    //             flagged_tiles,
-    //             unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
-    //             components,
-    //         };
-    //         Either::Left(modeller)
-    //     }
-
-    //     #[cfg(feature = "cuda")]
-    //     ModellerInfo::Cuda { .. } => unsafe {
-    //         let modeller = SkyModellerCuda::new(
-    //             beam,
-    //             &SourceList::new(),
-    //             unflagged_tile_xyzs,
-    //             all_fine_chan_freqs_hz,
-    //             flagged_tiles,
-    //             RADec::default(),
-    //             array_position.longitude_rad,
-    //             array_position.latitude_rad,
-    //             dut1,
-    //             !no_precession,
-    //         )?;
-    //         Either::Right((modeller, vec![]))
-    //     },
-    // };
-
-    //         // The UVWs for every timestep will be the same (because the phase
-    //         // centres are always the same). Make these ahead of time for
-    //         // efficiency.
-    //         let high_res_uvws = {
-    //             let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
-    //             let mut tile_uvws =
-    //                 vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
-    //             uvws.outer_iter_mut()
-    //                 .zip(precessed_tile_xyzs.outer_iter())
-    //                 .zip(lmsts.iter())
-    //                 .for_each(|((mut uvws, precessed_tile_xyzs), lmst)| {
-    //                     let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-    //                     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-    //                     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-    //                     // Get a UVW for each tile.
-    //                     tile_uvws
-    //                         .iter_mut()
-    //                         .zip(precessed_tile_xyzs.iter())
-    //                         .for_each(|(uvw, xyz)| {
-    //                             *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec)
-    //                         });
-    //                     // Take the difference of every pair of UVWs.
-    //                     let mut count = 0;
-    //                     for (i, t1) in tile_uvws.iter().enumerate() {
-    //                         for t2 in tile_uvws.iter().skip(i + 1) {
-    //                             uvws[count] = *t1 - *t2;
-    //                             count += 1;
-    //                         }
-    //                     }
-    //                 });
-    //             uvws
-    //         };
-
-    //         // If we're modelling with CUDA, we can allocate UVWs to the device
-    //         // once, now, and re-use the pointers.
-    //         #[cfg(feature = "cuda")]
-    //         match high_res_modeller.as_mut() {
-    //             Either::Right((_, d_uvws)) => {
-    //                 // One pointer per timestep.
-    //                 *d_uvws = Vec::with_capacity(high_res_uvws.len_of(Axis(0)));
-    //                 // Temp vector to store results.
-    //                 let mut cuda_uvws = vec![
-    //                     cuda::UVW {
-    //                         u: 0.0,
-    //                         v: 0.0,
-    //                         w: 0.0
-    //                     };
-    //                     high_res_uvws.len_of(Axis(1))
-    //                 ];
-    //                 for uvws in high_res_uvws.outer_iter() {
-    //                     // Convert the type and push the results to the device,
-    //                     // saving the resulting pointer.
-    //                     uvws.iter()
-    //                         .zip_eq(cuda_uvws.iter_mut())
-    //                         .for_each(|(uvw, cuda_uvw)| {
-    //                             *cuda_uvw = cuda::UVW {
-    //                                 u: uvw.u as _,
-    //                                 v: uvw.v as _,
-    //                                 w: uvw.w as _,
-    //                             }
-    //                         });
-    //                     unsafe {
-    //                         d_uvws.push(cuda::DevicePointer::copy_to_device(&cuda_uvws)?);
-    //                     }
-    //                 }
-    //             }
-
-    //             Either::Left(_) => (),
-    //         };
-
-    //         for ((source_name, source), source_phase_centre) in source_list
-    //             .iter()
-    //             .take(num_sources_to_iono_subtract)
-    //             .zip_eq(source_weighted_positions.iter())
-    //         {
-    //             // Should we continue?
-    //             if error.load() {
-    //                 return Ok(());
-    //             }
-
-    //             trace!("Modelling '{source_name}' in high res, weighted position {source_phase_centre}");
-    //             let mut vis_model_high_res = Array3::zeros(high_res_vis_dims);
-    //             match high_res_modeller.as_mut() {
-    //                 Either::Left(high_res_modeller) => {
-    //                     high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
-    //                     model_timesteps(
-    //                         high_res_modeller,
-    //                         timestamps,
-    //                         vis_model_high_res.view_mut(),
-    //                     )?;
-    //                 }
-    //                 Either::Right((high_res_cuda_modeller, d_uvws)) => {
-    //                     high_res_cuda_modeller
-    //                         .update_with_a_source(source, obs_context.phase_centre)?;
-    //                     vis_model_high_res
-    //                         .outer_iter_mut()
-    //                         .zip(d_uvws.iter())
-    //                         .zip(lmsts.iter())
-    //                         .zip(latitudes.iter())
-    //                         .try_for_each(|(((vis_model, d_uvws), lmst), latitude)| {
-    //                             high_res_cuda_modeller
-    //                                 .model_with_uvws(vis_model, d_uvws, *lmst, *latitude)
-    //                         })?;
-    //                 }
-    //             }
-    //             tx_high_res_model.send(vis_model_high_res).unwrap();
-    //         }
-
-    //         drop(tx_high_res_model);
-    //         Ok(())
-    //     });
-
-    //     let peel_handle: ScopedJoinHandle<Result<(), BeamError>> = scope.spawn(|| {
-    //         defer_on_unwind! { error.store(true); }
-
     //         let mut vis_model_low_res_tmp: Array3<Jones<f32>> = vis_residual_low_res.clone();
-    //         // let n_serial = num_sources_to_iono_subtract_in_serial.min(num_sources_to_iono_subtract);
-    //         let n_serial = num_sources_to_iono_subtract;
 
     //         for (i_source, ((source_name, iono_consts), source_phase_centre)) in source_list
     //             .keys()
-    //             .take(n_serial)
-    //             .zip_eq(iono_consts.iter_mut().take(n_serial))
-    //             .zip_eq(source_weighted_positions.iter().take(n_serial).copied())
+    //             .zip_eq(iono_consts.iter_mut())
+    //             .zip_eq(source_weighted_positions.iter().copied())
     //             .enumerate()
     //         {
     //             // Should we continue?
@@ -3639,9 +3214,6 @@ fn peel(
     //         // drop(vis_residual_low_res);
     //         // drop(tile_ws_to);
 
-    //         // // Parallel iono subtraction.
-    //         // let mut n_skip = n_serial;
-
     //         // // Prepare temp arrays and modellers for each thread.
     //         // let mut vis_residual_tmps: Vec<Array3<Jones<f32>>> = (0..num_threads)
     //         //     .into_iter()
@@ -3840,10 +3412,452 @@ fn peel(
     //         Ok(())
     //     });
 
-    //     low_res_model_handle.join().unwrap().unwrap();
-    //     high_res_model_handle.join().unwrap().unwrap();
-    //     peel_handle.join().unwrap().unwrap();
-    // });
+    Ok(())
+}
+
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn peel_cuda(
+    vis_residual: ArrayViewMut3<Jones<f32>>,
+    vis_weights: ArrayView3<f32>,
+    timeblock: &Timeblock,
+    source_list: &SourceList,
+    iono_consts: &mut [(f64, f64)],
+    source_weighted_positions: &[RADec],
+    num_sources_to_iono_subtract: usize,
+    all_fine_chan_freqs_hz: &[f64],
+    low_res_freqs_hz: &[f64],
+    all_fine_chan_lambdas_m: &[f64],
+    low_res_lambdas_m: &[f64],
+    obs_context: &ObsContext,
+    array_position: LatLngHeight,
+    unflagged_tile_xyzs: &[XyzGeodetic],
+    low_res_modeller: &mut SkyModellerCuda,
+    high_res_modeller: &mut SkyModellerCuda,
+    dut1: Duration,
+    no_precession: bool,
+    multi_progress_bar: &MultiProgress,
+) -> Result<(), PeelError> {
+    // TODO: Do we allow multiple timesteps in the low-res data?
+
+    let timestamps = &timeblock.timestamps;
+    let peel_progress = multi_progress_bar.add(
+        ProgressBar::new(num_sources_to_iono_subtract as _)
+            .with_style(
+                ProgressStyle::default_bar()
+                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} sources ({elapsed_precise}<{eta_precise})").unwrap()
+                    .progress_chars("=> "),
+            )
+            .with_position(0)
+            .with_message(format!("Peeling timeblock {}", timeblock.index + 1)),
+    );
+    peel_progress.tick();
+
+    let num_timesteps = vis_residual.len_of(Axis(0));
+    let num_tiles = unflagged_tile_xyzs.len();
+    let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
+
+    let precession_infos = timestamps
+        .iter()
+        .copied()
+        .map(|time| {
+            precess_time(
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                obs_context.phase_centre,
+                time,
+                dut1,
+            )
+        })
+        .collect::<Vec<_>>();
+    let (lmsts, latitudes): (Vec<f64>, Vec<f64>) = precession_infos
+        .iter()
+        .map(|p| {
+            if no_precession {
+                (p.lmst, array_position.latitude_rad)
+            } else {
+                (p.lmst_j2000, p.array_latitude_j2000)
+            }
+        })
+        .unzip();
+    let mut precessed_tile_xyzs =
+        Array2::from_elem((timestamps.len(), num_tiles), XyzGeodetic::default());
+    precessed_tile_xyzs
+        .outer_iter_mut()
+        .zip(precession_infos.into_iter())
+        .for_each(|(mut precessed_tile_xyzs, precession_info)| {
+            let xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
+            precessed_tile_xyzs.assign(&Array1::from_vec(xyzs));
+        });
+
+    let mut tile_uvs_high_res = Array2::default((timestamps.len(), num_tiles));
+
+    // Pre-compute tile UVs.
+    tile_uvs_high_res
+        .outer_iter_mut()
+        .zip(precessed_tile_xyzs.outer_iter())
+        .zip(lmsts.iter())
+        .for_each(|((mut tile_uvs, unflagged_tile_xyzs), lmst)| {
+            let obs_phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+            setup_uvs(
+                tile_uvs.as_slice_mut().unwrap(),
+                unflagged_tile_xyzs.as_slice().unwrap(),
+                obs_phase_centre,
+            );
+        });
+
+    // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
+    let short_baseline_sigma = 20.;
+    // TODO: Do we care about weights changing over time?
+    let iono_taper_weights = {
+        let mut iono_taper = get_weights_rts(
+            tile_uvs_high_res.view(),
+            all_fine_chan_lambdas_m,
+            short_baseline_sigma,
+            (obs_context.guess_freq_res() / FREQ_WEIGHT_FACTOR)
+                * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
+        );
+        iono_taper *= &vis_weights;
+        iono_taper
+    };
+
+    let mut tile_ws_from = Array2::default((timestamps.len(), num_tiles));
+    // Set up the first set of Ws at the phase centre.
+    tile_ws_from
+        .outer_iter_mut()
+        .into_par_iter()
+        .zip(precessed_tile_xyzs.outer_iter())
+        .zip(lmsts.par_iter())
+        .for_each(|((mut tile_ws_from, precessed_tile_xyzs), lmst)| {
+            let obs_phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+            setup_ws(
+                tile_ws_from.view_mut(),
+                precessed_tile_xyzs.view(),
+                obs_phase_centre,
+            );
+        });
+
+    let average_timestamp = average_epoch(timestamps);
+    let average_precession_info = precess_time(
+        array_position.longitude_rad,
+        array_position.latitude_rad,
+        obs_context.phase_centre,
+        average_timestamp,
+        dut1,
+    );
+    let average_lmst = if no_precession {
+        average_precession_info.lmst
+    } else {
+        average_precession_info.lmst_j2000
+    };
+    let average_latitude = if no_precession {
+        array_position.latitude_rad
+    } else {
+        average_precession_info.array_latitude_j2000
+    };
+    let average_precessed_tile_xyzs = Array2::from_shape_vec(
+        (1, num_tiles),
+        average_precession_info.precess_xyz(unflagged_tile_xyzs),
+    )
+    .expect("correct shape");
+
+    // temporary arrays for accumulation
+    // TODO: Do a stocktake of arrays that are lying around!
+    // These are time, bl, channel
+    let vis_residual_low_res: Array3<Jones<f32>> =
+        Array3::zeros((1, low_res_freqs_hz.len(), num_cross_baselines));
+    let mut vis_weights_low_res: Array3<f32> = Array3::zeros(vis_residual_low_res.dim());
+
+    // The low-res weights only need to be populated once.
+    weights_average(iono_taper_weights.view(), vis_weights_low_res.view_mut());
+
+    // The UVWs for every timestep will be the same (because the phase
+    // centres are always the same). Make these ahead of time for
+    // efficiency.
+    let high_res_uvws = {
+        let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
+        let mut tile_uvws = vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
+        uvws.outer_iter_mut()
+            .zip(precessed_tile_xyzs.outer_iter())
+            .zip(lmsts.iter())
+            .for_each(|((mut uvws, precessed_tile_xyzs), lmst)| {
+                let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+                let (s_ha, c_ha) = phase_centre.ha.sin_cos();
+                let (s_dec, c_dec) = phase_centre.dec.sin_cos();
+                // Get a UVW for each tile.
+                tile_uvws
+                    .iter_mut()
+                    .zip(precessed_tile_xyzs.iter())
+                    .for_each(|(uvw, xyz)| {
+                        *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec)
+                    });
+                // Take the difference of every pair of UVWs.
+                let mut count = 0;
+                for (i, t1) in tile_uvws.iter().enumerate() {
+                    for t2 in tile_uvws.iter().skip(i + 1) {
+                        uvws[count] = *t1 - *t2;
+                        count += 1;
+                    }
+                }
+            });
+        uvws
+    };
+
+    let freq_average_factor = all_fine_chan_freqs_hz.len() / low_res_freqs_hz.len();
+
+    unsafe {
+        let cuda_xyzs: Vec<_> = precessed_tile_xyzs
+            .iter()
+            .copied()
+            .map(|XyzGeodetic { x, y, z }| cuda::XYZ {
+                x: x as _,
+                y: y as _,
+                z: z as _,
+            })
+            .collect();
+        let mut cuda_uvws = Array2::from_elem(
+            (num_timesteps, num_cross_baselines),
+            cuda::UVW {
+                u: 0.0,
+                v: 0.0,
+                w: 0.0,
+            },
+        );
+        cuda_uvws
+            .outer_iter_mut()
+            .zip(precessed_tile_xyzs.outer_iter())
+            .zip(lmsts.iter())
+            .for_each(|((mut cuda_uvws, xyzs), lmst)| {
+                let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+                let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
+                    .into_iter()
+                    .map(|uvw| cuda::UVW {
+                        u: uvw.u as CudaFloat,
+                        v: uvw.v as CudaFloat,
+                        w: uvw.w as CudaFloat,
+                    })
+                    .collect::<Vec<_>>();
+                cuda_uvws.assign(&ArrayView1::from(&v));
+            });
+        let cuda_lmsts: Vec<CudaFloat> = lmsts.iter().map(|l| *l as CudaFloat).collect();
+        let cuda_lambdas: Vec<CudaFloat> = all_fine_chan_lambdas_m
+            .iter()
+            .map(|l| *l as CudaFloat)
+            .collect();
+        let cuda_xyzs_low_res: Vec<_> = average_precessed_tile_xyzs
+            .iter()
+            .copied()
+            .map(|XyzGeodetic { x, y, z }| cuda::XYZ {
+                x: x as _,
+                y: y as _,
+                z: z as _,
+            })
+            .collect();
+        let cuda_low_res_lambdas: Vec<CudaFloat> =
+            low_res_lambdas_m.iter().map(|l| *l as CudaFloat).collect();
+
+        let d_xyzs = DevicePointer::copy_to_device(&cuda_xyzs).unwrap();
+        let d_uvws_from = DevicePointer::copy_to_device(cuda_uvws.as_slice().unwrap()).unwrap();
+        let mut d_uvws_to =
+            DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
+        let d_lmsts = DevicePointer::copy_to_device(&cuda_lmsts).unwrap();
+        let d_lambdas = DevicePointer::copy_to_device(&cuda_lambdas).unwrap();
+        let d_xyzs_low_res = DevicePointer::copy_to_device(&cuda_xyzs_low_res).unwrap();
+        let d_average_lmsts = DevicePointer::copy_to_device(&[average_lmst as CudaFloat]).unwrap();
+        let mut d_uvws_low_res: DevicePointer<cuda::UVW> =
+            DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
+        let d_low_res_lambdas = DevicePointer::copy_to_device(&cuda_low_res_lambdas).unwrap();
+        // Make the amount of elements in `d_iono_fits` a power of 2, for
+        // efficiency.
+        let mut d_iono_fits = {
+            let min_size =
+                num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<f64>>();
+            let n = (min_size as f64).log2().ceil() as u32;
+            let size = 2_usize.pow(n);
+            // dbg!(min_size, size);
+            let mut d: DevicePointer<Jones<f64>> = DevicePointer::malloc(size).unwrap();
+            d.clear();
+            d
+        };
+
+        // let mut d_low_res_vis = DevicePointer::malloc(
+        //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<CudaFloat>>(),
+        // );
+        // let mut d_low_res_weights = DevicePointer::malloc(
+        //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<CudaFloat>(),
+        // );
+
+        let mut d_high_res_vis =
+            DevicePointer::copy_to_device(vis_residual.as_slice().unwrap()).unwrap();
+        let d_high_res_weights =
+            DevicePointer::copy_to_device(vis_weights.as_slice().unwrap()).unwrap();
+
+        let mut d_low_res_vis =
+            DevicePointer::copy_to_device(vis_residual_low_res.as_slice().unwrap()).unwrap();
+        let d_low_res_weights =
+            DevicePointer::copy_to_device(vis_weights_low_res.as_slice().unwrap()).unwrap();
+        let mut d_low_res_model_rotated =
+            DevicePointer::copy_to_device(vis_residual_low_res.as_slice().unwrap()).unwrap();
+
+        let mut d_high_res_model: DevicePointer<Jones<f32>> = DevicePointer::malloc(
+            timestamps.len()
+                * num_cross_baselines
+                * all_fine_chan_freqs_hz.len()
+                * std::mem::size_of::<Jones<f32>>(),
+        )
+        .unwrap();
+
+        // One pointer per timestep.
+        let mut d_uvws = Vec::with_capacity(high_res_uvws.len_of(Axis(0)));
+        // Temp vector to store results.
+        let mut cuda_uvws = vec![
+            cuda::UVW {
+                u: 0.0,
+                v: 0.0,
+                w: 0.0
+            };
+            high_res_uvws.len_of(Axis(1))
+        ];
+        for uvws in high_res_uvws.outer_iter() {
+            // Convert the type and push the results to the device,
+            // saving the resulting pointer.
+            uvws.iter()
+                .zip_eq(cuda_uvws.iter_mut())
+                .for_each(|(&UVW { u, v, w }, cuda_uvw)| {
+                    *cuda_uvw = cuda::UVW {
+                        u: u as CudaFloat,
+                        v: v as CudaFloat,
+                        w: w as CudaFloat,
+                    }
+                });
+            d_uvws.push(cuda::DevicePointer::copy_to_device(&cuda_uvws).unwrap());
+        }
+
+        for (((source_name, source), iono_consts), source_phase_centre) in source_list
+            .iter()
+            .take(num_sources_to_iono_subtract)
+            .zip_eq(iono_consts.iter_mut())
+            .zip_eq(source_weighted_positions.iter().copied())
+        {
+            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
+            let start = std::time::Instant::now();
+            let status = cuda::rotate_average(
+                d_high_res_vis.get().cast(),
+                d_high_res_weights.get(),
+                d_low_res_vis.get_mut().cast(),
+                cuda::RADec {
+                    ra: source_phase_centre.ra as _,
+                    dec: source_phase_centre.dec as _,
+                },
+                timestamps.len().try_into().unwrap(),
+                num_tiles.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                all_fine_chan_freqs_hz.len().try_into().unwrap(),
+                freq_average_factor.try_into().unwrap(),
+                d_lmsts.get(),
+                d_xyzs.get(),
+                d_uvws_from.get(),
+                d_uvws_to.get_mut(),
+                d_lambdas.get(),
+            );
+            assert_eq!(status, 0);
+            trace!("{:?}: rotate_average", std::time::Instant::now() - start);
+
+            low_res_modeller.update_with_a_source(source, source_phase_centre)?;
+            low_res_modeller.clear_vis();
+            trace!(
+                "{:?}: low res update and clear",
+                std::time::Instant::now() - start
+            );
+
+            let status = cuda::xyzs_to_uvws(
+                d_xyzs_low_res.get(),
+                d_average_lmsts.get(),
+                d_uvws_low_res.get_mut(),
+                cuda::RADec {
+                    ra: source_phase_centre.ra as CudaFloat,
+                    dec: source_phase_centre.dec as CudaFloat,
+                },
+                num_tiles.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                1,
+            );
+            assert_eq!(status, 0);
+            trace!(
+                "{:?}: low res xyzs_to_uvws",
+                std::time::Instant::now() - start
+            );
+
+            low_res_modeller.model_with_uvws2(&d_uvws_low_res, average_lmst, average_latitude)?;
+            trace!("{:?}: low res model", std::time::Instant::now() - start);
+
+            let status = cuda::iono_loop(
+                d_low_res_vis.get().cast(),
+                d_low_res_weights.get(),
+                low_res_modeller.d_vis.get_mut().cast(),
+                d_low_res_model_rotated.get_mut().cast(),
+                d_iono_fits.get_mut().cast(),
+                &mut iono_consts.0,
+                &mut iono_consts.1,
+                num_timesteps.try_into().unwrap(),
+                num_tiles.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                low_res_freqs_hz.len().try_into().unwrap(),
+                10,
+                d_average_lmsts.get(),
+                d_uvws_low_res.get(),
+                d_low_res_lambdas.get(),
+            );
+            assert_eq!(status, 0);
+            // dbg!(iono_consts);
+            trace!("{:?}: iono_loop", std::time::Instant::now() - start);
+
+            high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+            // high_res_modeller.clear_vis();
+            // Clear the old memory before reusing the buffer.
+            cuda_runtime_sys::cudaMemset(
+                d_high_res_model.get_mut().cast(),
+                0,
+                timestamps.len()
+                    * num_cross_baselines
+                    * all_fine_chan_freqs_hz.len()
+                    * std::mem::size_of::<Jones<f32>>(),
+            );
+            d_uvws
+                .iter()
+                .zip(lmsts.iter())
+                .zip(latitudes.iter())
+                .enumerate()
+                .try_for_each(|(i_time, ((d_uvws, lmst), latitude))| {
+                    high_res_modeller.model_with_uvws3(
+                        d_high_res_model
+                            .get_mut()
+                            .add(i_time * num_cross_baselines * all_fine_chan_freqs_hz.len()),
+                        d_uvws,
+                        *lmst,
+                        *latitude,
+                    )
+                })?;
+            trace!("{:?}: high res model", std::time::Instant::now() - start);
+
+            let status = cuda::subtract_iono(
+                d_high_res_vis.get_mut().cast(),
+                d_high_res_model.get().cast(),
+                iono_consts.0,
+                iono_consts.1,
+                d_uvws_from.get(),
+                d_lambdas.get(),
+                num_timesteps.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                all_fine_chan_freqs_hz.len().try_into().unwrap(),
+            );
+            assert_eq!(status, 0);
+            trace!("{:?}: subtract_iono", std::time::Instant::now() - start);
+            debug!("peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
+
+            peel_progress.inc(1);
+        }
+    }
 
     Ok(())
 }
@@ -4015,12 +4029,11 @@ pub(crate) enum PeelError {
     #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
     OutputVisFreqResNotMultiple { out: f64, inp: f64 },
 
-    #[error("Error when parsing minimum UVW cutoff: {0}")]
-    ParseUvwMin(crate::unit_parsing::UnitParseError),
+    // #[error("Error when parsing minimum UVW cutoff: {0}")]
+    // ParseUvwMin(crate::unit_parsing::UnitParseError),
 
-    #[error("Error when parsing maximum UVW cutoff: {0}")]
-    ParseUvwMax(crate::unit_parsing::UnitParseError),
-
+    // #[error("Error when parsing maximum UVW cutoff: {0}")]
+    // ParseUvwMax(crate::unit_parsing::UnitParseError),
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
     BadArrayPosition { pos: Vec<f64> },
 
@@ -4053,7 +4066,7 @@ pub(crate) enum PeelError {
     Cuda(#[from] crate::cuda::CudaError),
 }
 
-fn iono_sub_parallel(
+fn _iono_sub_parallel(
     vis_residual: ArrayView3<Jones<f32>>,
     mut vis_residual_low_res: ArrayViewMut3<Jones<f32>>,
     weight_residual_low_res: ArrayView3<f32>,
@@ -4065,7 +4078,7 @@ fn iono_sub_parallel(
     source_phase_centre: RADec,
     tile_xyzs: ArrayView2<XyzGeodetic>,
     lmsts: &[f64],
-    average_tile_xyzs: ArrayView2<XyzGeodetic>,
+    _average_tile_xyzs: ArrayView2<XyzGeodetic>,
     tile_ws_from: ArrayView2<W>,
     mut tile_ws_to: ArrayViewMut2<W>,
     tile_uvs_low_res: ArrayView2<UV>,
@@ -4078,7 +4091,7 @@ fn iono_sub_parallel(
 
     // Rotate the residual visibilities to the source phase centre and
     // average into vis_residual_low_res.
-    vis_rotate2_serial(
+    _vis_rotate2_serial(
         vis_residual.view(),
         vis_residual_tmp.view_mut(),
         source_phase_centre,

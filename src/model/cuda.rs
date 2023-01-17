@@ -659,7 +659,7 @@ impl<'a> SkyModellerCuda<'a> {
         self.d_uvws.overwrite(uvws)
     }
 
-    pub(crate) fn model_with_uvws(
+    pub(crate) fn _model_with_uvws(
         &mut self,
         mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
         d_uvws: &DevicePointer<cuda::UVW>,
