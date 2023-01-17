@@ -53,11 +53,11 @@ __global__ void xyzs_to_uvws_kernel(const XYZ *xyzs, const FLOAT *lmsts, UVW *uv
  * to fastest). The weights should never be negative; this allows us to avoid
  * special logic when averaging.
  */
-__global__ void rotate_average_kernel(const JONES *high_res_vis, const float *high_res_weights, JONES *low_res_vis,
-                                      RADec pointing_centre, const int num_timesteps, const int num_tiles,
-                                      const int num_baselines, const int num_freqs, const int freq_average_factor,
-                                      const FLOAT *lmsts, const XYZ *xyzs, const UVW *uvws_from, UVW *uvws_to,
-                                      const FLOAT *lambdas) {
+__global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float *high_res_weights,
+                                      JonesF32 *low_res_vis, RADec pointing_centre, const int num_timesteps,
+                                      const int num_tiles, const int num_baselines, const int num_freqs,
+                                      const int freq_average_factor, const FLOAT *lmsts, const XYZ *xyzs,
+                                      const UVW *uvws_from, UVW *uvws_to, const FLOAT *lambdas) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
@@ -84,8 +84,8 @@ __global__ void rotate_average_kernel(const JONES *high_res_vis, const float *hi
                 SINCOS(arg / lambdas[i_freq_chunk], &complex.y, &complex.x);
 
                 const int step = (i_time * num_freqs + i_freq_chunk) * num_baselines + i_bl;
-                const FLOAT weight = high_res_weights[step];
-                const JONES rotated_weighted_vis = high_res_vis[step] * weight * complex;
+                const float weight = high_res_weights[step];
+                const JonesF32 rotated_weighted_vis = high_res_vis[step] * weight * complex;
 
                 vis_weighted_sum += rotated_weighted_vis;
                 weight_sum += weight;
@@ -99,7 +99,16 @@ __global__ void rotate_average_kernel(const JONES *high_res_vis, const float *hi
         vis_weighted_sum /= (weight_sum > 0.0) ? weight_sum : 1.0;
 
         const int low_res_step = (i_freq / freq_average_factor) * num_baselines + i_bl;
-        low_res_vis[low_res_step] = vis_weighted_sum;
+        low_res_vis[low_res_step] = JonesF32{
+            .j00_re = (float)vis_weighted_sum.j00_re,
+            .j00_im = (float)vis_weighted_sum.j00_im,
+            .j01_re = (float)vis_weighted_sum.j01_re,
+            .j01_im = (float)vis_weighted_sum.j01_im,
+            .j10_re = (float)vis_weighted_sum.j10_re,
+            .j10_im = (float)vis_weighted_sum.j10_im,
+            .j11_re = (float)vis_weighted_sum.j11_re,
+            .j11_im = (float)vis_weighted_sum.j11_im,
+        };
         // low_res_weights[low_res_step] = weight_sum;
     }
 }
@@ -107,7 +116,7 @@ __global__ void rotate_average_kernel(const JONES *high_res_vis, const float *hi
 /**
  *
  */
-__device__ void apply_iono(const JonesF32 *vis, JONES *vis_out, const FLOAT iono_const_alpha,
+__device__ void apply_iono(const JonesF32 *vis, JonesF32 *vis_out, const FLOAT iono_const_alpha,
                            const FLOAT iono_const_beta, const int num_baselines, const int num_freqs, const UVW *uvws,
                            const FLOAT *lambdas_m) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
@@ -127,17 +136,7 @@ __device__ void apply_iono(const JonesF32 *vis, JONES *vis_out, const FLOAT iono
         const int step = i_freq * num_baselines + i_bl;
         // TODO: Yuck
         const int step2 = i_bl * num_freqs + i_freq;
-        const JonesF32 asdf = vis[step2] * complex;
-        vis_out[step] = JONES{
-            .j00_re = (FLOAT)asdf.j00_re,
-            .j00_im = (FLOAT)asdf.j00_im,
-            .j01_re = (FLOAT)asdf.j01_re,
-            .j01_im = (FLOAT)asdf.j01_im,
-            .j10_re = (FLOAT)asdf.j10_re,
-            .j10_im = (FLOAT)asdf.j10_im,
-            .j11_re = (FLOAT)asdf.j11_re,
-            .j11_im = (FLOAT)asdf.j11_im,
-        };
+        vis_out[step] = vis[step2] * complex;
     }
 }
 
@@ -290,8 +289,8 @@ __global__ void reduce_jones2(JonesF64 *data, const int n, double *iono_consts) 
 /**
  * Kernel for ...
  */
-__global__ void iono_loop_kernel(const JONES *vis_residual, const float *vis_weights, const JonesF32 *vis_model,
-                                 JONES *vis_model_rotated, const double *iono_consts, JonesF64 *iono_fits,
+__global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_weights, const JonesF32 *vis_model,
+                                 JonesF32 *vis_model_rotated, const double *iono_consts, JonesF64 *iono_fits,
                                  const int num_iterations, const int num_baselines, const int num_freqs,
                                  const FLOAT *lmsts, const UVW *uvws, const FLOAT *lambdas_m) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
@@ -318,10 +317,10 @@ __global__ void iono_loop_kernel(const JONES *vis_residual, const float *vis_wei
 
         const int step = i_freq * num_baselines + i_bl;
         const double weight = vis_weights[step];
-        const JONES *residual = &vis_residual[step];
+        const JonesF32 *residual = &vis_residual[step];
         const double residual_i_re = residual->j00_re + residual->j11_re;
         const double residual_i_im = residual->j00_im + residual->j11_im;
-        const JONES *model = &vis_model_rotated[step];
+        const JonesF32 *model = &vis_model_rotated[step];
         const double model_i_re = model->j00_re + model->j11_re;
         const double model_i_im = model->j00_im + model->j11_im;
 
@@ -342,7 +341,7 @@ __global__ void iono_loop_kernel(const JONES *vis_residual, const float *vis_wei
     }
 }
 
-__global__ void subtract_iono_kernel(JONES *vis_residual, const JonesF32 *vis_model, const double iono_const_alpha,
+__global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const double iono_const_alpha,
                                      const double iono_const_beta, const UVW *uvws, const FLOAT *lambdas_m,
                                      const int num_timesteps, const int num_baselines, const int num_freqs) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
@@ -364,7 +363,7 @@ __global__ void subtract_iono_kernel(JONES *vis_residual, const JonesF32 *vis_mo
             const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
             // TODO: Yuck
             const int step2 = (i_time * num_baselines + i_bl) * num_freqs + i_freq;
-            JONES r = vis_residual[step];
+            JonesF32 r = vis_residual[step];
             const JonesF32 m = vis_model[step2];
 
             r += m;
@@ -394,7 +393,7 @@ extern "C" int xyzs_to_uvws(const XYZ *d_xyzs, const FLOAT *d_lmsts, UVW *d_uvws
     return 0;
 }
 
-extern "C" int rotate_average(const JONES *d_high_res_vis, const float *d_high_res_weights, JONES *d_low_res_vis,
+extern "C" int rotate_average(const JonesF32 *d_high_res_vis, const float *d_high_res_weights, JonesF32 *d_low_res_vis,
                               RADec pointing_centre, const int num_timesteps, const int num_tiles,
                               const int num_baselines, const int num_freqs, const int freq_average_factor,
                               const FLOAT *d_lmsts, const XYZ *d_xyzs, const UVW *d_uvws_from, UVW *d_uvws_to,
@@ -411,16 +410,35 @@ extern "C" int rotate_average(const JONES *d_high_res_vis, const float *d_high_r
     // Prepare the "to" UVWs.
     xyzs_to_uvws_kernel<<<gridDim, blockDim>>>(d_xyzs, d_lmsts, d_uvws_to, pointing_centre, num_tiles, num_baselines,
                                                num_timesteps);
+    cudaError_t error_id = cudaDeviceSynchronize();
+    if (error_id != cudaSuccess) {
+        printf("%s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(error_id));
+        return -1;
+    }
+    error_id = cudaGetLastError();
+    if (error_id != cudaSuccess) {
+        printf("%s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(error_id));
+        return -1;
+    }
     rotate_average_kernel<<<gridDim, blockDim>>>(
         d_high_res_vis, d_high_res_weights, d_low_res_vis, pointing_centre, num_timesteps, num_tiles, num_baselines,
         num_freqs, freq_average_factor, d_lmsts, d_xyzs, d_uvws_from, d_uvws_to, d_lambdas);
-    cudaCheck(cudaPeekAtLastError());
+    error_id = cudaDeviceSynchronize();
+    if (error_id != cudaSuccess) {
+        printf("%s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(error_id));
+        return -1;
+    }
+    error_id = cudaGetLastError();
+    if (error_id != cudaSuccess) {
+        printf("%s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(error_id));
+        return -1;
+    }
 
     return 0;
 }
 
-extern "C" int iono_loop(const JONES *d_vis_residual, const float *d_vis_weights, const JonesF32 *d_vis_model,
-                         JONES *d_vis_model_rotated, JonesF64 *d_iono_fits, double *iono_const_alpha,
+extern "C" int iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weights, const JonesF32 *d_vis_model,
+                         JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits, double *iono_const_alpha,
                          double *iono_const_beta, const int num_timesteps, const int num_tiles, const int num_baselines,
                          const int num_freqs, const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws,
                          const FLOAT *d_lambdas_m) {
@@ -482,7 +500,7 @@ extern "C" int iono_loop(const JONES *d_vis_residual, const float *d_vis_weights
     return 0;
 }
 
-extern "C" int subtract_iono(JONES *d_vis_residual, const JonesF32 *d_vis_model, double iono_const_alpha,
+extern "C" int subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, double iono_const_alpha,
                              double iono_const_beta, const UVW *d_uvws, const FLOAT *d_lambdas_m,
                              const int num_timesteps, const int num_baselines, const int num_freqs) {
     // Thread blocks are distributed by baseline indices.

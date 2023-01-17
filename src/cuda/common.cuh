@@ -96,8 +96,21 @@ inline __device__ void operator+=(COMPLEX &a, const COMPLEX b) {
     a.y += b.y;
 }
 
-inline __device__ JONES operator*(const JONES a, const FLOAT b) {
-    return JONES{
+inline __device__ JonesF32 operator*(const JonesF32 a, const float b) {
+    return JonesF32{
+        .j00_re = a.j00_re * b,
+        .j00_im = a.j00_im * b,
+        .j01_re = a.j01_re * b,
+        .j01_im = a.j01_im * b,
+        .j10_re = a.j10_re * b,
+        .j10_im = a.j10_im * b,
+        .j11_re = a.j11_re * b,
+        .j11_im = a.j11_im * b,
+    };
+}
+
+inline __device__ JonesF64 operator*(const JonesF64 a, const double b) {
+    return JonesF64{
         .j00_re = a.j00_re * b,
         .j00_im = a.j00_im * b,
         .j01_re = a.j01_re * b,
