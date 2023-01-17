@@ -3046,7 +3046,7 @@ fn peel(
             .zip_eq(source_weighted_positions.iter().take(n_serial).copied())
             .enumerate()
         {
-            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})",);
+            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
             let start = std::time::Instant::now();
             let status = cuda::rotate_average(
                 d_high_res_vis.get().cast(),
@@ -3160,6 +3160,7 @@ fn peel(
             );
             assert_eq!(status, 0);
             trace!("{:?}: subtract_iono", std::time::Instant::now() - start);
+            debug!("peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
 
             peel_progress.inc(1);
         }
