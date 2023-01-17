@@ -134,78 +134,16 @@ __device__ void apply_iono(const JonesF32 *vis, JonesF32 *vis_out, const FLOAT i
         SINCOS(arg * lambdas_m[i_freq], &complex.y, &complex.x);
 
         const int step = i_freq * num_baselines + i_bl;
-        // TODO: Yuck
-        const int step2 = i_bl * num_freqs + i_freq;
-        vis_out[step] = vis[step2] * complex;
+        vis_out[step] = vis[step] * complex;
     }
 }
 
-// https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
-// template <unsigned int blockSize> __device__ void warpReduce(volatile JonesF64 *sdata, unsigned int tid) {
-__device__ void warpReduce(volatile JonesF64 *sdata, unsigned int tid) {
-    sdata[tid] += sdata[tid + 32];
-    sdata[tid] += sdata[tid + 16];
-    sdata[tid] += sdata[tid + 8];
-    sdata[tid] += sdata[tid + 4];
-    sdata[tid] += sdata[tid + 2];
-    sdata[tid] += sdata[tid + 1];
-}
-// template <unsigned int blockSize> __global__ void reduce_jones(JonesF64 *data, const int n) {
-//     extern __shared__ JonesF64 sdata[];
-//     unsigned int tid = threadIdx.x;
-//     unsigned int i = blockIdx.x * (blockSize * 2) + tid;
-//     unsigned int gridSize = blockSize * 2 * gridDim.x;
-//     sdata[tid] = JonesF64{
-//         .j00_re = 0.0,
-//         .j00_im = 0.0,
-//         .j01_re = 0.0,
-//         .j01_im = 0.0,
-//         .j10_re = 0.0,
-//         .j10_im = 0.0,
-//         .j11_re = 0.0,
-//         .j11_im = 0.0,
-//     };
-
-//     while (i < n + gridSize) {
-//         sdata[tid] += data[i] + data[i + blockSize];
-//         i += gridSize;
-//     }
-//     __syncthreads();
-//     if (blockSize >= 512) {
-//         if (tid < 256) {
-//             sdata[tid] += sdata[tid + 256];
-//         }
-//         __syncthreads();
-//     }
-//     if (blockSize >= 256) {
-//         if (tid < 128) {
-//             sdata[tid] += sdata[tid + 128];
-//         }
-//         __syncthreads();
-//     }
-//     if (blockSize >= 128) {
-//         if (tid < 64) {
-//             sdata[tid] += sdata[tid + 64];
-//         }
-//         __syncthreads();
-//     }
-//     if (tid < 32)
-//         warpReduce<blockSize>(sdata, tid);
-//     if (tid == 0)
-//         data[blockIdx.x] = sdata[0];
-//     if (tid == 0) {
-//         printf("reduce %f %d\n", sdata[0].j11_im, blockIdx.x);
-//     }
-// }
-
 // For each frequency, add up all of the data across baselines, dumping the
 // results back into the data according to block index.
-__global__ void reduce_jones(JonesF64 *data, const int num_baselines) {
-    extern __shared__ JonesF64 sdata[];
-    const int tid = threadIdx.x;
-    const int offset = blockIdx.x * num_baselines;
-
-    sdata[tid] = JonesF64{
+const int DIRTY_THREAD_COUNT = 512;
+__global__ void reduce(const JonesF64 *data, const int num_baselines, const int num_freqs, double *iono_consts) {
+    __shared__ JonesF64 sdata[DIRTY_THREAD_COUNT];
+    sdata[threadIdx.x] = JonesF64{
         .j00_re = 0.0,
         .j00_im = 0.0,
         .j01_re = 0.0,
@@ -215,63 +153,17 @@ __global__ void reduce_jones(JonesF64 *data, const int num_baselines) {
         .j11_re = 0.0,
         .j11_im = 0.0,
     };
-    int i = tid;
-    while (i + blockDim.x < num_baselines) {
-        sdata[tid] += data[i + offset] + data[i + offset + blockDim.x];
-        i += 2 * blockDim.x;
-    }
-    __syncthreads();
-    // Get the last few values.
-    if (i < num_baselines) {
-        sdata[tid] += data[i + offset];
+
+    for (int i = threadIdx.x; i < num_baselines * num_freqs; i += DIRTY_THREAD_COUNT) {
+        sdata[threadIdx.x] += data[i];
     }
     __syncthreads();
 
-    if (blockDim.x >= 512) {
-        if (tid < 256) {
-            sdata[tid] += sdata[tid + 256];
+    if (threadIdx.x == 0) {
+        for (int i = 1; i < DIRTY_THREAD_COUNT; i++) {
+            sdata[0] += sdata[i];
         }
-        __syncthreads();
-    }
-    if (blockDim.x >= 256) {
-        if (tid < 128) {
-            sdata[tid] += sdata[tid + 128];
-        }
-        __syncthreads();
-    }
-    if (blockDim.x >= 128) {
-        if (tid < 64) {
-            sdata[tid] += sdata[tid + 64];
-        }
-        __syncthreads();
-    }
 
-    if (tid < 32) {
-        warpReduce(sdata, tid);
-    }
-    if (tid == 0) {
-        data[blockIdx.x] = sdata[0];
-        // printf("reduce %f %d\n", sdata[0].j11_im, blockIdx.x);
-        // printf("");
-    }
-}
-
-// This is designed to take only a single block and add everything.
-__global__ void reduce_jones2(JonesF64 *data, const int n, double *iono_consts) {
-    extern __shared__ JonesF64 sdata[];
-    int tid = threadIdx.x;
-
-    if (tid < n) {
-        sdata[tid] = data[tid];
-    }
-    __syncthreads();
-    for (int i = n - 1; i > 0; i -= 1) {
-        if (tid == i) {
-            sdata[tid - 1] += sdata[tid];
-        }
-        __syncthreads();
-    }
-    if (tid == 0) {
         const double a_uu = sdata[0].j00_re;
         const double a_uv = sdata[0].j00_im;
         const double a_vv = sdata[0].j01_re;
@@ -279,7 +171,7 @@ __global__ void reduce_jones2(JonesF64 *data, const int n, double *iono_consts) 
         const double aa_v = sdata[0].j10_re;
         // const double s_vm = sdata[0].j10_im;
         // const double s_mm = sdata[0].j11_re;
-        // printf("reduce2 %f\n", sdata[0].j11_im);
+        // printf("sum %f == %d ?\n", sdata[0].j11_im, num_baselines * num_freqs);
         const double denom = TAU * (a_uu * a_vv - a_uv * a_uv);
         iono_consts[0] += (aa_u * a_vv - aa_v * a_uv) / denom;
         iono_consts[1] += (aa_v * a_uu - aa_u * a_uv) / denom;
@@ -361,10 +253,8 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
             SINCOS(arg * lambda, &complex.y, &complex.x);
 
             const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
-            // TODO: Yuck
-            const int step2 = (i_time * num_baselines + i_bl) * num_freqs + i_freq;
             JonesF32 r = vis_residual[step];
-            const JonesF32 m = vis_model[step2];
+            const JonesF32 m = vis_model[step];
 
             r += m;
             r -= m * complex;
@@ -445,27 +335,11 @@ extern "C" int iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weig
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
-    blockDim.y = 1;
-    blockDim.z = 1;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
-    gridDim.y = 1;
-    gridDim.z = 1;
     // These are used to do ionospheric fit adding.
     dim3 gridDimAdd, blockDimAdd;
-    blockDimAdd.x = 256;
-    blockDimAdd.y = 1;
-    blockDimAdd.z = 1;
-    gridDimAdd.x = num_freqs;
-    gridDimAdd.y = 1;
-    gridDimAdd.z = 1;
-    // And one final ionospheric fit adding.
-    dim3 gridDimAdd2, blockDimAdd2;
-    blockDimAdd2.x = num_freqs;
-    blockDimAdd2.y = 1;
-    blockDimAdd2.z = 1;
-    gridDimAdd2.x = 1;
-    gridDimAdd2.y = 1;
-    gridDimAdd2.z = 1;
+    blockDimAdd.x = DIRTY_THREAD_COUNT;
+    gridDimAdd.x = 1;
 
     double *d_iono_consts;
     cudaMalloc(&d_iono_consts, 2 * sizeof(double));
@@ -479,10 +353,7 @@ extern "C" int iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weig
                                                 d_lmsts, d_uvws, d_lambdas_m);
         cudaCheck(cudaPeekAtLastError());
         // Sum the iono fits.
-        reduce_jones<<<gridDimAdd, blockDimAdd, blockDimAdd.x * sizeof(JonesF64)>>>(d_iono_fits, num_baselines);
-        cudaCheck(cudaPeekAtLastError());
-        reduce_jones2<<<gridDimAdd2, blockDimAdd2, num_freqs * sizeof(JonesF64)>>>(d_iono_fits, num_freqs,
-                                                                                   d_iono_consts);
+        reduce<<<gridDimAdd, blockDimAdd>>>(d_iono_fits, num_baselines, num_freqs, d_iono_consts);
         cudaCheck(cudaPeekAtLastError());
 
         // // Sane?

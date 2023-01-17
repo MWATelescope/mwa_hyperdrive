@@ -10,7 +10,7 @@ use crate::srclist::{error::WriteSourceListError, SourceList};
 pub(crate) fn source_list_to_yaml<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
-    num_sources: Option<usize>,
+    _num_sources: Option<usize>,
 ) -> Result<(), WriteSourceListError> {
     serde_yaml::to_writer(buf, &sl)?;
     Ok(())
@@ -20,7 +20,7 @@ pub(crate) fn source_list_to_yaml<T: std::io::Write>(
 pub(crate) fn source_list_to_json<T: std::io::Write>(
     buf: &mut T,
     sl: &SourceList,
-    num_sources: Option<usize>,
+    _num_sources: Option<usize>,
 ) -> Result<(), WriteSourceListError> {
     serde_json::to_writer_pretty(buf, &sl)?;
     Ok(())
