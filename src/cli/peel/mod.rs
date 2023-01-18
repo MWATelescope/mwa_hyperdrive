@@ -6,7 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     f64::consts::TAU,
     io::Write,
-    ops::{Deref, Div, Sub},
+    ops::{Deref, DerefMut, Div, Sub},
     path::PathBuf,
     str::FromStr,
     thread::{self, ScopedJoinHandle},
@@ -22,10 +22,11 @@ use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR, VEL_C},
     math::num_tiles_from_num_cross_correlation_baselines,
-    pos::xyz::xyzs_to_cross_uvws,
     precession::precess_time,
-    HADec, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic, UVW,
+    HADec, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
 };
+#[cfg(feature = "cuda")]
+use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
 use ndarray::{prelude::*, Zip};
 use num_complex::Complex;
 use rayon::prelude::*;
@@ -33,8 +34,6 @@ use scopeguard::defer_on_unwind;
 use thiserror::Error;
 use vec1::Vec1;
 
-#[cfg(feature = "cuda")]
-use crate::cuda::{self, CudaFloat, DevicePointer};
 use crate::{
     averaging::{
         channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
@@ -48,7 +47,7 @@ use crate::{
     help_texts::*,
     math::{average_epoch, TileBaselineFlags},
     messages,
-    model::{new_sky_modeller, ModelError, ModellerInfo, SkyModeller, SkyModellerCuda},
+    model::{new_sky_modeller, ModelError, ModellerInfo, SkyModeller},
     srclist::{read::read_source_list_file, veto_sources, SourceList, SourceListType},
     unit_parsing::WAVELENGTH_FORMATS,
     vis_io::{
@@ -56,6 +55,11 @@ use crate::{
         write::{write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
     HyperdriveError,
+};
+#[cfg(feature = "cuda")]
+use crate::{
+    cuda::{self, CudaFloat, DevicePointer},
+    model::SkyModellerCuda
 };
 
 pub(crate) const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
@@ -125,9 +129,9 @@ pub struct PeelArgs {
     #[clap(long = "iono-sub", help_heading = "SKY-MODEL SOURCES")]
     pub num_sources_to_iono_subtract: Option<usize>,
 
-    #[cfg(feature = "cuda")]
     /// Use the CPU for peeling and ionospheric subraction. This is deliberately
     /// made non-default because using a GPU is much faster.
+    #[cfg(feature = "cuda")]
     #[clap(long, help_heading = "PEELING")]
     pub cpu_peel: bool,
 
@@ -145,9 +149,9 @@ pub struct PeelArgs {
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY-MODEL SOURCES")]
     pub veto_threshold: Option<f64>,
 
-    #[cfg(feature = "cuda")]
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
+    #[cfg(feature = "cuda")]
     #[clap(long, help_heading = "MODELLING")]
     pub cpu_vis: bool,
 
@@ -288,10 +292,12 @@ impl PeelArgs {
             outputs,
             num_sources_to_peel: _,
             num_sources_to_iono_subtract,
+            #[cfg(feature = "cuda")]
             cpu_peel,
             num_sources_to_subtract,
             source_dist_cutoff,
             veto_threshold,
+            #[cfg(feature = "cuda")]
             cpu_vis,
             beam_file,
             unity_dipole_gains,
@@ -365,6 +371,14 @@ impl PeelArgs {
             }
             None => None,
         };
+
+        #[cfg(feature = "cuda")]
+        match (cpu_peel, cpu_vis) {
+            (false, true) => {
+                return Err(PeelError::ModellerMismatch);
+            }
+            _ => {}
+        }
 
         // Handle input data. We expect one of three possibilities:
         // - gpubox files, a metafits file (and maybe mwaf files),
@@ -1370,6 +1384,7 @@ impl PeelArgs {
                     defer_on_unwind! { error.store(true); }
 
                     let mut modeller = new_sky_modeller(
+                        #[cfg(feature = "cuda")]
                         matches!(modeller_info, ModellerInfo::Cpu),
                         beam.deref(),
                         &source_list,
@@ -1498,33 +1513,6 @@ impl PeelArgs {
                 .spawn_scoped(scope, || {
                     defer_on_unwind! { error.store(true); }
 
-                    let (mut low_res_modeller, mut high_res_modeller) = unsafe {
-                        let low_res_modeller = SkyModellerCuda::new(
-                            beam.deref(),
-                            &SourceList::new(),
-                            &unflagged_tile_xyzs,
-                            &low_res_freqs_hz,
-                            flagged_tiles,
-                            RADec::default(),
-                            array_position.longitude_rad,
-                            array_position.latitude_rad,
-                            dut1,
-                            !no_precession,
-                        )?;
-                        let high_res_modeller = SkyModellerCuda::new(
-                            beam.deref(),
-                            &SourceList::new(),
-                            &unflagged_tile_xyzs,
-                            &all_fine_chan_freqs_hz,
-                            flagged_tiles,
-                            RADec::default(),
-                            array_position.longitude_rad,
-                            array_position.latitude_rad,
-                            dut1,
-                            !no_precession,
-                        )?;
-                        (low_res_modeller, high_res_modeller)
-                    };
 
                     for (i, (mut vis_residual, vis_weights, timeblock)) in
                         rx_residual.iter().enumerate()
@@ -1536,7 +1524,36 @@ impl PeelArgs {
 
                         let mut iono_consts = vec![(0.0, 0.0); num_sources_to_iono_subtract];
                         if num_sources_to_iono_subtract > 0 {
+                            #[cfg(feature = "cuda")]
                             if cpu_peel {
+                                let mut low_res_modeller = new_sky_modeller(
+                                    #[cfg(feature = "cuda")]
+                                    cpu_vis,
+                                    beam.deref(),
+                                    &SourceList::new(),
+                                    &unflagged_tile_xyzs,
+                                    &low_res_freqs_hz,
+                                    &flagged_tiles,
+                                    RADec::default(),
+                                    array_position.longitude_rad,
+                                    array_position.latitude_rad,
+                                    dut1,
+                                    !no_precession,
+                                )?;
+                                let mut high_res_modeller = new_sky_modeller(
+                                    #[cfg(feature = "cuda")]
+                                    cpu_vis,
+                                    beam.deref(),
+                                    &SourceList::new(),
+                                    &unflagged_tile_xyzs,
+                                    &all_fine_chan_freqs_hz,
+                                    &flagged_tiles,
+                                    RADec::default(),
+                                    array_position.longitude_rad,
+                                    array_position.latitude_rad,
+                                    dut1,
+                                    !no_precession,
+                                )?;
                                 peel_cpu(
                                     vis_residual.view_mut(),
                                     vis_weights.view(),
@@ -1551,14 +1568,45 @@ impl PeelArgs {
                                     obs_context,
                                     array_position,
                                     &unflagged_tile_xyzs,
-                                    &mut low_res_modeller,
-                                    &mut high_res_modeller,
+                                    low_res_modeller.deref_mut(),
+                                    high_res_modeller.deref_mut(),
                                     dut1,
                                     no_precession,
                                     &multi_progress,
                                 )
                                 .unwrap();
                             } else {
+                                // TODO (Dev): forgive me Ferris for I have sinned.
+                                // {high|low} could be instantiated once if we could figure out a
+                                // way to downcast to SkyModellerCuda from SkyModeller, but it looks
+                                // like this is impoissible because of lifetime stuff :(
+                                let (mut low_res_modeller, mut high_res_modeller) = unsafe {
+                                    let low_res_modeller = SkyModellerCuda::new(
+                                        beam.deref(),
+                                        &SourceList::new(),
+                                        &unflagged_tile_xyzs,
+                                        &low_res_freqs_hz,
+                                        flagged_tiles,
+                                        RADec::default(),
+                                        array_position.longitude_rad,
+                                        array_position.latitude_rad,
+                                        dut1,
+                                        !no_precession,
+                                    )?;
+                                    let high_res_modeller = SkyModellerCuda::new(
+                                        beam.deref(),
+                                        &SourceList::new(),
+                                        &unflagged_tile_xyzs,
+                                        &all_fine_chan_freqs_hz,
+                                        flagged_tiles,
+                                        RADec::default(),
+                                        array_position.longitude_rad,
+                                        array_position.latitude_rad,
+                                        dut1,
+                                        !no_precession,
+                                    )?;
+                                    (low_res_modeller, high_res_modeller)
+                                };
                                 peel_cuda(
                                     vis_residual.view_mut(),
                                     vis_weights.view(),
@@ -1582,7 +1630,60 @@ impl PeelArgs {
                                 )
                                 .unwrap();
                             }
+                            #[cfg(not(feature = "cuda"))]
+                            {
+                                let mut low_res_modeller = new_sky_modeller(
+                                    #[cfg(feature = "cuda")]
+                                    cpu_vis,
+                                    beam.deref(),
+                                    &SourceList::new(),
+                                    &unflagged_tile_xyzs,
+                                    &low_res_freqs_hz,
+                                    &flagged_tiles,
+                                    RADec::default(),
+                                    array_position.longitude_rad,
+                                    array_position.latitude_rad,
+                                    dut1,
+                                    !no_precession,
+                                )?;
+                                let mut high_res_modeller = new_sky_modeller(
+                                    #[cfg(feature = "cuda")]
+                                    cpu_vis,
+                                    beam.deref(),
+                                    &SourceList::new(),
+                                    &unflagged_tile_xyzs,
+                                    &all_fine_chan_freqs_hz,
+                                    &flagged_tiles,
+                                    RADec::default(),
+                                    array_position.longitude_rad,
+                                    array_position.latitude_rad,
+                                    dut1,
+                                    !no_precession,
+                                )?;
+                                peel_cpu(
+                                    vis_residual.view_mut(),
+                                    vis_weights.view(),
+                                    timeblock,
+                                    &source_list,
+                                    &mut iono_consts,
+                                    &source_weighted_positions,
+                                    num_sources_to_iono_subtract,
+                                    &low_res_freqs_hz,
+                                    &all_fine_chan_lambdas_m,
+                                    &low_res_lambdas_m,
+                                    obs_context,
+                                    array_position,
+                                    &unflagged_tile_xyzs,
+                                    low_res_modeller.deref_mut(),
+                                    high_res_modeller.deref_mut(),
+                                    dut1,
+                                    no_precession,
+                                    &multi_progress,
+                                )
+                                .unwrap();
+                            }
 
+                            // dev: what's with this?
                             if i == 0 {
                                 source_list
                                     .iter()
@@ -2723,8 +2824,8 @@ fn peel_cpu(
     obs_context: &ObsContext,
     array_position: LatLngHeight,
     unflagged_tile_xyzs: &[XyzGeodetic],
-    low_res_modeller: &mut SkyModellerCuda,
-    high_res_modeller: &mut SkyModellerCuda,
+    low_res_modeller: &mut dyn SkyModeller,
+    high_res_modeller: &mut dyn SkyModeller,
     dut1: Duration,
     no_precession: bool,
     multi_progress_bar: &MultiProgress,
@@ -2760,7 +2861,8 @@ fn peel_cpu(
             )
         })
         .collect::<Vec<_>>();
-    let (lmsts, latitudes): (Vec<f64>, Vec<f64>) = precession_infos
+    // TODO: use latitudes?
+    let (lmsts, _latitudes): (Vec<f64>, Vec<f64>) = precession_infos
         .iter()
         .map(|p| {
             if no_precession {
@@ -2847,11 +2949,12 @@ fn peel_cpu(
     } else {
         average_precession_info.lmst_j2000
     };
-    let average_latitude = if no_precession {
-        array_position.latitude_rad
-    } else {
-        average_precession_info.array_latitude_j2000
-    };
+    // TODO: what's this for?
+    // let average_latitude = if no_precession {
+    //     array_position.latitude_rad
+    // } else {
+    //     average_precession_info.array_latitude_j2000
+    // };
     let average_precessed_tile_xyzs = Array2::from_shape_vec(
         (1, num_tiles),
         average_precession_info.precess_xyz(unflagged_tile_xyzs),
@@ -4064,6 +4167,10 @@ pub(crate) enum PeelError {
     #[cfg(feature = "cuda")]
     #[error(transparent)]
     Cuda(#[from] crate::cuda::CudaError),
+
+    #[cfg(feature = "cuda")]
+    #[error("cpu_vis must be false if cpu_peel is false.")]
+    ModellerMismatch,
 }
 
 fn _iono_sub_parallel(
