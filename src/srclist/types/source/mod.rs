@@ -18,7 +18,7 @@ use super::{FluxDensity, SourceComponent};
 pub struct Source {
     /// The components associated with the source.
     #[serde(with = "serde_yaml::with::singleton_map_recursive")]
-    pub(crate) components: Vec1<SourceComponent>,
+    pub components: Vec1<SourceComponent>,
 }
 
 impl Source {

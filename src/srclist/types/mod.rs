@@ -9,7 +9,7 @@ mod flux_density;
 mod source;
 mod source_list;
 
-pub(crate) use components::*;
+pub use components::*;
 pub use flux_density::*;
 pub use source::*;
 pub use source_list::*;

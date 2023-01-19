@@ -86,7 +86,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 .unwrap();
 
                 b.iter(|| {
-                    modeller.model_points(vis.view_mut(), timestamp).unwrap();
+                    modeller._model_points(vis.view_mut(), timestamp).unwrap();
                 })
             },
         );
@@ -136,7 +136,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 )
                 .unwrap();
 
-                b.iter(|| modeller.model_points(vis.view_mut(), timestamp).unwrap());
+                b.iter(|| modeller._model_points(vis.view_mut(), timestamp).unwrap());
             },
         );
     }
@@ -208,7 +208,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 )
                 .unwrap();
 
-                b.iter(|| modeller.model_points(vis.view_mut(), timestamp).unwrap());
+                b.iter(|| modeller._model_points(vis.view_mut(), timestamp).unwrap());
             },
         );
     }
@@ -264,7 +264,7 @@ fn model_benchmarks(c: &mut Criterion) {
         .unwrap();
 
         b.iter(|| {
-            modeller.model_gaussians(vis.view_mut(), timestamp).unwrap();
+            modeller._model_gaussians(vis.view_mut(), timestamp).unwrap();
         })
     });
 
@@ -316,7 +316,7 @@ fn model_benchmarks(c: &mut Criterion) {
         )
         .unwrap();
 
-        b.iter(|| modeller.model_gaussians(vis.view_mut(), timestamp).unwrap());
+        b.iter(|| modeller._model_gaussians(vis.view_mut(), timestamp).unwrap());
     });
 
     #[cfg(feature = "cuda")]
@@ -367,7 +367,7 @@ fn model_benchmarks(c: &mut Criterion) {
         )
         .unwrap();
 
-        b.iter(|| modeller.model_gaussians(vis.view_mut(), timestamp).unwrap());
+        b.iter(|| modeller._model_gaussians(vis.view_mut(), timestamp).unwrap());
     });
     gaussians.finish();
 
@@ -430,7 +430,7 @@ fn model_benchmarks(c: &mut Criterion) {
             .unwrap();
 
             b.iter(|| {
-                modeller.model_shapelets(vis.view_mut(), timestamp).unwrap();
+                modeller._model_shapelets(vis.view_mut(), timestamp).unwrap();
             })
         },
     );
@@ -493,7 +493,7 @@ fn model_benchmarks(c: &mut Criterion) {
             )
             .unwrap();
 
-            b.iter(|| modeller.model_shapelets(vis.view_mut(), timestamp).unwrap());
+            b.iter(|| modeller._model_shapelets(vis.view_mut(), timestamp).unwrap());
         },
     );
 
@@ -555,7 +555,7 @@ fn model_benchmarks(c: &mut Criterion) {
             )
             .unwrap();
 
-            b.iter(|| modeller.model_shapelets(vis.view_mut(), timestamp).unwrap());
+            b.iter(|| modeller._model_shapelets(vis.view_mut(), timestamp).unwrap());
         },
     );
     shapelets.finish();

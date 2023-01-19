@@ -649,4 +649,118 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
 
         Ok(uvws)
     }
+
+    // TODO (dev): the following is only used for benchmarking, but I can't figure out how to hide them with #[cfg(test)]
+    fn _model_points(
+            &self,
+            vis_model_slice: ArrayViewMut2<Jones<f32>>,
+            timestamp: Epoch,
+        ) -> Result<Vec<UVW>, ModelError> {
+            let (uvws, lst, latitude) = if self.precess {
+                let precession_info = precess_time(
+                    self.array_longitude,
+                    self.array_latitude,
+                    self.phase_centre,
+                    timestamp,
+                    self.dut1,
+                );
+                // Apply precession to the tile XYZ positions.
+                let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+                let uvws = xyzs_to_cross_uvws(
+                    &precessed_tile_xyzs,
+                    self.phase_centre.to_hadec(precession_info.lmst_j2000),
+                );
+                (
+                    uvws,
+                    precession_info.lmst_j2000,
+                    precession_info.array_latitude_j2000,
+                )
+            } else {
+                let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
+                let uvws =
+                    xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
+                (uvws, lst, self.array_latitude)
+            };
+
+            self.model_points(vis_model_slice, &uvws, lst, latitude)?;
+            Ok(uvws)
+    }
+
+    fn _model_gaussians(
+            &self,
+            vis_model_slice: ArrayViewMut2<Jones<f32>>,
+            timestamp: Epoch,
+        ) -> Result<Vec<UVW>, ModelError> {
+            let (uvws, lst, latitude) = if self.precess {
+                let precession_info = precess_time(
+                    self.array_longitude,
+                    self.array_latitude,
+                    self.phase_centre,
+                    timestamp,
+                    self.dut1,
+                );
+                // Apply precession to the tile XYZ positions.
+                let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+                let uvws = xyzs_to_cross_uvws(
+                    &precessed_tile_xyzs,
+                    self.phase_centre.to_hadec(precession_info.lmst_j2000),
+                );
+                (
+                    uvws,
+                    precession_info.lmst_j2000,
+                    precession_info.array_latitude_j2000,
+                )
+            } else {
+                let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
+                let uvws =
+                    xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
+                (uvws, lst, self.array_latitude)
+            };
+            self.model_gaussians(vis_model_slice, &uvws, lst, latitude)?;
+            Ok(uvws)
+    }
+
+    fn _model_shapelets(
+            &self,
+            vis_model_slice: ArrayViewMut2<Jones<f32>>,
+            timestamp: Epoch,
+        ) -> Result<Vec<UVW>, ModelError> {
+            let (uvws, lst, latitude) = if self.precess {
+                let precession_info = precess_time(
+                    self.array_longitude,
+                    self.array_latitude,
+                    self.phase_centre,
+                    timestamp,
+                    self.dut1,
+                );
+                // Apply precession to the tile XYZ positions.
+                let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+                let uvws = xyzs_to_cross_uvws(
+                    &precessed_tile_xyzs,
+                    self.phase_centre.to_hadec(precession_info.lmst_j2000),
+                );
+                (
+                    uvws,
+                    precession_info.lmst_j2000,
+                    precession_info.array_latitude_j2000,
+                )
+            } else {
+                let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
+                let uvws =
+                    xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
+                (uvws, lst, self.array_latitude)
+            };
+            let shapelet_uvws = self
+                .components
+                .shapelets
+                .get_shapelet_uvws(lst, self.unflagged_tile_xyzs);
+            self.model_shapelets(
+                vis_model_slice,
+                &uvws,
+                shapelet_uvws.view(),
+                lst,
+                latitude,
+            )?;
+            Ok(uvws)
+        }
 }
