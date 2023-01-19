@@ -18,13 +18,13 @@ use super::{FluxDensity, FluxDensityType, SourceList};
 
 /// Information on a source's component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct SourceComponent {
+pub struct SourceComponent {
     /// Coordinates struct associated with the component.
     #[serde(flatten)]
-    pub(crate) radec: RADec,
+    pub radec: RADec,
 
     /// The type of component.
-    pub(crate) comp_type: ComponentType,
+    pub comp_type: ComponentType,
 
     /// The flux densities associated with this component.
     pub flux_type: FluxDensityType,
@@ -55,7 +55,7 @@ impl SourceComponent {
 /// Source component types supported by hyperdrive.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum ComponentType {
+pub enum ComponentType {
     Point,
 
     Gaussian {
@@ -122,10 +122,10 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct ShapeletCoeff {
-    pub(crate) n1: usize,
-    pub(crate) n2: usize,
-    pub(crate) value: f64,
+pub struct ShapeletCoeff {
+    pub n1: usize,
+    pub n2: usize,
+    pub value: f64,
 }
 
 impl ComponentType {

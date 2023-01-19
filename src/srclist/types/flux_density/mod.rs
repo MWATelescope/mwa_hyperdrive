@@ -116,7 +116,7 @@ impl std::ops::Mul<f64> for FluxDensity {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum FluxDensityType {
+pub enum FluxDensityType {
     /// $S_\nu = a \nu^{\alpha}$
     PowerLaw {
         /// Spectral index (alpha)

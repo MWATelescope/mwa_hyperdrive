@@ -84,6 +84,27 @@ pub trait SkyModeller<'a>: Send {
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError>;
+
+    // the following are only used for benchmarking
+    // todo: put these behind a flag
+    fn _model_points(
+        &self,
+        vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        timestamp: Epoch,
+    ) -> Result<Vec<UVW>, ModelError>;
+
+    fn _model_gaussians(
+        &self,
+        vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        timestamp: Epoch,
+    ) -> Result<Vec<UVW>, ModelError>;
+
+    fn _model_shapelets(
+        &self,
+        vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        timestamp: Epoch,
+    ) -> Result<Vec<UVW>, ModelError>;
+
 }
 
 /// Create a [`SkyModeller`] trait object that generates sky-model visibilities
