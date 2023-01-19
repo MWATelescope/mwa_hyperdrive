@@ -164,31 +164,29 @@ fn model_benchmarks(c: &mut Criterion) {
                             components: vec1![SourceComponent {
                                 radec: RADec::from_degrees(0.0, -27.0),
                                 comp_type: ComponentType::Point,
-                                flux_type: FluxDensityType::List {
-                                    fds: vec1![
-                                        FluxDensity {
-                                            freq: 150e6,
-                                            i: 1.0,
-                                            q: 0.0,
-                                            u: 0.0,
-                                            v: 0.0,
-                                        },
-                                        FluxDensity {
-                                            freq: 175e6,
-                                            i: 3.0,
-                                            q: 0.0,
-                                            u: 0.0,
-                                            v: 0.0,
-                                        },
-                                        FluxDensity {
-                                            freq: 200e6,
-                                            i: 2.0,
-                                            q: 0.0,
-                                            u: 0.0,
-                                            v: 0.0,
-                                        }
-                                    ]
-                                },
+                                flux_type: FluxDensityType::List(vec1![
+                                    FluxDensity {
+                                        freq: 150e6,
+                                        i: 1.0,
+                                        q: 0.0,
+                                        u: 0.0,
+                                        v: 0.0,
+                                    },
+                                    FluxDensity {
+                                        freq: 175e6,
+                                        i: 3.0,
+                                        q: 0.0,
+                                        u: 0.0,
+                                        v: 0.0,
+                                    },
+                                    FluxDensity {
+                                        freq: 200e6,
+                                        i: 2.0,
+                                        q: 0.0,
+                                        u: 0.0,
+                                        v: 0.0,
+                                    }
+                                ]),
                             }],
                         },
                     );

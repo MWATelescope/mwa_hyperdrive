@@ -1402,6 +1402,159 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
 
         Ok(uvws)
     }
+
+    // TODO (dev): the following is only used for benchmarking, but I can't figure out how to hide them with #[cfg(test)]
+    fn _model_points(
+        &mut self,
+        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        timestamp: Epoch,
+    ) -> Result<Vec<UVW>, ModelError> {
+        let (uvws, lst, latitude) = if self.precess {
+            let precession_info = precess_time(
+                self.array_longitude,
+                self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
+            );
+            // Apply precession to the tile XYZ positions.
+            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+            let uvws = xyzs_to_cross_uvws(
+                &precessed_tile_xyzs,
+                self.phase_centre.to_hadec(precession_info.lmst_j2000),
+            );
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
+        } else {
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
+            let uvws =
+                xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
+            (uvws, lst, self.array_latitude)
+        };
+
+        let cuda_uvws: Vec<cuda::UVW> = uvws
+            .iter()
+            .map(|&uvw| cuda::UVW {
+                u: uvw.u as CudaFloat,
+                v: uvw.v as CudaFloat,
+                w: uvw.w as CudaFloat,
+            })
+            .collect();
+
+        unsafe {
+            self.d_uvws.overwrite(&cuda_uvws)?;
+
+            self.model_points(lst, latitude)?;
+
+            self.d_vis
+                .copy_from_device(vis_model_slice.as_slice_mut().expect("is contiguous"))?;
+        }
+        Ok(uvws)
+    }
+
+    fn _model_gaussians(
+        &mut self,
+        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        timestamp: Epoch,
+    ) -> Result<Vec<UVW>, ModelError> {
+        let (uvws, lst, latitude) = if self.precess {
+            let precession_info = precess_time(
+                self.array_longitude,
+                self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
+            );
+            // Apply precession to the tile XYZ positions.
+            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+            let uvws = xyzs_to_cross_uvws(
+                &precessed_tile_xyzs,
+                self.phase_centre.to_hadec(precession_info.lmst_j2000),
+            );
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
+        } else {
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
+            let uvws =
+                xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
+            (uvws, lst, self.array_latitude)
+        };
+
+        let cuda_uvws: Vec<cuda::UVW> = uvws
+            .iter()
+            .map(|&uvw| cuda::UVW {
+                u: uvw.u as CudaFloat,
+                v: uvw.v as CudaFloat,
+                w: uvw.w as CudaFloat,
+            })
+            .collect();
+
+        unsafe {
+            self.d_uvws.overwrite(&cuda_uvws)?;
+
+            self.model_gaussians(lst, latitude)?;
+
+            self.d_vis
+                .copy_from_device(vis_model_slice.as_slice_mut().expect("is contiguous"))?;
+        }
+        Ok(uvws)
+    }
+
+    fn _model_shapelets(
+        &mut self,
+        mut vis_model_slice: ArrayViewMut2<Jones<f32>>,
+        timestamp: Epoch,
+    ) -> Result<Vec<UVW>, ModelError> {
+        let (uvws, lst, latitude) = if self.precess {
+            let precession_info = precess_time(
+                self.array_longitude,
+                self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
+            );
+            // Apply precession to the tile XYZ positions.
+            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
+            let uvws = xyzs_to_cross_uvws(
+                &precessed_tile_xyzs,
+                self.phase_centre.to_hadec(precession_info.lmst_j2000),
+            );
+            (
+                uvws,
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
+        } else {
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
+            let uvws =
+                xyzs_to_cross_uvws(self.unflagged_tile_xyzs, self.phase_centre.to_hadec(lst));
+            (uvws, lst, self.array_latitude)
+        };
+
+        let cuda_uvws: Vec<cuda::UVW> = uvws
+            .iter()
+            .map(|&uvw| cuda::UVW {
+                u: uvw.u as CudaFloat,
+                v: uvw.v as CudaFloat,
+                w: uvw.w as CudaFloat,
+            })
+            .collect();
+        unsafe {
+            self.d_uvws.overwrite(&cuda_uvws)?;
+
+            self.model_shapelets(lst, latitude)?;
+
+            self.d_vis
+                .copy_from_device(vis_model_slice.as_slice_mut().expect("is contiguous"))?;
+        }
+        Ok(uvws)
+    }
 }
 
 impl std::fmt::Debug for SkyModellerCuda<'_> {
