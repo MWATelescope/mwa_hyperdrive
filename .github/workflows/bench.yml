@@ -1,0 +1,38 @@
+on:
+  push:
+    pull_request:
+    branches:
+      - "**"
+
+name: Benchmarks
+
+jobs:
+  test:
+    name: Benchmarks
+    runs-on: self-hosted
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cargo Bench
+        run: |
+          cargo bench
+        env:
+          HYPERDRIVE_TEST_DIR: /home/runner/data
+
+      - name: Zip benchmark results
+        run: zip -r criterion.zip target/criterion/*
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: criterion.zip
+          path: criterion.zip
