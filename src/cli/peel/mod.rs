@@ -69,6 +69,8 @@ pub(crate) const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
 pub(crate) const DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR: &str = "8s";
 pub(crate) const DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
 pub(crate) const DEFAULT_UVW_MIN: &str = "0λ";
+#[cfg(test)]
+pub(crate) mod tests;
 // erros
 pub mod error;
 pub(crate) use error::PeelError;
@@ -2722,10 +2724,11 @@ fn iono_fit(
 }
 
 fn setup_ws(
-    mut tile_ws: ArrayViewMut1<W>,
-    tile_xyzs: ArrayView1<XyzGeodetic>,
+    tile_ws: &mut [W],
+    tile_xyzs: &[XyzGeodetic],
     phase_centre: HADec,
 ) {
+    assert_eq!(tile_ws.len(), tile_xyzs.len());
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
     tile_ws
@@ -2737,6 +2740,7 @@ fn setup_ws(
 }
 
 fn setup_uvs(tile_uvs: &mut [UV], tile_xyzs: &[XyzGeodetic], phase_centre: HADec) {
+    assert_eq!(tile_uvs.len(), tile_xyzs.len());
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
     tile_uvs
