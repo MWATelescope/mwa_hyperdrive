@@ -2084,157 +2084,53 @@ fn vis_average2(
         });
 }
 
-fn weights_average(weight_from: ArrayView3<f32>, mut weight_to: ArrayViewMut3<f32>) {
-    let from_dims = weight_from.dim();
+fn weights_average(weight_tfb: ArrayView3<f32>, mut weight_avg_tfb: ArrayViewMut3<f32>) {
+    let from_dims = weight_tfb.dim();
     let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
-    let avg_time = weight_from.len_of(time_axis) / weight_to.len_of(time_axis);
-    let avg_freq = weight_from.len_of(freq_axis) / weight_to.len_of(freq_axis);
+    let avg_time = div_ceil(
+        weight_tfb.len_of(time_axis),
+        weight_avg_tfb.len_of(time_axis),
+    );
+    let avg_freq = div_ceil(
+        weight_tfb.len_of(freq_axis),
+        weight_avg_tfb.len_of(freq_axis),
+    );
 
-    assert_eq!(from_dims, weight_from.dim());
-    let to_dims = weight_to.dim();
+    let to_dims = weight_avg_tfb.dim();
     assert_eq!(
         to_dims,
         (
-            (from_dims.0 as f64 / avg_time as f64).floor() as usize,
-            (from_dims.1 as f64 / avg_freq as f64).floor() as usize,
-            from_dims.2
+            div_ceil(from_dims.0, avg_time),
+            div_ceil(from_dims.1, avg_freq),
+            from_dims.2,
         )
-    );
-    assert_eq!(to_dims, weight_to.dim());
-
-    let num_tiles =
-        num_tiles_from_num_cross_correlation_baselines(weight_from.len_of(baseline_axis));
-    assert_eq!(
-        (num_tiles * (num_tiles - 1)) / 2,
-        weight_from.len_of(baseline_axis)
     );
 
     // iterate along time axis in chunks of avg_time
-    weight_from
-        .axis_chunks_iter(time_axis, avg_time)
-        .zip(weight_to.outer_iter_mut())
-        .for_each(|(weight_chunk, mut weight_to)| {
+    for (weight_chunk_tfb, mut weight_avg_fb) in izip!(
+        weight_tfb.axis_chunks_iter(time_axis, avg_time),
+        weight_avg_tfb.outer_iter_mut()
+    ) {
+        // iterate along frequency axis in chunks of avg_freq
+        for (weight_chunk_tfb, mut weight_avg_b) in izip!(
+            weight_chunk_tfb.axis_chunks_iter(freq_axis, avg_freq),
+            weight_avg_fb.outer_iter_mut()
+        ) {
             // iterate along baseline axis
-            let mut i_tile1 = 0;
-            let mut i_tile2 = 0;
-            weight_chunk
-                .axis_iter(Axis(1))
-                .zip(weight_to.outer_iter_mut())
-                .for_each(|(weight_chunk, mut weight_to)| {
-                    i_tile2 += 1;
-                    if i_tile2 == num_tiles {
-                        i_tile1 += 1;
-                        i_tile2 = i_tile1 + 1;
+            for (weight_chunk_tf, weight_avg) in izip!(
+                weight_chunk_tfb.axis_iter(baseline_axis),
+                weight_avg_b.iter_mut()
+            ) {
+                let mut weight_sum: f64 = 0.0;
+                for &weight in weight_chunk_tf.iter() {
+                    weight_sum += weight as f64;
                     }
 
-                    weight_chunk
-                        .axis_chunks_iter(Axis(1), avg_freq)
-                        .zip(weight_to.iter_mut())
-                        .for_each(|(weight_chunk, weight_to)| {
-                            let mut weight_sum = 0.0;
-
-                            // iterate through time chunks
-                            weight_chunk.outer_iter().for_each(|weights_chunk| {
-                                weights_chunk.iter().for_each(|weight| {
-                                    // Any flagged visibilities would have a
-                                    // weight <= 0, but we've already capped
-                                    // them to 0. This means we don't need to
-                                    // check the value of the weight when
-                                    // accumulating unflagged visibilities; the
-                                    // flagged ones contribute nothing.
-
-                                    let weight = *weight as f64;
-                                    weight_sum += weight;
-                                });
-                            });
-
-                            if weight_sum > 0.0 {
-                                *weight_to = weight_sum as f32;
+                *weight_avg = (weight_sum as f32).max(0.);
                             }
-                        });
-                });
-        });
 }
-
-// /// Rotate the provided visibilities to the given phase centre. This function
-// /// expects:
-// ///
-// /// 1) `tile_xyzs` to have already been precessed,
-// /// 2) `tile_ws_from` to already be populated with the correct [`W`]s for where
-// ///    the data is currently phased,
-// /// 3) An equal number of timesteps in `jones_array`, `tile_xyzs`,
-// ///    `tile_ws_from`, `tile_ws_to` and `lmsts`.
-// ///
-// /// After the visibilities have been "rotated", the memory of `tile_ws_from` and
-// /// `tile_ws_to` is swapped. This allows this function to be called again with
-// /// the same arrays and a new phase centre without new allocations.
-// #[allow(clippy::too_many_arguments)]
-// fn vis_rotate(
-//     mut jones_array: ArrayViewMut3<Jones<f32>>,
-//     phase_to: RADec,
-//     tile_xyzs: ArrayView2<XyzGeodetic>,
-//     tile_ws_from: &mut Array2<W>,
-//     tile_ws_to: &mut Array2<W>,
-//     lmsts: &[f64],
-//     fine_chan_freqs: &[f64],
-//     swap: bool,
-// ) {
-//     let num_tiles = tile_xyzs.len_of(Axis(1));
-//     assert_eq!(tile_ws_from.len_of(Axis(1)), num_tiles);
-//     assert_eq!(tile_ws_to.len_of(Axis(1)), num_tiles);
-
-//     // iterate along time axis in chunks of avg_time
-//     jones_array
-//         .outer_iter_mut()
-//         .into_par_iter()
-//         .zip(tile_ws_from.outer_iter())
-//         .zip(tile_ws_to.outer_iter_mut())
-//         .zip(tile_xyzs.outer_iter())
-//         .zip(lmsts.par_iter())
-//         .for_each(
-//             |((((mut jones_array, tile_ws_from), mut tile_ws_to), tile_xyzs), lmst)| {
-//                 assert_eq!(tile_ws_from.len(), num_tiles);
-//                 // Generate the "to" Ws.
-//                 let phase_to = phase_to.to_hadec(*lmst);
-//                 setup_ws(tile_ws_to.view_mut(), tile_xyzs.view(), phase_to);
-
-//                 // iterate along baseline axis
-//                 let mut i_tile1 = 0;
-//                 let mut i_tile2 = 0;
-//                 let mut tile1_w_from = tile_ws_from[i_tile1];
-//                 let mut tile2_w_from = tile_ws_from[i_tile2];
-//                 let mut tile1_w_to = tile_ws_to[i_tile1];
-//                 let mut tile2_w_to = tile_ws_to[i_tile2];
-//                 jones_array.outer_iter_mut().for_each(|mut jones_array| {
-//                     i_tile2 += 1;
-//                     if i_tile2 == num_tiles {
-//                         i_tile1 += 1;
-//                         i_tile2 = i_tile1 + 1;
-//                         tile1_w_from = tile_ws_from[i_tile1];
-//                         tile1_w_to = tile_ws_to[i_tile1];
-//                     }
-//                     tile2_w_from = tile_ws_from[i_tile2];
-//                     tile2_w_to = tile_ws_to[i_tile2];
-
-//                     let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
-//                     let arg = -TAU * w_diff / VEL_C;
-//                     // iterate along frequency axis
-//                     jones_array.iter_mut().zip(fine_chan_freqs.iter()).for_each(
-//                         |(jones, &freq_hz)| {
-//                             let rotation = Complex::cis(arg * freq_hz);
-//                             *jones = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
-//                         },
-//                     );
-//                 });
-//             },
-//         );
-
-//     if swap {
-//         // Swap the arrays, so that for the next source, the "from" Ws are our "to"
-//         // Ws.
-//         std::mem::swap(tile_ws_from, tile_ws_to);
-//     }
-// }
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 #[deprecated = "doesn't support --no-precession"]

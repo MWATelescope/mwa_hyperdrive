@@ -473,3 +473,38 @@ fn validate_vis_rotation() {
     }
 }
 
+#[test]
+fn validate_weight_average() {
+    let weights_tfb: Array3<f32> = array![
+        [
+            [1., 1., 1., -1.],
+            [2., 2., 2., -2.],
+            [4., 4., 4., -4.],
+        ],
+        [
+            [8., 8., 8., -8.],
+            [16., 16., 16., -16.],
+            [32., 32., 32., -32.],
+        ],
+    ];
+
+    // 2, 3, 4
+    let weights_shape = weights_tfb.dim();
+    // 1, 2, 4
+    let avg_shape = (1, 2, weights_shape.2);
+
+    let mut weights_avg_tfb = Array3::zeros(avg_shape);
+
+    weights_average(
+        weights_tfb.view(),
+        weights_avg_tfb.view_mut(),
+    );
+
+    assert_eq!(weights_avg_tfb, array![
+        [
+            [27., 27., 27., 0.],
+            [36., 36., 36., 0.],
+        ],
+    ]);
+}
+
