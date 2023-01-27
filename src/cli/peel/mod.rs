@@ -31,7 +31,6 @@ use ndarray::{prelude::*, Zip};
 use num_complex::Complex;
 use rayon::prelude::*;
 use scopeguard::defer_on_unwind;
-use thiserror::Error;
 use vec1::Vec1;
 
 use crate::{
@@ -42,7 +41,7 @@ use crate::{
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
-    filenames::{InputDataTypes, SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS},
+    filenames::{InputDataTypes},
     glob::get_single_match_from_glob,
     help_texts::*,
     math::{average_epoch, TileBaselineFlags},
@@ -70,6 +69,9 @@ pub(crate) const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
 pub(crate) const DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR: &str = "8s";
 pub(crate) const DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
 pub(crate) const DEFAULT_UVW_MIN: &str = "0λ";
+// erros
+pub mod error;
+pub(crate) use error::PeelError;
 
 lazy_static::lazy_static! {
     static ref DUT1: Duration = Duration::from_seconds(0.0);
@@ -4017,250 +4019,6 @@ impl Div<f64> for UV {
         UV {
             u: self.u / rhs,
             v: self.v / rhs,
-        }
-    }
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum PeelError {
-    #[error("No input data was given!")]
-    NoInputData,
-
-    #[error("{0}\n\nSupported combinations of file formats:\n{SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS}")]
-    InvalidDataInput(&'static str),
-
-    #[error("Multiple metafits files were specified: {0:?}\nThis is unsupported.")]
-    MultipleMetafits(Vec1<PathBuf>),
-
-    #[error("Multiple measurement sets were specified: {0:?}\nThis is currently unsupported.")]
-    MultipleMeasurementSets(Vec1<PathBuf>),
-
-    #[error("Multiple uvfits files were specified: {0:?}\nThis is currently unsupported.")]
-    MultipleUvfits(Vec1<PathBuf>),
-
-    #[error("No calibration output was specified. There must be at least one calibration solution file.")]
-    NoOutput,
-
-    #[error("No sky-model source list file supplied")]
-    NoSourceList,
-
-    #[error("Tried to create a beam object, but MWA dipole delay information isn't available!")]
-    NoDelays,
-
-    #[error(
-        "The specified MWA dipole delays aren't valid; there should be 16 values between 0 and 32"
-    )]
-    BadDelays,
-
-    #[error("The data either contains no tiles or all tiles are flagged")]
-    NoTiles,
-
-    #[error("The data either contains no frequency channels or all channels are flagged")]
-    NoChannels,
-
-    #[error("The data either contains no timesteps or no timesteps are being used")]
-    NoTimesteps,
-
-    #[error("The number of specified sources was 0, or the size of the source list was 0")]
-    NoSources,
-
-    #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
-    NoSourcesAfterVeto,
-
-    #[error("Duplicate timesteps were specified; this is invalid")]
-    DuplicateTimesteps,
-
-    #[error("Timestep {got} was specified but it isn't available; the last timestep is {last}")]
-    UnavailableTimestep { got: usize, last: usize },
-
-    #[error(
-        "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::vis_io::write::VIS_OUTPUT_EXTENSIONS
-    )]
-    VisFileType { ext: String },
-
-    #[error(transparent)]
-    TileFlag(#[from] crate::context::InvalidTileFlag),
-
-    #[error(transparent)]
-    ParsePfbFlavour(#[from] crate::pfb_gains::PfbParseError),
-
-    #[error("Error when parsing time average factor: {0}")]
-    ParseCalTimeAverageFactor(crate::unit_parsing::UnitParseError),
-
-    #[error("Error when parsing freq. average factor: {0}")]
-    ParseCalFreqAverageFactor(crate::unit_parsing::UnitParseError),
-
-    #[error("Calibration time average factor isn't an integer")]
-    CalTimeFactorNotInteger,
-
-    #[error("Calibration freq. average factor isn't an integer")]
-    CalFreqFactorNotInteger,
-
-    #[error("Calibration time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
-    CalTimeResNotMultiple { out: f64, inp: f64 },
-
-    #[error("Calibration freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
-    CalFreqResNotMultiple { out: f64, inp: f64 },
-
-    #[error("Calibration time average factor cannot be 0")]
-    CalTimeFactorZero,
-
-    #[error("Calibration freq. average factor cannot be 0")]
-    CalFreqFactorZero,
-
-    #[error("Error when parsing output vis. time average factor: {0}")]
-    ParseOutputVisTimeAverageFactor(crate::unit_parsing::UnitParseError),
-
-    #[error("Error when parsing output vis. freq. average factor: {0}")]
-    ParseOutputVisFreqAverageFactor(crate::unit_parsing::UnitParseError),
-
-    #[error("Output vis. time average factor isn't an integer")]
-    OutputVisTimeFactorNotInteger,
-
-    #[error("Output vis. freq. average factor isn't an integer")]
-    OutputVisFreqFactorNotInteger,
-
-    #[error("Output vis. time average factor cannot be 0")]
-    OutputVisTimeAverageFactorZero,
-
-    #[error("Output vis. freq. average factor cannot be 0")]
-    OutputVisFreqAverageFactorZero,
-
-    #[error("Output vis. time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")]
-    OutputVisTimeResNotMultiple { out: f64, inp: f64 },
-
-    #[error("Output vis. freq. resolution isn't a multiple of input data's: {out} Hz vs {inp} Hz")]
-    OutputVisFreqResNotMultiple { out: f64, inp: f64 },
-
-    // #[error("Error when parsing minimum UVW cutoff: {0}")]
-    // ParseUvwMin(crate::unit_parsing::UnitParseError),
-
-    // #[error("Error when parsing maximum UVW cutoff: {0}")]
-    // ParseUvwMax(crate::unit_parsing::UnitParseError),
-    #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
-    BadArrayPosition { pos: Vec<f64> },
-
-    #[error(transparent)]
-    Glob(#[from] crate::glob::GlobError),
-
-    #[error(transparent)]
-    VisRead(#[from] crate::vis_io::read::VisReadError),
-
-    #[error(transparent)]
-    FileWrite(#[from] crate::vis_io::write::FileWriteError),
-
-    #[error(transparent)]
-    Veto(#[from] crate::srclist::VetoError),
-
-    #[error("Error when trying to read source list: {0}")]
-    SourceList(#[from] crate::srclist::ReadSourceListError),
-
-    #[error(transparent)]
-    Beam(#[from] crate::beam::BeamError),
-
-    #[error(transparent)]
-    Model(#[from] crate::model::ModelError),
-
-    #[error(transparent)]
-    IO(#[from] std::io::Error),
-
-    #[cfg(feature = "cuda")]
-    #[error(transparent)]
-    Cuda(#[from] crate::cuda::CudaError),
-
-    #[cfg(feature = "cuda")]
-    #[error("cpu_vis must be false if cpu_peel is false.")]
-    ModellerMismatch,
-}
-
-fn _iono_sub_parallel(
-    vis_residual: ArrayView3<Jones<f32>>,
-    mut vis_residual_low_res: ArrayViewMut3<Jones<f32>>,
-    weight_residual_low_res: ArrayView3<f32>,
-    iono_taper_weights: ArrayView3<f32>,
-    mut vis_residual_tmp: ArrayViewMut3<Jones<f32>>,
-    vis_model_low_res: ArrayView3<Jones<f32>>,
-    mut vis_model_low_res_tmp: ArrayViewMut3<Jones<f32>>,
-    iono_consts: &mut (f64, f64),
-    source_phase_centre: RADec,
-    tile_xyzs: ArrayView2<XyzGeodetic>,
-    lmsts: &[f64],
-    _average_tile_xyzs: ArrayView2<XyzGeodetic>,
-    tile_ws_from: ArrayView2<W>,
-    mut tile_ws_to: ArrayViewMut2<W>,
-    tile_uvs_low_res: ArrayView2<UV>,
-    all_fine_chan_lambdas_m: &[f64],
-    low_res_lambdas_m: &[f64],
-) {
-    // /////////////////// //
-    // ROTATE, AVERAGE VIS //
-    // /////////////////// //
-
-    // Rotate the residual visibilities to the source phase centre and
-    // average into vis_residual_low_res.
-    _vis_rotate2_serial(
-        vis_residual.view(),
-        vis_residual_tmp.view_mut(),
-        source_phase_centre,
-        tile_xyzs,
-        tile_ws_from.view(),
-        tile_ws_to.view_mut(),
-        lmsts,
-        all_fine_chan_lambdas_m,
-    );
-    vis_average2(
-        vis_residual_tmp.view(),
-        vis_residual_low_res.view_mut(),
-        iono_taper_weights,
-    );
-
-    // ///////////// //
-    // UNPEEL SOURCE //
-    // ///////////// //
-    // at lower resolution
-
-    Zip::from(&mut vis_residual_low_res)
-        .and(&mut vis_model_low_res_tmp)
-        .and(&vis_model_low_res)
-        .for_each(|r, t, m| {
-            *r += *m;
-            *t = *m;
-        });
-
-    // ///////////////// //
-    // CALCULATE OFFSETS //
-    // ///////////////// //
-    // iterate towards a convergent solution for ɑ, β
-
-    let mut iteration = 0;
-    while iteration != 10 {
-        iteration += 1;
-
-        // iono rotate model using existing iono consts (if they're
-        // non-zero)
-        if iono_consts.0.abs() > 0.0 || iono_consts.1.abs() > 0.0 {
-            apply_iono2(
-                vis_model_low_res.view(),
-                vis_model_low_res_tmp.view_mut(),
-                tile_uvs_low_res.view(),
-                *iono_consts,
-                low_res_lambdas_m,
-            );
-        }
-
-        let offsets = iono_fit(
-            vis_residual_low_res.view(),
-            weight_residual_low_res.view(),
-            vis_model_low_res_tmp.view(),
-            low_res_lambdas_m,
-            tile_uvs_low_res.as_slice().unwrap(),
-        );
-
-        // if the offset is small, we've converged.
-        iono_consts.0 += offsets[0];
-        iono_consts.1 += offsets[1];
-        if offsets[0].abs() < 1e-12 && offsets[1].abs() < 1e-12 {
-            break;
         }
     }
 }
