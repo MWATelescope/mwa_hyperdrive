@@ -2237,6 +2237,7 @@ fn weights_average(weight_from: ArrayView3<f32>, mut weight_to: ArrayViewMut3<f3
 // }
 
 #[allow(clippy::too_many_arguments)]
+#[deprecated = "doesn't support --no-precession"]
 fn vis_rotate2(
     jones_array: ArrayView3<Jones<f32>>,
     mut jones_array2: ArrayViewMut3<Jones<f32>>,
@@ -2261,167 +2262,67 @@ fn vis_rotate2(
         .zip(tile_xyzs.outer_iter())
         .zip(lmsts.par_iter())
         .for_each(
-            |(
-                ((((jones_array, mut jones_array2), tile_ws_from), mut tile_ws_to), tile_xyzs),
-                lmst,
-            )| {
+            |(((((vis_tfb, mut vis_rot_tfb), tile_ws_from), mut tile_ws_to), tile_xyzs), lmst)| {
                 assert_eq!(tile_ws_from.len(), num_tiles);
                 // Generate the "to" Ws.
                 let phase_to = phase_to.to_hadec(*lmst);
-                setup_ws(tile_ws_to.view_mut(), tile_xyzs.view(), phase_to);
+                setup_ws(
+                    tile_ws_to.as_slice_mut().unwrap(),
+                    tile_xyzs.as_slice().unwrap(),
+                    phase_to,
+                );
 
-                // iterate along baseline axis
-                let mut i_tile1 = 0;
-                let mut i_tile2 = 0;
-                let mut tile1_w_from = tile_ws_from[i_tile1];
-                let mut tile2_w_from = tile_ws_from[i_tile2];
-                let mut tile1_w_to = tile_ws_to[i_tile1];
-                let mut tile2_w_to = tile_ws_to[i_tile2];
-                jones_array
-                    .axis_iter(Axis(1))
-                    .zip(jones_array2.axis_iter_mut(Axis(1)))
-                    .for_each(|(jones_array, mut jones_array2)| {
-                        i_tile2 += 1;
-                        if i_tile2 == num_tiles {
-                            i_tile1 += 1;
-                            i_tile2 = i_tile1 + 1;
-                            tile1_w_from = tile_ws_from[i_tile1];
-                            tile1_w_to = tile_ws_to[i_tile1];
-                        }
-                        tile2_w_from = tile_ws_from[i_tile2];
-                        tile2_w_to = tile_ws_to[i_tile2];
-
-                        let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
-                        let arg = -TAU * w_diff;
-                        // iterate along frequency axis
-                        jones_array
-                            .iter()
-                            .zip(jones_array2.iter_mut())
-                            .zip(fine_chan_lambdas_m.iter())
-                            .for_each(|((jones, jones2), lambda_m)| {
-                                let rotation = Complex::cis(arg / *lambda_m);
-                                *jones2 = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
-                            });
-                    });
+                vis_rotate_fb(
+                    vis_tfb,
+                    vis_rot_tfb,
+                    tile_ws_from.as_slice().unwrap(),
+                    tile_ws_to.as_slice().unwrap(),
+                    fine_chan_lambdas_m,
+                );
             },
         );
 }
 
-#[allow(clippy::too_many_arguments)]
-fn _vis_rotate2_serial(
-    jones_array: ArrayView3<Jones<f32>>,
-    mut jones_array2: ArrayViewMut3<Jones<f32>>,
-    phase_to: RADec,
-    tile_xyzs: ArrayView2<XyzGeodetic>,
-    tile_ws_from: ArrayView2<W>,
-    mut tile_ws_to: ArrayViewMut2<W>,
-    lmsts: &[f64],
+fn vis_rotate_fb(
+    vis_fb: ArrayView2<Jones<f32>>,
+    mut vis_rot_fb: ArrayViewMut2<Jones<f32>>,
+    tile_ws_from: &[W],
+    tile_ws_to: &[W],
     fine_chan_lambdas_m: &[f64],
 ) {
-    let num_tiles = tile_xyzs.len_of(Axis(1));
-    assert_eq!(tile_ws_from.len_of(Axis(1)), num_tiles);
-    assert_eq!(tile_ws_to.len_of(Axis(1)), num_tiles);
+    let num_tiles = tile_ws_from.len();
+    let mut i_tile1 = 0;
+    let mut i_tile2 = 0;
+    let mut tile1_w_from = tile_ws_from[i_tile1];
+    let mut tile2_w_from = tile_ws_from[i_tile2];
+    let mut tile1_w_to = tile_ws_to[i_tile1];
+    let mut tile2_w_to = tile_ws_to[i_tile2];
+    // iterate along baseline axis
+    vis_fb
+        .axis_iter(Axis(1))
+        .zip(vis_rot_fb.axis_iter_mut(Axis(1)))
+        .for_each(|(vis_f, mut vis_rot_f)| {
+            i_tile2 += 1;
+            if i_tile2 == num_tiles {
+                i_tile1 += 1;
+                i_tile2 = i_tile1 + 1;
+                tile1_w_from = tile_ws_from[i_tile1];
+                tile1_w_to = tile_ws_to[i_tile1];
+            }
+            tile2_w_from = tile_ws_from[i_tile2];
+            tile2_w_to = tile_ws_to[i_tile2];
 
-    // iterate along time axis in chunks of avg_time
-    jones_array
-        .outer_iter()
-        .zip(jones_array2.outer_iter_mut())
-        .zip(tile_ws_from.outer_iter())
-        .zip(tile_ws_to.outer_iter_mut())
-        .zip(tile_xyzs.outer_iter())
-        .zip(lmsts.iter())
-        .for_each(
-            |(
-                ((((jones_array, mut jones_array2), tile_ws_from), mut tile_ws_to), tile_xyzs),
-                lmst,
-            )| {
-                assert_eq!(tile_ws_from.len(), num_tiles);
-                // Generate the "to" Ws.
-                let phase_to = phase_to.to_hadec(*lmst);
-                setup_ws(tile_ws_to.view_mut(), tile_xyzs.view(), phase_to);
-
-                // iterate along baseline axis
-                let mut i_tile1 = 0;
-                let mut i_tile2 = 0;
-                let mut tile1_w_from = tile_ws_from[i_tile1];
-                let mut tile2_w_from = tile_ws_from[i_tile2];
-                let mut tile1_w_to = tile_ws_to[i_tile1];
-                let mut tile2_w_to = tile_ws_to[i_tile2];
-                jones_array
-                    .axis_iter(Axis(1))
-                    .zip(jones_array2.axis_iter_mut(Axis(1)))
-                    .for_each(|(jones_array, mut jones_array2)| {
-                        i_tile2 += 1;
-                        if i_tile2 == num_tiles {
-                            i_tile1 += 1;
-                            i_tile2 = i_tile1 + 1;
-                            tile1_w_from = tile_ws_from[i_tile1];
-                            tile1_w_to = tile_ws_to[i_tile1];
-                        }
-                        tile2_w_from = tile_ws_from[i_tile2];
-                        tile2_w_to = tile_ws_to[i_tile2];
-
-                        let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
-                        let arg = -TAU * w_diff;
-                        // iterate along frequency axis
-                        jones_array
-                            .iter()
-                            .zip(jones_array2.iter_mut())
-                            .zip(fine_chan_lambdas_m.iter())
-                            .for_each(|((jones, jones2), lambda_m)| {
-                                let rotation = Complex::cis(arg / *lambda_m);
-                                *jones2 = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
-                            });
-                    });
-            },
-        );
-}
-
-/// Rotate the supplied visibilities according to the `λ²` constants of
-/// proportionality with `exp(-2πi(αu+βv)λ²)`.
-fn _apply_iono(
-    mut jones: ArrayViewMut3<Jones<f32>>,
-    tile_uvs: ArrayView2<UV>,
-    const_lm: (f64, f64),
-    lambdas_m: &[f64],
-) {
-    let num_tiles = tile_uvs.len_of(Axis(1));
-
-    // iterate along time axis
-    jones
-        .outer_iter_mut()
-        .into_par_iter()
-        .zip(tile_uvs.outer_iter())
-        .for_each(|(mut jones, tile_uvs)| {
-            // Just in case the compiler can't understand how an ndarray is laid
-            // out.
-            assert_eq!(tile_uvs.len(), num_tiles);
-
-            // iterate along baseline axis
-            let mut i_tile1 = 0;
-            let mut i_tile2 = 0;
-            jones.axis_iter_mut(Axis(1)).for_each(|mut jones| {
-                i_tile2 += 1;
-                if i_tile2 == num_tiles {
-                    i_tile1 += 1;
-                    i_tile2 = i_tile1 + 1;
-                }
-
-                let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
-                let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
-                // iterate along frequency axis
-                jones
-                    .iter_mut()
-                    .zip(lambdas_m.iter())
-                    .for_each(|(jones, lambda_m)| {
-                        let j = Jones::<f64>::from(*jones);
-                        // The baseline UV is in units of metres, so we need to
-                        // divide by λ to use it in an exponential. But we're
-                        // also multiplying by λ², so just multiply by λ.
-                        let rotation = Complex::cis(arg * *lambda_m);
-                        *jones = Jones::from(j * rotation);
-                    });
-            });
+            let w_diff = (tile1_w_to - tile2_w_to) - (tile1_w_from - tile2_w_from);
+            let arg = -TAU * w_diff;
+            // iterate along frequency axis
+            vis_f
+                .iter()
+                .zip(vis_rot_f.iter_mut())
+                .zip(fine_chan_lambdas_m.iter())
+                .for_each(|((jones, jones_rot), lambda_m)| {
+                    let rotation = Complex::cis(arg / *lambda_m);
+                    *jones_rot = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
+                });
         });
 }
 
