@@ -6,7 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     f64::consts::TAU,
     io::Write,
-    ops::{Deref, DerefMut, Div, Sub},
+    ops::{Deref, DerefMut, Div, Sub, Neg},
     path::PathBuf,
     str::FromStr,
     thread::{self, ScopedJoinHandle},
@@ -3968,7 +3968,7 @@ fn peel_cuda(
 }
 
 /// Just the W terms of [`UVW`] coordinates.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
 struct W(f64);
 
 impl W {
@@ -3985,8 +3985,29 @@ impl Sub for W {
     }
 }
 
+impl Neg for W {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        W(-self.0)
+    }
+}
+
+#[cfg(test)]
+impl approx::AbsDiffEq for W {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        f64::abs_diff_eq(&self.0, &other.0, epsilon)
+    }
+}
+
 /// Just the U and V terms of [`UVW`] coordinates.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
 struct UV {
     u: f64,
     v: f64,
@@ -4020,5 +4041,18 @@ impl Div<f64> for UV {
             u: self.u / rhs,
             v: self.v / rhs,
         }
+    }
+}
+
+#[cfg(test)]
+impl approx::AbsDiffEq for UV {
+    type Epsilon = f64;
+
+    fn default_epsilon() -> Self::Epsilon {
+        f64::EPSILON
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        f64::abs_diff_eq(&self.u, &other.u, epsilon) && f64::abs_diff_eq(&self.v, &other.v, epsilon)
     }
 }
