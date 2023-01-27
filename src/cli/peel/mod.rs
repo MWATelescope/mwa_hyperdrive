@@ -23,10 +23,10 @@ use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR, VEL_C},
     math::num_tiles_from_num_cross_correlation_baselines,
     precession::{get_lmst, precess_time},
-    HADec, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
+    HADec, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic, UVW,
 };
 #[cfg(feature = "cuda")]
-use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
+use marlu::{pos::xyz::xyzs_to_cross_uvws};
 use ndarray::{prelude::*, Zip};
 use num_complex::Complex;
 use num_traits::Zero;
@@ -378,9 +378,10 @@ impl PeelArgs {
             None => None,
         };
 
+        #[cfg(feature = "cuda")]
         if let (false, true) = (cpu_peel, cpu_vis) {
-                return Err(PeelError::ModellerMismatch);
-            }
+            return Err(PeelError::ModellerMismatch);
+        }
 
         // Handle input data. We expect one of three possibilities:
         // - gpubox files, a metafits file (and maybe mwaf files),
