@@ -6,7 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     f64::consts::TAU,
     io::Write,
-    ops::{Deref, DerefMut, Div, Sub, Neg},
+    ops::{Deref, DerefMut, Div, Neg, Sub},
     path::PathBuf,
     str::FromStr,
     thread::{self, ScopedJoinHandle},
@@ -17,18 +17,19 @@ use crossbeam_channel::{bounded, unbounded};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR, VEL_C},
     math::num_tiles_from_num_cross_correlation_baselines,
-    precession::precess_time,
+    precession::{get_lmst, precess_time},
     HADec, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
 };
 #[cfg(feature = "cuda")]
 use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
 use ndarray::{prelude::*, Zip};
 use num_complex::Complex;
+use num_traits::Zero;
 use rayon::prelude::*;
 use scopeguard::defer_on_unwind;
 use vec1::Vec1;
@@ -41,7 +42,7 @@ use crate::{
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
-    filenames::{InputDataTypes},
+    filenames::InputDataTypes,
     glob::get_single_match_from_glob,
     help_texts::*,
     math::{average_epoch, TileBaselineFlags},
@@ -58,7 +59,7 @@ use crate::{
 #[cfg(feature = "cuda")]
 use crate::{
     cuda::{self, CudaFloat, DevicePointer},
-    model::SkyModellerCuda
+    model::SkyModellerCuda,
 };
 
 pub(crate) const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
@@ -313,6 +314,7 @@ impl PeelArgs {
             output_time_average_factor,
             output_freq_average_factor,
             timesteps,
+            // todo (dev): this could be match!(timesteps, None)
             use_all_timesteps,
             uvw_min: _,
             uvw_max: _,
@@ -1883,7 +1885,9 @@ fn get_weights_rts(
     weights
 }
 
-/// Average "high-res" data to "low-res" data.
+/// Average "high-res" vis and weights to "low-res" vis and weights
+/// arguments are all 3D arrays with axes (time, freq, baseline)
+// TODO(dev): rename to vis_weight_average_tfb
 fn vis_average(
     jones_from: ArrayView3<Jones<f32>>,
     mut jones_to: ArrayViewMut3<Jones<f32>>,
@@ -2468,55 +2472,6 @@ fn model_timesteps(
         })
 }
 
-// fn di_cal(
-//     mut vis_unpeeled: ArrayViewMut3<Jones<f32>>,
-//     vis_model: ArrayView3<Jones<f32>>,
-//     params: &DiCalParams,
-// ) {
-//     let num_tiles = params.unflagged_tile_xyzs.len();
-//     let shape = (1, num_tiles, params.fences.first().chanblocks.len());
-//     let mut di_jones = Array3::from_elem(shape, Jones::identity());
-//     let pb = ProgressBar::new(params.fences.first().chanblocks.len() as _);
-//     calibrate_timeblock(
-//         vis_unpeeled.view(),
-//         vis_model.view(),
-//         di_jones.view_mut(),
-//         params.timeblocks.first(),
-//         &params.fences.first().chanblocks,
-//         DEFAULT_MAX_ITERATIONS,
-//         DEFAULT_STOP_THRESHOLD,
-//         DEFAULT_MIN_THRESHOLD,
-//         pb,
-//         false,
-//     );
-
-//     vis_unpeeled.outer_iter_mut().for_each(|mut vis_unpeeled| {
-//         let mut i_tile1 = 0;
-//         let mut i_tile2 = 0;
-//         let mut tile1_sol = di_jones.slice(s![0, i_tile1, ..]);
-//         let mut tile2_sol = di_jones.slice(s![0, i_tile2, ..]);
-//         vis_unpeeled.outer_iter_mut().for_each(|mut vis_unpeeled| {
-//             i_tile2 += 1;
-//             if i_tile2 == num_tiles {
-//                 i_tile1 += 1;
-//                 i_tile2 = i_tile1 + 1;
-//                 tile1_sol = di_jones.slice(s![0, i_tile1, ..]);
-//             }
-//             tile2_sol = di_jones.slice(s![0, i_tile2, ..]);
-
-//             vis_unpeeled
-//                 .iter_mut()
-//                 .zip(tile1_sol.iter())
-//                 .zip(tile2_sol.iter())
-//                 .for_each(|((vis_unpeeled, sol_tile1), sol_tile2)| {
-//                     *vis_unpeeled = Jones::<f32>::from(
-//                         sol_tile1.inv() * Jones::<f64>::from(*vis_unpeeled) * sol_tile2.inv().h(),
-//                     );
-//                 });
-//         });
-//     });
-// }
-
 #[allow(clippy::too_many_arguments)]
 fn peel_cpu(
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
@@ -2541,6 +2496,33 @@ fn peel_cpu(
     // TODO: Do we allow multiple timesteps in the low-res data?
 
     let timestamps = &timeblock.timestamps;
+    let num_timestamps_high_res = timestamps.len();
+    let num_timestamps_low_res = 1;
+    let avg_time = num_timestamps_high_res / num_timestamps_low_res;
+
+    let num_tiles = unflagged_tile_xyzs.len();
+    let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
+
+    let num_freqs_high_res = all_fine_chan_lambdas_m.len();
+    let num_freqs_low_res = all_fine_chan_lambdas_m.len();
+
+    let num_sources = source_list.len();
+
+    // TODO: these assertions should be actual errors.
+    let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
+
+    assert_eq!(vis_residual.len_of(time_axis), num_timestamps_high_res);
+    assert_eq!(vis_weights.len_of(time_axis), num_timestamps_high_res);
+
+    assert_eq!(vis_residual.len_of(baseline_axis), num_cross_baselines);
+    assert_eq!(vis_weights.len_of(baseline_axis), num_cross_baselines);
+
+    assert_eq!(vis_residual.len_of(freq_axis), num_freqs_high_res);
+    assert_eq!(vis_weights.len_of(freq_axis), num_freqs_high_res);
+    assert_eq!(low_res_lambdas_m.len(), num_freqs_high_res);
+
+    assert_eq!(iono_consts.len(), num_sources);
+
     let peel_progress = multi_progress_bar.add(
         ProgressBar::new(num_sources_to_iono_subtract as _)
             .with_style(
@@ -2552,9 +2534,6 @@ fn peel_cpu(
             .with_message(format!("Peeling timeblock {}", timeblock.index + 1)),
     );
     peel_progress.tick();
-
-    let num_tiles = unflagged_tile_xyzs.len();
-    let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
 
     let precession_infos = timestamps
         .iter()
@@ -2657,24 +2636,22 @@ fn peel_cpu(
     } else {
         average_precession_info.lmst_j2000
     };
-    // TODO: what's this for?
-    // let average_latitude = if no_precession {
-    //     array_position.latitude_rad
-    // } else {
-    //     average_precession_info.array_latitude_j2000
-    // };
     let average_precessed_tile_xyzs = Array2::from_shape_vec(
-        (1, num_tiles),
+        (num_timestamps_low_res, num_tiles),
         average_precession_info.precess_xyz(unflagged_tile_xyzs),
     )
     .expect("correct shape");
 
     // temporary arrays for accumulation
     // TODO: Do a stocktake of arrays that are lying around!
-    // These are time, bl, channel
-    let mut vis_residual_low_res: Array3<Jones<f32>> =
-        Array3::zeros((1, low_res_freqs_hz.len(), num_cross_baselines));
+    // TODO (Dev): I would name this vis_residual_low_res_rot
+    let mut vis_residual_low_res: Array3<Jones<f32>> = Array3::zeros((
+        num_timestamps_low_res,
+        num_freqs_low_res,
+        num_cross_baselines,
+    ));
     let mut vis_model_low_res = vis_residual_low_res.clone();
+    // TODO (Dev): I would name this vis_model_low_res_rot
     let mut vis_model_low_res_tmp = vis_residual_low_res.clone();
     let mut vis_weights_low_res: Array3<f32> = Array3::zeros(vis_residual_low_res.dim());
 
