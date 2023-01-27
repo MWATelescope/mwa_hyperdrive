@@ -1991,97 +1991,76 @@ fn vis_average(
         );
 }
 
-fn vis_average2(
-    jones_from: ArrayView3<Jones<f32>>,
-    mut jones_to: ArrayViewMut3<Jones<f32>>,
-    weight_from: ArrayView3<f32>,
-) {
-    let from_dims = jones_from.dim();
-    let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
-    let avg_time = jones_from.len_of(time_axis) / jones_to.len_of(time_axis);
-    let avg_freq = jones_from.len_of(freq_axis) / jones_to.len_of(freq_axis);
+// TODO (dev): a.div_ceil(b) would be better, but it's nightly:
+// https://doc.rust-lang.org/std/primitive.i32.html#method.div_ceil
+fn div_ceil(a: usize, b: usize) -> usize {
+    (a + b - 1) / b
+}
 
-    assert_eq!(from_dims, weight_from.dim());
-    let to_dims = jones_to.dim();
+/// Like `vis_weight_average_tfb`, but for when we don't need to keep the low-res weights
+/// Average "high-res" vis and weights to "low-res" vis (no low-res weights)
+/// arguments are all 3D arrays with axes (time, freq, baseline).
+/// assumes weights are capped to 0
+// TODO(dev): rename to vis_average_tfb
+fn vis_average2(
+    jones_from_tfb: ArrayView3<Jones<f32>>,
+    mut jones_to_tfb: ArrayViewMut3<Jones<f32>>,
+    weight_tfb: ArrayView3<f32>,
+) {
+    let from_dims = jones_from_tfb.dim();
+    let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
+    let avg_time = div_ceil(
+        jones_from_tfb.len_of(time_axis),
+        jones_to_tfb.len_of(time_axis),
+    );
+    let avg_freq = div_ceil(
+        jones_from_tfb.len_of(freq_axis),
+        jones_to_tfb.len_of(freq_axis),
+    );
+
+    assert_eq!(from_dims, weight_tfb.dim());
+    let to_dims = jones_to_tfb.dim();
     assert_eq!(
         to_dims,
         (
-            (from_dims.0 as f64 / avg_time as f64).floor() as usize,
-            (from_dims.1 as f64 / avg_freq as f64).floor() as usize,
+            div_ceil(from_dims.0, avg_time),
+            div_ceil(from_dims.1, avg_freq),
             from_dims.2,
         )
     );
 
-    let num_tiles =
-        num_tiles_from_num_cross_correlation_baselines(jones_from.len_of(baseline_axis));
-    assert_eq!(
-        (num_tiles * (num_tiles - 1)) / 2,
-        jones_from.len_of(baseline_axis)
-    );
-
     // iterate along time axis in chunks of avg_time
-    jones_from
-        .axis_chunks_iter(time_axis, avg_time)
-        .zip_eq(weight_from.axis_chunks_iter(time_axis, avg_time))
-        .zip_eq(jones_to.outer_iter_mut())
-        .for_each(|((jones_chunk, weight_chunk), mut jones_to)| {
+    for (jones_chunk_tfb, weight_chunk_tfb, mut jones_to_fb) in izip!(
+        jones_from_tfb.axis_chunks_iter(time_axis, avg_time),
+        weight_tfb.axis_chunks_iter(time_axis, avg_time),
+        jones_to_tfb.outer_iter_mut()
+    ) {
+        for (jones_chunk_tfb, weight_chunk_tfb, mut jones_to_b) in izip!(
+            jones_chunk_tfb.axis_chunks_iter(freq_axis, avg_freq),
+            weight_chunk_tfb.axis_chunks_iter(freq_axis, avg_freq),
+            jones_to_fb.outer_iter_mut()
+        ) {
             // iterate along baseline axis
-            let mut i_tile1 = 0;
-            let mut i_tile2 = 0;
-            jones_chunk
-                .axis_iter(Axis(1))
-                .zip_eq(weight_chunk.axis_iter(Axis(1)))
-                .zip_eq(jones_to.outer_iter_mut())
-                .for_each(|((jones_chunk, weight_chunk), mut jones_to)| {
-                    i_tile2 += 1;
-                    if i_tile2 == num_tiles {
-                        i_tile1 += 1;
-                        i_tile2 = i_tile1 + 1;
+            for (jones_chunk_tf, weight_chunk_tf, jones_to) in izip!(
+                jones_chunk_tfb.axis_iter(baseline_axis),
+                weight_chunk_tfb.axis_iter(baseline_axis),
+                jones_to_b.iter_mut()
+            ) {
+                let mut jones_weighted_sum = Jones::zero();
+                let mut weight_sum: f64 = 0.0;
+                for (&jones, &weight) in jones_chunk_tf.iter().zip_eq(weight_chunk_tf.iter()) {
+                    // assumes weights are capped to 0. otherwise we would need to check weight >= 0
+                    debug_assert!(weight >= 0.0, "weight was not capped to zero: {}", weight);
+                    jones_weighted_sum += Jones::<f64>::from(jones) * weight as f64;
+                    weight_sum += weight as f64;
                     }
-
-                    jones_chunk
-                        .axis_chunks_iter(Axis(1), avg_freq)
-                        .zip_eq(weight_chunk.axis_chunks_iter(Axis(1), avg_freq))
-                        .zip_eq(jones_to.iter_mut())
-                        .for_each(|((jones_chunk, weight_chunk), jones_to)| {
-                            let mut jones_weighted_sum = Jones::default();
-                            let mut weight_sum = 0.0;
-
-                            // iterate through time chunks
-                            jones_chunk
-                                .outer_iter()
-                                .zip_eq(weight_chunk.outer_iter())
-                                .for_each(|(jones_chunk, weights_chunk)| {
-                                    jones_chunk.iter().zip_eq(weights_chunk.iter()).for_each(
-                                        |(jones, weight)| {
-                                            // Any flagged
-                                            // visibilities would
-                                            // have a weight <= 0,
-                                            // but we've already
-                                            // capped them to 0.
-                                            // This means we don't
-                                            // need to check the
-                                            // value of the weight
-                                            // when accumulating
-                                            // unflagged
-                                            // visibilities; the
-                                            // flagged ones
-                                            // contribute nothing.
-
-                                            let jones = Jones::<f64>::from(*jones);
-                                            let weight = *weight as f64;
-                                            jones_weighted_sum += jones * weight;
-                                            weight_sum += weight;
-                                        },
-                                    );
-                                });
 
                             if weight_sum > 0.0 {
                                 *jones_to = Jones::from(jones_weighted_sum / weight_sum);
                             }
-                        });
-                });
-        });
+            }
+        }
+    }
 }
 
 fn weights_average(weight_tfb: ArrayView3<f32>, mut weight_avg_tfb: ArrayViewMut3<f32>) {

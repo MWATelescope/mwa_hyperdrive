@@ -508,3 +508,53 @@ fn validate_weight_average() {
     ]);
 }
 
+#[test]
+fn validate_vis_average() {
+    let vis_tfb: Array3<Jones<f32>> = array![
+        [
+            [ Jones::zero(), Jones::zero(), Jones::zero(), Jones::identity() ],
+            [ Jones::zero(), Jones::zero(), Jones::identity(), Jones::zero() ],
+            [ Jones::zero(), Jones::zero(), Jones::identity(), Jones::identity() ],
+        ],
+        [
+            [ Jones::zero(), Jones::identity(), Jones::zero(), Jones::zero() ],
+            [ Jones::zero(), Jones::identity(), Jones::zero(), Jones::identity() ],
+            [ Jones::zero(), Jones::identity(), Jones::identity(), Jones::zero() ],
+        ],
+    ];
+
+    let weights_tfb: Array3<f32> = array![
+        [
+            [1., 1., 1., 1.],
+            [2., 2., 2., 2.],
+            [4., 4., 4., 4.],
+        ],
+        [
+            [8., 8., 8., 8.],
+            [16., 16., 16., 16.],
+            [32., 32., 32., 32.],
+        ],
+    ];
+
+    // 2, 3, 4
+    let vis_shape = vis_tfb.dim();
+    // 1, 2, 4
+    let avg_shape = (1, 2, vis_shape.2);
+
+    let mut vis_avg_tfb = Array3::zeros(avg_shape);
+
+    vis_average2(
+        vis_tfb.view(),
+        vis_avg_tfb.view_mut(),
+        weights_tfb.view(),
+    );
+
+    assert_eq!(vis_avg_tfb.slice(s![.., .., 0]), array![[Jones::zero(), Jones::zero()]]);
+
+    assert_eq!(vis_avg_tfb.slice(s![.., 0, 1]), array![Jones::identity() * 24./27.]);
+    assert_eq!(vis_avg_tfb.slice(s![.., 0, 2]), array![Jones::identity() * 2./27.]);
+    assert_eq!(vis_avg_tfb.slice(s![.., 0, 3]), array![Jones::identity() * 17./27.]);
+    assert_eq!(vis_avg_tfb.slice(s![.., 1, 1]), array![Jones::identity() * 32./36.]);
+    assert_eq!(vis_avg_tfb.slice(s![.., 1, 2]), array![Jones::identity() * 36./36.]);
+    assert_eq!(vis_avg_tfb.slice(s![.., 1, 3]), array![Jones::identity() * 4./36.]);
+}
