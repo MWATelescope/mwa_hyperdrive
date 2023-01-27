@@ -48,6 +48,7 @@ pub(crate) enum ModellerInfo {
 pub trait SkyModeller<'a>: Send {
     /// Update the sky model associated with the `SkyModeller`. All old source
     /// information is destroyed.
+    /// TODO(dev): something like impl IntoIterator<Item = &SourceComponent>
     fn update_source_list(
         &mut self,
         source_list: &SourceList,
@@ -61,7 +62,13 @@ pub trait SkyModeller<'a>: Send {
         &mut self,
         source: &Source,
         phase_centre: RADec,
-    ) -> Result<(), ModelError>;
+    ) -> Result<(), ModelError> {
+        use indexmap::indexmap;
+        let source_list = SourceList::from(indexmap! {
+            "source".into() => source.clone(),
+        });
+        self.update_source_list(&source_list, phase_centre)
+    }
 
     /// Generate sky-model visibilities for a single timestep. The [`UVW`]
     /// coordinates used in generating the visibilities are returned.
@@ -88,19 +95,19 @@ pub trait SkyModeller<'a>: Send {
     // the following are only used for benchmarking
     // todo: put these behind a flag
     fn _model_points(
-        &self,
+        &mut self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError>;
 
     fn _model_gaussians(
-        &self,
+        &mut self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError>;
 
     fn _model_shapelets(
-        &self,
+        &mut self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,
         timestamp: Epoch,
     ) -> Result<Vec<UVW>, ModelError>;
