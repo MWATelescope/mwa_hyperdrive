@@ -558,3 +558,366 @@ fn validate_vis_average() {
     assert_eq!(vis_avg_tfb.slice(s![.., 1, 2]), array![Jones::identity() * 36./36.]);
     assert_eq!(vis_avg_tfb.slice(s![.., 1, 3]), array![Jones::identity() * 4./36.]);
 }
+
+#[test]
+fn validate_apply_iono2() {
+    let apply_precession = false;
+    let array_pos = LatLngHeight {
+        longitude_rad: 0.,
+        latitude_rad: 0.,
+        height_metres: 100.,
+    };
+
+    let dut1: Duration = Duration::from_f64(0.0, Unit::Second);
+    let obs_time = get_j2100(&array_pos, dut1);
+
+    // at first timestep phase centre is at zenith
+    let lst_zenith_rad = get_lmst(array_pos.longitude_rad, obs_time, dut1);
+    let phase_centre = RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_zenith_rad);
+
+    // second timestep is at 1h
+    let hour_epoch = obs_time + Duration::from_f64(1.0, Unit::Hour);
+    let timestamps = vec![obs_time, hour_epoch];
+
+    let (tile_names, tile_xyzs) = get_simple_tiles(1.);
+
+    let num_tiles = tile_xyzs.len();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let ant_pairs = (0..num_baselines)
+        .into_iter()
+        .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
+        .collect_vec();
+    let flagged_tiles = HashSet::new();
+
+    // lambda = 1m
+    let lambdas_m = vec![2., 1.];
+    let freqs_hz = lambdas_m.iter().map(|&l| VEL_C / l).collect_vec();
+
+    // source is at zenith at 1h
+    let lst_1h_rad = get_lmst(array_pos.longitude_rad, hour_epoch, dut1);
+    let source_radec = RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_1h_rad);
+    let source_fd = 1.;
+    let source_list = SourceList::from(indexmap! {
+        "One".into() => point_source_i!(source_radec, 0., freqs_hz[0], source_fd),
+    });
+
+    let beam = get_beam(num_tiles);
+
+    let mut modeller = new_sky_modeller(
+        #[cfg(feature = "cuda")]
+        false,
+        beam.deref(),
+        &source_list,
+        &tile_xyzs,
+        &freqs_hz,
+        &flagged_tiles,
+        phase_centre,
+        array_pos.longitude_rad,
+        array_pos.latitude_rad,
+        dut1,
+        apply_precession,
+    )
+    .unwrap();
+
+    let mut vis_tfb = Array3::from_elem((timestamps.len(), freqs_hz.len(), ant_pairs.len()), Jones::<f32>::zero());
+    model_timesteps(modeller.deref_mut(), &timestamps, vis_tfb.view_mut()).unwrap();
+
+    let mut vis_iono_tfb = Array3::from_elem((timestamps.len(), freqs_hz.len(), ant_pairs.len()), Jones::<f32>::zero());
+
+    let mut tile_uvs_phase = Array2::default((timestamps.len(), num_tiles));
+    let mut tile_ws_phase = Array2::default((timestamps.len(), num_tiles));
+    let mut tile_uvs_source = Array2::default((timestamps.len(), num_tiles));
+    let mut tile_ws_source = Array2::default((timestamps.len(), num_tiles));
+
+    // iterate over time
+    for (
+        &time,
+        mut tile_uvs_phase,
+        mut tile_ws_phase,
+        mut tile_uvs_source,
+        mut tile_ws_source,
+    ) in izip!(
+        timestamps.iter(),
+        tile_uvs_phase.outer_iter_mut(),
+        tile_ws_phase.outer_iter_mut(),
+        tile_uvs_source.outer_iter_mut(),
+        tile_ws_source.outer_iter_mut(),
+    ) {
+        if apply_precession {
+            let precession_info = precess_time(
+                array_pos.longitude_rad,
+                array_pos.latitude_rad,
+                phase_centre,
+                time,
+                dut1,
+            );
+            let hadec_phase = phase_centre.to_hadec(precession_info.lmst_j2000);
+            let hadec_source = source_radec.to_hadec(precession_info.lmst_j2000);
+            let precessed_xyzs = precession_info.precess_xyz(&tile_xyzs);
+            setup_uvs(tile_uvs_phase.as_slice_mut().unwrap(), &precessed_xyzs, hadec_phase);
+            setup_ws(tile_ws_phase.as_slice_mut().unwrap(), &precessed_xyzs, hadec_phase);
+            setup_uvs(tile_uvs_source.as_slice_mut().unwrap(), &precessed_xyzs, hadec_source);
+            setup_ws(tile_ws_source.as_slice_mut().unwrap(), &precessed_xyzs, hadec_source);
+        } else {
+            let lmst = get_lmst(array_pos.longitude_rad, time, dut1);
+            let hadec_phase = phase_centre.to_hadec(lmst);
+            let hadec_source = source_radec.to_hadec(lmst);
+            setup_uvs(tile_uvs_phase.as_slice_mut().unwrap(), &tile_xyzs, hadec_phase);
+            setup_ws(tile_ws_phase.as_slice_mut().unwrap(), &tile_xyzs, hadec_phase);
+            setup_uvs(tile_uvs_source.as_slice_mut().unwrap(), &tile_xyzs, hadec_source);
+            setup_ws(tile_ws_source.as_slice_mut().unwrap(), &tile_xyzs, hadec_source);
+        }
+    }
+
+    // we want consts such that at lambda = 2m, the shift moves the source to the phase centre
+    let iono_lmn = source_radec.to_lmn(phase_centre);
+    let consts_lm = (iono_lmn.l / 4., iono_lmn.m / 4.);
+    // let consts_lm = ((lst_1h_rad-lst_zenith_rad)/4., 0.);
+
+    apply_iono2(
+        vis_tfb.view(),
+        vis_iono_tfb.view_mut(),
+        tile_uvs_source.view(),
+        consts_lm,
+        &lambdas_m,
+    );
+
+    let start_seconds = timestamps[0].to_gpst_seconds();
+    for (
+        time,
+        tile_uvs_source,
+        vis_fb,
+        vis_iono_fb
+    ) in izip!(
+        timestamps.iter(),
+        tile_uvs_source.outer_iter(),
+        vis_tfb.outer_iter(),
+        vis_iono_tfb.outer_iter(),
+    ) {
+        let seconds = time.to_gpst_seconds() - start_seconds;
+
+        // display_vis_fb(
+        //     &"model".into(),
+        //     vis_fb.view(),
+        //     seconds,
+        //     tile_uvs_phase.as_slice().unwrap(),
+        //     tile_ws_phase.as_slice().unwrap(),
+        //     &lambdas_m,
+        //     &ant_pairs,
+        //     &tile_names,
+        // );
+        // display_vis_fb(
+        //     &"iono".into(),
+        //     vis_iono_fb.view(),
+        //     seconds,
+        //     tile_uvs_source.as_slice().unwrap(),
+        //     tile_ws_source.as_slice().unwrap(),
+        //     &lambdas_m,
+        //     &ant_pairs,
+        //     &tile_names,
+        // );
+
+        if !apply_precession {
+            // baseline 1, from origin to v has no u or w component, should not be affected by the rotation
+            for (vis, vis_iono) in izip!(
+                vis_fb.slice(s![.., 1]),
+                vis_iono_fb.slice(s![.., 1]),
+            ) {
+                assert_abs_diff_eq!(vis, vis_iono, epsilon = 1e-6);
+            }
+            // in the second timestep, the source should be at the pointing centre, so:
+            // - should not be attenuated by the beam
+            // - at lambda=2, iono vis should have the source at the phase centre, so no angle in pols XX, YY
+            if seconds > 0. {
+                for (jones, jones_iono) in izip!(
+                    vis_fb.iter(),
+                    vis_iono_fb.iter(),
+                ) {
+                    // XX
+                    assert_abs_diff_eq!(jones[0].norm(), source_fd as f32, epsilon = 1e-6);
+                    assert_abs_diff_eq!(jones_iono[0].norm(), source_fd as f32, epsilon = 1e-6);
+                    // YY
+                    assert_abs_diff_eq!(jones[3].norm(), source_fd as f32, epsilon = 1e-6);
+                    assert_abs_diff_eq!(jones_iono[3].norm(), source_fd as f32, epsilon = 1e-6);
+                }
+                for vis_iono in vis_iono_fb.slice(s![0, ..]).iter() {
+                    assert_abs_diff_eq!(vis_iono[0].arg(), 0., epsilon = 1e-6); // XX
+                    assert_abs_diff_eq!(vis_iono[3].arg(), 0., epsilon = 1e-6); // YY
+                }
+            }
+        }
+
+        for (
+            &lambda_m,
+            vis_b,
+            vis_iono_b,
+        ) in izip!(
+            lambdas_m.iter(),
+            vis_fb.outer_iter(),
+            vis_iono_fb.outer_iter(),
+        ) {
+
+            for (
+                &(ant1, ant2),
+                vis,
+                vis_iono,
+            ) in izip!(
+                ant_pairs.iter(),
+                vis_b.iter(),
+                vis_iono_b.iter(),
+             ) {
+                let UV {u, v} = tile_uvs_source[ant1] - tile_uvs_source[ant2];
+                let arg = (TAU * (u * consts_lm.0 + v * consts_lm.1) * lambda_m) as f64;
+                for (pol_model, pol_model_iono) in vis.iter().zip_eq(vis_iono.iter()) {
+                    // magnitudes shoud not be affected by iono rotation
+                    assert_abs_diff_eq!(pol_model.norm(), pol_model_iono.norm(), epsilon = 1e-6);
+                    let pol_model_iono_expected = Complex::from_polar(pol_model.norm(), (pol_model.arg() as f64 - arg) as f32);
+                    assert_abs_diff_eq!(pol_model_iono_expected.arg(), pol_model_iono.arg(), epsilon = 1e-6);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn validate_iono_fit() {
+    let apply_precession = false;
+    let array_pos = LatLngHeight {
+        longitude_rad: 0.,
+        latitude_rad: 0.,
+        height_metres: 100.,
+    };
+
+    let dut1: Duration = Duration::from_f64(0.0, Unit::Second);
+    let obs_time = get_j2100(&array_pos, dut1);
+
+    // at first timestep phase centre is at zenith
+    let lst_zenith_rad = get_lmst(array_pos.longitude_rad, obs_time, dut1);
+    let phase_centre = RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_zenith_rad);
+
+    // second timestep is at 1h
+    let hour_epoch = obs_time + Duration::from_f64(1.0, Unit::Hour);
+    let timestamps = vec![obs_time, hour_epoch];
+
+    let (tile_names, tile_xyzs) = get_simple_tiles(1.);
+
+    let num_tiles = tile_xyzs.len();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let ant_pairs = (0..num_baselines)
+        .into_iter()
+        .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
+        .collect_vec();
+    let flagged_tiles = HashSet::new();
+
+    // lambda = 1m
+    let lambdas_m = vec![2., 1.];
+    let freqs_hz = lambdas_m.iter().map(|&l| VEL_C / l).collect_vec();
+
+    // source is at zenith at 1h
+    let lst_1h_rad = get_lmst(array_pos.longitude_rad, hour_epoch, dut1);
+    let source_radec = RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_1h_rad);
+    let source_fd = 1.;
+    let source_list = SourceList::from(indexmap! {
+        "One".into() => point_source_i!(source_radec, 0., freqs_hz[0], source_fd),
+    });
+
+    let beam = get_beam(num_tiles);
+
+    // unlike the other tests, this is in the SOURCE phase centre
+    let mut modeller = new_sky_modeller(
+        #[cfg(feature = "cuda")]
+        false,
+        beam.deref(),
+        &source_list,
+        &tile_xyzs,
+        &freqs_hz,
+        &flagged_tiles,
+        source_radec,
+        array_pos.longitude_rad,
+        array_pos.latitude_rad,
+        dut1,
+        apply_precession,
+    )
+    .unwrap();
+
+    let mut vis_tfb = Array3::from_elem((timestamps.len(), freqs_hz.len(), ant_pairs.len()), Jones::<f32>::zero());
+    model_timesteps(modeller.deref_mut(), &timestamps, vis_tfb.view_mut()).unwrap();
+
+    let mut vis_iono_tfb = Array3::from_elem((timestamps.len(), freqs_hz.len(), ant_pairs.len()), Jones::<f32>::zero());
+
+    let mut tile_uvs_phase = Array2::default((timestamps.len(), num_tiles));
+    let mut tile_ws_phase = Array2::default((timestamps.len(), num_tiles));
+    let mut tile_uvs_source = Array2::default((timestamps.len(), num_tiles));
+    let mut tile_ws_source = Array2::default((timestamps.len(), num_tiles));
+
+    // iterate over time
+    for (
+        &time,
+        mut tile_uvs_phase,
+        mut tile_ws_phase,
+        mut tile_uvs_source,
+        mut tile_ws_source,
+    ) in izip!(
+        timestamps.iter(),
+        tile_uvs_phase.outer_iter_mut(),
+        tile_ws_phase.outer_iter_mut(),
+        tile_uvs_source.outer_iter_mut(),
+        tile_ws_source.outer_iter_mut(),
+    ) {
+        if apply_precession {
+            let precession_info = precess_time(
+                array_pos.longitude_rad,
+                array_pos.latitude_rad,
+                phase_centre,
+                time,
+                dut1,
+            );
+            let hadec_phase = phase_centre.to_hadec(precession_info.lmst_j2000);
+            let hadec_source = source_radec.to_hadec(precession_info.lmst_j2000);
+            let precessed_xyzs = precession_info.precess_xyz(&tile_xyzs);
+            setup_uvs(tile_uvs_phase.as_slice_mut().unwrap(), &precessed_xyzs, hadec_phase);
+            setup_ws(tile_ws_phase.as_slice_mut().unwrap(), &precessed_xyzs, hadec_phase);
+            setup_uvs(tile_uvs_source.as_slice_mut().unwrap(), &precessed_xyzs, hadec_source);
+            setup_ws(tile_ws_source.as_slice_mut().unwrap(), &precessed_xyzs, hadec_source);
+        } else {
+            let lmst = get_lmst(array_pos.longitude_rad, time, dut1);
+            let hadec_phase = phase_centre.to_hadec(lmst);
+            let hadec_source = source_radec.to_hadec(lmst);
+            setup_uvs(tile_uvs_phase.as_slice_mut().unwrap(), &tile_xyzs, hadec_phase);
+            setup_ws(tile_ws_phase.as_slice_mut().unwrap(), &tile_xyzs, hadec_phase);
+            setup_uvs(tile_uvs_source.as_slice_mut().unwrap(), &tile_xyzs, hadec_source);
+            setup_ws(tile_ws_source.as_slice_mut().unwrap(), &tile_xyzs, hadec_source);
+        }
+    }
+
+    let vis_shape = vis_tfb.shape();
+    let weights = Array3::from_elem((vis_shape[0], vis_shape[1], vis_shape[2]), 1.);
+
+    for consts_lm in [
+        (0.0001, -0.0003),
+        (0.0003, -0.0001),
+        (-0.0007, 0.0001),
+    ] {
+
+        apply_iono2(
+            vis_tfb.view(),
+            vis_iono_tfb.view_mut(),
+            tile_uvs_source.view(),
+            consts_lm,
+            &lambdas_m,
+        );
+
+        let results = iono_fit(
+            vis_iono_tfb.view(),
+            weights.view(),
+            vis_tfb.view(),
+            &lambdas_m,
+            tile_uvs_source.view(),
+        );
+
+        assert_abs_diff_eq!(results[0], consts_lm.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(results[1], consts_lm.1, epsilon = 1e-6);
+    }
+
+}
+

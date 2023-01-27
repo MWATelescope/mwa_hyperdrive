@@ -2204,8 +2204,8 @@ fn vis_rotate_fb(
 /// Rotate the supplied visibilities according to the `λ²` constants of
 /// proportionality with `exp(-2πi(αu+βv)λ²)`.
 fn apply_iono2(
-    jones_from: ArrayView3<Jones<f32>>,
-    mut jones_to: ArrayViewMut3<Jones<f32>>,
+    vis_tfb: ArrayView3<Jones<f32>>,
+    mut vis_iono_tfb: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
     const_lm: (f64, f64),
     lambdas_m: &[f64],
@@ -2213,11 +2213,11 @@ fn apply_iono2(
     let num_tiles = tile_uvs.len_of(Axis(1));
 
     // iterate along time axis
-    jones_from
+    vis_tfb
         .outer_iter()
-        .zip(jones_to.outer_iter_mut())
+        .zip(vis_iono_tfb.outer_iter_mut())
         .zip(tile_uvs.outer_iter())
-        .for_each(|((jones_from, mut jones_to), tile_uvs)| {
+        .for_each(|((vis_fb, mut vis_iono_fb), tile_uvs)| {
             // Just in case the compiler can't understand how an ndarray is laid
             // out.
             assert_eq!(tile_uvs.len(), num_tiles);
@@ -2225,10 +2225,10 @@ fn apply_iono2(
             // iterate along baseline axis
             let mut i_tile1 = 0;
             let mut i_tile2 = 0;
-            jones_from
+            vis_fb
                 .axis_iter(Axis(1))
-                .zip(jones_to.axis_iter_mut(Axis(1)))
-                .for_each(|(jones_from, mut jones_to)| {
+                .zip(vis_iono_fb.axis_iter_mut(Axis(1)))
+                .for_each(|(vis_f, mut vis_iono_f)| {
                     i_tile2 += 1;
                     if i_tile2 == num_tiles {
                         i_tile1 += 1;
@@ -2238,23 +2238,24 @@ fn apply_iono2(
                     let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
                     let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
                     // iterate along frequency axis
-                    jones_from
+                    vis_f
                         .iter()
-                        .zip(jones_to.iter_mut())
+                        .zip(vis_iono_f.iter_mut())
                         .zip(lambdas_m.iter())
-                        .for_each(|((jones_from, jones_to), lambda_m)| {
-                            let j = Jones::<f64>::from(*jones_from);
+                        .for_each(|((jones, jones_iono), lambda_m)| {
+                            let j = Jones::<f64>::from(*jones);
                             // The baseline UV is in units of metres, so we need
                             // to divide by λ to use it in an exponential. But
                             // we're also multiplying by λ², so just multiply by
                             // λ.
                             let rotation = Complex::cis(arg * *lambda_m);
-                            *jones_to = Jones::from(j * rotation);
+                            *jones_iono = Jones::from(j * rotation);
                         });
                 });
         });
 }
 
+// unpeel model, peel iono model
 fn apply_iono3(
     vis_model: ArrayView3<Jones<f32>>,
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
@@ -2312,78 +2313,6 @@ fn apply_iono3(
         });
 }
 
-// TODO: CHJ: Ask Dev if this is useful
-// // apply ionospheric rotation approximation by `order` taylor expansion terms
-// fn apply_iono_approx<F>(
-//     mut jones: ArrayViewMut3<Jones<F>>,
-//     vis_ctx: &VisContext,
-//     obs_ctx: &MarluObsContext,
-//     // constants of proportionality for ionospheric offset in l,m
-//     const_lm: (f64, f64),
-//     order: usize,
-// ) where
-//     F: Float + Num + NumAssign + Default,
-// {
-//     let jones_dims = jones.dim();
-//     let freqs_hz = vis_ctx.frequencies_hz();
-//     let tile_xyzs: Vec<XyzGeodetic> = obs_ctx.ant_positions_geodetic().collect();
-//     let centroid_timestamps: Vec<Epoch> = vis_ctx.timeseries(false, true).collect();
-//     let phase_centre = obs_ctx.phase_centre;
-//     let array_pos = obs_ctx.array_pos;
-//     // let ant_pairs = vis_ctx.sel_baselines.clone();
-//     let num_tiles = num_tiles_from_num_cross_correlation_baselines(jones.dim().1);
-
-//     assert_eq!(jones_dims.0, centroid_timestamps.len());
-//     // assert_eq!(jones_dims.1, ant_pairs.len());
-//     assert_eq!(jones_dims.2, freqs_hz.len());
-
-//     // pre-compute partial uvws:
-//     let part_uvws = calc_part_uvws(
-//         num_tiles,
-//         &centroid_timestamps,
-//         phase_centre,
-//         array_pos,
-//         &tile_xyzs,
-//     );
-
-//     let lambdas = freqs_hz
-//         .iter()
-//         .map(|freq_hz| VEL_C / freq_hz)
-//         .collect::<Vec<_>>();
-
-//     // iterate along time axis
-//     for (mut jones, part_uvws) in jones.outer_iter_mut().zip(part_uvws.outer_iter()) {
-//         let mut i_tile1 = 0;
-//         let mut i_tile2 = 1;
-
-//         // iterate along baseline axis
-//         for mut jones in jones.outer_iter_mut() {
-//             i_tile2 += 1;
-//             if i_tile2 == num_tiles {
-//                 i_tile1 += 1;
-//                 i_tile2 = i_tile1 + 1;
-//             }
-
-//             let uvw = part_uvws[[i_tile1]] - part_uvws[[i_tile2]];
-//             let uv_lm = uvw.u * const_lm.0 + uvw.v * const_lm.1;
-//             // iterate along frequency axis
-//             for (jones, &lambda) in jones.iter_mut().zip(&lambdas) {
-//                 // in RTS, uvw is in units of λ but pal uvw is in meters, so divide by wavelength,
-//                 // but we're also multiplying by λ², so just multiply by λ
-
-//                 // first order taylor expansion, data D from rotation of model M
-//                 // D = M * exp(-i * phi * lambda^2 )
-//                 //   = M * (1 - i * phi * lambda^2 + ... )
-//                 let exponent = -Complex::i() * F::from(TAU * uv_lm * lambda).unwrap();
-//                 let rotation: Complex<F> = (0..=order)
-//                     .map(|n| exponent.powi(n as i32) / F::from(factorial(&n)).unwrap())
-//                     .sum();
-//                 *jones *= rotation;
-//             }
-//         }
-//     }
-// }
-
 // the offsets as defined by the RTS code
 // TODO: Assume there's only 1 timestep, because this is low res data?
 fn iono_fit(
@@ -2391,9 +2320,9 @@ fn iono_fit(
     weights: ArrayView3<f32>,
     model: ArrayView3<Jones<f32>>,
     lambdas_m: &[f64],
-    tile_uvs_low_res: &[UV],
+    tile_uvs_low_res: ArrayView2<UV>,
 ) -> [f64; 4] {
-    let num_tiles = tile_uvs_low_res.len();
+    let num_tiles = tile_uvs_low_res.len_of(Axis(1));
 
     // a-terms used in least-squares estimator
     let (mut a_uu, mut a_uv, mut a_vv) = (0.0, 0.0, 0.0);
@@ -2407,7 +2336,8 @@ fn iono_fit(
         .outer_iter()
         .zip(weights.outer_iter())
         .zip(model.outer_iter())
-        .for_each(|((residual, weights), model)| {
+        .zip(tile_uvs_low_res.outer_iter())
+        .for_each(|(((residual, weights), model), tile_uvs_low_res)| {
             // iterate over frequency
             residual
                 .outer_iter()
@@ -2499,11 +2429,7 @@ fn iono_fit(
     ]
 }
 
-fn setup_ws(
-    tile_ws: &mut [W],
-    tile_xyzs: &[XyzGeodetic],
-    phase_centre: HADec,
-) {
+fn setup_ws(tile_ws: &mut [W], tile_xyzs: &[XyzGeodetic], phase_centre: HADec) {
     assert_eq!(tile_ws.len(), tile_xyzs.len());
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
@@ -2839,7 +2765,7 @@ fn peel_cpu(
                 vis_weights_low_res.view(),
                 vis_model_low_res_tmp.view(),
                 low_res_lambdas_m,
-                tile_uvs_low_res.as_slice().unwrap(),
+                tile_uvs_low_res.view(),
             );
             trace!("iono_fits: {iono_fits:?}");
 
