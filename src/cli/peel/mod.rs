@@ -378,13 +378,9 @@ impl PeelArgs {
             None => None,
         };
 
-        #[cfg(feature = "cuda")]
-        match (cpu_peel, cpu_vis) {
-            (false, true) => {
+        if let (false, true) = (cpu_peel, cpu_vis) {
                 return Err(PeelError::ModellerMismatch);
             }
-            _ => {}
-        }
 
         // Handle input data. We expect one of three possibilities:
         // - gpubox files, a metafits file (and maybe mwaf files),
@@ -1061,7 +1057,7 @@ impl PeelArgs {
         //     let uvw_min = uvw_min_metres.powi(2);
         //     let uvw_max = uvw_max_metres.powi(2);
         //     let mut num_flagged_baselines = 0;
-        //     for (uvw, baseline_weight) in uvws.into_iter().zip(baseline_weights.iter_mut()) {
+        //     for (uvw, baseline_weight) in uvws.into_iter().zip_eq(baseline_weights.iter_mut()) {
         //         let uvw_length = uvw.u.powi(2) + uvw.v.powi(2) + uvw.w.powi(2);
         //         if uvw_length < uvw_min || uvw_length > uvw_max {
         //             *baseline_weight = 0.0;
@@ -1411,8 +1407,9 @@ impl PeelArgs {
                         num_unflagged_cross_baselines,
                     ));
                     for timeblock in &timeblocks {
-                        for (vis_model_slice, timestamp) in
-                            vis_model.outer_iter_mut().zip(timeblock.timestamps.iter())
+                        for (vis_model_slice, timestamp) in vis_model
+                            .outer_iter_mut()
+                            .zip_eq(timeblock.timestamps.iter())
                         {
                             // Should we continue?
                             if error.load() {
@@ -1432,72 +1429,6 @@ impl PeelArgs {
                         // to be subtracted for this to be a true "residual". That's
                         // happens next.
                         let (mut vis_residual, vis_weights, timeblock) = rx_data.recv().unwrap();
-
-                        // TODO: Make this available behind a flag.
-                        // // for each source in the sourcelist, rotate to it and
-                        // // subtract the model
-                        // for (source_name, source) in srclist.iter() {
-                        //     info!("Rotating to {source_name} and subtracting its model");
-                        //     modeller
-                        //         .update_with_a_source(source, source.weighted_radec)
-                        //         .unwrap();
-
-                        //     vis_rotate(
-                        //         vis_residual.view_mut(),
-                        //         source.weighted_radec,
-                        //         precessed_tile_xyzs.view(),
-                        //         &mut tile_ws_from,
-                        //         &mut tile_ws_to,
-                        //         &lmsts,
-                        //         all_fine_chan_freqs_hz,
-                        //         true,
-                        //     );
-
-                        //     vis_residual
-                        //         .outer_iter_mut()
-                        //         .zip(timestamps.iter())
-                        //         .for_each(|(mut vis_residual, epoch)| {
-                        //             // model into vis_slice: (bl, ch), a 2d slice of vis_residual_tmp: (1, bl, ch)
-                        //             // vis slice for modelling needs to be 2d, so we take a slice of vis_residual_tmp
-                        //             let mut vis_slice = vis_residual_tmp.slice_mut(s![0, .., ..]);
-                        //             modeller
-                        //                 .model_timestep(vis_slice.view_mut(), *epoch)
-                        //                 .unwrap();
-
-                        //             // TODO: This is currently useful as simulate_accumulate_iono is only in
-                        //             // one place. But it might be useful in Shintaro feedback when the
-                        //             // source already has constants?
-                        //             // // apply iono to temp model
-                        //             // if source.iono_consts.0.abs() > 1e-9 || source.iono_consts.1.abs() > 1e-9 {
-                        //             //     let part_uvws = calc_part_uvws(
-                        //             //         unflagged_tile_xyzs.len(),
-                        //             //         timestamps,
-                        //             //         source_pos,
-                        //             //         array_pos,
-                        //             //         unflagged_tile_xyzs,
-                        //             //     );
-                        //             //     apply_iono(
-                        //             //         vis_residual_tmp.view_mut(),
-                        //             //         part_uvws,
-                        //             //         source.iono_consts,
-                        //             //         all_fine_chan_freqs_hz,
-                        //             //     );
-                        //             // }
-                        //             // after apply iono, copy to residual array
-                        //             vis_residual -= &vis_residual_tmp.slice(s![0, .., ..]);
-                        //         });
-                        // }
-                        // // rotate back to original phase centre
-                        // vis_rotate(
-                        //     vis_residual.view_mut(),
-                        //     obs_context.phase_centre,
-                        //     precessed_tile_xyzs.view(),
-                        //     &mut tile_ws_from,
-                        //     &mut tile_ws_to,
-                        //     &lmsts,
-                        //     all_fine_chan_freqs_hz,
-                        //     true,
-                        // );
 
                         // Don't rotate to each source and subtract; just subtract
                         // the full model.
@@ -1519,7 +1450,6 @@ impl PeelArgs {
                 .spawn_scoped(scope, || {
                     defer_on_unwind! { error.store(true); }
 
-
                     for (i, (mut vis_residual, vis_weights, timeblock)) in
                         rx_residual.iter().enumerate()
                     {
@@ -1539,7 +1469,7 @@ impl PeelArgs {
                                     &SourceList::new(),
                                     &unflagged_tile_xyzs,
                                     &low_res_freqs_hz,
-                                    &flagged_tiles,
+                                    flagged_tiles,
                                     RADec::default(),
                                     array_position.longitude_rad,
                                     array_position.latitude_rad,
@@ -1553,7 +1483,7 @@ impl PeelArgs {
                                     &SourceList::new(),
                                     &unflagged_tile_xyzs,
                                     &all_fine_chan_freqs_hz,
-                                    &flagged_tiles,
+                                    flagged_tiles,
                                     RADec::default(),
                                     array_position.longitude_rad,
                                     array_position.latitude_rad,
@@ -1761,7 +1691,7 @@ impl PeelArgs {
                         );
 
                         let result = write_vis(
-                            &vis_outputs,
+                            vis_outputs,
                             array_position,
                             obs_context.phase_centre,
                             obs_context.pointing_centre,
@@ -2474,13 +2404,16 @@ fn model_timesteps(
 
 #[allow(clippy::too_many_arguments)]
 fn peel_cpu(
+    // TODO(dev): I would name this vis_residual_tfb
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
+    // TODO(dev): I would name this vis_weights
     vis_weights: ArrayView3<f32>,
     timeblock: &Timeblock,
     source_list: &SourceList,
     iono_consts: &mut [(f64, f64)],
     source_weighted_positions: &[RADec],
     num_sources_to_iono_subtract: usize,
+    // TODO (dev): Why do we need both this and low_res_lambdas_m? it's not even used
     low_res_freqs_hz: &[f64],
     all_fine_chan_lambdas_m: &[f64],
     low_res_lambdas_m: &[f64],
@@ -2734,7 +2667,7 @@ fn peel_cpu(
                     vis_residual_rot_fb.view_mut(),
                     tile_ws_high_res.as_slice().unwrap(),
                     tile_ws_high_res_rot.as_slice_mut().unwrap(),
-                    &all_fine_chan_lambdas_m,
+                    all_fine_chan_lambdas_m,
         );
             }
         }
