@@ -19,14 +19,14 @@ use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
+#[cfg(feature = "cuda")]
+use marlu::pos::xyz::xyzs_to_cross_uvws;
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR, VEL_C},
     math::num_tiles_from_num_cross_correlation_baselines,
     precession::{get_lmst, precess_time},
     HADec, Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic, UVW,
 };
-#[cfg(feature = "cuda")]
-use marlu::{pos::xyz::xyzs_to_cross_uvws};
 use ndarray::{prelude::*, Zip};
 use num_complex::Complex;
 use num_traits::Zero;
@@ -2848,41 +2848,74 @@ fn peel_cuda(
             )
         })
         .collect::<Vec<_>>();
-    let (lmsts, latitudes): (Vec<f64>, Vec<f64>) = precession_infos
-        .iter()
-        .map(|p| {
-            if no_precession {
-                (p.lmst, array_position.latitude_rad)
-            } else {
-                (p.lmst_j2000, p.array_latitude_j2000)
+
+    let mut lmsts = vec![0.; timestamps.len()];
+    let mut latitudes = vec![0.; timestamps.len()];
+    let mut precessed_tile_xyzs = Array2::<XyzGeodetic>::default((timestamps.len(), num_tiles));
+    let mut high_res_uvws = Array2::default((timestamps.len(), num_cross_baselines));
+    let mut tile_uvs_high_res = Array2::<UV>::default((timestamps.len(), num_tiles));
+    let mut tile_ws_high_res = Array2::<W>::default((timestamps.len(), num_tiles));
+
+    // Pre-compute high-res tile UVs and Ws at observation phase centre.
+    for (
+        &precession_info,
+        mut lmst,
+        mut latitude,
+        mut precessed_tile_xyzs,
+        mut high_res_uvws,
+        mut tile_uvs_high_res,
+        mut tile_ws_high_res,
+    ) in izip!(
+        precession_infos.iter(),
+        lmsts.iter_mut(),
+        latitudes.iter_mut(),
+        precessed_tile_xyzs.outer_iter_mut(),
+        high_res_uvws.outer_iter_mut(),
+        tile_uvs_high_res.outer_iter_mut(),
+        tile_ws_high_res.outer_iter_mut(),
+    ) {
+        if !no_precession {
+            precessed_tile_xyzs
+                .iter_mut()
+                .zip_eq(&precession_info.precess_xyz(unflagged_tile_xyzs))
+                .for_each(|(a, b)| *a = *b);
+            *lmst = precession_info.lmst_j2000;
+            *latitude = precession_info.array_latitude_j2000;
+        } else {
+            precessed_tile_xyzs
+                .iter_mut()
+                .zip_eq(unflagged_tile_xyzs)
+                .for_each(|(a, b)| *a = *b);
+            *lmst = precession_info.lmst;
+            *latitude = array_position.latitude_rad;
+        };
+        let hadec_phase = obs_context.phase_centre.to_hadec(*lmst);
+        let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
+        let (s_dec, c_dec) = hadec_phase.dec.sin_cos();
+        let mut tile_uvws_high_res = vec![UVW::default(); num_cross_baselines];
+        for (mut tile_uvw, mut tile_uv, mut tile_w, &precessed_tile_xyz) in izip!(
+            tile_uvws_high_res.iter_mut(),
+            tile_uvs_high_res.iter_mut(),
+            tile_ws_high_res.iter_mut(),
+            precessed_tile_xyzs.iter(),
+        ) {
+            let uvw = UVW::from_xyz_inner(precessed_tile_xyz, s_ha, c_ha, s_dec, c_dec);
+            *tile_uvw = uvw;
+            *tile_uv = UV { u: uvw.u, v: uvw.v };
+            *tile_w = W(uvw.w);
+        }
+
+        // The UVWs for every timestep will be the same (because the phase
+        // centres are always the same). Make these ahead of time for
+        // efficiency.
+        let mut count = 0;
+        for (i, t1) in tile_uvws_high_res.iter().enumerate() {
+            for t2 in tile_uvws_high_res.iter().skip(i + 1) {
+                high_res_uvws[count] = *t1 - *t2;
+                count += 1;
             }
-        })
-        .unzip();
-    let mut precessed_tile_xyzs =
-        Array2::from_elem((timestamps.len(), num_tiles), XyzGeodetic::default());
-    precessed_tile_xyzs
-        .outer_iter_mut()
-        .zip(precession_infos.into_iter())
-        .for_each(|(mut precessed_tile_xyzs, precession_info)| {
-            let xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
-            precessed_tile_xyzs.assign(&Array1::from_vec(xyzs));
-        });
-
-    let mut tile_uvs_high_res = Array2::default((timestamps.len(), num_tiles));
-
-    // Pre-compute tile UVs.
-    tile_uvs_high_res
-        .outer_iter_mut()
-        .zip(precessed_tile_xyzs.outer_iter())
-        .zip(lmsts.iter())
-        .for_each(|((mut tile_uvs, unflagged_tile_xyzs), lmst)| {
-            let obs_phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-            setup_uvs(
-                tile_uvs.as_slice_mut().unwrap(),
-                unflagged_tile_xyzs.as_slice().unwrap(),
-                obs_phase_centre,
-            );
-        });
+        }
+    }
 
     // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
     let short_baseline_sigma = 20.;
@@ -2898,22 +2931,6 @@ fn peel_cuda(
         iono_taper *= &vis_weights;
         iono_taper
     };
-
-    let mut tile_ws_from = Array2::default((timestamps.len(), num_tiles));
-    // Set up the first set of Ws at the phase centre.
-    tile_ws_from
-        .outer_iter_mut()
-        .into_par_iter()
-        .zip(precessed_tile_xyzs.outer_iter())
-        .zip(lmsts.par_iter())
-        .for_each(|((mut tile_ws_from, precessed_tile_xyzs), lmst)| {
-            let obs_phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-            setup_ws(
-                tile_ws_from.view_mut(),
-                precessed_tile_xyzs.view(),
-                obs_phase_centre,
-            );
-        });
 
     let average_timestamp = average_epoch(timestamps);
     let average_precession_info = precess_time(
@@ -2948,38 +2965,6 @@ fn peel_cuda(
 
     // The low-res weights only need to be populated once.
     weights_average(iono_taper_weights.view(), vis_weights_low_res.view_mut());
-
-    // The UVWs for every timestep will be the same (because the phase
-    // centres are always the same). Make these ahead of time for
-    // efficiency.
-    let high_res_uvws = {
-        let mut uvws = Array2::default((timestamps.len(), num_cross_baselines));
-        let mut tile_uvws = vec![UVW::default(); precessed_tile_xyzs.len_of(Axis(1))];
-        uvws.outer_iter_mut()
-            .zip(precessed_tile_xyzs.outer_iter())
-            .zip(lmsts.iter())
-            .for_each(|((mut uvws, precessed_tile_xyzs), lmst)| {
-                let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-                let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-                let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-                // Get a UVW for each tile.
-                tile_uvws
-                    .iter_mut()
-                    .zip(precessed_tile_xyzs.iter())
-                    .for_each(|(uvw, xyz)| {
-                        *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec)
-                    });
-                // Take the difference of every pair of UVWs.
-                let mut count = 0;
-                for (i, t1) in tile_uvws.iter().enumerate() {
-                    for t2 in tile_uvws.iter().skip(i + 1) {
-                        uvws[count] = *t1 - *t2;
-                        count += 1;
-                    }
-                }
-            });
-        uvws
-    };
 
     let freq_average_factor = all_fine_chan_freqs_hz.len() / low_res_freqs_hz.len();
 
