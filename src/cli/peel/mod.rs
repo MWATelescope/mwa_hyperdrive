@@ -2483,58 +2483,40 @@ fn peel_cpu(
         })
         .collect::<Vec<_>>();
 
-    let mut lmsts = vec![0.; timestamps.len()];
-    // let mut latitudes = vec![0.; timestamps.len()];
-    let mut precessed_tile_xyzs = Array2::<XyzGeodetic>::default((timestamps.len(), num_tiles));
     // let mut high_res_uvws = Array2::default((timestamps.len(), num_cross_baselines));
     // observation phase center
     let mut tile_uvs_high_res = Array2::<UV>::default((timestamps.len(), num_tiles));
-    // TODO(dev): I would name this "tile_ws_high_res"
+    // TODO (Dev): I would name this "tile_ws_high_res"
     let mut tile_ws_from = Array2::<W>::default((timestamps.len(), num_tiles));
     // source phase center
-    // TODO(dev): I would name this tile_uvs_high_res_rot
+    // TODO (Dev): I would name this tile_uvs_high_res_rot
     let mut tile_uvs_high_res_rot = tile_uvs_high_res.clone();
-    // TODO(dev): I would name this tile_ws_high_res_rot
+    // TODO (Dev): I would name this tile_ws_high_res_rot
     let mut tile_ws_to = tile_ws_from.clone();
-    // TODO(dev): I would name this tile_uvs_low_res_rot
+    // TODO (Dev): I would name this tile_uvs_low_res_rot
     let mut tile_uvs_low_res = Array2::<UV>::default((1, num_tiles));
 
     // Pre-compute high-res tile UVs and Ws at observation phase centre.
-    for (
-        &precession_info,
-        mut lmst,
-        mut precessed_tile_xyzs,
-        mut tile_uvs_high_res,
-        mut tile_ws_high_res,
-    ) in izip!(
+    for (&precession_info, mut tile_uvs, mut tile_ws) in izip!(
         precession_infos.iter(),
-        lmsts.iter_mut(),
-        precessed_tile_xyzs.outer_iter_mut(),
         tile_uvs_high_res.outer_iter_mut(),
         tile_ws_from.outer_iter_mut(),
     ) {
-        if !no_precession {
-            precessed_tile_xyzs
-                .iter_mut()
-                .zip_eq(&precession_info.precess_xyz(unflagged_tile_xyzs))
-                .for_each(|(a, b)| *a = *b);
-            *lmst = precession_info.lmst_j2000;
+        let (lmst, precessed_xyzs) = if !no_precession {
+            let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
+            (precession_info.lmst_j2000, precessed_xyzs)
             } else {
-    precessed_tile_xyzs
-                .iter_mut()
-                .zip_eq(unflagged_tile_xyzs)
-                .for_each(|(a, b)| *a = *b);
-            *lmst = precession_info.lmst;
-        }
-        let hadec_phase = obs_context.phase_centre.to_hadec(*lmst);
+            (precession_info.lmst, unflagged_tile_xyzs.into())
+        };
+        let hadec_phase = obs_context.phase_centre.to_hadec(lmst);
         let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
         let (s_dec, c_dec) = hadec_phase.dec.sin_cos();
-        for (mut tile_uv, mut tile_w, &precessed_tile_xyz) in izip!(
-            tile_uvs_high_res.iter_mut(),
-            tile_ws_high_res.iter_mut(),
-            precessed_tile_xyzs.iter(),
+        for (tile_uv, tile_w, &precessed_xyzs) in izip!(
+            tile_uvs.iter_mut(),
+            tile_ws.iter_mut(),
+            precessed_xyzs.iter(),
         ) {
-            let uvw = UVW::from_xyz_inner(precessed_tile_xyz, s_ha, c_ha, s_dec, c_dec);
+            let uvw = UVW::from_xyz_inner(precessed_xyzs, s_ha, c_ha, s_dec, c_dec);
             *tile_uv = UV { u: uvw.u, v: uvw.v };
             *tile_w = W(uvw.w);
         }
@@ -2556,29 +2538,12 @@ fn peel_cpu(
     };
 
     // Temporary visibility array, re-used for each timestep
-    // TODO(dev): I would name this vis_residual_rot_tfb
+    // TODO (Dev): I would name this vis_residual_rot_tfb
     let mut vis_residual_tmp = vis_residual.to_owned();
     let high_res_vis_dims = vis_residual.dim();
     let mut vis_model_high_res = Array3::default(high_res_vis_dims);
 
-    let average_timestamp = average_epoch(timestamps);
-    let average_precession_info = precess_time(
-        array_position.longitude_rad,
-        array_position.latitude_rad,
-        obs_context.phase_centre,
-        average_timestamp,
-        dut1,
-    );
-    let average_lmst = if no_precession {
-        average_precession_info.lmst
-    } else {
-        average_precession_info.lmst_j2000
-    };
-    let average_precessed_tile_xyzs = Array2::from_shape_vec(
-        (num_timestamps_low_res, num_tiles),
-        average_precession_info.precess_xyz(unflagged_tile_xyzs),
-    )
-    .expect("correct shape");
+    let timestamps_low_res = vec![average_epoch(timestamps)];
 
     // temporary arrays for accumulation
     // TODO: Do a stocktake of arrays that are lying around!
@@ -2605,7 +2570,8 @@ fn peel_cpu(
         debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
         let start = std::time::Instant::now();
 
-        // TODO: vis_rotate2 and vis_weightless_average_tfb could be combined
+        // TODO (dev): model_timestep returns uvws, could re-use these here.
+        // TODO (dev): vis_rotate2 and vis_weightless_average_tfb could be combined
         // iterate along time chunks
         for (
             timestamps,
@@ -2627,12 +2593,14 @@ fn peel_cpu(
                 &time,
                 vis_residual_fb,
                 mut vis_residual_rot_fb,
+                tile_ws_high_res,
                 mut tile_uvs_high_res_rot,
                 mut tile_ws_high_res_rot,
             ) in izip!(
                 timestamps,
                 vis_residual_tfb.outer_iter(),
                 vis_residual_rot_tfb.outer_iter_mut(),
+                tile_ws_high_res.outer_iter(),
                 tile_uvs_high_res_rot.outer_iter_mut(),
                 tile_ws_high_res_rot.outer_iter_mut(),
             ) {
@@ -2653,7 +2621,7 @@ fn peel_cpu(
                 let hadec_source = source_phase_centre.to_hadec(lmst);
                 let (s_ha, c_ha) = hadec_source.ha.sin_cos();
                 let (s_dec, c_dec) = hadec_source.dec.sin_cos();
-                for (mut tile_uv, mut tile_w, &precessed_xyz) in izip!(
+                for (tile_uv, tile_w, &precessed_xyz) in izip!(
                     tile_uvs_high_res_rot.iter_mut(),
                     tile_ws_high_res_rot.iter_mut(),
                     precessed_xyzs.iter(),
@@ -2667,24 +2635,11 @@ fn peel_cpu(
                     vis_residual_fb.view(),
                     vis_residual_rot_fb.view_mut(),
                     tile_ws_high_res.as_slice().unwrap(),
-                    tile_ws_high_res_rot.as_slice_mut().unwrap(),
+                    tile_ws_high_res_rot.as_slice().unwrap(),
                     all_fine_chan_lambdas_m,
         );
             }
         }
-
-        // replaced this with the above to support --no-precession, and because we now need
-        // trace!("{:?}: rotate_average", std::time::Instant::now() - start);
-        // vis_rotate2(
-        //     vis_residual_tfb.view(),
-        //     vis_residual_rot_tfb.view_mut(),
-        //     source_phase_centre,
-        //     precessed_tile_xyzs.view(),
-        //     tile_ws_high_res.view(),
-        //     tile_ws_high_res_rot.view_mut(),
-        //     &lmsts,
-        //     all_fine_chan_lambdas_m,
-        // );
 
         trace!("{:?}: vis_average", std::time::Instant::now() - start);
         vis_average2(
@@ -2697,36 +2652,56 @@ fn peel_cpu(
         low_res_modeller.update_with_a_source(source, source_phase_centre)?;
         model_timesteps(
             low_res_modeller,
-            &[average_timestamp],
+            &timestamps_low_res,
             vis_model_low_res.view_mut(),
         )?;
 
         trace!("{:?}: add low-res model", std::time::Instant::now() - start);
-        // vis_model_low_res_tmp is populated in apply_iono2. no need to do that here.
+        // vis_model_low_res_tmp is only populated in apply_iono2 if iono_consts is not 0
         Zip::from(&mut vis_residual_low_res)
-            // .and(&mut vis_model_low_res_rot)
+            .and(&mut vis_model_low_res_tmp)
             .and(&vis_model_low_res)
-            // .for_each(|r, t, m| {
-            .for_each(|r, m| {
+            .for_each(|r, t, m| {
                 *r += *m;
-                // *t = *m;
+                *t = *m;
             });
 
         trace!(
             "{:?}: pre-compute tile UVs",
             std::time::Instant::now() - start
         );
-        tile_uvs_low_res
-            .outer_iter_mut()
-            .zip(average_precessed_tile_xyzs.outer_iter())
-            .for_each(|(mut tile_uvs, tile_xyzs)| {
-                let phase_centre = source_phase_centre.to_hadec(average_lmst);
+
+        // compute low-res tile UVs and Ws at source phase centre.
+        for (
+            &time,
+            mut tile_uvs,
+            // mut tile_ws,
+        ) in izip!(
+            timestamps_low_res.iter(),
+            tile_uvs_low_res.outer_iter_mut(),
+            // tile_ws_from.outer_iter_mut(),
+        ) {
+            let (lmst, precessed_xyzs) = if !no_precession {
+                let precession_info = precess_time(
+                    array_position.longitude_rad,
+                    array_position.latitude_rad,
+                    source_phase_centre,
+                    time,
+                    dut1,
+                );
+                let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
+                (precession_info.lmst_j2000, precessed_xyzs)
+            } else {
+                let lmst = get_lmst(array_position.longitude_rad, time, dut1);
+                (lmst, unflagged_tile_xyzs.into())
+            };
+            let hadec_phase = source_phase_centre.to_hadec(lmst);
                 setup_uvs(
                     tile_uvs.as_slice_mut().unwrap(),
-                    tile_xyzs.as_slice().unwrap(),
-                    phase_centre,
+                &precessed_xyzs,
+                hadec_phase,
                 );
-            });
+        }
 
         trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start);
         // let mut gain_update = 1.0;
