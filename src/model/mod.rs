@@ -93,7 +93,7 @@ pub trait SkyModeller<'a>: Send {
     ) -> Result<Vec<UVW>, ModelError>;
 
     // the following are only used for benchmarking
-    // todo: put these behind a flag
+    // TODO (dev): put these behind a feature flag
     fn _model_points(
         &mut self,
         vis_model_slice: ArrayViewMut2<Jones<f32>>,

@@ -24,7 +24,7 @@ use crate::{
     beam::Beam,
     constants::*,
     shapelets,
-    srclist::{ComponentList, GaussianParams, PerComponentParams, Source},
+    srclist::{ComponentList, GaussianParams, PerComponentParams},
 };
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
@@ -588,10 +588,12 @@ impl<'a> SkyModellerCpu<'a> {
 impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
     fn update_source_list(
         &mut self,
-        _source_list: &crate::srclist::SourceList,
-        _phase_centre: RADec,
+        source_list: &crate::srclist::SourceList,
+        phase_centre: RADec,
     ) -> Result<(), ModelError> {
-        todo!()
+        self.phase_centre = phase_centre;
+        self.components = ComponentList::new(source_list, self.unflagged_fine_chan_freqs, phase_centre);
+        Ok(())
     }
 
     fn model_timestep(
