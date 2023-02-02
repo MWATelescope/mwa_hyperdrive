@@ -3191,7 +3191,7 @@ fn peel_cuda(
                 d_high_res_model.get().cast(),
                 iono_consts.0,
                 iono_consts.1,
-                d_uvws_from.get(),
+                d_uvws_to.get(),
                 d_lambdas.get(),
                 num_timesteps.try_into().unwrap(),
                 num_cross_baselines.try_into().unwrap(),
