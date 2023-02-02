@@ -2443,7 +2443,7 @@ fn peel_cpu(
     let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
 
     let num_freqs_high_res = all_fine_chan_lambdas_m.len();
-    let num_freqs_low_res = all_fine_chan_lambdas_m.len();
+    let num_freqs_low_res = low_res_lambdas_m.len();
 
     let num_sources = source_list.len();
 
@@ -2458,9 +2458,9 @@ fn peel_cpu(
 
     assert_eq!(vis_residual.len_of(freq_axis), num_freqs_high_res);
     assert_eq!(vis_weights.len_of(freq_axis), num_freqs_high_res);
-    assert_eq!(low_res_lambdas_m.len(), num_freqs_high_res);
 
-    assert_eq!(iono_consts.len(), num_sources);
+    assert_eq!(iono_consts.len(), num_sources_to_iono_subtract);
+    assert!(num_sources_to_iono_subtract <= num_sources);
 
     let peel_progress = multi_progress_bar.add(
         ProgressBar::new(num_sources_to_iono_subtract as _)
