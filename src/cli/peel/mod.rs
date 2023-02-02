@@ -2779,7 +2779,7 @@ fn peel_cpu(
 #[cfg(feature = "cuda")]
 #[allow(clippy::too_many_arguments)]
 fn peel_cuda(
-    vis_residual: ArrayViewMut3<Jones<f32>>,
+    mut vis_residual: ArrayViewMut3<Jones<f32>>,
     vis_weights: ArrayView3<f32>,
     timeblock: &Timeblock,
     source_list: &SourceList,
@@ -2875,8 +2875,8 @@ fn peel_cuda(
         let hadec_phase = obs_context.phase_centre.to_hadec(*lmst);
         let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
         let (s_dec, c_dec) = hadec_phase.dec.sin_cos();
-        let mut tile_uvws_high_res = vec![UVW::default(); num_cross_baselines];
-        for (mut tile_uvw, mut tile_uv, mut tile_w, &precessed_tile_xyz) in izip!(
+        let mut tile_uvws_high_res = vec![UVW::default(); num_tiles];
+        for (tile_uvw, tile_uv, tile_w, &precessed_tile_xyz) in izip!(
             tile_uvws_high_res.iter_mut(),
             tile_uvs_high_res.iter_mut(),
             tile_ws_high_res.iter_mut(),
@@ -3203,6 +3203,9 @@ fn peel_cuda(
 
             peel_progress.inc(1);
         }
+
+        // copy results back to host
+        d_high_res_vis.copy_from_device(vis_residual.as_slice_mut().unwrap()).unwrap();
     }
 
     Ok(())
