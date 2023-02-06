@@ -2474,21 +2474,6 @@ fn peel_cpu(
     );
     peel_progress.tick();
 
-    let precession_infos = timestamps
-        .iter()
-        .copied()
-        .map(|time| {
-            precess_time(
-                array_position.longitude_rad,
-                array_position.latitude_rad,
-                obs_context.phase_centre,
-                time,
-                dut1,
-            )
-        })
-        .collect::<Vec<_>>();
-
-    // let mut high_res_uvws = Array2::default((timestamps.len(), num_cross_baselines));
     // observation phase center
     let mut tile_uvs_high_res = Array2::<UV>::default((timestamps.len(), num_tiles));
     // TODO (Dev): I would name this "tile_ws_high_res"
@@ -2502,16 +2487,28 @@ fn peel_cpu(
     let mut tile_uvs_low_res = Array2::<UV>::default((1, num_tiles));
 
     // Pre-compute high-res tile UVs and Ws at observation phase centre.
-    for (&precession_info, mut tile_uvs, mut tile_ws) in izip!(
-        precession_infos.iter(),
+    for (
+        &time,
+        mut tile_uvs,
+        mut tile_ws
+    ) in izip!(
+        timestamps.iter(),
         tile_uvs_high_res.outer_iter_mut(),
         tile_ws_from.outer_iter_mut(),
     ) {
         let (lmst, precessed_xyzs) = if !no_precession {
+            let precession_info = precess_time(
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                obs_context.phase_centre,
+                time,
+                dut1,
+            );
             let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
             (precession_info.lmst_j2000, precessed_xyzs)
         } else {
-            (precession_info.lmst, unflagged_tile_xyzs.into())
+            let lmst = get_lmst(array_position.longitude_rad, time, dut1);
+            (lmst, unflagged_tile_xyzs.into())
         };
         let hadec_phase = obs_context.phase_centre.to_hadec(lmst);
         let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
@@ -2549,8 +2546,6 @@ fn peel_cpu(
     let high_res_vis_dims = vis_residual.dim();
     let mut vis_model_high_res = Array3::default(high_res_vis_dims);
 
-    let timestamps_low_res = vec![average_epoch(timestamps)];
-
     // temporary arrays for accumulation
     // TODO: Do a stocktake of arrays that are lying around!
     // TODO (Dev): I would name this vis_residual_low_res_rot
@@ -2573,28 +2568,54 @@ fn peel_cpu(
         .zip_eq(iono_consts.iter_mut())
         .zip_eq(source_weighted_positions.iter().copied())
     {
-        debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
+        multi_progress_bar.suspend(|| {
+            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})")
+        });
         let start = std::time::Instant::now();
 
+        low_res_modeller.update_with_a_source(source, source_phase_centre)?;
+        high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+        // this is only necessary for cpu modeller.
+        vis_model_low_res.fill(Jones::zero());
+
+        multi_progress_bar.suspend(|| {
+            trace!(
+                "{:?}: initialize modellers",
+                std::time::Instant::now() - start
+            )
+        });
         // TODO (dev): model_timestep returns uvws, could re-use these here.
-        // TODO (dev): vis_rotate2 and vis_weightless_average_tfb could be combined
-        // iterate along time chunks
+        // iterate along time chunks:
+        // - calculate high-res uvws in source phase centre
+        // - rotate residuals to source phase centre
+        // - model low res visibilities in source phase centre
+        // - calculate low-res uvws in source phase centre
         for (
             timestamps,
             vis_residual_tfb,
             mut vis_residual_rot_tfb,
+            mut vis_model_low_res_rot_fb,
             tile_ws_high_res,
             mut tile_uvs_high_res_rot,
             mut tile_ws_high_res_rot,
+            mut tile_uvs_low_res_rot,
         ) in izip!(
             timestamps.chunks(avg_time),
             vis_residual.axis_chunks_iter(time_axis, avg_time),
             vis_residual_tmp.axis_chunks_iter_mut(time_axis, avg_time),
+            vis_model_low_res.outer_iter_mut(),
             tile_ws_from.axis_chunks_iter(time_axis, avg_time),
             tile_uvs_high_res_rot.axis_chunks_iter_mut(time_axis, avg_time),
             tile_ws_to.axis_chunks_iter_mut(time_axis, avg_time),
+            tile_uvs_low_res.outer_iter_mut(),
         ) {
-            // iterate along time
+            multi_progress_bar.suspend(|| {
+                trace!(
+                    "{:?}: calc source uvw, rotate residual",
+                    std::time::Instant::now() - start
+                )
+            });
+            // iterate along high res times
             for (
                 &time,
                 vis_residual_fb,
@@ -2614,7 +2635,7 @@ fn peel_cpu(
                     let precession_info = precess_time(
                         array_position.longitude_rad,
                         array_position.latitude_rad,
-                        source_phase_centre,
+                        obs_context.phase_centre,
                         time,
                         dut1,
                     );
@@ -2645,80 +2666,63 @@ fn peel_cpu(
                     all_fine_chan_lambdas_m,
                 );
             }
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: low-res uvws", std::time::Instant::now() - start));
+
+            let low_res_epoch = average_epoch(timestamps);
+            // compute low-res tile UVs at source phase centre.
+            let (lmst, precessed_xyzs) = if !no_precession {
+                let precession_info = precess_time(
+                    array_position.longitude_rad,
+                    array_position.latitude_rad,
+                    obs_context.phase_centre,
+                    low_res_epoch,
+                    dut1,
+                );
+                let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
+                (precession_info.lmst_j2000, precessed_xyzs)
+            } else {
+                let lmst = get_lmst(array_position.longitude_rad, low_res_epoch, dut1);
+                (lmst, unflagged_tile_xyzs.into())
+            };
+            let hadec_source = source_phase_centre.to_hadec(lmst);
+            setup_uvs(
+                tile_uvs_low_res_rot.as_slice_mut().unwrap(),
+                &precessed_xyzs,
+                hadec_source,
+            );
+
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: low-res model", std::time::Instant::now() - start));
+            low_res_modeller.model_timestep(vis_model_low_res_rot_fb.view_mut(), low_res_epoch)?;
         }
 
-        trace!("{:?}: vis_average", std::time::Instant::now() - start);
+        multi_progress_bar
+            .suspend(|| trace!("{:?}: vis_average", std::time::Instant::now() - start));
         vis_average2(
             vis_residual_tmp.view(),
             vis_residual_low_res.view_mut(),
             iono_taper_weights.view(),
         );
 
-        trace!("{:?}: low-res model", std::time::Instant::now() - start);
-        low_res_modeller.update_with_a_source(source, source_phase_centre)?;
-        model_timesteps(
-            low_res_modeller,
-            &timestamps_low_res,
-            vis_model_low_res.view_mut(),
-        )?;
-
-        trace!("{:?}: add low-res model", std::time::Instant::now() - start);
+        multi_progress_bar
+            .suspend(|| trace!("{:?}: add low-res model", std::time::Instant::now() - start));
         // vis_model_low_res_tmp is only populated in apply_iono2 if iono_consts is not 0
         Zip::from(&mut vis_residual_low_res)
-            .and(&mut vis_model_low_res_tmp)
             .and(&vis_model_low_res)
-            .for_each(|r, t, m| {
+            .for_each(|r, m| {
                 *r += *m;
-                *t = *m;
             });
 
-        trace!(
-            "{:?}: pre-compute tile UVs",
-            std::time::Instant::now() - start
-        );
-
-        // compute low-res tile UVs and Ws at source phase centre.
-        for (
-            &time,
-            mut tile_uvs,
-            // mut tile_ws,
-        ) in izip!(
-            timestamps_low_res.iter(),
-            tile_uvs_low_res.outer_iter_mut(),
-            // tile_ws_from.outer_iter_mut(),
-        ) {
-            let (lmst, precessed_xyzs) = if !no_precession {
-                let precession_info = precess_time(
-                    array_position.longitude_rad,
-                    array_position.latitude_rad,
-                    source_phase_centre,
-                    time,
-                    dut1,
-                );
-                let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
-                (precession_info.lmst_j2000, precessed_xyzs)
-            } else {
-                let lmst = get_lmst(array_position.longitude_rad, time, dut1);
-                (lmst, unflagged_tile_xyzs.into())
-            };
-            let hadec_phase = source_phase_centre.to_hadec(lmst);
-            setup_uvs(
-                tile_uvs.as_slice_mut().unwrap(),
-                &precessed_xyzs,
-                hadec_phase,
-            );
-        }
-
-        trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start);
+        multi_progress_bar
+            .suspend(|| trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start));
         // let mut gain_update = 1.0;
         let mut iteration = 0;
         while iteration != 10 {
             iteration += 1;
-            debug!("iter {iteration}, consts: {iono_consts:?}");
+            multi_progress_bar.suspend(|| debug!("iter {iteration}, consts: {iono_consts:?}"));
 
-            // iono rotate model using existing iono consts (if they're
-            // non-zero)
-            if iono_consts.0.abs() > 0.0 || iono_consts.1.abs() > 0.0 {
+            // iono rotate model using existing iono consts
                 apply_iono2(
                     vis_model_low_res.view(),
                     vis_model_low_res_tmp.view_mut(),
@@ -2726,7 +2730,6 @@ fn peel_cpu(
                     *iono_consts,
                     low_res_lambdas_m,
                 );
-            }
 
             let iono_fits = iono_fit(
                 vis_residual_low_res.view(),
@@ -2735,7 +2738,7 @@ fn peel_cpu(
                 low_res_lambdas_m,
                 tile_uvs_low_res.view(),
             );
-            trace!("iono_fits: {iono_fits:?}");
+            multi_progress_bar.suspend(|| trace!("iono_fits: {iono_fits:?}"));
 
             iono_consts.0 += iono_fits[0];
             iono_consts.1 += iono_fits[1];
@@ -2751,11 +2754,12 @@ fn peel_cpu(
             }
         }
 
-        trace!("{:?}: high res model", std::time::Instant::now() - start);
-        high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+        multi_progress_bar
+            .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
         model_timesteps(high_res_modeller, timestamps, vis_model_high_res.view_mut())?;
 
-        trace!("{:?}: apply_iono3", std::time::Instant::now() - start);
+        multi_progress_bar
+            .suspend(|| trace!("{:?}: apply_iono3", std::time::Instant::now() - start));
         // add the model to residual, and subtract the iono rotated model
         apply_iono3(
             vis_model_high_res.view(),
@@ -2767,8 +2771,10 @@ fn peel_cpu(
             all_fine_chan_lambdas_m,
         );
 
+        multi_progress_bar.suspend(||
         debug!(
             "peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})"
+            )
         );
         peel_progress.inc(1);
     }
@@ -2818,20 +2824,6 @@ fn peel_cuda(
     let num_tiles = unflagged_tile_xyzs.len();
     let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
 
-    let precession_infos = timestamps
-        .iter()
-        .copied()
-        .map(|time| {
-            precess_time(
-                array_position.longitude_rad,
-                array_position.latitude_rad,
-                obs_context.phase_centre,
-                time,
-                dut1,
-            )
-        })
-        .collect::<Vec<_>>();
-
     let mut lmsts = vec![0.; timestamps.len()];
     let mut latitudes = vec![0.; timestamps.len()];
     let mut precessed_tile_xyzs = Array2::<XyzGeodetic>::default((timestamps.len(), num_tiles));
@@ -2841,15 +2833,15 @@ fn peel_cuda(
 
     // Pre-compute high-res tile UVs and Ws at observation phase centre.
     for (
-        &precession_info,
-        mut lmst,
-        mut latitude,
+        &time,
+        lmst,
+        latitude,
         mut precessed_tile_xyzs,
         mut high_res_uvws,
         mut tile_uvs_high_res,
         mut tile_ws_high_res,
     ) in izip!(
-        precession_infos.iter(),
+        timestamps.iter(),
         lmsts.iter_mut(),
         latitudes.iter_mut(),
         precessed_tile_xyzs.outer_iter_mut(),
@@ -2858,6 +2850,13 @@ fn peel_cuda(
         tile_ws_high_res.outer_iter_mut(),
     ) {
         if !no_precession {
+            let precession_info = precess_time(
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                obs_context.phase_centre,
+                time,
+                dut1,
+            );
             precessed_tile_xyzs
                 .iter_mut()
                 .zip_eq(&precession_info.precess_xyz(unflagged_tile_xyzs))
@@ -2869,7 +2868,7 @@ fn peel_cuda(
                 .iter_mut()
                 .zip_eq(unflagged_tile_xyzs)
                 .for_each(|(a, b)| *a = *b);
-            *lmst = precession_info.lmst;
+            *lmst = get_lmst(array_position.longitude_rad, time, dut1);
             *latitude = array_position.latitude_rad;
         };
         let hadec_phase = obs_context.phase_centre.to_hadec(*lmst);
@@ -3085,7 +3084,11 @@ fn peel_cuda(
             .zip_eq(iono_consts.iter_mut())
             .zip_eq(source_weighted_positions.iter().copied())
         {
-            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
+            multi_progress_bar.suspend(|| {
+                debug!(
+                    "peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})"
+                )
+            });
             let start = std::time::Instant::now();
             let status = cuda::rotate_average(
                 d_high_res_vis.get().cast(),
@@ -3107,14 +3110,17 @@ fn peel_cuda(
                 d_lambdas.get(),
             );
             assert_eq!(status, 0);
-            trace!("{:?}: rotate_average", std::time::Instant::now() - start);
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: rotate_average", std::time::Instant::now() - start));
 
             low_res_modeller.update_with_a_source(source, source_phase_centre)?;
             low_res_modeller.clear_vis();
-            trace!(
+            multi_progress_bar.suspend(|| {
+                trace!(
                 "{:?}: low res update and clear",
                 std::time::Instant::now() - start
-            );
+                )
+            });
 
             let status = cuda::xyzs_to_uvws(
                 d_xyzs_low_res.get(),
@@ -3128,14 +3134,18 @@ fn peel_cuda(
                 num_cross_baselines.try_into().unwrap(),
                 1,
             );
+
             assert_eq!(status, 0);
-            trace!(
+            multi_progress_bar.suspend(|| {
+                trace!(
                 "{:?}: low res xyzs_to_uvws",
                 std::time::Instant::now() - start
-            );
+                )
+            });
 
             low_res_modeller.model_with_uvws2(&d_uvws_low_res, average_lmst, average_latitude)?;
-            trace!("{:?}: low res model", std::time::Instant::now() - start);
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: low res model", std::time::Instant::now() - start));
 
             let status = cuda::iono_loop(
                 d_low_res_vis.get().cast(),
@@ -3156,7 +3166,8 @@ fn peel_cuda(
             );
             assert_eq!(status, 0);
             // dbg!(iono_consts);
-            trace!("{:?}: iono_loop", std::time::Instant::now() - start);
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: iono_loop", std::time::Instant::now() - start));
 
             high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
             // high_res_modeller.clear_vis();
@@ -3184,7 +3195,8 @@ fn peel_cuda(
                         *latitude,
                     )
                 })?;
-            trace!("{:?}: high res model", std::time::Instant::now() - start);
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
 
             let status = cuda::subtract_iono(
                 d_high_res_vis.get_mut().cast(),
@@ -3198,14 +3210,17 @@ fn peel_cuda(
                 all_fine_chan_freqs_hz.len().try_into().unwrap(),
             );
             assert_eq!(status, 0);
-            trace!("{:?}: subtract_iono", std::time::Instant::now() - start);
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: subtract_iono", std::time::Instant::now() - start));
             debug!("peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
 
             peel_progress.inc(1);
         }
 
         // copy results back to host
-        d_high_res_vis.copy_from_device(vis_residual.as_slice_mut().unwrap()).unwrap();
+        d_high_res_vis
+            .copy_from_device(vis_residual.as_slice_mut().unwrap())
+            .unwrap();
     }
 
     Ok(())

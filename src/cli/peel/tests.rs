@@ -329,7 +329,7 @@ fn setup_tile_uv_w_arrays(
             let precession_info = precess_time(
                 array_pos.longitude_rad,
                 array_pos.latitude_rad,
-                phase_centre,
+                obs_context.phase_centre,
                 time,
                 obs_context.dut1.unwrap(),
             );
@@ -514,6 +514,7 @@ fn test_vis_rotation() {
         )
         .unwrap();
 
+        vis_tfb.fill(Jones::zero());
         model_timesteps(
             modeller.deref_mut(),
             &obs_context.timestamps,
@@ -667,8 +668,8 @@ fn test_vis_average() {
             [ Jones::zero(), Jones::zero(), Jones::zero(), Jones::identity() ],
             [ Jones::zero(), Jones::zero(), Jones::identity(), Jones::zero() ],
             [ Jones::zero(), Jones::zero(), Jones::identity(), Jones::identity() ],
-            ],
-            [
+        ],
+        [
             [ Jones::zero(), Jones::identity(), Jones::zero(), Jones::zero() ],
             [ Jones::zero(), Jones::identity(), Jones::zero(), Jones::identity() ],
             [ Jones::zero(), Jones::identity(), Jones::identity(), Jones::zero() ],
@@ -793,6 +794,8 @@ fn test_apply_iono2() {
         )
         .unwrap();
 
+        vis_tfb.fill(Jones::zero());
+
         model_timesteps(
             modeller.deref_mut(),
             &obs_context.timestamps,
@@ -844,7 +847,8 @@ fn test_apply_iono2() {
         ) {
             if !apply_precession {
                 // baseline 1, from origin to v has no u or w component, should not be affected by the rotation
-                for (vis, vis_iono) in izip!(vis_fb.slice(s![.., 1]), vis_iono_fb.slice(s![.., 1]),) {
+                for (vis, vis_iono) in izip!(vis_fb.slice(s![.., 1]), vis_iono_fb.slice(s![.., 1]),)
+                {
                     assert_abs_diff_eq!(vis, vis_iono, epsilon = 1e-6);
                 }
                 // in the second timestep, the source should be at the pointing centre, so:
@@ -962,6 +966,8 @@ fn test_iono_fit() {
         )
         .unwrap();
 
+        vis_tfb.fill(Jones::zero());
+
         model_timesteps(
             modeller.deref_mut(),
             &obs_context.timestamps,
@@ -988,7 +994,12 @@ fn test_iono_fit() {
         let shape = vis_tfb.shape();
         let weights = Array3::ones((shape[0], shape[1], shape[2]));
 
-        for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
+        for consts_lm in [
+            (0., 0.),
+            (0.0001, -0.0003),
+            (0.0003, -0.0001),
+            (-0.0007, 0.0001),
+        ] {
             apply_iono2(
                 vis_tfb.view(),
                 vis_iono_tfb.view_mut(),
@@ -1013,8 +1024,10 @@ fn test_iono_fit() {
                 tile_uvs_src.view(),
             );
 
-            assert_abs_diff_eq!(results[0], consts_lm.0, epsilon = 1e-6);
-            assert_abs_diff_eq!(results[1], consts_lm.1, epsilon = 1e-6);
+            // println!("prec: {:?}, expected: {:?}, got: {:?}", apply_precession, consts_lm, &results);
+
+            assert_abs_diff_eq!(results[0], consts_lm.0, epsilon = 1e-8);
+            assert_abs_diff_eq!(results[1], consts_lm.1, epsilon = 1e-8);
         }
     }
 }
@@ -1085,6 +1098,8 @@ fn test_apply_iono3() {
         )
         .unwrap();
 
+        vis_model_obs_tfb.fill(Jones::zero());
+
         model_timesteps(
             modeller.deref_mut(),
             &obs_context.timestamps,
@@ -1148,8 +1163,8 @@ fn test_apply_iono3() {
 }
 
 #[test]
-/// test peel_cpu with and without precession
-fn test_peel_cpu() {
+/// test peel_cpu with and without precession on a single source
+fn test_peel_cpu_single_source() {
     // enable trace
     // let mut builder = env_logger::Builder::from_default_env();
     // builder.target(env_logger::Target::Stdout);
@@ -1182,7 +1197,7 @@ fn test_peel_cpu() {
         .collect_vec();
     let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
-    // source is at zenith at 1h
+    // source is at zenith at 1h (before precession)
     let lst_1h_rad = get_lmst(
         array_pos.longitude_rad,
         hour_epoch,
@@ -1197,13 +1212,13 @@ fn test_peel_cpu() {
 
     let beam = get_beam(num_tiles);
 
-    // residual visibilities in the observation phase centre
-    let mut vis_residual_obs_tfb =
-        Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
     // model visibilities in the observation phase centre
-    let mut vis_model_obs_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
+    let mut vis_model_obs_tfb = Array3::zeros((num_times, num_chans, num_baselines));
     // iono rotated model visibilities in the observation phase centre
-    let mut vis_iono_obs_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
+    let mut vis_iono_obs_tfb = Array3::zeros((num_times, num_chans, num_baselines));
+    // residual visibilities in the observation phase centre
+    let mut vis_residual_obs_tfb = Array3::zeros((num_times, num_chans, num_baselines));
+
     // tile uvs and ws in the source phase centre
     let mut tile_uvs_src = Array2::default((num_times, num_tiles));
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
@@ -1255,6 +1270,8 @@ fn test_peel_cpu() {
         )
         .unwrap();
 
+        vis_model_obs_tfb.fill(Jones::zero());
+
         model_timesteps(
             high_res_modeller.deref_mut(),
             &obs_context.timestamps,
@@ -1278,7 +1295,12 @@ fn test_peel_cpu() {
         //     apply_precession,
         // );
 
-        for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
+        for consts_lm in [
+            (0., 0.),
+            (0.0001, -0.0003),
+            (0.0003, -0.0001),
+            (-0.0007, 0.0001),
+        ] {
             apply_iono2(
                 vis_model_obs_tfb.view(),
                 vis_iono_obs_tfb.view_mut(),
@@ -1288,14 +1310,14 @@ fn test_peel_cpu() {
             );
 
             // display_vis_tfb(
-            //     &format!("iono@obs ({}, {})", &consts_lm.0, &consts_lm.1),
+            //     &format!("iono@obs prec={}, ({}, {})", apply_precession, &consts_lm.0, &consts_lm.1),
             //     vis_iono_obs_tfb.view(),
             //     &obs_context,
             //     obs_context.phase_centre,
             //     apply_precession,
             // );
 
-            // subtract model from iono at source phase centre
+            // subtract model from iono at observation phase centre
             vis_residual_obs_tfb.assign(&vis_iono_obs_tfb);
             vis_residual_obs_tfb -= &vis_model_obs_tfb;
 
@@ -1331,7 +1353,7 @@ fn test_peel_cpu() {
             )
             .unwrap();
 
-            // println!("expected: {:?}, got: {:?}", consts_lm, iono_consts);
+            // println!("prec: {:?}, expected: {:?}, got: {:?}", apply_precession, consts_lm, iono_consts);
 
             // display_vis_tfb(
             //     &"peeled@obs".into(),
@@ -1341,23 +1363,13 @@ fn test_peel_cpu() {
             //     apply_precession,
             // );
 
-            // TODO (Dev): why does this only work with cuda modeller or no precession?
-            // probable because we're modelling in the obs phase center. but why does cuda work then?
-            #[allow(unused_mut)]
-            let mut tests_will_fail = apply_precession;
-            #[cfg(feature = "cuda")]
-            {
-                tests_will_fail &= model_cpu;
-            }
-            if !tests_will_fail {
-                assert_abs_diff_eq!(iono_consts[0].0, consts_lm.0, epsilon = 1e-6);
-                assert_abs_diff_eq!(iono_consts[0].1, consts_lm.1, epsilon = 1e-6);
+            assert_abs_diff_eq!(iono_consts[0].0, consts_lm.0, epsilon = 2e-8);
+            assert_abs_diff_eq!(iono_consts[0].1, consts_lm.1, epsilon = 2e-8);
 
-                // peel should perfectly remove the iono rotate model vis
-                for jones_residual in vis_residual_obs_tfb.iter() {
-                    for pol_residual in jones_residual.iter() {
-                        assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 1e-6);
-                    }
+            // peel should perfectly remove the iono rotate model vis
+            for jones_residual in vis_residual_obs_tfb.iter() {
+                for pol_residual in jones_residual.iter() {
+                    assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 2e-8);
                 }
             }
         }
@@ -1426,7 +1438,6 @@ mod cuda_tests {
     /// - create residual: ionospheric - model
     /// - ap ply_iono3 should result in empty visibilitiesiono rotated model
     fn test_cuda_subtract_iono() {
-        let apply_precession = false;
         let obs_context = get_simple_obs_context();
         let array_pos = obs_context.array_position.unwrap();
 
@@ -1459,22 +1470,6 @@ mod cuda_tests {
 
         let beam = get_beam(num_tiles);
 
-        let mut modeller = new_sky_modeller(
-            #[cfg(feature = "cuda")]
-            false,
-            beam.deref(),
-            &source_list,
-            &obs_context.tile_xyzs,
-            &fine_chan_freqs_hz,
-            &flagged_tiles,
-            obs_context.phase_centre,
-            array_pos.longitude_rad,
-            array_pos.latitude_rad,
-            obs_context.dut1.unwrap(),
-            apply_precession,
-        )
-        .unwrap();
-
         // residual visibilities in the observation phase centre
         let mut vis_residual_obs_tfb =
             Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
@@ -1484,114 +1479,135 @@ mod cuda_tests {
         // iono rotated model visibilities in the observation phase centre
         let mut vis_iono_obs_tfb =
             Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
-        model_timesteps(
-            modeller.deref_mut(),
-            &obs_context.timestamps,
-            vis_model_obs_tfb.view_mut(),
-        )
-        .unwrap();
-
         // tile uvs and ws in the source phase centre
         let mut tile_uvws_src = Array2::default((num_times, num_tiles));
         let mut tile_uvs_src = Array2::default((num_times, num_tiles));
         let mut tile_ws_src = Array2::default((num_times, num_tiles));
-        setup_uvw_array(
-            tile_uvws_src.view_mut(),
-            &obs_context,
-            source_radec,
-            apply_precession,
-        );
-        setup_tile_uv_w_arrays(
-            tile_uvs_src.view_mut(),
-            tile_ws_src.view_mut(),
-            &obs_context,
-            source_radec,
-            apply_precession,
-        );
 
-        // display_vis_tfb(
-        //     &"model@obs".into(),
-        //     vis_model_obs_tfb.view(),
-        //     &obs_context,
-        //     obs_context.phase_centre,
-        //     apply_precession,
-        // );
+        for apply_precession in [false, true] {
+            let mut modeller = new_sky_modeller(
+                #[cfg(feature = "cuda")]
+                false,
+                beam.deref(),
+                &source_list,
+                &obs_context.tile_xyzs,
+                &fine_chan_freqs_hz,
+                &flagged_tiles,
+                obs_context.phase_centre,
+                array_pos.longitude_rad,
+                array_pos.latitude_rad,
+                obs_context.dut1.unwrap(),
+                apply_precession,
+            )
+            .unwrap();
 
-        let d_high_res_model =
-            DevicePointer::copy_to_device(vis_model_obs_tfb.as_slice().unwrap()).unwrap();
+            model_timesteps(
+                modeller.deref_mut(),
+                &obs_context.timestamps,
+                vis_model_obs_tfb.view_mut(),
+            )
+            .unwrap();
 
-        let cuda_uvws_src = tile_uvws_src.mapv(|uvw| cuda::UVW {
-            u: uvw.u as CudaFloat,
-            v: uvw.v as CudaFloat,
-            w: uvw.w as CudaFloat,
-        });
-
-        let d_uvws_src = DevicePointer::copy_to_device(cuda_uvws_src.as_slice().unwrap()).unwrap();
-        let d_lambdas = DevicePointer::copy_to_device(&lambdas_m).unwrap();
-
-        for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
-            // apply iono rotation at source phase to model at observation phase
-            apply_iono2(
-                vis_model_obs_tfb.view(),
-                vis_iono_obs_tfb.view_mut(),
-                tile_uvs_src.view(),
-                consts_lm,
-                &lambdas_m,
+            setup_uvw_array(
+                tile_uvws_src.view_mut(),
+                &obs_context,
+                source_radec,
+                apply_precession,
+            );
+            setup_tile_uv_w_arrays(
+                tile_uvs_src.view_mut(),
+                tile_ws_src.view_mut(),
+                &obs_context,
+                source_radec,
+                apply_precession,
             );
 
             // display_vis_tfb(
-            //     &format!("iono@obs ({}, {})", &consts_lm.0, &consts_lm.1),
-            //     vis_iono_obs_tfb.view(),
+            //     &"model@obs".into(),
+            //     vis_model_obs_tfb.view(),
             //     &obs_context,
             //     obs_context.phase_centre,
             //     apply_precession,
             // );
 
-            // subtract model from iono at observation phase centre
-            vis_residual_obs_tfb.assign(&vis_iono_obs_tfb);
-            vis_residual_obs_tfb -= &vis_model_obs_tfb;
+            let d_high_res_model =
+                DevicePointer::copy_to_device(vis_model_obs_tfb.as_slice().unwrap()).unwrap();
 
-            // display_vis_tfb(
-            //     &"residual@obs before".into(),
-            //     vis_residual_obs_tfb.view(),
-            //     &obs_context,
-            //     obs_context.phase_centre,
-            //     apply_precession,
-            // );
+            let cuda_uvws_src = tile_uvws_src.mapv(|uvw| cuda::UVW {
+                u: uvw.u as CudaFloat,
+                v: uvw.v as CudaFloat,
+                w: uvw.w as CudaFloat,
+            });
 
-            let mut d_high_res_vis =
-                DevicePointer::copy_to_device(vis_residual_obs_tfb.as_slice().unwrap()).unwrap();
+            let d_uvws_src =
+                DevicePointer::copy_to_device(cuda_uvws_src.as_slice().unwrap()).unwrap();
+            let d_lambdas = DevicePointer::copy_to_device(&lambdas_m).unwrap();
 
-            let status = unsafe {
-                cuda::subtract_iono(
-                    d_high_res_vis.get_mut().cast(),
-                    d_high_res_model.get().cast(),
-                    consts_lm.0,
-                    consts_lm.1,
-                    d_uvws_src.get(),
-                    d_lambdas.get(),
-                    num_times.try_into().unwrap(),
-                    num_baselines.try_into().unwrap(),
-                    num_chans.try_into().unwrap(),
-                )
-            };
-            assert_eq!(status, 0);
+            for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
+                // apply iono rotation at source phase to model at observation phase
+                apply_iono2(
+                    vis_model_obs_tfb.view(),
+                    vis_iono_obs_tfb.view_mut(),
+                    tile_uvs_src.view(),
+                    consts_lm,
+                    &lambdas_m,
+                );
 
-            d_high_res_vis
-                .copy_from_device(vis_residual_obs_tfb.as_slice_mut().unwrap())
-                .unwrap();
+                // display_vis_tfb(
+                //     &format!("iono@obs ({}, {})", &consts_lm.0, &consts_lm.1),
+                //     vis_iono_obs_tfb.view(),
+                //     &obs_context,
+                //     obs_context.phase_centre,
+                //     apply_precession,
+                // );
 
-            // display_vis_tfb(
-            //     &"residual@obs after".into(),
-            //     vis_residual_obs_tfb.view(),
-            //     &obs_context,
-            //     obs_context.phase_centre,
-            //     apply_precession,
-            // );
+                // subtract model from iono at observation phase centre
+                vis_residual_obs_tfb.assign(&vis_iono_obs_tfb);
+                vis_residual_obs_tfb -= &vis_model_obs_tfb;
 
-            for jones_residual in vis_residual_obs_tfb.iter() {
-                for pol_residual in jones_residual.iter() {
-                    assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 1e-6);
+                // display_vis_tfb(
+                //     &"residual@obs before".into(),
+                //     vis_residual_obs_tfb.view(),
+                //     &obs_context,
+                //     obs_context.phase_centre,
+                //     apply_precession,
+                // );
+
+                let mut d_high_res_vis =
+                    DevicePointer::copy_to_device(vis_residual_obs_tfb.as_slice().unwrap())
+                        .unwrap();
+
+                let status = unsafe {
+                    cuda::subtract_iono(
+                        d_high_res_vis.get_mut().cast(),
+                        d_high_res_model.get().cast(),
+                        consts_lm.0,
+                        consts_lm.1,
+                        d_uvws_src.get(),
+                        d_lambdas.get(),
+                        num_times.try_into().unwrap(),
+                        num_baselines.try_into().unwrap(),
+                        num_chans.try_into().unwrap(),
+                    )
+                };
+                assert_eq!(status, 0);
+
+                d_high_res_vis
+                    .copy_from_device(vis_residual_obs_tfb.as_slice_mut().unwrap())
+                    .unwrap();
+
+                // display_vis_tfb(
+                //     &"residual@obs after".into(),
+                //     vis_residual_obs_tfb.view(),
+                //     &obs_context,
+                //     obs_context.phase_centre,
+                //     apply_precession,
+                // );
+
+                for jones_residual in vis_residual_obs_tfb.iter() {
+                    for pol_residual in jones_residual.iter() {
+                        assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 1e-6);
+                    }
                 }
             }
         }
@@ -1600,15 +1616,13 @@ mod cuda_tests {
     #[test]
     /// test peel_cuda
     // TODO (Dev): with and without precession
-    fn test_peel_cuda() {
+    fn test_peel_cuda_single_source() {
         // enable trace
         // let mut builder = env_logger::Builder::from_default_env();
         // builder.target(env_logger::Target::Stdout);
         // builder.format_target(false);
         // builder.filter_level(log::LevelFilter::Trace);
         // builder.init();
-
-        let apply_precession = true;
 
         // modify obs_context so that timesteps are closer together
         let mut obs_context = get_simple_obs_context();
@@ -1633,7 +1647,7 @@ mod cuda_tests {
             .collect_vec();
         let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
 
-        // source is at zenith at 1h
+        // source is at zenith at 1h (before precession)
         let lst_1h_rad = get_lmst(
             array_pos.longitude_rad,
             hour_epoch,
@@ -1648,80 +1662,19 @@ mod cuda_tests {
 
         let beam = get_beam(num_tiles);
 
-        let mut high_res_modeller = unsafe {
-            SkyModellerCuda::new(
-                beam.deref(),
-                &source_list,
-                &obs_context.tile_xyzs,
-                &fine_chan_freqs_hz,
-                &flagged_tiles,
-                obs_context.phase_centre,
-                array_pos.longitude_rad,
-                array_pos.latitude_rad,
-                obs_context.dut1.unwrap(),
-                apply_precession,
-            )
-            .unwrap()
-        };
-
-        let mut low_res_modeller = unsafe {
-            SkyModellerCuda::new(
-                beam.deref(),
-                &source_list,
-                &obs_context.tile_xyzs,
-                &fine_chan_freqs_hz,
-                &flagged_tiles,
-                obs_context.phase_centre,
-                array_pos.longitude_rad,
-                array_pos.latitude_rad,
-                obs_context.dut1.unwrap(),
-                apply_precession,
-            )
-            .unwrap()
-        };
-
-        // residual visibilities in the observation phase centre
-        let mut vis_residual_obs_tfb =
-            Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
         // model visibilities in the observation phase centre
         let mut vis_model_obs_tfb =
             Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
         // iono rotated model visibilities in the observation phase centre
         let mut vis_iono_obs_tfb =
             Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
-        model_timesteps(
-            &mut high_res_modeller,
-            &obs_context.timestamps,
-            vis_model_obs_tfb.view_mut(),
-        )
-        .unwrap();
-
+        // residual visibilities in the observation phase centre
+        let mut vis_residual_obs_tfb =
+            Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
         // tile uvs and ws in the source phase centre
         let mut tile_uvs_src = Array2::default((num_times, num_tiles));
         let mut tile_ws_src = Array2::default((num_times, num_tiles));
         let mut tile_uvws_src = Array2::default((num_times, num_tiles));
-        setup_uvw_array(
-            tile_uvws_src.view_mut(),
-            &obs_context,
-            source_radec,
-            apply_precession,
-        );
-
-        setup_tile_uv_w_arrays(
-            tile_uvs_src.view_mut(),
-            tile_ws_src.view_mut(),
-            &obs_context,
-            source_radec,
-            apply_precession,
-        );
-
-        // display_vis_tfb(
-        //     &"model@obs".into(),
-        //     vis_model_obs_tfb.view(),
-        //     &obs_context,
-        //     obs_context.phase_centre,
-        //     apply_precession,
-        // );
 
         let timeblock = Timeblock {
             index: 0,
@@ -1730,84 +1683,158 @@ mod cuda_tests {
             median: obs_context.timestamps[0],
         };
 
-        let vis_shape = vis_residual_obs_tfb.dim();
-        let vis_weights = Array3::<f32>::ones(vis_shape);
-        let source_weighted_positions = vec![source_radec; 1];
-        let num_sources_to_iono_subtract = source_list.len();
+        // TODO (Dev): without precession
+        // for apply_precession in [false, true] {
+        #[allow(clippy::single_element_loop)]
+        for apply_precession in [true] {
+            let mut high_res_modeller = unsafe {
+                SkyModellerCuda::new(
+                    beam.deref(),
+                    &source_list,
+                    &obs_context.tile_xyzs,
+                    &fine_chan_freqs_hz,
+                    &flagged_tiles,
+                    obs_context.phase_centre,
+                    array_pos.longitude_rad,
+                    array_pos.latitude_rad,
+                    obs_context.dut1.unwrap(),
+                    apply_precession,
+                )
+                .unwrap()
+            };
 
-        let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
+            let mut low_res_modeller = unsafe {
+                SkyModellerCuda::new(
+                    beam.deref(),
+                    &source_list,
+                    &obs_context.tile_xyzs,
+                    &fine_chan_freqs_hz,
+                    &flagged_tiles,
+                    obs_context.phase_centre,
+                    array_pos.longitude_rad,
+                    array_pos.latitude_rad,
+                    obs_context.dut1.unwrap(),
+                    apply_precession,
+                )
+                .unwrap()
+            };
 
-        for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
-            apply_iono2(
-                vis_model_obs_tfb.view(),
-                vis_iono_obs_tfb.view_mut(),
-                tile_uvs_src.view(),
-                consts_lm,
-                &lambdas_m,
-            );
+            vis_model_obs_tfb.fill(Jones::zero());
 
-            // display_vis_tfb(
-            //     &"iono@obs".into(),
-            //     vis_iono_obs_tfb.view(),
-            //     &obs_context,
-            //     obs_context.phase_centre,
-            //     apply_precession,
-            // );
-
-            // subtract model from iono at source phase centre
-            vis_residual_obs_tfb.assign(&vis_iono_obs_tfb);
-            vis_residual_obs_tfb -= &vis_model_obs_tfb;
-
-            // display_vis_tfb(
-            //     &"residual@obs".into(),
-            //     vis_residual_obs_tfb.view(),
-            //     &obs_context,
-            //     obs_context.phase_centre,
-            //     apply_precession,
-            // );
-
-            let mut iono_consts = vec![(0., 0.); 1];
-
-            peel_cuda(
-                vis_residual_obs_tfb.view_mut(),
-                vis_weights.view(),
-                &timeblock,
-                &source_list,
-                &mut iono_consts,
-                &source_weighted_positions,
-                num_sources_to_iono_subtract,
-                &fine_chan_freqs_hz,
-                &fine_chan_freqs_hz,
-                &lambdas_m,
-                &lambdas_m,
-                &obs_context,
-                obs_context.array_position.unwrap(),
-                &obs_context.tile_xyzs,
-                &mut low_res_modeller,
+            model_timesteps(
                 &mut high_res_modeller,
-                obs_context.dut1.unwrap(),
-                !apply_precession,
-                &multi_progress,
+                &obs_context.timestamps,
+                vis_model_obs_tfb.view_mut(),
             )
             .unwrap();
 
-            // println!("expected: {:?}, got: {:?}", consts_lm, iono_consts);
+            setup_uvw_array(
+                tile_uvws_src.view_mut(),
+                &obs_context,
+                source_radec,
+                apply_precession,
+            );
+
+            setup_tile_uv_w_arrays(
+                tile_uvs_src.view_mut(),
+                tile_ws_src.view_mut(),
+                &obs_context,
+                source_radec,
+                apply_precession,
+            );
 
             // display_vis_tfb(
-            //     &"peeled@obs".into(),
-            //     vis_residual_obs_tfb.view(),
+            //     &"model@obs".into(),
+            //     vis_model_obs_tfb.view(),
             //     &obs_context,
             //     obs_context.phase_centre,
             //     apply_precession,
             // );
 
-            assert_abs_diff_eq!(iono_consts[0].0, consts_lm.0, epsilon = 1e-6);
-            assert_abs_diff_eq!(iono_consts[0].1, consts_lm.1, epsilon = 1e-6);
+            let vis_shape = vis_residual_obs_tfb.dim();
+            let vis_weights = Array3::<f32>::ones(vis_shape);
+            let source_weighted_positions = vec![source_radec; 1];
+            let num_sources_to_iono_subtract = source_list.len();
 
-            // peel should perfectly remove the iono rotate model vis
-            for jones_residual in vis_residual_obs_tfb.iter() {
-                for pol_residual in jones_residual.iter() {
-                    assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 1e-6);
+            let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
+
+            for consts_lm in [
+                (0., 0.),
+                (0.0001, -0.0003),
+                (0.0003, -0.0001),
+                (-0.0007, 0.0001),
+            ] {
+                apply_iono2(
+                    vis_model_obs_tfb.view(),
+                    vis_iono_obs_tfb.view_mut(),
+                    tile_uvs_src.view(),
+                    consts_lm,
+                    &lambdas_m,
+                );
+
+                // display_vis_tfb(
+                //     &"iono@obs".into(),
+                //     vis_iono_obs_tfb.view(),
+                //     &obs_context,
+                //     obs_context.phase_centre,
+                //     apply_precession,
+                // );
+
+                // subtract model from iono at observation phase centre
+                vis_residual_obs_tfb.assign(&vis_iono_obs_tfb);
+                vis_residual_obs_tfb -= &vis_model_obs_tfb;
+
+                // display_vis_tfb(
+                //     &"residual@obs".into(),
+                //     vis_residual_obs_tfb.view(),
+                //     &obs_context,
+                //     obs_context.phase_centre,
+                //     apply_precession,
+                // );
+
+                let mut iono_consts = vec![(0., 0.); 1];
+
+                peel_cuda(
+                    vis_residual_obs_tfb.view_mut(),
+                    vis_weights.view(),
+                    &timeblock,
+                    &source_list,
+                    &mut iono_consts,
+                    &source_weighted_positions,
+                    num_sources_to_iono_subtract,
+                    &fine_chan_freqs_hz,
+                    &fine_chan_freqs_hz,
+                    &lambdas_m,
+                    &lambdas_m,
+                    &obs_context,
+                    obs_context.array_position.unwrap(),
+                    &obs_context.tile_xyzs,
+                    &mut low_res_modeller,
+                    &mut high_res_modeller,
+                    obs_context.dut1.unwrap(),
+                    !apply_precession,
+                    &multi_progress,
+                )
+                .unwrap();
+
+                // println!("prec: {:?}, expected: {:?}, got: {:?}", apply_precession, consts_lm, iono_consts);
+
+                // display_vis_tfb(
+                //     &"peeled@obs".into(),
+                //     vis_residual_obs_tfb.view(),
+                //     &obs_context,
+                //     obs_context.phase_centre,
+                //     apply_precession,
+                // );
+
+                assert_abs_diff_eq!(iono_consts[0].0, consts_lm.0, epsilon = 3e-8);
+                assert_abs_diff_eq!(iono_consts[0].1, consts_lm.1, epsilon = 3e-8);
+
+                // peel should perfectly remove the iono rotate model vis
+                for jones_residual in vis_residual_obs_tfb.iter() {
+                    for pol_residual in jones_residual.iter() {
+                        assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 3e-8);
+                    }
                 }
             }
         }
