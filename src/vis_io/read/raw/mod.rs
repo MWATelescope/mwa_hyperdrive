@@ -218,7 +218,12 @@ impl RawDataReader {
             flagged_fine_chans
         };
 
-        let time_res = Duration::from_milliseconds(metafits_context.corr_int_time_ms as f64);
+        let time_res = {
+            let int_time_ns = i128::from(metafits_context.corr_int_time_ms)
+                .checked_mul(1_000_000)
+                .expect("does not overflow i128");
+            Duration::from_total_nanoseconds(int_time_ns)
+        };
 
         let all_timesteps = Vec1::try_from_vec(mwalib_context.provided_timestep_indices.clone())
             .map_err(|_| RawReadError::NoTimesteps)?;
@@ -226,9 +231,11 @@ impl RawDataReader {
             .timesteps
             .iter()
             .map(|t| {
-                Epoch::from_gpst_seconds(
-                    (t.gps_time_ms + metafits_context.corr_int_time_ms / 2) as f64 / 1e3,
-                )
+                let gps_nanoseconds = t
+                    .gps_time_ms
+                    .checked_mul(1_000_000)
+                    .expect("does not overflow u64");
+                Epoch::from_gpst_nanoseconds(gps_nanoseconds) + time_res / 2
             })
             .collect();
         let timestamps = Vec1::try_from_vec(timestamps).map_err(|_| RawReadError::NoTimesteps)?;
@@ -313,12 +320,20 @@ impl RawDataReader {
             // cotter has a nasty bug that can cause the start time listed in
             // mwaf files to be offset from data HDUs. Warn the user if this is
             // noticed.
-            let data_start =
-                Epoch::from_gpst_seconds(mwalib_context.common_start_gps_time_ms as f64 / 1e3)
-                    + time_res / 2;
-            let data_end =
-                Epoch::from_gpst_seconds(mwalib_context.common_end_gps_time_ms as f64 / 1e3)
-                    + time_res / 2;
+            let data_start = {
+                let gps_nanoseconds = mwalib_context
+                    .common_start_gps_time_ms
+                    .checked_mul(1_000_000)
+                    .expect("does not overflow u64");
+                Epoch::from_gpst_nanoseconds(gps_nanoseconds) + time_res / 2
+            };
+            let data_end = {
+                let gps_nanoseconds = mwalib_context
+                    .common_end_gps_time_ms
+                    .checked_mul(1_000_000)
+                    .expect("does not overflow u64");
+                Epoch::from_gpst_nanoseconds(gps_nanoseconds) + time_res / 2
+            };
             let flags_start = f.start_time;
             let flags_end = flags_start + f.num_time_steps as f64 * time_res;
             let diff = (flags_start - data_start).to_seconds() / time_res.to_seconds();

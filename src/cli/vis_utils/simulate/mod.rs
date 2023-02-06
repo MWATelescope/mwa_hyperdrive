@@ -422,7 +422,11 @@ impl VisSimParams {
         let time_res = Duration::from_seconds(*time_res);
         let timestamps = {
             let mut timestamps = Vec::with_capacity(*num_timesteps);
-            let start = Epoch::from_gpst_seconds(metafits.sched_start_gps_time_ms as f64 / 1e3)
+            let start_ns = metafits
+                .sched_start_gps_time_ms
+                .checked_mul(1_000_000)
+                .expect("does not overflow u64");
+            let start = Epoch::from_gpst_nanoseconds(start_ns)
                 + time_res / 2
                 + Duration::from_seconds(*time_offset);
             for i in 0..*num_timesteps {
