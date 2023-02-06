@@ -229,9 +229,10 @@ impl RawDataReader {
             .timesteps
             .iter()
             .map(|t| {
-                Epoch::from_gpst_seconds(
-                    (t.gps_time_ms + metafits_context.corr_int_time_ms / 2) as f64 / 1e3,
-                )
+                let gps_nanoseconds = (t.gps_time_ms + metafits_context.corr_int_time_ms / 2)
+                    .checked_mul(1_000_000)
+                    .expect("does not overflow u64");
+                Epoch::from_gpst_nanoseconds(gps_nanoseconds)
             })
             .collect();
         let timestamps = Vec1::try_from_vec(timestamps).map_err(|_| RawReadError::NoTimesteps)?;
