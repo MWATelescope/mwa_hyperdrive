@@ -2325,6 +2325,8 @@ fn iono_fit(
                                 let residual_i = residual[0] + residual[3];
                                 let model_i = model[0] + model[3];
 
+                                // debug!("uv ({:+1.5}, {:+1.5}) l{:+1.3} | RI {:+1.5} @{:+1.5}pi | MI {:+1.5} @{:+1.5}pi", u, v, lambda, residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
+
                                 let model_i_re = model_i.re as f64;
                                 let mr = model_i_re * (residual_i.im as f64 - model_i.im as f64);
                                 let mm = model_i_re * model_i_re;
