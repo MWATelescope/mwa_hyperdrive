@@ -24,6 +24,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   now read properly.
 - RTS source lists with multiple SHAPELET components are now removed properly
   (not to be confused with the favoured SHAPELET2 component type).
+- Some MWA raw data observations were not handled correctly due to a
+  floating-point error.
 
 ### Changed
 - The performance of CPU visibility modelling has been dramatically improved.
