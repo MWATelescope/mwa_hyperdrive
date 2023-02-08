@@ -18,7 +18,7 @@ use marlu::{
     precession::{get_lmst, precess_time},
     Complex, HADec, Jones, LatLngHeight, RADec, XyzGeodetic,
 };
-use ndarray::prelude::*;
+use ndarray::{prelude::*, Zip};
 use num_traits::Zero;
 use vec1::{vec1, Vec1};
 
@@ -163,6 +163,90 @@ fn get_simple_obs_context() -> ObsContext {
         ])),
         dipole_gains: None,
         time_res: Some(hour_epoch - obs_epoch),
+        coarse_chan_nums: vec![],
+        coarse_chan_freqs: vec![],
+        num_fine_chans_per_coarse_chan: 1,
+        freq_res: Some((fine_chan_freqs[1] - fine_chan_freqs[0]) as f64),
+        fine_chan_freqs,
+        flagged_fine_chans: vec![],
+        flagged_fine_chans_per_coarse_chan: vec![],
+    }
+}
+
+/// get an observation context with:
+/// - array positioned at LatLngHeight = 0, 0, 100m
+/// - 2 timestamps:
+///   - first: phase centre is at zenith on j2100
+///   - second: an hour later,
+/// - 2 frequencies: lambda = 2m, 1m
+/// - tiles from [get_simple_tiles], s=1
+fn get_complex_obs_context() -> ObsContext {
+    let tile_limit = 32;
+    let array_position = LatLngHeight::mwa();
+
+    let meta_path = "test_files/1090008640/1090008640.metafits";
+    let meta_ctx = mwalib::MetafitsContext::new(meta_path, None).unwrap();
+
+    let obsid = meta_ctx.obs_id;
+    let mut obs_time = Epoch::from_gpst_seconds(obsid as _);
+    let dut1 = Duration::from_f64(0., Unit::Second);
+
+    let obs_lst_rad = get_lmst(array_position.longitude_rad, obs_time, dut1);
+    // shift obs_time to the nearest time when the phase centre is at zenith
+    let zenith_lst_rad = get_lmst(array_position.longitude_rad, obs_time, dut1);
+    eprintln!("lst % 𝜏 should be 0: {zenith_lst_rad:?}");
+    let phase_centre =
+        RADec::from_hadec(HADec::new(0., array_position.latitude_rad), zenith_lst_rad);
+    eprintln!("phase centre: {phase_centre:?}");
+    let hadec = phase_centre.to_hadec(zenith_lst_rad);
+    eprintln!("ha % 𝜏 should be 0: {hadec:?}");
+    let azel = hadec.to_azel(array_position.latitude_rad);
+    eprintln!("(az, el) % 𝜏 should be 0, pi/2: {azel:?}");
+    let tile_names: Vec<String> = meta_ctx
+        .antennas
+        .iter()
+        .map(|ant| ant.tile_name.clone())
+        .collect();
+    let tile_names = Vec1::try_from_vec(tile_names).unwrap();
+    let tile_xyzs: Vec<XyzGeodetic> = XyzGeodetic::get_tiles_mwa(&meta_ctx)
+        .into_iter()
+        .take(tile_limit)
+        .collect();
+    let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
+
+    // at first timestep phase centre is at zenith
+    let lst_zenith_rad = get_lmst(array_position.longitude_rad, obs_time, dut1);
+    let phase_centre = RADec::from_hadec(
+        HADec::from_radians(0., array_position.latitude_rad),
+        lst_zenith_rad,
+    );
+
+    // second timestep is at 1h
+    let hour_epoch = obs_time + Duration::from_f64(1.0, Unit::Hour);
+    let timestamps = vec1![obs_time, hour_epoch];
+
+    let lambdas_m = vec1![2., 1.];
+    let fine_chan_freqs: Vec1<u64> = lambdas_m.mapped(|l| (VEL_C / l) as u64);
+
+    ObsContext {
+        obsid: None,
+        timestamps,
+        all_timesteps: vec1![0, 1],
+        unflagged_timesteps: vec![0, 1],
+        phase_centre,
+        pointing_centre: None,
+        array_position: Some(array_position),
+        dut1: Some(dut1),
+        tile_names,
+        tile_xyzs,
+        flagged_tiles: vec![],
+        unavailable_tiles: vec![],
+        autocorrelations_present: false,
+        dipole_delays: Some(Delays::Partial(vec![
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])),
+        dipole_gains: None,
+        time_res: Some(hour_epoch - obs_time),
         coarse_chan_nums: vec![],
         coarse_chan_freqs: vec![],
         num_fine_chans_per_coarse_chan: 1,
@@ -1392,6 +1476,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &multi_progress,
                 )
                 .unwrap(),
+
                 #[cfg(feature = "cuda")]
                 PeelType::CUDA => unsafe {
                     let mut high_res_modeller = SkyModellerCuda::new(
@@ -1472,6 +1557,323 @@ fn test_peel_single_source(peel_type: PeelType) {
 #[test]
 fn test_peel_cpu_single_source() {
     test_peel_single_source(PeelType::CPU)
+}
+
+#[track_caller]
+fn test_peel_multi_source(peel_type: PeelType) {
+    // // enable trace
+    // let mut builder = env_logger::Builder::from_default_env();
+    // builder.target(env_logger::Target::Stdout);
+    // builder.format_target(false);
+    // builder.filter_level(log::LevelFilter::Trace);
+    // builder.init();
+
+    #[cfg(feature = "cuda")]
+    let model_cpu = false;
+
+    // modify obs_context so that timesteps are closer together
+    let mut obs_context = get_complex_obs_context();
+    let time_res = Duration::from_f64(1.0, Unit::Second);
+    let second_epoch = obs_context.timestamps[0] + time_res;
+    obs_context.time_res = Some(time_res);
+    obs_context.timestamps[1] = second_epoch;
+
+    let array_pos = obs_context.array_position.unwrap();
+    let num_tiles = obs_context.get_num_unflagged_tiles();
+    let num_times = obs_context.timestamps.len();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let flagged_tiles = HashSet::new();
+    let num_chans = obs_context.fine_chan_freqs.len();
+
+    // lambda = 1m
+    let fine_chan_freqs_hz = obs_context
+        .fine_chan_freqs
+        .iter()
+        .map(|&f| f as f64)
+        .collect_vec();
+    let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
+
+    let lst_0h_rad = get_lmst(
+        array_pos.longitude_rad,
+        obs_context.timestamps[0],
+        obs_context.dut1.unwrap(),
+    );
+    let source_midpoint =
+        RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_0h_rad);
+
+    let source_list = SourceList::from(indexmap! {
+        "Four".into() => point_src_i!(RADec {ra: source_midpoint.ra + 0.05, dec: source_midpoint.dec + 0.05}, 0., fine_chan_freqs_hz[0], 4.),
+        "Three".into() => point_src_i!(RADec {ra: source_midpoint.ra + 0.03, dec: source_midpoint.dec - 0.03}, 0., fine_chan_freqs_hz[0], 3.),
+        // "Two".into() => point_src_i!(RADec {ra: source_midpoint.ra - 0.01, dec: source_midpoint.dec + 0.02}, 0., fine_chan_freqs_hz[0], 2.),
+        // "One".into() => point_src_i!(RADec {ra: source_midpoint.ra - 0.02, dec: source_midpoint.dec - 0.01}, 0., fine_chan_freqs_hz[0], 1.),
+    });
+
+    let source_weighted_positions = source_list
+        .iter()
+        .map(|(_, source)| source.components[0].radec)
+        .collect_vec();
+
+    let iono_consts = [
+        (-0.00002, -0.00001),
+        (0.00001, -0.00003),
+        (0.0003, -0.0001),
+        (-0.0007, 0.0001),
+    ];
+
+    let beam = get_beam(num_tiles);
+
+    // model visibilities of each source
+    let mut vis_model_tmp_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
+    // iono rotated visibilities of each source
+    let mut vis_iono_tmp_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
+    // residual visibilities in the observation phase centre
+    let mut vis_residual_obs_tfb =
+        Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
+    // tile uvs and ws in the source phase centre
+    let mut tile_uvs_src = Array2::default((num_times, num_tiles));
+    let mut tile_ws_src = Array2::default((num_times, num_tiles));
+
+    let vis_weights = Array3::<f32>::ones(vis_residual_obs_tfb.dim());
+
+    let timeblock = Timeblock {
+        index: 0,
+        range: 0..2,
+        timestamps: obs_context.timestamps.clone(),
+        median: obs_context.timestamps[0],
+    };
+
+    let num_sources_to_iono_subtract = source_list.len();
+
+    let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
+
+    // TODO (Dev): without precession
+    // for apply_precession in [false, true] {
+    #[allow(clippy::single_element_loop)]
+    for apply_precession in [true] {
+        let mut high_res_modeller = new_sky_modeller(
+            #[cfg(feature = "cuda")]
+            model_cpu,
+            beam.deref(),
+            &source_list,
+            &obs_context.tile_xyzs,
+            &fine_chan_freqs_hz,
+            &flagged_tiles,
+            obs_context.phase_centre,
+            array_pos.longitude_rad,
+            array_pos.latitude_rad,
+            obs_context.dut1.unwrap(),
+            apply_precession,
+        )
+        .unwrap();
+
+        let mut low_res_modeller = new_sky_modeller(
+            #[cfg(feature = "cuda")]
+            model_cpu,
+            beam.deref(),
+            &source_list,
+            &obs_context.tile_xyzs,
+            &fine_chan_freqs_hz,
+            &flagged_tiles,
+            obs_context.phase_centre,
+            array_pos.longitude_rad,
+            array_pos.latitude_rad,
+            obs_context.dut1.unwrap(),
+            apply_precession,
+        )
+        .unwrap();
+
+        vis_residual_obs_tfb.fill(Jones::zero());
+
+        // model each source in source_list and rotate by iono_consts with apply_iono2
+        for (&consts_lm, (name, source)) in izip!(iono_consts.iter(), source_list.iter(),) {
+            let source_radec = source.components[0].radec;
+            println!("source {} radec {:?}", name, &source_radec);
+
+            high_res_modeller
+                .update_with_a_source(source, obs_context.phase_centre)
+                .unwrap();
+
+            vis_model_tmp_tfb.fill(Jones::zero());
+            vis_iono_tmp_tfb.fill(Jones::zero());
+
+            // model visibilities in the observation phase centre
+            model_timesteps(
+                high_res_modeller.deref_mut(),
+                &obs_context.timestamps,
+                vis_model_tmp_tfb.view_mut(),
+            )
+            .unwrap();
+
+            setup_tile_uv_w_arrays(
+                tile_uvs_src.view_mut(),
+                tile_ws_src.view_mut(),
+                &obs_context,
+                source_radec,
+                apply_precession,
+            );
+
+            apply_iono2(
+                vis_model_tmp_tfb.view(),
+                vis_iono_tmp_tfb.view_mut(),
+                tile_uvs_src.view(),
+                consts_lm,
+                &lambdas_m,
+            );
+
+            display_vis_tfb(
+                &format!("iono@src={} consts={:?}", name, &consts_lm),
+                vis_iono_tmp_tfb.view(),
+                &obs_context,
+                source_radec,
+                apply_precession,
+            );
+
+            // add iono rotated and subtract model visibilities from residual
+            Zip::from(vis_residual_obs_tfb.view_mut())
+                .and(vis_iono_tmp_tfb.view())
+                .and(vis_model_tmp_tfb.view())
+                .for_each(|res, iono, model| *res += *iono - *model);
+        }
+
+        let mut iono_consts_result = vec![(0., 0.); num_sources_to_iono_subtract];
+
+        // When peel_cpu and peel_cuda are able to take generic
+        // `SkyModeller` objects (requires the generic objects to take
+        // currently CUDA-only methods), uncomment the following code and
+        // delete what follows.
+
+        // let function = match peel_type {
+        //     CPU => peel_cpu,
+        //     #[cfg(feature = "cuda")]
+        //     CUDA => peel_cuda,
+        // };
+        // function(
+        //     vis_residual_obs_tfb.view_mut(),
+        //     vis_weights.view(),
+        //     &timeblock,
+        //     &source_list,
+        //     &mut iono_consts,
+        //     &source_weighted_positions,
+        //     num_sources_to_iono_subtract,
+        //     &fine_chan_freqs_hz,
+        //     &lambdas_m,
+        //     &lambdas_m,
+        //     &obs_context,
+        //     obs_context.array_position.unwrap(),
+        //     &obs_context.tile_xyzs,
+        //     low_res_modeller.deref_mut(),
+        //     high_res_modeller.deref_mut(),
+        //     obs_context.dut1.unwrap(),
+        //     !apply_precession,
+        //     &multi_progress,
+        // )
+        // .unwrap();
+        match peel_type {
+            PeelType::CPU => peel_cpu(
+                vis_residual_obs_tfb.view_mut(),
+                vis_weights.view(),
+                &timeblock,
+                &source_list,
+                &mut iono_consts_result,
+                &source_weighted_positions,
+                num_sources_to_iono_subtract,
+                &fine_chan_freqs_hz,
+                &lambdas_m,
+                &lambdas_m,
+                &obs_context,
+                obs_context.array_position.unwrap(),
+                &obs_context.tile_xyzs,
+                low_res_modeller.deref_mut(),
+                high_res_modeller.deref_mut(),
+                obs_context.dut1.unwrap(),
+                !apply_precession,
+                &multi_progress,
+            )
+            .unwrap(),
+
+            #[cfg(feature = "cuda")]
+            PeelType::CUDA => unsafe {
+                let mut high_res_modeller = SkyModellerCuda::new(
+                    beam.deref(),
+                    &source_list,
+                    &obs_context.tile_xyzs,
+                    &fine_chan_freqs_hz,
+                    &flagged_tiles,
+                    obs_context.phase_centre,
+                    array_pos.longitude_rad,
+                    array_pos.latitude_rad,
+                    obs_context.dut1.unwrap(),
+                    apply_precession,
+                )
+                .unwrap();
+
+                let mut low_res_modeller = SkyModellerCuda::new(
+                    beam.deref(),
+                    &source_list,
+                    &obs_context.tile_xyzs,
+                    &fine_chan_freqs_hz,
+                    &flagged_tiles,
+                    obs_context.phase_centre,
+                    array_pos.longitude_rad,
+                    array_pos.latitude_rad,
+                    obs_context.dut1.unwrap(),
+                    apply_precession,
+                )
+                .unwrap();
+
+                peel_cuda(
+                    vis_residual_obs_tfb.view_mut(),
+                    vis_weights.view(),
+                    &timeblock,
+                    &source_list,
+                    &mut iono_consts_result,
+                    &source_weighted_positions,
+                    num_sources_to_iono_subtract,
+                    &fine_chan_freqs_hz,
+                    &lambdas_m,
+                    &lambdas_m,
+                    &obs_context,
+                    obs_context.array_position.unwrap(),
+                    &obs_context.tile_xyzs,
+                    &mut low_res_modeller,
+                    &mut high_res_modeller,
+                    obs_context.dut1.unwrap(),
+                    !apply_precession,
+                    &multi_progress,
+                )
+                .unwrap()
+            },
+        }
+
+        display_vis_tfb(
+            &"peeled@obs".into(),
+            vis_residual_obs_tfb.view(),
+            &obs_context,
+            obs_context.phase_centre,
+            apply_precession,
+        );
+
+        for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter(),) {
+            println!(
+                "prec: {:?}, expected: {:?}, got: {:?}",
+                apply_precession, expected, result
+            );
+            assert_abs_diff_eq!(expected.0, result.0, epsilon = 3e-7);
+            assert_abs_diff_eq!(expected.1, result.1, epsilon = 3e-7);
+        }
+
+        // peel should perfectly remove the iono rotate model vis
+        for jones_residual in vis_residual_obs_tfb.iter() {
+            for pol_residual in jones_residual.iter() {
+                assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 2e-3);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_peel_cpu_multi_source() {
+    test_peel_multi_source(PeelType::CPU)
 }
 
 #[cfg(feature = "cuda")]
@@ -1708,6 +2110,11 @@ mod cuda_tests {
     #[test]
     fn test_peel_cuda_single_source() {
         test_peel_single_source(PeelType::CUDA)
+    }
+
+    #[test]
+    fn test_peel_cuda_multi_source() {
+        test_peel_multi_source(PeelType::CUDA)
     }
 
     #[test]
