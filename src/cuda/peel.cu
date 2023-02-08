@@ -19,6 +19,8 @@ __global__ void xyzs_to_uvws_kernel(const XYZ *xyzs, const FLOAT *lmsts, UVW *uv
     if (i_bl >= num_baselines)
         return;
 
+    // Find the tile indices from the baseline index. `num_tiles` has to be
+    // subtracted by 1 to make it "0 index".
     const float n = (float)(num_tiles - 1);
     const float tile1f = floorf(-0.5 * sqrtf(4.0 * n * (n + 1.0) - 8.0 * i_bl + 1.0) + n + 0.5);
     const int tile2 = (int)(i_bl - tile1f * (n - (tile1f + 1.0) / 2.0) + 1.0);
@@ -62,11 +64,8 @@ __global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float 
     if (i_bl >= num_baselines)
         return;
 
-    // Prepare an "argument" for later.
-    const FLOAT arg = -TAU * (uvws_to[i_bl].w - uvws_from[i_bl].w);
-
     for (int i_freq = 0; i_freq < num_freqs; i_freq += freq_average_factor) {
-        JONES vis_weighted_sum = JONES{
+        JonesF64 vis_weighted_sum = JonesF64{
             .j00_re = 0.0,
             .j00_im = 0.0,
             .j01_re = 0.0,
@@ -76,16 +75,30 @@ __global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float 
             .j11_re = 0.0,
             .j11_im = 0.0,
         };
-        FLOAT weight_sum = 0.0;
+        double weight_sum = 0.0;
 
         for (int i_time = 0; i_time < num_timesteps; i_time++) {
+            // Prepare an "argument" for later.
+            const double arg = -TAU * ((double)uvws_to[i_time * num_baselines + i_bl].w -
+                                       (double)uvws_from[i_time * num_baselines + i_bl].w);
             for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor; i_freq_chunk++) {
-                COMPLEX complex;
-                SINCOS(arg / lambdas[i_freq_chunk], &complex.y, &complex.x);
+                cuDoubleComplex complex;
+                sincos(arg / lambdas[i_freq_chunk], &complex.y, &complex.x);
 
                 const int step = (i_time * num_freqs + i_freq_chunk) * num_baselines + i_bl;
-                const float weight = high_res_weights[step];
-                const JonesF32 rotated_weighted_vis = high_res_vis[step] * weight * complex;
+                const double weight = high_res_weights[step];
+                const JonesF32 vis_single = high_res_vis[step];
+                const JonesF64 vis_double = JonesF64{
+                    .j00_re = vis_single.j00_re,
+                    .j00_im = vis_single.j00_im,
+                    .j01_re = vis_single.j01_re,
+                    .j01_im = vis_single.j01_im,
+                    .j10_re = vis_single.j10_re,
+                    .j10_im = vis_single.j10_im,
+                    .j11_re = vis_single.j11_re,
+                    .j11_im = vis_single.j11_im,
+                };
+                const JonesF64 rotated_weighted_vis = vis_double * weight * complex;
 
                 vis_weighted_sum += rotated_weighted_vis;
                 weight_sum += weight;
@@ -203,7 +216,11 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
     for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
         const double lambda = lambdas_m[i_freq];
         const double lambda_2 = lambda * lambda;
+        const double lambda_4 = lambda_2 * lambda_2;
 
+        // Normally, we would divide by λ to get dimensionless UV. However, UV
+        // are only used to determine a_uu, a_uv, a_vv, which are also scaled by
+        // lambda. So... don't divide by λ.
         const double u = (double)uvw.u;
         const double v = (double)uvw.v;
 
@@ -220,6 +237,8 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
         const double mm = model_i_re * model_i_re;
 
         JonesF64 j = JonesF64{
+            // As above, we didn't divide UV by lambda, so below we use λ² for
+            // λ⁴, and λ for λ².
             .j00_re = lambda_2 * weight * mm * u * u,      // a_uu
             .j00_im = lambda_2 * weight * mm * u * v,      // a_uv
             .j01_re = lambda_2 * weight * mm * v * v,      // a_vv
@@ -256,9 +275,55 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
             JonesF32 r = vis_residual[step];
             const JonesF32 m = vis_model[step];
 
-            r += m;
-            r -= m * complex;
-            vis_residual[step] = r;
+            // Promoting the Jones matrices makes things demonstrably more
+            // precise.
+            JonesF64 r2 = JonesF64{
+                .j00_re = r.j00_re,
+                .j00_im = r.j00_im,
+                .j01_re = r.j01_re,
+                .j01_im = r.j01_im,
+                .j10_re = r.j10_re,
+                .j10_im = r.j10_im,
+                .j11_re = r.j11_re,
+                .j11_im = r.j11_im,
+            };
+            JonesF64 m2 = JonesF64{
+                .j00_re = m.j00_re,
+                .j00_im = m.j00_im,
+                .j01_re = m.j01_re,
+                .j01_im = m.j01_im,
+                .j10_re = m.j10_re,
+                .j10_im = m.j10_im,
+                .j11_re = m.j11_re,
+                .j11_im = m.j11_im,
+            };
+
+            r2 += m2;
+            r2 -= m2 * complex;
+            vis_residual[step] = JonesF32{
+                .j00_re = (float)r2.j00_re,
+                .j00_im = (float)r2.j00_im,
+                .j01_re = (float)r2.j01_re,
+                .j01_im = (float)r2.j01_im,
+                .j10_re = (float)r2.j10_re,
+                .j10_im = (float)r2.j10_im,
+                .j11_re = (float)r2.j11_re,
+                .j11_im = (float)r2.j11_im,
+            };
+        }
+    }
+}
+
+__global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const int num_timesteps,
+                                 const int num_baselines, const int num_freqs) {
+    const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
+    if (i_bl >= num_baselines)
+        return;
+
+    for (int i_time = 0; i_time < num_timesteps; i_time++) {
+        for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
+            const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
+            vis_residual[step] += vis_model[step];
         }
     }
 }
@@ -313,6 +378,7 @@ extern "C" int rotate_average(const JonesF32 *d_high_res_vis, const float *d_hig
     rotate_average_kernel<<<gridDim, blockDim>>>(
         d_high_res_vis, d_high_res_weights, d_low_res_vis, pointing_centre, num_timesteps, num_tiles, num_baselines,
         num_freqs, freq_average_factor, d_lmsts, d_xyzs, d_uvws_from, d_uvws_to, d_lambdas);
+
     error_id = cudaDeviceSynchronize();
     if (error_id != cudaSuccess) {
         printf("%s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(error_id));
@@ -377,11 +443,7 @@ extern "C" int subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_mod
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
-    blockDim.y = 1;
-    blockDim.z = 1;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
-    gridDim.y = 1;
-    gridDim.z = 1;
 
     subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_const_alpha, iono_const_beta, d_uvws,
                                                 d_lambdas_m, num_timesteps, num_baselines, num_freqs);

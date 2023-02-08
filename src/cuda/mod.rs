@@ -41,6 +41,16 @@ cfg_if::cfg_if! {
     }
 }
 
+impl Default for UVW {
+    fn default() -> Self {
+        Self {
+            u: 0.0,
+            v: 0.0,
+            w: 0.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum CudaCall {
     Malloc,
@@ -232,6 +242,39 @@ impl<T> DevicePointer<T> {
                 cuda_runtime_sys::cudaMemset(self.get_mut().cast(), 0, self.size);
             }
         }
+    }
+}
+
+impl<T: Default> DevicePointer<T> {
+    /// Copy a slice of data from the device. There must be an equal number of
+    /// bytes in the `DevicePointer` and `v`.
+    #[cfg(test)]
+    #[track_caller]
+    pub fn copy_from_device_new(&self) -> Result<Vec<T>, CudaError> {
+        if self.ptr.is_null() {
+            let loc = Location::caller();
+            return Err(CudaError::CopyFromDevice(format!(
+                "{}:{}:{}: Attempted to copy data from a null device pointer",
+                loc.file(),
+                loc.line(),
+                loc.column()
+            )));
+        }
+
+        let mut v: Vec<T> = Vec::default();
+        v.resize_with(self.size / std::mem::size_of::<T>(), || T::default());
+
+        unsafe {
+            cuda_runtime_sys::cudaMemcpy(
+                v.as_mut_ptr().cast(),
+                self.ptr.cast(),
+                self.size,
+                cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToHost,
+            );
+            peek_and_sync(CudaCall::CopyFromDevice)?;
+        }
+
+        Ok(v)
     }
 }
 
