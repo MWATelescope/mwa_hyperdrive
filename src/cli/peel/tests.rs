@@ -100,30 +100,19 @@ fn get_j2100(array_position: &LatLngHeight, dut1: Duration) -> Epoch {
 /// - tile "o" is at origin
 /// - tile "u" has a u-component of s at lambda = 1m
 /// - tile "v" has a v-component of s at lambda = 1m
+#[rustfmt::skip]
 fn get_simple_tiles(s_: f64) -> (Vec1<String>, Vec1<XyzGeodetic>) {
     (
         vec1!["o", "u", "v"].mapped(|s| s.into()),
         vec1![
-            XyzGeodetic {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            },
-            XyzGeodetic {
-                x: 0.,
-                y: s_,
-                z: 0.,
-            },
-            XyzGeodetic {
-                x: 0.,
-                y: 0.,
-                z: s_,
-            },
+            XyzGeodetic { x: 0., y: 0., z: 0., },
+            XyzGeodetic { x: 0., y: s_, z: 0., },
+            XyzGeodetic { x: 0., y: 0., z: s_, },
         ],
     )
 }
 
-/// get a simple observation context with:
+/// get an observation context with:
 /// - array positioned at LatLngHeight = 0, 0, 100m
 /// - 2 timestamps:
 ///   - first: phase centre is at zenith on j2100
@@ -1487,10 +1476,9 @@ fn test_peel_cpu_single_source() {
 
 #[cfg(feature = "cuda")]
 mod cuda_tests {
+    use super::*;
     use crate::cuda::{self, CudaFloat, DevicePointer};
     use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
-
-    use super::*;
 
     /// Populate the [UVW] array ([times, baselines]) for the given [ObsContext].
     fn setup_uvw_array(
@@ -1769,6 +1757,8 @@ mod cuda_tests {
         let mut tile_uvs_src = Array2::default((num_times, num_tiles));
         let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
+        let weights_tfb = Array3::from_elem(vis_tfb.dim(), 2.0);
+
         for apply_precession in [false, true] {
             let mut modeller = new_sky_modeller(
                 false,
@@ -1824,7 +1814,6 @@ mod cuda_tests {
                 );
             }
 
-            let weights_tfb = Array3::from_elem(vis_tfb.dim(), 2.0);
             let mut vis_averaged_tfb = Array3::default((1, 1, num_baselines));
             vis_average2(
                 vis_rot_tfb.view(),
