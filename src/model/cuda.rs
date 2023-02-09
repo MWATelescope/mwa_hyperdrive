@@ -22,8 +22,7 @@ use crate::{
     cuda::{self, CudaError, CudaFloat, CudaJones, DevicePointer},
     shapelets,
     srclist::{
-        get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, Source,
-        SourceList,
+        get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
     },
 };
 
@@ -161,7 +160,7 @@ impl<'a> SkyModellerCuda<'a> {
     /// This function interfaces directly with the CUDA API. Rust errors attempt
     /// to catch problems but there are no guarantees.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) unsafe fn new(
+    pub(crate) fn new(
         beam: &dyn Beam,
         source_list: &SourceList,
         unflagged_tile_xyzs: &'a [XyzGeodetic],

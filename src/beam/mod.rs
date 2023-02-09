@@ -115,7 +115,7 @@ pub trait Beam: Sync + Send {
     ///
     /// This function interfaces directly with the CUDA API. Rust errors attempt
     /// to catch problems but there are no guarantees.
-    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
+    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
 }
 
 /// A trait abstracting beam code functions on a CUDA-capable device.
@@ -292,7 +292,7 @@ impl Beam for NoBeam {
     fn empty_coeff_cache(&self) {}
 
     #[cfg(feature = "cuda")]
-    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
+    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
         let obj = NoBeamCUDA {
             tile_map: DevicePointer::copy_to_device(&vec![0; self.num_tiles])?,
             freq_map: DevicePointer::copy_to_device(&vec![0; freqs_hz.len()])?,

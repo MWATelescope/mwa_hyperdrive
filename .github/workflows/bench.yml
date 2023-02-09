@@ -1,10 +1,16 @@
+---
+name: Benchmarks
+
 on:
   push:
     pull_request:
     branches:
       - "**"
 
-name: Benchmarks
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  MWA_BEAM_FILE: /usr/local/mwa_full_embedded_element_pattern.h5
 
 jobs:
   test:

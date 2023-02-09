@@ -313,13 +313,15 @@ impl Beam for FEEBeam {
     }
 
     #[cfg(feature = "cuda")]
-    unsafe fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
-        let cuda_beam = self.hyperbeam_object.cuda_prepare(
-            freqs_hz,
-            self.delays.view(),
-            self.gains.view(),
-            true,
-        )?;
+    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
+        let cuda_beam = unsafe {
+            self.hyperbeam_object.cuda_prepare(
+                freqs_hz,
+                self.delays.view(),
+                self.gains.view(),
+                true,
+            )?
+        };
         Ok(Box::new(FEEBeamCUDA {
             hyperbeam_object: cuda_beam,
         }))

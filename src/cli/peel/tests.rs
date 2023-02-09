@@ -587,7 +587,7 @@ fn test_vis_rotation() {
     for apply_precession in [false, true] {
         let mut modeller = new_sky_modeller(
             #[cfg(feature = "cuda")]
-            false,
+            true,
             beam.deref(),
             &source_list,
             &obs_context.tile_xyzs,
@@ -866,7 +866,7 @@ fn test_apply_iono2() {
     for apply_precession in [false, true] {
         let mut modeller = new_sky_modeller(
             #[cfg(feature = "cuda")]
-            false,
+            true,
             beam.deref(),
             &source_list,
             &obs_context.tile_xyzs,
@@ -881,7 +881,6 @@ fn test_apply_iono2() {
         .unwrap();
 
         vis_tfb.fill(Jones::zero());
-
         model_timesteps(
             modeller.deref_mut(),
             &obs_context.timestamps,
@@ -1039,7 +1038,7 @@ fn test_iono_fit() {
         // unlike the other tests, this is in the SOURCE phase centre
         let mut modeller = new_sky_modeller(
             #[cfg(feature = "cuda")]
-            false,
+            true,
             beam.deref(),
             &source_list,
             &obs_context.tile_xyzs,
@@ -1171,7 +1170,7 @@ fn test_apply_iono3() {
     for apply_precession in [false, true] {
         let mut modeller = new_sky_modeller(
             #[cfg(feature = "cuda")]
-            false,
+            true,
             beam.deref(),
             &source_list,
             &obs_context.tile_xyzs,
@@ -1482,7 +1481,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                 .unwrap(),
 
                 #[cfg(feature = "cuda")]
-                PeelType::CUDA => unsafe {
+                PeelType::CUDA => {
                     let mut high_res_modeller = crate::model::SkyModellerCuda::new(
                         beam.deref(),
                         &source_list,
@@ -1532,7 +1531,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &multi_progress,
                     )
                     .unwrap()
-                },
+                }
             };
 
             println!("prec: {apply_precession:?}, expected: {consts_lm:?}, got: {iono_consts:?}");
@@ -1551,16 +1550,15 @@ fn test_peel_single_source(peel_type: PeelType) {
             // peel should perfectly remove the iono rotate model vis
             for jones_residual in vis_residual_obs_tfb.iter() {
                 for pol_residual in jones_residual.iter() {
-                    assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 1.3e-8);
+                    #[cfg(not(feature = "cuda-single"))]
+                    let eps = 1.3e-8;
+                    #[cfg(feature = "cuda-single")]
+                    let eps = 1.7e-8;
+                    assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = eps);
                 }
             }
         }
     }
-}
-
-#[test]
-fn test_peel_cpu_single_source() {
-    test_peel_single_source(PeelType::CPU)
 }
 
 #[track_caller]
@@ -1573,7 +1571,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
     // builder.init();
 
     #[cfg(feature = "cuda")]
-    let model_cpu = false;
+    let model_cpu = matches!(peel_type, PeelType::CPU);
 
     // modify obs_context so that timesteps are closer together
     let mut obs_context = get_complex_obs_context();
@@ -1650,10 +1648,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
 
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
 
-    // TODO (Dev): without precession
-    // for apply_precession in [false, true] {
-    #[allow(clippy::single_element_loop)]
-    for apply_precession in [true] {
+    for apply_precession in [false, true] {
         let mut high_res_modeller = new_sky_modeller(
             #[cfg(feature = "cuda")]
             model_cpu,
@@ -1697,10 +1692,8 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 .update_with_a_source(source, obs_context.phase_centre)
                 .unwrap();
 
-            vis_model_tmp_tfb.fill(Jones::zero());
-            vis_iono_tmp_tfb.fill(Jones::zero());
-
             // model visibilities in the observation phase centre
+            vis_model_tmp_tfb.fill(Jones::zero());
             model_timesteps(
                 high_res_modeller.deref_mut(),
                 &obs_context.timestamps,
@@ -1796,7 +1789,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             .unwrap(),
 
             #[cfg(feature = "cuda")]
-            PeelType::CUDA => unsafe {
+            PeelType::CUDA => {
                 let mut high_res_modeller = crate::model::SkyModellerCuda::new(
                     beam.deref(),
                     &source_list,
@@ -1873,6 +1866,11 @@ fn test_peel_multi_source(peel_type: PeelType) {
 }
 
 #[test]
+fn test_peel_cpu_single_source() {
+    test_peel_single_source(PeelType::CPU)
+}
+
+#[test]
 fn test_peel_cpu_multi_source() {
     test_peel_multi_source(PeelType::CPU)
 }
@@ -1880,7 +1878,10 @@ fn test_peel_cpu_multi_source() {
 #[cfg(feature = "cuda")]
 mod cuda_tests {
     use super::*;
-    use crate::cuda::{self, CudaFloat, DevicePointer};
+    use crate::{
+        cuda::{self, CudaFloat, DevicePointer},
+        model::SkyModellerCuda,
+    };
     use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
 
     /// Populate the [UVW] array ([times, baselines]) for the given [ObsContext].
@@ -1980,9 +1981,7 @@ mod cuda_tests {
         let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
         for apply_precession in [false, true] {
-            let mut modeller = new_sky_modeller(
-                #[cfg(feature = "cuda")]
-                false,
+            let mut modeller = SkyModellerCuda::new(
                 beam.deref(),
                 &source_list,
                 &obs_context.tile_xyzs,
@@ -1997,7 +1996,7 @@ mod cuda_tests {
             .unwrap();
 
             model_timesteps(
-                modeller.deref_mut(),
+                &mut modeller,
                 &obs_context.timestamps,
                 vis_model_obs_tfb.view_mut(),
             )
@@ -2115,16 +2114,6 @@ mod cuda_tests {
     }
 
     #[test]
-    fn test_peel_cuda_single_source() {
-        test_peel_single_source(PeelType::CUDA)
-    }
-
-    #[test]
-    fn test_peel_cuda_multi_source() {
-        test_peel_multi_source(PeelType::CUDA)
-    }
-
-    #[test]
     fn test_rotate_average() {
         let obs_context = get_simple_obs_context();
         let array_pos = obs_context.array_position.unwrap();
@@ -2172,7 +2161,7 @@ mod cuda_tests {
 
         for apply_precession in [false, true] {
             let mut modeller = new_sky_modeller(
-                false,
+                true,
                 beam.deref(),
                 &source_list,
                 &obs_context.tile_xyzs,
@@ -2388,7 +2377,11 @@ mod cuda_tests {
                 v: v as _,
                 w: w as _,
             });
-            assert_abs_diff_eq!(cpu_uvws, gpu_uvws);
+            #[cfg(not(feature = "cuda-single"))]
+            let eps = 0.0;
+            #[cfg(feature = "cuda-single")]
+            let eps = 5e-8;
+            assert_abs_diff_eq!(cpu_uvws, gpu_uvws, epsilon = eps);
 
             // Hack to use `display_vis_tfb` with low-res visibilities.
             let mut low_res_obs_context = get_simple_obs_context();
@@ -2449,5 +2442,15 @@ mod cuda_tests {
             //     }
             // }
         }
+    }
+
+    #[test]
+    fn test_peel_cuda_single_source() {
+        test_peel_single_source(PeelType::CUDA)
+    }
+
+    #[test]
+    fn test_peel_cuda_multi_source() {
+        test_peel_multi_source(PeelType::CUDA)
     }
 }

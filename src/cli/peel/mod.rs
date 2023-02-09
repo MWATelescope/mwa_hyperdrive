@@ -1522,33 +1522,30 @@ impl PeelArgs {
                                 // {high|low} could be instantiated once if we could figure out a
                                 // way to downcast to SkyModellerCuda from SkyModeller, but it looks
                                 // like this is impoissible because of lifetime stuff :(
-                                let (mut low_res_modeller, mut high_res_modeller) = unsafe {
-                                    let low_res_modeller = SkyModellerCuda::new(
-                                        beam.deref(),
-                                        &SourceList::new(),
-                                        &unflagged_tile_xyzs,
-                                        &low_res_freqs_hz,
-                                        flagged_tiles,
-                                        RADec::default(),
-                                        array_position.longitude_rad,
-                                        array_position.latitude_rad,
-                                        dut1,
-                                        !no_precession,
-                                    )?;
-                                    let high_res_modeller = SkyModellerCuda::new(
-                                        beam.deref(),
-                                        &SourceList::new(),
-                                        &unflagged_tile_xyzs,
-                                        &all_fine_chan_freqs_hz,
-                                        flagged_tiles,
-                                        RADec::default(),
-                                        array_position.longitude_rad,
-                                        array_position.latitude_rad,
-                                        dut1,
-                                        !no_precession,
-                                    )?;
-                                    (low_res_modeller, high_res_modeller)
-                                };
+                                let mut low_res_modeller = SkyModellerCuda::new(
+                                    beam.deref(),
+                                    &SourceList::new(),
+                                    &unflagged_tile_xyzs,
+                                    &low_res_freqs_hz,
+                                    flagged_tiles,
+                                    RADec::default(),
+                                    array_position.longitude_rad,
+                                    array_position.latitude_rad,
+                                    dut1,
+                                    !no_precession,
+                                )?;
+                                let mut high_res_modeller = SkyModellerCuda::new(
+                                    beam.deref(),
+                                    &SourceList::new(),
+                                    &unflagged_tile_xyzs,
+                                    &all_fine_chan_freqs_hz,
+                                    flagged_tiles,
+                                    RADec::default(),
+                                    array_position.longitude_rad,
+                                    array_position.latitude_rad,
+                                    dut1,
+                                    !no_precession,
+                                )?;
                                 peel_cuda(
                                     vis_residual.view_mut(),
                                     vis_weights.view(),
@@ -2771,6 +2768,7 @@ fn peel_cpu(
 
         multi_progress_bar
             .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
+        vis_model_high_res.fill(Jones::default());
         model_timesteps(high_res_modeller, timestamps, vis_model_high_res.view_mut())?;
 
         multi_progress_bar
