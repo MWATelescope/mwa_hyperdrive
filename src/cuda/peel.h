@@ -27,6 +27,9 @@ int subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, double 
                   double iono_const_beta, const UVW *d_uvws, const FLOAT *d_lambdas_m, const int num_timesteps,
                   const int num_baselines, const int num_freqs);
 
+int add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const int num_timesteps, const int num_baselines,
+              const int num_freqs);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif // __cplusplus

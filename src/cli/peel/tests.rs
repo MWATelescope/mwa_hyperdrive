@@ -32,7 +32,7 @@ use crate::{
     averaging::Timeblock,
     beam::{create_fee_beam_object, Beam, Delays},
     context::ObsContext,
-    model::{new_sky_modeller, SkyModellerCuda},
+    model::new_sky_modeller,
     srclist::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList},
 };
 
@@ -188,15 +188,17 @@ fn get_complex_obs_context() -> ObsContext {
     let meta_ctx = mwalib::MetafitsContext::new(meta_path, None).unwrap();
 
     let obsid = meta_ctx.obs_id;
-    let mut obs_time = Epoch::from_gpst_seconds(obsid as _);
+    let obs_time = Epoch::from_gpst_seconds(obsid as _);
     let dut1 = Duration::from_f64(0., Unit::Second);
 
-    let obs_lst_rad = get_lmst(array_position.longitude_rad, obs_time, dut1);
+    // let obs_lst_rad = get_lmst(array_position.longitude_rad, obs_time, dut1);
     // shift obs_time to the nearest time when the phase centre is at zenith
     let zenith_lst_rad = get_lmst(array_position.longitude_rad, obs_time, dut1);
     eprintln!("lst % 𝜏 should be 0: {zenith_lst_rad:?}");
-    let phase_centre =
-        RADec::from_hadec(HADec::new(0., array_position.latitude_rad), zenith_lst_rad);
+    let phase_centre = RADec::from_hadec(
+        HADec::from_radians(0., array_position.latitude_rad),
+        zenith_lst_rad,
+    );
     eprintln!("phase centre: {phase_centre:?}");
     let hadec = phase_centre.to_hadec(zenith_lst_rad);
     eprintln!("ha % 𝜏 should be 0: {hadec:?}");
@@ -1251,6 +1253,8 @@ fn test_apply_iono3() {
 #[allow(clippy::upper_case_acronyms)]
 enum PeelType {
     CPU,
+
+    #[cfg(feature = "cuda")]
     CUDA,
 }
 
@@ -1479,7 +1483,7 @@ fn test_peel_single_source(peel_type: PeelType) {
 
                 #[cfg(feature = "cuda")]
                 PeelType::CUDA => unsafe {
-                    let mut high_res_modeller = SkyModellerCuda::new(
+                    let mut high_res_modeller = crate::model::SkyModellerCuda::new(
                         beam.deref(),
                         &source_list,
                         &obs_context.tile_xyzs,
@@ -1493,7 +1497,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     )
                     .unwrap();
 
-                    let mut low_res_modeller = SkyModellerCuda::new(
+                    let mut low_res_modeller = crate::model::SkyModellerCuda::new(
                         beam.deref(),
                         &source_list,
                         &obs_context.tile_xyzs,
@@ -1793,7 +1797,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
 
             #[cfg(feature = "cuda")]
             PeelType::CUDA => unsafe {
-                let mut high_res_modeller = SkyModellerCuda::new(
+                let mut high_res_modeller = crate::model::SkyModellerCuda::new(
                     beam.deref(),
                     &source_list,
                     &obs_context.tile_xyzs,
@@ -1807,7 +1811,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 )
                 .unwrap();
 
-                let mut low_res_modeller = SkyModellerCuda::new(
+                let mut low_res_modeller = crate::model::SkyModellerCuda::new(
                     beam.deref(),
                     &source_list,
                     &obs_context.tile_xyzs,
@@ -1854,10 +1858,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
         );
 
         for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter(),) {
-            println!(
-                "prec: {:?}, expected: {:?}, got: {:?}",
-                apply_precession, expected, result
-            );
+            println!("prec: {apply_precession:?}, expected: {expected:?}, got: {result:?}");
             assert_abs_diff_eq!(expected.0, result.0, epsilon = 3e-7);
             assert_abs_diff_eq!(expected.1, result.1, epsilon = 3e-7);
         }
@@ -2035,7 +2036,13 @@ mod cuda_tests {
 
             let d_uvws_src =
                 DevicePointer::copy_to_device(cuda_uvws_src.as_slice().unwrap()).unwrap();
-            let d_lambdas = DevicePointer::copy_to_device(&lambdas_m).unwrap();
+            let d_lambdas = DevicePointer::copy_to_device(
+                &lambdas_m
+                    .iter()
+                    .map(|l| *l as CudaFloat)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
 
             for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
                 // apply iono rotation at source phase to model at observation phase
@@ -2125,9 +2132,6 @@ mod cuda_tests {
         let num_tiles = obs_context.get_num_unflagged_tiles();
         let num_times = obs_context.timestamps.len();
         let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-        let ant_pairs = (0..num_baselines)
-            .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
-            .collect_vec();
         let flagged_tiles = HashSet::new();
         let num_chans = obs_context.fine_chan_freqs.len();
 
@@ -2325,7 +2329,13 @@ mod cuda_tests {
                     DevicePointer::copy_to_device(weights_tfb.as_slice().unwrap()).unwrap();
                 let mut d_vis_averaged_tfb =
                     DevicePointer::copy_to_device(result.as_slice().unwrap()).unwrap();
-                let d_lmsts = DevicePointer::copy_to_device(&lmsts).unwrap();
+                let d_lmsts = DevicePointer::copy_to_device(
+                    &lmsts
+                        .iter()
+                        .map(|lmst| *lmst as CudaFloat)
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
                 let d_xyzs = DevicePointer::copy_to_device(&cuda_xyzs).unwrap();
                 let d_lambdas = DevicePointer::copy_to_device(&cuda_lambdas).unwrap();
 
@@ -2334,8 +2344,8 @@ mod cuda_tests {
                     d_weights_tfb.get().cast(),
                     d_vis_averaged_tfb.get_mut().cast(),
                     cuda::RADec {
-                        ra: source_radec.ra,
-                        dec: source_radec.dec,
+                        ra: source_radec.ra as CudaFloat,
+                        dec: source_radec.dec as CudaFloat,
                     },
                     vis_tfb.len_of(time_axis).try_into().unwrap(),
                     num_tiles.try_into().unwrap(),
@@ -2372,7 +2382,12 @@ mod cuda_tests {
                 d_uvws_from.copy_from_device_new().unwrap(),
             )
             .unwrap()
-            .mapv(|cuda::UVW { u, v, w }| UVW { u, v, w });
+            .mapv(|cuda::UVW { u, v, w }| UVW {
+                // The GPU float precision might not be f64.
+                u: u as _,
+                v: v as _,
+                w: w as _,
+            });
             assert_abs_diff_eq!(cpu_uvws, gpu_uvws);
 
             // Hack to use `display_vis_tfb` with low-res visibilities.

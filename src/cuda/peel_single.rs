@@ -61,3 +61,12 @@ extern "C" {
         num_freqs: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
+extern "C" {
+    pub fn add_model(
+        d_vis_residual: *mut JonesF32,
+        d_vis_model: *const JonesF32,
+        num_timesteps: ::std::os::raw::c_int,
+        num_baselines: ::std::os::raw::c_int,
+        num_freqs: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}

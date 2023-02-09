@@ -216,7 +216,6 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
     for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
         const double lambda = lambdas_m[i_freq];
         const double lambda_2 = lambda * lambda;
-        const double lambda_4 = lambda_2 * lambda_2;
 
         // Normally, we would divide by λ to get dimensionless UV. However, UV
         // are only used to determine a_uu, a_uv, a_vv, which are also scaled by
@@ -447,6 +446,18 @@ extern "C" int subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_mod
 
     subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_const_alpha, iono_const_beta, d_uvws,
                                                 d_lambdas_m, num_timesteps, num_baselines, num_freqs);
+
+    return 0;
+}
+
+extern "C" int add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const int num_timesteps,
+                         const int num_baselines, const int num_freqs) {
+    // Thread blocks are distributed by baseline indices.
+    dim3 gridDim, blockDim;
+    blockDim.x = 256;
+    gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
+
+    add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, num_timesteps, num_baselines, num_freqs);
 
     return 0;
 }

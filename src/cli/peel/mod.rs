@@ -3177,6 +3177,14 @@ fn peel_cuda(
             low_res_modeller.model_with_uvws2(&d_uvws_low_res, average_lmst, average_latitude)?;
             multi_progress_bar
                 .suspend(|| trace!("{:?}: low res model", std::time::Instant::now() - start));
+            let status = cuda::add_model(
+                d_low_res_vis.get_mut().cast(),
+                low_res_modeller.d_vis.get().cast(),
+                vis_residual_low_res.len_of(Axis(0)).try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                low_res_freqs_hz.len().try_into().unwrap(),
+            );
+            assert_eq!(status, 0);
 
             #[cfg(test)]
             {
@@ -3208,8 +3216,8 @@ fn peel_cuda(
                     ) {
                         let residual_i = residual[0] + residual[3];
                         let model_i = model[0] + model[3];
-                        let u = u / lambda;
-                        let v = v / lambda;
+                        let u = u / lambda as CudaFloat;
+                        let v = v / lambda as CudaFloat;
 
                         println!("uv ({:+1.5}, {:+1.5}) l{:+1.3} | RI {:+1.5} @{:+1.5}pi | MI {:+1.5} @{:+1.5}pi", u, v, lambda, residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
                     }
