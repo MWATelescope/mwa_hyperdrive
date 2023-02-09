@@ -1408,9 +1408,10 @@ impl PeelArgs {
                         num_unflagged_cross_baselines,
                     ));
                     for timeblock in &timeblocks {
-                        for (vis_model_slice, timestamp) in vis_model
-                            .outer_iter_mut()
-                            .zip_eq(timeblock.timestamps.iter())
+                        // The number of timestamps in a timeblock can vary;
+                        // don't use zip_eq.
+                        for (vis_model_slice, timestamp) in
+                            vis_model.outer_iter_mut().zip(timeblock.timestamps.iter())
                         {
                             // Should we continue?
                             if error.load() {
@@ -1433,7 +1434,11 @@ impl PeelArgs {
 
                         // Don't rotate to each source and subtract; just subtract
                         // the full model.
-                        vis_residual -= &vis_model;
+                        for (mut vis_residual_slice, vis_model_slice) in
+                            vis_residual.outer_iter_mut().zip(vis_model.outer_iter())
+                        {
+                            vis_residual_slice -= &vis_model_slice;
+                        }
 
                         tx_residual
                             .send((vis_residual, vis_weights, timeblock))
