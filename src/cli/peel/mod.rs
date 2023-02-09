@@ -2540,19 +2540,19 @@ fn peel_cpu(
 
     // TODO (Dev): iono_taper_weights could be supplied to peel
     // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
-    let short_baseline_sigma = 20.;
+    // let short_baseline_sigma = 20.;
     // TODO: Do we care about weights changing over time?
-    let iono_taper_weights = {
-        let mut iono_taper = get_weights_rts(
-            tile_uvs_high_res.view(),
-            all_fine_chan_lambdas_m,
-            short_baseline_sigma,
-            (obs_context.guess_freq_res() / FREQ_WEIGHT_FACTOR)
-                * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
-        );
-        iono_taper *= &vis_weights;
-        iono_taper
-    };
+    // let vis_weights = {
+    //     let mut iono_taper = get_weights_rts(
+    //         tile_uvs_high_res.view(),
+    //         all_fine_chan_lambdas_m,
+    //         short_baseline_sigma,
+    //         (obs_context.guess_freq_res() / FREQ_WEIGHT_FACTOR)
+    //             * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
+    //     );
+    //     iono_taper *= &vis_weights;
+    //     iono_taper
+    // };
 
     // Temporary visibility array, re-used for each timestep
     // TODO (Dev): I would name this vis_residual_rot_tfb
@@ -2717,7 +2717,7 @@ fn peel_cpu(
         vis_average2(
             vis_residual_tmp.view(),
             vis_residual_low_res.view_mut(),
-            iono_taper_weights.view(),
+            vis_weights.view(),
         );
 
         multi_progress_bar
@@ -2914,19 +2914,19 @@ fn peel_cuda(
     }
 
     // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
-    let short_baseline_sigma = 20.;
+    // let short_baseline_sigma = 20.;
     // TODO: Do we care about weights changing over time?
-    let iono_taper_weights = {
-        let mut iono_taper = get_weights_rts(
-            tile_uvs_high_res.view(),
-            all_fine_chan_lambdas_m,
-            short_baseline_sigma,
-            (obs_context.guess_freq_res() / FREQ_WEIGHT_FACTOR)
-                * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
-        );
-        iono_taper *= &vis_weights;
-        iono_taper
-    };
+    // let vis_weights = {
+    //     let mut iono_taper = get_weights_rts(
+    //         tile_uvs_high_res.view(),
+    //         all_fine_chan_lambdas_m,
+    //         short_baseline_sigma,
+    //         (obs_context.guess_freq_res() / FREQ_WEIGHT_FACTOR)
+    //             * (obs_context.guess_time_res().to_seconds() / TIME_WEIGHT_FACTOR),
+    //     );
+    //     iono_taper *= &vis_weights;
+    //     iono_taper
+    // };
 
     let (average_lmst, average_latitude, average_tile_xyzs) = if no_precession {
         let average_timestamp = average_epoch(timestamps);
@@ -2967,7 +2967,6 @@ fn peel_cuda(
     let mut vis_weights_low_res: Array3<f32> = Array3::zeros(vis_residual_low_res.dim());
 
     // The low-res weights only need to be populated once.
-    // weights_average(iono_taper_weights.view(), vis_weights_low_res.view_mut());
     weights_average(vis_weights.view(), vis_weights_low_res.view_mut());
 
     let freq_average_factor = all_fine_chan_lambdas_m.len() / low_res_freqs_hz.len();
@@ -3133,19 +3132,6 @@ fn peel_cuda(
             );
             assert_eq!(status, 0);
 
-            #[cfg(test)]
-            {
-                let vis_residual_low_res = d_low_res_vis.copy_from_device_new().unwrap();
-                for residual in vis_residual_low_res.iter() {
-                    let residual_i = residual[0] + residual[3];
-                    println!(
-                        "{} RI {:+1.5} @{:+1.5}pi",
-                        line!(),
-                        residual_i.norm(),
-                        residual_i.arg()
-                    );
-                }
-            }
             multi_progress_bar
                 .suspend(|| trace!("{:?}: rotate_average", std::time::Instant::now() - start));
 
