@@ -1839,7 +1839,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &multi_progress,
                 )
                 .unwrap()
-            },
+            }
         }
 
         display_vis_tfb(
@@ -1877,12 +1877,15 @@ fn test_peel_cpu_multi_source() {
 
 #[cfg(feature = "cuda")]
 mod cuda_tests {
+    use std::ffi::CStr;
+
+    use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
+
     use super::*;
     use crate::{
         cuda::{self, CudaFloat, DevicePointer},
         model::SkyModellerCuda,
     };
-    use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
 
     /// Populate the [UVW] array ([times, baselines]) for the given [ObsContext].
     fn setup_uvw_array(
@@ -2077,7 +2080,7 @@ mod cuda_tests {
                     DevicePointer::copy_to_device(vis_residual_obs_tfb.as_slice().unwrap())
                         .unwrap();
 
-                let status = unsafe {
+                let error_message_ptr = unsafe {
                     cuda::subtract_iono(
                         d_high_res_vis.get_mut().cast(),
                         d_high_res_model.get().cast(),
@@ -2090,7 +2093,9 @@ mod cuda_tests {
                         num_chans.try_into().unwrap(),
                     )
                 };
-                assert_eq!(status, 0);
+                assert!(error_message_ptr.is_null(), "{}", unsafe {CStr::from_ptr(error_message_ptr) }
+                .to_str()
+                .unwrap_or("<cannot read CUDA error string>"));
 
                 d_high_res_vis
                     .copy_from_device(vis_residual_obs_tfb.as_slice_mut().unwrap())

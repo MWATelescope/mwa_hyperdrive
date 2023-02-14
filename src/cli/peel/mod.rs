@@ -58,7 +58,7 @@ use crate::{
 };
 #[cfg(feature = "cuda")]
 use crate::{
-    cuda::{self, CudaFloat, DevicePointer},
+    cuda::{self, CudaError, CudaFloat, DevicePointer},
     model::SkyModellerCuda,
 };
 
@@ -2368,7 +2368,7 @@ fn iono_fit(
                     s_vm += s_vm_bl;
                     s_mm += s_mm_bl;
                 });
-            });
+        });
 
     let denom = TAU * (a_uu * a_vv - a_uv * a_uv);
     #[cfg(test)]
@@ -2817,6 +2817,8 @@ fn peel_cuda(
     no_precession: bool,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
+    use std::ffi::CStr;
+
     // TODO: Do we allow multiple timesteps in the low-res data?
 
     let timestamps = &timeblock.timestamps;
@@ -3109,7 +3111,7 @@ fn peel_cuda(
                 )
             });
             let start = std::time::Instant::now();
-            let status = cuda::rotate_average(
+            let error_message_ptr = cuda::rotate_average(
                 d_high_res_vis.get().cast(),
                 d_high_res_weights.get(),
                 d_low_res_vis.get_mut().cast(),
@@ -3128,7 +3130,15 @@ fn peel_cuda(
                 d_uvws_to.get_mut(),
                 d_lambdas.get(),
             );
-            assert_eq!(status, 0);
+            if !error_message_ptr.is_null() {
+                // Get the CUDA error message associated with the enum variant.
+                let error_message = CStr::from_ptr(error_message_ptr)
+                    .to_str()
+                    .unwrap_or("<cannot read CUDA error string>");
+                let our_error_str =
+                    format!("{}:{}: rotate_average: {error_message}", file!(), line!());
+                return Err(CudaError::Kernel(our_error_str).into());
+            }
 
             multi_progress_bar
                 .suspend(|| trace!("{:?}: rotate_average", std::time::Instant::now() - start));
@@ -3142,7 +3152,7 @@ fn peel_cuda(
                 )
             });
 
-            let status = cuda::xyzs_to_uvws(
+            let error_message_ptr = cuda::xyzs_to_uvws(
                 d_xyzs_low_res.get(),
                 d_average_lmsts.get(),
                 d_uvws_low_res.get_mut(),
@@ -3154,8 +3164,15 @@ fn peel_cuda(
                 num_cross_baselines.try_into().unwrap(),
                 1,
             );
+            if !error_message_ptr.is_null() {
+                let error_message = CStr::from_ptr(error_message_ptr)
+                    .to_str()
+                    .unwrap_or("<cannot read CUDA error string>");
+                let our_error_str =
+                    format!("{}:{}: xyzs_to_uvws: {error_message}", file!(), line!());
+                return Err(CudaError::Kernel(our_error_str).into());
+            }
 
-            assert_eq!(status, 0);
             multi_progress_bar.suspend(|| {
                 trace!(
                     "{:?}: low res xyzs_to_uvws",
@@ -3166,14 +3183,20 @@ fn peel_cuda(
             low_res_modeller.model_with_uvws2(&d_uvws_low_res, average_lmst, average_latitude)?;
             multi_progress_bar
                 .suspend(|| trace!("{:?}: low res model", std::time::Instant::now() - start));
-            let status = cuda::add_model(
+            let error_message_ptr = cuda::add_model(
                 d_low_res_vis.get_mut().cast(),
                 low_res_modeller.d_vis.get().cast(),
                 vis_residual_low_res.len_of(Axis(0)).try_into().unwrap(),
                 num_cross_baselines.try_into().unwrap(),
                 low_res_freqs_hz.len().try_into().unwrap(),
             );
-            assert_eq!(status, 0);
+            if !error_message_ptr.is_null() {
+                let error_message = CStr::from_ptr(error_message_ptr)
+                    .to_str()
+                    .unwrap_or("<cannot read CUDA error string>");
+                let our_error_str = format!("{}:{}: add_model: {error_message}", file!(), line!());
+                return Err(CudaError::Kernel(our_error_str).into());
+            }
 
             #[cfg(test)]
             {
@@ -3213,7 +3236,7 @@ fn peel_cuda(
                 }
             }
 
-            let status = cuda::iono_loop(
+            let error_message_ptr = cuda::iono_loop(
                 d_low_res_vis.get().cast(),
                 d_low_res_weights.get(),
                 low_res_modeller.d_vis.get().cast(),
@@ -3230,7 +3253,14 @@ fn peel_cuda(
                 d_uvws_low_res.get(),
                 d_low_res_lambdas.get(),
             );
-            assert_eq!(status, 0);
+            if !error_message_ptr.is_null() {
+                let error_message = CStr::from_ptr(error_message_ptr)
+                    .to_str()
+                    .unwrap_or("<cannot read CUDA error string>");
+                let our_error_str = format!("{}:{}: iono_loop: {error_message}", file!(), line!());
+                return Err(CudaError::Kernel(our_error_str).into());
+            }
+
             // dbg!(iono_consts);
             multi_progress_bar
                 .suspend(|| trace!("{:?}: iono_loop", std::time::Instant::now() - start));
@@ -3264,7 +3294,7 @@ fn peel_cuda(
             multi_progress_bar
                 .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
 
-            let status = cuda::subtract_iono(
+            let error_message_ptr = cuda::subtract_iono(
                 d_high_res_vis.get_mut().cast(),
                 d_high_res_model.get().cast(),
                 iono_consts.0,
@@ -3275,7 +3305,15 @@ fn peel_cuda(
                 num_cross_baselines.try_into().unwrap(),
                 all_fine_chan_lambdas_m.len().try_into().unwrap(),
             );
-            assert_eq!(status, 0);
+            if !error_message_ptr.is_null() {
+                let error_message = CStr::from_ptr(error_message_ptr)
+                    .to_str()
+                    .unwrap_or("<cannot read CUDA error string>");
+                let our_error_str =
+                    format!("{}:{}: subtract_iono: {error_message}", file!(), line!());
+                return Err(CudaError::Kernel(our_error_str).into());
+            }
+
             multi_progress_bar
                 .suspend(|| trace!("{:?}: subtract_iono", std::time::Instant::now() - start));
             debug!("peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
