@@ -397,7 +397,8 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
 }
 
 __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const double iono_const_alpha,
-                                     const double iono_const_beta, const UVW *uvws, const FLOAT *lambdas_m,
+                                     const double iono_const_beta, const double old_iono_const_alpha,
+                                     const double old_iono_const_beta, const UVW *uvws, const FLOAT *lambdas_m,
                                      const int num_timesteps, const int num_baselines, const int num_freqs) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
@@ -406,6 +407,7 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
     for (int i_time = 0; i_time < num_timesteps; i_time++) {
         const UVW uvw = uvws[i_time * num_baselines + i_bl];
         const FLOAT arg = -TAU * (uvw.u * iono_const_alpha + uvw.v * iono_const_beta);
+        const FLOAT old_arg = -TAU * (uvw.u * old_iono_const_alpha + uvw.v * old_iono_const_beta);
         for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
             const FLOAT lambda = lambdas_m[i_freq];
 
@@ -414,6 +416,8 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
             // use it in an exponential. But we're also multiplying by λ², so just
             // multiply by λ.
             SINCOS(arg * lambda, &complex.y, &complex.x);
+            COMPLEX old_complex;
+            SINCOS(old_arg * lambda, &old_complex.y, &old_complex.x);
 
             const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
             JonesF32 r = vis_residual[step];
@@ -442,7 +446,7 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
                 .j11_im = m.j11_im,
             };
 
-            r2 += m2;
+            r2 += m2 * old_complex;
             r2 -= m2 * complex;
             vis_residual[step] = JonesF32{
                 .j00_re = (float)r2.j00_re,
@@ -458,16 +462,31 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
     }
 }
 
-__global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const int num_timesteps,
-                                 const int num_baselines, const int num_freqs) {
+__global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const FLOAT iono_const_alpha,
+                                 const FLOAT iono_const_beta, const FLOAT *lambdas_m, const UVW *uvws,
+                                 const int num_timesteps, const int num_baselines, const int num_freqs) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
 
     for (int i_time = 0; i_time < num_timesteps; i_time++) {
+        const UVW uvw = uvws[i_time * num_baselines + i_bl];
+        const FLOAT arg = -TAU * (uvw.u * iono_const_alpha + uvw.v * iono_const_beta);
+
         for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
+            COMPLEX complex;
+            if (iono_const_alpha == 0.0 && iono_const_beta == 0.0) {
+                complex.x = 1.0;
+                complex.y = 0.0;
+            } else {
+                // The baseline UV is in units of metres, so we need to divide
+                // by λ to use it in an exponential. But we're also multiplying
+                // by λ², so just multiply by λ.
+                SINCOS(arg * lambdas_m[i_freq], &complex.y, &complex.x);
+            }
+
             const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
-            vis_residual[step] += vis_model[step];
+            vis_residual[step] += vis_model[step] * complex;
         }
     }
 }
@@ -617,15 +636,17 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
 }
 
 extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, double iono_const_alpha,
-                                     double iono_const_beta, const UVW *d_uvws, const FLOAT *d_lambdas_m,
-                                     const int num_timesteps, const int num_baselines, const int num_freqs) {
+                                     double iono_const_beta, double old_iono_const_alpha, double old_iono_const_beta,
+                                     const UVW *d_uvws, const FLOAT *d_lambdas_m, const int num_timesteps,
+                                     const int num_baselines, const int num_freqs) {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
-    subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_const_alpha, iono_const_beta, d_uvws,
-                                                d_lambdas_m, num_timesteps, num_baselines, num_freqs);
+    subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_const_alpha, iono_const_beta,
+                                                old_iono_const_alpha, old_iono_const_beta, d_uvws, d_lambdas_m,
+                                                num_timesteps, num_baselines, num_freqs);
     cudaError_t error_id = cudaDeviceSynchronize();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
@@ -638,14 +659,17 @@ extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d
     return NULL;
 }
 
-extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const int num_timesteps,
-                                 const int num_baselines, const int num_freqs) {
+extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const FLOAT iono_const_alpha,
+                                 const FLOAT iono_const_beta, const FLOAT *d_lambdas_m, const UVW *d_uvws,
+                                 const int num_timesteps, const int num_baselines, const int num_freqs) {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
-    add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, num_timesteps, num_baselines, num_freqs);
+    add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_const_alpha, iono_const_beta, d_lambdas_m,
+                                            d_uvws, num_timesteps, num_baselines, num_freqs);
+
     cudaError_t error_id = cudaDeviceSynchronize();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);

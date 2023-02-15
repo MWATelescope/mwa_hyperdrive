@@ -1228,6 +1228,7 @@ fn test_apply_iono3() {
                 vis_resid_obs_tfb.view_mut(),
                 tile_uvs_src.view(),
                 consts_lm,
+                (0.0, 0.0),
                 &lambdas_m,
             );
 
@@ -1465,7 +1466,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &source_list,
                     &mut iono_consts,
                     &source_weighted_positions,
-                    num_sources_to_iono_subtract,
+                    3,
                     &fine_chan_freqs_hz,
                     &lambdas_m,
                     &lambdas_m,
@@ -1517,7 +1518,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &source_list,
                         &mut iono_consts,
                         &source_weighted_positions,
-                        num_sources_to_iono_subtract,
+                        3,
                         &fine_chan_freqs_hz,
                         &lambdas_m,
                         &lambdas_m,
@@ -1773,7 +1774,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &source_list,
                 &mut iono_consts_result,
                 &source_weighted_positions,
-                num_sources_to_iono_subtract,
+                3,
                 &fine_chan_freqs_hz,
                 &lambdas_m,
                 &lambdas_m,
@@ -1825,7 +1826,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &source_list,
                     &mut iono_consts_result,
                     &source_weighted_positions,
-                    num_sources_to_iono_subtract,
+                    3,
                     &fine_chan_freqs_hz,
                     &lambdas_m,
                     &lambdas_m,
@@ -1859,7 +1860,11 @@ fn test_peel_multi_source(peel_type: PeelType) {
         // peel should perfectly remove the iono rotate model vis
         for jones_residual in vis_residual_obs_tfb.iter() {
             for pol_residual in jones_residual.iter() {
-                assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 2e-3);
+                #[cfg(not(feature = "cuda-single"))]
+                let eps = 3e-7;
+                #[cfg(feature = "cuda-single")]
+                let eps = 5e-7;
+                assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = eps);
             }
         }
     }
@@ -2086,6 +2091,8 @@ mod cuda_tests {
                         d_high_res_model.get().cast(),
                         consts_lm.0,
                         consts_lm.1,
+                        0.0,
+                        0.0,
                         d_uvws_src.get(),
                         d_lambdas.get(),
                         num_times.try_into().unwrap(),
@@ -2093,9 +2100,13 @@ mod cuda_tests {
                         num_chans.try_into().unwrap(),
                     )
                 };
-                assert!(error_message_ptr.is_null(), "{}", unsafe {CStr::from_ptr(error_message_ptr) }
-                .to_str()
-                .unwrap_or("<cannot read CUDA error string>"));
+                assert!(
+                    error_message_ptr.is_null(),
+                    "{}",
+                    unsafe { CStr::from_ptr(error_message_ptr) }
+                        .to_str()
+                        .unwrap_or("<cannot read CUDA error string>")
+                );
 
                 d_high_res_vis
                     .copy_from_device(vis_residual_obs_tfb.as_slice_mut().unwrap())

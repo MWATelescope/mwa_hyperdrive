@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+mod error;
+#[cfg(test)]
+mod tests;
+pub(crate) use error::PeelError;
+
 use std::{
     collections::{HashMap, HashSet},
     f64::consts::TAU,
@@ -64,22 +69,23 @@ use crate::{
 
 pub(crate) const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
 pub(crate) const DEFAULT_OUTPUT_IONO_CONSTS: &str = "hyperdrive_iono_consts.json";
+#[cfg(not(feature = "cuda"))]
+pub(crate) const DEFAULT_NUM_PASSES: usize = 1;
+#[cfg(feature = "cuda")]
+pub(crate) const DEFAULT_NUM_PASSES: usize = 3;
 pub(crate) const DEFAULT_TIME_AVERAGE_FACTOR: &str = "8s";
 pub(crate) const DEFAULT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
 pub(crate) const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
 pub(crate) const DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR: &str = "8s";
 pub(crate) const DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
 pub(crate) const DEFAULT_UVW_MIN: &str = "0λ";
-#[cfg(test)]
-pub(crate) mod tests;
-// erros
-pub mod error;
-pub(crate) use error::PeelError;
 
 lazy_static::lazy_static! {
     static ref DUT1: Duration = Duration::from_seconds(0.0);
 
     static ref VIS_OUTPUTS_HELP: String = format!("The paths to the files where the peeled visibilities are written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
+
+    static ref NUM_PASSES_HELP: String = format!("The number of times to iterate over all sources per timeblock. Default: {DEFAULT_NUM_PASSES}");
 
     static ref TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timesteps to use per timeblock *during* peeling. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then peeling is performed with 4 timesteps per timeblock. If the variable is instead 4s, then each timeblock contains up to 4s worth of data.");
 
@@ -133,6 +139,9 @@ pub struct PeelArgs {
     /// vetoing.
     #[clap(long = "iono-sub", help_heading = "SKY-MODEL SOURCES")]
     pub num_sources_to_iono_subtract: Option<usize>,
+
+    #[clap(long, help = NUM_PASSES_HELP.as_str(), help_heading = "PEELING")]
+    pub num_passes: Option<usize>,
 
     /// Use the CPU for peeling and ionospheric subraction. This is deliberately
     /// made non-default because using a GPU is much faster.
@@ -297,6 +306,7 @@ impl PeelArgs {
             outputs,
             num_sources_to_peel: _,
             num_sources_to_iono_subtract,
+            num_passes,
             #[cfg(feature = "cuda")]
             cpu_peel,
             num_sources_to_subtract,
@@ -313,8 +323,8 @@ impl PeelArgs {
             iono_freq_average_factor,
             output_time_average_factor,
             output_freq_average_factor,
-            timesteps,
             // todo (dev): this could be match!(timesteps, None)
+            timesteps,
             use_all_timesteps,
             uvw_min: _,
             uvw_max: _,
@@ -346,6 +356,8 @@ impl PeelArgs {
             (Some(_), None) => None,
             (None, None) => None,
         };
+
+        let num_passes = num_passes.unwrap_or(DEFAULT_NUM_PASSES);
 
         // If we're going to use a GPU for modelling, get the device info so we
         // can ensure a CUDA-capable device is available, and so we can report
@@ -1503,7 +1515,7 @@ impl PeelArgs {
                                     &source_list,
                                     &mut iono_consts,
                                     &source_weighted_positions,
-                                    num_sources_to_iono_subtract,
+                                    num_passes,
                                     &low_res_freqs_hz,
                                     &all_fine_chan_lambdas_m,
                                     &low_res_lambdas_m,
@@ -1553,7 +1565,7 @@ impl PeelArgs {
                                     &source_list,
                                     &mut iono_consts,
                                     &source_weighted_positions,
-                                    num_sources_to_iono_subtract,
+                                    num_passes,
                                     &low_res_freqs_hz,
                                     &all_fine_chan_lambdas_m,
                                     &low_res_lambdas_m,
@@ -1605,7 +1617,7 @@ impl PeelArgs {
                                     &source_list,
                                     &mut iono_consts,
                                     &source_weighted_positions,
-                                    num_sources_to_iono_subtract,
+                                    num_passes,
                                     &low_res_freqs_hz,
                                     &all_fine_chan_lambdas_m,
                                     &low_res_lambdas_m,
@@ -2199,6 +2211,7 @@ fn apply_iono3(
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
     const_lm: (f64, f64),
+    old_const_lm: (f64, f64),
     lambdas_m: &[f64],
 ) {
     let num_tiles = tile_uvs.len_of(Axis(1));
@@ -2229,6 +2242,7 @@ fn apply_iono3(
 
                     let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
                     let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
+                    let old_arg = -TAU * (u * old_const_lm.0 + v * old_const_lm.1);
                     // iterate along frequency axis
                     vis_model
                         .iter()
@@ -2236,16 +2250,17 @@ fn apply_iono3(
                         .zip(lambdas_m.iter())
                         .for_each(|((vis_model, vis_residual), lambda_m)| {
                             let mut j = Jones::<f64>::from(*vis_residual);
-                            let mut m = Jones::<f64>::from(*vis_model);
-                            j += m;
-
+                            let m = Jones::<f64>::from(*vis_model);
                             // The baseline UV is in units of metres, so we need
                             // to divide by λ to use it in an exponential. But
                             // we're also multiplying by λ², so just multiply by
                             // λ.
+                            let old_rotation = Complex::cis(old_arg * *lambda_m);
+                            j += m * old_rotation;
+
                             let rotation = Complex::cis(arg * *lambda_m);
-                            m *= rotation;
-                            *vis_residual = Jones::from(j - m);
+                            j -= m * rotation;
+                            *vis_residual = Jones::from(j);
                         });
                 });
         });
@@ -2430,7 +2445,7 @@ fn peel_cpu(
     source_list: &SourceList,
     iono_consts: &mut [(f64, f64)],
     source_weighted_positions: &[RADec],
-    num_sources_to_iono_subtract: usize,
+    num_passes: usize,
     // TODO (dev): Why do we need both this and low_res_lambdas_m? it's not even used
     _low_res_freqs_hz: &[f64],
     all_fine_chan_lambdas_m: &[f64],
@@ -2461,6 +2476,7 @@ fn peel_cpu(
     let num_freqs_low_res = low_res_lambdas_m.len();
 
     let num_sources = source_list.len();
+    let num_sources_to_iono_subtract = iono_consts.len();
 
     // TODO: these assertions should be actual errors.
     let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
@@ -2573,223 +2589,244 @@ fn peel_cpu(
     // The low-res weights only need to be populated once.
     weights_average(vis_weights.view(), vis_weights_low_res.view_mut());
 
-    for (((source_name, source), iono_consts), source_phase_centre) in source_list
-        .iter()
-        .take(num_sources_to_iono_subtract)
-        .zip_eq(iono_consts.iter_mut())
-        .zip_eq(source_weighted_positions.iter().copied())
-    {
-        multi_progress_bar.suspend(|| {
-            debug!("peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})")
-        });
-        let start = std::time::Instant::now();
+    for pass in 0..num_passes {
+        for (((source_name, source), iono_consts), source_phase_centre) in source_list
+            .iter()
+            .take(num_sources_to_iono_subtract)
+            .zip_eq(iono_consts.iter_mut())
+            .zip_eq(source_weighted_positions.iter().copied())
+        {
+            multi_progress_bar.suspend(|| {
+                debug!("peel loop {pass}: {source_name} at {source_phase_centre} (has iono {iono_consts:?})")
+            });
+            let start = std::time::Instant::now();
+            let old_iono_consts = *iono_consts;
 
-        low_res_modeller.update_with_a_source(source, source_phase_centre)?;
-        high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
-        // this is only necessary for cpu modeller.
-        vis_model_low_res.fill(Jones::zero());
+            low_res_modeller.update_with_a_source(source, source_phase_centre)?;
+            high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+            // this is only necessary for cpu modeller.
+            vis_model_low_res.fill(Jones::zero());
 
-        multi_progress_bar.suspend(|| {
-            trace!(
-                "{:?}: initialize modellers",
-                std::time::Instant::now() - start
-            )
-        });
-        // TODO (dev): model_timestep returns uvws, could re-use these here.
-        // iterate along time chunks:
-        // - calculate high-res uvws in source phase centre
-        // - rotate residuals to source phase centre
-        // - model low res visibilities in source phase centre
-        // - calculate low-res uvws in source phase centre
-        for (
-            timestamps,
-            vis_residual_tfb,
-            mut vis_residual_rot_tfb,
-            mut vis_model_low_res_rot_fb,
-            tile_ws_high_res,
-            mut tile_uvs_high_res_rot,
-            mut tile_ws_high_res_rot,
-            mut tile_uvs_low_res_rot,
-        ) in izip!(
-            timestamps.chunks(avg_time),
-            vis_residual.axis_chunks_iter(time_axis, avg_time),
-            vis_residual_tmp.axis_chunks_iter_mut(time_axis, avg_time),
-            vis_model_low_res.outer_iter_mut(),
-            tile_ws_from.axis_chunks_iter(time_axis, avg_time),
-            tile_uvs_high_res_rot.axis_chunks_iter_mut(time_axis, avg_time),
-            tile_ws_to.axis_chunks_iter_mut(time_axis, avg_time),
-            tile_uvs_low_res.outer_iter_mut(),
-        ) {
             multi_progress_bar.suspend(|| {
                 trace!(
-                    "{:?}: calc source uvw, rotate residual",
+                    "{:?}: initialize modellers",
                     std::time::Instant::now() - start
                 )
             });
-            // iterate along high res times
+            // TODO (dev): model_timestep returns uvws, could re-use these here.
+            // iterate along time chunks:
+            // - calculate high-res uvws in source phase centre
+            // - rotate residuals to source phase centre
+            // - model low res visibilities in source phase centre
+            // - calculate low-res uvws in source phase centre
             for (
-                &time,
-                vis_residual_fb,
-                mut vis_residual_rot_fb,
+                timestamps,
+                vis_residual_tfb,
+                mut vis_residual_rot_tfb,
+                mut vis_model_low_res_rot_fb,
                 tile_ws_high_res,
                 mut tile_uvs_high_res_rot,
                 mut tile_ws_high_res_rot,
+                mut tile_uvs_low_res_rot,
             ) in izip!(
-                timestamps,
-                vis_residual_tfb.outer_iter(),
-                vis_residual_rot_tfb.outer_iter_mut(),
-                tile_ws_high_res.outer_iter(),
-                tile_uvs_high_res_rot.outer_iter_mut(),
-                tile_ws_high_res_rot.outer_iter_mut(),
+                timestamps.chunks(avg_time),
+                vis_residual.axis_chunks_iter(time_axis, avg_time),
+                vis_residual_tmp.axis_chunks_iter_mut(time_axis, avg_time),
+                vis_model_low_res.outer_iter_mut(),
+                tile_ws_from.axis_chunks_iter(time_axis, avg_time),
+                tile_uvs_high_res_rot.axis_chunks_iter_mut(time_axis, avg_time),
+                tile_ws_to.axis_chunks_iter_mut(time_axis, avg_time),
+                tile_uvs_low_res.outer_iter_mut(),
             ) {
+                multi_progress_bar.suspend(|| {
+                    trace!(
+                        "{:?}: calc source uvw, rotate residual",
+                        std::time::Instant::now() - start
+                    )
+                });
+                // iterate along high res times
+                for (
+                    &time,
+                    vis_residual_fb,
+                    mut vis_residual_rot_fb,
+                    tile_ws_high_res,
+                    mut tile_uvs_high_res_rot,
+                    mut tile_ws_high_res_rot,
+                ) in izip!(
+                    timestamps,
+                    vis_residual_tfb.outer_iter(),
+                    vis_residual_rot_tfb.outer_iter_mut(),
+                    tile_ws_high_res.outer_iter(),
+                    tile_uvs_high_res_rot.outer_iter_mut(),
+                    tile_ws_high_res_rot.outer_iter_mut(),
+                ) {
+                    let (lmst, precessed_xyzs) = if !no_precession {
+                        let precession_info = precess_time(
+                            array_position.longitude_rad,
+                            array_position.latitude_rad,
+                            obs_context.phase_centre,
+                            time,
+                            dut1,
+                        );
+                        let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
+                        (precession_info.lmst_j2000, precessed_xyzs)
+                    } else {
+                        let lmst = get_lmst(array_position.longitude_rad, time, dut1);
+                        (lmst, unflagged_tile_xyzs.into())
+                    };
+                    let hadec_source = source_phase_centre.to_hadec(lmst);
+                    let (s_ha, c_ha) = hadec_source.ha.sin_cos();
+                    let (s_dec, c_dec) = hadec_source.dec.sin_cos();
+                    for (tile_uv, tile_w, &precessed_xyz) in izip!(
+                        tile_uvs_high_res_rot.iter_mut(),
+                        tile_ws_high_res_rot.iter_mut(),
+                        precessed_xyzs.iter(),
+                    ) {
+                        let UVW { u, v, w } =
+                            UVW::from_xyz_inner(precessed_xyz, s_ha, c_ha, s_dec, c_dec);
+                        *tile_uv = UV { u, v };
+                        *tile_w = W(w);
+                    }
+
+                    vis_rotate_fb(
+                        vis_residual_fb.view(),
+                        vis_residual_rot_fb.view_mut(),
+                        tile_ws_high_res.as_slice().unwrap(),
+                        tile_ws_high_res_rot.as_slice().unwrap(),
+                        all_fine_chan_lambdas_m,
+                    );
+                }
+                multi_progress_bar
+                    .suspend(|| trace!("{:?}: low-res uvws", std::time::Instant::now() - start));
+
+                let low_res_epoch = average_epoch(timestamps);
+                // compute low-res tile UVs at source phase centre.
                 let (lmst, precessed_xyzs) = if !no_precession {
                     let precession_info = precess_time(
                         array_position.longitude_rad,
                         array_position.latitude_rad,
                         obs_context.phase_centre,
-                        time,
+                        low_res_epoch,
                         dut1,
                     );
                     let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
                     (precession_info.lmst_j2000, precessed_xyzs)
                 } else {
-                    let lmst = get_lmst(array_position.longitude_rad, time, dut1);
+                    let lmst = get_lmst(array_position.longitude_rad, low_res_epoch, dut1);
                     (lmst, unflagged_tile_xyzs.into())
                 };
                 let hadec_source = source_phase_centre.to_hadec(lmst);
-                let (s_ha, c_ha) = hadec_source.ha.sin_cos();
-                let (s_dec, c_dec) = hadec_source.dec.sin_cos();
-                for (tile_uv, tile_w, &precessed_xyz) in izip!(
-                    tile_uvs_high_res_rot.iter_mut(),
-                    tile_ws_high_res_rot.iter_mut(),
-                    precessed_xyzs.iter(),
-                ) {
-                    let UVW { u, v, w } =
-                        UVW::from_xyz_inner(precessed_xyz, s_ha, c_ha, s_dec, c_dec);
-                    *tile_uv = UV { u, v };
-                    *tile_w = W(w);
-                }
-
-                vis_rotate_fb(
-                    vis_residual_fb.view(),
-                    vis_residual_rot_fb.view_mut(),
-                    tile_ws_high_res.as_slice().unwrap(),
-                    tile_ws_high_res_rot.as_slice().unwrap(),
-                    all_fine_chan_lambdas_m,
+                setup_uvs(
+                    tile_uvs_low_res_rot.as_slice_mut().unwrap(),
+                    &precessed_xyzs,
+                    hadec_source,
                 );
+
+                multi_progress_bar
+                    .suspend(|| trace!("{:?}: low-res model", std::time::Instant::now() - start));
+                low_res_modeller
+                    .model_timestep(vis_model_low_res_rot_fb.view_mut(), low_res_epoch)?;
             }
-            multi_progress_bar
-                .suspend(|| trace!("{:?}: low-res uvws", std::time::Instant::now() - start));
 
-            let low_res_epoch = average_epoch(timestamps);
-            // compute low-res tile UVs at source phase centre.
-            let (lmst, precessed_xyzs) = if !no_precession {
-                let precession_info = precess_time(
-                    array_position.longitude_rad,
-                    array_position.latitude_rad,
-                    obs_context.phase_centre,
-                    low_res_epoch,
-                    dut1,
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: vis_average", std::time::Instant::now() - start));
+            vis_average2(
+                vis_residual_tmp.view(),
+                vis_residual_low_res.view_mut(),
+                vis_weights.view(),
+            );
+
+            // Add the low-res model to the residuals. If the iono consts are
+            // non-zero, then also shift the model before adding it.
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: add low-res model", std::time::Instant::now() - start));
+            if iono_consts.0.abs() > f64::EPSILON && iono_consts.1.abs() > f64::EPSILON {
+                apply_iono2(
+                    vis_model_low_res.view(),
+                    vis_model_low_res_tmp.view_mut(),
+                    tile_uvs_low_res.view(),
+                    *iono_consts,
+                    low_res_lambdas_m,
                 );
-                let precessed_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
-                (precession_info.lmst_j2000, precessed_xyzs)
+                Zip::from(&mut vis_residual_low_res)
+                    .and(&vis_model_low_res_tmp)
+                    .for_each(|r, m| {
+                        *r += *m;
+                    });
             } else {
-                let lmst = get_lmst(array_position.longitude_rad, low_res_epoch, dut1);
-                (lmst, unflagged_tile_xyzs.into())
-            };
-            let hadec_source = source_phase_centre.to_hadec(lmst);
-            setup_uvs(
-                tile_uvs_low_res_rot.as_slice_mut().unwrap(),
-                &precessed_xyzs,
-                hadec_source,
-            );
+                Zip::from(&mut vis_residual_low_res)
+                    .and(&vis_model_low_res)
+                    .for_each(|r, m| {
+                        *r += *m;
+                    });
+            }
 
             multi_progress_bar
-                .suspend(|| trace!("{:?}: low-res model", std::time::Instant::now() - start));
-            low_res_modeller.model_timestep(vis_model_low_res_rot_fb.view_mut(), low_res_epoch)?;
-        }
+                .suspend(|| trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start));
+            // let mut gain_update = 1.0;
+            let mut iteration = 0;
+            while iteration != 10 {
+                iteration += 1;
+                multi_progress_bar.suspend(|| debug!("iter {iteration}, consts: {iono_consts:?}"));
 
-        multi_progress_bar
-            .suspend(|| trace!("{:?}: vis_average", std::time::Instant::now() - start));
-        vis_average2(
-            vis_residual_tmp.view(),
-            vis_residual_low_res.view_mut(),
-            vis_weights.view(),
-        );
+                // iono rotate model using existing iono consts
+                apply_iono2(
+                    vis_model_low_res.view(),
+                    vis_model_low_res_tmp.view_mut(),
+                    tile_uvs_low_res.view(),
+                    *iono_consts,
+                    low_res_lambdas_m,
+                );
 
-        multi_progress_bar
-            .suspend(|| trace!("{:?}: add low-res model", std::time::Instant::now() - start));
-        // vis_model_low_res_tmp is only populated in apply_iono2 if iono_consts is not 0
-        Zip::from(&mut vis_residual_low_res)
-            .and(&vis_model_low_res)
-            .for_each(|r, m| {
-                *r += *m;
-            });
+                let iono_fits = iono_fit(
+                    vis_residual_low_res.view(),
+                    vis_weights_low_res.view(),
+                    vis_model_low_res_tmp.view(),
+                    low_res_lambdas_m,
+                    tile_uvs_low_res.view(),
+                );
+                multi_progress_bar.suspend(|| trace!("iono_fits: {iono_fits:?}"));
 
-        multi_progress_bar
-            .suspend(|| trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start));
-        // let mut gain_update = 1.0;
-        let mut iteration = 0;
-        while iteration != 10 {
-            iteration += 1;
-            multi_progress_bar.suspend(|| debug!("iter {iteration}, consts: {iono_consts:?}"));
+                iono_consts.0 += iono_fits[0];
+                iono_consts.1 += iono_fits[1];
+                // gain_update *= iono_fits[2] / iono_fits[3];
+                // vis_model_low_res
+                //     .iter_mut()
+                //     .for_each(|v| *v *= gain_update as f32);
 
-            // iono rotate model using existing iono consts
-            apply_iono2(
-                vis_model_low_res.view(),
-                vis_model_low_res_tmp.view_mut(),
-                tile_uvs_low_res.view(),
-                *iono_consts,
-                low_res_lambdas_m,
-            );
-
-            let iono_fits = iono_fit(
-                vis_residual_low_res.view(),
-                vis_weights_low_res.view(),
-                vis_model_low_res_tmp.view(),
-                low_res_lambdas_m,
-                tile_uvs_low_res.view(),
-            );
-            multi_progress_bar.suspend(|| trace!("iono_fits: {iono_fits:?}"));
-
-            iono_consts.0 += iono_fits[0];
-            iono_consts.1 += iono_fits[1];
-            // gain_update *= iono_fits[2] / iono_fits[3];
-            // vis_model_low_res
-            //     .iter_mut()
-            //     .for_each(|v| *v *= gain_update as f32);
-
-            // if the offset is small, we've converged.
-            if iono_fits[0].abs() < 1e-12 && iono_fits[1].abs() < 1e-12 {
-                debug!("iter {iteration}, consts: {iono_consts:?}, finished");
-                break;
+                // if the offset is small, we've converged.
+                if iono_fits[0].abs() < 1e-12 && iono_fits[1].abs() < 1e-12 {
+                    debug!("iter {iteration}, consts: {iono_consts:?}, finished");
+                    break;
+                }
             }
+
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
+            vis_model_high_res.fill(Jones::default());
+            model_timesteps(high_res_modeller, timestamps, vis_model_high_res.view_mut())?;
+
+            multi_progress_bar
+                .suspend(|| trace!("{:?}: apply_iono3", std::time::Instant::now() - start));
+            // add the model to residual, and subtract the iono rotated model
+            apply_iono3(
+                vis_model_high_res.view(),
+                vis_residual.view_mut(),
+                // TODO: pretty sure this needs to be tile_uvs_high_res_rot
+                // tile_uvs_high_res.view(),
+                tile_uvs_high_res_rot.view(),
+                *iono_consts,
+                old_iono_consts,
+                all_fine_chan_lambdas_m,
+            );
+
+            multi_progress_bar.suspend(|| {
+                debug!(
+                    "peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})"
+                )
+            });
+            peel_progress.inc(1);
         }
-
-        multi_progress_bar
-            .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
-        vis_model_high_res.fill(Jones::default());
-        model_timesteps(high_res_modeller, timestamps, vis_model_high_res.view_mut())?;
-
-        multi_progress_bar
-            .suspend(|| trace!("{:?}: apply_iono3", std::time::Instant::now() - start));
-        // add the model to residual, and subtract the iono rotated model
-        apply_iono3(
-            vis_model_high_res.view(),
-            vis_residual.view_mut(),
-            // TODO: pretty sure this needs to be tile_uvs_high_res_rot
-            // tile_uvs_high_res.view(),
-            tile_uvs_high_res_rot.view(),
-            *iono_consts,
-            all_fine_chan_lambdas_m,
-        );
-
-        multi_progress_bar.suspend(|| {
-            debug!(
-            "peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})"
-            )
-        });
-        peel_progress.inc(1);
     }
 
     Ok(())
@@ -2804,7 +2841,7 @@ fn peel_cuda(
     source_list: &SourceList,
     iono_consts: &mut [(f64, f64)],
     source_weighted_positions: &[RADec],
-    num_sources_to_iono_subtract: usize,
+    num_passes: usize,
     low_res_freqs_hz: &[f64],
     all_fine_chan_lambdas_m: &[f64],
     low_res_lambdas_m: &[f64],
@@ -2819,6 +2856,8 @@ fn peel_cuda(
 ) -> Result<(), PeelError> {
     use std::ffi::CStr;
 
+    let num_sources_to_iono_subtract = iono_consts.len();
+
     // TODO: Do we allow multiple timesteps in the low-res data?
 
     let timestamps = &timeblock.timestamps;
@@ -2830,7 +2869,6 @@ fn peel_cuda(
                     .progress_chars("=> "),
             )
             .with_position(0)
-            .with_message(format!("Peeling timeblock {}", timeblock.index + 1)),
     );
     peel_progress.tick();
 
@@ -3030,7 +3068,7 @@ fn peel_cuda(
         let d_lambdas = DevicePointer::copy_to_device(&cuda_lambdas).unwrap();
         let d_xyzs_low_res = DevicePointer::copy_to_device(&cuda_xyzs_low_res).unwrap();
         let d_average_lmsts = DevicePointer::copy_to_device(&[average_lmst as CudaFloat]).unwrap();
-        let mut d_uvws_low_res: DevicePointer<cuda::UVW> =
+        let mut d_uvws_source_low_res: DevicePointer<cuda::UVW> =
             DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
         let d_low_res_lambdas = DevicePointer::copy_to_device(&cuda_low_res_lambdas).unwrap();
         // Make the amount of elements in `d_iono_fits` a power of 2, for
@@ -3099,226 +3137,251 @@ fn peel_cuda(
             d_uvws.push(cuda::DevicePointer::copy_to_device(&cuda_uvws).unwrap());
         }
 
-        for (((source_name, source), iono_consts), source_phase_centre) in source_list
-            .iter()
-            .take(num_sources_to_iono_subtract)
-            .zip_eq(iono_consts.iter_mut())
-            .zip_eq(source_weighted_positions.iter().copied())
-        {
-            multi_progress_bar.suspend(|| {
-                debug!(
-                    "peel loop: {source_name} at {source_phase_centre} (has iono {iono_consts:?})"
-                )
-            });
-            let start = std::time::Instant::now();
-            let error_message_ptr = cuda::rotate_average(
-                d_high_res_vis.get().cast(),
-                d_high_res_weights.get(),
-                d_low_res_vis.get_mut().cast(),
-                cuda::RADec {
-                    ra: source_phase_centre.ra as _,
-                    dec: source_phase_centre.dec as _,
-                },
-                timestamps.len().try_into().unwrap(),
-                num_tiles.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                all_fine_chan_lambdas_m.len().try_into().unwrap(),
-                freq_average_factor.try_into().unwrap(),
-                d_lmsts.get(),
-                d_xyzs.get(),
-                d_uvws_from.get(),
-                d_uvws_to.get_mut(),
-                d_lambdas.get(),
-            );
-            if !error_message_ptr.is_null() {
-                // Get the CUDA error message associated with the enum variant.
-                let error_message = CStr::from_ptr(error_message_ptr)
-                    .to_str()
-                    .unwrap_or("<cannot read CUDA error string>");
-                let our_error_str =
-                    format!("{}:{}: rotate_average: {error_message}", file!(), line!());
-                return Err(CudaError::Kernel(our_error_str).into());
-            }
+        for pass in 0..num_passes {
+            peel_progress.reset();
+            peel_progress.set_message(format!(
+                "Peeling timeblock {}, pass {}",
+                timeblock.index + 1,
+                pass + 1
+            ));
 
-            multi_progress_bar
-                .suspend(|| trace!("{:?}: rotate_average", std::time::Instant::now() - start));
-
-            low_res_modeller.update_with_a_source(source, source_phase_centre)?;
-            low_res_modeller.clear_vis();
-            multi_progress_bar.suspend(|| {
-                trace!(
-                    "{:?}: low res update and clear",
-                    std::time::Instant::now() - start
-                )
-            });
-
-            let error_message_ptr = cuda::xyzs_to_uvws(
-                d_xyzs_low_res.get(),
-                d_average_lmsts.get(),
-                d_uvws_low_res.get_mut(),
-                cuda::RADec {
-                    ra: source_phase_centre.ra as CudaFloat,
-                    dec: source_phase_centre.dec as CudaFloat,
-                },
-                num_tiles.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                1,
-            );
-            if !error_message_ptr.is_null() {
-                let error_message = CStr::from_ptr(error_message_ptr)
-                    .to_str()
-                    .unwrap_or("<cannot read CUDA error string>");
-                let our_error_str =
-                    format!("{}:{}: xyzs_to_uvws: {error_message}", file!(), line!());
-                return Err(CudaError::Kernel(our_error_str).into());
-            }
-
-            multi_progress_bar.suspend(|| {
-                trace!(
-                    "{:?}: low res xyzs_to_uvws",
-                    std::time::Instant::now() - start
-                )
-            });
-
-            low_res_modeller.model_with_uvws2(&d_uvws_low_res, average_lmst, average_latitude)?;
-            multi_progress_bar
-                .suspend(|| trace!("{:?}: low res model", std::time::Instant::now() - start));
-            let error_message_ptr = cuda::add_model(
-                d_low_res_vis.get_mut().cast(),
-                low_res_modeller.d_vis.get().cast(),
-                vis_residual_low_res.len_of(Axis(0)).try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                low_res_freqs_hz.len().try_into().unwrap(),
-            );
-            if !error_message_ptr.is_null() {
-                let error_message = CStr::from_ptr(error_message_ptr)
-                    .to_str()
-                    .unwrap_or("<cannot read CUDA error string>");
-                let our_error_str = format!("{}:{}: add_model: {error_message}", file!(), line!());
-                return Err(CudaError::Kernel(our_error_str).into());
-            }
-
-            #[cfg(test)]
+            for (((source_name, source), iono_consts), source_phase_centre) in source_list
+                .iter()
+                .take(num_sources_to_iono_subtract)
+                .zip_eq(iono_consts.iter_mut())
+                .zip_eq(source_weighted_positions.iter().copied())
             {
-                let vis_residual_low_res = d_low_res_vis.copy_from_device_new().unwrap();
-                let vis_residual_low_res = Array3::from_shape_vec(
-                    (1, low_res_freqs_hz.len(), num_cross_baselines),
-                    vis_residual_low_res,
-                )
-                .unwrap();
+                let start = std::time::Instant::now();
+                multi_progress_bar.suspend(|| {
+                    debug!(
+                        "peel loop {pass}: {source_name} at {source_phase_centre} (has iono {iono_consts:?})"
+                    )
+                });
 
-                let vis_model_low_res = low_res_modeller.d_vis.copy_from_device_new().unwrap();
-                let vis_model_low_res = Array3::from_shape_vec(
-                    (1, low_res_freqs_hz.len(), num_cross_baselines),
-                    vis_model_low_res,
-                )
-                .unwrap();
+                let old_iono_consts = *iono_consts;
 
-                let uvws_low_res = d_uvws_low_res.copy_from_device_new()?;
+                let error_message_ptr = cuda::rotate_average(
+                    d_high_res_vis.get().cast(),
+                    d_high_res_weights.get(),
+                    d_low_res_vis.get_mut().cast(),
+                    cuda::RADec {
+                        ra: source_phase_centre.ra as _,
+                        dec: source_phase_centre.dec as _,
+                    },
+                    timestamps.len().try_into().unwrap(),
+                    num_tiles.try_into().unwrap(),
+                    num_cross_baselines.try_into().unwrap(),
+                    all_fine_chan_lambdas_m.len().try_into().unwrap(),
+                    freq_average_factor.try_into().unwrap(),
+                    d_lmsts.get(),
+                    d_xyzs.get(),
+                    d_uvws_from.get(),
+                    d_uvws_to.get_mut(),
+                    d_lambdas.get(),
+                );
+                if !error_message_ptr.is_null() {
+                    // Get the CUDA error message associated with the enum variant.
+                    let error_message = CStr::from_ptr(error_message_ptr)
+                        .to_str()
+                        .unwrap_or("<cannot read CUDA error string>");
+                    let our_error_str =
+                        format!("{}:{}: rotate_average: {error_message}", file!(), line!());
+                    return Err(CudaError::Kernel(our_error_str).into());
+                }
 
-                for (vis_residual_low_res, vis_model_low_res, &lambda) in izip!(
-                    vis_residual_low_res.slice(s![0, .., ..]).outer_iter(),
-                    vis_model_low_res.slice(s![0, .., ..]).outer_iter(),
-                    low_res_lambdas_m
-                ) {
-                    for (residual, model, &cuda::UVW { u, v, w: _ }) in izip!(
-                        vis_residual_low_res.iter(),
-                        vis_model_low_res.iter(),
-                        &uvws_low_res,
+                multi_progress_bar
+                    .suspend(|| trace!("{:?}: rotate_average", std::time::Instant::now() - start));
+
+                low_res_modeller.update_with_a_source(source, source_phase_centre)?;
+                low_res_modeller.clear_vis();
+                multi_progress_bar.suspend(|| {
+                    trace!(
+                        "{:?}: low res update and clear",
+                        std::time::Instant::now() - start
+                    )
+                });
+
+                let error_message_ptr = cuda::xyzs_to_uvws(
+                    d_xyzs_low_res.get(),
+                    d_average_lmsts.get(),
+                    d_uvws_source_low_res.get_mut(),
+                    cuda::RADec {
+                        ra: source_phase_centre.ra as CudaFloat,
+                        dec: source_phase_centre.dec as CudaFloat,
+                    },
+                    num_tiles.try_into().unwrap(),
+                    num_cross_baselines.try_into().unwrap(),
+                    1,
+                );
+                if !error_message_ptr.is_null() {
+                    let error_message = CStr::from_ptr(error_message_ptr)
+                        .to_str()
+                        .unwrap_or("<cannot read CUDA error string>");
+                    let our_error_str =
+                        format!("{}:{}: xyzs_to_uvws: {error_message}", file!(), line!());
+                    return Err(CudaError::Kernel(our_error_str).into());
+                }
+
+                multi_progress_bar.suspend(|| {
+                    trace!(
+                        "{:?}: low res xyzs_to_uvws",
+                        std::time::Instant::now() - start
+                    )
+                });
+
+                low_res_modeller.model_with_uvws2(
+                    &d_uvws_source_low_res,
+                    average_lmst,
+                    average_latitude,
+                )?;
+                multi_progress_bar
+                    .suspend(|| trace!("{:?}: low res model", std::time::Instant::now() - start));
+
+                let error_message_ptr = cuda::add_model(
+                    d_low_res_vis.get_mut().cast(),
+                    low_res_modeller.d_vis.get().cast(),
+                    iono_consts.0 as CudaFloat,
+                    iono_consts.1 as CudaFloat,
+                    d_low_res_lambdas.get(),
+                    d_uvws_source_low_res.get(),
+                    vis_residual_low_res.len_of(Axis(0)).try_into().unwrap(),
+                    num_cross_baselines.try_into().unwrap(),
+                    low_res_freqs_hz.len().try_into().unwrap(),
+                );
+                if !error_message_ptr.is_null() {
+                    let error_message = CStr::from_ptr(error_message_ptr)
+                        .to_str()
+                        .unwrap_or("<cannot read CUDA error string>");
+                    let our_error_str =
+                        format!("{}:{}: add_model: {error_message}", file!(), line!());
+                    return Err(CudaError::Kernel(our_error_str).into());
+                }
+
+                #[cfg(test)]
+                {
+                    let vis_residual_low_res = d_low_res_vis.copy_from_device_new().unwrap();
+                    let vis_residual_low_res = Array3::from_shape_vec(
+                        (1, low_res_freqs_hz.len(), num_cross_baselines),
+                        vis_residual_low_res,
+                    )
+                    .unwrap();
+
+                    let vis_model_low_res = low_res_modeller.d_vis.copy_from_device_new().unwrap();
+                    let vis_model_low_res = Array3::from_shape_vec(
+                        (1, low_res_freqs_hz.len(), num_cross_baselines),
+                        vis_model_low_res,
+                    )
+                    .unwrap();
+
+                    let uvws_low_res = d_uvws_source_low_res.copy_from_device_new()?;
+
+                    for (vis_residual_low_res, vis_model_low_res, &lambda) in izip!(
+                        vis_residual_low_res.slice(s![0, .., ..]).outer_iter(),
+                        vis_model_low_res.slice(s![0, .., ..]).outer_iter(),
+                        low_res_lambdas_m
                     ) {
-                        let residual_i = residual[0] + residual[3];
-                        let model_i = model[0] + model[3];
-                        let u = u / lambda as CudaFloat;
-                        let v = v / lambda as CudaFloat;
+                        for (residual, model, &cuda::UVW { u, v, w: _ }) in izip!(
+                            vis_residual_low_res.iter(),
+                            vis_model_low_res.iter(),
+                            &uvws_low_res,
+                        ) {
+                            let residual_i = residual[0] + residual[3];
+                            let model_i = model[0] + model[3];
+                            let u = u / lambda as CudaFloat;
+                            let v = v / lambda as CudaFloat;
 
-                        println!("uv ({:+1.5}, {:+1.5}) l{:+1.3} | RI {:+1.5} @{:+1.5}pi | MI {:+1.5} @{:+1.5}pi", u, v, lambda, residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
+                            println!("uv ({:+1.5}, {:+1.5}) l{:+1.3} | RI {:+1.5} @{:+1.5}pi | MI {:+1.5} @{:+1.5}pi", u, v, lambda, residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
+                        }
                     }
                 }
+
+                let error_message_ptr = cuda::iono_loop(
+                    d_low_res_vis.get().cast(),
+                    d_low_res_weights.get(),
+                    low_res_modeller.d_vis.get().cast(),
+                    d_low_res_model_rotated.get_mut().cast(),
+                    d_iono_fits.get_mut().cast(),
+                    &mut iono_consts.0,
+                    &mut iono_consts.1,
+                    num_timesteps.try_into().unwrap(),
+                    num_tiles.try_into().unwrap(),
+                    num_cross_baselines.try_into().unwrap(),
+                    low_res_freqs_hz.len().try_into().unwrap(),
+                    10,
+                    d_average_lmsts.get(),
+                    d_uvws_source_low_res.get(),
+                    d_low_res_lambdas.get(),
+                );
+                if !error_message_ptr.is_null() {
+                    let error_message = CStr::from_ptr(error_message_ptr)
+                        .to_str()
+                        .unwrap_or("<cannot read CUDA error string>");
+                    let our_error_str =
+                        format!("{}:{}: iono_loop: {error_message}", file!(), line!());
+                    return Err(CudaError::Kernel(our_error_str).into());
+                }
+
+                // dbg!(iono_consts);
+                multi_progress_bar
+                    .suspend(|| trace!("{:?}: iono_loop", std::time::Instant::now() - start));
+
+                high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+                // high_res_modeller.clear_vis();
+                // Clear the old memory before reusing the buffer.
+                cuda_runtime_sys::cudaMemset(
+                    d_high_res_model.get_mut().cast(),
+                    0,
+                    timestamps.len()
+                        * num_cross_baselines
+                        * all_fine_chan_lambdas_m.len()
+                        * std::mem::size_of::<Jones<f32>>(),
+                );
+                d_uvws
+                    .iter()
+                    .zip(lmsts.iter())
+                    .zip(latitudes.iter())
+                    .enumerate()
+                    .try_for_each(|(i_time, ((d_uvws, lmst), latitude))| {
+                        high_res_modeller.model_with_uvws3(
+                            d_high_res_model
+                                .get_mut()
+                                .add(i_time * num_cross_baselines * all_fine_chan_lambdas_m.len()),
+                            d_uvws,
+                            *lmst,
+                            *latitude,
+                        )
+                    })?;
+                multi_progress_bar
+                    .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
+
+                let error_message_ptr = cuda::subtract_iono(
+                    d_high_res_vis.get_mut().cast(),
+                    d_high_res_model.get().cast(),
+                    iono_consts.0,
+                    iono_consts.1,
+                    old_iono_consts.0,
+                    old_iono_consts.1,
+                    d_uvws_to.get(),
+                    d_lambdas.get(),
+                    num_timesteps.try_into().unwrap(),
+                    num_cross_baselines.try_into().unwrap(),
+                    all_fine_chan_lambdas_m.len().try_into().unwrap(),
+                );
+                if !error_message_ptr.is_null() {
+                    let error_message = CStr::from_ptr(error_message_ptr)
+                        .to_str()
+                        .unwrap_or("<cannot read CUDA error string>");
+                    let our_error_str =
+                        format!("{}:{}: subtract_iono: {error_message}", file!(), line!());
+                    return Err(CudaError::Kernel(our_error_str).into());
+                }
+
+                multi_progress_bar
+                    .suspend(|| trace!("{:?}: subtract_iono", std::time::Instant::now() - start));
+                debug!("peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
+
+                peel_progress.inc(1);
             }
-
-            let error_message_ptr = cuda::iono_loop(
-                d_low_res_vis.get().cast(),
-                d_low_res_weights.get(),
-                low_res_modeller.d_vis.get().cast(),
-                d_low_res_model_rotated.get_mut().cast(),
-                d_iono_fits.get_mut().cast(),
-                &mut iono_consts.0,
-                &mut iono_consts.1,
-                num_timesteps.try_into().unwrap(),
-                num_tiles.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                low_res_freqs_hz.len().try_into().unwrap(),
-                10,
-                d_average_lmsts.get(),
-                d_uvws_low_res.get(),
-                d_low_res_lambdas.get(),
-            );
-            if !error_message_ptr.is_null() {
-                let error_message = CStr::from_ptr(error_message_ptr)
-                    .to_str()
-                    .unwrap_or("<cannot read CUDA error string>");
-                let our_error_str = format!("{}:{}: iono_loop: {error_message}", file!(), line!());
-                return Err(CudaError::Kernel(our_error_str).into());
-            }
-
-            // dbg!(iono_consts);
-            multi_progress_bar
-                .suspend(|| trace!("{:?}: iono_loop", std::time::Instant::now() - start));
-
-            high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
-            // high_res_modeller.clear_vis();
-            // Clear the old memory before reusing the buffer.
-            cuda_runtime_sys::cudaMemset(
-                d_high_res_model.get_mut().cast(),
-                0,
-                timestamps.len()
-                    * num_cross_baselines
-                    * all_fine_chan_lambdas_m.len()
-                    * std::mem::size_of::<Jones<f32>>(),
-            );
-            d_uvws
-                .iter()
-                .zip(lmsts.iter())
-                .zip(latitudes.iter())
-                .enumerate()
-                .try_for_each(|(i_time, ((d_uvws, lmst), latitude))| {
-                    high_res_modeller.model_with_uvws3(
-                        d_high_res_model
-                            .get_mut()
-                            .add(i_time * num_cross_baselines * all_fine_chan_lambdas_m.len()),
-                        d_uvws,
-                        *lmst,
-                        *latitude,
-                    )
-                })?;
-            multi_progress_bar
-                .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
-
-            let error_message_ptr = cuda::subtract_iono(
-                d_high_res_vis.get_mut().cast(),
-                d_high_res_model.get().cast(),
-                iono_consts.0,
-                iono_consts.1,
-                d_uvws_to.get(),
-                d_lambdas.get(),
-                num_timesteps.try_into().unwrap(),
-                num_cross_baselines.try_into().unwrap(),
-                all_fine_chan_lambdas_m.len().try_into().unwrap(),
-            );
-            if !error_message_ptr.is_null() {
-                let error_message = CStr::from_ptr(error_message_ptr)
-                    .to_str()
-                    .unwrap_or("<cannot read CUDA error string>");
-                let our_error_str =
-                    format!("{}:{}: subtract_iono: {error_message}", file!(), line!());
-                return Err(CudaError::Kernel(our_error_str).into());
-            }
-
-            multi_progress_bar
-                .suspend(|| trace!("{:?}: subtract_iono", std::time::Instant::now() - start));
-            debug!("peel loop finished: {source_name} at {source_phase_centre} (has iono {iono_consts:?})");
-
-            peel_progress.inc(1);
         }
 
         // copy results back to host
