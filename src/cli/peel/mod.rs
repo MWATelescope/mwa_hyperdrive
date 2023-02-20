@@ -1743,12 +1743,12 @@ impl PeelArgs {
                     }
 
                     // Write out the iono consts.
-                    let mut output_iono_consts: HashMap<_, _> = source_list
-                        .keys()
+                    let mut output_iono_consts: Vec<_> = source_list
+                        .iter()
                         .take(num_sources_to_iono_subtract)
-                        .map(|name| {
+                        .map(|(name, src)| {
                             (
-                                name,
+                                name.as_str(),
                                 (
                                     Vec::with_capacity(timeblocks.len()),
                                     Vec::with_capacity(timeblocks.len()),
@@ -1756,6 +1756,7 @@ impl PeelArgs {
                             )
                         })
                         .collect();
+
                     while let Ok(iono_consts) = rx_iono_consts.recv() {
                         output_iono_consts.iter_mut().zip_eq(iono_consts).for_each(
                             |((_, (output_alphas, output_betas)), iono_consts)| {
@@ -1764,6 +1765,16 @@ impl PeelArgs {
                             },
                         );
                     }
+
+                    let output_iono_consts: HashMap<_, _> = source_list
+                        .iter()
+                        .take(num_sources_to_iono_subtract)
+                        .zip_eq(output_iono_consts)
+                        .map(|((src_name, src), (_, (alphas, betas)))| {
+                            (src_name.as_str(), (alphas, betas, src.components[0].radec))
+                        })
+                        .collect();
+
                     let output_json_string =
                         serde_json::to_string_pretty(&output_iono_consts).unwrap();
                     for iono_output in iono_outputs {
