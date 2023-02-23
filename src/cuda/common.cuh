@@ -345,6 +345,13 @@ inline __device__ ShapeletUV operator*(const ShapeletUV a, const FLOAT b) {
     };
 }
 
+inline __device__ void operator+=(IonoConsts &a, IonoConsts b) {
+    a.alpha += b.alpha;
+    a.beta += b.beta;
+    a.s_vm += b.s_vm;
+    a.s_mm += b.s_mm;
+}
+
 /**
  * Multiply a Jones matrix by two beam Jones matrices (i.e. J1 . J . J2^H).
  */

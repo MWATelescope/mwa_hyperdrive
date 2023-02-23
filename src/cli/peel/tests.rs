@@ -24,7 +24,7 @@ use vec1::{vec1, Vec1};
 
 use super::{
     apply_iono2, apply_iono3, iono_fit, model_timesteps, peel_cpu, setup_uvs, setup_ws,
-    vis_average2, vis_rotate_fb, weights_average, UV, W,
+    vis_average2, vis_rotate_fb, weights_average, IonoConsts, UV, W,
 };
 #[cfg(feature = "cuda")]
 use crate::cli::peel::peel_cuda;
@@ -262,6 +262,7 @@ fn get_complex_obs_context() -> ObsContext {
 // these are used for debugging the tests
 use ndarray::{ArrayView2, ArrayView3};
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::uninlined_format_args)]
 fn display_vis_b(
     name: &String,
     vis_b: &[Jones<f32>],
@@ -898,14 +899,17 @@ fn test_apply_iono2() {
 
         // we want consts such that at lambda = 2m, the shift moves the source to the phase centre
         let iono_lmn = source_radec.to_lmn(obs_context.phase_centre);
-        let consts_lm = (iono_lmn.l / 4., iono_lmn.m / 4.);
-        // let consts_lm = ((lst_1h_rad-lst_zenith_rad)/4., 0.);
+        let iono_consts = IonoConsts {
+            alpha: iono_lmn.l / 4.,
+            beta: iono_lmn.m / 4.,
+            ..Default::default()
+        };
 
         apply_iono2(
             vis_tfb.view(),
             vis_iono_tfb.view_mut(),
             tile_uvs_src.view(),
-            consts_lm,
+            iono_consts,
             &lambdas_m,
         );
 
@@ -965,7 +969,7 @@ fn test_apply_iono2() {
                     izip!(ant_pairs.iter(), vis_b.iter(), vis_iono_b.iter(),)
                 {
                     let UV { u, v } = tile_uvs_src[ant1] - tile_uvs_src[ant2];
-                    let arg = TAU * (u * consts_lm.0 + v * consts_lm.1) * lambda_m;
+                    let arg = TAU * (u * iono_consts.alpha + v * iono_consts.beta) * lambda_m;
                     for (pol_model, pol_model_iono) in vis.iter().zip_eq(vis_iono.iter()) {
                         // magnitudes shoud not be affected by iono rotation
                         assert_abs_diff_eq!(
@@ -1080,17 +1084,33 @@ fn test_iono_fit() {
         let shape = vis_tfb.shape();
         let weights = Array3::ones((shape[0], shape[1], shape[2]));
 
-        for consts_lm in [
-            (0., 0.),
-            (0.0001, -0.0003),
-            (0.0003, -0.0001),
-            (-0.0007, 0.0001),
+        for iono_consts in [
+            IonoConsts {
+                alpha: 0.,
+                beta: 0.,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: 0.0001,
+                beta: -0.0003,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: 0.0003,
+                beta: -0.0001,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: -0.0007,
+                beta: 0.0001,
+                ..Default::default()
+            },
         ] {
             apply_iono2(
                 vis_tfb.view(),
                 vis_iono_tfb.view_mut(),
                 tile_uvs_src.view(),
-                consts_lm,
+                iono_consts,
                 &lambdas_m,
             );
 
@@ -1110,10 +1130,10 @@ fn test_iono_fit() {
                 tile_uvs_src.view(),
             );
 
-            // println!("prec: {:?}, expected: {:?}, got: {:?}", apply_precession, consts_lm, &results);
+            // println!("prec: {:?}, expected: {:?}, got: {:?}", apply_precession, iono_consts, &results);
 
-            assert_abs_diff_eq!(results[0], consts_lm.0, epsilon = 1e-8);
-            assert_abs_diff_eq!(results[1], consts_lm.1, epsilon = 1e-8);
+            assert_abs_diff_eq!(results[0], iono_consts.alpha, epsilon = 1e-8);
+            assert_abs_diff_eq!(results[1], iono_consts.beta, epsilon = 1e-8);
         }
     }
 }
@@ -1209,13 +1229,29 @@ fn test_apply_iono3() {
         //     apply_precession,
         // );
 
-        for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
+        for iono_consts in [
+            IonoConsts {
+                alpha: 0.0001,
+                beta: -0.0003,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: 0.0003,
+                beta: -0.0001,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: -0.0007,
+                beta: 0.0001,
+                ..Default::default()
+            },
+        ] {
             // apply iono rotation at source phase to model at observation phase
             apply_iono2(
                 vis_model_obs_tfb.view(),
                 vis_iono_obs_tfb.view_mut(),
                 tile_uvs_src.view(),
-                consts_lm,
+                iono_consts,
                 &lambdas_m,
             );
 
@@ -1227,8 +1263,8 @@ fn test_apply_iono3() {
                 vis_model_obs_tfb.view(),
                 vis_resid_obs_tfb.view_mut(),
                 tile_uvs_src.view(),
-                consts_lm,
-                (0.0, 0.0),
+                iono_consts,
+                IonoConsts::default(),
                 &lambdas_m,
             );
 
@@ -1329,7 +1365,6 @@ fn test_peel_single_source(peel_type: PeelType) {
     let vis_shape = vis_residual_obs_tfb.dim();
     let vis_weights = Array3::<f32>::ones(vis_shape);
     let source_weighted_positions = [source_radec];
-    let num_sources_to_iono_subtract = source_list.len();
 
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
 
@@ -1391,22 +1426,38 @@ fn test_peel_single_source(peel_type: PeelType) {
         //     apply_precession,
         // );
 
-        for consts_lm in [
-            (0., 0.),
-            (0.0001, -0.0003),
-            (0.0003, -0.0001),
-            (-0.0007, 0.0001),
+        for iono_consts in [
+            IonoConsts {
+                alpha: 0.,
+                beta: 0.,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: 0.0001,
+                beta: -0.0003,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: 0.0003,
+                beta: -0.0001,
+                ..Default::default()
+            },
+            IonoConsts {
+                alpha: -0.0007,
+                beta: 0.0001,
+                ..Default::default()
+            },
         ] {
             apply_iono2(
                 vis_model_obs_tfb.view(),
                 vis_iono_obs_tfb.view_mut(),
                 tile_uvs_src.view(),
-                consts_lm,
+                iono_consts,
                 &lambdas_m,
             );
 
             // display_vis_tfb(
-            //     &format!("iono@obs prec={}, ({}, {})", apply_precession, &consts_lm.0, &consts_lm.1),
+            //     &format!("iono@obs prec={}, ({}, {})", apply_precession, &iono_consts.0, &iono_consts.1),
             //     vis_iono_obs_tfb.view(),
             //     &obs_context,
             //     obs_context.phase_centre,
@@ -1425,7 +1476,11 @@ fn test_peel_single_source(peel_type: PeelType) {
             //     apply_precession,
             // );
 
-            let mut iono_consts = vec![(0., 0.); 1];
+            let mut result_iono_consts = [IonoConsts {
+                alpha: 0.0,
+                beta: 0.0,
+                ..Default::default()
+            }; 1];
 
             // When peel_cpu and peel_cuda are able to take generic
             // `SkyModeller` objects (requires the generic objects to take
@@ -1464,7 +1519,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     vis_weights.view(),
                     &timeblock,
                     &source_list,
-                    &mut iono_consts,
+                    &mut result_iono_consts,
                     &source_weighted_positions,
                     3,
                     &fine_chan_freqs_hz,
@@ -1516,7 +1571,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         vis_weights.view(),
                         &timeblock,
                         &source_list,
-                        &mut iono_consts,
+                        &mut result_iono_consts,
                         &source_weighted_positions,
                         3,
                         &fine_chan_freqs_hz,
@@ -1535,7 +1590,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                 }
             };
 
-            println!("prec: {apply_precession:?}, expected: {consts_lm:?}, got: {iono_consts:?}");
+            println!("prec: {apply_precession:?}, expected: {result_iono_consts:?}, got: {result_iono_consts:?}");
 
             display_vis_tfb(
                 &"peeled@obs".into(),
@@ -1545,8 +1600,16 @@ fn test_peel_single_source(peel_type: PeelType) {
                 apply_precession,
             );
 
-            assert_abs_diff_eq!(iono_consts[0].0, consts_lm.0, epsilon = 7e-10);
-            assert_abs_diff_eq!(iono_consts[0].1, consts_lm.1, epsilon = 7e-10);
+            assert_abs_diff_eq!(
+                iono_consts.alpha,
+                result_iono_consts[0].alpha,
+                epsilon = 7e-10
+            );
+            assert_abs_diff_eq!(
+                iono_consts.beta,
+                result_iono_consts[0].beta,
+                epsilon = 7e-10
+            );
 
             // peel should perfectly remove the iono rotate model vis
             for jones_residual in vis_residual_obs_tfb.iter() {
@@ -1617,10 +1680,26 @@ fn test_peel_multi_source(peel_type: PeelType) {
         .collect_vec();
 
     let iono_consts = [
-        (-0.00002, -0.00001),
-        (0.00001, -0.00003),
-        (0.0003, -0.0001),
-        (-0.0007, 0.0001),
+        IonoConsts {
+            alpha: -0.00002,
+            beta: -0.00001,
+            ..Default::default()
+        },
+        IonoConsts {
+            alpha: 0.00001,
+            beta: -0.00003,
+            ..Default::default()
+        },
+        IonoConsts {
+            alpha: 0.0003,
+            beta: -0.0001,
+            ..Default::default()
+        },
+        IonoConsts {
+            alpha: -0.0007,
+            beta: 0.0001,
+            ..Default::default()
+        },
     ];
 
     let beam = get_beam(num_tiles);
@@ -1685,7 +1764,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
         vis_residual_obs_tfb.fill(Jones::zero());
 
         // model each source in source_list and rotate by iono_consts with apply_iono2
-        for (&consts_lm, (name, source)) in izip!(iono_consts.iter(), source_list.iter(),) {
+        for (&iono_consts, (name, source)) in izip!(iono_consts.iter(), source_list.iter(),) {
             let source_radec = source.components[0].radec;
             println!("source {} radec {:?}", name, &source_radec);
 
@@ -1714,12 +1793,12 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 vis_model_tmp_tfb.view(),
                 vis_iono_tmp_tfb.view_mut(),
                 tile_uvs_src.view(),
-                consts_lm,
+                iono_consts,
                 &lambdas_m,
             );
 
             display_vis_tfb(
-                &format!("iono@src={} consts={:?}", name, &consts_lm),
+                &format!("iono@src={} consts={:?}", name, &iono_consts),
                 vis_iono_tmp_tfb.view(),
                 &obs_context,
                 source_radec,
@@ -1733,7 +1812,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 .for_each(|res, iono, model| *res += *iono - *model);
         }
 
-        let mut iono_consts_result = vec![(0., 0.); num_sources_to_iono_subtract];
+        let mut iono_consts_result = vec![IonoConsts::default(); num_sources_to_iono_subtract];
 
         // When peel_cpu and peel_cuda are able to take generic
         // `SkyModeller` objects (requires the generic objects to take
@@ -1750,7 +1829,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
         //     vis_weights.view(),
         //     &timeblock,
         //     &source_list,
-        //     &mut iono_consts,
+        //     &mut iono_consts_result,
         //     &source_weighted_positions,
         //     num_sources_to_iono_subtract,
         //     &fine_chan_freqs_hz,
@@ -1851,10 +1930,10 @@ fn test_peel_multi_source(peel_type: PeelType) {
             apply_precession,
         );
 
-        for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter(),) {
+        for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter()) {
             println!("prec: {apply_precession:?}, expected: {expected:?}, got: {result:?}");
-            assert_abs_diff_eq!(expected.0, result.0, epsilon = 3e-7);
-            assert_abs_diff_eq!(expected.1, result.1, epsilon = 3e-7);
+            assert_abs_diff_eq!(expected.alpha, result.alpha, epsilon = 3e-7);
+            assert_abs_diff_eq!(expected.beta, result.beta, epsilon = 3e-7);
         }
 
         // peel should perfectly remove the iono rotate model vis
@@ -1888,6 +1967,7 @@ mod cuda_tests {
 
     use super::*;
     use crate::{
+        cli::peel::IonoConsts,
         cuda::{self, CudaFloat, DevicePointer},
         model::SkyModellerCuda,
     };
@@ -2041,6 +2121,8 @@ mod cuda_tests {
                 w: uvw.w as CudaFloat,
             });
 
+            let mut d_high_res_vis =
+                DevicePointer::copy_to_device(vis_residual_obs_tfb.as_slice().unwrap()).unwrap();
             let d_uvws_src =
                 DevicePointer::copy_to_device(cuda_uvws_src.as_slice().unwrap()).unwrap();
             let d_lambdas = DevicePointer::copy_to_device(
@@ -2050,19 +2132,49 @@ mod cuda_tests {
                     .collect::<Vec<_>>(),
             )
             .unwrap();
+            let mut d_iono_consts = DevicePointer::copy_to_device(&[cuda::IonoConsts {
+                alpha: 0.0,
+                beta: 0.0,
+                s_vm: 0.0,
+                s_mm: 0.0,
+            }])
+            .unwrap();
+            let d_old_iono_consts = DevicePointer::copy_to_device(&[cuda::IonoConsts {
+                alpha: 0.0,
+                beta: 0.0,
+                s_vm: 0.0,
+                s_mm: 0.0,
+            }])
+            .unwrap();
 
-            for consts_lm in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
+            for iono_consts in [
+                IonoConsts {
+                    alpha: 0.0001,
+                    beta: -0.0003,
+                    ..Default::default()
+                },
+                IonoConsts {
+                    alpha: 0.0003,
+                    beta: -0.0001,
+                    ..Default::default()
+                },
+                IonoConsts {
+                    alpha: -0.0007,
+                    beta: 0.0001,
+                    ..Default::default()
+                },
+            ] {
                 // apply iono rotation at source phase to model at observation phase
                 apply_iono2(
                     vis_model_obs_tfb.view(),
                     vis_iono_obs_tfb.view_mut(),
                     tile_uvs_src.view(),
-                    consts_lm,
+                    iono_consts,
                     &lambdas_m,
                 );
 
                 // display_vis_tfb(
-                //     &format!("iono@obs ({}, {})", &consts_lm.0, &consts_lm.1),
+                //     &format!("iono@obs ({}, {})", &iono_consts.0, &iono_consts.1),
                 //     vis_iono_obs_tfb.view(),
                 //     &obs_context,
                 //     obs_context.phase_centre,
@@ -2081,18 +2193,24 @@ mod cuda_tests {
                 //     apply_precession,
                 // );
 
-                let mut d_high_res_vis =
-                    DevicePointer::copy_to_device(vis_residual_obs_tfb.as_slice().unwrap())
-                        .unwrap();
+                d_high_res_vis
+                    .overwrite(vis_residual_obs_tfb.as_slice().unwrap())
+                    .unwrap();
+                d_iono_consts
+                    .overwrite(&[cuda::IonoConsts {
+                        alpha: iono_consts.alpha,
+                        beta: iono_consts.beta,
+                        s_vm: iono_consts.s_vm,
+                        s_mm: iono_consts.s_mm,
+                    }])
+                    .unwrap();
 
                 let error_message_ptr = unsafe {
                     cuda::subtract_iono(
                         d_high_res_vis.get_mut().cast(),
                         d_high_res_model.get().cast(),
-                        consts_lm.0,
-                        consts_lm.1,
-                        0.0,
-                        0.0,
+                        d_iono_consts.get(),
+                        d_old_iono_consts.get(),
                         d_uvws_src.get(),
                         d_lambdas.get(),
                         num_times.try_into().unwrap(),

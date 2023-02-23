@@ -113,11 +113,12 @@ lazy_static::lazy_static! {
         format!("Specifies the maximum distance from the phase centre a source can be [degrees]. Default: {DEFAULT_CUTOFF_DISTANCE}");
 }
 
-#[derive(Debug, Serialize)]
-struct SourceIonoConsts {
-    alphas: Vec<f64>,
-    betas: Vec<f64>,
-    weighted_catalogue_pos_j2000: RADec,
+#[derive(Debug, Default, Clone, Copy)]
+struct IonoConsts {
+    alpha: f64,
+    beta: f64,
+    s_vm: f64,
+    s_mm: f64,
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -764,7 +765,6 @@ impl PeelArgs {
         }
         if log_enabled!(Debug) {
             let unflagged_fine_chans: Vec<_> = (0..obs_context.fine_chan_freqs.len())
-                .into_iter()
                 .filter(|i_chan| !flagged_fine_chans.contains(i_chan))
                 .collect();
             match unflagged_fine_chans.as_slice() {
@@ -1502,7 +1502,8 @@ impl PeelArgs {
                             return Ok(());
                         }
 
-                        let mut iono_consts = vec![(0.0, 0.0); num_sources_to_iono_subtract];
+                        let mut iono_consts =
+                            vec![IonoConsts::default(); num_sources_to_iono_subtract];
                         if num_sources_to_iono_subtract > 0 {
                             #[cfg(feature = "cuda")]
                             if cpu_peel {
@@ -1668,7 +1669,9 @@ impl PeelArgs {
                                     .for_each(|((name, src), iono_consts)| {
                                         multi_progress
                                             .println(format!(
-                                                "{name}: {iono_consts:?} ({})",
+                                                "{name}: {:e} {:e} ({})",
+                                                iono_consts.alpha,
+                                                iono_consts.beta,
                                                 src.components.first().radec
                                             ))
                                             .unwrap();
@@ -1773,6 +1776,13 @@ impl PeelArgs {
                         // for all the results. We use an IndexMap to keep the
                         // order of the sources preserved while also being able
                         // to write out a "HashMap-style" json.
+                        #[derive(Debug, Serialize)]
+                        struct SourceIonoConsts {
+                            alphas: Vec<f64>,
+                            betas: Vec<f64>,
+                            weighted_catalogue_pos_j2000: RADec,
+                        }
+
                         let mut output_iono_consts: IndexMap<&str, SourceIonoConsts> = source_list
                             .iter()
                             .take(num_sources_to_iono_subtract)
@@ -1795,10 +1805,20 @@ impl PeelArgs {
                             incoming_iono_consts
                                 .into_iter()
                                 .zip_eq(output_iono_consts.iter_mut())
-                                .for_each(|((alpha, beta), (_src_name, src_iono_consts))| {
-                                    src_iono_consts.alphas.push(alpha);
-                                    src_iono_consts.betas.push(beta);
-                                });
+                                .for_each(
+                                    |(
+                                        IonoConsts {
+                                            alpha,
+                                            beta,
+                                            s_vm: _,
+                                            s_mm: _,
+                                        },
+                                        (_src_name, src_iono_consts),
+                                    )| {
+                                        src_iono_consts.alphas.push(alpha);
+                                        src_iono_consts.betas.push(beta);
+                                    },
+                                );
                         }
 
                         // The channel has stopped sending results; write them
@@ -2038,7 +2058,7 @@ fn vis_average2(
                 let mut weight_sum: f64 = 0.0;
                 for (&jones, &weight) in jones_chunk_tf.iter().zip_eq(weight_chunk_tf.iter()) {
                     // assumes weights are capped to 0. otherwise we would need to check weight >= 0
-                    debug_assert!(weight >= 0.0, "weight was not capped to zero: {}", weight);
+                    debug_assert!(weight >= 0.0, "weight was not capped to zero: {weight}");
                     jones_weighted_sum += Jones::<f64>::from(jones) * weight as f64;
                     weight_sum += weight as f64;
                 }
@@ -2195,7 +2215,7 @@ fn apply_iono2(
     vis_tfb: ArrayView3<Jones<f32>>,
     mut vis_iono_tfb: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
-    const_lm: (f64, f64),
+    iono_consts: IonoConsts,
     lambdas_m: &[f64],
 ) {
     let num_tiles = tile_uvs.len_of(Axis(1));
@@ -2224,7 +2244,7 @@ fn apply_iono2(
                     }
 
                     let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
-                    let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
+                    let arg = -TAU * (u * iono_consts.alpha + v * iono_consts.beta);
                     // iterate along frequency axis
                     vis_f
                         .iter()
@@ -2250,8 +2270,8 @@ fn apply_iono3(
     vis_model: ArrayView3<Jones<f32>>,
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
-    const_lm: (f64, f64),
-    old_const_lm: (f64, f64),
+    iono_consts: IonoConsts,
+    old_iono_consts: IonoConsts,
     lambdas_m: &[f64],
 ) {
     let num_tiles = tile_uvs.len_of(Axis(1));
@@ -2281,8 +2301,8 @@ fn apply_iono3(
                     }
 
                     let UV { u, v } = tile_uvs[i_tile1] - tile_uvs[i_tile2];
-                    let arg = -TAU * (u * const_lm.0 + v * const_lm.1);
-                    let old_arg = -TAU * (u * old_const_lm.0 + v * old_const_lm.1);
+                    let arg = -TAU * (u * iono_consts.alpha + v * iono_consts.beta);
+                    let old_arg = -TAU * (u * old_iono_consts.alpha + v * old_iono_consts.beta);
                     // iterate along frequency axis
                     vis_model
                         .iter()
@@ -2436,6 +2456,7 @@ fn iono_fit(
     ]
 }
 
+#[cfg(test)]
 fn setup_ws(tile_ws: &mut [W], tile_xyzs: &[XyzGeodetic], phase_centre: HADec) {
     assert_eq!(tile_ws.len(), tile_xyzs.len());
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
@@ -2483,7 +2504,7 @@ fn peel_cpu(
     vis_weights: ArrayView3<f32>,
     timeblock: &Timeblock,
     source_list: &SourceList,
-    iono_consts: &mut [(f64, f64)],
+    iono_consts: &mut [IonoConsts],
     source_weighted_positions: &[RADec],
     num_passes: usize,
     // TODO (dev): Why do we need both this and low_res_lambdas_m? it's not even used
@@ -2637,7 +2658,10 @@ fn peel_cpu(
             .zip_eq(source_weighted_positions.iter().copied())
         {
             multi_progress_bar.suspend(|| {
-                debug!("peel loop {pass}: {source_name} at {source_phase_centre} (has iono {iono_consts:?})")
+                debug!(
+                    "peel loop {pass}: {source_name} at {source_phase_centre} (has iono ({} {}))",
+                    iono_consts.alpha, iono_consts.beta
+                )
             });
             let start = std::time::Instant::now();
             let old_iono_consts = *iono_consts;
@@ -2780,7 +2804,7 @@ fn peel_cpu(
             // non-zero, then also shift the model before adding it.
             multi_progress_bar
                 .suspend(|| trace!("{:?}: add low-res model", std::time::Instant::now() - start));
-            if iono_consts.0.abs() > f64::EPSILON && iono_consts.1.abs() > f64::EPSILON {
+            if iono_consts.alpha.abs() > f64::EPSILON && iono_consts.beta.abs() > f64::EPSILON {
                 apply_iono2(
                     vis_model_low_res.view(),
                     vis_model_low_res_tmp.view_mut(),
@@ -2827,8 +2851,8 @@ fn peel_cpu(
                 );
                 multi_progress_bar.suspend(|| trace!("iono_fits: {iono_fits:?}"));
 
-                iono_consts.0 += iono_fits[0];
-                iono_consts.1 += iono_fits[1];
+                iono_consts.alpha += iono_fits[0];
+                iono_consts.beta += iono_fits[1];
                 // gain_update *= iono_fits[2] / iono_fits[3];
                 // vis_model_low_res
                 //     .iter_mut()
@@ -2879,7 +2903,7 @@ fn peel_cuda(
     vis_weights: ArrayView3<f32>,
     timeblock: &Timeblock,
     source_list: &SourceList,
-    iono_consts: &mut [(f64, f64)],
+    iono_consts: &mut [IonoConsts],
     source_weighted_positions: &[RADec],
     num_passes: usize,
     low_res_freqs_hz: &[f64],
@@ -3111,18 +3135,11 @@ fn peel_cuda(
         let mut d_uvws_source_low_res: DevicePointer<cuda::UVW> =
             DevicePointer::malloc(cuda_uvws.len() * std::mem::size_of::<cuda::UVW>()).unwrap();
         let d_low_res_lambdas = DevicePointer::copy_to_device(&cuda_low_res_lambdas).unwrap();
-        // Make the amount of elements in `d_iono_fits` a power of 2, for
-        // efficiency.
-        let mut d_iono_fits = {
-            let min_size =
-                num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<f64>>();
-            let n = (min_size as f64).log2().ceil() as u32;
-            let size = 2_usize.pow(n);
-            // dbg!(min_size, size);
-            let mut d: DevicePointer<Jones<f64>> = DevicePointer::malloc(size).unwrap();
-            d.clear();
-            d
-        };
+        let mut d_iono_fits: DevicePointer<Jones<f64>> = DevicePointer::malloc(
+            num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<f64>>(),
+        )?;
+        let mut d_iono_consts = DevicePointer::malloc(std::mem::size_of::<cuda::IonoConsts>())?;
+        let mut d_old_iono_consts = DevicePointer::malloc(std::mem::size_of::<cuda::IonoConsts>())?;
 
         // let mut d_low_res_vis = DevicePointer::malloc(
         //     num_cross_baselines * low_res_freqs_hz.len() * std::mem::size_of::<Jones<CudaFloat>>(),
@@ -3199,6 +3216,18 @@ fn peel_cuda(
                 });
 
                 let old_iono_consts = *iono_consts;
+                d_iono_consts.overwrite(&[cuda::IonoConsts {
+                    alpha: iono_consts.alpha,
+                    beta: iono_consts.beta,
+                    s_vm: iono_consts.s_vm,
+                    s_mm: iono_consts.s_mm,
+                }])?;
+                d_old_iono_consts.overwrite(&[cuda::IonoConsts {
+                    alpha: old_iono_consts.alpha,
+                    beta: old_iono_consts.beta,
+                    s_vm: old_iono_consts.s_vm,
+                    s_mm: old_iono_consts.s_mm,
+                }])?;
 
                 let error_message_ptr = cuda::rotate_average(
                     d_high_res_vis.get().cast(),
@@ -3280,8 +3309,7 @@ fn peel_cuda(
                 let error_message_ptr = cuda::add_model(
                     d_low_res_vis.get_mut().cast(),
                     low_res_modeller.d_vis.get().cast(),
-                    iono_consts.0 as CudaFloat,
-                    iono_consts.1 as CudaFloat,
+                    d_iono_consts.get(),
                     d_low_res_lambdas.get(),
                     d_uvws_source_low_res.get(),
                     vis_residual_low_res.len_of(Axis(0)).try_into().unwrap(),
@@ -3341,8 +3369,7 @@ fn peel_cuda(
                     low_res_modeller.d_vis.get().cast(),
                     d_low_res_model_rotated.get_mut().cast(),
                     d_iono_fits.get_mut().cast(),
-                    &mut iono_consts.0,
-                    &mut iono_consts.1,
+                    d_iono_consts.get_mut(),
                     num_timesteps.try_into().unwrap(),
                     num_tiles.try_into().unwrap(),
                     num_cross_baselines.try_into().unwrap(),
@@ -3394,13 +3421,28 @@ fn peel_cuda(
                 multi_progress_bar
                     .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
 
+                // TODO: This is ugly.
+                let mut tmp = [cuda::IonoConsts {
+                    alpha: 0.0,
+                    beta: 0.0,
+                    s_vm: 0.0,
+                    s_mm: 0.0,
+                }];
+                d_iono_consts.copy_from_device(&mut tmp)?;
+                *iono_consts = IonoConsts {
+                    alpha: tmp[0].alpha,
+                    beta: tmp[0].beta,
+                    s_vm: tmp[0].s_vm,
+                    s_mm: tmp[0].s_mm,
+                };
+
+                // TODO: Check the iono consts. If they're not sensible, reset
+                // them and don't subtract the shifted model.
                 let error_message_ptr = cuda::subtract_iono(
                     d_high_res_vis.get_mut().cast(),
                     d_high_res_model.get().cast(),
-                    iono_consts.0,
-                    iono_consts.1,
-                    old_iono_consts.0,
-                    old_iono_consts.1,
+                    d_iono_consts.get(),
+                    d_old_iono_consts.get(),
                     d_uvws_to.get(),
                     d_lambdas.get(),
                     num_timesteps.try_into().unwrap(),

@@ -19,19 +19,17 @@ const char *rotate_average(const JonesF32 *d_high_res_vis, const float *d_high_r
                            const UVW *d_uvws_from, UVW *d_uvws_to, const FLOAT *d_lambdas);
 
 const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weights, const JonesF32 *d_vis_model,
-                      JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits, double *iono_const_alpha,
-                      double *iono_const_beta, const int num_timesteps, const int num_tiles, const int num_baselines,
-                      const int num_freqs, const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws,
-                      const FLOAT *d_lambdas_m);
+                      JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits, IonoConsts *d_iono_consts,
+                      const int num_timesteps, const int num_tiles, const int num_baselines, const int num_freqs,
+                      const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m);
 
-const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, double iono_const_alpha,
-                          double iono_const_beta, double old_iono_const_alpha, double old_iono_const_beta,
-                          const UVW *d_uvws, const FLOAT *d_lambdas_m, const int num_timesteps, const int num_baselines,
-                          const int num_freqs);
+const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const IonoConsts *d_iono_consts,
+                          const IonoConsts *d_old_iono_consts, const UVW *d_uvws, const FLOAT *d_lambdas_m,
+                          const int num_timesteps, const int num_baselines, const int num_freqs);
 
-const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const FLOAT iono_const_alpha,
-                                 const FLOAT iono_const_beta, const FLOAT *d_lambdas_m, const UVW *d_uvws,
-                                 const int num_timesteps, const int num_baselines, const int num_freqs);
+const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const IonoConsts *d_iono_consts,
+                      const FLOAT *d_lambdas_m, const UVW *d_uvws, const int num_timesteps, const int num_baselines,
+                      const int num_freqs);
 
 #ifdef __cplusplus
 } // extern "C"

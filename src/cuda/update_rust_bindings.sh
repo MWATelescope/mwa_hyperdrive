@@ -31,6 +31,7 @@ for PRECISION in SINGLE DOUBLE; do
             --allowlist-type "Points" \
             --allowlist-type "Gaussians" \
             --allowlist-type "Shapelets" \
+            --allowlist-type "IonoConsts" \
             -- -D "${PRECISION}" \
             > "${SCRIPTPATH}/types_${LOWER_CASE}.rs"
 

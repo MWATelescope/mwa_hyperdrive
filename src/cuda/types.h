@@ -274,6 +274,13 @@ typedef struct Shapelets {
     const int *list_num_shapelet_coeffs;
 } Shapelets;
 
+typedef struct IonoConsts {
+    double alpha;
+    double beta;
+    double s_vm;
+    double s_mm;
+} IonoConsts;
+
 #ifdef __cplusplus
 } // extern "C"
 #endif // __cplusplus

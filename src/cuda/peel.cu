@@ -255,7 +255,7 @@ template <int BLOCK_SIZE> __global__ void reduce_baselines(JonesF64 *data, const
  * thread block running this kernel.
  */
 template <int BLOCK_SIZE>
-__global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int num_freqs, double *iono_consts) {
+__global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int num_freqs, IonoConsts *iono_consts) {
     // Every thread has an element of shared memory. This is useful for speeding
     // up accumulation.
     __shared__ JonesF64 sdata[BLOCK_SIZE];
@@ -326,15 +326,19 @@ __global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int n
         const double a_vv = sdata[0].j01_re;
         const double aa_u = sdata[0].j01_im;
         const double aa_v = sdata[0].j10_re;
-        // const double s_vm = sdata[0].j10_im;
-        // const double s_mm = sdata[0].j11_re;
+        const double s_vm = sdata[0].j10_im;
+        const double s_mm = sdata[0].j11_re;
 
         // Not necessary, but might be useful for checking things.
         // data[0] = sdata[0];
 
         const double denom = TAU * (a_uu * a_vv - a_uv * a_uv);
-        iono_consts[0] += (aa_u * a_vv - aa_v * a_uv) / denom;
-        iono_consts[1] += (aa_v * a_uu - aa_u * a_uv) / denom;
+        *iono_consts += IonoConsts{
+            .alpha = (aa_u * a_vv - aa_v * a_uv) / denom,
+            .beta = (aa_v * a_uu - aa_u * a_uv) / denom,
+            .s_vm = s_vm,
+            .s_mm = s_mm,
+        };
     }
 }
 
@@ -342,7 +346,7 @@ __global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int n
  * Kernel for ...
  */
 __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_weights, const JonesF32 *vis_model,
-                                 JonesF32 *vis_model_rotated, const double *iono_consts, JonesF64 *iono_fits,
+                                 JonesF32 *vis_model_rotated, const IonoConsts *iono_consts, JonesF64 *iono_fits,
                                  const int num_iterations, const int num_baselines, const int num_freqs,
                                  const FLOAT *lmsts, const UVW *uvws, const FLOAT *lambdas_m) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
@@ -352,8 +356,8 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
     const UVW uvw = uvws[i_bl];
 
     // Apply the latest iono constants to the model visibilities.
-    const double iono_const_alpha = iono_consts[0];
-    const double iono_const_beta = iono_consts[1];
+    const FLOAT iono_const_alpha = (FLOAT)iono_consts->alpha;
+    const FLOAT iono_const_beta = (FLOAT)iono_consts->beta;
 
     // TODO: Would it be better to avoid the function call?
     // TODO: Use the updated source position for the UVWs?
@@ -396,9 +400,8 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
     }
 }
 
-__global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const double iono_const_alpha,
-                                     const double iono_const_beta, const double old_iono_const_alpha,
-                                     const double old_iono_const_beta, const UVW *uvws, const FLOAT *lambdas_m,
+__global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const IonoConsts *iono_consts,
+                                     const IonoConsts *old_iono_consts, const UVW *uvws, const FLOAT *lambdas_m,
                                      const int num_timesteps, const int num_baselines, const int num_freqs) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
@@ -406,8 +409,8 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
 
     for (int i_time = 0; i_time < num_timesteps; i_time++) {
         const UVW uvw = uvws[i_time * num_baselines + i_bl];
-        const FLOAT arg = -TAU * (uvw.u * iono_const_alpha + uvw.v * iono_const_beta);
-        const FLOAT old_arg = -TAU * (uvw.u * old_iono_const_alpha + uvw.v * old_iono_const_beta);
+        const FLOAT arg = -TAU * (uvw.u * iono_consts->alpha + uvw.v * iono_consts->beta);
+        const FLOAT old_arg = -TAU * (uvw.u * old_iono_consts->alpha + uvw.v * old_iono_consts->beta);
         for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
             const FLOAT lambda = lambdas_m[i_freq];
 
@@ -462,20 +465,20 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
     }
 }
 
-__global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const FLOAT iono_const_alpha,
-                                 const FLOAT iono_const_beta, const FLOAT *lambdas_m, const UVW *uvws,
-                                 const int num_timesteps, const int num_baselines, const int num_freqs) {
+__global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const IonoConsts *iono_consts,
+                                 const FLOAT *lambdas_m, const UVW *uvws, const int num_timesteps,
+                                 const int num_baselines, const int num_freqs) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
 
     for (int i_time = 0; i_time < num_timesteps; i_time++) {
         const UVW uvw = uvws[i_time * num_baselines + i_bl];
-        const FLOAT arg = -TAU * (uvw.u * iono_const_alpha + uvw.v * iono_const_beta);
+        const FLOAT arg = -TAU * (uvw.u * (FLOAT)iono_consts->alpha + uvw.v * (FLOAT)iono_consts->beta);
 
         for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
             COMPLEX complex;
-            if (iono_const_alpha == 0.0 && iono_const_beta == 0.0) {
+            if (iono_consts->alpha == 0.0 && iono_consts->beta == 0.0) {
                 complex.x = 1.0;
                 complex.y = 0.0;
             } else {
@@ -506,10 +509,13 @@ extern "C" const char *xyzs_to_uvws(const XYZ *d_xyzs, const FLOAT *d_lmsts, UVW
 
     xyzs_to_uvws_kernel<<<gridDim, blockDim>>>(d_xyzs, d_lmsts, d_uvws, pointing_centre, num_tiles, num_baselines,
                                                num_timesteps);
-    cudaError_t error_id = cudaDeviceSynchronize();
+    cudaError_t error_id;
+#ifdef DEBUG
+    error_id = cudaDeviceSynchronize();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
     }
+#endif
     error_id = cudaGetLastError();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
@@ -528,28 +534,30 @@ extern "C" const char *rotate_average(const JonesF32 *d_high_res_vis, const floa
     blockDim.x = 256;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
-    cudaError_t error_id;
-
     // Prepare the "to" UVWs.
     xyzs_to_uvws_kernel<<<gridDim, blockDim>>>(d_xyzs, d_lmsts, d_uvws_to, pointing_centre, num_tiles, num_baselines,
                                                num_timesteps);
-    // This function is unlikely to fail.
-    // error_id = cudaDeviceSynchronize();
-    // if (error_id != cudaSuccess) {
-    //     return cudaGetErrorString(error_id);
-    // }
-    // error_id = cudaGetLastError();
-    // if (error_id != cudaSuccess) {
-    //     return cudaGetErrorString(error_id);
-    // }
-
-    rotate_average_kernel<<<gridDim, blockDim>>>(
-        d_high_res_vis, d_high_res_weights, d_low_res_vis, pointing_centre, num_timesteps, num_tiles, num_baselines,
-        num_freqs, freq_average_factor, d_lmsts, d_xyzs, d_uvws_from, d_uvws_to, d_lambdas);
+    cudaError_t error_id;
+#ifdef DEBUG
     error_id = cudaDeviceSynchronize();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
     }
+#endif
+    error_id = cudaGetLastError();
+    if (error_id != cudaSuccess) {
+        return cudaGetErrorString(error_id);
+    }
+
+    rotate_average_kernel<<<gridDim, blockDim>>>(
+        d_high_res_vis, d_high_res_weights, d_low_res_vis, pointing_centre, num_timesteps, num_tiles, num_baselines,
+        num_freqs, freq_average_factor, d_lmsts, d_xyzs, d_uvws_from, d_uvws_to, d_lambdas);
+#ifdef DEBUG
+    error_id = cudaDeviceSynchronize();
+    if (error_id != cudaSuccess) {
+        return cudaGetErrorString(error_id);
+    }
+#endif
     error_id = cudaGetLastError();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
@@ -560,10 +568,9 @@ extern "C" const char *rotate_average(const JonesF32 *d_high_res_vis, const floa
 
 extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weights,
                                  const JonesF32 *d_vis_model, JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits,
-                                 double *iono_const_alpha, double *iono_const_beta, const int num_timesteps,
-                                 const int num_tiles, const int num_baselines, const int num_freqs,
-                                 const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws,
-                                 const FLOAT *d_lambdas_m) {
+                                 IonoConsts *d_iono_consts, const int num_timesteps, const int num_tiles,
+                                 const int num_baselines, const int num_freqs, const int num_iterations,
+                                 const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m) {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
@@ -579,20 +586,18 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
     blockDimAdd2.x = NUM_ADD_THREADS2;
     gridDimAdd2.x = 1;
 
-    double *d_iono_consts;
-    cudaMalloc(&d_iono_consts, 2 * sizeof(double));
-    cudaMemcpy(d_iono_consts, iono_const_alpha, sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_iono_consts + 1, iono_const_beta, sizeof(double), cudaMemcpyHostToDevice);
-
     for (int iteration = 0; iteration < num_iterations; iteration++) {
         // Do the work for one loop of the iteration.
         iono_loop_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_weights, d_vis_model, d_vis_model_rotated,
                                                 d_iono_consts, d_iono_fits, num_tiles, num_baselines, num_freqs,
                                                 d_lmsts, d_uvws, d_lambdas_m);
-        cudaError_t error_id = cudaDeviceSynchronize();
+        cudaError_t error_id;
+#ifdef DEBUG
+        error_id = cudaDeviceSynchronize();
         if (error_id != cudaSuccess) {
             return cudaGetErrorString(error_id);
         }
+#endif
         error_id = cudaGetLastError();
         if (error_id != cudaSuccess) {
             return cudaGetErrorString(error_id);
@@ -600,10 +605,12 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
 
         // Sum the iono fits.
         reduce_baselines<NUM_ADD_THREADS><<<gridDimAdd, blockDimAdd>>>(d_iono_fits, num_baselines);
+#ifdef DEBUG
         error_id = cudaDeviceSynchronize();
         if (error_id != cudaSuccess) {
             return cudaGetErrorString(error_id);
         }
+#endif
         error_id = cudaGetLastError();
         if (error_id != cudaSuccess) {
             return cudaGetErrorString(error_id);
@@ -611,32 +618,23 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
 
         reduce_freqs<NUM_ADD_THREADS2>
             <<<gridDimAdd2, blockDimAdd2>>>(d_iono_fits, d_lambdas_m, num_freqs, d_iono_consts);
+#ifdef DEBUG
         error_id = cudaDeviceSynchronize();
         if (error_id != cudaSuccess) {
             return cudaGetErrorString(error_id);
         }
+#endif
         error_id = cudaGetLastError();
         if (error_id != cudaSuccess) {
             return cudaGetErrorString(error_id);
         }
-
-        // // Sane?
-        // printf("iter %d\n", iteration);
-        // cudaMemcpy(iono_const_alpha, d_iono_consts, sizeof(double), cudaMemcpyDeviceToHost);
-        // cudaMemcpy(iono_const_beta, d_iono_consts + 1, sizeof(double), cudaMemcpyDeviceToHost);
-        // printf("%.4e %.4e\n", *iono_const_alpha, *iono_const_beta);
     }
-
-    cudaMemcpy(iono_const_alpha, d_iono_consts, sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(iono_const_beta, d_iono_consts + 1, sizeof(double), cudaMemcpyDeviceToHost);
-    cudaFree(d_iono_consts);
-    // printf("%.4e %.4e\n", *iono_const_alpha, *iono_const_beta);
 
     return NULL;
 }
 
-extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, double iono_const_alpha,
-                                     double iono_const_beta, double old_iono_const_alpha, double old_iono_const_beta,
+extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model,
+                                     const IonoConsts *d_iono_consts, const IonoConsts *d_old_iono_consts,
                                      const UVW *d_uvws, const FLOAT *d_lambdas_m, const int num_timesteps,
                                      const int num_baselines, const int num_freqs) {
     // Thread blocks are distributed by baseline indices.
@@ -644,13 +642,15 @@ extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d
     blockDim.x = 256;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
-    subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_const_alpha, iono_const_beta,
-                                                old_iono_const_alpha, old_iono_const_beta, d_uvws, d_lambdas_m,
-                                                num_timesteps, num_baselines, num_freqs);
-    cudaError_t error_id = cudaDeviceSynchronize();
+    subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, d_iono_consts, d_old_iono_consts, d_uvws,
+                                                d_lambdas_m, num_timesteps, num_baselines, num_freqs);
+    cudaError_t error_id;
+#ifdef DEBUG
+    error_id = cudaDeviceSynchronize();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
     }
+#endif
     error_id = cudaGetLastError();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
@@ -659,21 +659,24 @@ extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d
     return NULL;
 }
 
-extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const FLOAT iono_const_alpha,
-                                 const FLOAT iono_const_beta, const FLOAT *d_lambdas_m, const UVW *d_uvws,
-                                 const int num_timesteps, const int num_baselines, const int num_freqs) {
+extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const IonoConsts *d_iono_consts,
+                                 const FLOAT *d_lambdas_m, const UVW *d_uvws, const int num_timesteps,
+                                 const int num_baselines, const int num_freqs) {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
-    add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_const_alpha, iono_const_beta, d_lambdas_m,
-                                            d_uvws, num_timesteps, num_baselines, num_freqs);
+    add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, d_iono_consts, d_lambdas_m, d_uvws,
+                                            num_timesteps, num_baselines, num_freqs);
 
-    cudaError_t error_id = cudaDeviceSynchronize();
+    cudaError_t error_id;
+#ifdef DEBUG
+    error_id = cudaDeviceSynchronize();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);
     }
+#endif
     error_id = cudaGetLastError();
     if (error_id != cudaSuccess) {
         return cudaGetErrorString(error_id);

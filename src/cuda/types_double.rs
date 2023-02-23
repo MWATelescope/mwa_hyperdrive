@@ -1337,3 +1337,66 @@ fn bindgen_test_layout_Shapelets() {
         )
     );
 }
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct IonoConsts {
+    pub alpha: f64,
+    pub beta: f64,
+    pub s_vm: f64,
+    pub s_mm: f64,
+}
+#[test]
+fn bindgen_test_layout_IonoConsts() {
+    const UNINIT: ::std::mem::MaybeUninit<IonoConsts> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<IonoConsts>(),
+        32usize,
+        concat!("Size of: ", stringify!(IonoConsts))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<IonoConsts>(),
+        8usize,
+        concat!("Alignment of ", stringify!(IonoConsts))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).alpha) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(IonoConsts),
+            "::",
+            stringify!(alpha)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).beta) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(IonoConsts),
+            "::",
+            stringify!(beta)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).s_vm) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(IonoConsts),
+            "::",
+            stringify!(s_vm)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).s_mm) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(IonoConsts),
+            "::",
+            stringify!(s_mm)
+        )
+    );
+}
