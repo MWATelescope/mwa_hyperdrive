@@ -1263,7 +1263,10 @@ fn peel_cpu(
             .zip_eq(source_weighted_positions.iter().copied())
         {
             multi_progress_bar.suspend(|| {
-                debug!("peel loop {pass}: {source_name} at {source_phase_centre} (has iono {iono_consts:?})")
+                debug!(
+                    "peel loop {pass}: {source_name} at {source_phase_centre} (has iono ({} {}))",
+                    iono_consts.alpha, iono_consts.beta
+                )
             });
             let start = std::time::Instant::now();
             let old_iono_consts = *iono_consts;
@@ -1820,6 +1823,8 @@ fn peel_gpu(
             d_uvws.push(DevicePointer::copy_to_device(&gpu_uvws)?);
         }
         let mut d_beam_jones = DevicePointer::default();
+        let mut d_iono_consts = DevicePointer::default();
+        let mut d_old_iono_consts = DevicePointer::default();
 
         for pass in 0..num_passes {
             peel_progress.reset();
@@ -1856,6 +1861,16 @@ fn peel_gpu(
                 );
 
                 let old_iono_consts = *iono_consts;
+                d_iono_consts.overwrite(&[gpu::IonoConsts {
+                    alpha: iono_consts.alpha,
+                    beta: iono_consts.beta,
+                    gain: iono_consts.gain,
+                }])?;
+                d_old_iono_consts.overwrite(&[gpu::IonoConsts {
+                    alpha: old_iono_consts.alpha,
+                    beta: old_iono_consts.beta,
+                    gain: old_iono_consts.gain,
+                }])?;
 
                 // gpu_kernel_call!(gpu::rotate_average,
                 // d_high_res_vis.get().cast(),

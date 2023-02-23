@@ -151,13 +151,9 @@ inline __device__ COMPLEX operator*(const COMPLEX a, const COMPLEX b) {
     return MAKE_COMPLEX(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-inline __device__ void operator*=(C32 &a, const C32 b) {
-    a = MAKE_C32(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-}
+inline __device__ void operator*=(C32 &a, const C32 b) { a = MAKE_C32(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
 
-inline __device__ void operator*=(C64 &a, const C64 b) {
-    a = MAKE_C64(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-}
+inline __device__ void operator*=(C64 &a, const C64 b) { a = MAKE_C64(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
 
 inline __device__ C32 operator*(const C32 a, const C64 b) {
     return MAKE_C32(a.x * (float)b.x - a.y * (float)b.y, a.x * (float)b.y + a.y * (float)b.x);
@@ -249,7 +245,7 @@ inline __device__ JonesF64 operator*(const JonesF64 a, const C64 b) {
 }
 
 inline __device__ void operator*=(JonesF32 &a, const C32 b) {
-    JonesF32_C *c = (JonesF32_C*)&a;
+    JonesF32_C *c = (JonesF32_C *)&a;
     c->j00 *= b;
     c->j01 *= b;
     c->j10 *= b;
@@ -257,7 +253,7 @@ inline __device__ void operator*=(JonesF32 &a, const C32 b) {
 }
 
 inline __device__ void operator*=(JonesF64 &a, const C64 b) {
-    JonesF64_C *c = (JonesF64_C*)&a;
+    JonesF64_C *c = (JonesF64_C *)&a;
     c->j00 *= b;
     c->j01 *= b;
     c->j10 *= b;

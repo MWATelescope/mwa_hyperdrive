@@ -246,6 +246,7 @@ fn get_complex_obs_context() -> ObsContext {
 // these are used for debugging the tests
 use ndarray::{ArrayView2, ArrayView3};
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::uninlined_format_args)]
 fn display_vis_b(
     name: &String,
     vis_b: &[Jones<f32>],
@@ -1101,7 +1102,7 @@ fn test_iono_fit() {
                 tile_uvs_src.view(),
             );
 
-            // println!("prec: {:?}, expected: {:?}, got: {:?}", apply_precession, consts_lm, &results);
+            // println!("prec: {:?}, expected: {:?}, got: {:?}", apply_precession, iono_consts, &results);
 
             assert_abs_diff_eq!(results[0], iono_consts.alpha, epsilon = 1e-8);
             assert_abs_diff_eq!(results[1], iono_consts.beta, epsilon = 1e-8);
@@ -1438,7 +1439,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             );
 
             // display_vis_tfb(
-            //     &format!("iono@obs prec={}, ({}, {})", apply_precession, &consts_lm.0, &consts_lm.1),
+            //     &format!("iono@obs prec={}, ({}, {})", apply_precession, &iono_consts.0, &iono_consts.1),
             //     vis_iono_obs_tfb.view(),
             //     &obs_context,
             //     obs_context.phase_centre,
@@ -1793,7 +1794,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
         //     vis_weights.view(),
         //     &timeblock,
         //     &source_list,
-        //     &mut iono_consts,
+        //     &mut iono_consts_result,
         //     &source_weighted_positions,
         //     num_sources_to_iono_subtract,
         //     &fine_chan_freqs_hz,
@@ -1881,7 +1882,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             apply_precession,
         );
 
-        for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter(),) {
+        for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter()) {
             println!("prec: {apply_precession:?}, expected: {expected:?}, got: {result:?}");
             assert_abs_diff_eq!(expected.alpha, result.alpha, epsilon = 3e-7);
             assert_abs_diff_eq!(expected.beta, result.beta, epsilon = 3e-7);
@@ -2422,436 +2423,468 @@ mod gpu_tests {
                 w: uvw.w as GpuFloat,
             });
 
+            let mut d_high_res_vis =
+                DevicePointer::copy_to_device(vis_residual_obs_tfb.as_slice().unwrap()).unwrap();
             let d_uvws_src =
                 DevicePointer::copy_to_device(gpu_uvws_src.as_slice().unwrap()).unwrap();
             let d_lambdas = DevicePointer::copy_to_device(
                 &lambdas_m.iter().map(|l| *l as GpuFloat).collect::<Vec<_>>(),
             )
             .unwrap();
+            let mut d_iono_consts = DevicePointer::copy_to_device(&[gpu::IonoConsts {
+                alpha: 0.0,
+                beta: 0.0,
+                gain: 1.0,
+            }])
+            .unwrap();
+            let d_old_iono_consts = DevicePointer::copy_to_device(&[gpu::IonoConsts {
+                alpha: 0.0,
+                beta: 0.0,
+                gain: 1.0,
+            }])
+            .unwrap();
 
-            for iono_consts in [
-                IonoConsts {
-                    alpha: 0.0001,
-                    beta: -0.0003,
-                    gain: 1.0,
-                },
-                IonoConsts {
-                    alpha: 0.0003,
-                    beta: -0.0001,
-                    gain: 1.0,
-                },
-                IonoConsts {
-                    alpha: -0.0007,
-                    beta: 0.0001,
-                    gain: 1.0,
-                },
-            ] {
-                // apply iono rotation at source phase to model at observation phase
-                apply_iono2(
-                    vis_model_obs_tfb.view(),
-                    vis_iono_obs_tfb.view_mut(),
-                    tile_uvs_src.view(),
-                    iono_consts,
-                    &lambdas_m,
-                );
+            for (alpha, beta) in [(0.0001, -0.0003), (0.0003, -0.0001), (-0.0007, 0.0001)] {
+                let iono_consts = IonoConsts {
+                    alpha,
+                    beta,
+                    ..Default::default()
+                };
 
-                // display_vis_tfb(
-                //     &format!("iono@obs ({}, {})", &consts_lm.0, &consts_lm.1),
-                //     vis_iono_obs_tfb.view(),
-                //     &obs_context,
-                //     obs_context.phase_centre,
-                //     apply_precession,
-                // );
+                for iono_consts in [
+                    IonoConsts {
+                        alpha: 0.0001,
+                        beta: -0.0003,
+                        gain: 1.0,
+                    },
+                    IonoConsts {
+                        alpha: 0.0003,
+                        beta: -0.0001,
+                        gain: 1.0,
+                    },
+                    IonoConsts {
+                        alpha: -0.0007,
+                        beta: 0.0001,
+                        gain: 1.0,
+                    },
+                ] {
+                    // apply iono rotation at source phase to model at observation phase
+                    apply_iono2(
+                        vis_model_obs_tfb.view(),
+                        vis_iono_obs_tfb.view_mut(),
+                        tile_uvs_src.view(),
+                        iono_consts,
+                        &lambdas_m,
+                    );
 
-                // subtract model from iono at observation phase centre
-                vis_residual_obs_tfb.assign(&vis_iono_obs_tfb);
-                vis_residual_obs_tfb -= &vis_model_obs_tfb;
+                    // display_vis_tfb(
+                    //     &format!("iono@obs ({}, {})", &iono_consts.0, &iono_consts.1),
+                    //     vis_iono_obs_tfb.view(),
+                    //     &obs_context,
+                    //     obs_context.phase_centre,
+                    //     apply_precession,
+                    // );
 
-                // display_vis_tfb(
-                //     &"residual@obs before".into(),
-                //     vis_residual_obs_tfb.view(),
-                //     &obs_context,
-                //     obs_context.phase_centre,
-                //     apply_precession,
-                // );
+                    // subtract model from iono at observation phase centre
+                    vis_residual_obs_tfb.assign(&vis_iono_obs_tfb);
+                    vis_residual_obs_tfb -= &vis_model_obs_tfb;
 
-                let mut d_high_res_vis =
-                    DevicePointer::copy_to_device(vis_residual_obs_tfb.as_slice().unwrap())
+                    // display_vis_tfb(
+                    //     &"residual@obs before".into(),
+                    //     vis_residual_obs_tfb.view(),
+                    //     &obs_context,
+                    //     obs_context.phase_centre,
+                    //     apply_precession,
+                    // );
+
+                    d_high_res_vis
+                        .overwrite(vis_residual_obs_tfb.as_slice().unwrap())
+                        .unwrap();
+                    d_iono_consts
+                        .overwrite(&[gpu::IonoConsts {
+                            alpha: iono_consts.alpha,
+                            beta: iono_consts.beta,
+                            gain: iono_consts.gain,
+                        }])
                         .unwrap();
 
-                let gpu_iono_consts = gpu::IonoConsts {
-                    alpha: iono_consts.alpha,
-                    beta: iono_consts.beta,
-                    gain: 1.0,
-                };
-                let gpu_old_iono_consts = gpu::IonoConsts {
-                    alpha: 0.0,
-                    beta: 0.0,
-                    gain: 1.0,
-                };
-                let error_message_ptr = unsafe {
-                    gpu::subtract_iono(
-                        d_high_res_vis.get_mut().cast(),
-                        d_high_res_model.get().cast(),
-                        gpu_iono_consts,
-                        gpu_old_iono_consts,
-                        d_uvws_src.get(),
-                        d_lambdas.get(),
-                        num_times.try_into().unwrap(),
-                        num_baselines.try_into().unwrap(),
-                        num_chans.try_into().unwrap(),
-                    )
-                };
-                assert!(
-                    error_message_ptr.is_null(),
-                    "{}",
-                    unsafe { CStr::from_ptr(error_message_ptr) }
-                        .to_str()
-                        .unwrap_or("<cannot read GPU error string>")
-                );
+                    let gpu_iono_consts = gpu::IonoConsts {
+                        alpha: iono_consts.alpha,
+                        beta: iono_consts.beta,
+                        gain: 1.0,
+                    };
+                    let gpu_old_iono_consts = gpu::IonoConsts {
+                        alpha: 0.0,
+                        beta: 0.0,
+                        gain: 1.0,
+                    };
+                    let error_message_ptr = unsafe {
+                        gpu::subtract_iono(
+                            d_high_res_vis.get_mut().cast(),
+                            d_high_res_model.get().cast(),
+                            gpu_iono_consts,
+                            gpu_old_iono_consts,
+                            d_uvws_src.get(),
+                            d_lambdas.get(),
+                            num_times.try_into().unwrap(),
+                            num_baselines.try_into().unwrap(),
+                            num_chans.try_into().unwrap(),
+                        )
+                    };
+                    assert!(
+                        error_message_ptr.is_null(),
+                        "{}",
+                        unsafe { CStr::from_ptr(error_message_ptr) }
+                            .to_str()
+                            .unwrap_or("<cannot read GPU error string>")
+                    );
 
-                d_high_res_vis
-                    .copy_from_device(vis_residual_obs_tfb.as_slice_mut().unwrap())
-                    .unwrap();
+                    d_high_res_vis
+                        .copy_from_device(vis_residual_obs_tfb.as_slice_mut().unwrap())
+                        .unwrap();
 
-                // display_vis_tfb(
-                //     &"residual@obs after".into(),
-                //     vis_residual_obs_tfb.view(),
-                //     &obs_context,
-                //     obs_context.phase_centre,
-                //     apply_precession,
-                // );
+                    // display_vis_tfb(
+                    //     &"residual@obs after".into(),
+                    //     vis_residual_obs_tfb.view(),
+                    //     &obs_context,
+                    //     obs_context.phase_centre,
+                    //     apply_precession,
+                    // );
 
-                for jones_residual in vis_residual_obs_tfb.iter() {
-                    for pol_residual in jones_residual.iter() {
-                        assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 9e-7);
+                    for jones_residual in vis_residual_obs_tfb.iter() {
+                        for pol_residual in jones_residual.iter() {
+                            assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 9e-7);
+                        }
                     }
                 }
             }
         }
-    }
 
-    #[test]
-    fn test_rotate_average() {
-        let obs_context = get_simple_obs_context();
-        let array_pos = obs_context.array_position;
+        #[test]
+        fn test_rotate_average() {
+            let obs_context = get_simple_obs_context();
+            let array_pos = obs_context.array_position;
 
-        let num_tiles = obs_context.get_total_num_tiles();
-        let num_times = obs_context.timestamps.len();
-        let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-        let flagged_tiles = HashSet::new();
-        let num_chans = obs_context.fine_chan_freqs.len();
+            let num_tiles = obs_context.get_total_num_tiles();
+            let num_times = obs_context.timestamps.len();
+            let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+            let flagged_tiles = HashSet::new();
+            let num_chans = obs_context.fine_chan_freqs.len();
 
-        let fine_chan_freqs_hz = obs_context
-            .fine_chan_freqs
-            .iter()
-            .map(|&f| f as f64)
-            .collect_vec();
-        let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
-
-        // source is at zenith at 1h
-        let hour_epoch = obs_context.timestamps[1];
-        let lst_1h_rad = get_lmst(
-            array_pos.longitude_rad,
-            hour_epoch,
-            obs_context.dut1.unwrap_or_default(),
-        );
-        let source_radec =
-            RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_1h_rad);
-        let source_fd = 1.;
-        let source_list = SourceList::from(indexmap! {
-            "One".into() => point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
-        });
-
-        let beam = get_beam(num_tiles);
-
-        let mut vis_tfb = Array3::default((num_times, num_chans, num_baselines));
-        let mut vis_rot_tfb = Array3::default((num_times, num_chans, num_baselines));
-
-        // tile uvs and ws in the observation phase centre
-        let mut tile_uvs_obs = Array2::default((num_times, num_tiles));
-        let mut tile_ws_obs = Array2::default((num_times, num_tiles));
-        // tile uvs and ws in the source phase centre
-        let mut tile_uvs_src = Array2::default((num_times, num_tiles));
-        let mut tile_ws_src = Array2::default((num_times, num_tiles));
-
-        let weights_tfb = Array3::from_elem(vis_tfb.dim(), 2.0);
-
-        for apply_precession in [false, true] {
-            let modeller = SkyModellerCpu::new(
-                &beam,
-                &source_list,
-                Polarisations::default(),
-                &obs_context.tile_xyzs,
-                &fine_chan_freqs_hz,
-                &flagged_tiles,
-                obs_context.phase_centre,
-                array_pos.longitude_rad,
-                array_pos.latitude_rad,
-                obs_context.dut1.unwrap_or_default(),
-                apply_precession,
-            );
-
-            vis_tfb.fill(Jones::zero());
-            model_timesteps(&modeller, &obs_context.timestamps, vis_tfb.view_mut()).unwrap();
-
-            let (lmsts, xyzs) = setup_tile_uv_w_arrays(
-                tile_uvs_obs.view_mut(),
-                tile_ws_obs.view_mut(),
-                &obs_context,
-                obs_context.phase_centre,
-                apply_precession,
-            );
-            setup_tile_uv_w_arrays(
-                tile_uvs_src.view_mut(),
-                tile_ws_src.view_mut(),
-                &obs_context,
-                source_radec,
-                apply_precession,
-            );
-
-            // iterate over time, rotating visibilities
-            for (vis_fb, mut vis_rot_fb, tile_ws_obs, tile_ws_src) in izip!(
-                vis_tfb.outer_iter(),
-                vis_rot_tfb.view_mut().outer_iter_mut(),
-                tile_ws_obs.outer_iter(),
-                tile_ws_src.outer_iter(),
-            ) {
-                vis_rotate_fb(
-                    vis_fb.view(),
-                    vis_rot_fb.view_mut(),
-                    tile_ws_obs.as_slice().unwrap(),
-                    tile_ws_src.as_slice().unwrap(),
-                    &lambdas_m,
-                );
-            }
-
-            let mut vis_averaged_tfb = Array3::default((1, 1, num_baselines));
-            vis_average2(
-                vis_rot_tfb.view(),
-                vis_averaged_tfb.view_mut(),
-                weights_tfb.view(),
-            );
-
-            // display_vis_tfb(
-            //     &"model@obs".into(),
-            //     vis_tfb.view(),
-            //     &obs_context,
-            //     obs_context.phase_centre,
-            //     apply_precession,
-            // );
-            // display_vis_tfb(
-            //     &"rotated@source".into(),
-            //     vis_rot_tfb.view(),
-            //     &obs_context,
-            //     source_radec,
-            //     apply_precession,
-            // );
-
-            // if !apply_precession {
-            //     // rotated vis should always have the source in phase, so no angle in pols XX, YY
-            //     for vis_rot in vis_rot_tfb.iter() {
-            //         assert_abs_diff_eq!(vis_rot[0].arg(), 0., epsilon = 1e-6); // XX
-            //         assert_abs_diff_eq!(vis_rot[3].arg(), 0., epsilon = 1e-6); // YY
-            //     }
-            //     // baseline 1, from origin to v has no u or w component, should not be affected by the rotation
-            //     for (vis, vis_rot) in izip!(
-            //         vis_tfb.slice(s![.., .., 1]),
-            //         vis_rot_tfb.slice(s![.., .., 1]),
-            //     ) {
-            //         assert_abs_diff_eq!(vis, vis_rot, epsilon = 1e-6);
-            //     }
-            //     // in the second timestep, the source should be at the pointing centre, so should not be
-            //     // attenuated by the beam
-            //     for (vis, vis_rot) in izip!(
-            //         vis_tfb.slice(s![1, .., ..]),
-            //         vis_rot_tfb.slice(s![1, .., ..]),
-            //     ) {
-            //         // XX
-            //         assert_abs_diff_eq!(vis[0].norm(), source_fd as f32, epsilon = 1e-6);
-            //         assert_abs_diff_eq!(vis_rot[0].norm(), source_fd as f32, epsilon = 1e-6);
-            //         // YY
-            //         assert_abs_diff_eq!(vis[3].norm(), source_fd as f32, epsilon = 1e-6);
-            //         assert_abs_diff_eq!(vis_rot[3].norm(), source_fd as f32, epsilon = 1e-6);
-            //     }
-            // }
-
-            let (time_axis, freq_axis, _baseline_axis) = (Axis(0), Axis(1), Axis(2));
-            let gpu_xyzs: Vec<_> = xyzs
+            let fine_chan_freqs_hz = obs_context
+                .fine_chan_freqs
                 .iter()
-                .copied()
-                .map(|XyzGeodetic { x, y, z }| gpu::XYZ {
-                    x: x as GpuFloat,
-                    y: y as GpuFloat,
-                    z: z as GpuFloat,
-                })
-                .collect();
-            let mut gpu_uvws = Array2::from_elem(
-                (num_times, num_baselines),
-                gpu::UVW {
-                    u: -99.0,
-                    v: -99.0,
-                    w: -99.0,
-                },
+                .map(|&f| f as f64)
+                .collect_vec();
+            let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
+
+            // source is at zenith at 1h
+            let hour_epoch = obs_context.timestamps[1];
+            let lst_1h_rad = get_lmst(
+                array_pos.longitude_rad,
+                hour_epoch,
+                obs_context.dut1.unwrap_or_default(),
             );
-            gpu_uvws
-                .outer_iter_mut()
-                .zip(xyzs.outer_iter())
-                .zip(lmsts.iter())
-                .for_each(|((mut gpu_uvws, xyzs), lmst)| {
-                    let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-                    let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
-                        .into_iter()
-                        .map(|uvw| gpu::UVW {
-                            u: uvw.u as GpuFloat,
-                            v: uvw.v as GpuFloat,
-                            w: uvw.w as GpuFloat,
-                        })
-                        .collect::<Vec<_>>();
-                    gpu_uvws.assign(&ArrayView1::from(&v));
-                });
-            let gpu_lambdas: Vec<GpuFloat> = lambdas_m.iter().map(|l| *l as GpuFloat).collect();
+            let source_radec =
+                RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_1h_rad);
+            let source_fd = 1.;
+            let source_list = SourceList::from(indexmap! {
+                "One".into() => point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
+            });
 
-            let mut result = vis_averaged_tfb.clone();
-            result.fill(Jones::default());
+            let beam = get_beam(num_tiles);
 
-            let avg_freq = div_ceil(
-                vis_tfb.len_of(freq_axis),
-                vis_averaged_tfb.len_of(freq_axis),
-            );
+            let mut vis_tfb = Array3::default((num_times, num_chans, num_baselines));
+            let mut vis_rot_tfb = Array3::default((num_times, num_chans, num_baselines));
 
-            let d_uvws_from = DevicePointer::copy_to_device(gpu_uvws.as_slice().unwrap()).unwrap();
-            let mut d_uvws_to =
-                DevicePointer::malloc(gpu_uvws.len() * std::mem::size_of::<gpu::UVW>()).unwrap();
+            // tile uvs and ws in the observation phase centre
+            let mut tile_uvs_obs = Array2::default((num_times, num_tiles));
+            let mut tile_ws_obs = Array2::default((num_times, num_tiles));
+            // tile uvs and ws in the source phase centre
+            let mut tile_uvs_src = Array2::default((num_times, num_tiles));
+            let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
-            unsafe {
-                let d_vis_tfb = DevicePointer::copy_to_device(vis_tfb.as_slice().unwrap()).unwrap();
-                let d_weights_tfb =
-                    DevicePointer::copy_to_device(weights_tfb.as_slice().unwrap()).unwrap();
-                let mut d_vis_averaged_tfb =
-                    DevicePointer::copy_to_device(result.as_slice().unwrap()).unwrap();
-                let d_lmsts = DevicePointer::copy_to_device(
-                    &lmsts
-                        .iter()
-                        .map(|lmst| *lmst as GpuFloat)
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap();
-                let d_xyzs = DevicePointer::copy_to_device(&gpu_xyzs).unwrap();
-                let d_lambdas = DevicePointer::copy_to_device(&gpu_lambdas).unwrap();
+            let weights_tfb = Array3::from_elem(vis_tfb.dim(), 2.0);
 
-                gpu::rotate_average(
-                    d_vis_tfb.get().cast(),
-                    d_weights_tfb.get().cast(),
-                    d_vis_averaged_tfb.get_mut().cast(),
-                    gpu::RADec {
-                        ra: source_radec.ra as GpuFloat,
-                        dec: source_radec.dec as GpuFloat,
-                    },
-                    vis_tfb.len_of(time_axis).try_into().unwrap(),
-                    num_tiles.try_into().unwrap(),
-                    num_baselines.try_into().unwrap(),
-                    vis_tfb.len_of(freq_axis).try_into().unwrap(),
-                    avg_freq.try_into().unwrap(),
-                    d_lmsts.get(),
-                    d_xyzs.get(),
-                    d_uvws_from.get(),
-                    d_uvws_to.get_mut(),
-                    d_lambdas.get(),
+            for apply_precession in [false, true] {
+                let modeller = SkyModellerCpu::new(
+                    &beam,
+                    &source_list,
+                    Polarisations::default(),
+                    &obs_context.tile_xyzs,
+                    &fine_chan_freqs_hz,
+                    &flagged_tiles,
+                    obs_context.phase_centre,
+                    array_pos.longitude_rad,
+                    array_pos.latitude_rad,
+                    obs_context.dut1.unwrap_or_default(),
+                    apply_precession,
                 );
 
-                d_vis_averaged_tfb
-                    .copy_from_device(result.as_slice_mut().unwrap())
+                vis_tfb.fill(Jones::zero());
+                model_timesteps(&modeller, &obs_context.timestamps, vis_tfb.view_mut()).unwrap();
+
+                let (lmsts, xyzs) = setup_tile_uv_w_arrays(
+                    tile_uvs_obs.view_mut(),
+                    tile_ws_obs.view_mut(),
+                    &obs_context,
+                    obs_context.phase_centre,
+                    apply_precession,
+                );
+                setup_tile_uv_w_arrays(
+                    tile_uvs_src.view_mut(),
+                    tile_ws_src.view_mut(),
+                    &obs_context,
+                    source_radec,
+                    apply_precession,
+                );
+
+                // iterate over time, rotating visibilities
+                for (vis_fb, mut vis_rot_fb, tile_ws_obs, tile_ws_src) in izip!(
+                    vis_tfb.outer_iter(),
+                    vis_rot_tfb.view_mut().outer_iter_mut(),
+                    tile_ws_obs.outer_iter(),
+                    tile_ws_src.outer_iter(),
+                ) {
+                    vis_rotate_fb(
+                        vis_fb.view(),
+                        vis_rot_fb.view_mut(),
+                        tile_ws_obs.as_slice().unwrap(),
+                        tile_ws_src.as_slice().unwrap(),
+                        &lambdas_m,
+                    );
+                }
+
+                let mut vis_averaged_tfb = Array3::default((1, 1, num_baselines));
+                vis_average2(
+                    vis_rot_tfb.view(),
+                    vis_averaged_tfb.view_mut(),
+                    weights_tfb.view(),
+                );
+
+                // display_vis_tfb(
+                //     &"model@obs".into(),
+                //     vis_tfb.view(),
+                //     &obs_context,
+                //     obs_context.phase_centre,
+                //     apply_precession,
+                // );
+                // display_vis_tfb(
+                //     &"rotated@source".into(),
+                //     vis_rot_tfb.view(),
+                //     &obs_context,
+                //     source_radec,
+                //     apply_precession,
+                // );
+
+                // if !apply_precession {
+                //     // rotated vis should always have the source in phase, so no angle in pols XX, YY
+                //     for vis_rot in vis_rot_tfb.iter() {
+                //         assert_abs_diff_eq!(vis_rot[0].arg(), 0., epsilon = 1e-6); // XX
+                //         assert_abs_diff_eq!(vis_rot[3].arg(), 0., epsilon = 1e-6); // YY
+                //     }
+                //     // baseline 1, from origin to v has no u or w component, should not be affected by the rotation
+                //     for (vis, vis_rot) in izip!(
+                //         vis_tfb.slice(s![.., .., 1]),
+                //         vis_rot_tfb.slice(s![.., .., 1]),
+                //     ) {
+                //         assert_abs_diff_eq!(vis, vis_rot, epsilon = 1e-6);
+                //     }
+                //     // in the second timestep, the source should be at the pointing centre, so should not be
+                //     // attenuated by the beam
+                //     for (vis, vis_rot) in izip!(
+                //         vis_tfb.slice(s![1, .., ..]),
+                //         vis_rot_tfb.slice(s![1, .., ..]),
+                //     ) {
+                //         // XX
+                //         assert_abs_diff_eq!(vis[0].norm(), source_fd as f32, epsilon = 1e-6);
+                //         assert_abs_diff_eq!(vis_rot[0].norm(), source_fd as f32, epsilon = 1e-6);
+                //         // YY
+                //         assert_abs_diff_eq!(vis[3].norm(), source_fd as f32, epsilon = 1e-6);
+                //         assert_abs_diff_eq!(vis_rot[3].norm(), source_fd as f32, epsilon = 1e-6);
+                //     }
+                // }
+
+                let (time_axis, freq_axis, _baseline_axis) = (Axis(0), Axis(1), Axis(2));
+                let gpu_xyzs: Vec<_> = xyzs
+                    .iter()
+                    .copied()
+                    .map(|XyzGeodetic { x, y, z }| gpu::XYZ {
+                        x: x as GpuFloat,
+                        y: y as GpuFloat,
+                        z: z as GpuFloat,
+                    })
+                    .collect();
+                let mut gpu_uvws = Array2::from_elem(
+                    (num_times, num_baselines),
+                    gpu::UVW {
+                        u: -99.0,
+                        v: -99.0,
+                        w: -99.0,
+                    },
+                );
+                gpu_uvws
+                    .outer_iter_mut()
+                    .zip(xyzs.outer_iter())
+                    .zip(lmsts.iter())
+                    .for_each(|((mut gpu_uvws, xyzs), lmst)| {
+                        let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+                        let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
+                            .into_iter()
+                            .map(|uvw| gpu::UVW {
+                                u: uvw.u as GpuFloat,
+                                v: uvw.v as GpuFloat,
+                                w: uvw.w as GpuFloat,
+                            })
+                            .collect::<Vec<_>>();
+                        gpu_uvws.assign(&ArrayView1::from(&v));
+                    });
+                let gpu_lambdas: Vec<GpuFloat> = lambdas_m.iter().map(|l| *l as GpuFloat).collect();
+
+                let mut result = vis_averaged_tfb.clone();
+                result.fill(Jones::default());
+
+                let avg_freq = div_ceil(
+                    vis_tfb.len_of(freq_axis),
+                    vis_averaged_tfb.len_of(freq_axis),
+                );
+
+                let d_uvws_from =
+                    DevicePointer::copy_to_device(gpu_uvws.as_slice().unwrap()).unwrap();
+                let mut d_uvws_to =
+                    DevicePointer::malloc(gpu_uvws.len() * std::mem::size_of::<gpu::UVW>())
+                        .unwrap();
+
+                unsafe {
+                    let d_vis_tfb =
+                        DevicePointer::copy_to_device(vis_tfb.as_slice().unwrap()).unwrap();
+                    let d_weights_tfb =
+                        DevicePointer::copy_to_device(weights_tfb.as_slice().unwrap()).unwrap();
+                    let mut d_vis_averaged_tfb =
+                        DevicePointer::copy_to_device(result.as_slice().unwrap()).unwrap();
+                    let d_lmsts = DevicePointer::copy_to_device(
+                        &lmsts
+                            .iter()
+                            .map(|lmst| *lmst as GpuFloat)
+                            .collect::<Vec<_>>(),
+                    )
                     .unwrap();
-            }
+                    let d_xyzs = DevicePointer::copy_to_device(&gpu_xyzs).unwrap();
+                    let d_lambdas = DevicePointer::copy_to_device(&gpu_lambdas).unwrap();
 
-            // Test that the CPU and GPU UVWs are the same. CPU UVWs are per
-            // tile, GPU UVWs are per baseline, so we just make the CPU UVWs
-            // ourselves.
-            let mut cpu_uvws = Array2::from_elem((num_times, num_baselines), UVW::default());
-            cpu_uvws
-                .outer_iter_mut()
-                .zip(xyzs.outer_iter())
-                .zip(lmsts.iter())
-                .for_each(|((mut cpu_uvws, xyzs), lmst)| {
-                    let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-                    let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre);
-                    cpu_uvws.assign(&ArrayView1::from(&v));
+                    gpu::rotate_average(
+                        d_vis_tfb.get().cast(),
+                        d_weights_tfb.get().cast(),
+                        d_vis_averaged_tfb.get_mut().cast(),
+                        gpu::RADec {
+                            ra: source_radec.ra as GpuFloat,
+                            dec: source_radec.dec as GpuFloat,
+                        },
+                        vis_tfb.len_of(time_axis).try_into().unwrap(),
+                        num_tiles.try_into().unwrap(),
+                        num_baselines.try_into().unwrap(),
+                        vis_tfb.len_of(freq_axis).try_into().unwrap(),
+                        avg_freq.try_into().unwrap(),
+                        d_lmsts.get(),
+                        d_xyzs.get(),
+                        d_uvws_from.get(),
+                        d_uvws_to.get_mut(),
+                        d_lambdas.get(),
+                    );
+
+                    d_vis_averaged_tfb
+                        .copy_from_device(result.as_slice_mut().unwrap())
+                        .unwrap();
+                }
+
+                // Test that the CPU and GPU UVWs are the same. CPU UVWs are per
+                // tile, GPU UVWs are per baseline, so we just make the CPU UVWs
+                // ourselves.
+                let mut cpu_uvws = Array2::from_elem((num_times, num_baselines), UVW::default());
+                cpu_uvws
+                    .outer_iter_mut()
+                    .zip(xyzs.outer_iter())
+                    .zip(lmsts.iter())
+                    .for_each(|((mut cpu_uvws, xyzs), lmst)| {
+                        let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+                        let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre);
+                        cpu_uvws.assign(&ArrayView1::from(&v));
+                    });
+                let gpu_uvws = Array2::from_shape_vec(
+                    (num_times, num_baselines),
+                    d_uvws_from.copy_from_device_new().unwrap(),
+                )
+                .unwrap()
+                .mapv(|gpu::UVW { u, v, w }| UVW {
+                    // The GPU float precision might not be f64.
+                    u: u as _,
+                    v: v as _,
+                    w: w as _,
                 });
-            let gpu_uvws = Array2::from_shape_vec(
-                (num_times, num_baselines),
-                d_uvws_from.copy_from_device_new().unwrap(),
-            )
-            .unwrap()
-            .mapv(|gpu::UVW { u, v, w }| UVW {
-                // The GPU float precision might not be f64.
-                u: u as _,
-                v: v as _,
-                w: w as _,
-            });
-            #[cfg(not(feature = "gpu-single"))]
-            assert_abs_diff_eq!(cpu_uvws, gpu_uvws, epsilon = 0.0);
-            #[cfg(feature = "gpu-single")]
-            assert_abs_diff_eq!(cpu_uvws, gpu_uvws, epsilon = 5e-8);
+                #[cfg(not(feature = "gpu-single"))]
+                assert_abs_diff_eq!(cpu_uvws, gpu_uvws, epsilon = 0.0);
+                #[cfg(feature = "gpu-single")]
+                assert_abs_diff_eq!(cpu_uvws, gpu_uvws, epsilon = 5e-8);
 
-            // Hack to use `display_vis_tfb` with low-res visibilities.
-            let mut low_res_obs_context = get_simple_obs_context();
-            low_res_obs_context.timestamps = vec1![hour_epoch];
-            low_res_obs_context.fine_chan_freqs = vec1![VEL_C as _];
-            display_vis_tfb(
-                &"host".to_string(),
-                vis_averaged_tfb.view(),
-                &low_res_obs_context,
-                obs_context.phase_centre,
-                apply_precession,
-            );
-            display_vis_tfb(
-                &"gpu vis_rotate_average".to_string(),
-                result.view(),
-                &low_res_obs_context,
-                obs_context.phase_centre,
-                apply_precession,
-            );
+                // Hack to use `display_vis_tfb` with low-res visibilities.
+                let mut low_res_obs_context = get_simple_obs_context();
+                low_res_obs_context.timestamps = vec1![hour_epoch];
+                low_res_obs_context.fine_chan_freqs = vec1![VEL_C as _];
+                display_vis_tfb(
+                    &"host".to_string(),
+                    vis_averaged_tfb.view(),
+                    &low_res_obs_context,
+                    obs_context.phase_centre,
+                    apply_precession,
+                );
+                display_vis_tfb(
+                    &"gpu vis_rotate_average".to_string(),
+                    result.view(),
+                    &low_res_obs_context,
+                    obs_context.phase_centre,
+                    apply_precession,
+                );
 
-            assert_abs_diff_eq!(vis_averaged_tfb, result);
+                assert_abs_diff_eq!(vis_averaged_tfb, result);
 
-            // for (tile_ws_obs, tile_ws_src, vis_fb, vis_rot_fb) in izip!(
-            //     tile_ws_obs.outer_iter(),
-            //     tile_ws_src.outer_iter(),
-            //     vis_tfb.outer_iter(),
-            //     vis_rot_tfb.outer_iter(),
-            // ) {
-            //     for (lambda_m, vis_b, vis_rot_b) in izip!(
-            //         lambdas_m.iter(),
-            //         vis_fb.outer_iter(),
-            //         vis_rot_fb.outer_iter(),
-            //     ) {
-            //         for (&(ant1, ant2), vis, vis_rot) in
-            //             izip!(ant_pairs.iter(), vis_b.iter(), vis_rot_b.iter(),)
-            //         {
-            //             let w_obs = tile_ws_obs[ant1] - tile_ws_obs[ant2];
-            //             let w_src = tile_ws_src[ant1] - tile_ws_src[ant2];
-            //             let arg = (TAU * (w_src - w_obs) / lambda_m) as f64;
-            //             for (pol_model, pol_model_rot) in vis.iter().zip_eq(vis_rot.iter()) {
-            //                 // magnitudes shoud not be affected by rotation
-            //                 assert_abs_diff_eq!(
-            //                     pol_model.norm(),
-            //                     pol_model_rot.norm(),
-            //                     epsilon = 1e-6
-            //                 );
-            //                 let pol_model_rot_expected = Complex::from_polar(
-            //                     pol_model.norm(),
-            //                     (pol_model.arg() as f64 - arg) as f32,
-            //                 );
-            //                 assert_abs_diff_eq!(
-            //                     pol_model_rot_expected.arg(),
-            //                     pol_model_rot.arg(),
-            //                     epsilon = 1e-6
-            //                 );
-            //             }
-            //         }
-            //     }
-            // }
+                // for (tile_ws_obs, tile_ws_src, vis_fb, vis_rot_fb) in izip!(
+                //     tile_ws_obs.outer_iter(),
+                //     tile_ws_src.outer_iter(),
+                //     vis_tfb.outer_iter(),
+                //     vis_rot_tfb.outer_iter(),
+                // ) {
+                //     for (lambda_m, vis_b, vis_rot_b) in izip!(
+                //         lambdas_m.iter(),
+                //         vis_fb.outer_iter(),
+                //         vis_rot_fb.outer_iter(),
+                //     ) {
+                //         for (&(ant1, ant2), vis, vis_rot) in
+                //             izip!(ant_pairs.iter(), vis_b.iter(), vis_rot_b.iter(),)
+                //         {
+                //             let w_obs = tile_ws_obs[ant1] - tile_ws_obs[ant2];
+                //             let w_src = tile_ws_src[ant1] - tile_ws_src[ant2];
+                //             let arg = (TAU * (w_src - w_obs) / lambda_m) as f64;
+                //             for (pol_model, pol_model_rot) in vis.iter().zip_eq(vis_rot.iter()) {
+                //                 // magnitudes shoud not be affected by rotation
+                //                 assert_abs_diff_eq!(
+                //                     pol_model.norm(),
+                //                     pol_model_rot.norm(),
+                //                     epsilon = 1e-6
+                //                 );
+                //                 let pol_model_rot_expected = Complex::from_polar(
+                //                     pol_model.norm(),
+                //                     (pol_model.arg() as f64 - arg) as f32,
+                //                 );
+                //                 assert_abs_diff_eq!(
+                //                     pol_model_rot_expected.arg(),
+                //                     pol_model_rot.arg(),
+                //                     epsilon = 1e-6
+                //                 );
+                //             }
+                //         }
+                //     }
+                // }
+            }
         }
     }
 

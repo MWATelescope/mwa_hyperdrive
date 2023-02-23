@@ -249,8 +249,7 @@ __global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float 
  *
  */
 __device__ void apply_iono(const JonesF32 *vis, JonesF32 *vis_out, const IonoConsts *iono_consts,
-                           const int num_baselines, const int num_freqs, const UVW *uvws,
-                           const FLOAT *lambdas_m) {
+                           const int num_baselines, const int num_freqs, const UVW *uvws, const FLOAT *lambdas_m) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     // No need to check if this thread should continue; this is a device
     // function.
@@ -485,8 +484,7 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
     // Apply the latest iono constants to the model visibilities.
     // TODO: Would it be better to avoid the function call?
     // TODO: Use the updated source position for the UVWs?
-    apply_iono(vis_model, vis_model_rotated, iono_consts, num_baselines, num_freqs, uvws,
-               lambdas_m);
+    apply_iono(vis_model, vis_model_rotated, iono_consts, num_baselines, num_freqs, uvws, lambdas_m);
 
     for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
         const int step = i_freq * num_baselines + i_bl;
@@ -518,8 +516,7 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
 }
 
 __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const IonoConsts iono_consts,
-                                     const IonoConsts old_iono_consts,
-                                     const UVW *uvws, const FLOAT *lambdas_m,
+                                     const IonoConsts old_iono_consts, const UVW *uvws, const FLOAT *lambdas_m,
                                      const int num_timesteps, const int num_baselines, const int num_freqs) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
@@ -586,8 +583,8 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
 }
 
 __global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const IonoConsts iono_consts,
-                                 const FLOAT *lambdas_m, const UVW *uvws,
-                                 const int num_timesteps, const int num_freqs, const int num_baselines) {
+                                 const FLOAT *lambdas_m, const UVW *uvws, const int num_timesteps, const int num_freqs,
+                                 const int num_baselines) {
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
@@ -739,9 +736,9 @@ extern "C" const char *rotate_average(const JonesF32 *d_high_res_vis, const floa
 
 extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weights,
                                  const JonesF32 *d_vis_model, JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits,
-                                 IonoConsts *iono_consts, const int num_tiles,
-                                 const int num_baselines, const int num_freqs, const int num_iterations,
-                                 const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m) {
+                                 IonoConsts *iono_consts, const int num_tiles, const int num_baselines,
+                                 const int num_freqs, const int num_iterations, const FLOAT *d_lmsts, const UVW *d_uvws,
+                                 const FLOAT *d_lambdas_m) {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
@@ -816,7 +813,8 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         // printf("iter %d: %.4e %.4e %.4e\n", iteration, iono_consts->alpha, iono_consts->beta, iono_consts->gain);
         // JonesF64 sum;
         // gpuMemcpy(&sum, d_iono_fits, sizeof(JonesF64), gpuMemcpyDeviceToHost);
-        // printf("sum: %.4e %.4e %.4e %.4e %.4e %.4e %.4e %d\n", sum.j00_re, sum.j00_im, sum.j01_re, sum.j01_im, sum.j10_re, sum.j10_im, sum.j11_re, (int)sum.j11_im);
+        // printf("sum: %.4e %.4e %.4e %.4e %.4e %.4e %.4e %d\n", sum.j00_re, sum.j00_im, sum.j01_re, sum.j01_im,
+        // sum.j10_re, sum.j10_im, sum.j11_re, (int)sum.j11_im);
     }
 
     gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
@@ -836,7 +834,7 @@ extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
     subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_consts, old_iono_consts, d_uvws,
-                                     d_lambdas_m, num_timesteps, num_baselines, num_freqs);
+                                                d_lambdas_m, num_timesteps, num_baselines, num_freqs);
 
     gpuError_t error_id;
 #ifdef DEBUG
@@ -861,8 +859,8 @@ extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis
     blockDim.x = 256;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
-    add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_consts, d_lambdas_m,
-                                            d_uvws, num_timesteps, num_freqs, num_baselines);
+    add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_consts, d_lambdas_m, d_uvws,
+                                            num_timesteps, num_freqs, num_baselines);
 
     gpuError_t error_id;
 #ifdef DEBUG
