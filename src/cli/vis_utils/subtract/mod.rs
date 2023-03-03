@@ -17,6 +17,7 @@ use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::Duration;
+use indexmap::IndexMap;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, trace, warn};
@@ -959,6 +960,7 @@ fn model_vis_and_subtract(
         .iter()
         .map(|&i| i as f64)
         .collect::<Vec<_>>();
+    let source_iono_consts = IndexMap::new();
     let mut modeller = crate::model::new_sky_modeller(
         #[cfg(feature = "cuda")]
         use_cpu_for_modelling,
@@ -972,6 +974,7 @@ fn model_vis_and_subtract(
         array_position.latitude_rad,
         dut1,
         apply_precession,
+        &source_iono_consts,
     )?;
 
     // Recycle an array for model visibilities.

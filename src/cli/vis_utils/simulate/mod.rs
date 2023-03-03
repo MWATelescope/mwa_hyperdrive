@@ -20,6 +20,7 @@ use clap::Parser;
 use crossbeam_channel::{bounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, warn};
@@ -36,6 +37,7 @@ use vec1::Vec1;
 use crate::{
     averaging::{parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks},
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
+    cli::peel::SourceIonoConsts,
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     help_texts::{
         ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
@@ -64,6 +66,10 @@ pub struct VisSimulateArgs {
     /// Path to the metafits file.
     #[clap(short, long, parse(from_str), help_heading = "INPUT AND OUTPUT")]
     metafits: PathBuf,
+
+    /// Path to a JSON-formatted file with ionospheric constants.
+    #[clap(short, long, parse(from_str), help_heading = "INPUT AND OUTPUT")]
+    iono_consts_file: Option<PathBuf>,
 
     #[clap(
         short = 'o',
@@ -240,6 +246,9 @@ struct VisSimParams {
     /// mwalib metafits context
     metafits: MetafitsContext,
 
+    /// Ionospheric constants.
+    iono_consts: IndexMap<String, SourceIonoConsts>,
+
     /// The output visibility files.
     outputs: Vec1<(PathBuf, VisOutputType)>,
 
@@ -301,6 +310,7 @@ impl VisSimParams {
         // Expose all the struct fields to ensure they're all used.
         let VisSimulateArgs {
             metafits,
+            iono_consts_file,
             output_model_files,
             source_list,
             output_model_time_average,
@@ -326,9 +336,9 @@ impl VisSimParams {
             array_position,
             ignore_dut1,
             no_precession,
-            no_progress_bars: _,
             #[cfg(feature = "cuda")]
             cpu,
+            no_progress_bars: _,
         } = args;
 
         // If we're going to use a GPU for modelling, get the device info so we
@@ -673,9 +683,18 @@ impl VisSimParams {
 
         messages::print_modeller_info(&modeller_info);
 
+        let iono_consts = match iono_consts_file {
+            Some(f) => {
+                let mut f = std::io::BufReader::new(std::fs::File::open(f)?);
+                serde_json::from_reader(&mut f).unwrap()
+            }
+            None => IndexMap::new(),
+        };
+
         Ok(VisSimParams {
             source_list,
             metafits,
+            iono_consts,
             outputs: output_model_files,
             output_time_average_factor: time_factor,
             output_freq_average_factor: freq_factor,
@@ -701,6 +720,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
     let VisSimParams {
         source_list,
         metafits,
+        iono_consts,
         outputs,
         output_time_average_factor,
         output_freq_average_factor,
@@ -783,6 +803,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 array_position.latitude_rad,
                 dut1,
                 apply_precession,
+                &iono_consts,
             )?;
 
             let cross_vis_shape = (

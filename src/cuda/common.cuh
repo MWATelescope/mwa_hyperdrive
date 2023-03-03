@@ -234,6 +234,17 @@ inline __device__ JONES operator/(JONES a, FLOAT b) {
     };
 }
 
+inline __device__ JONES operator*=(JONES &a, FLOAT b) {
+    a.j00_re *= b;
+    a.j00_im *= b;
+    a.j01_re *= b;
+    a.j01_im *= b;
+    a.j10_re *= b;
+    a.j10_im *= b;
+    a.j11_re *= b;
+    a.j11_im *= b;
+}
+
 inline __device__ void operator/=(JonesF64 &a, double b) {
     a.j00_re /= b;
     a.j00_im /= b;
@@ -343,13 +354,6 @@ inline __device__ ShapeletUV operator*(const ShapeletUV a, const FLOAT b) {
         .u = a.u * b,
         .v = a.v * b,
     };
-}
-
-inline __device__ void operator+=(IonoConsts &a, IonoConsts b) {
-    a.alpha += b.alpha;
-    a.beta += b.beta;
-    a.s_vm += b.s_vm;
-    a.s_mm += b.s_mm;
 }
 
 /**

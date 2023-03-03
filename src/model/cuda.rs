@@ -7,6 +7,7 @@
 use std::{collections::HashSet, ffi::CStr};
 
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use log::debug;
 use marlu::{
     pos::xyz::xyzs_to_cross_uvws,
@@ -19,6 +20,7 @@ use rayon::prelude::*;
 use super::ModelError;
 use crate::{
     beam::{Beam, BeamCUDA},
+    cli::peel::SourceIonoConsts,
     cuda::{self, CudaError, CudaFloat, CudaJones, DevicePointer},
     shapelets,
     srclist::{
@@ -141,6 +143,20 @@ pub(crate) struct SkyModellerCuda<'a> {
     shapelet_list_gps: DevicePointer<cuda::GaussianParams>,
     shapelet_list_coeffs: DevicePointer<cuda::ShapeletCoeff>,
     shapelet_list_coeff_lens: DevicePointer<i32>,
+
+    iono_consts: &'a IndexMap<String, SourceIonoConsts>,
+    // iono_const_timestamps: Vec<Epoch>,
+    point_power_law_iono_consts: DevicePointer<cuda::IonoConsts>,
+    point_curved_power_law_iono_consts: DevicePointer<cuda::IonoConsts>,
+    point_list_iono_consts: DevicePointer<cuda::IonoConsts>,
+
+    gaussian_power_law_iono_consts: DevicePointer<cuda::IonoConsts>,
+    gaussian_curved_power_law_iono_consts: DevicePointer<cuda::IonoConsts>,
+    gaussian_list_iono_consts: DevicePointer<cuda::IonoConsts>,
+
+    shapelet_power_law_iono_consts: DevicePointer<cuda::IonoConsts>,
+    shapelet_curved_power_law_iono_consts: DevicePointer<cuda::IonoConsts>,
+    shapelet_list_iono_consts: DevicePointer<cuda::IonoConsts>,
 }
 
 // You're not re-using pointers after they've been sent to another thread,
@@ -171,6 +187,7 @@ impl<'a> SkyModellerCuda<'a> {
         array_latitude_rad: f64,
         dut1: Duration,
         apply_precession: bool,
+        iono_consts: &'a IndexMap<String, SourceIonoConsts>,
     ) -> Result<SkyModellerCuda<'a>, ModelError> {
         // Variables for CUDA. They're made flexible in their types for
         // whichever precision is being used in the CUDA code.
@@ -294,6 +311,20 @@ impl<'a> SkyModellerCuda<'a> {
             shapelet_list_gps: DevicePointer::default(),
             shapelet_list_coeffs: DevicePointer::default(),
             shapelet_list_coeff_lens: DevicePointer::default(),
+
+            iono_consts,
+
+            point_power_law_iono_consts: DevicePointer::default(),
+            point_curved_power_law_iono_consts: DevicePointer::default(),
+            point_list_iono_consts: DevicePointer::default(),
+
+            gaussian_power_law_iono_consts: DevicePointer::default(),
+            gaussian_curved_power_law_iono_consts: DevicePointer::default(),
+            gaussian_list_iono_consts: DevicePointer::default(),
+
+            shapelet_power_law_iono_consts: DevicePointer::default(),
+            shapelet_curved_power_law_iono_consts: DevicePointer::default(),
+            shapelet_list_iono_consts: DevicePointer::default(),
         };
         modeller.update_source_list(source_list, phase_centre)?;
         Ok(modeller)
@@ -376,6 +407,9 @@ impl<'a> SkyModellerCuda<'a> {
             &self.get_addresses(),
             self.d_uvws.get(),
             self.d_beam_jones.get(),
+            // self.point_power_law_iono_consts.get(),
+            // self.point_curved_power_law_iono_consts.get(),
+            // self.point_list_iono_consts.get(),
         );
         if error_message_ptr.is_null() {
             Ok(())
@@ -469,6 +503,9 @@ impl<'a> SkyModellerCuda<'a> {
             &self.get_addresses(),
             self.d_uvws.get(),
             self.d_beam_jones.get(),
+            // self.gaussian_power_law_iono_consts.get(),
+            // self.gaussian_curved_power_law_iono_consts.get(),
+            // self.gaussian_list_iono_consts.get(),
         );
         if error_message_ptr.is_null() {
             Ok(())
@@ -581,6 +618,9 @@ impl<'a> SkyModellerCuda<'a> {
             &self.get_addresses(),
             self.d_uvws.get(),
             self.d_beam_jones.get(),
+            // self.shapelet_power_law_iono_consts.get(),
+            // self.shapelet_curved_power_law_iono_consts.get(),
+            // self.shapelet_list_iono_consts.get(),
         );
         if error_message_ptr.is_null() {
             Ok(())
@@ -783,6 +823,18 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
         let mut shapelet_list_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
+        let mut point_power_law_iono_consts: Vec<cuda::IonoConsts> = vec![];
+        let mut point_curved_power_law_iono_consts: Vec<cuda::IonoConsts> = vec![];
+        let mut point_list_iono_consts: Vec<cuda::IonoConsts> = vec![];
+
+        let mut gaussian_power_law_iono_consts: Vec<cuda::IonoConsts> = vec![];
+        let mut gaussian_curved_power_law_iono_consts: Vec<cuda::IonoConsts> = vec![];
+        let mut gaussian_list_iono_consts: Vec<cuda::IonoConsts> = vec![];
+
+        let mut shapelet_power_law_iono_consts: Vec<cuda::IonoConsts> = vec![];
+        let mut shapelet_curved_power_law_iono_consts: Vec<cuda::IonoConsts> = vec![];
+        let mut shapelet_list_iono_consts: Vec<cuda::IonoConsts> = vec![];
+
         let jones_to_cuda_jones = |j: Jones<f64>| -> CudaJones {
             CudaJones {
                 j00_re: j[0].re as CudaFloat,
@@ -803,135 +855,156 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         // float starting from the brightest component means that the
         // floating-point precision errors are greater as we work through the
         // source list.
-        for comp in source_list
-            .iter()
-            .rev()
-            .flat_map(|(_, src)| &src.components)
-        {
-            let radec = comp.radec;
-            let LmnRime { l, m, n } = radec.to_lmn(phase_centre).prepare_for_rime();
-            let lmn = cuda::LmnRime {
-                l: l as CudaFloat,
-                m: m as CudaFloat,
-                n: n as CudaFloat,
-            };
-            match &comp.comp_type {
-                ComponentType::Point => match comp.flux_type {
-                    FluxDensityType::PowerLaw { si, .. } => {
-                        self.point_power_law_radecs.push(radec);
-                        point_power_law_lmns.push(lmn);
-                        let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                        let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                        point_power_law_fds.push(cuda_inst_fd);
-                        point_power_law_sis.push(si as CudaFloat);
-                    }
-
-                    FluxDensityType::CurvedPowerLaw { si, q, .. } => {
-                        self.point_curved_power_law_radecs.push(radec);
-                        point_curved_power_law_lmns.push(lmn);
-                        let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                        let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                        point_curved_power_law_fds.push(cuda_inst_fd);
-                        point_curved_power_law_qs.push(q as CudaFloat);
-                        point_curved_power_law_sis.push(si as CudaFloat);
-                    }
-
-                    FluxDensityType::List { .. } => {
-                        self.point_list_radecs.push(radec);
-                        point_list_lmns.push(lmn);
-                        point_list_fds.push(&comp.flux_type);
-                    }
-                },
-
-                ComponentType::Gaussian { maj, min, pa } => {
-                    let gp = cuda::GaussianParams {
-                        maj: *maj as CudaFloat,
-                        min: *min as CudaFloat,
-                        pa: *pa as CudaFloat,
-                    };
-                    match comp.flux_type {
+        for (src_name, src) in source_list.iter().rev() {
+            for comp in &src.components {
+                let radec = comp.radec;
+                let LmnRime { l, m, n } = radec.to_lmn(phase_centre).prepare_for_rime();
+                let lmn = cuda::LmnRime {
+                    l: l as CudaFloat,
+                    m: m as CudaFloat,
+                    n: n as CudaFloat,
+                };
+                let ic = match self.iono_consts.get(src_name.as_str()) {
+                    Some(c) => cuda::IonoConsts {
+                        alpha: c.alphas[0],
+                        beta: c.betas[0],
+                        gain: c.gains[0],
+                    },
+                    None => cuda::IonoConsts {
+                        alpha: 0.0,
+                        beta: 0.0,
+                        gain: 1.0,
+                    },
+                };
+                match &comp.comp_type {
+                    ComponentType::Point => match comp.flux_type {
                         FluxDensityType::PowerLaw { si, .. } => {
-                            self.gaussian_power_law_radecs.push(radec);
-                            gaussian_power_law_lmns.push(lmn);
+                            self.point_power_law_radecs.push(radec);
+                            point_power_law_lmns.push(lmn);
                             let fd_at_150mhz =
                                 comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
                             let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
                             let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            gaussian_power_law_fds.push(cuda_inst_fd);
-                            gaussian_power_law_sis.push(si as CudaFloat);
-                            gaussian_power_law_gps.push(gp);
+                            point_power_law_fds.push(cuda_inst_fd);
+                            point_power_law_sis.push(si as CudaFloat);
+                            point_power_law_iono_consts.push(ic);
                         }
 
                         FluxDensityType::CurvedPowerLaw { si, q, .. } => {
-                            self.gaussian_curved_power_law_radecs.push(radec);
-                            gaussian_curved_power_law_lmns.push(lmn);
+                            self.point_curved_power_law_radecs.push(radec);
+                            point_curved_power_law_lmns.push(lmn);
                             let fd_at_150mhz =
                                 comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
                             let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
                             let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            gaussian_curved_power_law_fds.push(cuda_inst_fd);
-                            gaussian_curved_power_law_qs.push(q as CudaFloat);
-                            gaussian_curved_power_law_sis.push(si as CudaFloat);
-                            gaussian_curved_power_law_gps.push(gp);
+                            point_curved_power_law_fds.push(cuda_inst_fd);
+                            point_curved_power_law_qs.push(q as CudaFloat);
+                            point_curved_power_law_sis.push(si as CudaFloat);
+                            point_curved_power_law_iono_consts.push(ic);
                         }
 
                         FluxDensityType::List { .. } => {
-                            self.gaussian_list_radecs.push(radec);
-                            gaussian_list_lmns.push(lmn);
-                            gaussian_list_fds.push(&comp.flux_type);
-                            gaussian_list_gps.push(gp);
+                            self.point_list_radecs.push(radec);
+                            point_list_lmns.push(lmn);
+                            point_list_fds.push(&comp.flux_type);
+                            point_list_iono_consts.push(ic);
                         }
-                    };
-                }
+                    },
 
-                ComponentType::Shapelet {
-                    maj,
-                    min,
-                    pa,
-                    coeffs,
-                } => {
-                    let gp = cuda::GaussianParams {
-                        maj: *maj as CudaFloat,
-                        min: *min as CudaFloat,
-                        pa: *pa as CudaFloat,
-                    };
-                    match comp.flux_type {
-                        FluxDensityType::PowerLaw { si, .. } => {
-                            self.shapelet_power_law_radecs.push(radec);
-                            shapelet_power_law_lmns.push(lmn);
-                            let fd_at_150mhz = comp
-                                .flux_type
-                                .estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            shapelet_power_law_fds.push(cuda_inst_fd);
-                            shapelet_power_law_sis.push(si as CudaFloat);
-                            shapelet_power_law_gps.push(gp);
-                            shapelet_power_law_coeffs.push(coeffs);
-                        }
+                    ComponentType::Gaussian { maj, min, pa } => {
+                        let gp = cuda::GaussianParams {
+                            maj: *maj as CudaFloat,
+                            min: *min as CudaFloat,
+                            pa: *pa as CudaFloat,
+                        };
+                        match comp.flux_type {
+                            FluxDensityType::PowerLaw { si, .. } => {
+                                self.gaussian_power_law_radecs.push(radec);
+                                gaussian_power_law_lmns.push(lmn);
+                                let fd_at_150mhz =
+                                    comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                                let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                                let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                                gaussian_power_law_fds.push(cuda_inst_fd);
+                                gaussian_power_law_sis.push(si as CudaFloat);
+                                gaussian_power_law_gps.push(gp);
+                                gaussian_power_law_iono_consts.push(ic);
+                            }
 
-                        FluxDensityType::CurvedPowerLaw { si, q, .. } => {
-                            self.shapelet_curved_power_law_radecs.push(radec);
-                            shapelet_curved_power_law_lmns.push(lmn);
-                            let fd_at_150mhz =
-                                comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
-                            let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                            let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
-                            shapelet_curved_power_law_fds.push(cuda_inst_fd);
-                            shapelet_curved_power_law_qs.push(q as CudaFloat);
-                            shapelet_curved_power_law_sis.push(si as CudaFloat);
-                            shapelet_curved_power_law_gps.push(gp);
-                            shapelet_curved_power_law_coeffs.push(coeffs);
-                        }
+                            FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                                self.gaussian_curved_power_law_radecs.push(radec);
+                                gaussian_curved_power_law_lmns.push(lmn);
+                                let fd_at_150mhz =
+                                    comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                                let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                                let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                                gaussian_curved_power_law_fds.push(cuda_inst_fd);
+                                gaussian_curved_power_law_qs.push(q as CudaFloat);
+                                gaussian_curved_power_law_sis.push(si as CudaFloat);
+                                gaussian_curved_power_law_gps.push(gp);
+                                gaussian_curved_power_law_iono_consts.push(ic);
+                            }
 
-                        FluxDensityType::List { .. } => {
-                            self.shapelet_list_radecs.push(radec);
-                            shapelet_list_lmns.push(lmn);
-                            shapelet_list_fds.push(&comp.flux_type);
-                            shapelet_list_gps.push(gp);
-                            shapelet_list_coeffs.push(coeffs);
+                            FluxDensityType::List { .. } => {
+                                self.gaussian_list_radecs.push(radec);
+                                gaussian_list_lmns.push(lmn);
+                                gaussian_list_fds.push(&comp.flux_type);
+                                gaussian_list_gps.push(gp);
+                                gaussian_list_iono_consts.push(ic);
+                            }
+                        };
+                    }
+
+                    ComponentType::Shapelet {
+                        maj,
+                        min,
+                        pa,
+                        coeffs,
+                    } => {
+                        let gp = cuda::GaussianParams {
+                            maj: *maj as CudaFloat,
+                            min: *min as CudaFloat,
+                            pa: *pa as CudaFloat,
+                        };
+                        match comp.flux_type {
+                            FluxDensityType::PowerLaw { si, .. } => {
+                                self.shapelet_power_law_radecs.push(radec);
+                                shapelet_power_law_lmns.push(lmn);
+                                let fd_at_150mhz = comp
+                                    .flux_type
+                                    .estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                                let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                                let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                                shapelet_power_law_fds.push(cuda_inst_fd);
+                                shapelet_power_law_sis.push(si as CudaFloat);
+                                shapelet_power_law_gps.push(gp);
+                                shapelet_power_law_coeffs.push(coeffs);
+                                shapelet_power_law_iono_consts.push(ic);
+                            }
+
+                            FluxDensityType::CurvedPowerLaw { si, q, .. } => {
+                                self.shapelet_curved_power_law_radecs.push(radec);
+                                shapelet_curved_power_law_lmns.push(lmn);
+                                let fd_at_150mhz =
+                                    comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                                let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                                let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                                shapelet_curved_power_law_fds.push(cuda_inst_fd);
+                                shapelet_curved_power_law_qs.push(q as CudaFloat);
+                                shapelet_curved_power_law_sis.push(si as CudaFloat);
+                                shapelet_curved_power_law_gps.push(gp);
+                                shapelet_curved_power_law_coeffs.push(coeffs);
+                                shapelet_curved_power_law_iono_consts.push(ic);
+                            }
+
+                            FluxDensityType::List { .. } => {
+                                self.shapelet_list_radecs.push(radec);
+                                shapelet_list_lmns.push(lmn);
+                                shapelet_list_fds.push(&comp.flux_type);
+                                shapelet_list_gps.push(gp);
+                                shapelet_list_coeffs.push(coeffs);
+                                shapelet_list_iono_consts.push(ic);
+                            }
                         }
                     }
                 }
@@ -1029,6 +1102,27 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCuda<'a> {
         self.shapelet_list_coeffs.overwrite(&shapelet_list_coeffs)?;
         self.shapelet_list_coeff_lens
             .overwrite(&shapelet_list_coeff_lens)?;
+
+        self.point_power_law_iono_consts
+            .overwrite(&point_power_law_iono_consts)?;
+        self.point_curved_power_law_iono_consts
+            .overwrite(&point_curved_power_law_iono_consts)?;
+        self.point_list_iono_consts
+            .overwrite(&point_list_iono_consts)?;
+
+        self.gaussian_power_law_iono_consts
+            .overwrite(&gaussian_power_law_iono_consts)?;
+        self.gaussian_curved_power_law_iono_consts
+            .overwrite(&gaussian_curved_power_law_iono_consts)?;
+        self.gaussian_list_iono_consts
+            .overwrite(&gaussian_list_iono_consts)?;
+
+        self.shapelet_power_law_iono_consts
+            .overwrite(&shapelet_power_law_iono_consts)?;
+        self.shapelet_curved_power_law_iono_consts
+            .overwrite(&shapelet_curved_power_law_iono_consts)?;
+        self.shapelet_list_iono_consts
+            .overwrite(&shapelet_list_iono_consts)?;
 
         Ok(())
     }

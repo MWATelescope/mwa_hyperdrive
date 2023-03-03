@@ -329,16 +329,17 @@ __global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int n
         const double s_vm = sdata[0].j10_im;
         const double s_mm = sdata[0].j11_re;
 
-        // Not necessary, but might be useful for checking things.
-        // data[0] = sdata[0];
+// Not necessary, but might be useful for checking things.
+#ifdef DEBUG
+        data[0] = sdata[0];
+#endif
 
         const double denom = TAU * (a_uu * a_vv - a_uv * a_uv);
-        *iono_consts += IonoConsts{
-            .alpha = (aa_u * a_vv - aa_v * a_uv) / denom,
-            .beta = (aa_v * a_uu - aa_u * a_uv) / denom,
-            .s_vm = s_vm,
-            .s_mm = s_mm,
-        };
+        iono_consts->alpha += (aa_u * a_vv - aa_v * a_uv) / denom * 0.4;
+        iono_consts->beta += (aa_v * a_uu - aa_u * a_uv) / denom * 0.4;
+        // iono_consts->gain = s_vm / s_mm;
+        iono_consts->gain = 1.0;
+        // printf("%e %e %f\n", iono_consts->alpha, iono_consts->beta, iono_consts->gain);
     }
 }
 
@@ -414,12 +415,11 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
         for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
             const FLOAT lambda = lambdas_m[i_freq];
 
-            COMPLEX complex;
+            COMPLEX complex, old_complex;
             // The baseline UV is in units of metres, so we need to divide by λ to
             // use it in an exponential. But we're also multiplying by λ², so just
             // multiply by λ.
             SINCOS(arg * lambda, &complex.y, &complex.x);
-            COMPLEX old_complex;
             SINCOS(old_arg * lambda, &old_complex.y, &old_complex.x);
 
             const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
@@ -438,7 +438,7 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
                 .j11_re = r.j11_re,
                 .j11_im = r.j11_im,
             };
-            JonesF64 m2 = JonesF64{
+            const JonesF64 m2 = JonesF64{
                 .j00_re = m.j00_re,
                 .j00_im = m.j00_im,
                 .j01_re = m.j01_re,
@@ -449,8 +449,8 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
                 .j11_im = m.j11_im,
             };
 
-            r2 += m2 * old_complex;
-            r2 -= m2 * complex;
+            r2 += m2 * old_complex * old_iono_consts->gain;
+            r2 -= m2 * complex * iono_consts->gain;
             vis_residual[step] = JonesF32{
                 .j00_re = (float)r2.j00_re,
                 .j00_im = (float)r2.j00_im,
@@ -489,7 +489,7 @@ __global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_mod
             }
 
             const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
-            vis_residual[step] += vis_model[step] * complex;
+            vis_residual[step] += vis_model[step] * complex * iono_consts->gain;
         }
     }
 }

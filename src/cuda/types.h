@@ -277,8 +277,7 @@ typedef struct Shapelets {
 typedef struct IonoConsts {
     double alpha;
     double beta;
-    double s_vm;
-    double s_mm;
+    double gain;
 } IonoConsts;
 
 #ifdef __cplusplus

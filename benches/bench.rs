@@ -12,6 +12,7 @@ fn model_benchmarks(c: &mut Criterion) {
     use std::collections::HashSet;
 
     use hifitime::{Duration, Epoch};
+    use indexmap::IndexMap;
     use marlu::{
         constants::{MWA_LAT_RAD, MWA_LONG_RAD},
         Jones, RADec, XyzGeodetic,
@@ -82,6 +83,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    &IndexMap::new(),
                 )
                 .unwrap();
 
@@ -133,6 +135,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    &IndexMap::new(),
                 )
                 .unwrap();
 
@@ -203,6 +206,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    &IndexMap::new(),
                 )
                 .unwrap();
 
@@ -258,6 +262,7 @@ fn model_benchmarks(c: &mut Criterion) {
             MWA_LAT_RAD,
             dut1,
             apply_precession,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -311,6 +316,7 @@ fn model_benchmarks(c: &mut Criterion) {
             MWA_LAT_RAD,
             dut1,
             apply_precession,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -362,6 +368,7 @@ fn model_benchmarks(c: &mut Criterion) {
             MWA_LAT_RAD,
             dut1,
             apply_precession,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -424,6 +431,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 MWA_LAT_RAD,
                 dut1,
                 apply_precession,
+                &IndexMap::new(),
             )
             .unwrap();
 
@@ -488,6 +496,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 MWA_LAT_RAD,
                 dut1,
                 apply_precession,
+                &IndexMap::new(),
             )
             .unwrap();
 
@@ -550,6 +559,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 MWA_LAT_RAD,
                 dut1,
                 apply_precession,
+                &IndexMap::new(),
             )
             .unwrap();
 

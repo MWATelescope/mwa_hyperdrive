@@ -9,7 +9,7 @@ use std::{
 
 use approx::assert_abs_diff_eq;
 use hifitime::{Duration, Epoch, Unit};
-use indexmap::indexmap;
+use indexmap::{indexmap, IndexMap};
 use indicatif::{MultiProgress, ProgressDrawTarget};
 use itertools::{izip, Itertools};
 use marlu::{
@@ -574,6 +574,7 @@ fn test_vis_rotation() {
     });
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     let mut vis_tfb = Array3::default((num_times, num_chans, num_baselines));
     let mut vis_rot_tfb = Array3::default((num_times, num_chans, num_baselines));
@@ -599,6 +600,7 @@ fn test_vis_rotation() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -863,6 +865,7 @@ fn test_apply_iono2() {
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     for apply_precession in [false, true] {
         let mut modeller = new_sky_modeller(
@@ -878,6 +881,7 @@ fn test_apply_iono2() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1037,6 +1041,7 @@ fn test_iono_fit() {
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     for apply_precession in [false, true] {
         // unlike the other tests, this is in the SOURCE phase centre
@@ -1053,6 +1058,7 @@ fn test_iono_fit() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1175,6 +1181,7 @@ fn test_apply_iono3() {
     });
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     // residual visibilities in the observation phase centre
     let mut vis_resid_obs_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
@@ -1201,6 +1208,7 @@ fn test_apply_iono3() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1343,6 +1351,7 @@ fn test_peel_single_source(peel_type: PeelType) {
     });
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     // model visibilities in the observation phase centre
     let mut vis_model_obs_tfb = Array3::zeros((num_times, num_chans, num_baselines));
@@ -1382,6 +1391,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1398,6 +1408,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1549,6 +1560,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         array_pos.latitude_rad,
                         obs_context.dut1.unwrap(),
                         apply_precession,
+                        &source_iono_consts,
                     )
                     .unwrap();
 
@@ -1563,6 +1575,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         array_pos.latitude_rad,
                         obs_context.dut1.unwrap(),
                         apply_precession,
+                        &source_iono_consts,
                     )
                     .unwrap();
 
@@ -1703,6 +1716,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
     ];
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     // model visibilities of each source
     let mut vis_model_tmp_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
@@ -1742,6 +1756,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1758,6 +1773,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1881,6 +1897,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     array_pos.latitude_rad,
                     obs_context.dut1.unwrap(),
                     apply_precession,
+                    &source_iono_consts,
                 )
                 .unwrap();
 
@@ -1895,6 +1912,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     array_pos.latitude_rad,
                     obs_context.dut1.unwrap(),
                     apply_precession,
+                    &source_iono_consts,
                 )
                 .unwrap();
 
@@ -2053,6 +2071,7 @@ mod cuda_tests {
         });
 
         let beam = get_beam(num_tiles);
+        let source_iono_consts = IndexMap::new();
 
         // residual visibilities in the observation phase centre
         let mut vis_residual_obs_tfb =
@@ -2080,6 +2099,7 @@ mod cuda_tests {
                 array_pos.latitude_rad,
                 obs_context.dut1.unwrap(),
                 apply_precession,
+                &source_iono_consts,
             )
             .unwrap();
 
@@ -2135,15 +2155,13 @@ mod cuda_tests {
             let mut d_iono_consts = DevicePointer::copy_to_device(&[cuda::IonoConsts {
                 alpha: 0.0,
                 beta: 0.0,
-                s_vm: 0.0,
-                s_mm: 0.0,
+                gain: 1.0,
             }])
             .unwrap();
             let d_old_iono_consts = DevicePointer::copy_to_device(&[cuda::IonoConsts {
                 alpha: 0.0,
                 beta: 0.0,
-                s_vm: 0.0,
-                s_mm: 0.0,
+                gain: 1.0,
             }])
             .unwrap();
 
@@ -2200,8 +2218,7 @@ mod cuda_tests {
                     .overwrite(&[cuda::IonoConsts {
                         alpha: iono_consts.alpha,
                         beta: iono_consts.beta,
-                        s_vm: iono_consts.s_vm,
-                        s_mm: iono_consts.s_mm,
+                        gain: iono_consts.gain,
                     }])
                     .unwrap();
 
@@ -2280,6 +2297,7 @@ mod cuda_tests {
         });
 
         let beam = get_beam(num_tiles);
+        let source_iono_consts = IndexMap::new();
 
         let mut vis_tfb = Array3::default((num_times, num_chans, num_baselines));
         let mut vis_rot_tfb = Array3::default((num_times, num_chans, num_baselines));
@@ -2306,6 +2324,7 @@ mod cuda_tests {
                 array_pos.latitude_rad,
                 obs_context.dut1.unwrap(),
                 apply_precession,
+                &source_iono_consts,
             )
             .unwrap();
 

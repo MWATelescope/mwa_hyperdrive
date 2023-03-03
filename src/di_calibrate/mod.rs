@@ -427,6 +427,7 @@ fn model_vis(
         params.array_position.latitude_rad,
         params.dut1,
         params.apply_precession,
+        &params.iono_consts,
     )?;
 
     let weight_factor =

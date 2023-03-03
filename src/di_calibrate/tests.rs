@@ -12,6 +12,7 @@ use std::{
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use clap::Parser;
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     Jones, LatLngHeight,
@@ -285,6 +286,7 @@ fn get_default_params() -> DiCalParams {
         raw_data_corrections: None,
         beam: create_no_beam_object(1),
         source_list: SourceList::new(),
+        iono_consts: IndexMap::new(),
         uvw_min: 0.0,
         uvw_max: f64::INFINITY,
         freq_centroid: 150e6,

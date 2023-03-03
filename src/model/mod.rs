@@ -21,11 +21,13 @@ pub(crate) use error::ModelError;
 use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
+use indexmap::{indexmap, IndexMap};
 use marlu::{Jones, RADec, XyzGeodetic, UVW};
 use ndarray::ArrayViewMut2;
 
 use crate::{
     beam::Beam,
+    cli::peel::SourceIonoConsts,
     srclist::{ComponentList, Source, SourceList},
 };
 
@@ -63,7 +65,6 @@ pub trait SkyModeller<'a>: Send {
         source: &Source,
         phase_centre: RADec,
     ) -> Result<(), ModelError> {
-        use indexmap::indexmap;
         let source_list = SourceList::from(indexmap! {
             "source".into() => source.clone(),
         });
@@ -121,6 +122,7 @@ pub fn new_sky_modeller<'a>(
     array_latitude_rad: f64,
     dut1: Duration,
     apply_precession: bool,
+    iono_consts: &'a IndexMap<String, SourceIonoConsts>,
 ) -> Result<Box<dyn SkyModeller<'a> + 'a>, ModelError> {
     cfg_if::cfg_if! {
         if #[cfg(feature = "cuda")] {
@@ -157,6 +159,7 @@ pub fn new_sky_modeller<'a>(
                         array_latitude_rad,
                         dut1,
                         apply_precession,
+                        iono_consts,
                     )?;
                     Ok(Box::new(modeller))
                 }

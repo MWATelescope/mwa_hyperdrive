@@ -38,7 +38,7 @@ use num_complex::Complex;
 use num_traits::Zero;
 use rayon::prelude::*;
 use scopeguard::defer_on_unwind;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 use crate::{
@@ -78,6 +78,7 @@ const DEFAULT_OUTPUT_IONO_CONSTS: &str = "hyperdrive_iono_consts.json";
 const DEFAULT_NUM_PASSES: usize = 1;
 #[cfg(feature = "cuda")]
 const DEFAULT_NUM_PASSES: usize = 3;
+const DEFAULT_IONO_CONST_THRESHOLD: f64 = 1e-4;
 const DEFAULT_TIME_AVERAGE_FACTOR: &str = "8s";
 const DEFAULT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
 const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
@@ -94,6 +95,8 @@ lazy_static::lazy_static! {
     static ref VIS_OUTPUTS_HELP: String = format!("The paths to the files where the peeled visibilities are written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
 
     static ref NUM_PASSES_HELP: String = format!("The number of times to iterate over all sources per timeblock. Default: {DEFAULT_NUM_PASSES}");
+
+    static ref IONO_CONST_HELP: String = format!("If an ionospheric constant (a shift in l or m to be scaled by λ²) exceeds this value, it is rejected, and the source is not updated. Default: {DEFAULT_IONO_CONST_THRESHOLD}");
 
     static ref TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timesteps to use per timeblock *during* peeling. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then peeling is performed with 4 timesteps per timeblock. If the variable is instead 4s, then each timeblock contains up to 4s worth of data.");
 
@@ -113,12 +116,30 @@ lazy_static::lazy_static! {
         format!("Specifies the maximum distance from the phase centre a source can be [degrees]. Default: {DEFAULT_CUTOFF_DISTANCE}");
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-struct IonoConsts {
-    alpha: f64,
-    beta: f64,
-    s_vm: f64,
-    s_mm: f64,
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IonoConsts {
+    pub(crate) alpha: f64,
+    pub(crate) beta: f64,
+    pub(crate) gain: f64,
+}
+
+impl Default for IonoConsts {
+    fn default() -> Self {
+        Self {
+            alpha: 0.0,
+            beta: 0.0,
+            gain: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SourceIonoConsts {
+    pub(crate) alphas: Vec<f64>,
+    pub(crate) betas: Vec<f64>,
+    pub(crate) gains: Vec<f64>,
+    pub(crate) weighted_catalogue_pos_j2000: RADec,
+    // pub(crate) centroid_timestamps: Vec<Epoch>,
 }
 
 // Arguments that are exposed to users. All arguments except bools should be
@@ -164,6 +185,15 @@ pub struct PeelArgs {
 
     #[clap(long, help = NUM_PASSES_HELP.as_str(), help_heading = "PEELING")]
     pub num_passes: Option<usize>,
+
+    // /// When performing ionospheric subtraction, the average gain difference
+    // /// between every source and its model is estimated and applied. This is
+    // /// currently disabled by default because it seems to do worse than not
+    // /// adjusting gains.
+    // #[clap(long, help_heading = "PEELING")]
+    // pub gain_update: bool,
+    #[clap(long, help = IONO_CONST_HELP.as_str(), help_heading = "PEELING")]
+    pub iono_const_threshold: Option<f64>,
 
     /// Use the CPU for peeling and ionospheric subraction. This is deliberately
     /// made non-default because using a GPU is much faster.
@@ -330,6 +360,8 @@ impl PeelArgs {
             num_sources_to_peel: _,
             num_sources_to_iono_subtract,
             num_passes,
+            // gain_update,
+            iono_const_threshold,
             #[cfg(feature = "cuda")]
             cpu_peel,
             num_sources_to_subtract,
@@ -346,7 +378,6 @@ impl PeelArgs {
             iono_freq_average_factor,
             output_time_average_factor,
             output_freq_average_factor,
-            // todo (dev): this could be match!(timesteps, None)
             timesteps,
             use_all_timesteps,
             uvw_min: _,
@@ -1424,6 +1455,7 @@ impl PeelArgs {
                 .spawn_scoped(scope, || {
                     defer_on_unwind! { error.store(true); }
 
+                    let source_iono_consts = IndexMap::new();
                     let mut modeller = new_sky_modeller(
                         #[cfg(feature = "cuda")]
                         matches!(modeller_info, ModellerInfo::Cpu),
@@ -1437,6 +1469,7 @@ impl PeelArgs {
                         array_position.latitude_rad,
                         dut1,
                         !no_precession,
+                        &source_iono_consts,
                     )
                     .unwrap();
 
@@ -1502,6 +1535,7 @@ impl PeelArgs {
                             return Ok(());
                         }
 
+                        let source_iono_consts = IndexMap::new();
                         let mut iono_consts =
                             vec![IonoConsts::default(); num_sources_to_iono_subtract];
                         if num_sources_to_iono_subtract > 0 {
@@ -1520,6 +1554,7 @@ impl PeelArgs {
                                     array_position.latitude_rad,
                                     dut1,
                                     !no_precession,
+                                    &source_iono_consts,
                                 )?;
                                 let mut high_res_modeller = new_sky_modeller(
                                     #[cfg(feature = "cuda")]
@@ -1534,6 +1569,7 @@ impl PeelArgs {
                                     array_position.latitude_rad,
                                     dut1,
                                     !no_precession,
+                                    &source_iono_consts,
                                 )?;
                                 peel_cpu(
                                     vis_residual.view_mut(),
@@ -1572,6 +1608,7 @@ impl PeelArgs {
                                     array_position.latitude_rad,
                                     dut1,
                                     !no_precession,
+                                    &source_iono_consts,
                                 )?;
                                 let mut high_res_modeller = SkyModellerCuda::new(
                                     beam.deref(),
@@ -1584,6 +1621,7 @@ impl PeelArgs {
                                     array_position.latitude_rad,
                                     dut1,
                                     !no_precession,
+                                    &source_iono_consts,
                                 )?;
                                 peel_cuda(
                                     vis_residual.view_mut(),
@@ -1776,13 +1814,6 @@ impl PeelArgs {
                         // for all the results. We use an IndexMap to keep the
                         // order of the sources preserved while also being able
                         // to write out a "HashMap-style" json.
-                        #[derive(Debug, Serialize)]
-                        struct SourceIonoConsts {
-                            alphas: Vec<f64>,
-                            betas: Vec<f64>,
-                            weighted_catalogue_pos_j2000: RADec,
-                        }
-
                         let mut output_iono_consts: IndexMap<&str, SourceIonoConsts> = source_list
                             .iter()
                             .take(num_sources_to_iono_subtract)
@@ -1793,6 +1824,7 @@ impl PeelArgs {
                                     SourceIonoConsts {
                                         alphas: Vec::with_capacity(timeblocks.len()),
                                         betas: Vec::with_capacity(timeblocks.len()),
+                                        gains: Vec::with_capacity(timeblocks.len()),
                                         weighted_catalogue_pos_j2000: weighted_pos,
                                     },
                                 )
@@ -1807,16 +1839,12 @@ impl PeelArgs {
                                 .zip_eq(output_iono_consts.iter_mut())
                                 .for_each(
                                     |(
-                                        IonoConsts {
-                                            alpha,
-                                            beta,
-                                            s_vm: _,
-                                            s_mm: _,
-                                        },
+                                        IonoConsts { alpha, beta, gain },
                                         (_src_name, src_iono_consts),
                                     )| {
                                         src_iono_consts.alphas.push(alpha);
                                         src_iono_consts.betas.push(beta);
+                                        src_iono_consts.gains.push(gain);
                                     },
                                 );
                         }
@@ -2827,7 +2855,6 @@ fn peel_cpu(
 
             multi_progress_bar
                 .suspend(|| trace!("{:?}: alpha/beta loop", std::time::Instant::now() - start));
-            // let mut gain_update = 1.0;
             let mut iteration = 0;
             while iteration != 10 {
                 iteration += 1;
@@ -3202,6 +3229,7 @@ fn peel_cuda(
                 pass + 1
             ));
 
+            let mut bad_source_fit_count = 0;
             for (((source_name, source), iono_consts), source_phase_centre) in source_list
                 .iter()
                 .take(num_sources_to_iono_subtract)
@@ -3219,14 +3247,12 @@ fn peel_cuda(
                 d_iono_consts.overwrite(&[cuda::IonoConsts {
                     alpha: iono_consts.alpha,
                     beta: iono_consts.beta,
-                    s_vm: iono_consts.s_vm,
-                    s_mm: iono_consts.s_mm,
+                    gain: iono_consts.gain,
                 }])?;
                 d_old_iono_consts.overwrite(&[cuda::IonoConsts {
                     alpha: old_iono_consts.alpha,
                     beta: old_iono_consts.beta,
-                    s_vm: old_iono_consts.s_vm,
-                    s_mm: old_iono_consts.s_mm,
+                    gain: old_iono_consts.gain,
                 }])?;
 
                 let error_message_ptr = cuda::rotate_average(
@@ -3234,8 +3260,8 @@ fn peel_cuda(
                     d_high_res_weights.get(),
                     d_low_res_vis.get_mut().cast(),
                     cuda::RADec {
-                        ra: source_phase_centre.ra as _,
-                        dec: source_phase_centre.dec as _,
+                        ra: source_phase_centre.ra as CudaFloat,
+                        dec: source_phase_centre.dec as CudaFloat,
                     },
                     timestamps.len().try_into().unwrap(),
                     num_tiles.try_into().unwrap(),
@@ -3388,9 +3414,58 @@ fn peel_cuda(
                     return Err(CudaError::Kernel(our_error_str).into());
                 }
 
+                // TODO: This is ugly.
+                let mut tmp = [cuda::IonoConsts {
+                    alpha: 0.0,
+                    beta: 0.0,
+                    gain: 0.0,
+                }];
+                d_iono_consts.copy_from_device(&mut tmp)?;
+                *iono_consts = IonoConsts {
+                    alpha: tmp[0].alpha,
+                    beta: tmp[0].beta,
+                    gain: tmp[0].gain,
+                };
                 // dbg!(iono_consts);
+
                 multi_progress_bar
                     .suspend(|| trace!("{:?}: iono_loop", std::time::Instant::now() - start));
+
+                if iono_consts.alpha.abs() > 3e-4 || iono_consts.beta.abs() > 3e-4 {
+                    // let fits = {
+                    //     let mut v: [Jones<f64>; 1] = [Jones::default()];
+                    //     cuda_runtime_sys::cudaMemcpy(
+                    //         v.as_mut_ptr().cast(),
+                    //         d_iono_fits.get_mut().cast(),
+                    //         64,
+                    //         cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToHost,
+                    //     );
+                    //     v
+                    // };
+                    // let a_uu = fits[0][0].re;
+                    // let a_uv = fits[0][0].im;
+                    // let a_vv = fits[0][1].re;
+                    // let aa_u = fits[0][1].im;
+                    // let aa_v = fits[0][2].re;
+                    // let denom = TAU * (a_uu * a_vv - a_uv * a_uv);
+                    // dbg!(
+                    //     source_name,
+                    //     fits,
+                    //     a_uu,
+                    //     a_uv,
+                    //     a_vv,
+                    //     aa_u,
+                    //     aa_v,
+                    //     denom,
+                    //     &iono_consts
+                    // );
+
+                    // The shift is too big.
+                    *iono_consts = old_iono_consts;
+                    debug!("Source fits are bad ({} {}), resetting to old values and moving to next source", iono_consts.alpha, iono_consts.beta);
+                    bad_source_fit_count += 1;
+                    continue;
+                }
 
                 high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
                 // high_res_modeller.clear_vis();
@@ -3421,29 +3496,13 @@ fn peel_cuda(
                 multi_progress_bar
                     .suspend(|| trace!("{:?}: high res model", std::time::Instant::now() - start));
 
-                // TODO: This is ugly.
-                let mut tmp = [cuda::IonoConsts {
-                    alpha: 0.0,
-                    beta: 0.0,
-                    s_vm: 0.0,
-                    s_mm: 0.0,
-                }];
-                d_iono_consts.copy_from_device(&mut tmp)?;
-                *iono_consts = IonoConsts {
-                    alpha: tmp[0].alpha,
-                    beta: tmp[0].beta,
-                    s_vm: tmp[0].s_vm,
-                    s_mm: tmp[0].s_mm,
-                };
-
-                // TODO: Check the iono consts. If they're not sensible, reset
-                // them and don't subtract the shifted model.
                 let error_message_ptr = cuda::subtract_iono(
                     d_high_res_vis.get_mut().cast(),
                     d_high_res_model.get().cast(),
                     d_iono_consts.get(),
                     d_old_iono_consts.get(),
                     d_uvws_to.get(),
+                    // d_uvws_from.get(),
                     d_lambdas.get(),
                     num_timesteps.try_into().unwrap(),
                     num_cross_baselines.try_into().unwrap(),
@@ -3464,6 +3523,9 @@ fn peel_cuda(
 
                 peel_progress.inc(1);
             }
+            multi_progress_bar
+                .println(format!("bad_source_fit_count: {bad_source_fit_count}"))
+                .unwrap();
         }
 
         // copy results back to host

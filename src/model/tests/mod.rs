@@ -212,6 +212,7 @@ struct ObsParams {
     flagged_tiles: HashSet<usize>,
     array_longitude_rad: f64,
     array_latitude_rad: f64,
+    iono_consts: IndexMap<String, SourceIonoConsts>,
 }
 
 impl ObsParams {
@@ -259,6 +260,7 @@ impl ObsParams {
             flagged_tiles,
             array_longitude_rad,
             array_latitude_rad,
+            iono_consts: IndexMap::new(),
         }
     }
 
@@ -299,6 +301,7 @@ impl ObsParams {
                 self.array_latitude_rad,
                 Duration::from_total_nanoseconds(0),
                 true,
+                &self.iono_consts,
             )
             .unwrap();
             let cuda_uvws = self

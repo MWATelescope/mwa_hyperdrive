@@ -7,6 +7,7 @@
 use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr};
 
 use hifitime::Duration;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use log::{debug, log_enabled, trace, warn, Level::Debug};
 use marlu::{
@@ -24,6 +25,7 @@ use crate::{
         timesteps_to_timeblocks, AverageFactorError, Fence, Timeblock,
     },
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
+    cli::peel::SourceIonoConsts,
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
     di_calibrate::{calibrate_timeblocks, get_cal_vis, CalVis},
@@ -60,6 +62,9 @@ pub(crate) struct DiCalParams {
 
     /// The sky-model source list.
     pub(crate) source_list: SourceList,
+
+    /// Ionospheric constants.
+    pub(crate) iono_consts: IndexMap<String, SourceIonoConsts>,
 
     /// The minimum UVW cutoff used in calibration \[metres\].
     pub(crate) uvw_min: f64,
@@ -203,6 +208,7 @@ impl DiCalParams {
             source_list,
             source_list_type,
             ms_data_column_name,
+            iono_consts_file,
             ignore_dut1,
             outputs,
             model_filenames,
@@ -1076,6 +1082,15 @@ impl DiCalParams {
             raw_data_corrections,
             beam,
             source_list,
+            iono_consts: {
+                match iono_consts_file {
+                    Some(f) => {
+                        let mut f = std::io::BufReader::new(std::fs::File::open(f)?);
+                        serde_json::from_reader(&mut f).unwrap()
+                    }
+                    None => IndexMap::new(),
+                }
+            },
             uvw_min: uvw_min_metres,
             uvw_max: uvw_max_metres,
             freq_centroid,
