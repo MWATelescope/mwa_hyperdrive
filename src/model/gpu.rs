@@ -7,6 +7,7 @@
 use std::{borrow::Cow, collections::HashSet};
 
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use log::debug;
 use marlu::{
     pos::xyz::xyzs_to_cross_uvws,
@@ -20,9 +21,10 @@ use crate::{
     beam::{Beam, BeamGpu},
     context::Polarisations,
     gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
+    params::SourceIonoConsts,
     srclist::{
         get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, Source,
-        SourceComponent, SourceList,
+        SourceList,
     },
 };
 
@@ -133,6 +135,20 @@ pub struct SkyModellerGpu<'a> {
     shapelet_list_gps: DevicePointer<gpu::GaussianParams>,
     shapelet_list_coeffs: DevicePointer<gpu::ShapeletCoeff>,
     shapelet_list_coeff_lens: DevicePointer<i32>,
+
+    iono_consts: &'a IndexMap<String, SourceIonoConsts>,
+    // iono_const_timestamps: Vec<Epoch>,
+    _point_power_law_iono_consts: DevicePointer<gpu::IonoConsts>,
+    _point_curved_power_law_iono_consts: DevicePointer<gpu::IonoConsts>,
+    _point_list_iono_consts: DevicePointer<gpu::IonoConsts>,
+
+    _gaussian_power_law_iono_consts: DevicePointer<gpu::IonoConsts>,
+    _gaussian_curved_power_law_iono_consts: DevicePointer<gpu::IonoConsts>,
+    _gaussian_list_iono_consts: DevicePointer<gpu::IonoConsts>,
+
+    _shapelet_power_law_iono_consts: DevicePointer<gpu::IonoConsts>,
+    _shapelet_curved_power_law_iono_consts: DevicePointer<gpu::IonoConsts>,
+    _shapelet_list_iono_consts: DevicePointer<gpu::IonoConsts>,
 }
 
 // You're not re-using pointers after they've been sent to another thread,
@@ -159,6 +175,7 @@ impl<'a> SkyModellerGpu<'a> {
         array_latitude_rad: f64,
         dut1: Duration,
         apply_precession: bool,
+        iono_consts: &'a IndexMap<String, SourceIonoConsts>,
     ) -> Result<SkyModellerGpu<'a>, ModelError> {
         let mut point_power_law_radecs: Vec<RADec> = vec![];
         let mut point_power_law_lmns: Vec<gpu::LmnRime> = vec![];
@@ -524,12 +541,26 @@ impl<'a> SkyModellerGpu<'a> {
             shapelet_list_gps: DevicePointer::default(),
             shapelet_list_coeffs: DevicePointer::default(),
             shapelet_list_coeff_lens: DevicePointer::default(),
+
+            iono_consts,
+
+            _point_power_law_iono_consts: DevicePointer::default(),
+            _point_curved_power_law_iono_consts: DevicePointer::default(),
+            _point_list_iono_consts: DevicePointer::default(),
+
+            _gaussian_power_law_iono_consts: DevicePointer::default(),
+            _gaussian_curved_power_law_iono_consts: DevicePointer::default(),
+            _gaussian_list_iono_consts: DevicePointer::default(),
+
+            _shapelet_power_law_iono_consts: DevicePointer::default(),
+            _shapelet_curved_power_law_iono_consts: DevicePointer::default(),
+            _shapelet_list_iono_consts: DevicePointer::default(),
         };
         modeller.update_source_list(
             source_list
-                .values()
+                .iter()
                 .rev()
-                .flat_map(|src| src.components.iter()),
+                .map(|(name, src)| (name.as_str(), src)),
             phase_centre,
         )?;
         Ok(modeller)
@@ -537,11 +568,11 @@ impl<'a> SkyModellerGpu<'a> {
 
     fn update_source_list<'b, I>(
         &mut self,
-        components: I,
+        sources: I,
         phase_centre: RADec,
     ) -> Result<(), ModelError>
     where
-        I: IntoIterator<Item = &'b SourceComponent>,
+        I: IntoIterator<Item = (&'b str, &'b Source)>,
     {
         self.phase_centre = phase_centre;
 
@@ -599,6 +630,18 @@ impl<'a> SkyModellerGpu<'a> {
         let mut shapelet_list_gps: Vec<gpu::GaussianParams> = vec![];
         let mut shapelet_list_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
+        let mut point_power_law_iono_consts: Vec<gpu::IonoConsts> = vec![];
+        let mut point_curved_power_law_iono_consts: Vec<gpu::IonoConsts> = vec![];
+        let mut point_list_iono_consts: Vec<gpu::IonoConsts> = vec![];
+
+        let mut gaussian_power_law_iono_consts: Vec<gpu::IonoConsts> = vec![];
+        let mut gaussian_curved_power_law_iono_consts: Vec<gpu::IonoConsts> = vec![];
+        let mut gaussian_list_iono_consts: Vec<gpu::IonoConsts> = vec![];
+
+        let mut shapelet_power_law_iono_consts: Vec<gpu::IonoConsts> = vec![];
+        let mut shapelet_curved_power_law_iono_consts: Vec<gpu::IonoConsts> = vec![];
+        let mut shapelet_list_iono_consts: Vec<gpu::IonoConsts> = vec![];
+
         let jones_to_gpu_jones = |j: Jones<f64>| -> GpuJones {
             GpuJones {
                 j00_re: j[0].re as GpuFloat,
@@ -619,29 +662,148 @@ impl<'a> SkyModellerGpu<'a> {
         // float starting from the brightest component means that the
         // floating-point precision errors are greater as we work through the
         // source list.
-        for comp in components {
-            let radec = comp.radec;
-            let LmnRime { l, m, n } = radec.to_lmn(phase_centre).prepare_for_rime();
-            let lmn = gpu::LmnRime {
-                l: l as GpuFloat,
-                m: m as GpuFloat,
-                n: n as GpuFloat,
-            };
-            match &comp.flux_type {
-                FluxDensityType::PowerLaw { si, fd: _ } => {
-                    // Rather than using this PL's reference freq, use a pre-
-                    // defined one, so the the GPU code doesn't need to keep
-                    // track of all reference freqs.
-                    let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
-                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                    let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
+        for (src_name, src) in sources.into_iter() {
+            for comp in src.components.iter() {
+                let radec = comp.radec;
+                let LmnRime { l, m, n } = radec.to_lmn(phase_centre).prepare_for_rime();
+                let lmn = gpu::LmnRime {
+                    l: l as GpuFloat,
+                    m: m as GpuFloat,
+                    n: n as GpuFloat,
+                };
+                let ic = match self.iono_consts.get(src_name) {
+                    Some(c) => gpu::IonoConsts {
+                        alpha: c.alphas[0],
+                        beta: c.betas[0],
+                        gain: c.gains[0],
+                    },
+                    None => gpu::IonoConsts {
+                        alpha: 0.0,
+                        beta: 0.0,
+                        gain: 1.0,
+                    },
+                };
+                match &comp.flux_type {
+                    FluxDensityType::PowerLaw { si, fd: _ } => {
+                        // Rather than using this PL's reference freq, use a pre-
+                        // defined one, so the the GPU code doesn't need to keep
+                        // track of all reference freqs.
+                        let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
+                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                        let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
 
-                    match &comp.comp_type {
+                        match &comp.comp_type {
+                            ComponentType::Point => {
+                                self.point_power_law_radecs.push(radec);
+                                point_power_law_lmns.push(lmn);
+                                point_power_law_fds.push(gpu_inst_fd);
+                                point_power_law_sis.push(*si as GpuFloat);
+                                point_power_law_iono_consts.push(ic);
+                            }
+
+                            ComponentType::Gaussian { maj, min, pa } => {
+                                let gp = gpu::GaussianParams {
+                                    maj: *maj as GpuFloat,
+                                    min: *min as GpuFloat,
+                                    pa: *pa as GpuFloat,
+                                };
+                                self.gaussian_power_law_radecs.push(radec);
+                                gaussian_power_law_lmns.push(lmn);
+                                gaussian_power_law_gps.push(gp);
+                                gaussian_power_law_fds.push(gpu_inst_fd);
+                                gaussian_power_law_sis.push(*si as GpuFloat);
+                                gaussian_power_law_iono_consts.push(ic);
+                            }
+
+                            ComponentType::Shapelet {
+                                maj,
+                                min,
+                                pa,
+                                coeffs,
+                            } => {
+                                let gp = gpu::GaussianParams {
+                                    maj: *maj as GpuFloat,
+                                    min: *min as GpuFloat,
+                                    pa: *pa as GpuFloat,
+                                };
+                                self.shapelet_power_law_radecs.push(radec);
+                                shapelet_power_law_lmns.push(lmn);
+                                shapelet_power_law_gps.push(gp);
+                                shapelet_power_law_coeffs.push(coeffs);
+                                shapelet_power_law_fds.push(gpu_inst_fd);
+                                shapelet_power_law_sis.push(*si as GpuFloat);
+                                shapelet_power_law_iono_consts.push(ic);
+                            }
+                        }
+                    }
+
+                    FluxDensityType::CurvedPowerLaw { si, fd, q } => {
+                        let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
+                        let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                        let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
+                        // A new SI is needed when changing the reference freq.
+                        // Thanks Jack.
+                        let si = if fd.freq == gpu::POWER_LAW_FD_REF_FREQ as f64 {
+                            *si
+                        } else {
+                            let logratio = (fd.freq / gpu::POWER_LAW_FD_REF_FREQ as f64).ln();
+                            ((fd.i / fd_at_150mhz.i).ln() - q * logratio.powi(2)) / logratio
+                        };
+
+                        match &comp.comp_type {
+                            ComponentType::Point => {
+                                self.point_curved_power_law_radecs.push(radec);
+                                point_curved_power_law_lmns.push(lmn);
+                                point_curved_power_law_fds.push(gpu_inst_fd);
+                                point_curved_power_law_sis.push(si as GpuFloat);
+                                point_curved_power_law_qs.push(*q as GpuFloat);
+                                point_curved_power_law_iono_consts.push(ic);
+                            }
+
+                            ComponentType::Gaussian { maj, min, pa } => {
+                                let gp = gpu::GaussianParams {
+                                    maj: *maj as GpuFloat,
+                                    min: *min as GpuFloat,
+                                    pa: *pa as GpuFloat,
+                                };
+                                self.gaussian_curved_power_law_radecs.push(radec);
+                                gaussian_curved_power_law_lmns.push(lmn);
+                                gaussian_curved_power_law_gps.push(gp);
+                                gaussian_curved_power_law_fds.push(gpu_inst_fd);
+                                gaussian_curved_power_law_sis.push(si as GpuFloat);
+                                gaussian_curved_power_law_qs.push(*q as GpuFloat);
+                                gaussian_curved_power_law_iono_consts.push(ic);
+                            }
+
+                            ComponentType::Shapelet {
+                                maj,
+                                min,
+                                pa,
+                                coeffs,
+                            } => {
+                                let gp = gpu::GaussianParams {
+                                    maj: *maj as GpuFloat,
+                                    min: *min as GpuFloat,
+                                    pa: *pa as GpuFloat,
+                                };
+                                self.shapelet_curved_power_law_radecs.push(radec);
+                                shapelet_curved_power_law_lmns.push(lmn);
+                                shapelet_curved_power_law_gps.push(gp);
+                                shapelet_curved_power_law_coeffs.push(coeffs);
+                                shapelet_curved_power_law_fds.push(gpu_inst_fd);
+                                shapelet_curved_power_law_sis.push(si as GpuFloat);
+                                shapelet_curved_power_law_qs.push(*q as GpuFloat);
+                                shapelet_curved_power_law_iono_consts.push(ic);
+                            }
+                        }
+                    }
+
+                    FluxDensityType::List { .. } => match &comp.comp_type {
                         ComponentType::Point => {
-                            self.point_power_law_radecs.push(radec);
-                            point_power_law_lmns.push(lmn);
-                            point_power_law_fds.push(gpu_inst_fd);
-                            point_power_law_sis.push(*si as GpuFloat);
+                            self.point_list_radecs.push(radec);
+                            point_list_lmns.push(lmn);
+                            point_list_fds.push(&comp.flux_type);
+                            point_list_iono_consts.push(ic);
                         }
 
                         ComponentType::Gaussian { maj, min, pa } => {
@@ -650,11 +812,11 @@ impl<'a> SkyModellerGpu<'a> {
                                 min: *min as GpuFloat,
                                 pa: *pa as GpuFloat,
                             };
-                            self.gaussian_power_law_radecs.push(radec);
-                            gaussian_power_law_lmns.push(lmn);
-                            gaussian_power_law_gps.push(gp);
-                            gaussian_power_law_fds.push(gpu_inst_fd);
-                            gaussian_power_law_sis.push(*si as GpuFloat);
+                            self.gaussian_list_radecs.push(radec);
+                            gaussian_list_lmns.push(lmn);
+                            gaussian_list_gps.push(gp);
+                            gaussian_list_fds.push(&comp.flux_type);
+                            gaussian_list_iono_consts.push(ic);
                         }
 
                         ComponentType::Shapelet {
@@ -668,112 +830,15 @@ impl<'a> SkyModellerGpu<'a> {
                                 min: *min as GpuFloat,
                                 pa: *pa as GpuFloat,
                             };
-                            self.shapelet_power_law_radecs.push(radec);
-                            shapelet_power_law_lmns.push(lmn);
-                            shapelet_power_law_gps.push(gp);
-                            shapelet_power_law_coeffs.push(coeffs);
-                            shapelet_power_law_fds.push(gpu_inst_fd);
-                            shapelet_power_law_sis.push(*si as GpuFloat);
+                            self.shapelet_list_radecs.push(radec);
+                            shapelet_list_lmns.push(lmn);
+                            shapelet_list_gps.push(gp);
+                            shapelet_list_coeffs.push(coeffs);
+                            shapelet_list_fds.push(&comp.flux_type);
+                            shapelet_list_iono_consts.push(ic);
                         }
-                    };
+                    },
                 }
-
-                FluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                    let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
-                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                    let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
-
-                    // A new SI is needed when changing the reference freq.
-                    // Thanks Jack.
-                    let si = if fd.freq == gpu::POWER_LAW_FD_REF_FREQ as f64 {
-                        *si
-                    } else {
-                        let logratio = (fd.freq / gpu::POWER_LAW_FD_REF_FREQ as f64).ln();
-                        ((fd.i / fd_at_150mhz.i).ln() - q * logratio.powi(2)) / logratio
-                    };
-
-                    match &comp.comp_type {
-                        ComponentType::Point => {
-                            self.point_curved_power_law_radecs.push(radec);
-                            point_curved_power_law_lmns.push(lmn);
-                            point_curved_power_law_fds.push(gpu_inst_fd);
-                            point_curved_power_law_sis.push(si as GpuFloat);
-                            point_curved_power_law_qs.push(*q as GpuFloat);
-                        }
-
-                        ComponentType::Gaussian { maj, min, pa } => {
-                            let gp = gpu::GaussianParams {
-                                maj: *maj as GpuFloat,
-                                min: *min as GpuFloat,
-                                pa: *pa as GpuFloat,
-                            };
-                            self.gaussian_curved_power_law_radecs.push(radec);
-                            gaussian_curved_power_law_lmns.push(lmn);
-                            gaussian_curved_power_law_gps.push(gp);
-                            gaussian_curved_power_law_fds.push(gpu_inst_fd);
-                            gaussian_curved_power_law_sis.push(si as GpuFloat);
-                            gaussian_curved_power_law_qs.push(*q as GpuFloat);
-                        }
-
-                        ComponentType::Shapelet {
-                            maj,
-                            min,
-                            pa,
-                            coeffs,
-                        } => {
-                            let gp = gpu::GaussianParams {
-                                maj: *maj as GpuFloat,
-                                min: *min as GpuFloat,
-                                pa: *pa as GpuFloat,
-                            };
-                            self.shapelet_curved_power_law_radecs.push(radec);
-                            shapelet_curved_power_law_lmns.push(lmn);
-                            shapelet_curved_power_law_gps.push(gp);
-                            shapelet_curved_power_law_coeffs.push(coeffs);
-                            shapelet_curved_power_law_fds.push(gpu_inst_fd);
-                            shapelet_curved_power_law_sis.push(si as GpuFloat);
-                            shapelet_curved_power_law_qs.push(*q as GpuFloat);
-                        }
-                    };
-                }
-
-                FluxDensityType::List(_) => match &comp.comp_type {
-                    ComponentType::Point => {
-                        self.point_list_radecs.push(radec);
-                        point_list_lmns.push(lmn);
-                        point_list_fds.push(&comp.flux_type);
-                    }
-
-                    ComponentType::Gaussian { maj, min, pa } => {
-                        let gp = gpu::GaussianParams {
-                            maj: *maj as GpuFloat,
-                            min: *min as GpuFloat,
-                            pa: *pa as GpuFloat,
-                        };
-                        self.gaussian_list_radecs.push(radec);
-                        gaussian_list_lmns.push(lmn);
-                        gaussian_list_gps.push(gp);
-                        gaussian_list_fds.push(&comp.flux_type);
-                    }
-
-                    ComponentType::Shapelet {
-                        maj,
-                        min,
-                        pa,
-                        coeffs,
-                    } => {
-                        let gp = gpu::GaussianParams {
-                            maj: *maj as GpuFloat,
-                            min: *min as GpuFloat,
-                            pa: *pa as GpuFloat,
-                        };
-                        self.shapelet_list_radecs.push(radec);
-                        shapelet_list_lmns.push(lmn);
-                        shapelet_list_gps.push(gp);
-                        shapelet_list_coeffs.push(coeffs);
-                        shapelet_list_fds.push(&comp.flux_type);
-                    }
-                },
             }
         }
 
@@ -1326,9 +1391,10 @@ impl<'a> SkyModeller<'a> for SkyModellerGpu<'a> {
     fn update_with_a_source(
         &mut self,
         source: &Source,
+        source_name: &str,
         phase_centre: RADec,
     ) -> Result<(), ModelError> {
-        self.update_source_list(source.components.iter(), phase_centre)
+        self.update_source_list([(source_name, source)], phase_centre)
     }
 }
 

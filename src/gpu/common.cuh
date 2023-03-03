@@ -365,6 +365,17 @@ inline __device__ JONES operator/(JONES a, FLOAT b) {
     };
 }
 
+inline __device__ void operator*=(JONES &a, FLOAT b) {
+    a.j00_re *= b;
+    a.j00_im *= b;
+    a.j01_re *= b;
+    a.j01_im *= b;
+    a.j10_re *= b;
+    a.j10_im *= b;
+    a.j11_re *= b;
+    a.j11_im *= b;
+}
+
 inline __device__ void operator/=(JonesF64 &a, double b) {
     a.j00_re /= b;
     a.j00_im /= b;

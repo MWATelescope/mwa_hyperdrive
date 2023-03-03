@@ -9,6 +9,7 @@ use std::thread::{self, ScopedJoinHandle};
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use crossbeam_utils::atomic::AtomicCell;
+use indexmap::IndexMap;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info};
@@ -16,7 +17,7 @@ use marlu::Jones;
 use ndarray::prelude::*;
 use scopeguard::defer_on_unwind;
 
-use super::{InputVisParams, ModellingParams, OutputVisParams};
+use super::{InputVisParams, ModellingParams, OutputVisParams, SourceIonoConsts};
 use crate::{
     beam::Beam,
     io::{
@@ -44,7 +45,11 @@ impl VisSubtractParams {
             output_vis_params,
             beam,
             source_list,
-            modelling_params: ModellingParams { apply_precession },
+            modelling_params:
+                ModellingParams {
+                    apply_precession,
+                    source_iono_consts,
+                },
         } = self;
 
         let obs_context = input_vis_params.get_obs_context();
@@ -168,6 +173,7 @@ impl VisSubtractParams {
                     let result = model_thread(
                         &**beam,
                         source_list,
+                        source_iono_consts,
                         input_vis_params,
                         *apply_precession,
                         vis_shape,
@@ -246,6 +252,7 @@ impl VisSubtractParams {
 fn model_thread(
     beam: &dyn Beam,
     source_list: &SourceList,
+    source_iono_consts: &IndexMap<String, SourceIonoConsts>,
     input_vis_params: &InputVisParams,
     apply_precession: bool,
     vis_shape: (usize, usize),
@@ -285,6 +292,7 @@ fn model_thread(
         obs_context.array_position.latitude_rad,
         input_vis_params.dut1,
         apply_precession,
+        source_iono_consts,
     )?;
 
     // Recycle an array for model visibilities.

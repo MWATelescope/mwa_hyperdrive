@@ -20,7 +20,7 @@ mod vis_subtract;
 
 pub(crate) use di_calibration::{DiCalParams, DiCalibrateError};
 pub(crate) use input_vis::InputVisParams;
-pub(crate) use peel::{PeelError, PeelParams};
+pub(crate) use peel::{IonoConsts, PeelError, PeelParams, SourceIonoConsts};
 pub(crate) use solutions_apply::SolutionsApplyParams;
 pub(crate) use vis_convert::{VisConvertError, VisConvertParams};
 pub(crate) use vis_simulate::{VisSimulateError, VisSimulateParams};
@@ -49,4 +49,5 @@ pub(crate) struct OutputVisParams {
 
 pub(crate) struct ModellingParams {
     pub(crate) apply_precession: bool,
+    pub(crate) source_iono_consts: indexmap::IndexMap<String, SourceIonoConsts>,
 }

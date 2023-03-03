@@ -806,6 +806,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
     fn update_with_a_source(
         &mut self,
         source: &Source,
+        source_name: &str,
         phase_centre: RADec,
     ) -> Result<(), ModelError> {
         self.phase_centre = phase_centre;

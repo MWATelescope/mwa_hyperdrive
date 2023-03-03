@@ -9,6 +9,7 @@ use std::{
 
 use criterion::*;
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use marlu::{
     constants::{MWA_LAT_RAD, MWA_LONG_RAD},
     Jones, RADec, XyzGeodetic,
@@ -38,6 +39,7 @@ fn model_benchmarks(c: &mut Criterion) {
     let xyzs = vec![XyzGeodetic::default(); num_tiles];
     let flagged_tiles = HashSet::new();
     let beam = create_beam_object(Some("fee"), num_tiles, Delays::Partial(vec![0; 16])).unwrap();
+    let iono_consts = IndexMap::new();
 
     let mut points = c.benchmark_group("model FEE points");
     for (num_power_law_points, num_chans) in [(10, 2), (100, 2)] {
@@ -142,6 +144,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    &iono_consts,
                 )
                 .unwrap();
 
@@ -263,6 +266,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    &iono_consts,
                 )
                 .unwrap();
 
@@ -405,6 +409,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
+                    &iono_consts,
                 )
                 .unwrap();
 

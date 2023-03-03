@@ -75,7 +75,7 @@ impl Default for IonoConsts {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct SourceIonoConsts {
+pub struct SourceIonoConsts {
     pub(crate) alphas: Vec<f64>,
     pub(crate) betas: Vec<f64>,
     pub(crate) gains: Vec<f64>,
@@ -98,6 +98,7 @@ pub(crate) struct PeelParams {
     pub(crate) num_sources_to_iono_subtract: usize,
     pub(crate) num_sources_to_peel: usize,
     pub(crate) num_passes: NonZeroUsize,
+    pub(crate) iono_const_threshold: f64,
 }
 
 impl PeelParams {
@@ -109,7 +110,11 @@ impl PeelParams {
             iono_outputs,
             beam,
             source_list,
-            modelling_params: ModellingParams { apply_precession },
+            modelling_params:
+                ModellingParams {
+                    apply_precession,
+                    source_iono_consts,
+                },
             iono_timeblocks,
             iono_time_average_factor,
             low_res_spw,
@@ -118,6 +123,7 @@ impl PeelParams {
             num_sources_to_iono_subtract,
             num_sources_to_peel: _,
             num_passes,
+            iono_const_threshold,
         } = self;
 
         let obs_context = input_vis_params.get_obs_context();
@@ -1112,6 +1118,7 @@ fn peel_cpu(
     iono_consts: &mut [IonoConsts],
     source_weighted_positions: &[RADec],
     num_passes: usize,
+    iono_const_threshold: f64,
     // TODO (dev): Why do we need both this and low_res_lambdas_m? it's not even used
     _low_res_freqs_hz: &[f64],
     all_fine_chan_lambdas_m: &[f64],
@@ -1271,8 +1278,12 @@ fn peel_cpu(
             let start = std::time::Instant::now();
             let old_iono_consts = *iono_consts;
 
-            low_res_modeller.update_with_a_source(source, source_phase_centre)?;
-            high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
+            low_res_modeller.update_with_a_source(source, source_name, source_phase_centre)?;
+            high_res_modeller.update_with_a_source(
+                source,
+                source_name,
+                obs_context.phase_centre,
+            )?;
             // this is only necessary for cpu modeller.
             vis_model_low_res.fill(Jones::zero());
 
@@ -1919,7 +1930,7 @@ fn peel_gpu(
                 )?;
                 pb_trace!("{:?}: rotate", start.elapsed());
 
-                high_res_modeller.update_with_a_source(source, source_pos)?;
+                high_res_modeller.update_with_a_source(source, "", source_pos)?;
                 // Clear the old memory before reusing the buffer.
                 d_high_res_model_tfb.clear();
                 for (i_time, (lmst, latitude)) in lmsts.iter().zip(latitudes.iter()).enumerate() {
@@ -2466,6 +2477,7 @@ fn subtract_thread(
         d_vis_fb: DevicePointer<Jones<f32>>,
     }
 
+    let wip_iono_consts: IndexMap<String, SourceIonoConsts> = IndexMap::new();
     #[cfg(any(feature = "cuda", feature = "hip"))]
     let mut gpu_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
         let modeller = SkyModellerGpu::new(
@@ -2481,6 +2493,7 @@ fn subtract_thread(
             array_position.latitude_rad,
             dut1,
             apply_precession,
+            &wip_iono_consts,
         )?;
         #[cfg(feature = "gpu-single")]
         let d_lambdas = {
@@ -2591,7 +2604,7 @@ fn subtract_thread(
                 todo!("rotate vis in place");
                 //vis_rotate_fb(vis_data_fb.view_mut(), , , , );
 
-                modeller.update_with_a_source(source, *source_pos)?;
+                modeller.update_with_a_source(source, "", *source_pos)?;
                 modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
                 std::mem::swap(&mut uvws_from, &mut uvws_to);
             }
@@ -2666,7 +2679,7 @@ fn subtract_thread(
                 )?;
                 std::mem::swap(d_uvws_from, d_uvws_to);
 
-                modeller.update_with_a_source(&source, *source_pos)?;
+                modeller.update_with_a_source(&source, "", *source_pos)?;
                 modeller.model_timestep_with(lst, latitude, d_uvws_to, d_beam_jones, d_vis_fb)?;
                 sub_progress.inc(1);
             }
@@ -2867,6 +2880,7 @@ fn peel_thread(
                     &mut iono_consts,
                     &source_weighted_positions,
                     num_passes.get(),
+                    0.0,
                     &low_res_freqs_hz,
                     &all_fine_chan_lambdas_m,
                     &low_res_lambdas_m,
@@ -2881,6 +2895,7 @@ fn peel_thread(
                 )?;
             }
 
+            let wip_iono_consts: IndexMap<String, SourceIonoConsts> = IndexMap::new();
             #[cfg(any(feature = "cuda", feature = "hip"))]
             if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
                 let mut high_res_modeller = SkyModellerGpu::new(
@@ -2895,6 +2910,7 @@ fn peel_thread(
                     array_position.latitude_rad,
                     dut1,
                     apply_precession,
+                    &wip_iono_consts,
                 )?;
                 peel_gpu(
                     vis_residual_tfb.view_mut(),

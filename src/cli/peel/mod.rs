@@ -36,6 +36,7 @@ const DEFAULT_OUTPUT_IONO_CONSTS: &str = "hyperdrive_iono_consts.json";
 const DEFAULT_NUM_PASSES: usize = 1;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 const DEFAULT_NUM_PASSES: usize = 3;
+const DEFAULT_IONO_CONST_THRESHOLD: f64 = 5e-4;
 const DEFAULT_TIME_AVERAGE_FACTOR: &str = "8s";
 const DEFAULT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
 const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
@@ -47,6 +48,8 @@ lazy_static::lazy_static! {
     static ref VIS_OUTPUTS_HELP: String = format!("The paths to the files where the peeled visibilities are written. Supported formats: {}", *VIS_OUTPUT_EXTENSIONS);
 
     static ref NUM_PASSES_HELP: String = format!("The number of times to iterate over all sources per iono timeblock. Default: {DEFAULT_NUM_PASSES}");
+
+    static ref IONO_CONST_HELP: String = format!("If an ionospheric constant (a shift in l or m to be scaled by λ²) exceeds this value, it is rejected, and the source is not updated. Default: {DEFAULT_IONO_CONST_THRESHOLD}");
 
     static ref TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timesteps to use per timeblock *during* peeling. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then peeling is performed with 4 timesteps per timeblock. If the variable is instead 4s, then each timeblock contains up to 4s worth of data.");
 
@@ -87,6 +90,15 @@ pub(crate) struct PeelCliArgs {
     /// after vetoing.
     #[clap(long = "sub", help_heading = "PEELING")]
     pub(super) num_sources_to_subtract: Option<usize>,
+
+    // /// When performing ionospheric subtraction, the average gain difference
+    // /// between every source and its model is estimated and applied. This is
+    // /// currently disabled by default because it seems to do worse than not
+    // /// adjusting gains.
+    // #[clap(long, help_heading = "PEELING")]
+    // pub gain_update: bool,
+    #[clap(long, help = IONO_CONST_HELP.as_str(), help_heading = "PEELING")]
+    pub iono_const_threshold: Option<f64>,
 
     #[clap(long, help = NUM_PASSES_HELP.as_str(), help_heading = "PEELING")]
     pub(super) num_passes: Option<usize>,
@@ -203,6 +215,8 @@ impl PeelArgs {
                     num_sources_to_peel,
                     num_sources_to_iono_subtract,
                     num_sources_to_subtract,
+                    // gain_update,
+                    iono_const_threshold,
                     num_passes,
                     iono_time_average_factor,
                     iono_freq_average_factor,
@@ -226,7 +240,10 @@ impl PeelArgs {
             obs_context.dipole_gains.clone(),
             Some(obs_context.input_data_type),
         )?;
-        let modelling_params @ ModellingParams { apply_precession } = model_args.parse();
+        let modelling_params @ ModellingParams {
+            apply_precession,
+            source_iono_consts: _,
+        } = model_args.parse();
 
         let LatLngHeight {
             longitude_rad,
@@ -660,6 +677,7 @@ impl PeelArgs {
             num_sources_to_iono_subtract,
             num_sources_to_peel,
             num_passes,
+            iono_const_threshold: iono_const_threshold.unwrap_or(DEFAULT_IONO_CONST_THRESHOLD),
         })
     }
 
@@ -688,6 +706,7 @@ impl PeelCliArgs {
             num_sources_to_subtract: self
                 .num_sources_to_subtract
                 .or(other.num_sources_to_subtract),
+            iono_const_threshold: self.iono_const_threshold.or(other.iono_const_threshold),
             num_passes: self.num_passes.or(other.num_passes),
             iono_time_average_factor: self
                 .iono_time_average_factor

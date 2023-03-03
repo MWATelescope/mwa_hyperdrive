@@ -13,6 +13,7 @@ use std::{
 use crossbeam_channel::{bounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::info;
@@ -37,6 +38,8 @@ use crate::{
     srclist::SourceList,
     PROGRESS_BARS,
 };
+
+use super::SourceIonoConsts;
 
 /// Parameters needed to do sky-model visibility simulation.
 pub(crate) struct VisSimulateParams {
@@ -109,7 +112,11 @@ impl VisSimulateParams {
             beam,
             array_position,
             dut1,
-            modelling_params: ModellingParams { apply_precession },
+            modelling_params:
+                ModellingParams {
+                    apply_precession,
+                    source_iono_consts,
+                },
         } = self;
 
         // Channel for writing simulated visibilities.
@@ -163,6 +170,7 @@ impl VisSimulateParams {
                     let result = model_thread(
                         &**beam,
                         source_list,
+                        source_iono_consts,
                         tile_xyzs,
                         tile_baseline_flags,
                         timestamps,
@@ -256,6 +264,7 @@ impl VisSimulateParams {
 fn model_thread(
     beam: &dyn Beam,
     source_list: &SourceList,
+    source_iono_consts: &IndexMap<String, SourceIonoConsts>,
     unflagged_tile_xyzs: &[XyzGeodetic],
     tile_baseline_flags: &TileBaselineFlags,
     timestamps: &[Epoch],
@@ -282,6 +291,7 @@ fn model_thread(
         array_position.latitude_rad,
         dut1,
         apply_precession,
+        source_iono_consts,
     )?;
 
     for &timestamp in timestamps {

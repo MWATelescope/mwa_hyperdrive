@@ -8,7 +8,7 @@ use std::{collections::HashSet, f64::consts::TAU};
 
 use approx::assert_abs_diff_eq;
 use hifitime::{Duration, Epoch};
-use indexmap::indexmap;
+use indexmap::{indexmap, IndexMap};
 use indicatif::{MultiProgress, ProgressDrawTarget};
 use itertools::{izip, Itertools};
 use marlu::{
@@ -566,6 +566,7 @@ fn test_vis_rotation() {
     });
 
     let beam = get_beam(num_tiles);
+    // let source_iono_consts = IndexMap::new();
 
     let mut vis_tfb = Array3::default((num_times, num_chans, num_baselines));
     let mut vis_rot_tfb = Array3::default((num_times, num_chans, num_baselines));
@@ -848,6 +849,7 @@ fn test_apply_iono2() {
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
     let beam = get_beam(num_tiles);
+    // let source_iono_consts = IndexMap::new();
 
     for apply_precession in [false, true] {
         let modeller = SkyModellerCpu::new(
@@ -1016,6 +1018,7 @@ fn test_iono_fit() {
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
     let beam = get_beam(num_tiles);
+    // let source_iono_consts = IndexMap::new();
 
     for apply_precession in [false, true] {
         // unlike the other tests, this is in the SOURCE phase centre
@@ -1147,6 +1150,7 @@ fn test_apply_iono3() {
     });
 
     let beam = get_beam(num_tiles);
+    // let source_iono_consts = IndexMap::new();
 
     // residual visibilities in the observation phase centre
     let mut vis_resid_obs_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
@@ -1323,6 +1327,7 @@ fn test_peel_single_source(peel_type: PeelType) {
     )]);
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     // model visibilities in the observation phase centre
     let mut vis_model_obs_tfb = Array3::zeros((num_times, num_chans, num_baselines));
@@ -1362,6 +1367,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1377,6 +1383,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1500,6 +1507,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &mut all_iono_consts,
                     &source_weighted_positions,
                     3,
+                    1.0,
                     &fine_chan_freqs_hz,
                     &lambdas_m,
                     &lambdas_m,
@@ -1528,6 +1536,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         array_pos.latitude_rad,
                         obs_context.dut1.unwrap_or_default(),
                         apply_precession,
+                        &source_iono_consts,
                     )
                     .unwrap();
 
@@ -1667,6 +1676,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
     ];
 
     let beam = get_beam(num_tiles);
+    let source_iono_consts = IndexMap::new();
 
     // model visibilities of each source
     let mut vis_model_tmp_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
@@ -1706,6 +1716,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1721,6 +1732,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            &source_iono_consts,
         )
         .unwrap();
 
@@ -1734,7 +1746,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             println!("source {} radec {:?}", name, &source_radec);
 
             high_res_modeller
-                .update_with_a_source(source, obs_context.phase_centre)
+                .update_with_a_source(source, name.as_str(), obs_context.phase_centre)
                 .unwrap();
 
             // model visibilities in the observation phase centre
@@ -1819,6 +1831,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &mut iono_consts_result,
                 &source_weighted_positions,
                 3,
+                1.0,
                 &fine_chan_freqs_hz,
                 &lambdas_m,
                 &lambdas_m,
@@ -1847,6 +1860,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     array_pos.latitude_rad,
                     obs_context.dut1.unwrap_or_default(),
                     apply_precession,
+                    &source_iono_consts,
                 )
                 .unwrap();
 
@@ -1989,6 +2003,7 @@ fn test_peel_single_source_brightness_offset(peel_type: PeelType) {
 
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
 
+    let wip_iono_consts = IndexMap::new();
     for apply_precession in [false, true] {
         let mut high_res_modeller = new_sky_modeller(
             &beam,
@@ -2002,6 +2017,7 @@ fn test_peel_single_source_brightness_offset(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            &wip_iono_consts,
         )
         .unwrap();
         let mut low_res_modeller = new_sky_modeller(
@@ -2016,6 +2032,7 @@ fn test_peel_single_source_brightness_offset(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            &wip_iono_consts,
         )
         .unwrap();
 
@@ -2023,7 +2040,7 @@ fn test_peel_single_source_brightness_offset(peel_type: PeelType) {
 
         high_res_modeller
             //.update_with_a_source(&true_source_list[0], source_weighted_positions[0])
-            .update_with_a_source(&true_source_list[0], obs_context.phase_centre)
+            .update_with_a_source(&true_source_list[0], "", obs_context.phase_centre)
             .unwrap();
         model_timesteps(
             &*high_res_modeller,
@@ -2034,7 +2051,7 @@ fn test_peel_single_source_brightness_offset(peel_type: PeelType) {
 
         high_res_modeller
             //.update_with_a_source(&source_list[0], source_weighted_positions[0])
-            .update_with_a_source(&source_list[0], obs_context.phase_centre)
+            .update_with_a_source(&source_list[0], "", obs_context.phase_centre)
             .unwrap();
         model_timesteps(
             &*high_res_modeller,
@@ -2161,6 +2178,7 @@ fn test_peel_single_source_brightness_offset(peel_type: PeelType) {
                     &mut all_iono_consts,
                     &source_weighted_positions,
                     3,
+                    0.0,
                     &fine_chan_freqs_hz,
                     &lambdas_m,
                     &lambdas_m,
@@ -2189,6 +2207,7 @@ fn test_peel_single_source_brightness_offset(peel_type: PeelType) {
                         array_pos.latitude_rad,
                         obs_context.dut1.unwrap_or_default(),
                         apply_precession,
+                        &wip_iono_consts,
                     )
                     .unwrap();
 
@@ -2261,6 +2280,7 @@ fn test_peel_cpu_multi_source() {
 mod gpu_tests {
     use std::ffi::CStr;
 
+    use indexmap::IndexMap;
     use marlu::{pos::xyz::xyzs_to_cross_uvws, UVW};
 
     use super::*;
@@ -2354,6 +2374,7 @@ mod gpu_tests {
         });
 
         let beam = get_beam(num_tiles);
+        let source_iono_consts = IndexMap::new();
 
         // residual visibilities in the observation phase centre
         let mut vis_residual_obs_tfb =
@@ -2382,6 +2403,7 @@ mod gpu_tests {
                 array_pos.latitude_rad,
                 obs_context.dut1.unwrap_or_default(),
                 apply_precession,
+                &source_iono_consts,
             )
             .unwrap();
 

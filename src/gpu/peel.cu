@@ -529,12 +529,11 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
         for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
             const FLOAT lambda = lambdas_m[i_freq];
 
-            COMPLEX complex;
+            COMPLEX complex, old_complex;
             // The baseline UV is in units of metres, so we need to divide by λ to
             // use it in an exponential. But we're also multiplying by λ², so just
             // multiply by λ.
             SINCOS(arg * lambda, &complex.y, &complex.x);
-            COMPLEX old_complex;
             SINCOS(old_arg * lambda, &old_complex.y, &old_complex.x);
 
             const int step = (i_time * num_freqs + i_freq) * num_baselines + i_bl;
@@ -553,7 +552,7 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
                 .j11_re = r.j11_re,
                 .j11_im = r.j11_im,
             };
-            JonesF64 m2 = JonesF64{
+            const JonesF64 m2 = JonesF64{
                 .j00_re = m.j00_re,
                 .j00_im = m.j00_im,
                 .j01_re = m.j01_re,

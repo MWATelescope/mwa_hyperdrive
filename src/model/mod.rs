@@ -20,12 +20,14 @@ pub use gpu::SkyModellerGpu;
 use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use marlu::{c32, Jones, RADec, XyzGeodetic, UVW};
 use ndarray::{Array2, ArrayViewMut2};
 
 use crate::{
     beam::Beam,
     context::Polarisations,
+    params::SourceIonoConsts,
     srclist::{Source, SourceList},
     MODEL_DEVICE,
 };
@@ -170,10 +172,11 @@ pub trait SkyModeller<'a>: Send {
     ) -> Result<Vec<UVW>, ModelError>;
 
     /// Replace the sky model with a single source. This is mostly useful for
-    /// peeling.
+    /// peeling. The name is used to access ionospheric constants.
     fn update_with_a_source(
         &mut self,
         source: &Source,
+        source_name: &str,
         phase_centre: RADec,
     ) -> Result<(), ModelError>;
 }
@@ -199,6 +202,7 @@ pub fn new_sky_modeller<'a>(
     array_latitude_rad: f64,
     dut1: Duration,
     apply_precession: bool,
+    iono_consts: &'a IndexMap<String, SourceIonoConsts>,
 ) -> Result<Box<dyn SkyModeller<'a> + 'a>, ModelError> {
     match MODEL_DEVICE.load() {
         ModelDevice::Cpu => Ok(Box::new(SkyModellerCpu::new(
@@ -229,6 +233,7 @@ pub fn new_sky_modeller<'a>(
                 array_latitude_rad,
                 dut1,
                 apply_precession,
+                iono_consts,
             )?;
             Ok(Box::new(modeller))
         }

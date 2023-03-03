@@ -9,6 +9,7 @@ use std::{
 
 use crossbeam_channel::{unbounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
+use indexmap::IndexMap;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info, log_enabled, Level::Debug};
@@ -21,7 +22,7 @@ use rayon::prelude::*;
 use scopeguard::defer_on_unwind;
 use vec1::Vec1;
 
-use super::{InputVisParams, ModellingParams, OutputVisParams};
+use super::{InputVisParams, ModellingParams, OutputVisParams, SourceIonoConsts};
 use crate::{
     averaging::Timeblock,
     beam::Beam,
@@ -340,6 +341,7 @@ impl DiCalParams {
                     let result = model_thread(
                         &*self.beam,
                         &self.source_list,
+                        &IndexMap::new(),
                         input_vis_params,
                         self.modelling_params.apply_precession,
                         vis_model_slices,
@@ -448,6 +450,7 @@ impl DiCalParams {
 fn model_thread(
     beam: &dyn Beam,
     source_list: &SourceList,
+    source_iono_consts: &IndexMap<String, SourceIonoConsts>,
     input_vis_params: &InputVisParams,
     apply_precession: bool,
     vis_model_slices: AxisIterMut<'_, Jones<f32>, Ix2>,
@@ -486,6 +489,7 @@ fn model_thread(
         obs_context.array_position.latitude_rad,
         input_vis_params.dut1,
         apply_precession,
+        source_iono_consts,
     )?;
 
     let weight_factor = ((input_vis_params.spw.freq_res / FREQ_WEIGHT_FACTOR)

@@ -449,13 +449,17 @@ impl SkyModelWithVetoArgs {
     }
 }
 
-#[derive(Parser, Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct ModellingArgs {
     /// If specified, don't precess the array to J2000. We assume that sky-model
     /// sources are specified in the J2000 epoch.
     #[clap(long, help_heading = "MODELLING")]
     #[serde(default)]
     pub(super) no_precession: bool,
+
+    /// Path to a JSON-formatted file with ionospheric constants.
+    #[clap(long, help_heading = "MODELLING")]
+    pub(super) iono_consts_file: Option<String>,
 
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
@@ -469,6 +473,7 @@ impl ModellingArgs {
     pub(super) fn merge(self, other: Self) -> Self {
         Self {
             no_precession: self.no_precession || other.no_precession,
+            iono_consts_file: self.iono_consts_file.or(other.iono_consts_file),
             #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu: self.cpu || other.cpu,
         }
@@ -477,6 +482,7 @@ impl ModellingArgs {
     pub(super) fn parse(self) -> ModellingParams {
         let ModellingArgs {
             no_precession,
+            iono_consts_file,
             #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu,
         } = self;
@@ -543,6 +549,13 @@ impl ModellingArgs {
 
         ModellingParams {
             apply_precession: !no_precession,
+            source_iono_consts: match iono_consts_file {
+                Some(f) => {
+                    let mut f = std::io::BufReader::new(std::fs::File::open(f).unwrap());
+                    serde_json::from_reader(&mut f).unwrap()
+                }
+                None => indexmap::IndexMap::new(),
+            },
         }
     }
 }

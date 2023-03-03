@@ -12,6 +12,7 @@ use std::{
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use hifitime::{Duration, Epoch};
+use indexmap::IndexMap;
 use indicatif::{ProgressBar, ProgressDrawTarget};
 use marlu::Jones;
 use ndarray::prelude::*;
@@ -303,6 +304,7 @@ fn get_default_params() -> DiCalParams {
         output_model_vis_params: None,
         modelling_params: ModellingParams {
             apply_precession: true,
+            source_iono_consts: IndexMap::new(),
         },
     }
 }
