@@ -8,9 +8,6 @@ use std::{collections::HashSet, path::Path};
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use marlu::Jones;
-use mwalib::{
-    _get_required_fits_key, _open_fits, _open_hdu, fits_open, fits_open_hdu, get_required_fits_key,
-};
 use ndarray::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -18,7 +15,10 @@ use vec1::vec1;
 
 use super::*;
 use crate::{
-    io::read::RawDataCorrections,
+    io::read::{
+        fits::{fits_get_required_key, fits_open, fits_open_hdu},
+        RawDataCorrections,
+    },
     pfb_gains::PfbFlavour,
     tests::reduced_obsids::{
         get_reduced_1090008640, get_reduced_1090008640_ms, get_reduced_1090008640_uvfits,
@@ -82,7 +82,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     let mut crosses = Array2::zeros((total_num_channels, total_num_baselines));
     let mut cross_weights = Array2::zeros((total_num_channels, total_num_baselines));
     let mut autos = Array2::zeros((total_num_channels, total_num_tiles));
@@ -125,7 +125,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     crosses.fill(Jones::default());
     cross_weights.fill(0.0);
     autos.fill(Jones::default());
@@ -173,7 +173,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     crosses.fill(Jones::default());
     cross_weights.fill(0.0);
     autos.fill(Jones::default());
@@ -269,7 +269,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     let mut crosses = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
     let mut cross_weights = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
     let mut autos = Array2::zeros((total_num_channels, num_unflagged_tiles));
@@ -347,7 +347,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     crosses.fill(Jones::default());
     cross_weights.fill(0.0);
     autos.fill(Jones::default());
@@ -444,7 +444,7 @@ fn test_solutions_apply_trivial_uvfits() {
     let mut data = cal_args.data.unwrap().into_iter();
     let metafits = data.next().unwrap();
     let uvfits = data.next().unwrap();
-    let input_data = UvfitsReader::new(uvfits, Some(&metafits)).unwrap();
+    let input_data = UvfitsReader::new(uvfits, Some(&metafits), None).unwrap();
 
     test_solutions_apply_trivial(Box::new(input_data).deref(), &metafits)
 }
@@ -488,15 +488,14 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits() {
     let exp_baselines = 8256;
     let exp_channels = 32;
 
-    let mut out_vis = fits_open!(&out_vis_path).unwrap();
-    let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
-    let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
+    let mut out_vis = fits_open(&out_vis_path).unwrap();
+    let hdu0 = fits_open_hdu(&mut out_vis, 0).unwrap();
+    let gcount: String = fits_get_required_key(&mut out_vis, &hdu0, "GCOUNT").unwrap();
     assert_eq!(
         gcount.parse::<usize>().unwrap(),
         exp_timesteps * exp_baselines
     );
-    let num_fine_freq_chans: String =
-        get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
+    let num_fine_freq_chans: String = fits_get_required_key(&mut out_vis, &hdu0, "NAXIS4").unwrap();
     assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
 }
 
@@ -530,15 +529,14 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_no_autos() {
     let exp_baselines = 8128;
     let exp_channels = 32;
 
-    let mut out_vis = fits_open!(&out_vis_path).unwrap();
-    let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
-    let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
+    let mut out_vis = fits_open(&out_vis_path).unwrap();
+    let hdu0 = fits_open_hdu(&mut out_vis, 0).unwrap();
+    let gcount: String = fits_get_required_key(&mut out_vis, &hdu0, "GCOUNT").unwrap();
     assert_eq!(
         gcount.parse::<usize>().unwrap(),
         exp_timesteps * exp_baselines
     );
-    let num_fine_freq_chans: String =
-        get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
+    let num_fine_freq_chans: String = fits_get_required_key(&mut out_vis, &hdu0, "NAXIS4").unwrap();
     assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
 }
 
@@ -574,15 +572,14 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_avg_freq() {
     let exp_baselines = 8256;
     let exp_channels = 32 / freq_avg_factor;
 
-    let mut out_vis = fits_open!(&out_vis_path).unwrap();
-    let hdu0 = fits_open_hdu!(&mut out_vis, 0).unwrap();
-    let gcount: String = get_required_fits_key!(&mut out_vis, &hdu0, "GCOUNT").unwrap();
+    let mut out_vis = fits_open(&out_vis_path).unwrap();
+    let hdu0 = fits_open_hdu(&mut out_vis, 0).unwrap();
+    let gcount: String = fits_get_required_key(&mut out_vis, &hdu0, "GCOUNT").unwrap();
     assert_eq!(
         gcount.parse::<usize>().unwrap(),
         exp_timesteps * exp_baselines
     );
-    let num_fine_freq_chans: String =
-        get_required_fits_key!(&mut out_vis, &hdu0, "NAXIS4").unwrap();
+    let num_fine_freq_chans: String = fits_get_required_key(&mut out_vis, &hdu0, "NAXIS4").unwrap();
     assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
 }
 
@@ -618,7 +615,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_and_ms() {
     let exp_timesteps = 1;
     let exp_channels = 32;
 
-    let uvfits_data = UvfitsReader::new(&out_uvfits_path, Some(metafits)).unwrap();
+    let uvfits_data = UvfitsReader::new(&out_uvfits_path, Some(metafits), None).unwrap();
 
     let uvfits_ctx = uvfits_data.get_obs_context();
 
@@ -689,8 +686,8 @@ fn test_1090008640_solutions_apply_correct_vis() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     assert!(vis_out.exists(), "out vis file not written");
 
-    let uncal_reader = UvfitsReader::new(uvfits, Some(metafits)).unwrap();
-    let cal_reader = UvfitsReader::new(vis_out, Some(metafits)).unwrap();
+    let uncal_reader = UvfitsReader::new(uvfits, Some(metafits), None).unwrap();
+    let cal_reader = UvfitsReader::new(vis_out, Some(metafits), None).unwrap();
     let obs_context = cal_reader.get_obs_context();
 
     let total_num_tiles = obs_context.get_total_num_tiles();
@@ -835,7 +832,7 @@ fn test_1090008640_solutions_apply_correct_vis() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     assert!(vis_out.exists(), "out vis file not written");
 
-    let cal2_reader = UvfitsReader::new(vis_out, Some(metafits)).unwrap();
+    let cal2_reader = UvfitsReader::new(vis_out, Some(metafits), None).unwrap();
     let mut cal2_cross_vis_data = Array2::zeros((
         obs_context.fine_chan_freqs.len(),
         num_unflagged_cross_baselines,

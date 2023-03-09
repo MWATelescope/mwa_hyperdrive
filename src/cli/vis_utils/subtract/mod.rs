@@ -358,7 +358,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 }
             };
 
-            let input_data = UvfitsReader::new(uvfits, meta)?;
+            let input_data = UvfitsReader::new(uvfits, meta, array_position)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from uvfits {}",

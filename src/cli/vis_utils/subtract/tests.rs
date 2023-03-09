@@ -10,13 +10,13 @@ use std::{
 use approx::assert_abs_diff_eq;
 use clap::Parser;
 use marlu::RADec;
-use mwalib::{_open_fits, _open_hdu, fits_open, fits_open_hdu};
 use tempfile::TempDir;
 use vec1::vec1;
 
 use super::*;
 use crate::{
     cli::vis_utils::simulate::VisSimulateArgs,
+    io::read::fits::{fits_open, fits_open_hdu},
     srclist::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList},
     tests::reduced_obsids::get_reduced_1090008640,
 };
@@ -118,8 +118,8 @@ fn test_1090008640_vis_subtract() {
         let result = sub_args.run(false);
         assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
-        let mut uvfits_1 = fits_open!(&model_1).unwrap();
-        fits_open_hdu!(&mut uvfits_1, 0).unwrap();
+        let mut uvfits_1 = fits_open(&model_1).unwrap();
+        fits_open_hdu(&mut uvfits_1, 0).unwrap();
         let mut group_params = [0.0; 5];
         let mut vis_1: Vec<f32> = vec![0.0; num_chans * 4 * 3];
         let mut status = 0;
@@ -148,8 +148,8 @@ fn test_1090008640_vis_subtract() {
             assert_eq!(status, 0, "Status wasn't 0");
         };
 
-        let mut uvfits_2 = fits_open!(&subtracted).unwrap();
-        fits_open_hdu!(&mut uvfits_2, 0).unwrap();
+        let mut uvfits_2 = fits_open(&subtracted).unwrap();
+        fits_open_hdu(&mut uvfits_2, 0).unwrap();
         let mut vis_2: Vec<f32> = vec![0.0; num_chans * 4 * 3];
         unsafe {
             // ffggpe = fits_read_grppar_flt
@@ -193,8 +193,8 @@ fn test_1090008640_vis_subtract() {
         let result = sub_args.run(false);
         assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
-        let mut uvfits = fits_open!(&subtracted).unwrap();
-        fits_open_hdu!(&mut uvfits, 0).unwrap();
+        let mut uvfits = fits_open(&subtracted).unwrap();
+        fits_open_hdu(&mut uvfits, 0).unwrap();
         let mut group_params = [0.0; 5];
         let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
         let mut status = 0;

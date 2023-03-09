@@ -344,7 +344,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
                 }
             };
 
-            let input_data = UvfitsReader::new(&uvfits, meta)?;
+            let input_data = UvfitsReader::new(&uvfits, meta, array_position)?;
 
             messages::InputFileDetails::UvfitsFile {
                 obsid: input_data.get_obs_context().obsid,

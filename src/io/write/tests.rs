@@ -183,7 +183,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
             VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None).unwrap())
+                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
@@ -381,7 +381,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
             VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None).unwrap())
+                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
@@ -587,7 +587,7 @@ fn test_vis_output_time_averaging() {
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
             VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None).unwrap())
+                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())

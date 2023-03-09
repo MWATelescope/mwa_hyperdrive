@@ -46,7 +46,7 @@ pub(crate) enum SolutionsReadError {
     Rts(#[from] RtsReadSolsError),
 
     #[error(transparent)]
-    Fits(#[from] mwalib::FitsError),
+    Fits(#[from] crate::io::read::fits::FitsError),
 
     #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),
@@ -64,7 +64,7 @@ pub(crate) enum SolutionsWriteError {
     Fitsio(#[from] fitsio::errors::Error),
 
     #[error(transparent)]
-    Fits(#[from] mwalib::FitsError),
+    Fits(#[from] crate::io::read::fits::FitsError),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

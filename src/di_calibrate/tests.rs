@@ -16,10 +16,6 @@ use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     Jones, LatLngHeight,
 };
-use mwalib::{
-    _get_fits_col, _get_required_fits_key, _open_fits, _open_hdu, fits_open, fits_open_hdu,
-    get_fits_col, get_required_fits_key,
-};
 use ndarray::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -30,7 +26,10 @@ use crate::{
     averaging::{channels_to_chanblocks, timesteps_to_timeblocks, Chanblock, Fence, Timeblock},
     beam::create_no_beam_object,
     cli::di_calibrate::DiCalParams,
-    io::read::{MsReader, RawDataCorrections, RawDataReader, VisRead},
+    io::read::{
+        fits::{fits_get_col, fits_get_required_key, fits_open, fits_open_hdu},
+        MsReader, RawDataCorrections, RawDataReader, VisRead,
+    },
     math::{is_prime, TileBaselineFlags},
     solutions::CalSolutionType,
     srclist::SourceList,
@@ -768,27 +767,27 @@ fn test_1090008640_calibrate_model_uvfits() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     let sols = result.unwrap();
 
-    let mut uvfits_m = fits_open!(&model).unwrap();
-    let hdu_m = fits_open_hdu!(&mut uvfits_m, 0).unwrap();
-    let gcount_m: String = get_required_fits_key!(&mut uvfits_m, &hdu_m, "GCOUNT").unwrap();
-    let pcount_m: String = get_required_fits_key!(&mut uvfits_m, &hdu_m, "PCOUNT").unwrap();
-    let floats_per_pol_m: String = get_required_fits_key!(&mut uvfits_m, &hdu_m, "NAXIS2").unwrap();
-    let num_pols_m: String = get_required_fits_key!(&mut uvfits_m, &hdu_m, "NAXIS3").unwrap();
+    let mut uvfits_m = fits_open(&model).unwrap();
+    let hdu_m = fits_open_hdu(&mut uvfits_m, 0).unwrap();
+    let gcount_m: String = fits_get_required_key(&mut uvfits_m, &hdu_m, "GCOUNT").unwrap();
+    let pcount_m: String = fits_get_required_key(&mut uvfits_m, &hdu_m, "PCOUNT").unwrap();
+    let floats_per_pol_m: String = fits_get_required_key(&mut uvfits_m, &hdu_m, "NAXIS2").unwrap();
+    let num_pols_m: String = fits_get_required_key(&mut uvfits_m, &hdu_m, "NAXIS3").unwrap();
     let num_fine_freq_chans_m: String =
-        get_required_fits_key!(&mut uvfits_m, &hdu_m, "NAXIS4").unwrap();
-    let jd_zero_m: String = get_required_fits_key!(&mut uvfits_m, &hdu_m, "PZERO5").unwrap();
-    let ptype4_m: String = get_required_fits_key!(&mut uvfits_m, &hdu_m, "PTYPE4").unwrap();
+        fits_get_required_key(&mut uvfits_m, &hdu_m, "NAXIS4").unwrap();
+    let jd_zero_m: String = fits_get_required_key(&mut uvfits_m, &hdu_m, "PZERO5").unwrap();
+    let ptype4_m: String = fits_get_required_key(&mut uvfits_m, &hdu_m, "PTYPE4").unwrap();
 
-    let mut uvfits_c = fits_open!(&cal_model).unwrap();
-    let hdu_c = fits_open_hdu!(&mut uvfits_c, 0).unwrap();
-    let gcount_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "GCOUNT").unwrap();
-    let pcount_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "PCOUNT").unwrap();
-    let floats_per_pol_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "NAXIS2").unwrap();
-    let num_pols_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "NAXIS3").unwrap();
+    let mut uvfits_c = fits_open(&cal_model).unwrap();
+    let hdu_c = fits_open_hdu(&mut uvfits_c, 0).unwrap();
+    let gcount_c: String = fits_get_required_key(&mut uvfits_c, &hdu_c, "GCOUNT").unwrap();
+    let pcount_c: String = fits_get_required_key(&mut uvfits_c, &hdu_c, "PCOUNT").unwrap();
+    let floats_per_pol_c: String = fits_get_required_key(&mut uvfits_c, &hdu_c, "NAXIS2").unwrap();
+    let num_pols_c: String = fits_get_required_key(&mut uvfits_c, &hdu_c, "NAXIS3").unwrap();
     let num_fine_freq_chans_c: String =
-        get_required_fits_key!(&mut uvfits_c, &hdu_c, "NAXIS4").unwrap();
-    let jd_zero_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "PZERO5").unwrap();
-    let ptype4_c: String = get_required_fits_key!(&mut uvfits_c, &hdu_c, "PTYPE4").unwrap();
+        fits_get_required_key(&mut uvfits_c, &hdu_c, "NAXIS4").unwrap();
+    let jd_zero_c: String = fits_get_required_key(&mut uvfits_c, &hdu_c, "PZERO5").unwrap();
+    let ptype4_c: String = fits_get_required_key(&mut uvfits_c, &hdu_c, "PTYPE4").unwrap();
 
     assert_eq!(gcount_m, gcount_c);
     assert_eq!(pcount_m, pcount_c);
@@ -798,19 +797,19 @@ fn test_1090008640_calibrate_model_uvfits() {
     assert_eq!(jd_zero_m, jd_zero_c);
     assert_eq!(ptype4_m, ptype4_c);
 
-    let hdu_m = fits_open_hdu!(&mut uvfits_m, 1).unwrap();
-    let tile_names_m: Vec<String> = get_fits_col!(&mut uvfits_m, &hdu_m, "ANNAME").unwrap();
-    let hdu_c = fits_open_hdu!(&mut uvfits_c, 1).unwrap();
-    let tile_names_c: Vec<String> = get_fits_col!(&mut uvfits_c, &hdu_c, "ANNAME").unwrap();
+    let hdu_m = fits_open_hdu(&mut uvfits_m, 1).unwrap();
+    let tile_names_m: Vec<String> = fits_get_col(&mut uvfits_m, &hdu_m, "ANNAME").unwrap();
+    let hdu_c = fits_open_hdu(&mut uvfits_c, 1).unwrap();
+    let tile_names_c: Vec<String> = fits_get_col(&mut uvfits_c, &hdu_c, "ANNAME").unwrap();
     for (tile_m, tile_c) in tile_names_m.into_iter().zip(tile_names_c.into_iter()) {
         assert_eq!(tile_m, tile_c);
     }
 
     // Test visibility values.
-    fits_open_hdu!(&mut uvfits_m, 0).unwrap();
+    fits_open_hdu(&mut uvfits_m, 0).unwrap();
     let mut group_params_m = Array1::zeros(5);
     let mut vis_m = Array1::zeros(10 * 4 * 3);
-    fits_open_hdu!(&mut uvfits_c, 0).unwrap();
+    fits_open_hdu(&mut uvfits_c, 0).unwrap();
     let mut group_params_c = group_params_m.clone();
     let mut vis_c = vis_m.clone();
 
