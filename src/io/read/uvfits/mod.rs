@@ -236,7 +236,14 @@ impl UvfitsReader {
             let tile_xyzs = Vec1::try_from_vec(tile_xyzs)
                 .expect("can't be empty, non-empty tile names verified above");
 
-            let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &primary_hdu)?;
+            let metadata = crate::misc::expensive_op(
+                || {
+                    let mut uvfits_fptr = fits_open(uvfits)?;
+                    let hdu = fits_open_hdu(&mut uvfits_fptr, 0)?;
+                    UvfitsMetadata::new(&mut uvfits_fptr, &hdu)
+                },
+                "Still waiting to inspect all uvfits metadata",
+            )?;
             debug!("Number of rows in the uvfits:   {}", metadata.num_rows);
             debug!("PCOUNT:                         {}", metadata.pcount);
             debug!("Number of polarisations:        {}", metadata.num_pols);
