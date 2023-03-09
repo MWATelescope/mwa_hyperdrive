@@ -186,7 +186,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(MsReader::new::<&Path, &Path>(&path, None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -384,7 +384,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(MsReader::new::<&Path, &Path>(&path, None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -590,7 +590,7 @@ fn test_vis_output_time_averaging() {
                 Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(MsReader::new::<&Path, &Path>(&path, None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();

@@ -202,6 +202,7 @@ impl DiCalParams {
             data,
             source_list,
             source_list_type,
+            ms_data_column_name,
             ignore_dut1,
             outputs,
             model_filenames,
@@ -341,7 +342,7 @@ impl DiCalParams {
                         }
                     };
 
-                    let input_data = MsReader::new(&ms, meta, array_position)?;
+                    let input_data = MsReader::new(&ms, ms_data_column_name, meta, array_position)?;
 
                     messages::InputFileDetails::MeasurementSet {
                         obsid: input_data.get_obs_context().obsid,

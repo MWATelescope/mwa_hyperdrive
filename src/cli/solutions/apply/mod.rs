@@ -32,7 +32,7 @@ use crate::{
     },
     context::ObsContext,
     filenames::InputDataTypes,
-    help_texts::ARRAY_POSITION_HELP,
+    help_texts::{ARRAY_POSITION_HELP, MS_DATA_COL_NAME_HELP},
     io::{
         read::{MsReader, RawDataReader, UvfitsReader, VisInputType, VisRead},
         write::{can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
@@ -82,6 +82,9 @@ pub struct SolutionsApplyArgs {
         value_names = &["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
     )]
     array_position: Option<Vec<f64>>,
+
+    #[clap(long, help = MS_DATA_COL_NAME_HELP, help_heading = "INPUT FILES")]
+    ms_data_column_name: Option<String>,
 
     /// Use a DUT1 value of 0 seconds rather than what is in the input data.
     #[clap(long, help_heading = "INPUT FILES")]
@@ -177,6 +180,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
         timesteps,
         use_all_timesteps,
         array_position,
+        ms_data_column_name,
         ignore_dut1,
         tile_flags,
         ignore_input_data_tile_flags,
@@ -311,7 +315,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
                 }
             };
 
-            let input_data = MsReader::new(&ms, meta, array_position)?;
+            let input_data = MsReader::new(&ms, ms_data_column_name, meta, array_position)?;
 
             messages::InputFileDetails::MeasurementSet {
                 obsid: input_data.get_obs_context().obsid,

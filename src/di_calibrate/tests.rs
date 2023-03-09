@@ -922,9 +922,9 @@ fn test_1090008640_calibrate_model_ms() {
     let sols = result.unwrap();
 
     let array_pos = LatLngHeight::mwa();
-    let ms_m = MsReader::new(&model, Some(metafits), Some(array_pos)).unwrap();
+    let ms_m = MsReader::new(&model, None, Some(metafits), Some(array_pos)).unwrap();
     let ctx_m = ms_m.get_obs_context();
-    let ms_c = MsReader::new(&cal_model, Some(metafits), Some(array_pos)).unwrap();
+    let ms_c = MsReader::new(&cal_model, None, Some(metafits), Some(array_pos)).unwrap();
     let ctx_c = ms_c.get_obs_context();
     assert_eq!(ctx_m.all_timesteps, ctx_c.all_timesteps);
     assert_eq!(ctx_m.all_timesteps.len(), num_timesteps);

@@ -43,3 +43,5 @@ lazy_static::lazy_static! {
         format!("Specifies the type of the output source list. If not specified, the input source list type is used. Currently supported types: {}",
                 *SOURCE_LIST_TYPES_COMMA_SEPARATED);
 }
+
+pub(crate) const MS_DATA_COL_NAME_HELP: &str = "If reading from a measurement set, this specifies the column to use in the main table containing visibilities. Default: DATA";

@@ -3,6 +3,8 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 //! Code to interface with CASA measurement sets.
+//!
+//! More info: https://casa.nrao.edu/Memos/229.html#SECTION00060000000000000000
 
 mod error;
 #[cfg(test)]
@@ -30,6 +32,8 @@ use rubbl_casatables::{Table, TableOpenMode};
 
 use super::*;
 use crate::{beam::Delays, context::ObsContext, metafits, misc::round_hundredths_of_a_second};
+
+const SUPPORTED_WEIGHT_COL_NAMES: [&str; 2] = ["WEIGHT_SPECTRUM", "WEIGHT"];
 
 pub(crate) enum MsFlavour {
     Hyperdrive,
@@ -108,6 +112,19 @@ pub(crate) struct MsReader {
     /// MSs may not number their antennas 0 to the total number of antennas.
     /// This map converts a MS antenna number to a 0-to-total index.
     tile_map: HashMap<i32, usize>,
+
+    /// The name of the column to be used containing visibility data in the main
+    /// column.
+    data_col_name: String,
+
+    /// The name of the column containing visibility weights in the main column.
+    // Some measurement sets use WEIGHT_SPECTRUM as their weights column, others
+    // use WEIGHT. Maybe there are probably even more variants.
+    weight_col_name: &'static str,
+
+    /// Is the weight column two-dimensional? We track this here because it
+    /// could be 1D or 2D.
+    weight_col_is_2d: bool,
 }
 
 impl MsReader {
@@ -120,11 +137,13 @@ impl MsReader {
     // TODO: Handle multiple measurement sets.
     pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         ms: P,
+        data_column_name: Option<String>,
         metafits: Option<P2>,
         array_pos: Option<LatLngHeight>,
     ) -> Result<MsReader, VisReadError> {
         fn inner(
             ms: &Path,
+            data_column_name: Option<String>,
             metafits: Option<&Path>,
             array_pos: Option<LatLngHeight>,
         ) -> Result<MsReader, MsReadError> {
@@ -144,6 +163,106 @@ impl MsReader {
             if main_table.n_rows() == 0 {
                 return Err(MsReadError::MainTableEmpty);
             }
+            let col_names = main_table.column_names()?;
+            let data_col_name = data_column_name.unwrap_or_else(|| "DATA".to_string());
+            // Validate the data column name, specified or not.
+            if !col_names.contains(&data_col_name) {
+                return Err(MsReadError::NoDataCol { col: data_col_name });
+            }
+            let weight_col_name = {
+                let mut weight_col_name_to_use = None;
+                for name in SUPPORTED_WEIGHT_COL_NAMES {
+                    if col_names.iter().any(|col_name| col_name == name) {
+                        weight_col_name_to_use = Some(name);
+                        break;
+                    }
+                }
+                weight_col_name_to_use.ok_or(MsReadError::NoWeightCol)?
+            };
+            drop(col_names);
+
+            // The weights array can be 1D or 2D (upside-down
+            // emoji). This is documented, but, I don't trust people
+            // to be sensible here. So, if the weights array is 2D,
+            // we assume that the second axis is a weight per
+            // polarisation, otherwise a single weight for all pols
+            // of a visibility.
+            let weight_col_is_2d = {
+                // Try the 2D read, and report whether it succeeded or not.
+                let mut weight_col_is_2d = true;
+                main_table.for_each_row_in_range(0..1, |row| {
+                    let array2: Result<Array2<f32>, _> = row.get_cell(weight_col_name);
+                    if array2.is_ok() {
+                        // Until the need arises, we complain if there aren't 4
+                        // polarisations present.
+                        if array2?.len_of(Axis(1)) != 4 {
+                            panic!(
+                                "{}",
+                                MsReadError::BadArraySize {
+                                    array_type: "weights",
+                                    row_index: 0,
+                                    expected_len: 4,
+                                    axis_num: 1,
+                                }
+                            );
+                        }
+                    } else {
+                        weight_col_is_2d = false;
+                    }
+                    Ok(())
+                })?;
+                weight_col_is_2d
+            };
+
+            // Verify that the dimensions of the data and flag columns are
+            // sensible. We're assuming that the dimensions of the arrays pulled
+            // out from each column doesn't change with row, but that's not
+            // possible with a MS, right?
+            main_table.for_each_row_in_range(0..1, |row| {
+                let data: Result<Array2<c32>, _> = row.get_cell(&data_col_name);
+                // If there was an error here, the reason might be that we
+                // attempted to read complex numbers out of a column that
+                // doesn't contain them.
+                if let Err(err) = data {
+                    panic!(
+                        "{}",
+                        MsReadError::MainTableColReadError {
+                            column: data_col_name.clone(),
+                            err,
+                        }
+                    );
+                }
+                let data = data?;
+                // We assume here that the main_table contains a FLAG table.
+                let flags: Array2<bool> = row.get_cell("FLAG")?;
+
+                // Until the need arises, we complain if there aren't 4
+                // polarisations present.
+                if data.len_of(Axis(1)) != 4 {
+                    panic!(
+                        "{}",
+                        MsReadError::BadArraySize {
+                            array_type: "data",
+                            row_index: 0,
+                            expected_len: 4,
+                            axis_num: 1,
+                        }
+                    );
+                }
+                if flags.len_of(Axis(1)) != 4 {
+                    panic!(
+                        "{}",
+                        MsReadError::BadArraySize {
+                            array_type: "flags",
+                            row_index: 0,
+                            expected_len: 4,
+                            axis_num: 1,
+                        }
+                    );
+                }
+                assert_eq!(data.dim(), flags.dim());
+                Ok(())
+            })?;
 
             // What created this measurement set?
             let mut history_table = read_table(ms, Some("HISTORY"))?;
@@ -183,7 +302,7 @@ impl MsReader {
                             height_metres: COTTER_MWA_HEIGHT_METRES,
                         }
                     }
-                    (None, MsFlavour::Casa) => todo!(),
+                    (None, MsFlavour::Casa) => return Err(MsReadError::NoArrayPos),
                 };
 
                 let vec = XyzGeocentric::get_geocentric_vector(array_pos);
@@ -599,8 +718,6 @@ impl MsReader {
 
             // Get the observation's flagged channels per coarse band.
             let flagged_fine_chans: Vec<bool> = {
-                // We assume here that the main_table contains a FLAG table.
-
                 // Get the first unflagged timestep. If there aren't any, get
                 // the middle one.
                 let timestep = *unflagged_timesteps
@@ -618,10 +735,19 @@ impl MsReader {
                     // are flagged, flag the whole channel.
                     let flagged_fine_chans: Vec<bool> =
                         main_table.get_cell_as_vec("FLAG", row_range.start)?;
-                    flagged_fine_chans
-                        .chunks_exact(4)
-                        .map(|pol_flags| pol_flags.iter().any(|f| *f))
-                        .collect()
+                    // If there are 4x as many flags as there are fine channels,
+                    // then we assume its because there's a flag specified for
+                    // each polarisation. Which is dumb. If any of the 4 flags
+                    // for a channel are flagged, we consider the channel
+                    // flagged.
+                    if (flagged_fine_chans.len() / fine_chan_freqs.len()) % 4 == 0 {
+                        flagged_fine_chans
+                            .chunks_exact(4)
+                            .map(|pol_flags| pol_flags.iter().any(|f| *f))
+                            .collect()
+                    } else {
+                        flagged_fine_chans
+                    }
                 };
                 main_table.for_each_row_in_range(row_range, |row| {
                     let row_flagged_fine_chans: Array2<bool> = row.get_cell("FLAG")?;
@@ -729,11 +855,15 @@ impl MsReader {
                 step,
                 metafits_context: mwalib_context,
                 tile_map,
+                data_col_name,
+                weight_col_name,
+                weight_col_is_2d,
             };
             Ok(ms)
         }
         inner(
             ms.as_ref(),
+            data_column_name,
             metafits.as_ref().map(|f| f.as_ref()),
             array_pos,
         )
@@ -774,59 +904,35 @@ impl MsReader {
                         .tile_baseline_flags
                         .tile_to_unflagged_cross_baseline_map
                         .get(&(ant1, ant2))
-                        .cloned()
+                        .copied()
                     {
                         // The data array is arranged [frequency][instrumental_pol].
-                        let ms_data: Array2<c32> = row.get_cell("DATA")?;
-                        // The weight array is arranged
-                        // [frequency][instrumental_pol], however, we assume the
-                        // weights for all instrumental visibility polarisations
-                        // are all the same. There isn't a way to just read one
-                        // axis of the data.
-                        let ms_weights: Array2<f32> = row.get_cell("WEIGHT_SPECTRUM")?;
+                        let ms_data: Array2<c32> = row.get_cell(&self.data_col_name)?;
+                        let ms_weights: Vec<f32> = {
+                            if self.weight_col_is_2d {
+                                // The weight array is arranged
+                                // [frequency][instrumental_pol].
+                                let ms_weights: Array2<f32> = row.get_cell(self.weight_col_name)?;
+                                // Collapse the weights into a single number per
+                                // frequency; having a weight per polarisation
+                                // is not useful.
+                                ms_weights
+                                    .exact_chunks((1, 4))
+                                    .into_iter()
+                                    .map(|weights| {
+                                        weights.iter().copied().reduce(f32::min).expect("not empty")
+                                    })
+                                    .collect()
+                            } else {
+                                // One weight per frequency.
+                                row.get_cell(self.weight_col_name)?
+                            }
+                        };
                         // The flag array is arranged
                         // [frequency][instrumental_pol]. As with the weights,
-                        // the polarisation doesn't matter.
+                        // we ignore the per polarisation values.
                         let flags: Array2<bool> = row.get_cell("FLAG")?;
 
-                        // Ensure that all arrays have appropriate sizes. We
-                        // have to panic here because of the way Rubbl does
-                        // error handling.
-                        if ms_data.len_of(Axis(1)) != 4 {
-                            panic!(
-                                "{}",
-                                MsReadError::BadArraySize {
-                                    array_type: "ms_data",
-                                    row_index,
-                                    expected_len: 4,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
-                        if ms_weights.len_of(Axis(1)) != 4 {
-                            panic!(
-                                "{}",
-                                MsReadError::BadArraySize {
-                                    array_type: "weights",
-                                    row_index,
-                                    expected_len: 4,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
-                        if flags.len_of(Axis(1)) != 4 {
-                            panic!(
-                                "{}",
-                                MsReadError::BadArraySize {
-                                    array_type: "flags",
-                                    row_index,
-                                    expected_len: 4,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
-                        assert_eq!(ms_data.dim(), ms_weights.dim());
-                        assert_eq!(ms_weights.dim(), flags.dim());
                         if crosses.data_array.len_of(Axis(1)) < bl {
                             panic!(
                                 "{}",
@@ -869,12 +975,16 @@ impl MsReader {
                         let mut out_weights = crosses.weights_array.slice_mut(s![.., bl]);
                         ms_weights
                             .into_iter()
-                            .step_by(4)
-                            .zip(flags.into_iter().step_by(4))
+                            .zip(flags.outer_iter())
                             .enumerate()
                             .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                             .zip(out_weights.iter_mut())
                             .for_each(|((_, (weight, flag)), out_weight)| {
+                                // Collapse the multiple flag values into a
+                                // single one by finding any that are true (i.e.
+                                // at least one polarisation is marked as
+                                // flagged, so flag the whole visibility).
+                                let flag = flag.into_iter().copied().any(|f| f);
                                 *out_weight = if flag { -weight.abs() } else { weight };
                             });
                     }
@@ -888,45 +998,27 @@ impl MsReader {
                             .get(&ant1)
                             .copied()
                         {
-                            let ms_data: Array2<c32> = row.get_cell("DATA")?;
-                            let ms_weights: Array2<f32> = row.get_cell("WEIGHT_SPECTRUM")?;
+                            let ms_data: Array2<c32> = row.get_cell(&self.data_col_name)?;
+                            let ms_weights: Vec<f32> = {
+                                if self.weight_col_is_2d {
+                                    let ms_weights: Array2<f32> =
+                                        row.get_cell(self.weight_col_name)?;
+                                    ms_weights
+                                        .exact_chunks((1, 4))
+                                        .into_iter()
+                                        .map(|weights| {
+                                            weights
+                                                .iter()
+                                                .copied()
+                                                .reduce(f32::min)
+                                                .expect("not empty")
+                                        })
+                                        .collect()
+                                } else {
+                                    row.get_cell(self.weight_col_name)?
+                                }
+                            };
                             let flags: Array2<bool> = row.get_cell("FLAG")?;
-
-                            if ms_data.len_of(Axis(1)) != 4 {
-                                panic!(
-                                    "{}",
-                                    MsReadError::BadArraySize {
-                                        array_type: "ms_data",
-                                        row_index,
-                                        expected_len: 4,
-                                        axis_num: 1,
-                                    }
-                                );
-                            }
-                            if ms_weights.len_of(Axis(1)) != 4 {
-                                panic!(
-                                    "{}",
-                                    MsReadError::BadArraySize {
-                                        array_type: "weights",
-                                        row_index,
-                                        expected_len: 4,
-                                        axis_num: 1,
-                                    }
-                                );
-                            }
-                            if flags.len_of(Axis(1)) != 4 {
-                                panic!(
-                                    "{}",
-                                    MsReadError::BadArraySize {
-                                        array_type: "flags",
-                                        row_index,
-                                        expected_len: 4,
-                                        axis_num: 1,
-                                    }
-                                );
-                            }
-                            assert_eq!(ms_data.dim(), ms_weights.dim());
-                            assert_eq!(ms_weights.dim(), flags.dim());
 
                             if autos.data_array.len_of(Axis(1)) < i_ant {
                                 panic!(
@@ -964,12 +1056,12 @@ impl MsReader {
                             let mut out_weights = autos.weights_array.slice_mut(s![.., i_ant]);
                             ms_weights
                                 .into_iter()
-                                .step_by(4)
-                                .zip(flags.into_iter().step_by(4))
+                                .zip(flags.outer_iter())
                                 .enumerate()
                                 .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                                 .zip(out_weights.iter_mut())
                                 .for_each(|((_, (weight, flag)), out_weight)| {
+                                    let flag = flag.into_iter().copied().any(|f| f);
                                     *out_weight = if flag { -weight.abs() } else { weight };
                                 });
                         }

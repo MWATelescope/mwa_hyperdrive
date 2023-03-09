@@ -35,8 +35,8 @@ use crate::{
     context::ObsContext,
     filenames::InputDataTypes,
     help_texts::{
-        ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP as sdc_help,
-        SOURCE_LIST_TYPE_HELP, VETO_THRESHOLD_HELP as vt_help,
+        ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, MS_DATA_COL_NAME_HELP,
+        SOURCE_DIST_CUTOFF_HELP as sdc_help, SOURCE_LIST_TYPE_HELP, VETO_THRESHOLD_HELP as vt_help,
     },
     io::{
         get_single_match_from_glob,
@@ -81,6 +81,9 @@ pub struct VisSubtractArgs {
     /// timesteps, including flagged ones.
     #[clap(long, multiple_values(true), help_heading = "INPUT FILES")]
     timesteps: Option<Vec<usize>>,
+
+    #[clap(long, help = MS_DATA_COL_NAME_HELP, help_heading = "INPUT FILES")]
+    ms_data_column_name: Option<String>,
 
     /// Use a DUT1 value of 0 seconds rather than what is in the input data.
     #[clap(long, help_heading = "INPUT FILES")]
@@ -200,6 +203,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         source_list,
         source_list_type,
         timesteps,
+        ms_data_column_name,
         ignore_dut1,
         outputs,
         time_average,
@@ -322,7 +326,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 }
             };
 
-            let input_data = MsReader::new(ms, meta, array_position)?;
+            let input_data = MsReader::new(ms, ms_data_column_name, meta, array_position)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from measurement set {}",

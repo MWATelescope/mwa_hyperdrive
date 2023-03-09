@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use marlu::rubbl_casatables;
 use thiserror::Error;
 
+use super::SUPPORTED_WEIGHT_COL_NAMES;
+
 #[derive(Error, Debug)]
 pub(crate) enum MsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
@@ -16,6 +18,18 @@ pub(crate) enum MsReadError {
 
     #[error("The main table of the measurement set contains no rows!")]
     MainTableEmpty,
+
+    #[error("Could not find the column '{col}' in the main table containing visibility data")]
+    NoDataCol { col: String },
+
+    #[error("Could not find a column in the main table with visibility weights; searched for {SUPPORTED_WEIGHT_COL_NAMES:?}")]
+    NoWeightCol,
+
+    #[error("Error when trying to read from main table column '{column}': {err}")]
+    MainTableColReadError {
+        column: String,
+        err: rubbl_casatables::TableError,
+    },
 
     #[error("The antenna table of the measurement set contains no rows!")]
     AntennaTableEmpty,
@@ -60,6 +74,9 @@ pub(crate) enum MsReadError {
 
     #[error("Found a MWA_SUBBAND number '{num}'; values must not be negative")]
     NegativeSubband { num: i32 },
+
+    #[error("The Earth position/location of the array responsible for these MS visibilities cannot be assumed or determined. Please specify manually or supply a metafits file.")]
+    NoArrayPos,
 
     #[error("Error when trying to interface with measurement set: {0}")]
     Table(#[from] rubbl_casatables::TableError),
