@@ -561,7 +561,7 @@ impl UvfitsReader {
             phase_centre,
             pointing_centre,
             array_position,
-            _supplied_array_position: Some(supplied_array_position),
+            _supplied_array_position: supplied_array_position,
             dut1,
             tile_names,
             tile_xyzs,

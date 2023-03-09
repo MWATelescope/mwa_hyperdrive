@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use marlu::rubbl_casatables;
 use thiserror::Error;
 
+use super::SUPPORTED_WEIGHT_COL_NAMES;
+
 #[derive(Error, Debug)]
 pub enum MsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
@@ -16,6 +18,18 @@ pub enum MsReadError {
 
     #[error("The main table of the measurement set contains no rows!")]
     MainTableEmpty,
+
+    #[error("Could not find the column '{col}' in the main table containing visibility data")]
+    NoDataCol { col: String },
+
+    #[error("Could not find a column in the main table with visibility weights; searched for {SUPPORTED_WEIGHT_COL_NAMES:?}")]
+    NoWeightCol,
+
+    #[error("Error when trying to read from main table column '{column}': {err}")]
+    MainTableColReadError {
+        column: String,
+        err: rubbl_casatables::TableError,
+    },
 
     #[error("The antenna table of the measurement set contains no rows!")]
     AntennaTableEmpty,

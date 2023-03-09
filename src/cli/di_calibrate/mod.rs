@@ -110,6 +110,9 @@ pub struct DiCalArgs {
     #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
     pub source_list_type: Option<String>,
 
+    #[clap(long, help = MS_DATA_COL_NAME_HELP, help_heading = "INPUT FILES")]
+    pub ms_data_column_name: Option<String>,
+
     /// Use a DUT1 value of 0 seconds rather than what is in the input data.
     #[clap(long, help_heading = "INPUT FILES")]
     pub ignore_dut1: bool,
@@ -360,6 +363,7 @@ impl DiCalArgs {
                 data,
                 source_list,
                 source_list_type,
+                ms_data_column_name,
                 ignore_dut1,
                 outputs,
                 model_filenames,
@@ -402,6 +406,7 @@ impl DiCalArgs {
                 data: cli_args.data.or(data),
                 source_list: cli_args.source_list.or(source_list),
                 source_list_type: cli_args.source_list_type.or(source_list_type),
+                ms_data_column_name: cli_args.ms_data_column_name.or(ms_data_column_name),
                 ignore_dut1: cli_args.ignore_dut1 || ignore_dut1,
                 outputs: cli_args.outputs.or(outputs),
                 model_filenames: cli_args.model_filenames.or(model_filenames),

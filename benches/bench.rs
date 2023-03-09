@@ -563,7 +563,7 @@ fn io_benchmarks(c: &mut Criterion) {
     )
     .unwrap();
     let uvfits = UvfitsReader::new(uvfits.path().to_path_buf(), Some(&metafits), None).unwrap();
-    let ms = MsReader::new(ms.path(), Some(&metafits), None).unwrap();
+    let ms = MsReader::new(ms.path().to_path_buf(), None, Some(&metafits), None).unwrap();
 
     let tile_baseline_flags = TileBaselineFlags::new(128, HashSet::new());
 

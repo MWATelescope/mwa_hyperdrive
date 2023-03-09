@@ -186,7 +186,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(MsReader::new(path.to_path_buf(), None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -384,7 +384,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(MsReader::new(path.to_path_buf(), None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -402,18 +402,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
-
-        // Currently, our uvfits files report the time resolution, but not our
-        // measurement sets. Without the metafits file, the MS reader guesses
-        // the time resolution from the data. Seeing as the smallest gap is 2s,
-        // the time resolution will be reported as 2s, but it should be 1s.
-        match vis_type {
-            VisOutputType::Uvfits => assert_eq!(obs_context.time_res, Some(time_res)),
-            VisOutputType::MeasurementSet => {
-                assert_ne!(obs_context.time_res, Some(time_res));
-                assert_eq!(obs_context.time_res, Some(Duration::from_seconds(2.0)));
-            }
-        }
+        assert_eq!(obs_context.time_res, Some(time_res));
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
@@ -595,7 +584,7 @@ fn test_vis_output_time_averaging() {
                 Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(MsReader::new(path.to_path_buf(), None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -612,19 +601,7 @@ fn test_vis_output_time_averaging() {
             obs_context.timestamps.mapped_ref(|t| t.to_gpst_seconds()),
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
-
-        // Currently, our uvfits files report the time resolution, but not our
-        // measurement sets. Without the metafits file, the MS reader guesses
-        // the time resolution from the data. Seeing as the smallest gap is 6s,
-        // the time resolution will be reported as 6s, but it should be 3s.
-        match vis_type {
-            VisOutputType::Uvfits => {
-                assert_eq!(obs_context.time_res, Some(Duration::from_seconds(3.0)))
-            }
-            VisOutputType::MeasurementSet => {
-                assert_eq!(obs_context.time_res, Some(Duration::from_seconds(6.0)));
-            }
-        }
+        assert_eq!(obs_context.time_res, Some(Duration::from_seconds(3.0)));
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (

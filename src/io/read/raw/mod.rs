@@ -459,7 +459,7 @@ impl RawDataReader {
             phase_centre,
             pointing_centre,
             array_position,
-            _supplied_array_position: Some(supplied_array_position),
+            _supplied_array_position: supplied_array_position,
             dut1: metafits_context.dut1.map(Duration::from_seconds),
             tile_names,
             tile_xyzs,

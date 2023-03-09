@@ -72,7 +72,7 @@ pub(crate) struct ObsContext {
     /// The Earth position of the instrumental array *that is described by the
     /// input data*. It is provided here to distinguish from `array_position`,
     /// which may be different.
-    pub(crate) _supplied_array_position: Option<LatLngHeight>,
+    pub(crate) _supplied_array_position: LatLngHeight,
 
     /// The difference between UT1 and UTC. If this is 0 seconds, then LSTs are
     /// wrong by up to 0.9 seconds. The code will assume that 0 seconds means

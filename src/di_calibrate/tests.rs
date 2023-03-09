@@ -900,6 +900,12 @@ fn test_1090008640_calibrate_model_ms() {
     let args = get_reduced_1090008640(false, false);
     let metafits = &args.data.as_ref().unwrap()[0];
     let srclist = args.source_list.unwrap();
+
+    // Non-default array position
+    let lat_deg = MWA_LAT_DEG - 1.;
+    let long_deg = MWA_LONG_DEG - 1.;
+    let height_m = MWA_HEIGHT_M - 1.;
+
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
@@ -908,6 +914,10 @@ fn test_1090008640_calibrate_model_ms() {
         "--output-model-files", &format!("{}", model.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
+        "--array-position",
+            &format!("{long_deg}"),
+            &format!("{lat_deg}"),
+            &format!("{height_m}"),
         "--no-progress-bars"
     ]);
 
@@ -924,6 +934,10 @@ fn test_1090008640_calibrate_model_ms() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
+        "--array-position",
+            &format!("{long_deg}"),
+            &format!("{lat_deg}"),
+            &format!("{height_m}"),
         "--no-progress-bars"
     ]);
 
@@ -933,9 +947,15 @@ fn test_1090008640_calibrate_model_ms() {
     let sols = result.unwrap();
 
     let array_pos = LatLngHeight::mwa();
-    let ms_m = MsReader::new(&model, Some(metafits), Some(array_pos)).unwrap();
+    let ms_m = MsReader::new(model, None, Some(&PathBuf::from(metafits)), Some(array_pos)).unwrap();
     let ctx_m = ms_m.get_obs_context();
-    let ms_c = MsReader::new(&cal_model, Some(metafits), Some(array_pos)).unwrap();
+    let ms_c = MsReader::new(
+        cal_model,
+        None,
+        Some(&PathBuf::from(metafits)),
+        Some(array_pos),
+    )
+    .unwrap();
     let ctx_c = ms_c.get_obs_context();
     assert_eq!(ctx_m.all_timesteps, ctx_c.all_timesteps);
     assert_eq!(ctx_m.all_timesteps.len(), num_timesteps);
@@ -990,7 +1010,7 @@ fn test_1090008640_calibrate_model_ms() {
         // introduced. If a metafits' positions are used instead, the results
         // are *exactly* the same, but we should trust the MS's positions, so
         // these errors must remain.
-        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 1e-4);
+        assert_abs_diff_eq!(vis_m, vis_c, epsilon = 5e-6);
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
@@ -998,7 +1018,7 @@ fn test_1090008640_calibrate_model_ms() {
     assert_abs_diff_eq!(
         sols.di_jones,
         Array3::from_elem(sols.di_jones.dim(), Jones::identity()),
-        epsilon = 2e-8
+        epsilon = 5e-9
     );
 }
 

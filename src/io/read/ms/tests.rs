@@ -25,7 +25,12 @@ use crate::{
 fn test_1090008640_cross_vis() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits), None) {
+        match MsReader::new(
+            PathBuf::from(ms),
+            None,
+            Some(&PathBuf::from(metafits)),
+            None,
+        ) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -90,7 +95,12 @@ fn test_1090008640_cross_vis() {
 fn read_1090008640_auto_vis() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits), None) {
+        match MsReader::new(
+            PathBuf::from(ms),
+            None,
+            Some(&PathBuf::from(metafits)),
+            None,
+        ) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -180,7 +190,12 @@ fn read_1090008640_auto_vis() {
 fn read_1090008640_auto_vis_with_flags() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits), None) {
+        match MsReader::new(
+            PathBuf::from(ms),
+            None,
+            Some(&PathBuf::from(metafits)),
+            None,
+        ) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -278,7 +293,12 @@ fn read_1090008640_auto_vis_with_flags() {
 fn read_1090008640_cross_and_auto_vis() {
     let args = get_reduced_1090008640_ms();
     let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(ms, Some(metafits), None) {
+        match MsReader::new(
+            PathBuf::from(ms),
+            None,
+            Some(&PathBuf::from(metafits)),
+            None,
+        ) {
             Ok(m) => m,
             Err(e) => panic!("{}", e),
         }
@@ -501,7 +521,7 @@ fn test_timestep_reading() {
         .write_vis(vis_data.view(), weight_data.view(), &vis_ctx)
         .unwrap();
 
-    let ms_reader = MsReader::new::<&PathBuf, &PathBuf>(&vis_path, None, None).unwrap();
+    let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
     let ms_ctx = ms_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)
@@ -523,13 +543,13 @@ fn test_timestep_reading() {
 #[test]
 #[serial]
 fn test_trunc_data() {
-    let metafits: Option<&str> = None;
     let expected_num_tiles = 128;
     let expected_unavailable_tiles = (2..128).collect::<Vec<usize>>();
 
     let result = MsReader::new(
-        "test_files/1090008640/1090008640_cotter_trunc_autos.ms",
-        metafits,
+        PathBuf::from("test_files/1090008640/1090008640_cotter_trunc_autos.ms"),
+        None,
+        None,
         None,
     );
     assert!(result.is_ok(), "{:?}", result.err());
@@ -549,8 +569,9 @@ fn test_trunc_data() {
     assert_eq!(&reader.obs_context.unflagged_timesteps, &[2]);
 
     let result = MsReader::new(
-        "test_files/1090008640/1090008640_cotter_trunc_noautos.ms",
-        metafits,
+        PathBuf::from("test_files/1090008640/1090008640_cotter_trunc_noautos.ms"),
+        None,
+        None,
         None,
     );
     assert!(result.is_ok(), "{:?}", result.err());
@@ -570,8 +591,9 @@ fn test_trunc_data() {
     assert_eq!(&reader.obs_context.unflagged_timesteps, &[2]);
 
     let result = MsReader::new(
-        "test_files/1090008640/1090008640_birli_trunc.ms",
-        metafits,
+        PathBuf::from("test_files/1090008640/1090008640_birli_trunc.ms"),
+        None,
+        None,
         None,
     );
     assert!(result.is_ok(), "{:?}", result.err());
@@ -618,8 +640,9 @@ fn test_map_metafits_antenna_order() {
     // and gains are already correct without re-ordering.
     let metafits_path = "test_files/1090008640/1090008640.metafits";
     let ms = MsReader::new(
-        "test_files/1090008640/1090008640.ms",
-        Some(metafits_path),
+        PathBuf::from("test_files/1090008640/1090008640.ms"),
+        None,
+        Some(&PathBuf::from(metafits_path)),
         None,
     )
     .unwrap();
@@ -721,7 +744,8 @@ fn test_map_metafits_antenna_order() {
     }
 
     let ms = MsReader::new(
-        "test_files/1090008640/1090008640.ms",
+        PathBuf::from("test_files/1090008640/1090008640.ms"),
+        None,
         Some(metafits.path()),
         None,
     )
@@ -823,7 +847,8 @@ fn test_map_metafits_antenna_order() {
     }
 
     let ms = MsReader::new(
-        "test_files/1090008640/1090008640.ms",
+        PathBuf::from("test_files/1090008640/1090008640.ms"),
+        None,
         Some(metafits.path()),
         None,
     )

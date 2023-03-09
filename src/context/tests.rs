@@ -17,7 +17,7 @@ fn get_minimal_obs_context() -> ObsContext {
         phase_centre: RADec::default(),
         pointing_centre: Some(RADec::default()),
         array_position: LatLngHeight::mwa(),
-        _supplied_array_position: None,
+        _supplied_array_position: LatLngHeight::mwa(),
         dut1: None,
         tile_names: vec1!["Tile00".into()],
         tile_xyzs: vec1![XyzGeodetic::default()],

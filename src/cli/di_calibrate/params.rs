@@ -206,6 +206,7 @@ impl DiCalParams {
             data,
             source_list,
             source_list_type,
+            ms_data_column_name,
             ignore_dut1,
             outputs,
             model_filenames,
@@ -339,18 +340,20 @@ impl DiCalParams {
                     };
 
                     // Ensure that there's only one metafits.
-                    let meta: Option<&PathBuf> = match meta.as_ref() {
+                    let meta: Option<&Path> = match meta.as_ref() {
                         None => None,
                         Some(m) => {
                             if m.len() > 1 {
                                 return Err(DiCalArgsError::MultipleMetafits(m.clone()));
                             } else {
-                                Some(m.first())
+                                Some(m.first().as_path())
                             }
                         }
                     };
 
-                    let input_data = MsReader::new(&ms, meta, array_position)?;
+                    let input_data =
+                        MsReader::new(ms.clone(), ms_data_column_name, meta, array_position)
+                            .map_err(VisReadError::from)?;
 
                     messages::InputFileDetails::MeasurementSet {
                         obsid: input_data.get_obs_context().obsid,
