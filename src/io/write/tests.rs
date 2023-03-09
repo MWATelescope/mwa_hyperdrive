@@ -15,8 +15,8 @@ use vec1::{vec1, Vec1};
 use super::*;
 use crate::{
     averaging::timesteps_to_timeblocks,
+    io::read::{MsReader, UvfitsReader, VisRead},
     math::TileBaselineFlags,
-    vis_io::read::{MsReader, UvfitsReader, VisRead},
 };
 
 fn synthesize_test_data(

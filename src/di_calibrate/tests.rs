@@ -32,11 +32,11 @@ use crate::{
     beam::create_no_beam_object,
     cli::di_calibrate::DiCalParams,
     di_calibrate::calibrate_timeblock,
+    io::read::{MsReader, RawDataCorrections, RawDataReader, VisRead},
     math::{is_prime, TileBaselineFlags},
     solutions::CalSolutionType,
     srclist::SourceList,
     tests::reduced_obsids::get_reduced_1090008640,
-    vis_io::read::{MsReader, RawDataCorrections, RawDataReader, VisRead},
     CalibrationSolutions, DiCalArgs, VisSimulateArgs,
 };
 

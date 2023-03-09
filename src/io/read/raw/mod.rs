@@ -6,6 +6,7 @@
 
 mod error;
 mod helpers;
+pub(crate) mod pfb_gains;
 #[cfg(test)]
 mod tests;
 
@@ -36,13 +37,12 @@ use crate::{
     flagging::{MwafFlags, MwafProducer},
     math::TileBaselineFlags,
     metafits,
-    pfb_gains::{PfbFlavour, PfbParseError},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawDataCorrections {
     /// What 'flavour' are the PFB gains?
-    pub(crate) pfb_flavour: PfbFlavour,
+    pub(crate) pfb_flavour: pfb_gains::PfbFlavour,
 
     /// Should digital gains be applied?
     pub(crate) digital_gains: bool,
@@ -65,11 +65,11 @@ impl RawDataCorrections {
         digital_gains: bool,
         cable_length: bool,
         geometric: bool,
-    ) -> Result<RawDataCorrections, PfbParseError> {
+    ) -> Result<RawDataCorrections, pfb_gains::PfbParseError> {
         Ok(Self {
             pfb_flavour: match pfb_flavour {
-                None => crate::pfb_gains::DEFAULT_PFB_FLAVOUR,
-                Some(s) => PfbFlavour::parse(s)?,
+                None => pfb_gains::DEFAULT_PFB_FLAVOUR,
+                Some(s) => pfb_gains::PfbFlavour::parse(s)?,
             },
             digital_gains,
             cable_length,
@@ -84,14 +84,17 @@ impl RawDataCorrections {
             cable_length,
             geometric,
         } = self;
-        matches!(pfb_flavour, PfbFlavour::None) && !digital_gains && !cable_length && !geometric
+        matches!(pfb_flavour, pfb_gains::PfbFlavour::None)
+            && !digital_gains
+            && !cable_length
+            && !geometric
     }
 }
 
 impl Default for RawDataCorrections {
     fn default() -> Self {
         Self {
-            pfb_flavour: crate::pfb_gains::DEFAULT_PFB_FLAVOUR,
+            pfb_flavour: pfb_gains::DEFAULT_PFB_FLAVOUR,
             digital_gains: true,
             cable_length: true,
             geometric: true,

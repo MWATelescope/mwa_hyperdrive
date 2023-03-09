@@ -15,8 +15,7 @@ use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 use vec1::Vec1;
 
-use crate::glob::{get_all_matches_from_glob, GlobError};
-use crate::vis_io::read::VisReadError;
+use crate::io::{get_all_matches_from_glob, read::VisReadError, GlobError};
 
 lazy_static::lazy_static! {
     // gpubox files should not be renamed in any way! This includes the case of

@@ -34,19 +34,19 @@ use crate::{
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
     filenames::InputDataTypes,
-    glob::*,
     help_texts::{
         ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP as sdc_help,
         SOURCE_LIST_TYPE_HELP, VETO_THRESHOLD_HELP as vt_help,
+    },
+    io::{
+        get_single_match_from_glob,
+        read::{MsReader, UvfitsReader, VisInputType, VisRead},
+        write::{can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
     math::TileBaselineFlags,
     messages,
     model::ModellerInfo,
     srclist::{read::read_source_list_file, veto_sources, SourceList, SourceListType},
-    vis_io::{
-        read::{MsReader, UvfitsReader, VisInputType, VisRead},
-        write::{can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
-    },
     HyperdriveError,
 };
 

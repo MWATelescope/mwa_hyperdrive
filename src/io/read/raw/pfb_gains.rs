@@ -16,11 +16,11 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
 
-pub(super) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Jake;
+pub(crate) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Jake;
 
 lazy_static::lazy_static! {
     // Useful for help texts.
-    pub(super) static ref PFB_FLAVOURS: String = PfbFlavour::iter().join(", ");
+    pub(crate) static ref PFB_FLAVOURS: String = PfbFlavour::iter().join(", ");
 }
 
 /// All available kinds of PFB gains.
@@ -71,7 +71,7 @@ impl PfbFlavour {
 }
 
 #[derive(Error, Debug)]
-#[error("Could not parse PFB flavour '{value}'.\nSupported flavours are: {}", *crate::pfb_gains::PFB_FLAVOURS)]
+#[error("Could not parse PFB flavour '{value}'.\nSupported flavours are: {}", *PFB_FLAVOURS)]
 pub(crate) struct PfbParseError {
     value: String,
 }

@@ -31,18 +31,18 @@ use crate::{
     averaging::{parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks},
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
-    glob::get_single_match_from_glob,
     help_texts::{
         ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
+    },
+    io::{
+        get_single_match_from_glob,
+        write::{can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
     math::TileBaselineFlags,
     messages,
     metafits::{get_dipole_delays, get_dipole_gains},
     model::{self, ModellerInfo, SkyModeller},
     srclist::{read::read_source_list_file, veto_sources, ComponentCounts, SourceList},
-    vis_io::write::{
-        can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS,
-    },
     HyperdriveError,
 };
 

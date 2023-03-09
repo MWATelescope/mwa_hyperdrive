@@ -76,7 +76,7 @@ pub(crate) enum UvfitsReadError {
     BadString(#[from] std::ffi::NulError),
 
     #[error(transparent)]
-    Glob(#[from] crate::glob::GlobError),
+    Glob(#[from] crate::io::GlobError),
 
     /// An IO error.
     #[error(transparent)]

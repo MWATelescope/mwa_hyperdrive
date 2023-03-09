@@ -36,7 +36,7 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use super::CalibrationSolutions;
-use crate::glob::get_all_matches_from_glob;
+use crate::io::get_all_matches_from_glob;
 
 lazy_static::lazy_static! {
     static ref NODE_NUM: Regex = Regex::new(r"node(\d{3})\.dat$").unwrap();
@@ -663,7 +663,7 @@ pub(crate) enum RtsReadSolsError {
     },
 
     #[error(transparent)]
-    Glob(#[from] crate::glob::GlobError),
+    Glob(#[from] crate::io::GlobError),
 
     #[error("Error when reading metafits: {0}")]
     Mwalib(#[from] mwalib::MwalibError),

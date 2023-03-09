@@ -8,7 +8,7 @@ use crate::{
     constants::{
         DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG,
     },
-    pfb_gains::{DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
+    io::read::pfb_gains::{DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
     srclist::SOURCE_LIST_TYPES_COMMA_SEPARATED,
 };
 

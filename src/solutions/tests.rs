@@ -9,7 +9,7 @@ use ndarray::prelude::*;
 use vec1::{vec1, Vec1};
 
 use super::*;
-use crate::{pfb_gains::PfbFlavour, vis_io::read::RawDataCorrections};
+use crate::io::read::{pfb_gains::PfbFlavour, RawDataCorrections};
 
 fn make_solutions() -> CalibrationSolutions {
     let num_timeblocks = 2;

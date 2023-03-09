@@ -33,9 +33,9 @@ use strum_macros::{Display, EnumIter, EnumString};
 use crate::{
     di_calibrate::DiCalibrateError,
     help_texts::*,
+    io::write::VIS_OUTPUT_EXTENSIONS,
     solutions::{self, CalSolutionType, CalibrationSolutions, CAL_SOLUTION_EXTENSIONS},
     unit_parsing::WAVELENGTH_FORMATS,
-    vis_io::write::VIS_OUTPUT_EXTENSIONS,
     HyperdriveError,
 };
 

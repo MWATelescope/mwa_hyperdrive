@@ -11,7 +11,7 @@ mod uvfits;
 
 pub(crate) use error::VisReadError;
 pub(crate) use ms::MsReader;
-pub(crate) use raw::{RawDataCorrections, RawDataReader};
+pub(crate) use raw::{pfb_gains, RawDataCorrections, RawDataReader};
 pub(crate) use uvfits::UvfitsReader;
 
 use std::collections::HashSet;

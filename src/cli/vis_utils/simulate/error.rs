@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::vis_io::write::VIS_OUTPUT_EXTENSIONS;
+use crate::io::write::VIS_OUTPUT_EXTENSIONS;
 
 #[derive(Error, Debug)]
 pub(crate) enum VisSimulateError {
@@ -48,7 +48,7 @@ pub(crate) enum VisSimulateError {
     NoSourcesAfterVeto,
 
     #[error(transparent)]
-    FileWrite(#[from] crate::vis_io::write::FileWriteError),
+    FileWrite(#[from] crate::io::write::FileWriteError),
 
     #[error(transparent)]
     AverageFactor(#[from] crate::averaging::AverageFactorError),
@@ -63,10 +63,10 @@ pub(crate) enum VisSimulateError {
     Beam(#[from] crate::beam::BeamError),
 
     #[error(transparent)]
-    VisWrite(#[from] crate::vis_io::write::VisWriteError),
+    VisWrite(#[from] crate::io::write::VisWriteError),
 
     #[error(transparent)]
-    Glob(#[from] crate::glob::GlobError),
+    Glob(#[from] crate::io::GlobError),
 
     #[error(transparent)]
     Mwalib(#[from] mwalib::MwalibError),

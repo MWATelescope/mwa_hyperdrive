@@ -29,10 +29,10 @@ pub(crate) enum DiCalibrateError {
     Model(#[from] crate::model::ModelError),
 
     #[error(transparent)]
-    VisRead(#[from] crate::vis_io::read::VisReadError),
+    VisRead(#[from] crate::io::read::VisReadError),
 
     #[error(transparent)]
-    VisWrite(#[from] crate::vis_io::write::VisWriteError),
+    VisWrite(#[from] crate::io::write::VisWriteError),
 
     #[error(transparent)]
     Fitsio(#[from] fitsio::errors::Error),

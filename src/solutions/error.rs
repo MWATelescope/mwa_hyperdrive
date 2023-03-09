@@ -37,7 +37,7 @@ pub(crate) enum SolutionsReadError {
     },
 
     #[error(transparent)]
-    ParsePfbFlavour(#[from] crate::pfb_gains::PfbParseError),
+    ParsePfbFlavour(#[from] crate::io::read::pfb_gains::PfbParseError),
 
     #[error("When interfacing with RTS calibration solutions, a metafits file is required")]
     RtsMetafitsRequired,

@@ -80,7 +80,7 @@ pub(crate) enum DiCalArgsError {
     UnavailableTimestep { got: usize, last: usize },
 
     #[error(
-        "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::vis_io::write::VIS_OUTPUT_EXTENSIONS
+        "Cannot write visibilities to a file type '{ext}'. Supported formats are: {}", *crate::io::write::VIS_OUTPUT_EXTENSIONS
     )]
     VisFileType { ext: String },
 
@@ -91,7 +91,7 @@ pub(crate) enum DiCalArgsError {
     CalibrationOutputFile { ext: String },
 
     #[error(transparent)]
-    ParsePfbFlavour(#[from] crate::pfb_gains::PfbParseError),
+    ParsePfbFlavour(#[from] crate::io::read::pfb_gains::PfbParseError),
 
     #[error("Error when parsing time average factor: {0}")]
     ParseCalTimeAverageFactor(crate::unit_parsing::UnitParseError),
@@ -151,13 +151,13 @@ pub(crate) enum DiCalArgsError {
     BadArrayPosition { pos: Vec<f64> },
 
     #[error(transparent)]
-    Glob(#[from] crate::glob::GlobError),
+    Glob(#[from] crate::io::GlobError),
 
     #[error(transparent)]
-    VisRead(#[from] crate::vis_io::read::VisReadError),
+    VisRead(#[from] crate::io::read::VisReadError),
 
     #[error(transparent)]
-    FileWrite(#[from] crate::vis_io::write::FileWriteError),
+    FileWrite(#[from] crate::io::write::FileWriteError),
 
     #[error(transparent)]
     Veto(#[from] crate::srclist::VetoError),

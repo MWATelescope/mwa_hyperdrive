@@ -30,7 +30,7 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use vec1::Vec1;
 
-use crate::{vis_io::read::RawDataCorrections, HyperdriveError};
+use crate::{io::read::RawDataCorrections, HyperdriveError};
 
 lazy_static::lazy_static! {
     pub(crate) static ref CAL_SOLUTION_EXTENSIONS: String = CalSolutionType::iter().join(", ");

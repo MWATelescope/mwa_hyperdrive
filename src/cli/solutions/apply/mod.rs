@@ -33,14 +33,15 @@ use crate::{
     context::ObsContext,
     filenames::InputDataTypes,
     help_texts::ARRAY_POSITION_HELP,
-    math::TileBaselineFlags,
-    messages,
-    pfb_gains::PfbFlavour,
-    solutions::CalibrationSolutions,
-    vis_io::{
-        read::{MsReader, RawDataReader, UvfitsReader, VisInputType, VisRead},
+    io::{
+        read::{
+            pfb_gains::PfbFlavour, MsReader, RawDataReader, UvfitsReader, VisInputType, VisRead,
+        },
         write::{can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
+    math::TileBaselineFlags,
+    messages,
+    solutions::CalibrationSolutions,
     HyperdriveError,
 };
 

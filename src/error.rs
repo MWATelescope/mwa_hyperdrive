@@ -15,9 +15,9 @@ use crate::{
     },
     di_calibrate::DiCalibrateError,
     filenames::InputFileError,
+    io::read::VisReadError,
     solutions::{SolutionsReadError, SolutionsWriteError},
     srclist::SrclistError,
-    vis_io::read::VisReadError,
 };
 
 const URL: &str = "https://MWATelescope.github.io/mwa_hyperdrive";

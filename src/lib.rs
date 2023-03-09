@@ -16,18 +16,16 @@ pub mod di_calibrate;
 pub(crate) mod error;
 pub(crate) mod filenames;
 pub(crate) mod flagging;
-pub(crate) mod glob;
 mod help_texts;
+pub(crate) mod io;
 pub(crate) mod math;
 pub(crate) mod messages;
 pub(crate) mod metafits;
 pub(crate) mod misc;
 pub mod model;
-pub(crate) mod pfb_gains;
 pub(crate) mod solutions;
 pub mod srclist;
 pub(crate) mod unit_parsing;
-pub(crate) mod vis_io;
 
 #[cfg(feature = "cuda")]
 pub(crate) mod cuda;

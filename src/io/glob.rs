@@ -71,10 +71,10 @@ mod tests {
         let result = get_single_match_from_glob("./Cargo*");
         assert!(result.is_err());
 
-        let result = get_single_match_from_glob("src/vis_io/write/mod*");
+        let result = get_single_match_from_glob("src/io/write/mod*");
         assert!(result.is_ok(), "{:?}", result.err().unwrap());
         let entry = result.unwrap();
-        assert_eq!(entry, PathBuf::from("src/vis_io/write/mod.rs"));
+        assert_eq!(entry, PathBuf::from("src/io/write/mod.rs"));
 
         let glob = "Cargo.t*l";
         assert_eq!(

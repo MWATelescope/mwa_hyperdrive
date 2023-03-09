@@ -35,10 +35,10 @@ use vec1::Vec1;
 use crate::{
     averaging::{timesteps_to_timeblocks, Chanblock, Timeblock},
     cli::di_calibrate::DiCalParams,
+    io::write::{write_vis, VisTimestep},
     math::average_epoch,
     model::{self, ModellerInfo},
     solutions::CalibrationSolutions,
-    vis_io::write::{write_vis, VisTimestep},
 };
 
 pub(crate) struct CalVis {

@@ -14,7 +14,6 @@ use super::*;
 use crate::{
     cli::di_calibrate::DiCalArgs,
     di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
-    pfb_gains::{EMPIRICAL_40KHZ, LEVINE_40KHZ},
     tests::{deflate_gz_into_file, reduced_obsids::get_reduced_1090008640},
 };
 
@@ -392,7 +391,7 @@ fn pfb_empirical_gains() {
     vis_pfb
         .outer_iter()
         .zip_eq(vis_no_pfb.outer_iter())
-        .zip_eq(EMPIRICAL_40KHZ.iter())
+        .zip_eq(pfb_gains::EMPIRICAL_40KHZ.iter())
         .for_each(|((vis_pfb, vis_no_pfb), &gain)| {
             vis_pfb
                 .iter()
@@ -435,7 +434,7 @@ fn pfb_levine_gains() {
     vis_pfb
         .outer_iter()
         .zip_eq(vis_no_pfb.outer_iter())
-        .zip(LEVINE_40KHZ.iter())
+        .zip(pfb_gains::LEVINE_40KHZ.iter())
         .for_each(|((vis_pfb, vis_no_pfb), &gain)| {
             vis_pfb
                 .iter()
