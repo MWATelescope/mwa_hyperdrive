@@ -127,7 +127,10 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
         }
 
         // Read the input source list.
-        let (sl, sl_type) = read_source_list_file(input_path, input_type)?;
+        let (sl, sl_type) = crate::misc::expensive_op(
+            || read_source_list_file(input_path, input_type),
+            "Still reading source list file",
+        )?;
         if input_type.is_none() {
             info!(
                 "Successfully read {} as a {}-style source list",

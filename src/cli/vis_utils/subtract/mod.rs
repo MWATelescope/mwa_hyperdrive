@@ -268,7 +268,10 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
         let sl_type = source_list_type
             .as_ref()
             .and_then(|t| SourceListType::from_str(t.as_ref()).ok());
-        let (sl, _) = match read_source_list_file(pb, sl_type) {
+        let (sl, _) = match crate::misc::expensive_op(
+            || read_source_list_file(pb, sl_type),
+            "Still reading source list file",
+        ) {
             Ok((sl, sl_type)) => (sl, sl_type),
             Err(e) => return Err(VisSubtractError::from(e)),
         };

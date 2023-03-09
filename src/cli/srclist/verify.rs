@@ -67,10 +67,22 @@ fn verify<P: AsRef<Path>>(
         let (sl, sl_type) = if let Some(input_type) = input_type {
             let mut buf = std::io::BufReader::new(File::open(source_list)?);
             let result = match input_type {
-                SourceListType::Hyperdrive => hyperdrive::source_list_from_yaml(&mut buf),
-                SourceListType::AO => ao::parse_source_list(&mut buf),
-                SourceListType::Rts => rts::parse_source_list(&mut buf),
-                SourceListType::Woden => woden::parse_source_list(&mut buf),
+                SourceListType::Hyperdrive => crate::misc::expensive_op(
+                    || hyperdrive::source_list_from_yaml(&mut buf),
+                    "Still reading source list file",
+                ),
+                SourceListType::AO => crate::misc::expensive_op(
+                    || ao::parse_source_list(&mut buf),
+                    "Still reading source list file",
+                ),
+                SourceListType::Rts => crate::misc::expensive_op(
+                    || rts::parse_source_list(&mut buf),
+                    "Still reading source list file",
+                ),
+                SourceListType::Woden => crate::misc::expensive_op(
+                    || woden::parse_source_list(&mut buf),
+                    "Still reading source list file",
+                ),
             };
             match result {
                 Ok(sl) => (sl, input_type),
@@ -81,7 +93,11 @@ fn verify<P: AsRef<Path>>(
                 }
             }
         } else {
-            match read_source_list_file(source_list, None) {
+            let source_list = source_list.as_ref();
+            match crate::misc::expensive_op(
+                || read_source_list_file(source_list, None),
+                "Still reading source list file",
+            ) {
                 Ok(sl) => sl,
                 Err(e) => {
                     info!("{}", e);

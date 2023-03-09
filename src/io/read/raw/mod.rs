@@ -5,13 +5,11 @@
 //! Code to handle reading from raw MWA files.
 
 mod error;
-mod helpers;
 pub(crate) mod pfb_gains;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use error::*;
-use helpers::*;
 
 use std::{
     collections::HashSet,
@@ -168,8 +166,10 @@ impl RawDataReader {
         trace!("Using gpubox files: {:#?}", gpubox_pbs);
 
         trace!("Creating mwalib context");
-        let mwalib_context =
-            get_mwalib_correlator_context(meta_pb, gpubox_pbs).map_err(Box::new)?;
+        let mwalib_context = crate::misc::expensive_op(
+            || CorrelatorContext::new(meta_pb, &gpubox_pbs).map_err(Box::new),
+            "Still waiting to inspect all gpubox metadata",
+        )?;
         let metafits_context = &mwalib_context.metafits_context;
 
         let is_mwax = match mwalib_context.mwa_version {

@@ -464,7 +464,10 @@ impl VisSimParams {
         };
         // Read the source list.
         // TODO: Allow the user to specify a source list type.
-        let source_list = match read_source_list_file(sl_pb, None) {
+        let source_list: SourceList = match crate::misc::expensive_op(
+            || read_source_list_file(sl_pb, None),
+            "Still reading source list file",
+        ) {
             Ok((sl, sl_type)) => {
                 debug!("Successfully parsed {}-style source list", sl_type);
                 sl

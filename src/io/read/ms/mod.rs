@@ -351,51 +351,57 @@ impl MsReader {
         // ("unavailable tiles"). Iterate over the baselines (i.e. main table
         // rows) until we've seen all available antennas.
         let mut autocorrelations_present = false;
-        let (tile_map, unavailable_tiles): (HashMap<i32, usize>, Vec<usize>) = {
-            let antenna1: Vec<i32> = main_table.get_col_as_vec("ANTENNA1")?;
-            let antenna2: Vec<i32> = main_table.get_col_as_vec("ANTENNA2")?;
+        let (tile_map, unavailable_tiles): (HashMap<i32, usize>, Vec<usize>) =
+            crate::misc::expensive_op(
+                || {
+                    let mut main_table = read_table(&ms, None)?;
+                    let antenna1: Vec<i32> = main_table.get_col_as_vec("ANTENNA1")?;
+                    let antenna2: Vec<i32> = main_table.get_col_as_vec("ANTENNA2")?;
 
-            let mut present_tiles = HashSet::with_capacity(total_num_tiles);
-            for (&antenna1, &antenna2) in antenna1.iter().zip(antenna2.iter()) {
-                present_tiles.insert(antenna1);
-                present_tiles.insert(antenna2);
+                    let mut present_tiles = HashSet::with_capacity(total_num_tiles);
+                    for (&antenna1, &antenna2) in antenna1.iter().zip(antenna2.iter()) {
+                        present_tiles.insert(antenna1);
+                        present_tiles.insert(antenna2);
 
-                if !autocorrelations_present && antenna1 == antenna2 {
-                    autocorrelations_present = true;
-                }
-            }
+                        if !autocorrelations_present && antenna1 == antenna2 {
+                            autocorrelations_present = true;
+                        }
+                    }
 
-            // Ensure there aren't more tiles here than in the names or XYZs
-            // (names and XYZs are checked to be the same above).
-            if present_tiles.len() > tile_xyzs.len() {
-                return Err(MsReadError::MismatchNumMainTableNumXyzs {
-                    main: present_tiles.len(),
-                    xyzs: tile_xyzs.len(),
-                });
-            }
+                    // Ensure there aren't more tiles here than in the names or XYZs
+                    // (names and XYZs are checked to be the same above).
+                    if present_tiles.len() > tile_xyzs.len() {
+                        return Err(MsReadError::MismatchNumMainTableNumXyzs {
+                            main: present_tiles.len(),
+                            xyzs: tile_xyzs.len(),
+                        });
+                    }
 
-            // Ensure all MS antenna indices are positive and none are bigger
-            // than the number of XYZs.
-            for &i in &present_tiles {
-                if i < 0 {
-                    return Err(MsReadError::AntennaNumNegative(i));
-                }
-                if i as usize >= tile_xyzs.len() {
-                    return Err(MsReadError::AntennaNumTooBig(i));
-                }
-            }
+                    // Ensure all MS antenna indices are positive and none are bigger
+                    // than the number of XYZs.
+                    for &i in &present_tiles {
+                        if i < 0 {
+                            return Err(MsReadError::AntennaNumNegative(i));
+                        }
+                        if i as usize >= tile_xyzs.len() {
+                            return Err(MsReadError::AntennaNumTooBig(i));
+                        }
+                    }
 
-            let mut tile_map = HashMap::with_capacity(present_tiles.len());
-            let mut unavailable_tiles = Vec::with_capacity(total_num_tiles - present_tiles.len());
-            for i_tile in 0..total_num_tiles {
-                if let Some(v) = present_tiles.get(&(i_tile as i32)) {
-                    tile_map.insert(*v, i_tile);
-                } else {
-                    unavailable_tiles.push(i_tile);
-                }
-            }
-            (tile_map, unavailable_tiles)
-        };
+                    let mut tile_map = HashMap::with_capacity(present_tiles.len());
+                    let mut unavailable_tiles =
+                        Vec::with_capacity(total_num_tiles - present_tiles.len());
+                    for i_tile in 0..total_num_tiles {
+                        if let Some(v) = present_tiles.get(&(i_tile as i32)) {
+                            tile_map.insert(*v, i_tile);
+                        } else {
+                            unavailable_tiles.push(i_tile);
+                        }
+                    }
+                    Ok::<_, MsReadError>((tile_map, unavailable_tiles))
+                },
+                "Still waiting to determine MS antenna metadata",
+            )?;
         debug!("Autocorrelations present: {autocorrelations_present}");
         debug!("Unavailable tiles: {unavailable_tiles:?}");
 
@@ -418,47 +424,52 @@ impl MsReader {
         // all flagged, and (by default) we are not interested in using any of
         // those data. We work out the first and last good timesteps by
         // inspecting the flags at each timestep.
-        let unflagged_timesteps: Vec<usize> = {
-            // The first and last good timestep indices.
-            let mut first: Option<usize> = None;
-            let mut last: Option<usize> = None;
+        let unflagged_timesteps: Vec<usize> = crate::misc::expensive_op(
+            || {
+                // The first and last good timestep indices.
+                let mut first: Option<usize> = None;
+                let mut last: Option<usize> = None;
 
-            trace!("Searching for unflagged timesteps in the MS");
-            for i_step in 0..(main_table.n_rows() as usize) / step {
-                trace!("Reading timestep {i_step}");
-                let mut all_rows_for_step_flagged = true;
-                for i_row in 0..step {
-                    let vis_flags: Vec<bool> =
-                        main_table.get_cell_as_vec("FLAG", (i_step * step + i_row) as u64)?;
-                    let all_flagged = vis_flags.into_iter().all(|f| f);
-                    if !all_flagged {
-                        all_rows_for_step_flagged = false;
-                        if first.is_none() {
-                            first = Some(i_step);
-                            debug!("First good timestep: {i_step}");
+                trace!("Searching for unflagged timesteps in the MS");
+                let mut main_table = read_table(&ms, None)?;
+                for i_step in 0..(main_table.n_rows() as usize) / step {
+                    trace!("Reading timestep {i_step}");
+                    let mut all_rows_for_step_flagged = true;
+                    for i_row in 0..step {
+                        let vis_flags: Vec<bool> =
+                            main_table.get_cell_as_vec("FLAG", (i_step * step + i_row) as u64)?;
+                        let all_flagged = vis_flags.into_iter().all(|f| f);
+                        if !all_flagged {
+                            all_rows_for_step_flagged = false;
+                            if first.is_none() {
+                                first = Some(i_step);
+                                debug!("First good timestep: {i_step}");
+                            }
+                            break;
                         }
+                    }
+                    if all_rows_for_step_flagged && first.is_some() {
+                        last = Some(i_step);
+                        debug!("Last good timestep: {}", i_step - 1);
                         break;
                     }
                 }
-                if all_rows_for_step_flagged && first.is_some() {
-                    last = Some(i_step);
-                    debug!("Last good timestep: {}", i_step - 1);
-                    break;
-                }
-            }
 
-            // Did the indices get set correctly?
-            match (first, last) {
-                (Some(f), Some(l)) => f..l,
-                // If there weren't any flags at the end of the MS, then the
-                // last timestep is fine.
-                (Some(f), None) => f..main_table.n_rows() as usize / step,
-                // All timesteps are flagged. The user can still use the MS, but
-                // they must specify some amount of flagged timesteps.
-                _ => 0..0,
-            }
-        }
-        .collect();
+                // Did the indices get set correctly?
+                let timesteps = match (first, last) {
+                    (Some(f), Some(l)) => f..l,
+                    // If there weren't any flags at the end of the MS, then the
+                    // last timestep is fine.
+                    (Some(f), None) => f..main_table.n_rows() as usize / step,
+                    // All timesteps are flagged. The user can still use the MS, but
+                    // they must specify some amount of flagged timesteps.
+                    _ => 0..0,
+                }
+                .collect();
+                Ok::<_, TableError>(timesteps)
+            },
+            "Still waiting to determine MS timesteps",
+        )?;
 
         // Neither Birli nor cotter utilise the "FLAG_ROW" column of the antenna
         // table. This is the best (only?) way to unambiguously identify flagged

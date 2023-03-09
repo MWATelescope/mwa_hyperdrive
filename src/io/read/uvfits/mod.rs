@@ -207,7 +207,14 @@ impl UvfitsReader {
         let tile_xyzs = Vec1::try_from_vec(tile_xyzs)
             .expect("can't be empty, non-empty tile names verified above");
 
-        let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &primary_hdu)?;
+        let metadata = crate::misc::expensive_op(
+            || {
+                let mut uvfits_fptr = fits_open(&uvfits)?;
+                let hdu = fits_open_hdu(&mut uvfits_fptr, 0)?;
+                UvfitsMetadata::new(&mut uvfits_fptr, &hdu)
+            },
+            "Still waiting to inspect all uvfits metadata",
+        )?;
         // Make a nice little string for user display. uvfits always puts YY
         // before cross pols so we have to use some logic here.
         let pol_str = match metadata.pols {

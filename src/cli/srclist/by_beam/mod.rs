@@ -173,7 +173,10 @@ fn by_beam<P: AsRef<Path>, S: AsRef<str>>(
     ) -> Result<(), SrclistError> {
         // Read the input source list.
         let input_type = input_type.and_then(|t| SourceListType::from_str(t).ok());
-        let (sl, sl_type) = read_source_list_file(input_path, input_type)?;
+        let (sl, sl_type) = crate::misc::expensive_op(
+            || read_source_list_file(input_path, input_type),
+            "Still reading source list file",
+        )?;
         if input_type.is_none() {
             info!(
                 "Successfully read {} as a {}-style source list",

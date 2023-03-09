@@ -38,6 +38,7 @@ use crate::{
     context::Polarisations,
     io::write::{write_vis, VisTimestep},
     math::average_epoch,
+    misc::expensive_op,
     model::{self, ModellerInfo},
     solutions::CalibrationSolutions,
 };
@@ -115,9 +116,25 @@ pub(crate) fn get_cal_vis(
     }
 
     debug!("Allocating memory for input data visibilities and model visibilities");
-    let mut vis_data_tfb: Array3<Jones<f32>> = fallible_allocator!(Jones::default())?;
-    let mut vis_model_tfb: Array3<Jones<f32>> = fallible_allocator!(Jones::default())?;
-    let mut vis_weights_tfb: Array3<f32> = fallible_allocator!(0.0)?;
+    let CalVis {
+        mut vis_data_tfb,
+        mut vis_model_tfb,
+        mut vis_weights_tfb,
+        pols: _,
+    } = expensive_op(
+        || -> Result<_, DiCalibrateError> {
+            let vis_data_tfb: Array3<Jones<f32>> = fallible_allocator!(Jones::default())?;
+            let vis_model_tfb: Array3<Jones<f32>> = fallible_allocator!(Jones::default())?;
+            let vis_weights_tfb: Array3<f32> = fallible_allocator!(0.0)?;
+            Ok(CalVis {
+                vis_data_tfb,
+                vis_weights_tfb,
+                vis_model_tfb,
+                pols: Polarisations::default(),
+            })
+        },
+        "Still waiting to allocate visibility memory",
+    )?;
 
     // Sky-modelling communication channel. Used to tell the model writer when
     // visibilities have been generated and they're ready to be written.

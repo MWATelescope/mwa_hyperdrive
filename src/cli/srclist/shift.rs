@@ -128,7 +128,10 @@ fn shift<P: AsRef<Path>, S: AsRef<str>>(
         let f = BufReader::new(File::open(source_shifts_file)?);
         let source_shifts: BTreeMap<String, RaDec> =
             serde_json::from_reader(f).map_err(WriteSourceListError::from)?;
-        let (sl, sl_type) = read_source_list_file(source_list_file, input_type)?;
+        let (sl, sl_type) = crate::misc::expensive_op(
+            || read_source_list_file(source_list_file, input_type),
+            "Still reading source list file",
+        )?;
         info!(
             "Successfully read {} as a {}-style source list",
             source_list_file.display(),
