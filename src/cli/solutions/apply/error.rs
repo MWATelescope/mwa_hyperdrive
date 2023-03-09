@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use vec1::Vec1;
 
-use crate::{filenames::SUPPORTED_INPUT_FILE_COMBINATIONS, vis_io::write::VIS_OUTPUT_EXTENSIONS};
+use crate::{filenames::SUPPORTED_INPUT_FILE_COMBINATIONS, io::write::VIS_OUTPUT_EXTENSIONS};
 
 #[derive(Error, Debug)]
 pub(crate) enum SolutionsApplyError {
@@ -87,13 +87,13 @@ pub(crate) enum SolutionsApplyError {
     SolutionsRead(#[from] crate::solutions::SolutionsReadError),
 
     #[error(transparent)]
-    VisRead(#[from] crate::vis_io::read::VisReadError),
+    VisRead(#[from] crate::io::read::VisReadError),
 
     #[error(transparent)]
-    FileWrite(#[from] crate::vis_io::write::FileWriteError),
+    FileWrite(#[from] crate::io::write::FileWriteError),
 
     #[error(transparent)]
-    VisWrite(#[from] crate::vis_io::write::VisWriteError),
+    VisWrite(#[from] crate::io::write::VisWriteError),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

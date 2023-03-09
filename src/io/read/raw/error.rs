@@ -32,7 +32,7 @@ pub(crate) enum RawReadError {
     MwafMerge(#[from] MwafMergeError),
 
     #[error(transparent)]
-    Glob(#[from] crate::glob::GlobError),
+    Glob(#[from] crate::io::GlobError),
 
     #[error("mwalib error: {0}")]
     Mwalib(#[from] mwalib::MwalibError),

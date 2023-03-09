@@ -20,12 +20,12 @@ use vec1::Vec1;
 
 use crate::{
     flagging::MwafFlags,
+    io::{read::RawDataCorrections, write::VisOutputType},
     model::ModellerInfo,
     pfb_gains::PfbFlavour,
     solutions::CalibrationSolutions,
     srclist::{ComponentCounts, SourceList},
     unit_parsing::WavelengthUnit,
-    vis_io::{read::RawDataCorrections, write::VisOutputType},
 };
 
 #[must_use = "This struct must be consumed with its print() method"]

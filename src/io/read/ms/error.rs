@@ -68,7 +68,7 @@ pub(crate) enum MsReadError {
     Casacore(#[from] rubbl_casatables::CasacoreError),
 
     #[error(transparent)]
-    Glob(#[from] crate::glob::GlobError),
+    Glob(#[from] crate::io::GlobError),
 
     #[error(transparent)]
     Mwalib(#[from] mwalib::MwalibError),

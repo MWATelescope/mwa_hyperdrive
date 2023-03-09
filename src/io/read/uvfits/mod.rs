@@ -29,9 +29,9 @@ use super::*;
 use crate::{
     beam::Delays,
     context::ObsContext,
+    io::read::{VisRead, VisReadError},
     metafits::{get_dipole_delays, get_dipole_gains, map_antenna_order},
     misc::quantize_duration,
-    vis_io::read::{VisRead, VisReadError},
 };
 
 pub(crate) struct UvfitsReader {

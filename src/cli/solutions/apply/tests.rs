@@ -18,11 +18,11 @@ use vec1::vec1;
 
 use super::*;
 use crate::{
+    io::read::RawDataCorrections,
     pfb_gains::PfbFlavour,
     tests::reduced_obsids::{
         get_reduced_1090008640, get_reduced_1090008640_ms, get_reduced_1090008640_uvfits,
     },
-    vis_io::read::RawDataCorrections,
 };
 
 fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {

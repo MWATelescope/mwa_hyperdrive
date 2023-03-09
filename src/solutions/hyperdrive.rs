@@ -30,7 +30,7 @@ use rayon::prelude::*;
 use vec1::Vec1;
 
 use super::{error::*, CalibrationSolutions};
-use crate::{pfb_gains::PfbFlavour, vis_io::read::RawDataCorrections};
+use crate::{io::read::RawDataCorrections, pfb_gains::PfbFlavour};
 
 pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
     let mut fptr = fits_open!(file)?;

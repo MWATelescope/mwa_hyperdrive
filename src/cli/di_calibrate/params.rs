@@ -28,20 +28,20 @@ use crate::{
     context::ObsContext,
     di_calibrate::{calibrate_timeblocks, get_cal_vis, CalVis},
     filenames::InputDataTypes,
-    glob::*,
-    math::TileBaselineFlags,
-    messages,
-    model::ModellerInfo,
-    solutions::{CalSolutionType, CalibrationSolutions},
-    srclist::{read::read_source_list_file, veto_sources, SourceList, SourceListType},
-    unit_parsing::{parse_wavelength, WavelengthUnit},
-    vis_io::{
+    io::{
+        get_single_match_from_glob,
         read::{
             MsReader, RawDataCorrections, RawDataReader, UvfitsReader, VisInputType, VisRead,
             VisReadError,
         },
         write::{can_write_to_file, VisOutputType},
     },
+    math::TileBaselineFlags,
+    messages,
+    model::ModellerInfo,
+    solutions::{CalSolutionType, CalibrationSolutions},
+    srclist::{read::read_source_list_file, veto_sources, SourceList, SourceListType},
+    unit_parsing::{parse_wavelength, WavelengthUnit},
 };
 
 /// Parameters needed to perform calibration.
