@@ -193,19 +193,19 @@ impl MsReader {
                 main_table.for_each_row_in_range(0..1, |row| {
                     let array2: Result<Array2<f32>, _> = row.get_cell(weight_col_name);
                     if array2.is_ok() {
-                        // Until the need arises, we complain if there aren't 4
-                        // polarisations present.
-                        if array2?.len_of(Axis(1)) != 4 {
-                            panic!(
-                                "{}",
-                                MsReadError::BadArraySize {
-                                    array_type: "weights",
-                                    row_index: 0,
-                                    expected_len: 4,
-                                    axis_num: 1,
-                                }
-                            );
-                        }
+                        // // Until the need arises, we complain if there aren't 4
+                        // // polarisations present.
+                        // if array2?.len_of(Axis(1)) != 4 {
+                        //     panic!(
+                        //         "{}",
+                        //         MsReadError::BadArraySize {
+                        //             array_type: "weights",
+                        //             row_index: 0,
+                        //             expected_len: 4,
+                        //             axis_num: 1,
+                        //         }
+                        //     );
+                        // }
                     } else {
                         weight_col_is_2d = false;
                     }
@@ -236,30 +236,30 @@ impl MsReader {
                 // We assume here that the main_table contains a FLAG table.
                 let flags: Array2<bool> = row.get_cell("FLAG")?;
 
-                // Until the need arises, we complain if there aren't 4
-                // polarisations present.
-                if data.len_of(Axis(1)) != 4 {
-                    panic!(
-                        "{}",
-                        MsReadError::BadArraySize {
-                            array_type: "data",
-                            row_index: 0,
-                            expected_len: 4,
-                            axis_num: 1,
-                        }
-                    );
-                }
-                if flags.len_of(Axis(1)) != 4 {
-                    panic!(
-                        "{}",
-                        MsReadError::BadArraySize {
-                            array_type: "flags",
-                            row_index: 0,
-                            expected_len: 4,
-                            axis_num: 1,
-                        }
-                    );
-                }
+                // // Until the need arises, we complain if there aren't 4
+                // // polarisations present.
+                // if data.len_of(Axis(1)) != 4 {
+                //     panic!(
+                //         "{}",
+                //         MsReadError::BadArraySize {
+                //             array_type: "data",
+                //             row_index: 0,
+                //             expected_len: 4,
+                //             axis_num: 1,
+                //         }
+                //     );
+                // }
+                // if flags.len_of(Axis(1)) != 4 {
+                //     panic!(
+                //         "{}",
+                //         MsReadError::BadArraySize {
+                //             array_type: "flags",
+                //             row_index: 0,
+                //             expected_len: 4,
+                //             axis_num: 1,
+                //         }
+                //     );
+                // }
                 assert_eq!(data.dim(), flags.dim());
                 Ok(())
             })?;
@@ -964,8 +964,18 @@ impl MsReader {
                             .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                             .zip(out_vis.iter_mut())
                             .for_each(|((_, ms_data), out_vis)| {
-                                *out_vis =
-                                    Jones::from([ms_data[0], ms_data[1], ms_data[2], ms_data[3]]);
+                                *out_vis = if ms_data.len() == 4 {
+                                    Jones::from([ms_data[0], ms_data[1], ms_data[2], ms_data[3]])
+                                } else if ms_data.len() == 1 {
+                                    Jones::from([
+                                        ms_data[0],
+                                        c32::default(),
+                                        c32::default(),
+                                        ms_data[0],
+                                    ])
+                                } else {
+                                    panic!("Number of data polarisations wasn't 4 or 1");
+                                };
                             });
 
                         // Apply the flags to the weights (negate if flagged),

@@ -896,8 +896,8 @@ impl UvfitsReader {
                                         0.0,        // XY imag
                                         0.0,        // YX real
                                         0.0,        // YX imag
-                                        0.0,        // YY real
-                                        0.0,        // YY imag
+                                        in_data[0], // YY real
+                                        in_data[1], // YY imag
                                     ]);
                                     *out_weight = in_data[2];
                                 });
