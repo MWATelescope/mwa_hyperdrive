@@ -8,15 +8,14 @@
 use approx::assert_abs_diff_eq;
 use clap::Parser;
 use marlu::{XyzGeodetic, ENH};
-use mwalib::{
-    _get_required_fits_key, _open_fits, _open_hdu, fits_open, fits_open_hdu, get_required_fits_key,
-    Pol, _get_fits_col, get_fits_col, MetafitsContext,
-};
+use mwalib::{MetafitsContext, Pol};
 use serial_test::serial;
 use tempfile::TempDir;
 
 use crate::{
-    cli::vis_utils::simulate::VisSimulateArgs, tests::reduced_obsids::get_reduced_1090008640,
+    cli::vis_utils::simulate::VisSimulateArgs,
+    io::read::fits::{fits_get_col, fits_get_required_key, fits_open, fits_open_hdu},
+    tests::reduced_obsids::get_reduced_1090008640,
 };
 
 fn read_uvfits_stabxyz(
@@ -89,15 +88,15 @@ fn test_1090008640_vis_simulate() {
 
     // Test some metadata. Compare with the input metafits file.
     let metafits = MetafitsContext::new(&metafits, None).unwrap();
-    let mut uvfits = fits_open!(&output_path).unwrap();
-    let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
-    let gcount: String = get_required_fits_key!(&mut uvfits, &hdu, "GCOUNT").unwrap();
-    let pcount: String = get_required_fits_key!(&mut uvfits, &hdu, "PCOUNT").unwrap();
-    let floats_per_pol: String = get_required_fits_key!(&mut uvfits, &hdu, "NAXIS2").unwrap();
-    let num_pols: String = get_required_fits_key!(&mut uvfits, &hdu, "NAXIS3").unwrap();
-    let num_fine_freq_chans: String = get_required_fits_key!(&mut uvfits, &hdu, "NAXIS4").unwrap();
-    let jd_zero: String = get_required_fits_key!(&mut uvfits, &hdu, "PZERO5").unwrap();
-    let ptype4: String = get_required_fits_key!(&mut uvfits, &hdu, "PTYPE4").unwrap();
+    let mut uvfits = fits_open(&output_path).unwrap();
+    let hdu = fits_open_hdu(&mut uvfits, 0).unwrap();
+    let gcount: String = fits_get_required_key(&mut uvfits, &hdu, "GCOUNT").unwrap();
+    let pcount: String = fits_get_required_key(&mut uvfits, &hdu, "PCOUNT").unwrap();
+    let floats_per_pol: String = fits_get_required_key(&mut uvfits, &hdu, "NAXIS2").unwrap();
+    let num_pols: String = fits_get_required_key(&mut uvfits, &hdu, "NAXIS3").unwrap();
+    let num_fine_freq_chans: String = fits_get_required_key(&mut uvfits, &hdu, "NAXIS4").unwrap();
+    let jd_zero: String = fits_get_required_key(&mut uvfits, &hdu, "PZERO5").unwrap();
+    let ptype4: String = fits_get_required_key(&mut uvfits, &hdu, "PTYPE4").unwrap();
 
     let pcount: usize = pcount.parse().unwrap();
     assert_eq!(pcount, 7);
@@ -110,8 +109,8 @@ fn test_1090008640_vis_simulate() {
     assert_abs_diff_eq!(jd_zero, 2.456860500E+06);
     assert_eq!(ptype4, "BASELINE");
 
-    let hdu = fits_open_hdu!(&mut uvfits, 1).unwrap();
-    let tile_names: Vec<String> = get_fits_col!(&mut uvfits, &hdu, "ANNAME").unwrap();
+    let hdu = fits_open_hdu(&mut uvfits, 1).unwrap();
+    let tile_names: Vec<String> = fits_get_col(&mut uvfits, &hdu, "ANNAME").unwrap();
     assert_eq!(tile_names.len(), 128);
     assert_eq!(tile_names[0], "Tile011");
     assert_eq!(tile_names[1], "Tile012");
@@ -161,7 +160,7 @@ fn test_1090008640_vis_simulate() {
     }
 
     // Test visibility values.
-    fits_open_hdu!(&mut uvfits, 0).unwrap();
+    fits_open_hdu(&mut uvfits, 0).unwrap();
     let mut group_params = vec![0.0; pcount];
     let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
     let mut status = 0;
@@ -365,8 +364,8 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let result = sim_args.run(false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
-    let mut uvfits = fits_open!(&output_path).unwrap();
-    let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
+    let mut uvfits = fits_open(&output_path).unwrap();
+    let hdu = fits_open_hdu(&mut uvfits, 0).unwrap();
 
     let mut group_params = [0.0; 5];
     let mut vis_cpu = Array4::default((num_timesteps, num_chans, 4, 3));
@@ -415,8 +414,8 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let result = sim_args.run(false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
 
-    let mut uvfits = fits_open!(&output_path).unwrap();
-    let hdu = fits_open_hdu!(&mut uvfits, 0).unwrap();
+    let mut uvfits = fits_open(&output_path).unwrap();
+    let hdu = fits_open_hdu(&mut uvfits, 0).unwrap();
 
     let mut vis_gpu = Array4::default((num_timesteps, num_chans, 4, 3));
     unsafe {

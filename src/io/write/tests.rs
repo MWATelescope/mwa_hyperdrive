@@ -183,7 +183,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
             VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
@@ -381,7 +381,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
             VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
@@ -403,12 +403,17 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
-        // Without the metafits file, the uvfits reader guesses the time
-        // resolution from the data. Seeing as the smallest gap is 2s, the time
-        // resolution will be reported as 2s, but it should be 1s. This will be
-        // fixed in the next version of Marlu.
-        assert_ne!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.time_res, Some(Duration::from_seconds(2.0)));
+        // Currently, our uvfits files report the time resolution, but not our
+        // measurement sets. Without the metafits file, the MS reader guesses
+        // the time resolution from the data. Seeing as the smallest gap is 2s,
+        // the time resolution will be reported as 2s, but it should be 1s.
+        match vis_type {
+            VisOutputType::Uvfits => assert_eq!(obs_context.time_res, Some(time_res)),
+            VisOutputType::MeasurementSet => {
+                assert_ne!(obs_context.time_res, Some(time_res));
+                assert_eq!(obs_context.time_res, Some(Duration::from_seconds(2.0)));
+            }
+        }
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (
@@ -587,7 +592,7 @@ fn test_vis_output_time_averaging() {
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
             VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new::<&Path, &Path>(&path, None, None).unwrap())
+                Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
             }
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new::<&Path, &Path>(&path, None, None).unwrap())
@@ -608,12 +613,18 @@ fn test_vis_output_time_averaging() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
 
-        // Without the metafits file, the uvfits reader guesses the time
-        // resolution from the data. Seeing as the smallest gap is 6s, the time
-        // resolution will be reported as 6s, but it should be 3s. This will be
-        // fixed in the next version of Marlu.
-        assert_ne!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.time_res, Some(Duration::from_seconds(6.0)));
+        // Currently, our uvfits files report the time resolution, but not our
+        // measurement sets. Without the metafits file, the MS reader guesses
+        // the time resolution from the data. Seeing as the smallest gap is 6s,
+        // the time resolution will be reported as 6s, but it should be 3s.
+        match vis_type {
+            VisOutputType::Uvfits => {
+                assert_eq!(obs_context.time_res, Some(Duration::from_seconds(3.0)))
+            }
+            VisOutputType::MeasurementSet => {
+                assert_eq!(obs_context.time_res, Some(Duration::from_seconds(6.0)));
+            }
+        }
         assert_eq!(obs_context.freq_res, Some(freq_res));
 
         let avg_shape = (

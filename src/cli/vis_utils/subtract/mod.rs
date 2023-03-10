@@ -11,7 +11,12 @@ pub(crate) use error::VisSubtractError;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashSet, path::PathBuf, str::FromStr, thread};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    str::FromStr,
+    thread,
+};
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -40,7 +45,7 @@ use crate::{
     },
     io::{
         get_single_match_from_glob,
-        read::{MsReader, UvfitsReader, VisInputType, VisRead},
+        read::{MsReader, UvfitsReader, VisInputType, VisRead, VisReadError},
         write::{can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
     math::TileBaselineFlags,
@@ -347,7 +352,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
             };
 
             // Ensure that there's only one metafits.
-            let meta: Option<&PathBuf> = match meta.as_ref() {
+            let meta: Option<&Path> = match meta.as_ref() {
                 None => None,
                 Some(m) => {
                     if m.len() > 1 {
@@ -358,7 +363,8 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 }
             };
 
-            let input_data = UvfitsReader::new(uvfits, meta, array_position)?;
+            let input_data =
+                UvfitsReader::new(uvfits, meta, array_position).map_err(VisReadError::from)?;
             match input_data.get_obs_context().obsid {
                 Some(o) => info!(
                     "Reading obsid {} from uvfits {}",

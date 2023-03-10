@@ -151,8 +151,7 @@ fn write_then_read_uvfits(autos: bool) {
     result.unwrap();
 
     // Inspect the file for sanity's sake!
-    let metafits: Option<&str> = None;
-    let result = UvfitsReader::new(output.path(), metafits, None);
+    let result = UvfitsReader::new(output.path().to_path_buf(), None, None);
     assert!(
         result.is_ok(),
         "Failed to read the just-created uvfits file"
@@ -242,7 +241,7 @@ fn uvfits_io_works_for_auto_correlations() {
 fn test_1090008640_cross_vis() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits), None) {
+        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -306,7 +305,7 @@ fn test_1090008640_cross_vis() {
 fn test_1090008640_auto_vis() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits), None) {
+        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -395,7 +394,7 @@ fn test_1090008640_auto_vis() {
 fn test_1090008640_auto_vis_with_flags() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits), None) {
+        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -492,7 +491,7 @@ fn test_1090008640_auto_vis_with_flags() {
 fn read_1090008640_cross_and_auto_vis() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits), None) {
+        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -694,12 +693,14 @@ fn test_timestep_reading() {
 
     writer.finalise().unwrap();
 
-    let uvfits_reader =
-        UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path, None, Some(array_pos)).unwrap();
+    let uvfits_reader = UvfitsReader::new(vis_path, None, Some(array_pos)).unwrap();
     let uvfits_ctx = uvfits_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)
-        .map(|t| Epoch::from_gpst_seconds((obsid + t) as f64 + 0.5))
+        .map(|t| {
+            let e = Epoch::from_gpst_seconds((obsid + t) as f64 + 0.5);
+            e.round(10.milliseconds()).to_gpst_seconds()
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         uvfits_ctx
@@ -708,9 +709,6 @@ fn test_timestep_reading() {
             .map(|t| t.to_gpst_seconds())
             .collect::<Vec<_>>(),
         expected_timestamps
-            .iter()
-            .map(|t| t.to_gpst_seconds())
-            .collect::<Vec<_>>()
     );
 }
 
@@ -719,10 +717,10 @@ fn test_map_metafits_antenna_order() {
     // First, check the delays and gains of the existing test data. Because this
     // uvfits file has its tiles in the same order as the "metafits order", the
     // delays and gains are already correct without re-ordering.
-    let metafits_path = "test_files/1090008640/1090008640.metafits";
+    let metafits_path = PathBuf::from("test_files/1090008640/1090008640.metafits");
     let uvfits = UvfitsReader::new(
-        "test_files/1090008640/1090008640.uvfits",
-        Some(metafits_path),
+        PathBuf::from("test_files/1090008640/1090008640.uvfits"),
+        Some(&metafits_path),
         None,
     )
     .unwrap();
@@ -743,7 +741,7 @@ fn test_map_metafits_antenna_order() {
     // uvfits file is already in the same order as the metafits file, the
     // easiest thing to do is to modify the metafits file.
     let metafits = tempfile::NamedTempFile::new().expect("couldn't make a temp file");
-    std::fs::copy(metafits_path, metafits.path()).unwrap();
+    std::fs::copy(&metafits_path, metafits.path()).unwrap();
     unsafe {
         let metafits = CString::new(metafits.path().display().to_string())
             .unwrap()
@@ -824,7 +822,7 @@ fn test_map_metafits_antenna_order() {
     }
 
     let uvfits = UvfitsReader::new(
-        "test_files/1090008640/1090008640.uvfits",
+        PathBuf::from("test_files/1090008640/1090008640.uvfits"),
         Some(metafits.path()),
         None,
     )
@@ -926,7 +924,7 @@ fn test_map_metafits_antenna_order() {
     }
 
     let uvfits = UvfitsReader::new(
-        "test_files/1090008640/1090008640.uvfits",
+        PathBuf::from("test_files/1090008640/1090008640.uvfits"),
         Some(metafits.path()),
         None,
     )
@@ -944,4 +942,54 @@ fn test_map_metafits_antenna_order() {
     };
     // The gains should be the same as the unaltered-metafits case.
     assert_abs_diff_eq!(gains, perturbed_gains);
+}
+
+#[test]
+fn test_sdc3() {
+    let uvfits = UvfitsReader::new(
+        PathBuf::from("test_files/sdc3/sdc3_0000.uvfits"),
+        None,
+        None,
+    )
+    .unwrap();
+    let obs_context = uvfits.get_obs_context();
+    assert_eq!(obs_context.timestamps.len(), 1);
+    assert_eq!(obs_context.fine_chan_freqs.len(), 1);
+    let array_position = obs_context.array_position;
+    assert_abs_diff_eq!(
+        array_position.longitude_rad.to_degrees(),
+        116.76372382627274,
+        epsilon = 1e-8
+    );
+    assert_abs_diff_eq!(
+        array_position.latitude_rad.to_degrees(),
+        -26.824419317822766,
+        epsilon = 1e-8
+    );
+    assert_abs_diff_eq!(
+        array_position.height_metres,
+        -10.401579822123448, // yep, really
+        epsilon = 1e-8
+    );
+
+    let mut cross_vis = Array2::zeros((1, 1));
+    let mut cross_vis_weights = Array2::zeros((1, 1));
+    let tile_baseline_flags = TileBaselineFlags::new(512, (2..512).collect());
+    uvfits
+        .read_crosses(
+            cross_vis.view_mut(),
+            cross_vis_weights.view_mut(),
+            0,
+            &tile_baseline_flags,
+            &HashSet::new(),
+        )
+        .unwrap();
+
+    assert_abs_diff_eq!(
+        cross_vis[(0, 0)],
+        // N.B. This should be conjugated, because the SDC3 data uses ant2-ant1
+        // UVWs, whereas we expect ant1-ant2.
+        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    );
+    assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }

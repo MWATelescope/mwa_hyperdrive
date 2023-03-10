@@ -26,11 +26,11 @@ pub enum RawReadError {
     Vcs,
 
     #[error(transparent)]
-    MwafMerge(#[from] MwafMergeError),
+    MwafMerge(#[from] Box<MwafMergeError>),
 
     #[error(transparent)]
     Glob(#[from] crate::io::GlobError),
 
     #[error("mwalib error: {0}")]
-    Mwalib(#[from] mwalib::MwalibError),
+    Mwalib(#[from] Box<mwalib::MwalibError>),
 }

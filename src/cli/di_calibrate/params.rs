@@ -4,7 +4,11 @@
 
 //! Parameters required for DI calibration.
 
-use std::{collections::HashSet, path::PathBuf, str::FromStr};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use hifitime::Duration;
 use itertools::Itertools;
@@ -368,7 +372,7 @@ impl DiCalParams {
                     };
 
                     // Ensure that there's only one metafits.
-                    let meta: Option<&PathBuf> = match meta.as_ref() {
+                    let meta: Option<&Path> = match meta.as_ref() {
                         None => None,
                         Some(m) => {
                             if m.len() > 1 {
@@ -379,7 +383,8 @@ impl DiCalParams {
                         }
                     };
 
-                    let input_data = UvfitsReader::new(&uvfits, meta, array_position)?;
+                    let input_data = UvfitsReader::new(uvfits.clone(), meta, array_position)
+                        .map_err(VisReadError::from)?;
 
                     messages::InputFileDetails::UvfitsFile {
                         obsid: input_data.get_obs_context().obsid,

@@ -12,13 +12,12 @@ use std::path::Path;
 
 use hifitime::Epoch;
 use log::trace;
-use mwalib::{
-    _get_optional_fits_key, _get_required_fits_key, _open_fits, _open_hdu, fits_open,
-    fits_open_hdu, get_optional_fits_key, get_required_fits_key, FitsError,
-};
 use ndarray::prelude::*;
 
-use super::error::*;
+use super::error::{MwafError, MwafMergeError};
+use crate::io::read::fits::{
+    fits_get_optional_key, fits_get_required_key, fits_open, fits_open_hdu, FitsError,
+};
 
 #[derive(Debug)]
 pub(crate) enum MwafProducer {
@@ -353,37 +352,37 @@ impl Mwaf {
         let file = file.as_ref();
         // Get the metadata written with the flags.
         trace!("Reading in {}", file.display());
-        let mut fptr = fits_open!(file)?;
-        let hdu = fits_open_hdu!(&mut fptr, 0)?;
+        let mut fptr = fits_open(file)?;
+        let hdu = fits_open_hdu(&mut fptr, 0)?;
 
         // Handle versions 1.0 and 2.0.
-        let mwaf_version: String = get_required_fits_key!(&mut fptr, &hdu, "VERSION")?;
+        let mwaf_version: String = fits_get_required_key(&mut fptr, &hdu, "VERSION")?;
         let (obsid, start_time, software, aoflagger_version, aoflagger_strategy) =
             match mwaf_version.as_ref() {
                 "1.0" => {
                     // We assume that GPSTIME is the scheduled start time of the
                     // observation, and that this is when the flags start.
                     let start_time = {
-                        let start_time: f64 = get_required_fits_key!(&mut fptr, &hdu, "GPSTIME")?;
+                        let start_time: f64 = fits_get_required_key(&mut fptr, &hdu, "GPSTIME")?;
                         Epoch::from_gpst_seconds(start_time)
                     };
                     let software: Option<String> =
-                        get_optional_fits_key!(&mut fptr, &hdu, "COTVER")?;
+                        fits_get_optional_key(&mut fptr, &hdu, "COTVER")?;
 
                     (None, start_time, software, None, None)
                 }
                 "2.0" => {
-                    let obsid = get_required_fits_key!(&mut fptr, &hdu, "OBSID")?;
+                    let obsid = fits_get_required_key(&mut fptr, &hdu, "OBSID")?;
                     let start_time = {
-                        let gps_start: f64 = get_required_fits_key!(&mut fptr, &hdu, "GPSSTART")?;
+                        let gps_start: f64 = fits_get_required_key(&mut fptr, &hdu, "GPSSTART")?;
                         Epoch::from_gpst_seconds(gps_start)
                     };
                     let software: Option<String> =
-                        get_optional_fits_key!(&mut fptr, &hdu, "SOFTWARE")?;
+                        fits_get_optional_key(&mut fptr, &hdu, "SOFTWARE")?;
                     let aoflagger_version: Option<String> =
-                        get_optional_fits_key!(&mut fptr, &hdu, "AO_VER")?;
+                        fits_get_optional_key(&mut fptr, &hdu, "AO_VER")?;
                     let aoflagger_strategy: Option<String> =
-                        get_optional_fits_key!(&mut fptr, &hdu, "AO_STRAT")?;
+                        fits_get_optional_key(&mut fptr, &hdu, "AO_STRAT")?;
 
                     (
                         Some(obsid),
@@ -401,11 +400,11 @@ impl Mwaf {
                 }
             };
 
-        let num_channels = get_required_fits_key!(&mut fptr, &hdu, "NCHANS")?;
-        let num_antennas = get_required_fits_key!(&mut fptr, &hdu, "NANTENNA")?;
-        let num_time_steps = get_required_fits_key!(&mut fptr, &hdu, "NSCANS")?;
+        let num_channels = fits_get_required_key(&mut fptr, &hdu, "NCHANS")?;
+        let num_antennas = fits_get_required_key(&mut fptr, &hdu, "NANTENNA")?;
+        let num_time_steps = fits_get_required_key(&mut fptr, &hdu, "NSCANS")?;
         let num_baselines = (num_antennas * (num_antennas + 1)) / 2;
-        let gpubox_num = get_required_fits_key!(&mut fptr, &hdu, "GPUBOXNO")?;
+        let gpubox_num = fits_get_required_key(&mut fptr, &hdu, "GPUBOXNO")?;
         let (software, software_version) = match software.as_deref() {
             Some(ver) => {
                 if ver.contains("Birli") {
@@ -422,9 +421,9 @@ impl Mwaf {
             None => (MwafProducer::Unknown, None),
         };
 
-        let hdu = fits_open_hdu!(&mut fptr, 1)?;
-        let bytes_per_row = get_required_fits_key!(&mut fptr, &hdu, "NAXIS1")?;
-        let num_rows: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS2")?;
+        let hdu = fits_open_hdu(&mut fptr, 1)?;
+        let bytes_per_row = fits_get_required_key(&mut fptr, &hdu, "NAXIS1")?;
+        let num_rows: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS2")?;
         // cotter can *lie* about how many rows it writes out. Unbelievable. The
         // actual number of written timesteps is num_rows / num_baselines. If
         // cotter has lied, assume that the missing timesteps are at the start
@@ -464,11 +463,12 @@ impl Mwaf {
                 );
             }
             fitsio::errors::check_status(status).map_err(|e| FitsError::Fitsio {
-                fits_error: e,
-                fits_filename: file.to_path_buf(),
-                hdu_num: 1,
+                fits_error: Box::new(e),
+                fits_filename: file.to_path_buf().into_boxed_path(),
+                hdu_description: "1".to_string().into_boxed_str(),
                 source_file: file!(),
                 source_line: line!(),
+                source_column: column!(),
             })?;
 
             flags

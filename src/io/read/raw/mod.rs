@@ -168,7 +168,8 @@ impl RawDataReader {
         trace!("Using gpubox files: {:#?}", gpubox_pbs);
 
         trace!("Creating mwalib context");
-        let mwalib_context = get_mwalib_correlator_context(meta_pb, gpubox_pbs)?;
+        let mwalib_context =
+            get_mwalib_correlator_context(meta_pb, gpubox_pbs).map_err(Box::new)?;
         let metafits_context = &mwalib_context.metafits_context;
 
         let is_mwax = match mwalib_context.mwa_version {
@@ -368,7 +369,7 @@ impl RawDataReader {
 
         let mwaf_flags = if let Some(m) = mwafs {
             trace!("Reading mwaf files");
-            let mut f = MwafFlags::new_from_mwafs(m)?;
+            let mut f = MwafFlags::new_from_mwafs(m).map_err(Box::new)?;
 
             // Ensure that there is a mwaf file for each specified gpubox file.
             for gpubox_file in &mwalib_context.gpubox_batches[0].gpubox_files {
@@ -645,7 +646,7 @@ impl RawDataReader {
                     flag_array_fb.fill(true);
                 }
 
-                Err(e) => return Err(RawReadError::from(MwalibError::from(e)).into()),
+                Err(e) => return Err(RawReadError::from(Box::new(MwalibError::from(e))).into()),
             }
         }
 

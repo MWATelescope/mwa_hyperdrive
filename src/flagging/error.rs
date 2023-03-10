@@ -18,7 +18,7 @@ pub enum MwafError {
     BirliVersion { file: PathBuf },
 
     #[error(transparent)]
-    FitsError(#[from] mwalib::FitsError),
+    FitsError(#[from] crate::io::read::fits::FitsError),
 }
 
 #[derive(Error, Debug)]

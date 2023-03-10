@@ -3,6 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use approx::assert_abs_diff_eq;
+use hifitime::{Epoch, TimeUnits};
 
 use super::*;
 
@@ -127,4 +128,20 @@ fn test_is_prime() {
     assert!(is_prime(5));
     assert!(!is_prime(6));
     assert!(is_prime(7));
+}
+
+#[test]
+fn test_hifitime_works_as_expected() {
+    let e = Epoch::from_gpst_seconds(1090008639.999405);
+    assert_abs_diff_eq!(e.round(10.milliseconds()).to_gpst_seconds(), 1090008640.0);
+
+    let e = Epoch::from_gpst_seconds(1090008640.251);
+    assert_abs_diff_eq!(e.round(10.milliseconds()).to_gpst_seconds(), 1090008640.25);
+
+    let e = Epoch::from_gpst_seconds(1090008640.24999);
+    assert_abs_diff_eq!(e.round(10.milliseconds()).to_gpst_seconds(), 1090008640.25);
+
+    // No rounding.
+    let e = Epoch::from_gpst_seconds(1090008640.26);
+    assert_abs_diff_eq!(e.round(10.milliseconds()).to_gpst_seconds(), 1090008640.26);
 }

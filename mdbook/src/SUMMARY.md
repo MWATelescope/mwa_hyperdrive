@@ -58,6 +58,7 @@
 - [Modelling visibilities](defs/modelling/intro.md)
   - [Measurement equation](defs/modelling/rime.md)
   - [Estimating flux densities](defs/modelling/estimating.md)
+- [Coordinate systems](defs/coords.md)
 - [DUT1](defs/dut1.md)
 - [Terminology]()
   - [Timeblocks and chanblocks](defs/blocks.md)

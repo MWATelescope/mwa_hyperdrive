@@ -20,32 +20,34 @@ use fitsio::{
 };
 use hifitime::Epoch;
 use marlu::{constants::VEL_C, Jones};
-use mwalib::{
-    _get_fits_image, _get_optional_fits_key, _get_optional_fits_key_long_string,
-    _get_required_fits_key, _open_fits, _open_hdu, fits_open, fits_open_hdu, get_fits_image,
-    get_optional_fits_key, get_optional_fits_key_long_string, get_required_fits_key,
-};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 use vec1::Vec1;
 
 use super::{error::*, CalibrationSolutions};
-use crate::io::read::{pfb_gains::PfbFlavour, RawDataCorrections};
+use crate::io::read::{
+    fits::{
+        fits_get_image, fits_get_optional_key, fits_get_optional_key_long_string,
+        fits_get_required_key, fits_open, fits_open_hdu,
+    },
+    pfb_gains::PfbFlavour,
+    RawDataCorrections,
+};
 
 pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
-    let mut fptr = fits_open!(file)?;
-    let hdu = fits_open_hdu!(&mut fptr, 0)?;
-    let obsid = get_optional_fits_key!(&mut fptr, &hdu, "OBSID")?;
+    let mut fptr = fits_open(file)?;
+    let hdu = fits_open_hdu(&mut fptr, 0)?;
+    let obsid = fits_get_optional_key(&mut fptr, &hdu, "OBSID")?;
 
-    let max_iterations: Option<u32> = get_optional_fits_key!(&mut fptr, &hdu, "MAXITER")?;
-    let stop_threshold: Option<f64> = get_optional_fits_key!(&mut fptr, &hdu, "S_THRESH")?;
-    let min_threshold: Option<f64> = get_optional_fits_key!(&mut fptr, &hdu, "M_THRESH")?;
-    let uvw_min: Option<f64> = get_optional_fits_key!(&mut fptr, &hdu, "UVW_MIN")?;
-    let uvw_max: Option<f64> = get_optional_fits_key!(&mut fptr, &hdu, "UVW_MAX")?;
+    let max_iterations: Option<u32> = fits_get_optional_key(&mut fptr, &hdu, "MAXITER")?;
+    let stop_threshold: Option<f64> = fits_get_optional_key(&mut fptr, &hdu, "S_THRESH")?;
+    let min_threshold: Option<f64> = fits_get_optional_key(&mut fptr, &hdu, "M_THRESH")?;
+    let uvw_min: Option<f64> = fits_get_optional_key(&mut fptr, &hdu, "UVW_MIN")?;
+    let uvw_max: Option<f64> = fits_get_optional_key(&mut fptr, &hdu, "UVW_MAX")?;
     let freq_centroid: Option<f64> = {
         // We need one of the lambda values as well as it's paired cutoff.
-        let uvw_min_l: Option<f64> = get_optional_fits_key!(&mut fptr, &hdu, "UVW_MIN_L")?;
-        let uvw_max_l: Option<f64> = get_optional_fits_key!(&mut fptr, &hdu, "UVW_MAX_L")?;
+        let uvw_min_l: Option<f64> = fits_get_optional_key(&mut fptr, &hdu, "UVW_MIN_L")?;
+        let uvw_max_l: Option<f64> = fits_get_optional_key(&mut fptr, &hdu, "UVW_MAX_L")?;
         match (uvw_min, uvw_min_l, uvw_max, uvw_max_l) {
             (Some(uvw_min), Some(uvw_min_l), _, _) => {
                 let lambda = uvw_min / uvw_min_l;
@@ -58,13 +60,12 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
             _ => None,
         }
     };
-    let beam_file: Option<String> =
-        get_optional_fits_key_long_string!(&mut fptr, &hdu, "BEAMFILE")?;
+    let beam_file: Option<String> = fits_get_optional_key_long_string(&mut fptr, &hdu, "BEAMFILE")?;
 
-    let pfb_flavour: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "PFB")?;
-    let digital_gains: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "D_GAINS")?;
-    let cable_length: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "CABLELEN")?;
-    let geometric: Option<String> = get_optional_fits_key!(&mut fptr, &hdu, "GEOMETRY")?;
+    let pfb_flavour: Option<String> = fits_get_optional_key(&mut fptr, &hdu, "PFB")?;
+    let digital_gains: Option<String> = fits_get_optional_key(&mut fptr, &hdu, "D_GAINS")?;
+    let cable_length: Option<String> = fits_get_optional_key(&mut fptr, &hdu, "CABLELEN")?;
+    let geometric: Option<String> = fits_get_optional_key(&mut fptr, &hdu, "GEOMETRY")?;
     let raw_data_corrections = match (pfb_flavour, digital_gains, cable_length, geometric) {
         (Some(p), Some(d), Some(c), Some(g)) => {
             let pfb_flavour = PfbFlavour::parse(&p)?;
@@ -84,20 +85,20 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
     };
 
     // MODELLER is a long string.
-    let modeller = get_optional_fits_key_long_string!(&mut fptr, &hdu, "MODELLER")?;
+    let modeller = fits_get_optional_key_long_string(&mut fptr, &hdu, "MODELLER")?;
 
     let hdu = fptr.hdu("SOLUTIONS")?;
-    let num_timeblocks: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS4")?;
-    let total_num_tiles: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS3")?;
-    let total_num_chanblocks: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS2")?;
+    let num_timeblocks: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS4")?;
+    let total_num_tiles: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS3")?;
+    let total_num_chanblocks: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS2")?;
     let num_polarisations: usize = {
-        let p: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS1")?;
+        let p: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS1")?;
         // There are two floats per polarisation; one for real, one for
         // imag.
         p / 2
     };
 
-    let di_jones_vec: Vec<f64> = get_fits_image!(&mut fptr, &hdu)?;
+    let di_jones_vec: Vec<f64> = fits_get_image(&mut fptr, &hdu)?;
     let di_jones_a4 = Array4::from_shape_vec(
         (
             num_timeblocks,
@@ -462,8 +463,8 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
         match fptr.hdu("RESULTS") {
             // If the HDU exists, we assume that it is sensible.
             Ok(hdu) => {
-                let n_timeblocks: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS2")?;
-                let n_chanblocks: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS1")?;
+                let n_timeblocks: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS2")?;
+                let n_chanblocks: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS1")?;
 
                 // Complain if the number of timeblocks or chanblocks isn't
                 // right.
@@ -482,7 +483,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                     });
                 }
 
-                let results_vec: Vec<f64> = get_fits_image!(&mut fptr, &hdu)?;
+                let results_vec: Vec<f64> = fits_get_image(&mut fptr, &hdu)?;
                 Some(Array2::from_shape_vec((n_timeblocks, n_chanblocks), results_vec).unwrap())
             }
             Err(e) => match e {
@@ -497,7 +498,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
         match fptr.hdu("BASELINES") {
             Ok(hdu) => {
                 // Complain if the number of baselines isn't right.
-                let num_baselines: usize = get_required_fits_key!(&mut fptr, &hdu, "NAXIS1")?;
+                let num_baselines: usize = fits_get_required_key(&mut fptr, &hdu, "NAXIS1")?;
                 let expected_num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
                 if num_baselines != expected_num_baselines {
                     return Err(SolutionsReadError::BadShape {
@@ -507,7 +508,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                     });
                 }
 
-                Vec1::try_from_vec(get_fits_image!(&mut fptr, &hdu)?).ok()
+                Vec1::try_from_vec(fits_get_image(&mut fptr, &hdu)?).ok()
             }
             Err(e) => match e {
                 // Status code 301 means "unavailable".
@@ -548,7 +549,7 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         std::fs::remove_file(file)?;
     }
     let mut fptr = FitsFile::create(file).open()?;
-    let hdu = fits_open_hdu!(&mut fptr, 0)?;
+    let hdu = fits_open_hdu(&mut fptr, 0)?;
     let mut status = 0;
 
     let CalibrationSolutions {

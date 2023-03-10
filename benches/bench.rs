@@ -562,7 +562,7 @@ fn io_benchmarks(c: &mut Criterion) {
         None,
     )
     .unwrap();
-    let uvfits = UvfitsReader::new(uvfits.path(), Some(&metafits), None).unwrap();
+    let uvfits = UvfitsReader::new(uvfits.path().to_path_buf(), Some(&metafits), None).unwrap();
     let ms = MsReader::new(ms.path(), Some(&metafits), None).unwrap();
 
     let tile_baseline_flags = TileBaselineFlags::new(128, HashSet::new());
@@ -651,7 +651,7 @@ fn io_benchmarks(c: &mut Criterion) {
                 tile_baseline_flags: &tile_baseline_flags,
             };
 
-            uvfits.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+            uvfits.read_inner::<4, 3>(Some(crosses), None, 0, &flagged_fine_chans)
         });
     });
     uvfits_bench_group.bench_function("Read crosses for timestep, MWA channel flags", |b| {
@@ -666,7 +666,7 @@ fn io_benchmarks(c: &mut Criterion) {
                 tile_baseline_flags: &tile_baseline_flags,
             };
 
-            uvfits.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+            uvfits.read_inner::<4, 3>(Some(crosses), None, 0, &flagged_fine_chans)
         });
     });
     uvfits_bench_group.finish();

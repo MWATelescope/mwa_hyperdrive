@@ -16,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use hifitime::{Duration, Epoch};
+use hifitime::{Duration, Epoch, TimeUnits};
 use log::{debug, trace, warn};
 use marlu::{
     c32,
@@ -30,7 +30,7 @@ use rayon::prelude::*;
 use rubbl_casatables::{Table, TableOpenMode};
 
 use super::*;
-use crate::{beam::Delays, context::ObsContext, metafits, misc::round_hundredths_of_a_second};
+use crate::{beam::Delays, context::ObsContext, metafits};
 
 pub(crate) enum MsFlavour {
     Hyperdrive,
@@ -358,8 +358,8 @@ impl MsReader {
                         utc_time - hifitime::J1900_OFFSET * hifitime::SECONDS_PER_DAY,
                     );
                     // The values can be slightly off of their intended values;
-                    // round them to the nearest hundredth.
-                    timestamps.push(round_hundredths_of_a_second(e));
+                    // round them to the nearest 10 milliseconds.
+                    timestamps.push(e.round(10.milliseconds()));
                 }
             }
             let timestamps =

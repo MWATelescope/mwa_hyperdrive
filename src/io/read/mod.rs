@@ -5,6 +5,7 @@
 //! Code to handle reading from and writing to various data container formats.
 
 mod error;
+pub(crate) mod fits;
 mod ms;
 mod raw;
 mod uvfits;

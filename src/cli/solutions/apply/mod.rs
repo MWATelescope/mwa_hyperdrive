@@ -11,7 +11,12 @@ mod tests;
 
 pub(crate) use error::SolutionsApplyError;
 
-use std::{collections::HashSet, path::PathBuf, str::FromStr, thread};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    str::FromStr,
+    thread,
+};
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -36,6 +41,7 @@ use crate::{
     io::{
         read::{
             pfb_gains::PfbFlavour, MsReader, RawDataReader, UvfitsReader, VisInputType, VisRead,
+            VisReadError,
         },
         write::{can_write_to_file, write_vis, VisOutputType, VisTimestep, VIS_OUTPUT_EXTENSIONS},
     },
@@ -335,7 +341,7 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
             };
 
             // Ensure that there's only one metafits.
-            let meta: Option<&PathBuf> = match meta.as_ref() {
+            let meta: Option<&Path> = match meta.as_ref() {
                 None => None,
                 Some(m) => {
                     if m.len() > 1 {
@@ -346,7 +352,8 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
                 }
             };
 
-            let input_data = UvfitsReader::new(&uvfits, meta, array_position)?;
+            let input_data = UvfitsReader::new(uvfits.clone(), meta, array_position)
+                .map_err(VisReadError::from)?;
 
             messages::InputFileDetails::UvfitsFile {
                 obsid: input_data.get_obs_context().obsid,

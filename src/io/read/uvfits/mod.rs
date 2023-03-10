@@ -3,6 +3,9 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 //! Code to handle reading from uvfits files.
+//!
+//! The uvfits standard can be found here:
+//! <https://library.nrao.edu/public/memos/aips/memos/AIPSM_117.pdf>
 
 mod error;
 #[cfg(test)]
@@ -11,6 +14,7 @@ mod tests;
 pub(crate) use error::*;
 
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
     os::raw::c_char,
@@ -18,25 +22,26 @@ use std::{
 };
 
 use fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile};
-use hifitime::{Duration, Epoch};
+use hifitime::{Duration, Epoch, TimeUnits};
 use log::{debug, trace, warn};
 use marlu::{
     io::uvfits::decode_uvfits_baseline, Jones, LatLngHeight, RADec, XyzGeocentric, XyzGeodetic,
 };
-use mwalib::{
-    _get_fits_col, _open_fits, fits_open, fits_open_hdu, get_fits_col, MetafitsContext,
-    _get_optional_fits_key, _get_required_fits_key, _open_hdu, get_optional_fits_key,
-    get_required_fits_key,
-};
+use mwalib::MetafitsContext;
 use ndarray::prelude::*;
+use num_complex::Complex;
 
 use super::*;
 use crate::{
     beam::Delays,
     context::ObsContext,
-    io::read::{VisRead, VisReadError},
+    io::read::{
+        fits::{
+            fits_get_col, fits_get_optional_key, fits_get_required_key, fits_open, fits_open_hdu,
+        },
+        VisRead, VisReadError,
+    },
     metafits::{get_dipole_delays, get_dipole_gains, map_antenna_order},
-    misc::quantize_duration,
 };
 
 pub struct UvfitsReader {
@@ -65,507 +70,531 @@ pub struct UvfitsReader {
 }
 
 impl UvfitsReader {
-    /// Verify and populate metadata associated with this measurement set.
+    /// Verify and populate metadata associated with this uvfits file.
     ///
-    /// The measurement set is expected to be formatted in the way that
-    /// cotter/Birli write measurement sets.
-    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
-        uvfits: P,
-        metafits: Option<P2>,
+    /// The uvfits file is expected to generally be compliant with AIPS 117
+    /// ("the uvfits standard"), but the code here is a little less rigorous
+    /// than the standard mandates.
+    pub fn new(
+        uvfits: PathBuf,
+        metafits: Option<&Path>,
         array_position: Option<LatLngHeight>,
-    ) -> Result<UvfitsReader, VisReadError> {
-        fn inner(
-            uvfits: &Path,
-            metafits: Option<&Path>,
-            array_position: Option<LatLngHeight>,
-        ) -> Result<UvfitsReader, UvfitsReadError> {
-            // If a metafits file was provided, get an mwalib object ready.
-            // TODO: Let the user supply the MWA version.
-            let mwalib_context = match metafits {
-                None => None,
-                Some(m) => Some(MetafitsContext::new(m, None)?),
-            };
+    ) -> Result<UvfitsReader, UvfitsReadError> {
+        // If a metafits file was provided, get an mwalib object ready.
+        // TODO: Let the user supply the MWA version.
+        let mwalib_context = match metafits {
+            None => None,
+            Some(m) => Some(MetafitsContext::new(m, None).map_err(Box::new)?),
+        };
 
-            debug!("Using uvfits file: {}", uvfits.display());
-            if !uvfits.exists() {
-                return Err(UvfitsReadError::BadFile(uvfits.to_path_buf()));
+        debug!("Using uvfits file: {}", uvfits.display());
+        if !uvfits.exists() {
+            return Err(UvfitsReadError::BadFile(uvfits));
+        }
+
+        // Get the tile names, XYZ positions and antenna numbers.
+        let mut uvfits_fptr = fits_open(&uvfits)?;
+        let primary_hdu = fits_open_hdu(&mut uvfits_fptr, 0)?;
+        let antenna_table_hdu = fits_open_hdu(&mut uvfits_fptr, "AIPS AN")?;
+
+        let tile_names: Vec<String> = fits_get_col(&mut uvfits_fptr, &antenna_table_hdu, "ANNAME")?;
+        let tile_names =
+            Vec1::try_from_vec(tile_names).map_err(|_| UvfitsReadError::AnnameEmpty)?;
+        let total_num_tiles = tile_names.len();
+
+        // Set up the tile map.
+        let tile_nums: Vec<u32> = fits_get_col(&mut uvfits_fptr, &antenna_table_hdu, "NOSTA")?;
+        let tile_map: HashMap<usize, usize> = tile_nums
+            .into_iter()
+            .zip(0..total_num_tiles)
+            .map(|(a, b)| (a.try_into().expect("not larger than usize::MAX"), b))
+            .collect();
+
+        // ARRAY{X,Y,Z} describes the array position.
+        let array_x: f64 = fits_get_required_key(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYX")?;
+        let array_y: f64 = fits_get_required_key(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYY")?;
+        let array_z: f64 = fits_get_required_key(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYZ")?;
+        let mut supplied_array_position = XyzGeocentric {
+            x: array_x,
+            y: array_y,
+            z: array_z,
+        }
+        .to_earth_wgs84();
+        // It seems that CASA/casacore products incorrectly set these to 0, so
+        // if we're in this situation, we have to alter our logic below.
+        let wrong_array_xyz = array_x.abs() < f64::EPSILON
+            && array_y.abs() < f64::EPSILON
+            && array_z.abs() < f64::EPSILON;
+        // Get the tile positions from the uvfits file. Update the supplied
+        // array position if ARRAY{X,Y,Z} are wrong.
+        let tile_xyzs = {
+            // The uvfits standard only defines one frame (ITRF). So warn the
+            // user if this isn't explicit, but we assume this is always used.
+            // FRAME is supposed to be mandatory, but we'll be kind here.
+            let frame: Option<String> =
+                fits_get_optional_key(&mut uvfits_fptr, &antenna_table_hdu, "FRAME")?;
+            if !matches!(frame.as_deref(), Some("ITRF")) {
+                warn!("Assuming that the uvfits antenna coordinate system is ITRF");
             }
 
-            // Get the tile names, XYZ positions and antenna numbers.
-            let mut uvfits_fptr = fits_open!(uvfits)?;
-            let antenna_table_hdu = fits_open_hdu!(&mut uvfits_fptr, 1)?;
-
-            let tile_names: Vec<String> =
-                get_fits_col!(&mut uvfits_fptr, &antenna_table_hdu, "ANNAME")?;
-            let tile_names =
-                Vec1::try_from_vec(tile_names).map_err(|_| UvfitsReadError::AnnameEmpty)?;
-            let total_num_tiles = tile_names.len();
-
-            let tile_xyzs = {
-                let mut tile_xyzs: Vec<XyzGeodetic> = Vec::with_capacity(total_num_tiles);
-                for i in 0..total_num_tiles {
-                    let fits_xyz = read_cell_array(
-                        &mut uvfits_fptr,
-                        &antenna_table_hdu,
-                        "STABXYZ",
-                        i as _,
-                        3,
-                    )?;
+            // Because ARRAY{X,Y,Z} are defined to be the array position, the
+            // STABXYZ positions are relative to it, and the frame is always
+            // ITRF, the STABXYZ positions are geodetic.
+            let mut tile_xyzs: Vec<XyzGeodetic> = Vec::with_capacity(total_num_tiles);
+            let mut average_xyz = XyzGeocentric::default();
+            for i in 0..total_num_tiles {
+                let fits_xyz = read_cell_array::<3>(
+                    &mut uvfits_fptr,
+                    &antenna_table_hdu,
+                    "STABXYZ",
+                    i.try_into().expect("not larger than i64::MAX"),
+                )?;
+                if wrong_array_xyz {
+                    tile_xyzs.push(XyzGeodetic {
+                        x: fits_xyz[0],
+                        y: fits_xyz[1],
+                        z: fits_xyz[2],
+                    });
+                    average_xyz.x += fits_xyz[0];
+                    average_xyz.y += fits_xyz[1];
+                    average_xyz.z += fits_xyz[2];
+                } else {
                     tile_xyzs.push(XyzGeodetic {
                         x: fits_xyz[0],
                         y: fits_xyz[1],
                         z: fits_xyz[2],
                     });
                 }
-                tile_xyzs
+            }
+
+            if wrong_array_xyz {
+                warn!("It seems this uvfits file's antenna positions has been blessed by casacore. Unblessing.");
+                // Get the supplied array position from the average tile
+                // position.
+                average_xyz.x /= tile_xyzs.len() as f64;
+                average_xyz.y /= tile_xyzs.len() as f64;
+                average_xyz.z /= tile_xyzs.len() as f64;
+                supplied_array_position = average_xyz.to_earth_wgs84();
+                // If the user supplied an array position, use that instead of
+                // the data's.
+                let array_position = array_position.unwrap_or(supplied_array_position);
+
+                // Convert the geocentric positions to geodetic.
+                let vec = XyzGeocentric::get_geocentric_vector(array_position);
+                let (s_long, c_long) = array_position.longitude_rad.sin_cos();
+                tile_xyzs.iter_mut().for_each(|geocentric| {
+                    // `geocentric` is typed as `XyzGeodetic`; just convert the
+                    // type so we can use the `to_geodetic_inner` method.
+                    let gc = XyzGeocentric {
+                        x: geocentric.x,
+                        y: geocentric.y,
+                        z: geocentric.z,
+                    };
+                    *geocentric = gc.to_geodetic_inner(vec, s_long, c_long);
+                });
+            }
+
+            tile_xyzs
+        };
+        // If the user supplied an array position, use that instead of the
+        // data's.
+        let array_position = array_position.unwrap_or(supplied_array_position);
+        let tile_xyzs = Vec1::try_from_vec(tile_xyzs)
+            .expect("can't be empty, non-empty tile names verified above");
+
+        let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &primary_hdu)?;
+        debug!("Number of rows in the uvfits:   {}", metadata.num_rows);
+        debug!("PCOUNT:                         {}", metadata.pcount);
+        debug!("Number of polarisations:        {}", metadata.num_pols);
+        debug!(
+            "Floats per polarisation:        {}",
+            metadata.num_floats_per_pol
+        );
+        debug!(
+            "Number of fine frequency chans: {}",
+            metadata.num_fine_freq_chans
+        );
+        debug!("UU index:       {}", metadata.indices.u);
+        debug!("VV index:       {}", metadata.indices.v);
+        debug!("WW index:       {}", metadata.indices.w);
+        match metadata.indices.baseline_or_antennas {
+            BaselineOrAntennas::Baseline { index } => debug!("BASELINE index: {index}"),
+            BaselineOrAntennas::Antennas { index1, index2 } => {
+                debug!("ANTENNA1 index: {index1}");
+                debug!("ANTENNA2 index: {index2}");
+            }
+        }
+        debug!("DATE index:     {}", metadata.indices.date1);
+        if let Some(d2) = metadata.indices.date2 {
+            debug!("(Second) DATE index: {}", d2);
+        }
+        if let Some(inttim) = metadata.indices.inttim {
+            debug!("INTTIM index:        {}", inttim);
+        }
+        debug!("COMPLEX index:  {}", metadata.indices.complex);
+        debug!("STOKES index:   {}", metadata.indices.stokes);
+        debug!("FREQ index:     {}", metadata.indices.freq);
+        debug!("RA index:       {}", metadata.indices.ra);
+        debug!("DEC index:      {}", metadata.indices.dec);
+
+        if metadata.num_rows == 0 {
+            return Err(UvfitsReadError::Empty(uvfits));
+        }
+
+        // The phase centre is described by RA and DEC if there is no SOURCE
+        // table (as per the standard).
+        // TODO: Check that there is no SOURCE table!
+        let phase_centre = {
+            let ra = fits_get_required_key(
+                &mut uvfits_fptr,
+                &primary_hdu,
+                &format!("CRVAL{}", metadata.indices.ra),
+            )?;
+            let dec = fits_get_required_key(
+                &mut uvfits_fptr,
+                &primary_hdu,
+                &format!("CRVAL{}", metadata.indices.dec),
+            )?;
+            RADec::from_degrees(ra, dec)
+        };
+
+        // Populate the dipole delays, gains and the pointing centre if we
+        // can.
+        let mut dipole_delays: Option<Delays> = None;
+        let mut dipole_gains: Option<_> = None;
+        let mut pointing_centre: Option<RADec> = None;
+        if let Some(context) = &mwalib_context {
+            debug!("Using metafits for dipole delays, gains and pointing centre");
+            let delays = get_dipole_delays(context);
+            let gains = get_dipole_gains(context);
+            pointing_centre = Some(RADec::from_degrees(
+                context.ra_tile_pointing_degrees,
+                context.dec_tile_pointing_degrees,
+            ));
+
+            // Re-order the tile delays and gains according to the uvfits
+            // order, if possible.
+            if let Some(map) = map_antenna_order(context, &tile_names) {
+                let mut delays2 = delays.clone();
+                let mut gains2 = gains.clone();
+                for i in 0..tile_names.len() {
+                    let j = map[&i];
+                    delays2
+                        .slice_mut(s![i, ..])
+                        .assign(&delays.slice(s![j, ..]));
+                    gains2.slice_mut(s![i, ..]).assign(&gains.slice(s![j, ..]));
+                }
+                dipole_delays = Some(Delays::Full(delays2));
+                dipole_gains = Some(gains2);
+            } else {
+                // We have no choice but to leave the order as is.
+                warn!("The uvfits antenna names are different to those supplied in the metafits.");
+                warn!("Dipole delays/gains may be incorrectly mapped to uvfits antennas.");
+                dipole_delays = Some(Delays::Full(delays));
+                dipole_gains = Some(gains);
+            }
+        }
+
+        // Work out which tiles are unavailable.
+        let mut present_tiles_set: HashSet<usize> = HashSet::new();
+        metadata.uvfits_baselines.iter().for_each(|&uvfits_bl| {
+            let (uvfits_ant1, uvfits_ant2) = decode_uvfits_baseline(uvfits_bl);
+            present_tiles_set.insert(uvfits_ant1);
+            present_tiles_set.insert(uvfits_ant2);
+        });
+        present_tiles_set.extend(metadata.uvfits_antennas.iter());
+        let unavailable_tiles = {
+            let mut v = tile_map
+                .iter()
+                .filter(|(i, _)| !present_tiles_set.contains(*i))
+                .map(|(_, v)| *v)
+                .collect::<Vec<_>>();
+            v.sort_unstable();
+            v
+        };
+        // Similar to the measurement set situation, we have no way(?) to
+        // identify tiles in the uvfits file that have data but shouldn't be
+        // used (i.e. they are flagged). So, we assume all tiles are
+        // unflagged, except those that are "unavailable" (determined
+        // above).
+        let flagged_tiles = unavailable_tiles.clone();
+
+        // Work out the timestamp epochs.
+        let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
+            .jd_frac_timestamps
+            .iter()
+            .enumerate()
+            .map(|(i, &jd_frac)| {
+                // uvfits timestamps are in the middle of their respective
+                // integration periods (centroids), so no adjustment for
+                // half the integration time is needed here.
+                let e = metadata.jd_zero + jd_frac;
+                // Round to the nearest 10 milliseconds to avoid float
+                // precision issues.
+                (i, e.round(10.milliseconds()))
+            })
+            .unzip();
+        // TODO: Determine flagging!
+        let unflagged_timesteps = all_timesteps.clone();
+        let all_timesteps =
+            Vec1::try_from_vec(all_timesteps).map_err(|_| UvfitsReadError::NoTimesteps {
+                file: uvfits_fptr.filename.clone(),
+            })?;
+        let timestamps =
+            Vec1::try_from_vec(timestamps).map_err(|_| UvfitsReadError::NoTimesteps {
+                file: uvfits_fptr.filename.clone(),
+            })?;
+
+        // Get the data's time resolution. There is a possibility that the file
+        // contains only one timestep.
+        let time_res = match metadata.time_res {
+            Some(r) => Some(Duration::from_seconds(r)),
+            None => {
+                if timestamps.len() == 1 {
+                    debug!("Only one timestep is present in the data; can't determine the data's time resolution.");
+                    None
+                } else {
+                    // Find the minimum gap between two consecutive
+                    // timestamps.
+                    let time_res = timestamps
+                        .windows(2)
+                        .fold(Duration::from_seconds(f64::INFINITY), |acc, ts| {
+                            acc.min(ts[1] - ts[0])
+                        });
+                    trace!(
+                        "Time resolution from smallest gap: {}s",
+                        time_res.to_seconds()
+                    );
+                    Some(time_res)
+                }
+            }
+        };
+        // Verify that all timestamps are spaced by a multiple of the time
+        // resolution.
+        if let Some(time_res) = time_res {
+            for (i_pair, window) in timestamps.windows(2).enumerate() {
+                let diff = window[1] - window[0];
+                if diff.total_nanoseconds() % time_res.total_nanoseconds() != 0 {
+                    return Err(UvfitsReadError::IrregularTimestamps {
+                        what_we_think_is_the_time_res: time_res,
+                        gap_found: diff,
+                        pair: i_pair,
+                    });
+                }
+            }
+        }
+        match timestamps.as_slice() {
+            // Handled above; uvfits files aren't allowed to be empty.
+            [] => unreachable!(),
+            [t] => debug!("Only timestep (GPS): {:.2}", t.to_gpst_seconds()),
+            [t0, .., tn] => {
+                debug!("First good timestep (GPS): {:.2}", t0.to_gpst_seconds());
+                debug!("Last good timestep  (GPS): {:.2}", tn.to_gpst_seconds());
+            }
+        }
+
+        debug!("Unavailable tiles in the uvfits: {unavailable_tiles:?}");
+        debug!("Flagged tiles in the uvfits: {flagged_tiles:?}");
+        debug!(
+            "Autocorrelations present: {}",
+            metadata.autocorrelations_present
+        );
+
+        // Get the obsid. There is an "obs. name" in the "object" key, but
+        // that's not the same thing.
+        let obsid = mwalib_context.as_ref().map(|context| context.obs_id);
+
+        let step = metadata.num_rows / timestamps.len();
+        debug!("Number of baselines per timestep: {step}");
+
+        let freq_val_str = format!("CRVAL{}", metadata.indices.freq);
+        let base_freq_str: String =
+            fits_get_required_key(&mut uvfits_fptr, &primary_hdu, &freq_val_str)?;
+        let base_freq: f64 = match base_freq_str.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                return Err(UvfitsReadError::Parse {
+                    key: Cow::from(freq_val_str),
+                    value: base_freq_str,
+                    parse_error: e.to_string(),
+                })
+            }
+        };
+        let base_index: isize = {
+            // CRPIX might be a float. Parse it as one, then make it an int.
+            let freq_val_str = format!("CRPIX{}", metadata.indices.freq);
+            let f_str: String =
+                fits_get_required_key(&mut uvfits_fptr, &primary_hdu, &freq_val_str)?;
+            let f: f64 = match f_str.parse() {
+                Ok(p) => p,
+                Err(e) => {
+                    return Err(UvfitsReadError::Parse {
+                        key: Cow::from(freq_val_str),
+                        value: f_str,
+                        parse_error: e.to_string(),
+                    })
+                }
             };
-            let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
+            f.round() as _
+        };
+        let freq_val_str = format!("CDELT{}", metadata.indices.freq);
+        let fine_chan_width_str: String =
+            fits_get_required_key(&mut uvfits_fptr, &primary_hdu, &freq_val_str)?;
+        let freq_res: f64 = match fine_chan_width_str.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                return Err(UvfitsReadError::Parse {
+                    key: Cow::from(freq_val_str),
+                    value: fine_chan_width_str,
+                    parse_error: e.to_string(),
+                })
+            }
+        };
 
-            // Set up the tile map.
-            let tile_nums: Vec<u32> = get_fits_col!(&mut uvfits_fptr, &antenna_table_hdu, "NOSTA")?;
-            let tile_map: HashMap<usize, usize> = tile_nums
-                .into_iter()
-                .zip(0..total_num_tiles)
-                .map(|(a, b)| (a as usize, b))
-                .collect();
+        let mut fine_chan_freqs_f64 = Vec::with_capacity(metadata.num_fine_freq_chans);
+        let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
+        for i in 0..metadata.num_fine_freq_chans {
+            let freq = (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round();
+            fine_chan_freqs_f64.push(freq);
+            fine_chan_freqs.push(freq.round() as u64);
+        }
+        let fine_chan_freqs_f64 = Vec1::try_from_vec(fine_chan_freqs_f64).unwrap();
+        let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
-            let supplied_array_position = {
-                let frame: Option<String> =
-                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "FRAME")?;
-                // The uvfits standard only defines one frame (ITRF). So warn
-                // the user if this isn't explicit, but we assume this is always
-                // used.
-                let itrf_frame_warning = match frame.as_ref().map(|s| s.trim()) {
-                    Some("ITRF") => None,
-                    _ => Some("Assuming that the uvfits antenna coordinate system is ITRF"),
-                };
-                let array_x: Option<f64> =
-                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYX")?;
-                let array_y: Option<f64> =
-                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYY")?;
-                let array_z: Option<f64> =
-                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "ARRAYZ")?;
-                match (array_x, array_y, array_z) {
-                    (Some(x), Some(y), Some(z)) => {
-                        if let Some(itrf_frame_warning) = itrf_frame_warning {
-                            warn!("{itrf_frame_warning}");
+        let mwa_coarse_chan_nums = match mwalib_context.as_ref() {
+            Some(c) => {
+                // Get the coarse channel information out of the metafits
+                // file, but only the ones aligned with the frequencies in
+                // the uvfits file.
+                let cc_width = f64::from(c.coarse_chan_width_hz);
+                let mut cc_nums: Vec<u32> = c
+                    .metafits_coarse_chans
+                    .iter()
+                    .filter_map(|cc| {
+                        let cc_num =
+                            u32::try_from(cc.rec_chan_number).expect("not bigger than u32::MAX");
+                        let cc_centre = f64::from(cc.chan_centre_hz);
+                        for &f in &fine_chan_freqs_f64 {
+                            if (f - cc_centre).abs() < cc_width / 2.0 {
+                                return Some(cc_num);
+                            }
                         }
-                        Some(XyzGeocentric { x, y, z }.to_earth_wgs84())
+                        None
+                    })
+                    .collect();
+                cc_nums.sort_unstable();
+                debug!("Found corresponding MWA coarse channel numbers from the metafits and uvfits frequencies");
+                Vec1::try_from_vec(cc_nums).ok()
+            }
+
+            None => {
+                debug!("Assuming MWA coarse channel numbers from uvfits frequencies");
+
+                // Find all multiples of 1.28 MHz within our bandwidth.
+                let mut cc_nums = fine_chan_freqs
+                    .iter()
+                    .map(|&f| (f as f64 / 1.28e6).round() as u32)
+                    .collect::<Vec<_>>();
+                cc_nums.sort_unstable();
+                cc_nums.dedup();
+                Vec1::try_from_vec(cc_nums).ok()
+            }
+        };
+
+        let num_coarse_chans = mwa_coarse_chan_nums.as_ref().map(|ccs| {
+            NonZeroUsize::new(ccs.len())
+                .expect("length is always > 0 because collection cannot be empty")
+        });
+        let num_fine_chans_per_coarse_chan = num_coarse_chans.and_then(|num_coarse_chans| {
+            let total_bandwidth_hz =
+                *fine_chan_freqs_f64.last() - *fine_chan_freqs_f64.first() + freq_res;
+            NonZeroUsize::new(
+                (total_bandwidth_hz / num_coarse_chans.get() as f64 / freq_res).round() as usize,
+            )
+        });
+
+        match (
+            mwa_coarse_chan_nums.as_ref(),
+            num_fine_chans_per_coarse_chan,
+        ) {
+            (Some(mwa_ccs), Some(n)) => {
+                debug!("MWA coarse channel numbers: {mwa_ccs:?}");
+                debug!("num_fine_chans_per_coarse_chan: {n}");
+            }
+            _ => debug!("This doesn't appear to be MWA data; no MWA coarse channels described"),
+        }
+
+        let dut1 = {
+            let antenna_table_hdu = fits_open_hdu(&mut uvfits_fptr, "AIPS AN")?;
+            let uvfits_dut1: Option<f64> =
+                fits_get_optional_key(&mut uvfits_fptr, &antenna_table_hdu, "UT1UTC")?;
+            match uvfits_dut1 {
+                Some(dut1) => debug!("uvfits DUT1: {dut1}"),
+                None => debug!("uvfits has no DUT1 (UT1UTC key)"),
+            }
+
+            let metafits_dut1 = match mwalib_context.as_ref() {
+                Some(c) => match c.dut1 {
+                    Some(dut1) => {
+                        debug!("metafits DUT1: {dut1}");
+                        Some(dut1)
                     }
-                    (None, None, None) => None,
-                    _ => {
-                        warn!("Only a subset of uvfits ARRAYX, ARRAYY, ARRAYZ is available; ignoring present values");
+                    None => {
+                        debug!("metafits has no DUT1");
                         None
                     }
-                }
+                },
+                None => None,
             };
-            let array_position = array_position
-                .or(supplied_array_position)
-                .unwrap_or_else(|| {
-                    trace!("The array position was not specified in the input data; assuming MWA");
-                    LatLngHeight::mwa()
-                });
 
-            let hdu = fits_open_hdu!(&mut uvfits_fptr, 0)?;
-            let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &hdu)?;
-            debug!("Number of rows in the uvfits: {}", metadata.num_rows);
-            debug!("PCOUNT: {}", metadata.pcount);
-            debug!("Number of cross polarisations: {}", metadata.num_pols);
-            debug!("Floats per polarisation: {}", metadata.floats_per_pol);
-            debug!(
-                "Number of fine frequency chans: {}",
-                metadata.num_fine_freq_chans
-            );
-            debug!("UU index:       {}", metadata.indices.u);
-            debug!("VV index:       {}", metadata.indices.v);
-            debug!("WW index:       {}", metadata.indices.w);
-            debug!("BASELINE index: {}", metadata.indices.baseline);
-            debug!("DATE index:     {}", metadata.indices.date1);
-            if let Some(d2) = metadata.indices.date2 {
-                debug!("(Second) DATE index: {}", d2);
+            if metafits_dut1.is_some() && uvfits_dut1.is_some() {
+                debug!("Preferring metafits DUT1 over uvfits DUT1");
             }
-            debug!("RA index:       {}", metadata.indices.ra);
-            debug!("DEC index:      {}", metadata.indices.dec);
-            debug!("FREQ index:     {}", metadata.indices.freq);
+            metafits_dut1.or(uvfits_dut1).map(Duration::from_seconds)
+        };
 
-            if metadata.num_rows == 0 {
-                return Err(UvfitsReadError::Empty(uvfits.to_path_buf()));
-            }
-
-            // The phase centre is described by RA and DEC if there is no SOURCE
-            // table (as per the standard).
-            // TODO: Check that there is no SOURCE table!
-            let phase_centre = {
-                let ra = get_required_fits_key!(
-                    &mut uvfits_fptr,
-                    &hdu,
-                    &format!("CRVAL{}", metadata.indices.ra)
-                )?;
-                let dec = get_required_fits_key!(
-                    &mut uvfits_fptr,
-                    &hdu,
-                    &format!("CRVAL{}", metadata.indices.dec)
-                )?;
-                RADec::from_degrees(ra, dec)
-            };
-
-            // Populate the dipole delays, gains and the pointing centre if we
-            // can.
-            let mut dipole_delays: Option<Delays> = None;
-            let mut dipole_gains: Option<_> = None;
-            let mut pointing_centre: Option<RADec> = None;
-            if let Some(context) = &mwalib_context {
-                debug!("Using metafits for dipole delays, gains and pointing centre");
-                let delays = get_dipole_delays(context);
-                let gains = get_dipole_gains(context);
-                pointing_centre = Some(RADec::from_degrees(
-                    context.ra_tile_pointing_degrees,
-                    context.dec_tile_pointing_degrees,
-                ));
-
-                // Re-order the tile delays and gains according to the uvfits
-                // order, if possible.
-                if let Some(map) = map_antenna_order(context, &tile_names) {
-                    let mut delays2 = delays.clone();
-                    let mut gains2 = gains.clone();
-                    for i in 0..tile_names.len() {
-                        let j = map[&i];
-                        delays2
-                            .slice_mut(s![i, ..])
-                            .assign(&delays.slice(s![j, ..]));
-                        gains2.slice_mut(s![i, ..]).assign(&gains.slice(s![j, ..]));
-                    }
-                    dipole_delays = Some(Delays::Full(delays2));
-                    dipole_gains = Some(gains2);
-                } else {
-                    // We have no choice but to leave the order as is.
-                    warn!(
-                        "The uvfits antenna names are different to those supplied in the metafits."
-                    );
-                    warn!("Dipole delays/gains may be incorrectly mapped to uvfits antennas.");
-                    dipole_delays = Some(Delays::Full(delays));
-                    dipole_gains = Some(gains);
-                }
-            }
-
-            // Work out which tiles are unavailable.
-            let mut present_tiles_set: HashSet<usize> = HashSet::new();
-            metadata.uvfits_baselines.iter().for_each(|&uvfits_bl| {
-                let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
-                present_tiles_set.insert(ant1);
-                present_tiles_set.insert(ant2);
-            });
-            let unavailable_tiles = {
-                let mut v = tile_map
-                    .iter()
-                    .filter(|(i, _)| !present_tiles_set.contains(*i))
-                    .map(|(_, v)| *v)
-                    .collect::<Vec<_>>();
-                v.sort_unstable();
-                v
-            };
-            // Similar to the measurement set situation, we have no way(?) to
-            // identify tiles in the uvfits file that have data but shouldn't be
-            // used (i.e. they are flagged). So, we assume all tiles are
-            // unflagged, except those that are "unavailable" (determined
-            // above).
-            let flagged_tiles = unavailable_tiles.clone();
-
-            // Work out the timestamp epochs. The file tells us what time standard
-            // is being used (probably UTC). If this is false, then we assume TAI.
-            let uses_utc_time = {
-                let timsys: Option<String> =
-                    get_optional_fits_key!(&mut uvfits_fptr, &hdu, "TIMSYS")?;
-                match timsys {
-                    None => {
-                        debug!("No TIMSYS present; assuming UTC");
-                        true
-                    }
-                    Some(timsys) => {
-                        if timsys.starts_with("UTC") {
-                            true
-                        } else if timsys.starts_with("IAT") || timsys.starts_with("TAI") {
-                            false
-                        } else {
-                            return Err(UvfitsReadError::UnknownTimsys(timsys));
-                        }
-                    }
-                }
-            };
-
-            // uvfits timestamps are in the middle of their respective integration
-            // periods, so no adjustment is needed here.
-            let jd_zero = if uses_utc_time {
-                Epoch::from_jde_utc(metadata.jd_zero)
-            } else {
-                Epoch::from_jde_tai(metadata.jd_zero)
-            };
-
-            // the number of nanoseconds to quantize to.
-            let q = 10_000_000.;
-
-            let (all_timesteps, timestamps): (Vec<usize>, Vec<Epoch>) = metadata
-                .jd_frac_timestamps
-                .iter()
-                .enumerate()
-                .map(|(i, &frac)| {
-                    let jd_offset = Duration::from_days(frac);
-                    (i, jd_zero + quantize_duration(jd_offset, q))
-                })
-                .unzip();
-            // TODO: Determine flagging!
-            let unflagged_timesteps = all_timesteps.clone();
-            let all_timesteps =
-                Vec1::try_from_vec(all_timesteps).map_err(|_| UvfitsReadError::NoTimesteps {
-                    file: uvfits_fptr.filename.clone(),
-                })?;
-            let timestamps =
-                Vec1::try_from_vec(timestamps).map_err(|_| UvfitsReadError::NoTimesteps {
-                    file: uvfits_fptr.filename.clone(),
-                })?;
-
-            // Get the data's time resolution. There is a possibility that the file
-            // contains only one timestep.
-            let time_res = {
-                // If it's available, the integration time should be written out
-                // as a single-precision float. Reading as a double-precision
-                // float means cfitsio either promotes the single or returns the
-                // double that was written. I really don't mind if the key
-                // breaks the standard here...
-                let int_time: Option<f64> =
-                    get_optional_fits_key!(&mut uvfits_fptr, &hdu, "INTTIM")?;
-                match int_time {
-                    Some(t) => {
-                        let d = Duration::from_seconds(t);
-                        trace!("Time resolution from INTTIM: {}s", d.to_seconds());
-                        Some(d)
-                    }
-                    None => {
-                        if timestamps.len() == 1 {
-                            debug!("Only one timestep is present in the data; can't determine the data's time resolution.");
-                            None
-                        } else {
-                            // Find the minimum gap between two consecutive
-                            // timestamps.
-                            let time_res = timestamps
-                                .windows(2)
-                                .fold(Duration::from_seconds(f64::INFINITY), |acc, ts| {
-                                    acc.min(ts[1] - ts[0])
-                                });
-                            trace!(
-                                "Time resolution from smallest gap: {}s",
-                                time_res.to_seconds()
-                            );
-                            Some(time_res)
-                        }
-                    }
-                }
-            };
-            match timestamps.as_slice() {
-                // Handled above; uvfits files aren't allowed to be empty.
-                [] => unreachable!(),
-                [t] => debug!("Only timestep (GPS): {:.2}", t.to_gpst_seconds()),
-                [t0, .., tn] => {
-                    debug!("First good timestep (GPS): {:.2}", t0.to_gpst_seconds());
-                    debug!("Last good timestep  (GPS): {:.2}", tn.to_gpst_seconds());
-                }
-            }
-
-            debug!("Unavailable tiles in the uvfits: {unavailable_tiles:?}");
-            debug!("Flagged tiles in the uvfits: {flagged_tiles:?}");
-            debug!(
-                "Autocorrelations present: {}",
-                metadata.autocorrelations_present
-            );
-
-            // Get the obsid. There is an "obs. name" in the "object" key, but
-            // that's not the same thing.
-            let obsid = mwalib_context.as_ref().map(|context| context.obs_id);
-
-            let step = metadata.num_rows / timestamps.len();
-
-            let freq_val_str = format!("CRVAL{}", metadata.indices.freq);
-            let base_freq_str: String =
-                get_required_fits_key!(&mut uvfits_fptr, &hdu, &freq_val_str)?;
-            let base_freq: f64 = match base_freq_str.parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    return Err(UvfitsReadError::Parse {
-                        key: freq_val_str,
-                        value: base_freq_str,
-                    })
-                }
-            };
-            let base_index: isize = {
-                // CRPIX might be a float. Parse it as one, then make it an int.
-                let freq_val_str = format!("CRPIX{}", metadata.indices.freq);
-                let f_str: String = get_required_fits_key!(&mut uvfits_fptr, &hdu, &freq_val_str)?;
-                let f: f64 = match f_str.parse() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        return Err(UvfitsReadError::Parse {
-                            key: freq_val_str,
-                            value: f_str,
-                        })
-                    }
-                };
-                f.round() as _
-            };
-            let freq_val_str = format!("CDELT{}", metadata.indices.freq);
-            let fine_chan_width_str: String =
-                get_required_fits_key!(&mut uvfits_fptr, &hdu, &freq_val_str)?;
-            let freq_res: f64 = match fine_chan_width_str.parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    return Err(UvfitsReadError::Parse {
-                        key: freq_val_str,
-                        value: fine_chan_width_str,
-                    })
-                }
-            };
-
-            let mut fine_chan_freqs_f64 = Vec::with_capacity(metadata.num_fine_freq_chans);
-            let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
-            for i in 0..metadata.num_fine_freq_chans {
-                let freq = (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round();
-                fine_chan_freqs_f64.push(freq);
-                fine_chan_freqs.push(freq.round() as u64);
-            }
-            let fine_chan_freqs_f64 = Vec1::try_from_vec(fine_chan_freqs_f64).unwrap();
-            let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
-
-            let mwa_coarse_chan_nums = match mwalib_context.as_ref() {
-                Some(c) => {
-                    // Get the coarse channel information out of the metafits
-                    // file, but only the ones aligned with the frequencies in
-                    // the uvfits file.
-                    let cc_width = f64::from(c.coarse_chan_width_hz);
-                    let mut cc_nums: Vec<u32> = c
-                        .metafits_coarse_chans
-                        .iter()
-                        .filter_map(|cc| {
-                            let cc_num = u32::try_from(cc.rec_chan_number)
-                                .expect("not bigger than u32::MAX");
-                            let cc_centre = f64::from(cc.chan_centre_hz);
-                            for &f in &fine_chan_freqs_f64 {
-                                if (f - cc_centre).abs() < cc_width / 2.0 {
-                                    return Some(cc_num);
-                                }
-                            }
-                            None
-                        })
-                        .collect();
-                    cc_nums.sort_unstable();
-                    debug!("Found corresponding MWA coarse channel numbers from the metafits and uvfits frequencies");
-                    Vec1::try_from_vec(cc_nums).ok()
-                }
-
-                None => {
-                    debug!("Assuming MWA coarse channel numbers from uvfits frequencies");
-
-                    // Find all multiples of 1.28 MHz within our bandwidth.
-                    let mut cc_nums = fine_chan_freqs
-                        .iter()
-                        .map(|&f| (f as f64 / 1.28e6).round() as u32)
-                        .collect::<Vec<_>>();
-                    cc_nums.sort_unstable();
-                    cc_nums.dedup();
-                    Vec1::try_from_vec(cc_nums).ok()
-                }
-            };
-
-            let num_coarse_chans = mwa_coarse_chan_nums.as_ref().map(|ccs| {
-                NonZeroUsize::try_from(ccs.len())
-                    .expect("length is always > 0 because collection cannot be empty")
-            });
-            let num_fine_chans_per_coarse_chan = num_coarse_chans.and_then(|num_coarse_chans| {
-                let total_bandwidth_hz =
-                    *fine_chan_freqs_f64.last() - *fine_chan_freqs_f64.first() + freq_res;
-                NonZeroUsize::try_from(
-                    (total_bandwidth_hz / num_coarse_chans.get() as f64 / freq_res).round()
-                        as usize,
-                )
-                .ok()
-            });
-
-            match (
-                mwa_coarse_chan_nums.as_ref(),
-                num_fine_chans_per_coarse_chan,
-            ) {
-                (Some(mwa_ccs), Some(n)) => {
-                    debug!("MWA coarse channel numbers: {mwa_ccs:?}");
-                    debug!("num_fine_chans_per_coarse_chan: {n}");
-                }
-                _ => debug!("This doesn't appear to be MWA data; no MWA coarse channels described"),
-            }
-
-            let dut1 = {
-                // TODO: Don't assume the "AIPS AN" HDU is HDU 2.
-                let antenna_table_hdu = fits_open_hdu!(&mut uvfits_fptr, 1)?;
-                let uvfits_dut1: Option<f64> =
-                    get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "UT1UTC")?;
-                match uvfits_dut1 {
-                    Some(dut1) => debug!("uvfits DUT1: {dut1}"),
-                    None => debug!("uvfits has no DUT1 (UT1UTC key)"),
-                }
-
-                let metafits_dut1 = mwalib_context.as_ref().and_then(|c| c.dut1);
-                match metafits_dut1 {
-                    Some(dut1) => debug!("metafits DUT1: {dut1}"),
-                    None => debug!("metafits has no DUT1"),
-                }
-
-                if metafits_dut1.is_some() && uvfits_dut1.is_some() {
-                    debug!("Preferring metafits DUT1 over uvfits DUT1");
-                }
-                metafits_dut1.or(uvfits_dut1).map(Duration::from_seconds)
-            };
-
-            let obs_context = ObsContext {
-                obsid,
-                timestamps,
-                all_timesteps,
-                unflagged_timesteps,
-                phase_centre,
-                pointing_centre,
-                array_position,
-                _supplied_array_position: supplied_array_position,
-                dut1,
-                tile_names,
-                tile_xyzs,
-                flagged_tiles,
-                unavailable_tiles,
-                autocorrelations_present: metadata.autocorrelations_present,
-                dipole_delays,
-                dipole_gains,
-                time_res,
-                mwa_coarse_chan_nums,
-                num_fine_chans_per_coarse_chan,
-                freq_res: Some(freq_res),
-                fine_chan_freqs,
-                // TODO: Get flagging right. I think that info is in an optional table.
-                flagged_fine_chans: vec![],
-                flagged_fine_chans_per_coarse_chan: None,
-            };
-
-            Ok(UvfitsReader {
-                obs_context,
-                uvfits: uvfits.to_path_buf(),
-                metadata,
-                step,
-                metafits_context: mwalib_context,
-                tile_map,
-            })
-        }
-        inner(
-            uvfits.as_ref(),
-            metafits.as_ref().map(|f| f.as_ref()),
+        let obs_context = ObsContext {
+            obsid,
+            timestamps,
+            all_timesteps,
+            unflagged_timesteps,
+            phase_centre,
+            pointing_centre,
             array_position,
-        )
-        .map_err(VisReadError::from)
+            _supplied_array_position: Some(supplied_array_position),
+            dut1,
+            tile_names,
+            tile_xyzs,
+            flagged_tiles,
+            unavailable_tiles,
+            autocorrelations_present: metadata.autocorrelations_present,
+            dipole_delays,
+            dipole_gains,
+            time_res,
+            mwa_coarse_chan_nums,
+            num_fine_chans_per_coarse_chan,
+            freq_res: Some(freq_res),
+            fine_chan_freqs,
+            // TODO: Get flagging right. I think that info is in an optional table.
+            flagged_fine_chans: vec![],
+            flagged_fine_chans_per_coarse_chan: None,
+        };
+
+        Ok(UvfitsReader {
+            obs_context,
+            uvfits,
+            metadata,
+            step,
+            metafits_context: mwalib_context,
+            tile_map,
+        })
     }
 
-    pub fn read_inner(
+    /// This function is intended to be private, but is public so that it may be
+    /// benchmarked. The const parameters should be equal to whatever is in the
+    /// `self.metadata`; using them means that many branch conditions can be
+    /// avoided.
+    pub fn read_inner<const NUM_POLS: usize, const NUM_FLOATS_PER_POL: usize>(
         &self,
         mut crosses: Option<CrossData>,
         mut autos: Option<AutoData>,
@@ -575,24 +604,27 @@ impl UvfitsReader {
         let row_range_start = timestep * self.step;
         let row_range_end = (timestep + 1) * self.step;
 
-        let mut uvfits = fits_open!(&self.uvfits).map_err(UvfitsReadError::from)?;
-        fits_open_hdu!(&mut uvfits, 0).map_err(UvfitsReadError::from)?;
+        let mut uvfits = fits_open(&self.uvfits).map_err(UvfitsReadError::from)?;
+        fits_open_hdu(&mut uvfits, 0).map_err(UvfitsReadError::from)?;
         let mut group_params: Vec<f32> = vec![0.0; self.metadata.pcount];
-        let mut uvfits_vis: Array3<f32> = Array3::zeros((
-            self.metadata.num_fine_freq_chans,
-            self.metadata.num_pols,
-            self.metadata.floats_per_pol,
-        ));
+        let mut uvfits_vis: Vec<f32> =
+            vec![0.0; self.metadata.num_fine_freq_chans * NUM_POLS * NUM_FLOATS_PER_POL];
+        let flags = (0..self.metadata.num_fine_freq_chans)
+            .map(|i_chan| flagged_fine_chans.contains(&i_chan))
+            .collect::<Vec<_>>();
         for row in row_range_start..row_range_end {
             // Read in the row's group parameters.
             let mut status = 0;
-            let uvfits_bl = unsafe {
+            unsafe {
                 // ffggpe = fits_read_grppar_flt
                 fitsio_sys::ffggpe(
-                    uvfits.as_raw(),           /* I - FITS file pointer                       */
-                    1 + row as i64,            /* I - group to read (1 = 1st group)           */
-                    1,                         /* I - first vector element to read (1 = 1st)  */
-                    group_params.len() as i64, /* I - number of values to read                */
+                    uvfits.as_raw(), /* I - FITS file pointer                       */
+                    (1 + row).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                    1, /* I - first vector element to read (1 = 1st)  */
+                    group_params
+                        .len()
+                        .try_into()
+                        .expect("not larger than i64::MAX"), /* I - number of values to read                */
                     group_params.as_mut_ptr(), /* O - array of values that are returned       */
                     &mut status,               /* IO - error status                           */
                 );
@@ -600,12 +632,49 @@ impl UvfitsReader {
                     row_num: row + 1,
                     err,
                 })?;
-
-                group_params[(self.metadata.indices.baseline - 1) as usize]
             };
 
-            let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl.round() as usize);
-            let (ant1, ant2) = (self.tile_map[&ant1], self.tile_map[&ant2]);
+            // Check that the time associated with these group parameters is
+            // correct.
+            let this_timestamp = {
+                let mut jd_frac = Duration::from_days(f64::from(
+                    group_params[usize::from(self.metadata.indices.date1 - 1)],
+                ));
+                if let Some(date2) = self.metadata.indices.date2 {
+                    jd_frac += Duration::from_days(f64::from(group_params[usize::from(date2 - 1)]));
+                }
+                jd_frac
+            };
+            // Verify that this timestamp is what we expect it to be.
+            if this_timestamp != self.metadata.jd_frac_timestamps[timestep] {
+                return Err(UvfitsReadError::MismatchedTimestamps {
+                    timestep,
+                    expected_timestamp: self.metadata.jd_zero
+                        + self.metadata.jd_frac_timestamps[timestep],
+                    got: self.metadata.jd_zero + this_timestamp,
+                    uvfits_row: row,
+                }
+                .into());
+            }
+
+            let (uvfits_ant1, uvfits_ant2) = match self.metadata.indices.baseline_or_antennas {
+                BaselineOrAntennas::Baseline { index } => {
+                    let uvfits_bl = group_params[usize::from(index - 1)];
+                    assert!(self
+                        .metadata
+                        .uvfits_baselines
+                        .contains(&(uvfits_bl as usize)));
+                    decode_uvfits_baseline(uvfits_bl as usize)
+                }
+                BaselineOrAntennas::Antennas { index1, index2 } => {
+                    let a1 = group_params[usize::from(index1 - 1)] as usize;
+                    let a2 = group_params[usize::from(index2 - 1)] as usize;
+                    assert!(self.metadata.uvfits_antennas.contains(&a1));
+                    assert!(self.metadata.uvfits_antennas.contains(&a2));
+                    (a1, a2)
+                }
+            };
+            let (ant1, ant2) = (self.tile_map[&uvfits_ant1], self.tile_map[&uvfits_ant2]);
 
             if let Some(crosses) = crosses.as_mut() {
                 if let Some(i_baseline) = crosses
@@ -617,10 +686,13 @@ impl UvfitsReader {
                     unsafe {
                         // ffgpve = fits_read_img_flt
                         fitsio_sys::ffgpve(
-                            uvfits.as_raw(),         /* I - FITS file pointer                       */
-                            1 + row as i64, /* I - group to read (1 = 1st group)           */
-                            1,              /* I - first vector element to read (1 = 1st)  */
-                            uvfits_vis.len() as i64, /* I - number of values to read                */
+                            uvfits.as_raw(), /* I - FITS file pointer                       */
+                            (1 + row).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                            1, /* I - first vector element to read (1 = 1st)  */
+                            uvfits_vis
+                                .len()
+                                .try_into()
+                                .expect("not larger than i64::MAX"), /* I - number of values to read                */
                             0.0, /* I - value for undefined pixels              */
                             uvfits_vis.as_mut_ptr(), /* O - array of values that are returned       */
                             &mut 0,      /* O - set to 1 if any values are null; else 0 */
@@ -637,30 +709,73 @@ impl UvfitsReader {
                     // globally-flagged fine channels.
                     let mut out_vis = crosses.vis_fb.slice_mut(s![.., i_baseline]);
                     let mut out_weights = crosses.weights_fb.slice_mut(s![.., i_baseline]);
+
+                    let mut i_unflagged_chan = 0;
                     uvfits_vis
-                        .outer_iter()
-                        .enumerate()
-                        .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                        .zip(out_vis.iter_mut())
-                        .zip(out_weights.iter_mut())
-                        .for_each(|(((_, data_pol_axis), out_vis), out_weight)| {
-                            // These are the components of the input data's
-                            // visibilities.
-                            let data_xx = data_pol_axis.index_axis(Axis(0), 0);
-                            let data_yy = data_pol_axis.index_axis(Axis(0), 1);
-                            let data_xy = data_pol_axis.index_axis(Axis(0), 2);
-                            let data_yx = data_pol_axis.index_axis(Axis(0), 3);
+                        .chunks_exact(NUM_POLS * NUM_FLOATS_PER_POL)
+                        .zip(flags.iter())
+                        .filter(|(_, &flag)| !flag)
+                        .for_each(|(in_data, _flag)| {
+                            let (vis, weight) = match NUM_FLOATS_PER_POL {
+                                3 => {
+                                    let mut vis = Jones::default();
+                                    let mut weight = -0.0;
+                                    if NUM_POLS > 0 {
+                                        // XX
+                                        vis[0] = Complex::new(in_data[0], in_data[1]);
+                                        weight = in_data[2];
+                                    }
+                                    if NUM_POLS > 1 {
+                                        // YY
+                                        vis[3] = Complex::new(in_data[3], in_data[4]);
+                                        if in_data[5] < weight {
+                                            weight = in_data[5];
+                                        };
+                                    }
+                                    if NUM_POLS > 2 {
+                                        // XY
+                                        vis[1] = Complex::new(in_data[6], in_data[7]);
+                                        if in_data[8] < weight {
+                                            weight = in_data[8];
+                                        };
+                                    }
+                                    if NUM_POLS > 3 {
+                                        // YX
+                                        vis[2] = Complex::new(in_data[9], in_data[10]);
+                                        if in_data[11] < weight {
+                                            weight = in_data[11];
+                                        };
+                                    }
+                                    (vis, weight)
+                                }
 
-                            // Write to the output weights array. We assume that
-                            // each polarisation weight is equal.
-                            *out_weight = data_xx[2];
+                                2 => {
+                                    let mut vis = Jones::default();
+                                    if NUM_POLS > 0 {
+                                        // XX
+                                        vis[0] = Complex::new(in_data[0], in_data[1]);
+                                    }
+                                    if NUM_POLS > 1 {
+                                        // YY
+                                        vis[3] = Complex::new(in_data[2], in_data[3]);
+                                    }
+                                    if NUM_POLS > 2 {
+                                        // XY
+                                        vis[1] = Complex::new(in_data[4], in_data[5]);
+                                    }
+                                    if NUM_POLS > 3 {
+                                        // YX
+                                        vis[2] = Complex::new(in_data[6], in_data[7]);
+                                    }
+                                    (vis, 1.0)
+                                }
 
-                            // Write the input data visibility components to the
-                            // output data array.
-                            *out_vis = Jones::from([
-                                data_xx[0], data_xx[1], data_xy[0], data_xy[1], data_yx[0],
-                                data_yx[1], data_yy[0], data_yy[1],
-                            ]);
+                                _ => unreachable!("NUM_FLOATS_PER_POL must be 2 or 3"),
+                            };
+
+                            *out_vis.get_mut(i_unflagged_chan).expect("is in range") = vis;
+                            *out_weights.get_mut(i_unflagged_chan).expect("is in range") = weight;
+                            i_unflagged_chan += 1;
                         });
                 }
             }
@@ -676,10 +791,13 @@ impl UvfitsReader {
                         unsafe {
                             // ffgpve = fits_read_img_flt
                             fitsio_sys::ffgpve(
-                                uvfits.as_raw(),         /* I - FITS file pointer                       */
-                                1 + row as i64, /* I - group to read (1 = 1st group)           */
-                                1,              /* I - first vector element to read (1 = 1st)  */
-                                uvfits_vis.len() as i64, /* I - number of values to read                */
+                                uvfits.as_raw(), /* I - FITS file pointer                       */
+                                (1 + row).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                                1, /* I - first vector element to read (1 = 1st)  */
+                                uvfits_vis
+                                    .len()
+                                    .try_into()
+                                    .expect("not larger than i64::MAX"), /* I - number of values to read                */
                                 0.0, /* I - value for undefined pixels              */
                                 uvfits_vis.as_mut_ptr(), /* O - array of values that are returned       */
                                 &mut 0,      /* O - set to 1 if any values are null; else 0 */
@@ -693,25 +811,47 @@ impl UvfitsReader {
 
                         let mut out_vis = autos.vis_fb.slice_mut(s![.., i_ant]);
                         let mut out_weights = autos.weights_fb.slice_mut(s![.., i_ant]);
+                        // Auto-correlations are a lower priority in hyperdrive,
+                        // so we don't do the big match statement as with the
+                        // cross-correlations. This means that unpacking the
+                        // autos is slower. At least there are many fewer of
+                        // them!
                         uvfits_vis
-                            .outer_iter()
+                            .chunks_exact(NUM_POLS * NUM_FLOATS_PER_POL)
                             .enumerate()
                             .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
                             .zip(out_vis.iter_mut())
                             .zip(out_weights.iter_mut())
-                            .for_each(|(((_, data_pol_axis), out_vis), out_weight)| {
-                                let data_xx = data_pol_axis.index_axis(Axis(0), 0);
-                                let data_yy = data_pol_axis.index_axis(Axis(0), 1);
-                                let data_xy = data_pol_axis.index_axis(Axis(0), 2);
-                                let data_yx = data_pol_axis.index_axis(Axis(0), 3);
+                            .for_each(|(((_, in_data), out_vis), out_weight)| {
+                                let mut out_vis_tmp = [0.0; 8];
+                                let mut out_weight_tmp = f32::MAX;
 
-                                // We assume that weights are all equal for these
-                                // visibilities.
-                                *out_weight = data_xx[2];
+                                in_data
+                                    .chunks_exact(NUM_FLOATS_PER_POL)
+                                    .zip(out_vis_tmp.chunks_exact_mut(2))
+                                    .for_each(|(in_data, out_data)| {
+                                        out_data[0] = in_data[0];
+                                        out_data[1] = in_data[1];
+                                        if in_data.len() == 3 {
+                                            if in_data[2] < out_weight_tmp {
+                                                out_weight_tmp = in_data[2];
+                                            }
+                                        } else {
+                                            out_weight_tmp = 1.0;
+                                        };
+                                    });
+
                                 *out_vis = Jones::from([
-                                    data_xx[0], data_xx[1], data_xy[0], data_xy[1], data_yx[0],
-                                    data_yx[1], data_yy[0], data_yy[1],
+                                    out_vis_tmp[0], // XX real
+                                    out_vis_tmp[1], // XX imag
+                                    out_vis_tmp[4], // XY real
+                                    out_vis_tmp[5], // XY imag
+                                    out_vis_tmp[6], // YX real
+                                    out_vis_tmp[7], // YX imag
+                                    out_vis_tmp[2], // YY real
+                                    out_vis_tmp[3], // YY imag
                                 ]);
+                                *out_weight = out_weight_tmp;
                             });
                     }
                 }
@@ -749,20 +889,29 @@ impl VisRead for UvfitsReader {
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
-        self.read_inner(
-            Some(CrossData {
-                vis_fb: cross_vis_fb,
-                weights_fb: cross_weights_fb,
-                tile_baseline_flags,
-            }),
-            Some(AutoData {
-                vis_fb: auto_vis_fb,
-                weights_fb: auto_weights_fb,
-                tile_baseline_flags,
-            }),
-            timestep,
-            flagged_fine_chans,
-        )
+        let cross_data = Some(CrossData {
+            vis_fb: cross_vis_fb,
+            weights_fb: cross_weights_fb,
+            tile_baseline_flags,
+        });
+        let auto_data = Some(AutoData {
+            vis_fb: auto_vis_fb,
+            weights_fb: auto_weights_fb,
+            tile_baseline_flags,
+        });
+        match (self.metadata.num_pols, self.metadata.num_floats_per_pol) {
+            (4, 3) => self.read_inner::<4, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (3, 3) => self.read_inner::<3, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (2, 3) => self.read_inner::<2, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (1, 3) => self.read_inner::<1, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (4, 2) => self.read_inner::<4, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (3, 2) => self.read_inner::<3, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (2, 2) => self.read_inner::<2, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (1, 2) => self.read_inner::<1, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            _ => {
+                unimplemented!("uvfits num pols must be 1-4 and num floats per pol must be 2 or 3")
+            }
+        }
     }
 
     fn read_crosses(
@@ -773,16 +922,24 @@ impl VisRead for UvfitsReader {
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
-        self.read_inner(
-            Some(CrossData {
-                vis_fb,
-                weights_fb,
-                tile_baseline_flags,
-            }),
-            None,
-            timestep,
-            flagged_fine_chans,
-        )
+        let cross_data = Some(CrossData {
+            vis_fb,
+            weights_fb,
+            tile_baseline_flags,
+        });
+        match (self.metadata.num_pols, self.metadata.num_floats_per_pol) {
+            (4, 3) => self.read_inner::<4, 3>(cross_data, None, timestep, flagged_fine_chans),
+            (3, 3) => self.read_inner::<3, 3>(cross_data, None, timestep, flagged_fine_chans),
+            (2, 3) => self.read_inner::<2, 3>(cross_data, None, timestep, flagged_fine_chans),
+            (1, 3) => self.read_inner::<1, 3>(cross_data, None, timestep, flagged_fine_chans),
+            (4, 2) => self.read_inner::<4, 2>(cross_data, None, timestep, flagged_fine_chans),
+            (3, 2) => self.read_inner::<3, 2>(cross_data, None, timestep, flagged_fine_chans),
+            (2, 2) => self.read_inner::<2, 2>(cross_data, None, timestep, flagged_fine_chans),
+            (1, 2) => self.read_inner::<1, 2>(cross_data, None, timestep, flagged_fine_chans),
+            _ => {
+                unimplemented!("uvfits num pols must be 1-4 and num floats per pol must be 2 or 3")
+            }
+        }
     }
 
     fn read_autos(
@@ -793,16 +950,24 @@ impl VisRead for UvfitsReader {
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
-        self.read_inner(
-            None,
-            Some(AutoData {
-                vis_fb,
-                weights_fb,
-                tile_baseline_flags,
-            }),
-            timestep,
-            flagged_fine_chans,
-        )
+        let auto_data = Some(AutoData {
+            vis_fb,
+            weights_fb,
+            tile_baseline_flags,
+        });
+        match (self.metadata.num_pols, self.metadata.num_floats_per_pol) {
+            (4, 3) => self.read_inner::<4, 3>(None, auto_data, timestep, flagged_fine_chans),
+            (3, 3) => self.read_inner::<3, 3>(None, auto_data, timestep, flagged_fine_chans),
+            (2, 3) => self.read_inner::<2, 3>(None, auto_data, timestep, flagged_fine_chans),
+            (1, 3) => self.read_inner::<1, 3>(None, auto_data, timestep, flagged_fine_chans),
+            (4, 2) => self.read_inner::<4, 2>(None, auto_data, timestep, flagged_fine_chans),
+            (3, 2) => self.read_inner::<3, 2>(None, auto_data, timestep, flagged_fine_chans),
+            (2, 2) => self.read_inner::<2, 2>(None, auto_data, timestep, flagged_fine_chans),
+            (1, 2) => self.read_inner::<1, 2>(None, auto_data, timestep, flagged_fine_chans),
+            _ => {
+                unimplemented!("uvfits num pols must be 1-4 and num floats per pol must be 2 or 3")
+            }
+        }
     }
 
     fn get_marlu_mwa_info(&self) -> Option<MarluMwaObsContext> {
@@ -812,28 +977,55 @@ impl VisRead for UvfitsReader {
 }
 
 struct UvfitsMetadata {
+    /// The number of rows in the metafits file (hopefully equal to the number
+    /// of timesteps * the number of baselines).
     num_rows: usize,
+
     /// The number of parameters are in each uvfits group (PCOUNT).
     pcount: usize,
-    /// The number of cross polarisations (probably 4).
-    num_pols: usize,
-    /// The number of floats are associated with a cross pol (probably 3; real
-    /// part of visibilitiy, imag part of visibility, weight).
-    floats_per_pol: usize,
+
+    /// The number of polarisations (probably 4, but allowed to be no less than
+    /// 1 and no greater than 4).
+    num_pols: u8,
+
+    /// The "type" of polarisation present. Values of 1 through 4 are assigned
+    /// to Stokes I, Q, U, and V, values of -1 through -4 are assigned to RR,
+    /// LL, RL, and LR polarization products, respectively. Values -5 through -8
+    /// are assigned to XX, YY, XY, and YX polarization products, respectively.
+    _pol_type: i8,
+
+    /// The number of floats associated with a polarisation. If this value is 3,
+    /// these are the real part of the pol, imag part of the pol, and the
+    /// weight, respectively. If this value is 2, then it's the same as 3,
+    /// except the weight is always 1.0.
+    num_floats_per_pol: u8,
+
+    /// The... number of fine channel frequencies.
     num_fine_freq_chans: usize,
-    // The Julian date at midnight of the first day of the observation, as per
-    // the uvfits standard.
-    jd_zero: f64,
+
+    /// The Julian date at midnight of the first day of the observation, as per
+    /// the uvfits standard.
+    jd_zero: Epoch,
+
+    /// The time resolution \[seconds\] determined by INTTIM (if it's
+    /// available). We don't support multiple values of INTTIM, so this one
+    /// value is true for all data.
+    time_res: Option<f64>,
+
     /// The indices of various parameters (e.g. BASELINE is PTYPE4, DATE is
     /// PTYPE5, etc.)
     indices: Indices,
 
     /// Unique collection of baselines (uvfits formatted, i.e. need to be
     /// decoded).
-    uvfits_baselines: Vec<usize>,
+    uvfits_baselines: HashSet<usize>,
+
+    /// Unique collection of antennas (uvfits formatted, i.e. need to be
+    /// decoded).
+    uvfits_antennas: HashSet<usize>,
 
     /// Unique collection of JD fractions for timestamps.
-    jd_frac_timestamps: Vec<f64>,
+    jd_frac_timestamps: Vec<Duration>,
 
     /// Are auto-correlations present?
     autocorrelations_present: bool,
@@ -843,77 +1035,149 @@ impl UvfitsMetadata {
     /// Get metadata on the supplied uvfits file.
     ///
     /// This function assumes the correct HDU has already been opened (should be
-    /// HDU 1, index 0).
+    /// HDU "AIPS AN").
     fn new(uvfits: &mut FitsFile, hdu: &FitsHdu) -> Result<Self, UvfitsReadError> {
         let indices = Indices::new(uvfits, hdu)?;
 
+        // The file tells us what time standard is being used (probably UTC). If
+        // this is false, then we assume TAI.
+        let uses_utc_time = {
+            let timsys: Option<String> = fits_get_optional_key(uvfits, hdu, "TIMSYS")?;
+            match timsys {
+                None => {
+                    debug!("No TIMSYS present; assuming UTC");
+                    true
+                }
+                Some(timsys) => {
+                    if timsys.starts_with("UTC") {
+                        true
+                    } else if timsys.starts_with("IAT") || timsys.starts_with("TAI") {
+                        false
+                    } else {
+                        return Err(UvfitsReadError::UnknownTimsys(timsys));
+                    }
+                }
+            }
+        };
+
         // GCOUNT tells us how many visibilities are in the file.
-        let num_rows_str: String = get_required_fits_key!(uvfits, hdu, "GCOUNT")?;
+        let num_rows_str: String = fits_get_required_key(uvfits, hdu, "GCOUNT")?;
         let num_rows: usize = match num_rows_str.parse() {
             Ok(p) => p,
-            Err(_) => {
+            Err(e) => {
                 return Err(UvfitsReadError::Parse {
-                    key: "GCOUNT".to_string(),
+                    key: Cow::from("GCOUNT"),
                     value: num_rows_str,
-                })
-            }
-        };
-        // PCOUNT tells us how many parameters are in each uvfits group.
-        let pcount_str: String = get_required_fits_key!(uvfits, hdu, "PCOUNT")?;
-        let pcount: usize = match pcount_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(UvfitsReadError::Parse {
-                    key: "PCOUNT".to_string(),
-                    value: pcount_str,
-                })
-            }
-        };
-        // NAXIS2 is how many floats are associated with a cross pol (probably 3; real
-        // part of visibilitiy, imag part of visibility, weight).
-        let floats_per_pol_str: String = get_required_fits_key!(uvfits, hdu, "NAXIS2")?;
-        let floats_per_pol: usize = match floats_per_pol_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(UvfitsReadError::Parse {
-                    key: "NAXIS2".to_string(),
-                    value: floats_per_pol_str,
-                })
-            }
-        };
-        // NAXIS3 is the number of cross pols.
-        let num_pols_str: String = get_required_fits_key!(uvfits, hdu, "NAXIS3")?;
-        let num_pols: usize = match num_pols_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(UvfitsReadError::Parse {
-                    key: "NAXIS3".to_string(),
-                    value: num_pols_str,
+                    parse_error: e.to_string(),
                 })
             }
         };
 
-        // NAXIS4 is the number of fine-frequency channels.
-        let num_fine_freq_chans_str: String = get_required_fits_key!(uvfits, hdu, "NAXIS4")?;
-        let num_fine_freq_chans: usize = match num_fine_freq_chans_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
+        // PCOUNT tells us how many parameters are in each uvfits group.
+        let pcount_str: String = fits_get_required_key::<String>(uvfits, hdu, "PCOUNT")?;
+        let pcount = pcount_str
+            .parse::<usize>()
+            .map_err(|e| UvfitsReadError::Parse {
+                key: Cow::from("PCOUNT"),
+                value: pcount_str,
+                parse_error: e.to_string(),
+            })?;
+
+        // We expect the COMPLEX index to be 2 (mandated by the standard), the
+        // STOKES index to be 3, and the FREQ index to be 4. The order of these
+        // indices determines the shape of the array of visibilities, and we
+        // currently only support this one particular order.
+        if indices.complex != 2 && indices.stokes != 3 && indices.freq != 4 {
+            return Err(UvfitsReadError::WrongDataOrder {
+                complex: indices.complex,
+                stokes: indices.stokes,
+                freq: indices.freq,
+            });
+        }
+
+        // NAXIS2 (COMPLEX) is how many floats are associated with a
+        // polarisation. It must be either 2 or 3, as per the standard. The
+        // first two floats represent the real and imag part of a complex
+        // number, respectively, and the optional third is the weight. If there
+        // are only 2 floats, the weight is set to 1.
+        let num_floats_per_pol_str: String = fits_get_required_key(uvfits, hdu, "NAXIS2")?;
+        let num_floats_per_pol =
+            num_floats_per_pol_str
+                .parse::<u8>()
+                .map_err(|e| UvfitsReadError::Parse {
+                    key: Cow::from("NAXIS2"),
+                    value: num_floats_per_pol_str,
+                    parse_error: e.to_string(),
+                })?;
+        match num_floats_per_pol {
+            2 | 3 => (),
+            _ => return Err(UvfitsReadError::WrongFloatsPerPolCount(num_floats_per_pol)),
+        }
+
+        // The number of polarisations is described by the NAXIS key associated
+        // with STOKES.
+        let stokes_naxis_str = format!("NAXIS{}", indices.stokes);
+        let num_pols_str: String = fits_get_required_key(uvfits, hdu, &stokes_naxis_str)?;
+        let num_pols = num_pols_str
+            .parse::<u8>()
+            .map_err(|e| UvfitsReadError::Parse {
+                key: Cow::from(stokes_naxis_str),
+                value: num_pols_str,
+                parse_error: e.to_string(),
+            })?;
+
+        // The pol type is described by the CRVAL key associated with STOKES.
+        let stokes_crval_str = format!("CRVAL{}", indices.stokes);
+        let pol_type_str: String = fits_get_required_key(uvfits, hdu, &stokes_crval_str)?;
+        let pol_type: i8 = match pol_type_str.parse::<f32>() {
+            Ok(pol_type) => {
+                // Convert the float to an int.
+                if pol_type.abs() > 127.0 {
+                    panic!(
+                        "STOKES {stokes_crval_str} has an unsupported value (absolute value > 127)"
+                    );
+                }
+                let pol_type = pol_type.round() as i8;
+                // We currently only support a "pol type" of -5, i.e. XX.
+                if pol_type != -5 {
+                    return Err(UvfitsReadError::UnsupportedPolType {
+                        key: Cow::from(stokes_crval_str),
+                        value: pol_type,
+                    });
+                }
+                pol_type
+            }
+            Err(e) => {
                 return Err(UvfitsReadError::Parse {
-                    key: "NAXIS4".to_string(),
-                    value: num_fine_freq_chans_str,
+                    key: Cow::from(stokes_crval_str),
+                    value: pol_type_str,
+                    parse_error: e.to_string(),
                 })
             }
         };
+
+        // The number of fine-frequency channels is described by the NAXIS key
+        // associated with FREQ.
+        let freq_naxis_str = format!("NAXIS{}", indices.freq);
+        let num_fine_freq_chans_str: String = fits_get_required_key(uvfits, hdu, &freq_naxis_str)?;
+        let num_fine_freq_chans =
+            num_fine_freq_chans_str
+                .parse::<usize>()
+                .map_err(|e| UvfitsReadError::Parse {
+                    key: Cow::from(freq_naxis_str),
+                    value: num_fine_freq_chans_str,
+                    parse_error: e.to_string(),
+                })?;
 
         // "JD zero" refers to the Julian date at midnight of the first day of
         // the observation, as per the uvfits standard.
         let jd_zero_val_str = format!("PZERO{}", indices.date1);
-        let jd_zero_str: String = get_required_fits_key!(uvfits, hdu, &jd_zero_val_str)?;
+        let jd_zero_str: String = fits_get_required_key(uvfits, hdu, &jd_zero_val_str)?;
         // We expect that the PZERO corresponding to the second date (if
         // available) is 0.
         if let Some(d2) = indices.date2 {
             let pzero = format!("PZERO{d2}");
-            let key: Option<String> = get_optional_fits_key!(uvfits, hdu, &pzero)?;
+            let key: Option<String> = fits_get_optional_key(uvfits, hdu, &pzero)?;
             match key {
                 Some(key) => match key.parse::<f32>() {
                     Ok(n) => {
@@ -928,82 +1192,213 @@ impl UvfitsMetadata {
                 None => warn!("{pzero} does not exist, corresponding to the second DATE"),
             }
         }
-        let jd_zero: f64 = match jd_zero_str.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(UvfitsReadError::Parse {
-                    key: jd_zero_val_str,
-                    value: jd_zero_str,
-                })
+        let jd_zero = jd_zero_str
+            .parse::<f64>()
+            .map_err(|e| UvfitsReadError::Parse {
+                key: Cow::from(jd_zero_val_str),
+                value: jd_zero_str,
+                parse_error: e.to_string(),
+            })?;
+        // Given what JD zero is supposed to represent, we can round to the
+        // nearest hour; doing this helps ward off float precision issues.
+        let jd_zero = {
+            let e = if uses_utc_time {
+                Epoch::from_jde_utc(jd_zero)
+            } else {
+                Epoch::from_jde_tai(jd_zero)
+            };
+
+            // Don't round if the value is 0. Sigh.
+            if jd_zero.abs() < f64::EPSILON {
+                warn!("PZERO{} is supposed to be non-zero!", indices.date1);
+                e
+            } else {
+                e.round(1.hours())
             }
         };
 
-        // Read unique group parameters (timestamps and baselines).
-        let mut uvfits_baselines_set = HashSet::new();
-        let mut uvfits_baselines = vec![];
+        // Read unique group parameters (timestamps and baselines/antennas).
+        let mut uvfits_baselines = HashSet::new();
+        let mut uvfits_antennas = HashSet::new();
         let mut autocorrelations_present = false;
         let mut jd_frac_timestamp_set = HashSet::new();
         let mut jd_frac_timestamps = vec![];
+        let mut time_res = None;
 
-        let mut group_params = Array2::zeros((num_rows, pcount));
-        unsafe {
-            let mut status = 0;
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits.as_raw(),           /* I - FITS file pointer                       */
-                1,                         /* I - group to read (1 = 1st group)           */
-                1,                         /* I - first vector element to read (1 = 1st)  */
-                (pcount * num_rows) as _,  /* I - number of values to read                */
-                group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,               /* IO - error status                           */
-            );
-            // Check the status.
-            fits_check_status(status).map_err(UvfitsReadError::Metadata)?;
-        }
+        // Determine the number of baselines present. We assume that all
+        // baselines of a timestep are grouped together, so the number of
+        // baselines is found when the timestamp changes.
+        let mut group_params = Array2::zeros((num_rows.min(8257), pcount)); // 8257 is likely to get all MWA baselines in a single pass.
+        let num_cross_and_auto_baselines = {
+            let mut num_cross_and_auto_baselines = None;
+            let mut i_row = 0;
+            'outer: while i_row < num_rows {
+                let num_rows_to_iterate =
+                    group_params.len_of(Axis(0)).min(num_rows.abs_diff(i_row));
+                unsafe {
+                    let mut status = 0;
+                    // ffggpe = fits_read_grppar_flt
+                    fitsio_sys::ffggpe(
+                        uvfits.as_raw(), /* I - FITS file pointer                       */
+                        (i_row + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                        1, /* I - first vector element to read (1 = 1st)  */
+                        (num_rows_to_iterate * pcount)
+                            .try_into()
+                            .expect("not larger than i64::MAX"), /* I - number of values to read                */
+                        group_params.as_mut_ptr(), /* O - array of values that are returned       */
+                        &mut status,               /* IO - error status                           */
+                    );
+                    // Check the status.
+                    fits_check_status(status).map_err(UvfitsReadError::Metadata)?;
+                }
 
-        for params in group_params.outer_iter() {
-            let uvfits_bl = params[indices.baseline as usize - 1] as usize;
-            let (ant1, ant2) = decode_uvfits_baseline(uvfits_bl);
-            if !autocorrelations_present && (ant1 == ant2) {
-                autocorrelations_present = true;
+                for params in group_params.outer_iter().take(num_rows_to_iterate) {
+                    // Track information on the timestamps.
+                    let jd_frac = {
+                        let mut t =
+                            Duration::from_days(f64::from(params[usize::from(indices.date1) - 1]));
+                        // Use the second date, if it's there.
+                        if let Some(d2) = indices.date2 {
+                            t += Duration::from_days(f64::from(params[usize::from(d2) - 1]));
+                        }
+                        t
+                    };
+                    let nanos = jd_frac.total_nanoseconds();
+                    // If our set is empty, it's because this is the first
+                    // timestamp.
+                    if jd_frac_timestamp_set.is_empty() {
+                        jd_frac_timestamp_set.insert(nanos);
+                        jd_frac_timestamps.push(jd_frac);
+                    }
+                    // If the set doesn't contain this timestamp, we've hit the
+                    // next timestep, and we've therefore found the number of
+                    // baselines per timestep.
+                    if !jd_frac_timestamp_set.contains(&nanos) {
+                        num_cross_and_auto_baselines = Some(i_row);
+                        break 'outer;
+                    }
+
+                    // Track information on the baseline/antennas.
+                    let (ant1, ant2) = match indices.baseline_or_antennas {
+                        BaselineOrAntennas::Baseline { index } => {
+                            let uvfits_bl = params[usize::from(index) - 1] as usize;
+                            if !uvfits_baselines.contains(&uvfits_bl) {
+                                uvfits_baselines.insert(uvfits_bl);
+                            }
+                            decode_uvfits_baseline(uvfits_bl)
+                        }
+                        BaselineOrAntennas::Antennas { index1, index2 } => {
+                            let uvfits_ant1 = params[usize::from(index1) - 1] as usize;
+                            let uvfits_ant2 = params[usize::from(index2) - 1] as usize;
+                            uvfits_antennas.insert(uvfits_ant1);
+                            uvfits_antennas.insert(uvfits_ant2);
+                            (uvfits_ant1, uvfits_ant2)
+                        }
+                    };
+
+                    if !autocorrelations_present && (ant1 == ant2) {
+                        autocorrelations_present = true;
+                    }
+
+                    // Get/check time resolution.
+                    if let Some(i_inttim) = indices.inttim {
+                        let inttim = params[usize::from(i_inttim) - 1] as f64;
+                        if let Some(time_res) = time_res {
+                            assert_eq!(time_res, inttim);
+                        } else if time_res.is_none() {
+                            time_res = Some(inttim);
+                        }
+                    }
+
+                    i_row += 1;
+                }
             }
-            // Don't just push into a set; we want the order of the baselines as
-            // they come out of the uvfits file, and this isn't necessarily
-            // sorted.
-            if !uvfits_baselines_set.contains(&uvfits_bl) {
-                uvfits_baselines_set.insert(uvfits_bl);
-                uvfits_baselines.push(uvfits_bl);
+            num_cross_and_auto_baselines.unwrap_or(i_row)
+        };
+
+        // Now get the timestamps out of all the other timesteps.
+        let mut i_row = num_cross_and_auto_baselines;
+        assert!(
+            num_rows % num_cross_and_auto_baselines == 0,
+            "There are a variable number of baselines per timestep, which is not supported"
+        );
+        while i_row < num_rows {
+            unsafe {
+                let mut status = 0;
+                // ffggpe = fits_read_grppar_flt
+                fitsio_sys::ffggpe(
+                    uvfits.as_raw(), /* I - FITS file pointer                       */
+                    (i_row + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                    1, /* I - first vector element to read (1 = 1st)  */
+                    pcount.try_into().expect("not larger than i64::MAX"), /* I - number of values to read                */
+                    group_params.as_mut_ptr(), /* O - array of values that are returned       */
+                    &mut status,               /* IO - error status                           */
+                );
+                // Check the status.
+                fits_check_status(status).map_err(UvfitsReadError::Metadata)?;
             }
 
-            let jd = {
-                let mut t = params[indices.date1 as usize - 1] as f64;
+            // Take the metadata out of read-in group parameters.
+            let jd_frac = {
+                let mut t = Duration::from_days(f64::from(
+                    group_params[(0, usize::from(indices.date1) - 1)],
+                ));
                 // Use the second date, if it's there.
                 if let Some(d2) = indices.date2 {
-                    t += params[d2 as usize - 1] as f64;
+                    t += Duration::from_days(f64::from(group_params[(0, usize::from(d2) - 1)]));
                 }
                 t
             };
-            // Floats can't be hashed. Hash the bits!
-            let jd_bits = jd.to_bits();
-            if !jd_frac_timestamp_set.contains(&jd_bits) {
-                jd_frac_timestamp_set.insert(jd_bits);
-                jd_frac_timestamps.push(jd);
+            let nanos = jd_frac.total_nanoseconds();
+            if !jd_frac_timestamp_set.contains(&nanos) {
+                jd_frac_timestamp_set.insert(nanos);
+                jd_frac_timestamps.push(jd_frac);
             }
+
+            match indices.baseline_or_antennas {
+                BaselineOrAntennas::Baseline { index } => {
+                    let uvfits_bl = group_params[(0, usize::from(index) - 1)] as usize;
+                    if !uvfits_baselines.contains(&uvfits_bl) {
+                        // TODO: error
+                    }
+                }
+                BaselineOrAntennas::Antennas { index1, index2 } => {
+                    let uvfits_ant1 = group_params[(0, usize::from(index1) - 1)] as usize;
+                    let uvfits_ant2 = group_params[(0, usize::from(index2) - 1)] as usize;
+                    if !uvfits_antennas.contains(&uvfits_ant1)
+                        || !uvfits_antennas.contains(&uvfits_ant2)
+                    {
+                        // TODO: Error
+                    }
+                }
+            }
+
+            i_row += num_cross_and_auto_baselines;
         }
 
         Ok(UvfitsMetadata {
             num_rows,
             pcount,
             num_pols,
-            floats_per_pol,
+            _pol_type: pol_type,
+            num_floats_per_pol,
             num_fine_freq_chans,
             jd_zero,
+            time_res,
             indices,
             uvfits_baselines,
+            uvfits_antennas,
             jd_frac_timestamps,
             autocorrelations_present,
         })
     }
+}
+
+#[derive(Debug)]
+enum BaselineOrAntennas {
+    Baseline { index: u8 },
+
+    Antennas { index1: u8, index2: u8 },
 }
 
 #[derive(Debug)]
@@ -1015,31 +1410,36 @@ struct Indices {
     /// PTYPE
     w: u8,
     /// PTYPE
-    baseline: u8,
+    baseline_or_antennas: BaselineOrAntennas,
     /// PTYPE
     date1: u8,
     /// PTYPE
     date2: Option<u8>,
+    /// PTYPE
+    inttim: Option<u8>,
+    /// CTYPE
+    complex: u8,
+    /// CTYPE
+    stokes: u8,
+    /// CTYPE
+    freq: u8,
     /// CTYPE
     ra: u8,
     /// CTYPE
     dec: u8,
-    /// CTYPE
-    freq: u8,
 }
 
 impl Indices {
-    /// "UU", "VV", "WW", "BASELINE" and "DATE" indices could be on any index 1
-    /// to 5. These are identified by the "PTYPE" key. Check they all exist, and
-    /// return the indices. Do the same for "RA", "DEC" and "FREQ" in the ctypes.
-    ///
-    /// This function assumes the correct HDU has already been opened (should be
-    /// HDU 1, index 0).
+    /// Find the 1-indexed indices of "PTYPE" and "CTYPE" keys we require (e.g.
+    /// "UU", "VV", "WW", "RA", "DEC"). "BASELINE" will be in most uvfits files,
+    /// but "ANTENNA1" and "ANTENNA2" may be used instead; exactly one of the
+    /// two is ensured to be present. A second "DATE"/"_DATE" key may also be
+    /// present but does not have to be.
     fn new(uvfits: &mut FitsFile, hdu: &FitsHdu) -> Result<Self, UvfitsReadError> {
         // Accumulate the "PTYPE" keys.
         let mut ptypes = Vec::with_capacity(12);
         for i in 1.. {
-            let ptype: Option<String> = get_optional_fits_key!(uvfits, hdu, &format!("PTYPE{i}"))?;
+            let ptype: Option<String> = fits_get_optional_key(uvfits, hdu, &format!("PTYPE{i}"))?;
             match ptype {
                 Some(ptype) => ptypes.push(ptype),
 
@@ -1053,12 +1453,15 @@ impl Indices {
         let mut v_index = None;
         let mut w_index = None;
         let mut baseline_index = None;
+        let mut antenna1_index = None;
+        let mut antenna2_index = None;
         let mut date1_index = None;
         let mut date2_index = None;
+        let mut inttim_index = None;
 
         for (i, key) in ptypes.into_iter().enumerate() {
             let ii = (i + 1) as u8;
-            match key.as_ref() {
+            match key.as_str() {
                 "UU" => {
                     if u_index.is_none() {
                         u_index = Some(ii)
@@ -1087,111 +1490,163 @@ impl Indices {
                         warn!("Found another BASELINE key -- only using the first");
                     }
                 }
-                "DATE" => match (date1_index, date2_index) {
+                "ANTENNA1" => {
+                    if antenna1_index.is_none() {
+                        antenna1_index = Some(ii)
+                    } else {
+                        warn!("Found another ANTENNA1 key -- only using the first");
+                    }
+                }
+                "ANTENNA2" => {
+                    if antenna2_index.is_none() {
+                        antenna2_index = Some(ii)
+                    } else {
+                        warn!("Found another ANTENNA1 key -- only using the first");
+                    }
+                }
+                "DATE" | "_DATE" => match (date1_index, date2_index) {
                     (None, None) => date1_index = Some(ii),
                     (Some(_), None) => date2_index = Some(ii),
                     (Some(_), Some(_)) => {
-                        warn!("Found more than 2 DATE keys -- only using the first two")
+                        warn!("Found more than 2 DATE/_DATE keys -- only using the first two")
                     }
                     (None, Some(_)) => unreachable!(),
                 },
+                "INTTIM" => {
+                    if inttim_index.is_none() {
+                        inttim_index = Some(ii)
+                    } else {
+                        warn!("Found another INTTIM key -- only using the first");
+                    }
+                }
                 _ => (),
             }
         }
 
-        let (u, v, w, baseline, date1) =
-            match (u_index, v_index, w_index, baseline_index, date1_index) {
-                (Some(u), Some(v), Some(w), Some(baseline), Some(date1)) => {
-                    (u, v, w, baseline, date1)
-                }
-                (None, _, _, _, _) => {
-                    return Err(UvfitsReadError::MissingKey {
-                        key: "UU",
-                        hdu: hdu.number + 1,
-                    })
-                }
-                (_, None, _, _, _) => {
-                    return Err(UvfitsReadError::MissingKey {
-                        key: "VV",
-                        hdu: hdu.number + 1,
-                    })
-                }
-                (_, _, None, _, _) => {
-                    return Err(UvfitsReadError::MissingKey {
-                        key: "WW",
-                        hdu: hdu.number + 1,
-                    })
-                }
-                (_, _, _, None, _) => {
-                    return Err(UvfitsReadError::MissingKey {
-                        key: "BASELINE",
-                        hdu: hdu.number + 1,
-                    })
-                }
-                (_, _, _, _, None) => {
-                    return Err(UvfitsReadError::MissingKey {
-                        key: "DATE",
-                        hdu: hdu.number + 1,
-                    })
-                }
-            };
-
-        let ctype2: Option<String> = get_optional_fits_key!(uvfits, hdu, "CTYPE2")?;
-        let ctype3: Option<String> = get_optional_fits_key!(uvfits, hdu, "CTYPE3")?;
-        let ctype4: Option<String> = get_optional_fits_key!(uvfits, hdu, "CTYPE4")?;
-        let ctype5: Option<String> = get_optional_fits_key!(uvfits, hdu, "CTYPE5")?;
-        let ctype6: Option<String> = get_optional_fits_key!(uvfits, hdu, "CTYPE6")?;
-        let ctype7: Option<String> = get_optional_fits_key!(uvfits, hdu, "CTYPE7")?;
-
-        let mut ra_index = None;
-        let mut dec_index = None;
-        let mut freq_index = None;
-
-        for (i, key) in [ctype2, ctype3, ctype4, ctype5, ctype6, ctype7]
-            .iter()
-            .enumerate()
-        {
-            let ii = (i + 2) as u8;
-            match key.as_deref() {
-                Some("RA") => ra_index = Some(ii),
-                Some("DEC") => dec_index = Some(ii),
-                Some("FREQ") => freq_index = Some(ii),
-                _ => (),
+        // Handle problems surrounding some combination of BASELINE and
+        // ANTENNA1/ANTENNA2.
+        let baseline_or_antennas = match (baseline_index, antenna1_index, antenna2_index) {
+            // These are OK.
+            (Some(index), None, None) => BaselineOrAntennas::Baseline { index },
+            (None, Some(index1), Some(index2)) => BaselineOrAntennas::Antennas { index1, index2 },
+            (Some(index), Some(_), _) | (Some(index), _, Some(_)) => {
+                warn!("Found both BASELINE and ANTENNA keys; only using BASELINE");
+                BaselineOrAntennas::Baseline { index }
             }
-        }
+            // These are not.
+            (None, Some(_), None) => return Err(UvfitsReadError::Antenna1ButNotAntenna2),
+            (None, None, Some(_)) => return Err(UvfitsReadError::Antenna2ButNotAntenna1),
+            (None, None, None) => return Err(UvfitsReadError::NoBaselineInfo),
+        };
 
-        let (ra, dec, freq) = match (ra_index, dec_index, freq_index) {
-            (Some(ra), Some(dec), Some(freq)) => (ra, dec, freq),
-            (None, _, _) => {
+        let (u, v, w, date1) = match (u_index, v_index, w_index, date1_index) {
+            (Some(u), Some(v), Some(w), Some(date1)) => (u, v, w, date1),
+            (None, _, _, _) => {
                 return Err(UvfitsReadError::MissingKey {
-                    key: "RA",
+                    key: "UU",
                     hdu: hdu.number + 1,
                 })
             }
-            (_, None, _) => {
+            (_, None, _, _) => {
                 return Err(UvfitsReadError::MissingKey {
-                    key: "DEC",
+                    key: "VV",
                     hdu: hdu.number + 1,
                 })
             }
-            (_, _, None) => {
+            (_, _, None, _) => {
                 return Err(UvfitsReadError::MissingKey {
-                    key: "FREQ",
+                    key: "WW",
+                    hdu: hdu.number + 1,
+                })
+            }
+            (_, _, _, None) => {
+                return Err(UvfitsReadError::MissingKey {
+                    key: "DATE",
                     hdu: hdu.number + 1,
                 })
             }
         };
 
+        // Now find CTYPEs.
+        let mut ctypes = Vec::with_capacity(12);
+        for i in 2.. {
+            let ctype: Option<String> = fits_get_optional_key(uvfits, hdu, &format!("CTYPE{i}"))?;
+            match ctype {
+                Some(ctype) => ctypes.push(ctype),
+
+                // We've found the last CTYPE.
+                None => break,
+            }
+        }
+
+        let mut complex_index = None;
+        let mut stokes_index = None;
+        let mut freq_index = None;
+        let mut ra_index = None;
+        let mut dec_index = None;
+
+        for (i, key) in ctypes.into_iter().enumerate() {
+            let ii = (i + 2) as u8;
+            match key.as_str() {
+                "COMPLEX" => complex_index = Some(ii),
+                "STOKES" => stokes_index = Some(ii),
+                "FREQ" => freq_index = Some(ii),
+                "RA" => ra_index = Some(ii),
+                "DEC" => dec_index = Some(ii),
+                _ => (),
+            }
+        }
+
+        let (complex, stokes, freq, ra, dec) =
+            match (complex_index, stokes_index, freq_index, ra_index, dec_index) {
+                (Some(complex), Some(stokes), Some(freq), Some(ra), Some(dec)) => {
+                    (complex, stokes, freq, ra, dec)
+                }
+                (None, _, _, _, _) => {
+                    return Err(UvfitsReadError::MissingKey {
+                        key: "COMPLEX",
+                        hdu: hdu.number + 1,
+                    })
+                }
+                (_, None, _, _, _) => {
+                    return Err(UvfitsReadError::MissingKey {
+                        key: "STOKES",
+                        hdu: hdu.number + 1,
+                    })
+                }
+                (_, _, None, _, _) => {
+                    return Err(UvfitsReadError::MissingKey {
+                        key: "FREQ",
+                        hdu: hdu.number + 1,
+                    })
+                }
+                (_, _, _, None, _) => {
+                    return Err(UvfitsReadError::MissingKey {
+                        key: "RA",
+                        hdu: hdu.number + 1,
+                    })
+                }
+                (_, _, _, _, None) => {
+                    return Err(UvfitsReadError::MissingKey {
+                        key: "DEC",
+                        hdu: hdu.number + 1,
+                    })
+                }
+            };
+
         Ok(Indices {
             u,
             v,
             w,
-            baseline,
+            baseline_or_antennas,
             date1,
             date2: date2_index,
+            complex,
+            stokes,
+            freq,
             ra,
             dec,
-            freq,
+            inttim: inttim_index,
         })
     }
 }
@@ -1199,18 +1654,17 @@ impl Indices {
 /// Pull out fits array-in-a-cell values; useful for e.g. STABXYZ. This function
 /// assumes that the output datatype is f64, and that the fits datatype is
 /// TDOUBLE, so it is not to be used generally!
-fn read_cell_array(
+fn read_cell_array<const NUM_ELEM: usize>(
     fits_ptr: &mut fitsio::FitsFile,
     hdu: &fitsio::hdu::FitsHdu,
     col_name: &'static str,
     row: i64,
-    n_elem: i64,
-) -> Result<Vec<f64>, UvfitsReadError> {
+) -> Result<[f64; NUM_ELEM], UvfitsReadError> {
     unsafe {
         // With the column name, get the column number.
         let mut status = 0;
         let mut col_num = -1;
-        let keyword = std::ffi::CString::new(col_name).unwrap();
+        let keyword = std::ffi::CString::new(col_name).expect("CString::new failed");
         // ffgcno = fits_get_colnum
         fitsio_sys::ffgcno(
             fits_ptr.as_raw(),
@@ -1227,7 +1681,7 @@ fn read_cell_array(
         })?;
 
         // Now get the specified row from that column.
-        let mut array: Vec<f64> = vec![0.0; n_elem as usize];
+        let mut array = [0.0; NUM_ELEM];
         // ffgcv = fits_read_col
         fitsio_sys::ffgcv(
             fits_ptr.as_raw(),
@@ -1235,7 +1689,7 @@ fn read_cell_array(
             col_num,
             row + 1,
             1,
-            n_elem,
+            NUM_ELEM.try_into().expect("not larger than i64::MAX"),
             std::ptr::null_mut(),
             array.as_mut_ptr().cast(),
             &mut 0,

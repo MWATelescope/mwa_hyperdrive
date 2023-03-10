@@ -9,9 +9,7 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 
-use hifitime::Epoch;
-
-use crate::misc::round_hundredths_of_a_second;
+use hifitime::{Epoch, TimeUnits};
 
 /// Is the supplied number prime? This isn't necessarily efficient code; it's
 /// used just for testing. Stolen from
@@ -39,7 +37,7 @@ pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
         acc + t.to_gpst_seconds()
     });
     let average = duration_sum.to_gpst_seconds() / es.len() as f64;
-    round_hundredths_of_a_second(Epoch::from_gpst_seconds(average))
+    Epoch::from_gpst_seconds(average).round(10.milliseconds())
 }
 
 /// Information on flagged tiles, baselines and maps to and from array indices.
