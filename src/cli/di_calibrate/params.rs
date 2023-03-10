@@ -431,10 +431,13 @@ impl DiCalParams {
         let obs_context = input_data.get_obs_context();
 
         // If the array position wasn't user defined, try the input data.
-        let array_position = array_position.unwrap_or_else(|| {
-            trace!("The array position was not specified in the input data; assuming MWA");
-            LatLngHeight::mwa()
-        });
+        // Otherwise warn that we're assuming MWA.
+        let array_position = array_position
+            .or(obs_context.array_position)
+            .unwrap_or_else(|| {
+                trace!("The array position was not specified in the input data; assuming MWA");
+                LatLngHeight::mwa()
+            });
         let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
 
         let timesteps_to_use = {

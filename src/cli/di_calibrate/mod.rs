@@ -222,7 +222,7 @@ pub struct DiCalArgs {
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "CALIBRATION",
         number_of_values = 3,
         allow_hyphen_values = true,
-        value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
+        value_names = &["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
     )]
     pub array_position: Option<Vec<f64>>,
 

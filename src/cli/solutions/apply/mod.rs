@@ -79,7 +79,7 @@ pub struct SolutionsApplyArgs {
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "INPUT FILES",
         number_of_values = 3,
         allow_hyphen_values = true,
-        value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
+        value_names = &["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
     )]
     array_position: Option<Vec<f64>>,
 
@@ -475,11 +475,14 @@ fn apply_solutions(args: SolutionsApplyArgs, dry_run: bool) -> Result<(), Soluti
     if num_unflagged_tiles == 0 {
         return Err(SolutionsApplyError::NoTiles);
     }
-    // If the array position wasn't user defined, try the input data.
-    let array_position = array_position.unwrap_or_else(|| {
-        trace!("The array position was not specified in the input data; assuming MWA");
-        LatLngHeight::mwa()
-    });
+    // If the array position wasn't user defined, try the input data. Otherwise
+    // warn that we're assuming MWA.
+    let array_position = array_position
+        .or(obs_context.array_position)
+        .unwrap_or_else(|| {
+            trace!("The array position was not specified in the input data; assuming MWA");
+            LatLngHeight::mwa()
+        });
     messages::ArrayDetails {
         array_position: Some(array_position),
         array_latitude_j2000: None,

@@ -164,7 +164,7 @@ pub struct VisSubtractArgs {
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "MODEL PARAMETERS",
         number_of_values = 3,
         allow_hyphen_values = true,
-        value_names = &["LONG_RAD", "LAT_RAD", "HEIGHT_M"]
+        value_names = &["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
     )]
     array_position: Option<Vec<f64>>,
 
@@ -473,11 +473,14 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     let beam_file = beam.get_beam_file();
     debug!("Beam file: {beam_file:?}");
 
-    // If the array position wasn't user defined, try the input data.
-    let array_pos = array_position.unwrap_or_else(|| {
-        trace!("The array position was not specified in the input data; assuming MWA");
-        LatLngHeight::mwa()
-    });
+    // If the array position wasn't user defined, try the input data. Otherwise
+    // warn that we're assuming MWA.
+    let array_position = array_position
+        .or(obs_context.array_position)
+        .unwrap_or_else(|| {
+            trace!("The array position was not specified in the input data; assuming MWA");
+            LatLngHeight::mwa()
+        });
 
     let timesteps = match timesteps {
         None => Vec1::try_from(obs_context.all_timesteps.as_slice()),
@@ -507,14 +510,14 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
 
     let precession_info = precess_time(
-        array_pos.longitude_rad,
-        array_pos.latitude_rad,
+        array_position.longitude_rad,
+        array_position.latitude_rad,
         obs_context.phase_centre,
         obs_context.timestamps[*timesteps.first()],
         dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
     );
     let (lmst, latitude) = if no_precession {
-        (precession_info.lmst, array_pos.latitude_rad)
+        (precession_info.lmst, array_position.latitude_rad)
     } else {
         (
             precession_info.lmst_j2000,
@@ -523,7 +526,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
     };
 
     messages::ArrayDetails {
-        array_position: Some(array_pos),
+        array_position: Some(array_position),
         array_latitude_j2000: if no_precession {
             None
         } else {
@@ -786,7 +789,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 beam.deref(),
                 &source_list,
                 obs_context,
-                array_pos,
+                array_position,
                 vis_shape,
                 dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
                 !no_precession,
@@ -816,7 +819,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
             });
             let result = write_vis(
                 &outputs,
-                array_pos,
+                array_position,
                 obs_context.phase_centre,
                 obs_context.pointing_centre,
                 &obs_context.tile_xyzs,
@@ -927,7 +930,7 @@ fn model_vis_and_subtract(
     beam: &dyn Beam,
     source_list: &SourceList,
     obs_context: &ObsContext,
-    array_pos: LatLngHeight,
+    array_position: LatLngHeight,
     vis_shape: (usize, usize),
     dut1: Duration,
     apply_precession: bool,
@@ -961,8 +964,8 @@ fn model_vis_and_subtract(
         &freqs,
         &flagged_tiles,
         obs_context.phase_centre,
-        array_pos.longitude_rad,
-        array_pos.latitude_rad,
+        array_position.longitude_rad,
+        array_position.latitude_rad,
         dut1,
         apply_precession,
     )?;
