@@ -20,7 +20,7 @@ use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, log_enabled, trace, warn, Level::Debug};
-use marlu::{Jones, LatLngHeight, MwaObsContext};
+use marlu::{Jones, LatLngHeight};
 use ndarray::{prelude::*, ArcArray2};
 use scopeguard::defer_on_unwind;
 use vec1::{vec1, Vec1};
@@ -793,12 +793,7 @@ pub(super) fn apply_solutions_inner(
                 .sorted()
                 .collect::<Vec<_>>();
             let fine_chan_freqs = obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64);
-            let marlu_mwa_obs_context = input_data.get_metafits_context().map(|c| {
-                (
-                    MwaObsContext::from_mwalib(c),
-                    0..obs_context.coarse_chan_freqs.len(),
-                )
-            });
+
             let result = write_vis(
                 outputs,
                 array_position,
@@ -818,7 +813,7 @@ pub(super) fn apply_solutions_inner(
                 &HashSet::new(),
                 output_vis_time_average_factor,
                 output_vis_freq_average_factor,
-                marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
+                input_data.get_marlu_mwa_info().as_ref(),
                 rx_write,
                 &error,
                 Some(write_progress),

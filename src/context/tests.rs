@@ -26,13 +26,12 @@ fn get_minimal_obs_context() -> ObsContext {
         dipole_delays: Some(Delays::Partial(vec![0; 16])),
         dipole_gains: None,
         time_res: None,
-        coarse_chan_nums: vec![],
-        coarse_chan_freqs: vec![],
-        num_fine_chans_per_coarse_chan: 1,
+        mwa_coarse_chan_nums: None,
+        num_fine_chans_per_coarse_chan: None,
         freq_res: None,
         fine_chan_freqs: vec1![128_000_000],
         flagged_fine_chans: vec![],
-        flagged_fine_chans_per_coarse_chan: vec![],
+        flagged_fine_chans_per_coarse_chan: None,
     }
 }
 
@@ -72,4 +71,12 @@ fn test_guess_freq_res() {
     obs_ctx.fine_chan_freqs = vec1![128_000_000, 128_100_000, 128_120_000];
 
     assert_eq!(obs_ctx.guess_freq_res(), 30_000.);
+}
+
+#[test]
+fn test_veto_freqs() {
+    let mut obs_ctx = get_minimal_obs_context();
+    obs_ctx.fine_chan_freqs = vec1![182335000, 182415000];
+
+    assert_eq!(&obs_ctx.get_veto_freqs(), &[181760000.0, 183040000.0]);
 }

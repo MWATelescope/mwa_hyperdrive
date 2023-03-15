@@ -759,8 +759,6 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
-        // If we don't give the array position, there's a bit flip in the results. grrr
-        "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars",
     ]);

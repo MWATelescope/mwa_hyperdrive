@@ -7,7 +7,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashSet, fmt::Write};
+use std::{collections::HashSet, fmt::Write, num::NonZeroUsize};
 
 use hifitime::{Duration, Epoch};
 use log::{debug, error, info, trace, warn};
@@ -119,19 +119,16 @@ pub(crate) struct ObsContext {
     /// therefore no resolution.
     pub(crate) time_res: Option<Duration>,
 
-    /// The coarse channel numbers (typically 1 to 24) that are present in the
-    /// supplied data. This does not necessarily match the coarse channel
+    /// The MWA receiver channel numbers (all in the range 0 to 255, e.g. 131 to
+    /// 154 for EoR high-band) that are present in the supplied data. The vector
+    /// is ascendingly sorted. These do not necessarily match the coarse channel
     /// numbers present in the full observation, as the input data may only
     /// reflect a fraction of it.
-    pub(crate) coarse_chan_nums: Vec<u32>,
-
-    /// The centre frequencies of each of the coarse channels in this
-    /// observation \[Hz\].
-    pub(crate) coarse_chan_freqs: Vec<f64>,
+    pub(crate) mwa_coarse_chan_nums: Option<Vec1<u32>>,
 
     /// The number of fine-frequency channels per coarse channel. For 40 kHz
     /// legacy MWA data, this is 32.
-    pub(crate) num_fine_chans_per_coarse_chan: usize,
+    pub(crate) num_fine_chans_per_coarse_chan: Option<NonZeroUsize>,
 
     /// The fine-channel resolution of the supplied data \[Hz\]. This is not
     /// necessarily the fine-channel resolution of the original observation's
@@ -151,7 +148,7 @@ pub(crate) struct ObsContext {
 
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
-    pub(crate) flagged_fine_chans_per_coarse_chan: Vec<usize>,
+    pub(crate) flagged_fine_chans_per_coarse_chan: Option<Vec1<usize>>,
 }
 
 impl ObsContext {
@@ -264,6 +261,19 @@ impl ObsContext {
         }
 
         Ok(flagged_tiles)
+    }
+
+    /// Return all frequencies within the fine frequency channel range that are
+    /// multiples of 1.28 MHz.
+    pub(crate) fn get_veto_freqs(&self) -> Vec<f64> {
+        let mut veto_freqs = self.fine_chan_freqs.clone();
+        veto_freqs.sort_unstable();
+        let mut veto_freqs: Vec<f64> = veto_freqs
+            .into_iter()
+            .map(|f| (f as f64 / 1.28e6).round() * 1.28e6)
+            .collect();
+        veto_freqs.dedup();
+        veto_freqs
     }
 
     /// Print information on the indices, names and statuses of all of the tiles

@@ -12,6 +12,7 @@ pub(crate) use error::*;
 
 use std::{
     collections::{BTreeSet, HashMap},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
 };
 
@@ -391,11 +392,11 @@ impl MsReader {
 
             // Get the frequency information.
             let mut spectral_window_table = read_table(ms, Some("SPECTRAL_WINDOW"))?;
+            let fine_chan_freqs_f64: Vec<f64> =
+                spectral_window_table.get_cell_as_vec("CHAN_FREQ", 0)?;
             let fine_chan_freqs = {
-                let fine_chan_freqs_hz: Vec<f64> =
-                    spectral_window_table.get_cell_as_vec("CHAN_FREQ", 0)?;
-                let fine_chan_freqs = fine_chan_freqs_hz
-                    .into_iter()
+                let fine_chan_freqs = fine_chan_freqs_f64
+                    .iter()
                     .map(|f| f.round() as u64)
                     .collect();
                 Vec1::try_from_vec(fine_chan_freqs).map_err(|_| MsReadError::NoChannelFreqs)?
@@ -405,36 +406,89 @@ impl MsReader {
             let total_bandwidth_hz: f64 = spectral_window_table.get_cell("TOTAL_BANDWIDTH", 0)?;
             debug!("MS total bandwidth: {} Hz", total_bandwidth_hz);
 
-            // Note the "subband" is CASA nomenclature. MWA tends to use "coarse
-            // channel" instead.
-            let coarse_chan_nums: Vec<u32> = {
-                // If MWA_SUBBAND doesn't exist, then we must assume that this
-                // measurement set only contains one coarse channel.
-                match read_table(ms, Some("MWA_SUBBAND")) {
-                    Err(_) => vec![1],
-                    Ok(mut mwa_subband_table) => {
-                        let zero_indexed_coarse_chans: Vec<i32> =
-                            mwa_subband_table.get_col_as_vec("NUMBER")?;
-                        let one_indexed_coarse_chans: Vec<u32> = zero_indexed_coarse_chans
-                            .into_iter()
-                            .map(|cc_num| {
-                                if cc_num < 0 {
-                                    Err(MsReadError::NegativeSubband { num: cc_num })
-                                } else {
-                                    Ok((cc_num + 1) as _)
-                                }
-                            })
-                            .collect::<Result<_, MsReadError>>()?;
-                        if one_indexed_coarse_chans.is_empty() {
-                            vec![1]
-                        } else {
-                            one_indexed_coarse_chans
-                        }
+            // Round the values in here because sometimes they have a fractional
+            // component, for some reason. We're unlikely to ever have a fraction of
+            // a Hz as the channel resolution.
+            let freq_res = {
+                let all_widths: Vec<f64> =
+                    spectral_window_table.get_cell_as_vec("CHAN_WIDTH", 0)?;
+                let width = *all_widths.first().ok_or(MsReadError::NoChanWidths)?;
+                // Make sure all the widths all the same.
+                for w in all_widths.iter().skip(1) {
+                    if (w - width).abs() > f64::EPSILON {
+                        return Err(MsReadError::ChanWidthsUnequal);
                     }
                 }
+                width
             };
-            debug!("Coarse channel numbers: {:?}", coarse_chan_nums);
-            let num_coarse_chans = coarse_chan_nums.len();
+
+            // The MWA_SUBBAND table is supposed to contain information on MWA
+            // coarse channels ("subband" is CASA nomenclature, MWA tends to use
+            // "coarse channel" instead). Instead, it contains nothing useful.
+            // So, we determine what would be MWA coarse channel numbers from
+            // the available frequencies.
+            let mwa_coarse_chan_nums = match mwalib_context.as_ref() {
+                Some(c) => {
+                    // Get the coarse channel information out of the metafits
+                    // file, but only the ones aligned with the frequencies in
+                    // the uvfits file.
+                    let cc_width = f64::from(c.coarse_chan_width_hz);
+                    let mut cc_nums: Vec<u32> = c
+                        .metafits_coarse_chans
+                        .iter()
+                        .filter_map(|cc| {
+                            let cc_num = u32::try_from(cc.rec_chan_number)
+                                .expect("not bigger than u32::MAX");
+                            let cc_centre = f64::from(cc.chan_centre_hz);
+                            for &f in &fine_chan_freqs_f64 {
+                                if (f - cc_centre).abs() < cc_width / 2.0 {
+                                    return Some(cc_num);
+                                }
+                            }
+                            None
+                        })
+                        .collect();
+                    cc_nums.sort_unstable();
+                    debug!("Found corresponding MWA coarse channel numbers from the metafits and MS frequencies");
+                    Vec1::try_from_vec(cc_nums).ok()
+                }
+
+                None => {
+                    debug!("Assuming MWA coarse channel numbers from MS frequencies");
+
+                    // Find all multiples of 1.28 MHz within our bandwidth.
+                    let mut cc_nums = fine_chan_freqs
+                        .iter()
+                        .map(|&f| (f as f64 / 1.28e6).round() as u32)
+                        .collect::<Vec<_>>();
+                    cc_nums.sort_unstable();
+                    cc_nums.dedup();
+                    Vec1::try_from_vec(cc_nums).ok()
+                }
+            };
+
+            let num_coarse_chans = mwa_coarse_chan_nums.as_ref().map(|ccs| {
+                NonZeroUsize::try_from(ccs.len())
+                    .expect("length is always > 0 because collection cannot be empty")
+            });
+            let num_fine_chans_per_coarse_chan = num_coarse_chans.and_then(|num_coarse_chans| {
+                NonZeroUsize::try_from(
+                    (total_bandwidth_hz / num_coarse_chans.get() as f64 / freq_res).round()
+                        as usize,
+                )
+                .ok()
+            });
+
+            match (
+                mwa_coarse_chan_nums.as_ref(),
+                num_fine_chans_per_coarse_chan,
+            ) {
+                (Some(mwa_ccs), Some(n)) => {
+                    debug!("MWA coarse channel numbers: {mwa_ccs:?}");
+                    debug!("num_fine_chans_per_coarse_chan: {n}");
+                }
+                _ => debug!("This doesn't appear to be MWA data; no MWA coarse channels described"),
+            }
 
             // Get other metadata.
             let obsid: Option<u32> = {
@@ -540,63 +594,6 @@ impl MsReader {
                 }
             }
 
-            // Round the values in here because sometimes they have a fractional
-            // component, for some reason. We're unlikely to ever have a fraction of
-            // a Hz as the channel resolution.
-            let freq_res = {
-                let all_widths: Vec<f64> =
-                    spectral_window_table.get_cell_as_vec("CHAN_WIDTH", 0)?;
-                let width = *all_widths.first().ok_or(MsReadError::NoChanWidths)?;
-                // Make sure all the widths all the same.
-                for w in all_widths.iter().skip(1) {
-                    if (w - width).abs() > f64::EPSILON {
-                        return Err(MsReadError::ChanWidthsUnequal);
-                    }
-                }
-                width
-            };
-
-            let num_fine_chans_per_coarse_chan =
-                (total_bandwidth_hz / coarse_chan_nums.len() as f64 / freq_res).round() as _;
-            let coarse_chan_freqs: Vec<f64> = match mwalib_context.as_ref() {
-                Some(context) => {
-                    // Get the coarse channel information out of the metafits
-                    // file, but only the ones aligned with the frequencies in
-                    // the uvfits file.
-                    let cc_width = f64::from(context.coarse_chan_width_hz);
-
-                    context
-                        .metafits_coarse_chans
-                        .iter()
-                        .map(|cc| f64::from(cc.chan_centre_hz))
-                        .filter(|cc_freq| {
-                            fine_chan_freqs
-                                .iter()
-                                .any(|f| (*f as f64 - *cc_freq).abs() < cc_width / 2.0)
-                        })
-                        .collect()
-                }
-                None => {
-                    // Divide each chunk of fine channels per coarse channel
-                    fine_chan_freqs
-                        .chunks_exact(num_fine_chans_per_coarse_chan)
-                        .map(|chunk| {
-                            if chunk.len() % 2 == 0 {
-                                // We round the coarse channel freqs hoping
-                                // there isn't any sub-Hz structure.
-                                ((chunk[chunk.len() / 2 - 1] + chunk[chunk.len() / 2]) / 2) as f64
-                            } else {
-                                chunk[chunk.len() / 2] as f64
-                            }
-                        })
-                        .collect()
-                }
-            };
-            debug!(
-                "Coarse channel centre frequencies [Hz]: {:?}",
-                coarse_chan_freqs
-            );
-
             // Get the observation's flagged channels per coarse band.
             let flagged_fine_chans: Vec<bool> = {
                 // We assume here that the main_table contains a FLAG table.
@@ -639,19 +636,33 @@ impl MsReader {
 
             let flagged_fine_chans_per_coarse_chan = {
                 let mut flagged_fine_chans_per_coarse_chan = vec![];
-                for i_chan in 0..num_fine_chans_per_coarse_chan {
-                    let mut chan_is_flagged = true;
-                    for i_cc in 0..num_coarse_chans {
-                        if !flagged_fine_chans[i_cc * num_fine_chans_per_coarse_chan + i_chan] {
-                            chan_is_flagged = false;
-                            break;
+
+                if let (Some(num_coarse_chans), Some(num_fine_chans_per_coarse_chan)) = (
+                    num_coarse_chans,
+                    num_fine_chans_per_coarse_chan.map(|n| n.get()),
+                ) {
+                    // Loop over all fine channels within a coarse channel.
+                    // For each fine channel, check all coarse channels; is
+                    // the fine channel flagged? If so, add it to our
+                    // collection.
+                    for i_chan in 0..num_fine_chans_per_coarse_chan {
+                        let mut chan_is_flagged = true;
+                        // Note that the coarse channel indices do not
+                        // matter; the data in measurement sets is
+                        // concatenated even if a coarse channel is missing.
+                        for i_cc in 0..num_coarse_chans.get() {
+                            if !flagged_fine_chans[i_cc * num_fine_chans_per_coarse_chan + i_chan] {
+                                chan_is_flagged = false;
+                                break;
+                            }
+                        }
+                        if chan_is_flagged {
+                            flagged_fine_chans_per_coarse_chan.push(i_chan);
                         }
                     }
-                    if chan_is_flagged {
-                        flagged_fine_chans_per_coarse_chan.push(i_chan);
-                    }
                 }
-                flagged_fine_chans_per_coarse_chan
+
+                Vec1::try_from_vec(flagged_fine_chans_per_coarse_chan).ok()
             };
             let flagged_fine_chans = flagged_fine_chans
                 .into_iter()
@@ -714,8 +725,7 @@ impl MsReader {
                 dipole_delays,
                 dipole_gains,
                 time_res,
-                coarse_chan_nums,
-                coarse_chan_freqs,
+                mwa_coarse_chan_nums,
                 num_fine_chans_per_coarse_chan,
                 freq_res: Some(freq_res),
                 fine_chan_freqs,
@@ -1066,5 +1076,10 @@ impl VisRead for MsReader {
             timestep,
             flagged_fine_chans,
         )
+    }
+
+    fn get_marlu_mwa_info(&self) -> Option<MarluMwaObsContext> {
+        self.get_metafits_context()
+            .map(MarluMwaObsContext::from_mwalib)
     }
 }

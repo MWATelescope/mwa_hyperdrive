@@ -11,7 +11,6 @@ pub(crate) use error::{FileWriteError, VisWriteError};
 
 use std::{
     collections::HashSet,
-    ops::Range,
     path::{Path, PathBuf},
 };
 
@@ -131,7 +130,7 @@ pub(crate) fn write_vis<'a>(
     flagged_fine_chans: &HashSet<usize>,
     time_average_factor: usize,
     freq_average_factor: usize,
-    marlu_mwa_obs_context: Option<(&MarluMwaObsContext, &Range<usize>)>,
+    marlu_mwa_obs_context: Option<&MarluMwaObsContext>,
     rx: Receiver<VisTimestep>,
     error: &'a AtomicCell<bool>,
     progress_bar: Option<ProgressBar>,
@@ -230,15 +229,13 @@ pub(crate) fn write_vis<'a>(
                     dut1,
                     true,
                 );
-                if let Some((marlu_mwa_obs_context, coarse_chan_range)) =
-                    marlu_mwa_obs_context.as_ref()
-                {
+                if let Some(marlu_mwa_obs_context) = marlu_mwa_obs_context {
                     ms.initialize_mwa(
                         &vis_ctx,
                         &marlu_obs_ctx,
                         marlu_mwa_obs_context,
                         Some(&history),
-                        coarse_chan_range,
+                        &(0..marlu_mwa_obs_context.coarse_chan_recs.len()),
                     )?;
                 } else {
                     ms.initialize(&vis_ctx, &marlu_obs_ctx, Some(&history))?;

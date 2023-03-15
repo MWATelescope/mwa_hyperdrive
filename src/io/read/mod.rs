@@ -16,7 +16,7 @@ pub(crate) use uvfits::UvfitsReader;
 
 use std::collections::HashSet;
 
-use marlu::Jones;
+use marlu::{Jones, MwaObsContext as MarluMwaObsContext};
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use vec1::Vec1;
@@ -78,6 +78,14 @@ pub(crate) trait VisRead: Sync + Send {
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError>;
+
+    /// Get optional MWA information to give to `Marlu` when writing out
+    /// visibilities.
+    // The existence of this code is nothing but horrible. This optional info
+    // is, to my knowledge, *only* useful because `wsclean` uses it to detect
+    // MWA data (specifically via the MWA_TILE_POINTING table) and apply the MWA
+    // FEE beam. The `Marlu` API should instead take MWA dipole delays.
+    fn get_marlu_mwa_info(&self) -> Option<MarluMwaObsContext>;
 }
 
 /// A private container for cross-correlation data. It only exists to give

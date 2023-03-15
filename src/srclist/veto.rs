@@ -39,15 +39,15 @@ use crate::{
 /// If there are fewer sources than that of `num_sources`, an error is returned;
 /// it's up to the caller to handle this if they want to.
 ///
-/// `coarse_chan_freqs_hz`: The centre frequencies of each of the coarse
-/// channels of this observation \[Hz\].
+/// `freqs_hz`: The frequencies to use for beam calculations \[Hz\]. These are
+/// traditionally multiples of 1.28 MHz.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn veto_sources(
     source_list: &mut SourceList,
     phase_centre: RADec,
     lst_rad: f64,
     array_latitude_rad: f64,
-    coarse_chan_freqs_hz: &[f64],
+    freqs_hz: &[f64],
     beam: &dyn Beam,
     num_sources: Option<usize>,
     source_dist_cutoff_deg: f64,
@@ -89,7 +89,7 @@ pub(crate) fn veto_sources(
 
             // Iterate over each frequency. Is the total flux density
             // acceptable for each frequency?
-            for &cc_freq in coarse_chan_freqs_hz {
+            for &cc_freq in freqs_hz {
                 // `fd` is the sum of the source's component XX+YY flux
                 // densities at this coarse-channel frequency.
                 let mut fd = 0.0;

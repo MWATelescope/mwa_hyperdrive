@@ -253,7 +253,7 @@ fn test_1090008640_cross_vis() {
     let obs_context = &uvfits_reader.obs_context;
     let total_num_tiles = obs_context.tile_xyzs.len();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan;
+    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -316,7 +316,7 @@ fn test_1090008640_auto_vis() {
 
     let obs_context = &uvfits_reader.obs_context;
     let total_num_tiles = obs_context.get_total_num_tiles();
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan;
+    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -405,7 +405,7 @@ fn test_1090008640_auto_vis_with_flags() {
 
     let obs_context = &uvfits_reader.obs_context;
     let total_num_tiles = obs_context.get_total_num_tiles();
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan;
+    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
     let flagged_tiles = HashSet::from([1, 9]);
     let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
     let chan_flags = HashSet::from([1]);
@@ -503,7 +503,7 @@ fn read_1090008640_cross_and_auto_vis() {
     let obs_context = &uvfits_reader.obs_context;
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan;
+    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(

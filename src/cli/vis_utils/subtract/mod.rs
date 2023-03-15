@@ -20,7 +20,7 @@ use hifitime::Duration;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info, trace, warn};
-use marlu::{precession::precess_time, Jones, LatLngHeight, MwaObsContext};
+use marlu::{precession::precess_time, Jones, LatLngHeight};
 use ndarray::{prelude::*, ArcArray2};
 use scopeguard::defer_on_unwind;
 use vec1::{vec1, Vec1};
@@ -600,7 +600,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
             obs_context.phase_centre,
             lmst,
             latitude,
-            &obs_context.coarse_chan_freqs,
+            &obs_context.get_veto_freqs(),
             &*beam,
             num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
@@ -808,12 +808,6 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
             defer_on_unwind! { error.store(true); }
             write_progress.tick();
 
-            let marlu_mwa_obs_context = input_data.get_metafits_context().map(|c| {
-                (
-                    MwaObsContext::from_mwalib(c),
-                    0..obs_context.coarse_chan_freqs.len(),
-                )
-            });
             let result = write_vis(
                 &outputs,
                 array_pos,
@@ -839,7 +833,7 @@ fn vis_subtract(args: VisSubtractArgs, dry_run: bool) -> Result<(), VisSubtractE
                 &HashSet::new(),
                 time_average_factor,
                 freq_average_factor,
-                marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
+                input_data.get_marlu_mwa_info().as_ref(),
                 rx_write,
                 &error,
                 Some(write_progress),

@@ -8,7 +8,7 @@ mod error;
 
 pub(crate) use error::VisSimulateError;
 
-use std::{collections::HashSet, ops::Range, path::PathBuf, str::FromStr, thread};
+use std::{collections::HashSet, path::PathBuf, str::FromStr, thread};
 
 use clap::Parser;
 use crossbeam_channel::{bounded, Sender};
@@ -250,12 +250,6 @@ struct VisSimParams {
 
     /// The fine channel frequencies \[Hz\].
     fine_chan_freqs: Vec1<f64>,
-
-    /// The simulated MWA coarse channel numbers. These probably don't exactly
-    /// correspond to the actual coarse channels of the observation paired with
-    /// the metafits file. Starts from 1. Only used to populate a measurement
-    /// set's MWA_SUBBAND table.
-    coarse_chan_nums: Range<usize>,
 
     /// The frequency resolution of the fine channels.
     freq_res_hz: f64,
@@ -599,29 +593,27 @@ impl VisSimParams {
         }
         .print();
 
-        let (coarse_chan_freqs, coarse_chan_nums) = {
-            let (mut coarse_chan_freqs, mut coarse_chan_nums): (Vec<_>, Vec<_>) = fine_chan_freqs
-                .iter()
-                .map(|&f| {
-                    // MWA coarse channel numbers are a multiple of 1.28 MHz.
-                    // This might change with MWAX, but ignore that until it
-                    // becomes an issue; vis-simulate is mostly useful for
-                    // testing.
-                    let coarse_chan_number = (f / 1.28e6).round();
-                    let cc_freq = coarse_chan_number * 1.28e6;
-                    (cc_freq, coarse_chan_number)
-                })
-                .unzip();
+        let coarse_chan_freqs = {
+            let (mut coarse_chan_freqs, mut coarse_chan_nums): (Vec<f64>, Vec<u32>) =
+                fine_chan_freqs
+                    .iter()
+                    .map(|&f| {
+                        // MWA coarse channel numbers are a multiple of 1.28 MHz.
+                        // This might change with MWAX, but ignore that until it
+                        // becomes an issue; vis-simulate is mostly useful for
+                        // testing.
+                        let cc_num = (f / 1.28e6).round();
+                        (cc_num * 1.28e6, cc_num as u32)
+                    })
+                    .unzip();
             // Deduplicate. As `fine_chan_freqs` is always sorted, we don't need
             // to sort here.
             coarse_chan_freqs.dedup();
             coarse_chan_nums.dedup();
             debug!("MWA coarse channel numbers: {coarse_chan_nums:?}");
             // Convert the coarse channel numbers to a range starting from 1.
-            // TODO: Make Marlu take a slice of coarse channel numbers, not a range.
-            (coarse_chan_freqs, 1..coarse_chan_nums.len())
+            coarse_chan_freqs
         };
-        debug!("Coarse channel numbers: {:?}", coarse_chan_nums);
         debug!(
             "Coarse channel centre frequencies [Hz]: {:?}",
             coarse_chan_freqs
@@ -675,7 +667,6 @@ impl VisSimParams {
             output_freq_average_factor: freq_factor,
             phase_centre,
             fine_chan_freqs,
-            coarse_chan_nums,
             freq_res_hz: freq_res,
             tile_xyzs,
             tile_names,
@@ -700,7 +691,6 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         output_freq_average_factor,
         phase_centre,
         fine_chan_freqs,
-        coarse_chan_nums,
         freq_res_hz,
         tile_xyzs,
         tile_names,
@@ -815,7 +805,6 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 .copied()
                 .sorted()
                 .collect::<Vec<_>>();
-            let marlu_mwa_obs_context = MwaObsContext::from_mwalib(&metafits);
 
             let result = write_vis(
                 &outputs,
@@ -836,7 +825,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 &HashSet::new(),
                 output_time_average_factor,
                 output_freq_average_factor,
-                Some((&marlu_mwa_obs_context, &coarse_chan_nums)),
+                Some(&MwaObsContext::from_mwalib(&metafits)),
                 rx_model,
                 &error,
                 Some(write_progress),

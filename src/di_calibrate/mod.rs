@@ -25,7 +25,7 @@ use marlu::{
     c64,
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     math::num_tiles_from_num_cross_correlation_baselines,
-    Jones, MwaObsContext,
+    Jones,
 };
 use ndarray::{iter::AxisIterMut, prelude::*};
 use rayon::prelude::*;
@@ -241,12 +241,7 @@ pub(crate) fn get_cal_vis(
                     params.output_model_time_average_factor,
                     &params.timesteps,
                 );
-                let marlu_mwa_obs_context = params.input_data.get_metafits_context().map(|c| {
-                    (
-                        MwaObsContext::from_mwalib(c),
-                        0..obs_context.coarse_chan_freqs.len(),
-                    )
-                });
+
                 let result = write_vis(
                     model_files,
                     params.array_position,
@@ -266,7 +261,7 @@ pub(crate) fn get_cal_vis(
                     &params.flagged_fine_chans,
                     params.output_model_time_average_factor,
                     params.output_model_freq_average_factor,
-                    marlu_mwa_obs_context.as_ref().map(|(c, r)| (c, r)),
+                    params.input_data.get_marlu_mwa_info().as_ref(),
                     rx_model,
                     &error,
                     model_write_progress,

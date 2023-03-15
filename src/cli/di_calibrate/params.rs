@@ -580,27 +580,49 @@ impl DiCalParams {
             None => HashSet::new(),
         };
         if !ignore_input_data_fine_channel_flags {
-            for &f in &obs_context.flagged_fine_chans {
-                flagged_fine_chans.insert(f);
-            }
+            flagged_fine_chans.extend(obs_context.flagged_fine_chans.iter());
         }
         // Assign the per-coarse-channel fine-channel flags.
         let fine_chan_flags_per_coarse_chan: HashSet<usize> = {
-            let mut out_flags = match fine_chan_flags_per_coarse_chan {
-                Some(flags) => flags.into_iter().collect(),
-                None => HashSet::new(),
-            };
-            if !ignore_input_data_fine_channel_flags {
-                for &obs_fine_chan_flag in &obs_context.flagged_fine_chans_per_coarse_chan {
-                    out_flags.insert(obs_fine_chan_flag);
-                }
+            let mut out_flags = HashSet::new();
+            // Handle user flags.
+            if let Some(fine_chan_flags_per_coarse_chan) = fine_chan_flags_per_coarse_chan {
+                out_flags.extend(fine_chan_flags_per_coarse_chan.into_iter());
+            }
+            // Handle input data flags.
+            if let (false, Some(flags)) = (
+                ignore_input_data_fine_channel_flags,
+                obs_context.flagged_fine_chans_per_coarse_chan.as_ref(),
+            ) {
+                out_flags.extend(flags.iter());
             }
             out_flags
         };
-        if !ignore_input_data_fine_channel_flags {
-            for (i, _) in obs_context.coarse_chan_nums.iter().enumerate() {
-                for f in &fine_chan_flags_per_coarse_chan {
-                    flagged_fine_chans.insert(f + obs_context.num_fine_chans_per_coarse_chan * i);
+        // Take the per-coarse-channel flags and put them in the fine channel
+        // flags.
+        match (
+            obs_context.mwa_coarse_chan_nums.as_ref(),
+            obs_context.num_fine_chans_per_coarse_chan.map(|n| n.get()),
+        ) {
+            (Some(mwa_coarse_chan_nums), Some(num_fine_chans_per_coarse_chan)) => {
+                for (i_cc, _) in mwa_coarse_chan_nums.iter().enumerate() {
+                    for f in &fine_chan_flags_per_coarse_chan {
+                        flagged_fine_chans.insert(f + num_fine_chans_per_coarse_chan * i_cc);
+                    }
+                }
+            }
+
+            // We can't do anything without the number of fine channels per
+            // coarse channel.
+            (_, None) => {
+                warn!("Flags per coarse channel were specified, but no information on how many fine channels per coarse channel is available; flags are being ignored.");
+            }
+
+            // If we don't have MWA coarse channel numbers but we do have
+            // per-coarse-channel flags, warn the user.
+            (None, _) => {
+                if !fine_chan_flags_per_coarse_chan.is_empty() {
+                    warn!("Flags per coarse channel were specified, but no MWA coarse channel information is available; flags are being ignored.");
                 }
             }
         }
@@ -666,7 +688,9 @@ impl DiCalParams {
             time_res: obs_context.time_res,
             total_num_channels: obs_context.fine_chan_freqs.len(),
             num_unflagged_channels: Some(unflagged_fine_chan_freqs.len()),
-            flagged_chans_per_coarse_chan: Some(&obs_context.flagged_fine_chans_per_coarse_chan),
+            flagged_chans_per_coarse_chan: obs_context
+                .flagged_fine_chans_per_coarse_chan
+                .as_deref(),
             first_freq_hz: Some(*obs_context.fine_chan_freqs.first() as f64),
             last_freq_hz: Some(*obs_context.fine_chan_freqs.last() as f64),
             first_unflagged_freq_hz: unflagged_fine_chan_freqs.first().copied(),
@@ -969,7 +993,7 @@ impl DiCalParams {
             obs_context.phase_centre,
             lmst,
             latitude,
-            &obs_context.coarse_chan_freqs,
+            &obs_context.get_veto_freqs(),
             &*beam,
             num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),

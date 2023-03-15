@@ -10,9 +10,12 @@ mod tests;
 
 pub(crate) use error::*;
 
-use std::collections::{HashMap, HashSet};
-use std::os::raw::c_char;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroUsize,
+    os::raw::c_char,
+    path::{Path, PathBuf},
+};
 
 use fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile};
 use hifitime::{Duration, Epoch};
@@ -408,58 +411,80 @@ impl UvfitsReader {
                 }
             };
 
+            let mut fine_chan_freqs_f64 = Vec::with_capacity(metadata.num_fine_freq_chans);
             let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
             for i in 0..metadata.num_fine_freq_chans {
-                fine_chan_freqs.push(
-                    (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round() as u64,
-                );
+                let freq = (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round();
+                fine_chan_freqs_f64.push(freq);
+                fine_chan_freqs.push(freq.round() as u64);
             }
+            let fine_chan_freqs_f64 = Vec1::try_from_vec(fine_chan_freqs_f64).unwrap();
             let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
-            let (coarse_chan_nums, coarse_chan_freqs) = match mwalib_context.as_ref() {
-                Some(context) => {
+            let mwa_coarse_chan_nums = match mwalib_context.as_ref() {
+                Some(c) => {
                     // Get the coarse channel information out of the metafits
                     // file, but only the ones aligned with the frequencies in
                     // the uvfits file.
-                    let cc_width = f64::from(context.coarse_chan_width_hz);
-
-                    context
+                    let cc_width = f64::from(c.coarse_chan_width_hz);
+                    let mut cc_nums: Vec<u32> = c
                         .metafits_coarse_chans
                         .iter()
-                        .map(|cc| (cc.gpubox_number as u32, f64::from(cc.chan_centre_hz)))
-                        .filter(|(_, cc_freq)| {
-                            fine_chan_freqs
-                                .iter()
-                                .any(|f| (*f as f64 - *cc_freq).abs() < cc_width / 2.0)
-                        })
-                        .unzip()
-                }
-                None => {
-                    // Divide each chunk of fine channels per coarse channel
-                    let coarse_chan_freqs = fine_chan_freqs
-                        // We assume 1.28 MHz per coarse channel.
-                        .chunks_exact(1_280_000 / freq_res as usize)
-                        .map(|chunk| {
-                            if chunk.len() % 2 == 0 {
-                                // We round the coarse channel freqs hoping
-                                // there isn't any sub-Hz structure.
-                                ((chunk[chunk.len() / 2 - 1] + chunk[chunk.len() / 2]) / 2) as f64
-                            } else {
-                                chunk[chunk.len() / 2] as f64
+                        .filter_map(|cc| {
+                            let cc_num = u32::try_from(cc.rec_chan_number)
+                                .expect("not bigger than u32::MAX");
+                            let cc_centre = f64::from(cc.chan_centre_hz);
+                            for &f in &fine_chan_freqs_f64 {
+                                if (f - cc_centre).abs() < cc_width / 2.0 {
+                                    return Some(cc_num);
+                                }
                             }
+                            None
                         })
-                        .collect::<Vec<_>>();
-                    let coarse_chan_nums =
-                        (1..coarse_chan_freqs.len() + 1).map(|n| n as u32).collect();
+                        .collect();
+                    cc_nums.sort_unstable();
+                    debug!("Found corresponding MWA coarse channel numbers from the metafits and uvfits frequencies");
+                    Vec1::try_from_vec(cc_nums).ok()
+                }
 
-                    (coarse_chan_nums, coarse_chan_freqs)
+                None => {
+                    debug!("Assuming MWA coarse channel numbers from uvfits frequencies");
+
+                    // Find all multiples of 1.28 MHz within our bandwidth.
+                    let mut cc_nums = fine_chan_freqs
+                        .iter()
+                        .map(|&f| (f as f64 / 1.28e6).round() as u32)
+                        .collect::<Vec<_>>();
+                    cc_nums.sort_unstable();
+                    cc_nums.dedup();
+                    Vec1::try_from_vec(cc_nums).ok()
                 }
             };
-            debug!("Coarse channel numbers: {:?}", coarse_chan_nums);
-            debug!(
-                "Coarse channel centre frequencies [Hz]: {:?}",
-                coarse_chan_freqs
-            );
+
+            let num_coarse_chans = mwa_coarse_chan_nums.as_ref().map(|ccs| {
+                NonZeroUsize::try_from(ccs.len())
+                    .expect("length is always > 0 because collection cannot be empty")
+            });
+            let num_fine_chans_per_coarse_chan = num_coarse_chans.and_then(|num_coarse_chans| {
+                let total_bandwidth_hz =
+                    *fine_chan_freqs_f64.last() - *fine_chan_freqs_f64.first() + freq_res;
+                NonZeroUsize::try_from(
+                    (total_bandwidth_hz / num_coarse_chans.get() as f64 / freq_res).round()
+                        as usize,
+                )
+                .ok()
+            });
+
+            match (
+                mwa_coarse_chan_nums.as_ref(),
+                num_fine_chans_per_coarse_chan,
+            ) {
+                (Some(mwa_ccs), Some(n)) => {
+                    debug!("MWA coarse channel numbers: {mwa_ccs:?}");
+                    debug!("num_fine_chans_per_coarse_chan: {n}");
+                }
+                _ => debug!("This doesn't appear to be MWA data; no MWA coarse channels described"),
+            }
 
             let dut1 = {
                 // TODO: Don't assume the "AIPS AN" HDU is HDU 2.
@@ -500,14 +525,13 @@ impl UvfitsReader {
                 dipole_delays,
                 dipole_gains,
                 time_res,
-                coarse_chan_nums,
-                coarse_chan_freqs,
-                num_fine_chans_per_coarse_chan: metadata.num_fine_freq_chans,
+                mwa_coarse_chan_nums,
+                num_fine_chans_per_coarse_chan,
                 freq_res: Some(freq_res),
                 fine_chan_freqs,
                 // TODO: Get flagging right. I think that info is in an optional table.
                 flagged_fine_chans: vec![],
-                flagged_fine_chans_per_coarse_chan: vec![],
+                flagged_fine_chans_per_coarse_chan: None,
             };
 
             Ok(UvfitsReader {
@@ -760,6 +784,11 @@ impl VisRead for UvfitsReader {
             timestep,
             flagged_fine_chans,
         )
+    }
+
+    fn get_marlu_mwa_info(&self) -> Option<MarluMwaObsContext> {
+        self.get_metafits_context()
+            .map(MarluMwaObsContext::from_mwalib)
     }
 }
 

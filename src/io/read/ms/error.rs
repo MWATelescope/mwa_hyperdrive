@@ -58,9 +58,6 @@ pub(crate) enum MsReadError {
     #[error("Found a dipole delay '{delay}' in the MWA_TILE_POINTING table; values must be between 0 and 32")]
     InvalidDelay { delay: i32 },
 
-    #[error("Found a MWA_SUBBAND number '{num}'; values must not be negative")]
-    NegativeSubband { num: i32 },
-
     #[error("Error when trying to interface with measurement set: {0}")]
     Table(#[from] rubbl_casatables::TableError),
 

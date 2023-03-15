@@ -15,6 +15,7 @@ use helpers::*;
 
 use std::{
     collections::HashSet,
+    num::NonZeroUsize,
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -242,18 +243,21 @@ impl RawDataReader {
         if coarse_chan_indices.is_empty() {
             return Err(RawReadError::NoGoodCoarseChannels);
         }
-        let (coarse_chan_nums, coarse_chan_freqs) = mwalib_context
+        let mut coarse_chan_nums: Vec<u32> = mwalib_context
             .coarse_chans
             .iter()
             .enumerate()
             .filter(|(i, _)| coarse_chan_indices.contains(i))
-            .map(|(_, cc)| (cc.corr_chan_number as u32, cc.chan_centre_hz as f64))
-            .unzip();
-        debug!("Coarse channel numbers: {:?}", coarse_chan_nums);
-        debug!(
-            "Coarse channel centre frequencies [Hz]: {:?}",
-            coarse_chan_freqs
-        );
+            .map(|(_, cc)| {
+                cc.rec_chan_number
+                    .try_into()
+                    .expect("not larger than u32::MAX")
+            })
+            .collect();
+        coarse_chan_nums.sort_unstable();
+        debug!("MWA coarse channel numbers: {coarse_chan_nums:?}");
+        let mwa_coarse_chan_nums =
+            Vec1::try_from_vec(coarse_chan_nums).expect("MWA data always has coarse channel info");
 
         let flagged_fine_chans_per_coarse_chan = get_80khz_fine_chan_flags_per_coarse_chan(
             metafits_context.corr_fine_chan_width_hz,
@@ -448,13 +452,17 @@ impl RawDataReader {
             dipole_delays: Some(dipole_delays),
             dipole_gains: Some(dipole_gains),
             time_res: Some(time_res),
-            coarse_chan_nums,
-            coarse_chan_freqs,
-            num_fine_chans_per_coarse_chan: metafits_context.num_corr_fine_chans_per_coarse,
+            mwa_coarse_chan_nums: Some(mwa_coarse_chan_nums),
+            num_fine_chans_per_coarse_chan: NonZeroUsize::new(
+                metafits_context.num_corr_fine_chans_per_coarse,
+            ),
             freq_res: Some(metafits_context.corr_fine_chan_width_hz as f64),
             fine_chan_freqs,
             flagged_fine_chans,
-            flagged_fine_chans_per_coarse_chan,
+            flagged_fine_chans_per_coarse_chan: Vec1::try_from_vec(
+                flagged_fine_chans_per_coarse_chan,
+            )
+            .ok(),
         };
 
         let all_baseline_tile_pairs = metafits_context
@@ -486,7 +494,11 @@ impl RawDataReader {
                 let flags = self.mwaf_flags.as_ref().unwrap().flags[&(gpubox_channel as u8)]
                     .slice(s![timestep, .., ..,]);
                 // Select only the applicable frequencies.
-                let n = self.obs_context.num_fine_chans_per_coarse_chan;
+                let n = self
+                    .obs_context
+                    .num_fine_chans_per_coarse_chan
+                    .expect("raw MWA data always specifies this")
+                    .get();
                 let selection = s![
                     (i_gpubox_chan * n)..((i_gpubox_chan + 1) * n),
                     .. // All baselines
@@ -868,6 +880,12 @@ impl VisRead for RawDataReader {
             timestep,
             flagged_fine_chans,
         )
+    }
+
+    fn get_marlu_mwa_info(&self) -> Option<MarluMwaObsContext> {
+        Some(MarluMwaObsContext::from_mwalib(
+            &self.mwalib_context.metafits_context,
+        ))
     }
 }
 
