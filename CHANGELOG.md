@@ -28,6 +28,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   floating-point error.
 - MWA raw data observations with all flagged tiles weren't allowed to be used,
   even with the explicit "ignore input data tile flags".
+- Some aspects of hyperdrive weren't using user-specified array positions
+  correctly. The help text also indicated the wrong units.
 
 ### Changed
 - The performance of CPU visibility modelling has been dramatically improved.

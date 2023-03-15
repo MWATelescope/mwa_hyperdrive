@@ -152,7 +152,7 @@ fn write_then_read_uvfits(autos: bool) {
 
     // Inspect the file for sanity's sake!
     let metafits: Option<&str> = None;
-    let result = UvfitsReader::new(output.path(), metafits);
+    let result = UvfitsReader::new(output.path(), metafits, None);
     assert!(
         result.is_ok(),
         "Failed to read the just-created uvfits file"
@@ -242,7 +242,7 @@ fn uvfits_io_works_for_auto_correlations() {
 fn test_1090008640_cross_vis() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits)) {
+        match UvfitsReader::new(uvfits, Some(metafits), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -306,7 +306,7 @@ fn test_1090008640_cross_vis() {
 fn test_1090008640_auto_vis() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits)) {
+        match UvfitsReader::new(uvfits, Some(metafits), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -395,7 +395,7 @@ fn test_1090008640_auto_vis() {
 fn test_1090008640_auto_vis_with_flags() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits)) {
+        match UvfitsReader::new(uvfits, Some(metafits), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -492,7 +492,7 @@ fn test_1090008640_auto_vis_with_flags() {
 fn read_1090008640_cross_and_auto_vis() {
     let args = get_reduced_1090008640_uvfits();
     let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(uvfits, Some(metafits)) {
+        match UvfitsReader::new(uvfits, Some(metafits), None) {
             Ok(u) => u,
             Err(e) => panic!("{}", e),
         }
@@ -694,7 +694,8 @@ fn test_timestep_reading() {
 
     writer.finalise().unwrap();
 
-    let uvfits_reader = UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path, None).unwrap();
+    let uvfits_reader =
+        UvfitsReader::new::<&PathBuf, &PathBuf>(&vis_path, None, Some(array_pos)).unwrap();
     let uvfits_ctx = uvfits_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)
@@ -722,6 +723,7 @@ fn test_map_metafits_antenna_order() {
     let uvfits = UvfitsReader::new(
         "test_files/1090008640/1090008640.uvfits",
         Some(metafits_path),
+        None,
     )
     .unwrap();
     let obs_context = uvfits.get_obs_context();
@@ -824,6 +826,7 @@ fn test_map_metafits_antenna_order() {
     let uvfits = UvfitsReader::new(
         "test_files/1090008640/1090008640.uvfits",
         Some(metafits.path()),
+        None,
     )
     .unwrap();
     let obs_context = uvfits.get_obs_context();
@@ -925,6 +928,7 @@ fn test_map_metafits_antenna_order() {
     let uvfits = UvfitsReader::new(
         "test_files/1090008640/1090008640.uvfits",
         Some(metafits.path()),
+        None,
     )
     .unwrap();
     let obs_context = uvfits.get_obs_context();

@@ -134,8 +134,10 @@ impl RawDataReader {
         gpuboxes: &[T],
         mwafs: Option<&[T]>,
         corrections: RawDataCorrections,
+        array_position: Option<LatLngHeight>,
     ) -> Result<RawDataReader, VisReadError> {
-        Self::new_inner(metadata, gpuboxes, mwafs, corrections).map_err(VisReadError::from)
+        Self::new_inner(metadata, gpuboxes, mwafs, corrections, array_position)
+            .map_err(VisReadError::from)
     }
 
     /// Create a new [`RawDataReader`].
@@ -144,6 +146,7 @@ impl RawDataReader {
         gpuboxes: &[T],
         mwafs: Option<&[T]>,
         corrections: RawDataCorrections,
+        array_position: Option<LatLngHeight>,
     ) -> Result<RawDataReader, RawReadError> {
         // There are a lot of unwraps in this function. These are fine because
         // mwalib ensures that vectors aren't empty so when we convert a Vec to
@@ -328,7 +331,9 @@ impl RawDataReader {
             metafits_context.ra_tile_pointing_degrees,
             metafits_context.dec_tile_pointing_degrees,
         ));
-        let tile_xyzs = XyzGeodetic::get_tiles_mwa(metafits_context);
+        let supplied_array_position = LatLngHeight::mwa();
+        let array_position = array_position.unwrap_or(supplied_array_position);
+        let tile_xyzs = XyzGeodetic::get_tiles(metafits_context, array_position.latitude_rad);
         let tile_xyzs = Vec1::try_from_vec(tile_xyzs).unwrap();
         let tile_names: Vec<String> = metafits_context
             .rf_inputs
@@ -442,7 +447,8 @@ impl RawDataReader {
             unflagged_timesteps: mwalib_context.common_good_timestep_indices.clone(),
             phase_centre,
             pointing_centre,
-            array_position: Some(LatLngHeight::mwa()),
+            array_position,
+            _supplied_array_position: Some(supplied_array_position),
             dut1: metafits_context.dut1.map(Duration::from_seconds),
             tile_names,
             tile_xyzs,
@@ -650,10 +656,7 @@ impl RawDataReader {
         // Correct the raw data.
         if !self.corrections.nothing_to_do() {
             let prep_ctx = PreprocessContext {
-                array_pos: self
-                    .obs_context
-                    .array_position
-                    .unwrap_or_else(LatLngHeight::mwa),
+                array_pos: self.obs_context.array_position,
                 phase_centre: self.obs_context.phase_centre,
                 correct_cable_lengths: self.corrections.cable_length
                     && match metafits_context.cable_delays_applied {

@@ -20,7 +20,9 @@ use std::{
 use fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile};
 use hifitime::{Duration, Epoch};
 use log::{debug, trace, warn};
-use marlu::{io::uvfits::decode_uvfits_baseline, Jones, RADec, XyzGeocentric, XyzGeodetic};
+use marlu::{
+    io::uvfits::decode_uvfits_baseline, Jones, LatLngHeight, RADec, XyzGeocentric, XyzGeodetic,
+};
 use mwalib::{
     _get_fits_col, _open_fits, fits_open, fits_open_hdu, get_fits_col, MetafitsContext,
     _get_optional_fits_key, _get_required_fits_key, _open_hdu, get_optional_fits_key,
@@ -70,8 +72,13 @@ impl UvfitsReader {
     pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         uvfits: P,
         metafits: Option<P2>,
+        array_position: Option<LatLngHeight>,
     ) -> Result<UvfitsReader, VisReadError> {
-        fn inner(uvfits: &Path, metafits: Option<&Path>) -> Result<UvfitsReader, UvfitsReadError> {
+        fn inner(
+            uvfits: &Path,
+            metafits: Option<&Path>,
+            array_position: Option<LatLngHeight>,
+        ) -> Result<UvfitsReader, UvfitsReadError> {
             // If a metafits file was provided, get an mwalib object ready.
             // TODO: Let the user supply the MWA version.
             let mwalib_context = match metafits {
@@ -122,7 +129,7 @@ impl UvfitsReader {
                 .map(|(a, b)| (a as usize, b))
                 .collect();
 
-            let array_position = {
+            let supplied_array_position = {
                 let frame: Option<String> =
                     get_optional_fits_key!(&mut uvfits_fptr, &antenna_table_hdu, "FRAME")?;
                 // The uvfits standard only defines one frame (ITRF). So warn
@@ -152,6 +159,12 @@ impl UvfitsReader {
                     }
                 }
             };
+            let array_position = array_position
+                .or(supplied_array_position)
+                .unwrap_or_else(|| {
+                    trace!("The array position was not specified in the input data; assuming MWA");
+                    LatLngHeight::mwa()
+                });
 
             let hdu = fits_open_hdu!(&mut uvfits_fptr, 0)?;
             let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &hdu)?;
@@ -516,6 +529,7 @@ impl UvfitsReader {
                 phase_centre,
                 pointing_centre,
                 array_position,
+                _supplied_array_position: supplied_array_position,
                 dut1,
                 tile_names,
                 tile_xyzs,
@@ -543,7 +557,12 @@ impl UvfitsReader {
                 tile_map,
             })
         }
-        inner(uvfits.as_ref(), metafits.as_ref().map(|f| f.as_ref())).map_err(VisReadError::from)
+        inner(
+            uvfits.as_ref(),
+            metafits.as_ref().map(|f| f.as_ref()),
+            array_position,
+        )
+        .map_err(VisReadError::from)
     }
 
     fn read_inner(

@@ -81,7 +81,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     let mut crosses = Array2::zeros((total_num_channels, total_num_baselines));
     let mut cross_weights = Array2::zeros((total_num_channels, total_num_baselines));
     let mut autos = Array2::zeros((total_num_channels, total_num_tiles));
@@ -124,7 +124,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     crosses.fill(Jones::default());
     cross_weights.fill(0.0);
     autos.fill(Jones::default());
@@ -172,7 +172,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     crosses.fill(Jones::default());
     cross_weights.fill(0.0);
     autos.fill(Jones::default());
@@ -268,7 +268,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     let mut crosses = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
     let mut cross_weights = Array2::zeros((total_num_channels, num_unflagged_cross_baselines));
     let mut autos = Array2::zeros((total_num_channels, num_unflagged_tiles));
@@ -346,7 +346,7 @@ fn test_solutions_apply_trivial(input_data: &dyn VisRead, metafits: &str) {
     .unwrap();
 
     // Read the output visibilities.
-    let output_data = UvfitsReader::new(&output, Some(&metafits)).unwrap();
+    let output_data = UvfitsReader::new(&output, Some(&metafits), None).unwrap();
     crosses.fill(Jones::default());
     cross_weights.fill(0.0);
     autos.fill(Jones::default());
@@ -416,6 +416,7 @@ fn test_solutions_apply_trivial_raw() {
             cable_length: false,
             geometric: false,
         },
+        None,
     )
     .unwrap();
 
@@ -443,7 +444,7 @@ fn test_solutions_apply_trivial_uvfits() {
     let mut data = cal_args.data.unwrap().into_iter();
     let metafits = data.next().unwrap();
     let uvfits = data.next().unwrap();
-    let input_data = UvfitsReader::new(uvfits, Some(&metafits)).unwrap();
+    let input_data = UvfitsReader::new(uvfits, Some(&metafits), None).unwrap();
 
     test_solutions_apply_trivial(&input_data, &metafits)
 }
@@ -617,7 +618,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_and_ms() {
     let exp_timesteps = 1;
     let exp_channels = 32;
 
-    let uvfits_data = UvfitsReader::new(&out_uvfits_path, Some(metafits)).unwrap();
+    let uvfits_data = UvfitsReader::new(&out_uvfits_path, Some(metafits), None).unwrap();
 
     let uvfits_ctx = uvfits_data.get_obs_context();
 
@@ -688,8 +689,8 @@ fn test_1090008640_solutions_apply_correct_vis() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     assert!(vis_out.exists(), "out vis file not written");
 
-    let uncal_reader = UvfitsReader::new(uvfits, Some(metafits)).unwrap();
-    let cal_reader = UvfitsReader::new(vis_out, Some(metafits)).unwrap();
+    let uncal_reader = UvfitsReader::new(uvfits, Some(metafits), None).unwrap();
+    let cal_reader = UvfitsReader::new(vis_out, Some(metafits), None).unwrap();
     let obs_context = cal_reader.get_obs_context();
 
     let total_num_tiles = obs_context.get_total_num_tiles();
@@ -834,7 +835,7 @@ fn test_1090008640_solutions_apply_correct_vis() {
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
     assert!(vis_out.exists(), "out vis file not written");
 
-    let cal2_reader = UvfitsReader::new(vis_out, Some(metafits)).unwrap();
+    let cal2_reader = UvfitsReader::new(vis_out, Some(metafits), None).unwrap();
     let mut cal2_cross_vis_data = Array2::zeros((
         obs_context.fine_chan_freqs.len(),
         num_unflagged_cross_baselines,

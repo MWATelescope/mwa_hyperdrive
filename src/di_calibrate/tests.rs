@@ -282,6 +282,11 @@ fn get_default_params() -> DiCalParams {
                 &["test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits"],
                 None,
                 RawDataCorrections::default(),
+                Some(LatLngHeight {
+                    longitude_rad: 0.0,
+                    latitude_rad: 0.0,
+                    height_metres: 0.0,
+                }),
             )
             .unwrap(),
         ),
@@ -741,6 +746,10 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--output-model-files", &format!("{}", model.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
+        "--array-position",
+            &format!("{MWA_LAT_DEG}"),
+            &format!("{MWA_LONG_DEG}"),
+            &format!("{MWA_HEIGHT_M}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars",
     ]);
@@ -759,6 +768,10 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
+        "--array-position",
+            &format!("{MWA_LAT_DEG}"),
+            &format!("{MWA_LONG_DEG}"),
+            &format!("{MWA_HEIGHT_M}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--no-progress-bars",
     ]);

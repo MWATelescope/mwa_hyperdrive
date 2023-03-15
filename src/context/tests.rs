@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use hifitime::{Duration, Epoch};
-use marlu::{RADec, XyzGeodetic};
+use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use vec1::vec1;
 
 use crate::{beam::Delays, context::ObsContext};
@@ -16,7 +16,8 @@ fn get_minimal_obs_context() -> ObsContext {
         unflagged_timesteps: vec![0],
         phase_centre: RADec::default(),
         pointing_centre: Some(RADec::default()),
-        array_position: None,
+        array_position: LatLngHeight::mwa(),
+        _supplied_array_position: None,
         dut1: None,
         tile_names: vec1!["Tile00".into()],
         tile_xyzs: vec1![XyzGeodetic::default()],

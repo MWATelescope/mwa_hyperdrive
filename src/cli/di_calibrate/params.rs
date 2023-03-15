@@ -305,8 +305,13 @@ impl DiCalParams {
                         !no_cable_length_correction,
                         !no_geometric_correction,
                     )?;
-                    let input_data =
-                        RawDataReader::new(meta, &gpuboxes, mwafs.as_deref(), corrections)?;
+                    let input_data = RawDataReader::new(
+                        meta,
+                        &gpuboxes,
+                        mwafs.as_deref(),
+                        corrections,
+                        array_position,
+                    )?;
 
                     messages::InputFileDetails::Raw {
                         obsid: input_data.mwalib_context.metafits_context.obs_id,
@@ -374,7 +379,7 @@ impl DiCalParams {
                         }
                     };
 
-                    let input_data = UvfitsReader::new(&uvfits, meta)?;
+                    let input_data = UvfitsReader::new(&uvfits, meta, array_position)?;
 
                     messages::InputFileDetails::UvfitsFile {
                         obsid: input_data.get_obs_context().obsid,
@@ -430,11 +435,7 @@ impl DiCalParams {
 
         let obs_context = input_data.get_obs_context();
 
-        // If the array position wasn't user defined, try the input data.
-        let array_position = array_position.unwrap_or_else(|| {
-            trace!("The array position was not specified in the input data; assuming MWA");
-            LatLngHeight::mwa()
-        });
+        let array_position = obs_context.array_position;
         let dut1 = if ignore_dut1 { None } else { obs_context.dut1 };
 
         let timesteps_to_use = {

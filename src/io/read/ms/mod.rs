@@ -122,12 +122,12 @@ impl MsReader {
     pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         ms: P,
         metafits: Option<P2>,
-        array_pos: Option<LatLngHeight>,
+        array_position: Option<LatLngHeight>,
     ) -> Result<MsReader, VisReadError> {
         fn inner(
             ms: &Path,
             metafits: Option<&Path>,
-            array_pos: Option<LatLngHeight>,
+            array_position: Option<LatLngHeight>,
         ) -> Result<MsReader, MsReadError> {
             debug!("Using measurement set: {}", ms.display());
             if !ms.exists() {
@@ -157,7 +157,11 @@ impl MsReader {
             let tile_names =
                 Vec1::try_from_vec(tile_names).map_err(|_| MsReadError::AntennaTableEmpty)?;
 
-            let (tile_xyzs, array_pos): (Vec<marlu::XyzGeodetic>, LatLngHeight) = {
+            let (tile_xyzs, array_position, supplied_array_position): (
+                Vec<marlu::XyzGeodetic>,
+                LatLngHeight,
+                Option<LatLngHeight>,
+            ) = {
                 let mut casacore_positions = Vec::with_capacity(antenna_table.n_rows() as usize);
                 antenna_table.for_each_row(|row| {
                     let pos: Vec<f64> = row.get_cell("POSITION")?;
@@ -170,31 +174,35 @@ impl MsReader {
                     Ok(())
                 })?;
                 // XXX(Dev): no way to get array_pos from MS AFAIK
-                let array_pos = match (array_pos, flavour) {
-                    (Some(p), _) => p,
+                let supplied_array_position = match (array_position, flavour) {
+                    (Some(p), _) => Some(p),
                     (None, MsFlavour::Hyperdrive | MsFlavour::Birli | MsFlavour::Marlu) => {
                         warn!("Assuming that this measurement set's array position is the MWA");
-                        LatLngHeight::mwa()
+                        Some(LatLngHeight::mwa())
                     }
                     (None, MsFlavour::Cotter) => {
                         warn!("Assuming that this measurement set's array position is cotter's MWA position");
-                        LatLngHeight {
+                        Some(LatLngHeight {
                             longitude_rad: COTTER_MWA_LONGITUDE_RADIANS,
                             latitude_rad: COTTER_MWA_LATITUDE_RADIANS,
                             height_metres: COTTER_MWA_HEIGHT_METRES,
-                        }
+                        })
                     }
-                    (None, MsFlavour::Casa) => todo!(),
+                    (None, MsFlavour::Casa) => None,
                 };
+                let array_position = supplied_array_position.unwrap_or_else(|| {
+                    warn!("The array position was not specified; assuming MWA");
+                    LatLngHeight::mwa()
+                });
 
-                let vec = XyzGeocentric::get_geocentric_vector(array_pos);
-                let (s_long, c_long) = array_pos.longitude_rad.sin_cos();
+                let vec = XyzGeocentric::get_geocentric_vector(array_position);
+                let (s_long, c_long) = array_position.longitude_rad.sin_cos();
                 let tile_xyzs = casacore_positions
                     .par_iter()
                     .map(|xyz| xyz.to_geodetic_inner(vec, s_long, c_long))
                     .collect();
 
-                (tile_xyzs, array_pos)
+                (tile_xyzs, array_position, supplied_array_position)
             };
             trace!("There are positions for {} tiles", tile_xyzs.len());
             // Not sure if this is even possible, but we'll handle it anyway.
@@ -715,7 +723,8 @@ impl MsReader {
                 unflagged_timesteps,
                 phase_centre,
                 pointing_centre,
-                array_position: Some(array_pos),
+                array_position,
+                _supplied_array_position: supplied_array_position,
                 dut1,
                 tile_names,
                 tile_xyzs,
@@ -745,7 +754,7 @@ impl MsReader {
         inner(
             ms.as_ref(),
             metafits.as_ref().map(|f| f.as_ref()),
-            array_pos,
+            array_position,
         )
         .map_err(VisReadError::from)
     }
