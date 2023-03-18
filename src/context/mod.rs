@@ -7,7 +7,11 @@
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashSet, fmt::Write, num::NonZeroUsize};
+use std::{
+    collections::HashSet,
+    fmt::{Display, Write},
+    num::NonZeroUsize,
+};
 
 use hifitime::{Duration, Epoch};
 use log::{debug, error, info, trace, warn};
@@ -20,6 +24,51 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use crate::beam::Delays;
+
+/// Currently supported polarisations.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(non_camel_case_types)]
+pub enum Polarisations {
+    XX_XY_YX_YY,
+    XX,
+    YY,
+    XX_YY,
+    XX_YY_XY,
+}
+
+impl Default for Polarisations {
+    fn default() -> Self {
+        Self::XX_XY_YX_YY
+    }
+}
+
+impl Display for Polarisations {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Polarisations::XX_XY_YX_YY => "XX XY YX YY",
+                Polarisations::XX => "XX",
+                Polarisations::YY => "YY",
+                Polarisations::XX_YY => "XX YY",
+                Polarisations::XX_YY_XY => "XX YY XY",
+            }
+        )
+    }
+}
+
+impl Polarisations {
+    pub(crate) fn num_pols(self) -> u8 {
+        match self {
+            Polarisations::XX_XY_YX_YY => 4,
+            Polarisations::XX => 1,
+            Polarisations::YY => 1,
+            Polarisations::XX_YY => 2,
+            Polarisations::XX_YY_XY => 3,
+        }
+    }
+}
 
 /// MWA observation metadata.
 ///
@@ -158,6 +207,10 @@ pub(crate) struct ObsContext {
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
     pub(crate) flagged_fine_chans_per_coarse_chan: Option<Vec1<usize>>,
+
+    /// The polarisations included in the data. Any combinations not listed are
+    /// not supported.
+    pub(crate) polarisations: Polarisations,
 }
 
 impl ObsContext {

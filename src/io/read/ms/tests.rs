@@ -17,7 +17,7 @@ use super::*;
 use crate::{
     di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
     math::TileBaselineFlags,
-    tests::reduced_obsids::get_reduced_1090008640_ms,
+    tests::{deflate_gz_into_tempfile, reduced_obsids::get_reduced_1090008640_ms},
 };
 
 #[test]
@@ -866,4 +866,63 @@ fn test_map_metafits_antenna_order() {
     };
     // The gains should be the same as the unaltered-metafits case.
     assert_abs_diff_eq!(gains, perturbed_gains);
+}
+
+#[test]
+fn test_sdc3() {
+    let ms = tempdir().unwrap();
+    // I hate measurement sets.
+    let ms_tarball_temppath = deflate_gz_into_tempfile("test_files/sdc3/sdc3_0000.ms.tar.gz");
+    let mut archive = tar::Archive::new(std::fs::File::open(ms_tarball_temppath).unwrap());
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let path = ms.path().join(entry.header().path().unwrap());
+        if path.to_string_lossy().ends_with('/') {
+            std::fs::create_dir_all(path).unwrap();
+            continue;
+        }
+        entry.unpack(path).unwrap();
+    }
+
+    let ms = MsReader::new(ms.path().join("sdc3_0000.ms"), None, None, None).unwrap();
+    let obs_context = ms.get_obs_context();
+    assert_eq!(obs_context.timestamps.len(), 1);
+    assert_eq!(obs_context.fine_chan_freqs.len(), 1);
+    let supplied_array_position = obs_context._supplied_array_position;
+    assert_abs_diff_eq!(
+        supplied_array_position.longitude_rad.to_degrees(),
+        116.76444819999999,
+        epsilon = 1e-8
+    );
+    assert_abs_diff_eq!(
+        supplied_array_position.latitude_rad.to_degrees(),
+        -26.824722078221356,
+        epsilon = 1e-8
+    );
+    assert_abs_diff_eq!(
+        supplied_array_position.height_metres,
+        -4.979552228708624e-5,
+        epsilon = 1e-8
+    );
+    assert_eq!(obs_context.polarisations, Polarisations::XX);
+
+    let mut cross_vis = Array2::zeros((1, 1));
+    let mut cross_vis_weights = Array2::zeros((1, 1));
+    let tile_baseline_flags = TileBaselineFlags::new(512, (2..512).collect());
+    ms.read_crosses(
+        cross_vis.view_mut(),
+        cross_vis_weights.view_mut(),
+        0,
+        &tile_baseline_flags,
+        &HashSet::new(),
+    )
+    .unwrap();
+
+    assert_abs_diff_eq!(
+        cross_vis[(0, 0)],
+        // N.B. This should be conjugated, because the SDC3 data uses ant2-ant1
+        // UVWs, whereas we expect ant1-ant2.
+        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    );
+    assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }

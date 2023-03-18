@@ -22,10 +22,10 @@ pub(crate) use error::ModelError;
 use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
-use marlu::{Jones, RADec, XyzGeodetic, UVW};
+use marlu::{c32, Jones, RADec, XyzGeodetic, UVW};
 use ndarray::{Array2, ArrayViewMut2};
 
-use crate::{beam::Beam, srclist::SourceList};
+use crate::{beam::Beam, srclist::SourceList, Polarisations};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ModellerInfo {
@@ -105,6 +105,7 @@ pub fn new_sky_modeller<'a>(
     #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
     beam: &'a dyn Beam,
     source_list: &SourceList,
+    pols: Polarisations,
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     unflagged_fine_chan_freqs: &'a [f64],
     flagged_tiles: &'a HashSet<usize>,
@@ -120,6 +121,7 @@ pub fn new_sky_modeller<'a>(
                 Ok(Box::new(SkyModellerCpu::new(
                     beam,
                     source_list,
+                    pols,
                     unflagged_tile_xyzs,
                     unflagged_fine_chan_freqs,
                     flagged_tiles,
@@ -133,6 +135,7 @@ pub fn new_sky_modeller<'a>(
                 let modeller = SkyModellerCuda::new(
                     beam,
                     source_list,
+                    pols,
                     unflagged_tile_xyzs,
                     unflagged_fine_chan_freqs,
                     flagged_tiles,
@@ -148,6 +151,7 @@ pub fn new_sky_modeller<'a>(
             Ok(Box::new(SkyModellerCpu::new(
                 beam,
                 source_list,
+                pols,
                 unflagged_tile_xyzs,
                 unflagged_fine_chan_freqs,
                 flagged_tiles,
@@ -159,4 +163,28 @@ pub fn new_sky_modeller<'a>(
             )))
         }
     }
+}
+
+/// Set any unavailable polarisations to zero.
+fn mask_pols(mut vis: ArrayViewMut2<Jones<f32>>, pols: Polarisations) {
+    // Don't do anything if all pols are available.
+    if matches!(pols, Polarisations::XX_XY_YX_YY) {
+        return;
+    }
+
+    let func = |j: &mut Jones<f32>| {
+        *j = match pols {
+            Polarisations::XX_XY_YX_YY => *j,
+            Polarisations::XX => {
+                Jones::from([j[0], c32::default(), c32::default(), c32::default()])
+            }
+            Polarisations::YY => {
+                Jones::from([c32::default(), c32::default(), c32::default(), j[3]])
+            }
+            Polarisations::XX_YY => Jones::from([j[0], c32::default(), c32::default(), j[3]]),
+            Polarisations::XX_YY_XY => Jones::from([j[0], j[1], c32::default(), j[3]]),
+        }
+    };
+
+    vis.iter_mut().for_each(func);
 }

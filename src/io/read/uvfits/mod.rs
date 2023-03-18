@@ -34,7 +34,7 @@ use num_complex::Complex;
 use super::*;
 use crate::{
     beam::Delays,
-    context::ObsContext,
+    context::{ObsContext, Polarisations},
     io::read::{
         fits::{
             fits_get_col, fits_get_optional_key, fits_get_required_key, fits_open, fits_open_hdu,
@@ -203,9 +203,19 @@ impl UvfitsReader {
             .expect("can't be empty, non-empty tile names verified above");
 
         let metadata = UvfitsMetadata::new(&mut uvfits_fptr, &primary_hdu)?;
+        // Make a nice little string for user display. uvfits always puts YY
+        // before cross pols so we have to use some logic here.
+        let pol_str = match metadata.pols {
+            Polarisations::XX_XY_YX_YY => "4 [XX YY XY YX]",
+            Polarisations::XX => "1 [XX]",
+            Polarisations::YY => "1 [YY]",
+            Polarisations::XX_YY => "2 [XX YY]",
+            Polarisations::XX_YY_XY => "3 [XX YY XY]",
+        };
+
         debug!("Number of rows in the uvfits:   {}", metadata.num_rows);
         debug!("PCOUNT:                         {}", metadata.pcount);
-        debug!("Number of polarisations:        {}", metadata.num_pols);
+        debug!("Number of polarisations:        {pol_str}");
         debug!(
             "Floats per polarisation:        {}",
             metadata.num_floats_per_pol
@@ -578,6 +588,7 @@ impl UvfitsReader {
             // TODO: Get flagging right. I think that info is in an optional table.
             flagged_fine_chans: vec![],
             flagged_fine_chans_per_coarse_chan: None,
+            polarisations: metadata.pols,
         };
 
         Ok(UvfitsReader {
@@ -858,6 +869,38 @@ impl UvfitsReader {
             }
         }
 
+        // Transform the data, depending on what the actual polarisations are.
+        if let Some(crosses) = crosses.as_mut() {
+            match self.metadata.pols {
+                // These are all handled correctly.
+                Polarisations::XX_XY_YX_YY => (),
+                Polarisations::XX => (),
+                Polarisations::XX_YY => (),
+                Polarisations::XX_YY_XY => (),
+
+                // Because we read in one polarisation, it was treated as XX,
+                // but this is actually YY.
+                Polarisations::YY => crosses.vis_fb.mapv_inplace(|j| {
+                    Jones::from([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, j[0].re, j[0].im])
+                }),
+            }
+        }
+        if let Some(autos) = autos.as_mut() {
+            match self.metadata.pols {
+                // These are all handled correctly.
+                Polarisations::XX_XY_YX_YY => (),
+                Polarisations::XX => (),
+                Polarisations::XX_YY => (),
+                Polarisations::XX_YY_XY => (),
+
+                // Because we read in one polarisation, it was treated as XX,
+                // but this is actually YY.
+                Polarisations::YY => autos.vis_fb.mapv_inplace(|j| {
+                    Jones::from([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, j[0].re, j[0].im])
+                }),
+            }
+        }
+
         Ok(())
     }
 }
@@ -899,7 +942,11 @@ impl VisRead for UvfitsReader {
             weights_fb: auto_weights_fb,
             tile_baseline_flags,
         });
-        match (self.metadata.num_pols, self.metadata.num_floats_per_pol) {
+
+        match (
+            self.metadata.pols.num_pols(),
+            self.metadata.num_floats_per_pol,
+        ) {
             (4, 3) => self.read_inner::<4, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
             (3, 3) => self.read_inner::<3, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
             (2, 3) => self.read_inner::<2, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
@@ -927,7 +974,10 @@ impl VisRead for UvfitsReader {
             weights_fb,
             tile_baseline_flags,
         });
-        match (self.metadata.num_pols, self.metadata.num_floats_per_pol) {
+        match (
+            self.metadata.pols.num_pols(),
+            self.metadata.num_floats_per_pol,
+        ) {
             (4, 3) => self.read_inner::<4, 3>(cross_data, None, timestep, flagged_fine_chans),
             (3, 3) => self.read_inner::<3, 3>(cross_data, None, timestep, flagged_fine_chans),
             (2, 3) => self.read_inner::<2, 3>(cross_data, None, timestep, flagged_fine_chans),
@@ -955,7 +1005,10 @@ impl VisRead for UvfitsReader {
             weights_fb,
             tile_baseline_flags,
         });
-        match (self.metadata.num_pols, self.metadata.num_floats_per_pol) {
+        match (
+            self.metadata.pols.num_pols(),
+            self.metadata.num_floats_per_pol,
+        ) {
             (4, 3) => self.read_inner::<4, 3>(None, auto_data, timestep, flagged_fine_chans),
             (3, 3) => self.read_inner::<3, 3>(None, auto_data, timestep, flagged_fine_chans),
             (2, 3) => self.read_inner::<2, 3>(None, auto_data, timestep, flagged_fine_chans),
@@ -984,15 +1037,8 @@ struct UvfitsMetadata {
     /// The number of parameters are in each uvfits group (PCOUNT).
     pcount: usize,
 
-    /// The number of polarisations (probably 4, but allowed to be no less than
-    /// 1 and no greater than 4).
-    num_pols: u8,
-
-    /// The "type" of polarisation present. Values of 1 through 4 are assigned
-    /// to Stokes I, Q, U, and V, values of -1 through -4 are assigned to RR,
-    /// LL, RL, and LR polarization products, respectively. Values -5 through -8
-    /// are assigned to XX, YY, XY, and YX polarization products, respectively.
-    _pol_type: i8,
+    /// The available polarisations.
+    pols: Polarisations,
 
     /// The number of floats associated with a polarisation. If this value is 3,
     /// these are the real part of the pol, imag part of the pol, and the
@@ -1116,20 +1162,23 @@ impl UvfitsMetadata {
 
         // The number of polarisations is described by the NAXIS key associated
         // with STOKES.
-        let stokes_naxis_str = format!("NAXIS{}", indices.stokes);
-        let num_pols_str: String = fits_get_required_key(uvfits, hdu, &stokes_naxis_str)?;
-        let num_pols = num_pols_str
-            .parse::<u8>()
-            .map_err(|e| UvfitsReadError::Parse {
-                key: Cow::from(stokes_naxis_str),
-                value: num_pols_str,
-                parse_error: e.to_string(),
-            })?;
+        let stokes_naxis_str: Cow<str> = format!("NAXIS{}", indices.stokes).into();
+        let num_pols_str: String = fits_get_required_key(uvfits, hdu, stokes_naxis_str.as_ref())?;
+        let num_pols = match num_pols_str.parse::<u8>() {
+            Ok(n) => n,
+            Err(e) => {
+                return Err(UvfitsReadError::Parse {
+                    key: stokes_naxis_str,
+                    value: num_pols_str,
+                    parse_error: e.to_string(),
+                })
+            }
+        };
 
         // The pol type is described by the CRVAL key associated with STOKES.
         let stokes_crval_str = format!("CRVAL{}", indices.stokes);
         let pol_type_str: String = fits_get_required_key(uvfits, hdu, &stokes_crval_str)?;
-        let pol_type: i8 = match pol_type_str.parse::<f32>() {
+        let pols = match pol_type_str.parse::<f32>() {
             Ok(pol_type) => {
                 // Convert the float to an int.
                 if pol_type.abs() > 127.0 {
@@ -1138,14 +1187,37 @@ impl UvfitsMetadata {
                     );
                 }
                 let pol_type = pol_type.round() as i8;
-                // We currently only support a "pol type" of -5, i.e. XX.
-                if pol_type != -5 {
-                    return Err(UvfitsReadError::UnsupportedPolType {
-                        key: Cow::from(stokes_crval_str),
-                        value: pol_type,
-                    });
+
+                // We currently only support a "pol type" of -5 or -6, i.e. XX or YY.
+                match (pol_type, num_pols) {
+                    (-5, 1) => Polarisations::XX,
+                    (-5, 2) => Polarisations::XX_YY,
+                    (-5, 3) => Polarisations::XX_YY_XY,
+                    (-5, 4) => Polarisations::XX_XY_YX_YY,
+                    (-5, _) => {
+                        return Err(UvfitsReadError::UnsupportedPols {
+                            crval: Cow::from(stokes_crval_str),
+                            naxis: stokes_naxis_str,
+                            pol_type,
+                            num_pols,
+                        })
+                    }
+                    (-6, 1) => Polarisations::YY,
+                    (-6, _) => {
+                        return Err(UvfitsReadError::UnsupportedPols {
+                            crval: Cow::from(stokes_crval_str),
+                            naxis: stokes_naxis_str,
+                            pol_type,
+                            num_pols,
+                        })
+                    }
+                    _ => {
+                        return Err(UvfitsReadError::UnsupportedPolType {
+                            key: Cow::from(stokes_crval_str),
+                            value: pol_type,
+                        })
+                    }
                 }
-                pol_type
             }
             Err(e) => {
                 return Err(UvfitsReadError::Parse {
@@ -1379,8 +1451,7 @@ impl UvfitsMetadata {
         Ok(UvfitsMetadata {
             num_rows,
             pcount,
-            num_pols,
-            _pol_type: pol_type,
+            pols,
             num_floats_per_pol,
             num_fine_freq_chans,
             jd_zero,

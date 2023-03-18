@@ -480,6 +480,7 @@ impl RawDataReader {
                 flagged_fine_chans_per_coarse_chan,
             )
             .ok(),
+            polarisations: crate::context::Polarisations::XX_XY_YX_YY,
         };
 
         let all_baseline_tile_pairs = metafits_context

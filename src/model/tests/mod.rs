@@ -302,6 +302,7 @@ impl ObsParams {
         SkyModellerCpu::new(
             &*self.beam,
             srclist,
+            Polarisations::default(),
             &self.xyzs,
             &self.freqs,
             &self.flagged_tiles,
@@ -322,6 +323,7 @@ impl ObsParams {
         let m = SkyModellerCuda::new(
             &*self.beam,
             srclist,
+            Polarisations::default(),
             &self.xyzs,
             &self.freqs,
             &self.flagged_tiles,

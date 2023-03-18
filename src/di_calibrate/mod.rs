@@ -35,6 +35,7 @@ use vec1::Vec1;
 use crate::{
     averaging::{timesteps_to_timeblocks, Chanblock, Timeblock},
     cli::di_calibrate::DiCalParams,
+    context::Polarisations,
     io::write::{write_vis, VisTimestep},
     math::average_epoch,
     model::{self, ModellerInfo},
@@ -50,6 +51,9 @@ pub(crate) struct CalVis {
 
     /// Visibilites generated from the sky-model source list.
     pub(crate) vis_model_tfb: Array3<Jones<f32>>,
+
+    /// The available polarisations within the data.
+    pub(crate) pols: Polarisations,
 }
 
 /// For calibration, read in unflagged visibilities and generate sky-model
@@ -337,6 +341,7 @@ pub(crate) fn get_cal_vis(
         vis_data_tfb,
         vis_weights_tfb,
         vis_model_tfb,
+        pols: obs_context.polarisations,
     })
 }
 
@@ -384,6 +389,7 @@ fn model_vis(
         use_cpu_for_modelling,
         &*params.beam,
         &params.source_list,
+        obs_context.polarisations,
         &params.unflagged_tile_xyzs,
         &params.unflagged_fine_chan_freqs,
         &params.tile_baseline_flags.flagged_tiles,
@@ -546,6 +552,23 @@ impl<'a> IncompleteSolutions<'a> {
             Jones::from([c64::new(f64::NAN, f64::NAN); 4]),
         );
 
+        // If we only have a single polarisation in the data, then we need to
+        // not do proper Jones matrix inversion, because all Jones matrices are
+        // singular.
+        let inv_func = |j: Jones<f64>| -> Jones<f64> {
+            match obs_context.polarisations {
+                Polarisations::XX => {
+                    Jones::from([j[0].inv(), c64::default(), c64::default(), c64::default()])
+                }
+                Polarisations::YY => {
+                    Jones::from([c64::default(), c64::default(), c64::default(), j[3].inv()])
+                }
+                Polarisations::XX_XY_YX_YY | Polarisations::XX_YY | Polarisations::XX_YY_XY => {
+                    j.inv()
+                }
+            }
+        };
+
         // Populate out_di_jones. The timeblocks are always 1-to-1.
         out_di_jones
             .outer_iter_mut()
@@ -571,9 +594,9 @@ impl<'a> IncompleteSolutions<'a> {
                                         // inverted (i.e. they go from model to
                                         // data, but we want to store data to
                                         // model).
-                                        *out_di_jones = di_jones
-                                            [(i_unflagged_tile, i_unflagged_chanblock)]
-                                            .inv();
+                                        *out_di_jones = inv_func(
+                                            di_jones[(i_unflagged_tile, i_unflagged_chanblock)],
+                                        );
                                         i_unflagged_chanblock += 1;
                                     }
                                 },
@@ -697,6 +720,7 @@ pub fn calibrate_timeblocks<'a>(
     max_iterations: u32,
     stop_threshold: f64,
     min_threshold: f64,
+    pols: Polarisations,
     draw_progress_bar: bool,
     print_convergence_messages: bool,
 ) -> (IncompleteSolutions<'a>, Array2<CalibrationResult>) {
@@ -722,6 +746,7 @@ pub fn calibrate_timeblocks<'a>(
             max_iterations,
             stop_threshold,
             min_threshold,
+            pols,
             pb,
             print_convergence_messages,
         );
@@ -759,6 +784,7 @@ pub fn calibrate_timeblocks<'a>(
             max_iterations,
             stop_threshold,
             min_threshold,
+            pols,
             pb,
             print_convergence_messages,
         );
@@ -794,6 +820,7 @@ pub fn calibrate_timeblocks<'a>(
                 max_iterations,
                 stop_threshold,
                 min_threshold,
+                pols,
                 pb,
                 print_convergence_messages,
             );
@@ -861,6 +888,7 @@ fn calibrate_timeblock(
     max_iterations: u32,
     stop_threshold: f64,
     min_threshold: f64,
+    pols: Polarisations,
     progress_bar: ProgressBar,
     print_convergence_messages: bool,
 ) -> Vec<CalibrationResult> {
@@ -890,6 +918,7 @@ fn calibrate_timeblock(
                 max_iterations,
                 stop_threshold,
                 min_threshold,
+                pols,
             );
             cal_result.chanblock = Some(chanblock.chanblock_index as usize);
             cal_result.i_chanblock = Some(chanblock.unflagged_index as usize);
@@ -1020,6 +1049,7 @@ fn calibrate_timeblock(
                             max_iterations,
                             stop_threshold,
                             min_threshold,
+                            pols,
                         );
                         new_cal_result.chanblock = Some(chanblock);
                         new_cal_result.i_chanblock = Some(i_chanblock);
@@ -1109,6 +1139,7 @@ pub(super) fn calibrate(
     max_iterations: u32,
     stop_threshold: f64,
     min_threshold: f64,
+    pols: Polarisations,
 ) -> CalibrationResult {
     assert_eq!(data_tfb.dim(), model_tfb.dim());
     let num_tiles = di_jones.len_of(Axis(0));
@@ -1121,6 +1152,28 @@ pub(super) fn calibrate(
     // largest value in the entire array.
     let mut precisions: Array2<f64> = Array::zeros((num_tiles, 4));
     let mut failed: Array1<bool> = Array1::from_elem(num_tiles, false);
+
+    // If we only have a single polarisation in the data, then we need to not do
+    // proper Jones matrix division, because all Jones matrices are singular.
+    let div_func = |top: &Jones<f64>, bot: &Jones<f64>| -> Jones<f64> {
+        match pols {
+            Polarisations::XX => Jones::from([
+                top[0] / bot[0],
+                c64::default(),
+                c64::default(),
+                c64::default(),
+            ]),
+            Polarisations::YY => Jones::from([
+                c64::default(),
+                c64::default(),
+                c64::default(),
+                top[3] / bot[3],
+            ]),
+            Polarisations::XX_XY_YX_YY | Polarisations::XX_YY | Polarisations::XX_YY_XY => {
+                *top / bot
+            }
+        }
+    };
 
     let mut iteration = 0;
     while iteration < max_iterations {
@@ -1208,7 +1261,7 @@ pub(super) fn calibrate(
                     .zip(top.iter())
                     .zip(bot.iter())
                     .for_each(|(((di_jones, old_jones), top), bot)| {
-                        let div = *top / bot;
+                        let div = div_func(top, bot);
                         if div.any_nan() {
                             *failed = true;
                             *di_jones = Jones::default();

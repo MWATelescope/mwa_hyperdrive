@@ -1189,6 +1189,7 @@ impl DiCalParams {
             vis_data_tfb,
             vis_weights_tfb,
             vis_model_tfb,
+            pols,
         } = get_cal_vis(self, !self.no_progress_bars)?;
         assert_eq!(vis_weights_tfb.len_of(Axis(2)), self.baseline_weights.len());
 
@@ -1219,6 +1220,7 @@ impl DiCalParams {
             self.max_iterations,
             self.stop_threshold,
             self.min_threshold,
+            pols,
             !self.no_progress_bars,
             true,
         );

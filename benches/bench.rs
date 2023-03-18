@@ -26,7 +26,8 @@ use mwa_hyperdrive::{
         get_instrumental_flux_densities, ComponentType, FluxDensity, FluxDensityType,
         ShapeletCoeff, Source, SourceComponent, SourceList,
     },
-    CrossData, MsReader, RawDataCorrections, RawDataReader, TileBaselineFlags, UvfitsReader,
+    CrossData, MsReader, Polarisations, RawDataCorrections, RawDataReader, TileBaselineFlags,
+    UvfitsReader,
 };
 
 fn model_benchmarks(c: &mut Criterion) {
@@ -77,6 +78,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     true,
                     &*beam,
                     &source_list,
+                    Polarisations::default(),
                     &xyzs,
                     &freqs,
                     &flagged_tiles,
@@ -139,6 +141,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     false,
                     &*beam,
                     &source_list,
+                    Polarisations::default(),
                     &xyzs,
                     &freqs,
                     &flagged_tiles,
@@ -198,6 +201,7 @@ fn model_benchmarks(c: &mut Criterion) {
             true,
             &*beam,
             &source_list,
+            Polarisations::default(),
             &xyzs,
             &freqs,
             &flagged_tiles,
@@ -262,6 +266,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     false,
                     &*beam,
                     &source_list,
+                    Polarisations::default(),
                     &xyzs,
                     &freqs,
                     &flagged_tiles,
@@ -332,6 +337,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 true,
                 &*beam,
                 &source_list,
+                Polarisations::default(),
                 &xyzs,
                 &freqs,
                 &flagged_tiles,
@@ -406,6 +412,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     false,
                     &*beam,
                     &source_list,
+                    Polarisations::default(),
                     &xyzs,
                     &freqs,
                     &flagged_tiles,
@@ -481,6 +488,7 @@ fn calibrate_benchmarks(c: &mut Criterion) {
                     50,
                     1e-8,
                     1e-4,
+                    Polarisations::default(),
                     false,
                     false,
                 );
@@ -685,7 +693,7 @@ fn io_benchmarks(c: &mut Criterion) {
                 tile_baseline_flags: &tile_baseline_flags,
             };
 
-            ms.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+            ms.read_inner::<4>(Some(crosses), None, 0, &flagged_fine_chans)
         });
     });
     ms_bench_group.bench_function("Read crosses for timestep, MWA channel flags", |b| {
@@ -700,7 +708,7 @@ fn io_benchmarks(c: &mut Criterion) {
                 tile_baseline_flags: &tile_baseline_flags,
             };
 
-            ms.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+            ms.read_inner::<4>(Some(crosses), None, 0, &flagged_fine_chans)
         });
     });
     ms_bench_group.finish();

@@ -25,6 +25,19 @@ pub enum MsReadError {
     #[error("Could not find a column in the main table with visibility weights; searched for {SUPPORTED_WEIGHT_COL_NAMES:?}")]
     NoWeightCol,
 
+    #[error(
+        "CORR_TYPE {corr_type} was found in the POLARIZATION table; this is currently unsupported"
+    )]
+    UnsupportedCorrType { corr_type: i32 },
+
+    #[error(
+        "CORR_TYPE {corr_type:?} was found in the POLARIZATION table; but this combination of polarisations is currently unsupported"
+    )]
+    UnsupportedPols { corr_type: Vec<i32> },
+
+    #[error("There are {data} polarisations for each data frequency, but {pol_table} polarisations described by the POLARIZATION table. Refusing to continue with this inconsistency.")]
+    InconsistentPolCount { data: usize, pol_table: usize },
+
     #[error("Error when trying to read from main table column '{column}': {err}")]
     MainTableColReadError {
         column: String,

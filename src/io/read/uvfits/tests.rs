@@ -971,6 +971,7 @@ fn test_sdc3() {
         -10.401579822123448, // yep, really
         epsilon = 1e-8
     );
+    assert_eq!(obs_context.polarisations, Polarisations::XX);
 
     let mut cross_vis = Array2::zeros((1, 1));
     let mut cross_vis_weights = Array2::zeros((1, 1));

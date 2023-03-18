@@ -958,6 +958,7 @@ fn model_vis_and_subtract(
         use_cpu_for_modelling,
         beam,
         source_list,
+        obs_context.polarisations,
         &unflagged_tile_xyzs,
         &freqs,
         &flagged_tiles,

@@ -46,6 +46,7 @@ pub use cli::{
     },
     vis_utils::{simulate::VisSimulateArgs, subtract::VisSubtractArgs},
 };
+pub use context::Polarisations;
 pub use error::HyperdriveError;
 pub use io::read::{
     AutoData, CrossData, MsReader, RawDataCorrections, RawDataReader, UvfitsReader,

@@ -15,6 +15,17 @@ that, currently, `hyperdrive` outputs are (somewhat) inappropriate for usage
 with `wsclean`. We are discussing how to move forward given the history of MWA
 data processing and expectations in the community.
 
+We expect that any input data contains 4 cross-correlation polarisations (XX XY
+YX YY), but `hyperdrive` is able to read the following combinations out of the
+supported [input data types](./vis_formats_read.md):
+- XX
+- YY
+- XX YY
+- XX XY YY
+
+In addition, uvfits files need not have a weight associated with each
+polarisation.
+
 # Stokes polarisations
 
 In `hyperdrive`:

@@ -27,6 +27,7 @@ use crate::{
     averaging::{channels_to_chanblocks, timesteps_to_timeblocks, Chanblock, Fence, Timeblock},
     beam::create_no_beam_object,
     cli::di_calibrate::DiCalParams,
+    context::Polarisations,
     di_calibrate::calibrate_timeblock,
     io::read::{
         fits::{fits_get_col, fits_get_required_key, fits_open, fits_open_hdu},
@@ -114,6 +115,7 @@ fn test_calibrate_trivial() {
                 20,
                 1e-8,
                 1e-5,
+                Polarisations::default(),
             );
 
             assert!(result.converged);
@@ -186,6 +188,7 @@ fn test_calibrate_trivial_with_flags() {
                 20,
                 1e-8,
                 1e-5,
+                Polarisations::default(),
             );
 
             assert!(result.converged);
@@ -238,6 +241,7 @@ fn test_calibrate_trivial_with_flags() {
                 20,
                 1e-8,
                 1e-5,
+                Polarisations::default(),
             );
 
             assert!(result.converged);
@@ -1050,6 +1054,7 @@ fn test_multiple_timeblocks_behave() {
         10,
         1e-8,
         1e-4,
+        Polarisations::default(),
         false,
         false,
     );
@@ -1091,6 +1096,7 @@ fn test_chanblocks_without_data_have_nan_solutions() {
         10,
         1e-8,
         1e-4,
+        Polarisations::default(),
         false,
         false,
     );
@@ -1112,6 +1118,7 @@ fn test_chanblocks_without_data_have_nan_solutions() {
         10,
         1e-8,
         1e-4,
+        Polarisations::default(),
         false,
         false,
     );
@@ -1152,6 +1159,7 @@ fn test_recalibrating_failed_chanblocks() {
         10,
         1e-8,
         1e-4,
+        Polarisations::default(),
         pb.clone(),
         false,
     );
@@ -1174,6 +1182,7 @@ fn test_recalibrating_failed_chanblocks() {
         10,
         1e-8,
         1e-4,
+        Polarisations::default(),
         pb,
         false,
     );
@@ -1194,6 +1203,7 @@ pub(crate) fn test_1090008640_quality(params: DiCalParams, cal_vis: CalVis) {
         50,
         1e-8,
         1e-4,
+        Polarisations::default(),
         false,
         false,
     );

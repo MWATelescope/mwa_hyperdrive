@@ -26,6 +26,8 @@ use super::{shapelets, ModelError};
 use crate::{
     beam::{Beam, BeamError, BeamType},
     constants::*,
+    context::Polarisations,
+    model::mask_pols,
     srclist::{ComponentList, GaussianParams, PerComponentParams, SourceList},
 };
 
@@ -60,6 +62,8 @@ pub(crate) struct SkyModellerCpu<'a> {
     freq_map: Vec<usize>,
     unique_tiles: Vec<usize>,
     unique_freqs: Vec<f64>,
+
+    pub(super) pols: Polarisations,
 }
 
 impl<'a> SkyModellerCpu<'a> {
@@ -67,6 +71,7 @@ impl<'a> SkyModellerCpu<'a> {
     pub(super) fn new(
         beam: &'a dyn Beam,
         source_list: &SourceList,
+        pols: Polarisations,
         unflagged_tile_xyzs: &'a [XyzGeodetic],
         unflagged_fine_chan_freqs: &'a [f64],
         flagged_tiles: &'a HashSet<usize>,
@@ -157,6 +162,7 @@ impl<'a> SkyModellerCpu<'a> {
             unique_tiles,
             unique_freqs,
             freq_map,
+            pols,
         }
     }
 
@@ -459,6 +465,7 @@ impl<'a> SkyModellerCpu<'a> {
                         *vis_model += Jones::from(jones_accum);
                     });
             });
+
         Ok(())
     }
 
@@ -685,6 +692,7 @@ impl<'a> SkyModellerCpu<'a> {
                         });
                 },
             );
+
         Ok(())
     }
 
@@ -777,6 +785,9 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             lst,
             latitude,
         )?;
+
+        // Mask any unavailable polarisations.
+        mask_pols(vis_fb, self.pols);
 
         Ok(uvws)
     }

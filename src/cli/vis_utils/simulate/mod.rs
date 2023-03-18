@@ -31,6 +31,7 @@ use crate::{
     averaging::{parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks},
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
+    context::Polarisations,
     help_texts::{
         ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
     },
@@ -759,6 +760,7 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 args.cpu,
                 &*beam,
                 &source_list,
+                Polarisations::XX_XY_YX_YY,
                 &tile_xyzs,
                 &fine_chan_freqs,
                 &tile_baseline_flags.flagged_tiles,

@@ -6,6 +6,7 @@ use hifitime::{Duration, Epoch};
 use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use vec1::vec1;
 
+use super::Polarisations;
 use crate::{beam::Delays, context::ObsContext};
 
 fn get_minimal_obs_context() -> ObsContext {
@@ -33,6 +34,7 @@ fn get_minimal_obs_context() -> ObsContext {
         fine_chan_freqs: vec1![128_000_000],
         flagged_fine_chans: vec![],
         flagged_fine_chans_per_coarse_chan: None,
+        polarisations: Polarisations::default(),
     }
 }
 

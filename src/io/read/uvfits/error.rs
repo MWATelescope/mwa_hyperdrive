@@ -75,6 +75,16 @@ pub enum UvfitsReadError {
     )]
     UnsupportedPolType { key: Cow<'static, str>, value: i8 },
 
+    #[error(
+        "STOKES {crval} and {naxis} indicates a polarisation type '{pol_type}' along with '{num_pols}' polarisations; this is currently unsupported"
+    )]
+    UnsupportedPols {
+        crval: Cow<'static, str>,
+        naxis: Cow<'static, str>,
+        pol_type: i8,
+        num_pols: u8,
+    },
+
     #[error("Could not parse key {key}'s value {value} into a number: {parse_error}")]
     Parse {
         key: Cow<'static, str>,

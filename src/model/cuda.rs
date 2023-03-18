@@ -15,9 +15,10 @@ use marlu::{
 };
 use ndarray::prelude::*;
 
-use super::{shapelets, ModelError, SkyModeller};
+use super::{mask_pols, shapelets, ModelError, SkyModeller};
 use crate::{
     beam::{Beam, BeamCUDA},
+    context::Polarisations,
     cuda::{self, cuda_kernel_call, CudaError, CudaFloat, CudaJones, DevicePointer},
     srclist::{
         get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
@@ -50,6 +51,8 @@ pub(crate) struct SkyModellerCuda<'a> {
     unflagged_tile_xyzs: &'a [XyzGeodetic],
     num_baselines: i32,
     num_freqs: i32,
+
+    pols: Polarisations,
 
     /// A simple map from an absolute tile index into an unflagged tile index.
     /// This is important because CUDA will use tile indices from 0 to the
@@ -141,6 +144,7 @@ impl<'a> SkyModellerCuda<'a> {
     pub(super) fn new(
         beam: &dyn Beam,
         source_list: &SourceList,
+        pols: Polarisations,
         unflagged_tile_xyzs: &'a [XyzGeodetic],
         unflagged_fine_chan_freqs: &[f64],
         flagged_tiles: &HashSet<usize>,
@@ -449,6 +453,8 @@ impl<'a> SkyModellerCuda<'a> {
             unflagged_tile_xyzs,
             num_baselines: num_baselines.try_into().expect("not bigger than i32::MAX"),
             num_freqs: num_freqs.try_into().expect("not bigger than i32::MAX"),
+
+            pols,
 
             tile_index_to_unflagged_tile_index_map: d_tile_index_to_unflagged_tile_index_map,
 
@@ -992,6 +998,9 @@ impl<'a> SkyModeller<'a> for SkyModellerCuda<'a> {
 
         self.model_timestep_with(lst, latitude, &d_uvws, &mut d_beam_jones, &mut d_vis_fb)?;
         d_vis_fb.copy_from_device(vis_fb.as_slice_mut().expect("is contiguous"))?;
+
+        // Mask any unavailable polarisations.
+        mask_pols(vis_fb, self.pols);
 
         Ok(uvws)
     }

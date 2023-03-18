@@ -30,7 +30,11 @@ use ndarray::prelude::*;
 use rubbl_casatables::{Table, TableError, TableOpenMode};
 
 use super::*;
-use crate::{beam::Delays, context::ObsContext, metafits};
+use crate::{
+    beam::Delays,
+    context::{ObsContext, Polarisations},
+    metafits,
+};
 
 const SUPPORTED_WEIGHT_COL_NAMES: [&str; 2] = ["WEIGHT_SPECTRUM", "WEIGHT"];
 lazy_static::lazy_static! {
@@ -165,51 +169,66 @@ impl MsReader {
         // We're assuming that the dimensions of the arrays pulled out from each
         // column doesn't change with row, but that's not possible with a MS,
         // right?
-        main_table.for_each_row_in_range(0..1, |row| {
-            let data: Result<Array2<c32>, _> = row.get_cell(&data_col_name);
-            // If there was an error here, the reason might be that we attempted
-            // to read complex numbers out of a column that doesn't contain
-            // them.
-            if let Err(err) = data {
-                panic!(
-                    "{}",
-                    MsReadError::MainTableColReadError {
-                        column: data_col_name.clone(),
-                        err,
-                    }
-                );
-            }
-            let data = data?;
-            // We assume here that the main_table contains a FLAG table.
-            let flags: Array2<bool> = row.get_cell("FLAG")?;
+        let pols = {
+            let mut num_pols = 0;
+            main_table.for_each_row_in_range(0..1, |row| {
+                let data: Result<Array2<c32>, _> = row.get_cell(&data_col_name);
+                // If there was an error here, the reason might be that we
+                // attempted to read complex numbers out of a column that
+                // doesn't contain them.
+                if let Err(err) = data {
+                    panic!(
+                        "{}",
+                        MsReadError::MainTableColReadError {
+                            column: data_col_name.clone(),
+                            err,
+                        }
+                    );
+                }
+                let data = data?;
+                // We assume here that the main_table contains a FLAG table.
+                let flags: Array2<bool> = row.get_cell("FLAG")?;
 
-            // Until the need arises, we complain if there aren't 4
-            // polarisations present.
-            if data.len_of(Axis(1)) != 4 {
-                panic!(
-                    "{}",
-                    MsReadError::BadArraySize {
-                        array_type: "data",
-                        row_index: 0,
-                        expected_len: 4,
-                        axis_num: 1,
-                    }
-                );
+                assert_eq!(data.dim(), flags.dim());
+                num_pols = data.len_of(Axis(1));
+                Ok(())
+            })?;
+
+            assert_ne!(num_pols, 0, "Couldn't detect the number of polarisations");
+            assert!(
+                num_pols <= 4,
+                "Detected {num_pols} polarisations; this is not supported"
+            );
+
+            // Verify the polarisation count with the POLARIZATION table,
+            // and determine what pols are actually available.
+            let mut pol_table = read_table(&ms, Some("POLARIZATION"))?;
+            let corr_type: Vec<i32> = pol_table.get_cell_as_vec("CORR_TYPE", 0)?;
+            // We only support instrumental pols for now.
+            for &corr_type in &corr_type {
+                if ![9, 10, 11, 12].contains(&corr_type) {
+                    return Err(MsReadError::UnsupportedCorrType { corr_type });
+                }
             }
-            if flags.len_of(Axis(1)) != 4 {
-                panic!(
-                    "{}",
-                    MsReadError::BadArraySize {
-                        array_type: "flags",
-                        row_index: 0,
-                        expected_len: 4,
-                        axis_num: 1,
-                    }
-                );
+
+            let (pols, pol_table_num_pols) = match corr_type.as_slice() {
+                [9, 10, 11, 12] => (Polarisations::XX_XY_YX_YY, 4),
+                [9] => (Polarisations::XX, 1),
+                [12] => (Polarisations::YY, 1),
+                [9, 12] => (Polarisations::XX_YY, 2),
+                [9, 10, 12] => (Polarisations::XX_YY_XY, 3),
+                _ => return Err(MsReadError::UnsupportedPols { corr_type }),
+            };
+            if num_pols != pol_table_num_pols {
+                return Err(MsReadError::InconsistentPolCount {
+                    data: num_pols,
+                    pol_table: pol_table_num_pols,
+                });
             }
-            assert_eq!(data.dim(), flags.dim());
-            Ok(())
-        })?;
+
+            pols
+        };
+        debug!("Polarisations: {pols}");
 
         // The weights array can be 1D or 2D (upside-down emoji). This is
         // documented, but, I don't trust people to be sensible here. So, if the
@@ -221,15 +240,15 @@ impl MsReader {
             main_table.for_each_row_in_range(0..1, |row| {
                 let array2: Result<Array2<f32>, _> = row.get_cell(weight_col_name);
                 if array2.is_ok() {
-                    // Until the need arises, we complain if there aren't 4
+                    // Complain if there aren't the expected number of
                     // polarisations present.
-                    if array2?.len_of(Axis(1)) != 4 {
+                    if array2?.len_of(Axis(1)) != usize::from(pols.num_pols()) {
                         panic!(
                             "{}",
                             MsReadError::BadArraySize {
                                 array_type: "weights",
                                 row_index: 0,
-                                expected_len: 4,
+                                expected_len: usize::from(pols.num_pols()),
                                 axis_num: 1,
                             }
                         );
@@ -830,6 +849,7 @@ impl MsReader {
             fine_chan_freqs,
             flagged_fine_chans,
             flagged_fine_chans_per_coarse_chan,
+            polarisations: pols,
         };
 
         let ms = MsReader {
@@ -849,7 +869,7 @@ impl MsReader {
     /// An internal method for reading visibilities. Cross- and/or
     /// auto-correlation visibilities and weights are written to the supplied
     /// arrays.
-    pub fn read_inner(
+    pub fn read_inner<const NUM_POLS: usize>(
         &self,
         mut crosses: Option<CrossData>,
         mut autos: Option<AutoData>,
@@ -905,7 +925,7 @@ impl MsReader {
                                 // is not useful.
                                 ms_weights
                                     .into_raw_vec()
-                                    .chunks_exact(4)
+                                    .chunks_exact(NUM_POLS)
                                     .map(|weights| {
                                         weights.iter().copied().reduce(f32::min).expect("not empty")
                                     })
@@ -947,13 +967,25 @@ impl MsReader {
                         let mut out_vis = crosses.vis_fb.slice_mut(s![.., bl]);
                         ms_data
                             .into_raw_vec()
-                            .chunks_exact(4)
+                            .chunks_exact(NUM_POLS)
                             .zip(chan_flags.iter())
                             .filter(|(_, &chan_flag)| !chan_flag)
                             .zip(out_vis.iter_mut())
                             .for_each(|((ms_data, _chan_flag), out_vis)| {
-                                *out_vis =
-                                    Jones::from([ms_data[0], ms_data[1], ms_data[2], ms_data[3]]);
+                                let mut vis = Jones::default();
+                                if NUM_POLS > 0 {
+                                    vis[0] = ms_data[0];
+                                }
+                                if NUM_POLS > 1 {
+                                    vis[1] = ms_data[1];
+                                }
+                                if NUM_POLS > 2 {
+                                    vis[2] = ms_data[2];
+                                }
+                                if NUM_POLS > 3 {
+                                    vis[3] = ms_data[3];
+                                }
+                                *out_vis = vis;
                             });
 
                         // Apply the flags to the weights (negate if flagged),
@@ -963,7 +995,7 @@ impl MsReader {
                         let mut out_weights = crosses.weights_fb.slice_mut(s![.., bl]);
                         ms_weights
                             .into_iter()
-                            .zip(ms_flags.into_raw_vec().chunks_exact(4))
+                            .zip(ms_flags.into_raw_vec().chunks_exact(NUM_POLS))
                             .zip(chan_flags.iter())
                             .filter(|((_, _), &chan_flag)| !chan_flag)
                             .zip(out_weights.iter_mut())
@@ -993,7 +1025,7 @@ impl MsReader {
                                         row.get_cell(self.weight_col_name)?;
                                     ms_weights
                                         .into_raw_vec()
-                                        .chunks_exact(4)
+                                        .chunks_exact(NUM_POLS)
                                         .map(|weights| {
                                             weights
                                                 .iter()
@@ -1037,9 +1069,20 @@ impl MsReader {
                                 .filter(|(_, &chan_flag)| !chan_flag)
                                 .zip(out_vis.iter_mut())
                                 .for_each(|((ms_data, _chan_flag), out_vis)| {
-                                    *out_vis = Jones::from([
-                                        ms_data[0], ms_data[1], ms_data[2], ms_data[3],
-                                    ]);
+                                    let mut vis = Jones::default();
+                                    if NUM_POLS > 0 {
+                                        vis[0] = ms_data[0];
+                                    }
+                                    if NUM_POLS > 1 {
+                                        vis[1] = ms_data[1];
+                                    }
+                                    if NUM_POLS > 2 {
+                                        vis[2] = ms_data[2];
+                                    }
+                                    if NUM_POLS > 3 {
+                                        vis[3] = ms_data[3];
+                                    }
+                                    *out_vis = vis;
                                 });
 
                             let mut out_weights = autos.weights_fb.slice_mut(s![.., i_ant]);
@@ -1060,6 +1103,31 @@ impl MsReader {
                 Ok(())
             })
             .map_err(MsReadError::from)?;
+
+        // Transform the data, depending on what the actual polarisations are.
+        if let Some(crosses) = crosses.as_mut() {
+            match self.obs_context.polarisations {
+                // These are all handled correctly.
+                Polarisations::XX_XY_YX_YY => (),
+                Polarisations::XX => (),
+
+                // Because we read in one polarisation, it was treated as XX,
+                // but this is actually YY.
+                Polarisations::YY => crosses.vis_fb.mapv_inplace(|j| {
+                    Jones::from([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, j[0].re, j[0].im])
+                }),
+                // What looks like XY is YY.
+                Polarisations::XX_YY => crosses.vis_fb.mapv_inplace(|j| {
+                    Jones::from([j[0].re, j[0].im, 0.0, 0.0, 0.0, 0.0, j[1].re, j[1].im])
+                }),
+                // What looks like YX is YY.
+                Polarisations::XX_YY_XY => crosses.vis_fb.mapv_inplace(|j| {
+                    Jones::from([
+                        j[0].re, j[0].im, j[1].re, j[1].im, 0.0, 0.0, j[2].re, j[2].im,
+                    ])
+                }),
+            }
+        }
 
         Ok(())
     }
@@ -1092,20 +1160,26 @@ impl VisRead for MsReader {
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
-        self.read_inner(
-            Some(CrossData {
-                vis_fb: cross_vis_fb,
-                weights_fb: cross_weights_fb,
-                tile_baseline_flags,
-            }),
-            Some(AutoData {
-                vis_fb: auto_vis_fb,
-                weights_fb: auto_weights_fb,
-                tile_baseline_flags,
-            }),
-            timestep,
-            flagged_fine_chans,
-        )
+        let cross_data = Some(CrossData {
+            vis_fb: cross_vis_fb,
+            weights_fb: cross_weights_fb,
+            tile_baseline_flags,
+        });
+        let auto_data = Some(AutoData {
+            vis_fb: auto_vis_fb,
+            weights_fb: auto_weights_fb,
+            tile_baseline_flags,
+        });
+
+        match self.obs_context.polarisations.num_pols() {
+            4 => self.read_inner::<4>(cross_data, auto_data, timestep, flagged_fine_chans),
+            3 => self.read_inner::<3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            2 => self.read_inner::<2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            1 => self.read_inner::<1>(cross_data, auto_data, timestep, flagged_fine_chans),
+            _ => {
+                unimplemented!("num pols must be 1-4")
+            }
+        }
     }
 
     fn read_crosses(
@@ -1116,16 +1190,21 @@ impl VisRead for MsReader {
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
-        self.read_inner(
-            Some(CrossData {
-                vis_fb,
-                weights_fb,
-                tile_baseline_flags,
-            }),
-            None,
-            timestep,
-            flagged_fine_chans,
-        )
+        let cross_data = Some(CrossData {
+            vis_fb,
+            weights_fb,
+            tile_baseline_flags,
+        });
+
+        match self.obs_context.polarisations.num_pols() {
+            4 => self.read_inner::<4>(cross_data, None, timestep, flagged_fine_chans),
+            3 => self.read_inner::<3>(cross_data, None, timestep, flagged_fine_chans),
+            2 => self.read_inner::<2>(cross_data, None, timestep, flagged_fine_chans),
+            1 => self.read_inner::<1>(cross_data, None, timestep, flagged_fine_chans),
+            _ => {
+                unimplemented!("num pols must be 1-4")
+            }
+        }
     }
 
     fn read_autos(
@@ -1136,16 +1215,21 @@ impl VisRead for MsReader {
         tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<usize>,
     ) -> Result<(), VisReadError> {
-        self.read_inner(
-            None,
-            Some(AutoData {
-                vis_fb,
-                weights_fb,
-                tile_baseline_flags,
-            }),
-            timestep,
-            flagged_fine_chans,
-        )
+        let auto_data = Some(AutoData {
+            vis_fb,
+            weights_fb,
+            tile_baseline_flags,
+        });
+
+        match self.obs_context.polarisations.num_pols() {
+            4 => self.read_inner::<4>(None, auto_data, timestep, flagged_fine_chans),
+            3 => self.read_inner::<3>(None, auto_data, timestep, flagged_fine_chans),
+            2 => self.read_inner::<2>(None, auto_data, timestep, flagged_fine_chans),
+            1 => self.read_inner::<1>(None, auto_data, timestep, flagged_fine_chans),
+            _ => {
+                unimplemented!("num pols must be 1-4")
+            }
+        }
     }
 
     fn get_marlu_mwa_info(&self) -> Option<MarluMwaObsContext> {
