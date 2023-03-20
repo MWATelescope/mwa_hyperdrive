@@ -260,7 +260,7 @@ fn test_unity_dipole_gains() {
 
     // Because there are dead dipoles in the metafits, we expect some of the
     // gains to not be 1.
-    assert!(!beam_gains.iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
+    assert!(!beam_gains.unwrap().iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
 
     // Now ignore dead dipoles.
     args.unity_dipole_gains = true;
@@ -271,7 +271,7 @@ fn test_unity_dipole_gains() {
     let beam_gains = fee_beam.get_dipole_gains();
 
     // Now we expect all gains to be 1s, as we're ignoring dead dipoles.
-    assert!(beam_gains.iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
+    assert!(beam_gains.unwrap().iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
     // Verify that there are no dead dipoles in the delays.
     assert!(fee_beam
         .get_dipole_delays()

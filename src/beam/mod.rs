@@ -57,7 +57,7 @@ pub trait Beam: Sync + Send {
     /// Get the dipole gains used in this beam object. The rows correspond to
     /// tiles and there are 32 columns, one for each dipole. The first 16 values
     /// are for X dipoles, the second 16 are for Y dipoles.
-    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>>;
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>>;
 
     /// Get the beam file associated with this beam, if there is one.
     fn get_beam_file(&self) -> Option<&Path>;
@@ -245,8 +245,8 @@ impl Beam for NoBeam {
         None
     }
 
-    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>> {
-        Array2::ones((self.num_tiles, 32)).into_shared()
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>> {
+        Some(Array2::ones((self.num_tiles, 32)).into_shared())
     }
 
     fn get_beam_file(&self) -> Option<&Path> {

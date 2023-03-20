@@ -182,8 +182,8 @@ impl Beam for FEEBeam {
         Some(self.delays.view().to_shared())
     }
 
-    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>> {
-        self.gains.view().to_shared()
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>> {
+        Some(self.gains.view().to_shared())
     }
 
     fn get_beam_file(&self) -> Option<&Path> {
