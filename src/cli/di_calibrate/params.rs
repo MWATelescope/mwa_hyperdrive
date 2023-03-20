@@ -24,7 +24,9 @@ use crate::{
         channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
         timesteps_to_timeblocks, AverageFactorError, Fence, Timeblock,
     },
-    beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
+    beam::{
+        create_analytic_beam_object, create_fee_beam_object, create_no_beam_object, Beam, Delays,
+    },
     cli::peel::SourceIonoConsts,
     constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
     context::ObsContext,
@@ -218,6 +220,9 @@ impl DiCalParams {
             source_dist_cutoff,
             veto_threshold,
             beam_file,
+            analytic_beam_type,
+            analytic_ref_freq_hz,
+            analytic_fwhm_rad,
             unity_dipole_gains,
             delays,
             no_beam,
@@ -536,50 +541,75 @@ impl DiCalParams {
             None => obs_context.dipole_delays.as_ref().cloned(),
         };
 
-        let beam: Box<dyn Beam> = if no_beam {
-            create_no_beam_object(total_num_tiles)
-        } else {
-            let mut dipole_delays = dipole_delays.ok_or(DiCalArgsError::NoDelays)?;
-            let dipole_gains = if unity_dipole_gains {
-                None
-            } else {
-                // If we don't have dipole gains from the input data, then
-                // we issue a warning that we must assume no dead dipoles.
-                if obs_context.dipole_gains.is_none() {
-                    match input_data.get_input_data_type() {
-                        VisInputType::MeasurementSet => {
-                            warn!("Measurement sets cannot supply dead dipole information.");
-                            warn!("Without a metafits file, we must assume all dipoles are alive.");
-                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                        }
-                        VisInputType::Uvfits => {
-                            warn!("uvfits files cannot supply dead dipole information.");
-                            warn!("Without a metafits file, we must assume all dipoles are alive.");
-                            warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
-                        }
-                        VisInputType::Raw => unreachable!(),
+        let beam: Box<dyn Beam> = match (no_beam, analytic_beam_type) {
+            (true, _) => create_no_beam_object(obs_context.tile_xyzs.len()),
+            (_, Some(_beam_type)) => {
+                // TODO: use beam_type, currently fixed as gaussian
+                match (
+                    analytic_ref_freq_hz,
+                    analytic_fwhm_rad,
+                    obs_context.array_position,
+                ) {
+                    (Some(ref_freq_hz), Some(fwhm_rad), Some(array_pos)) => {
+                        create_analytic_beam_object(
+                            obs_context.tile_xyzs.len(),
+                            ref_freq_hz,
+                            fwhm_rad,
+                            array_pos.latitude_rad,
+                            obs_context.phase_centre,
+                        )
+                    }
+                    _ => {
+                        // TODO: put missing params in error message
+                        return Err(DiCalArgsError::AnalyticBeamMissingParams(
+                            "either --analytic-ref-freq-hz, --analytic-fwhm-rad or --array-position".to_string(),
+                        ));
                     }
                 }
-                obs_context.dipole_gains.clone()
-            };
-            if dipole_gains.is_none() {
-                // If we don't have dipole gains, we must assume all dipoles are
-                // "alive". But, if any dipole delays are 32, then the beam code
-                // will still ignore those dipoles. So use ideal dipole delays
-                // for all tiles.
-                let ideal_delays = dipole_delays.get_ideal_delays();
-
-                // Warn the user if they wanted unity dipole gains but the ideal
-                // dipole delays contain 32.
-                if unity_dipole_gains && ideal_delays.iter().any(|&v| v == 32) {
-                    warn!(
-                        "Some ideal dipole delays are 32; these dipoles will not have unity gains"
-                    );
-                }
-                dipole_delays.set_to_ideal_delays();
             }
+            (_, _) => {
+                let mut dipole_delays = dipole_delays.ok_or(DiCalArgsError::NoDelays)?;
+                let dipole_gains = if unity_dipole_gains {
+                    None
+                } else {
+                    // If we don't have dipole gains from the input data, then
+                    // we issue a warning that we must assume no dead dipoles.
+                    if obs_context.dipole_gains.is_none() {
+                        match input_data.get_input_data_type() {
+                            VisInputType::MeasurementSet => {
+                                warn!("Measurement sets cannot supply dead dipole information.");
+                                warn!("Without a metafits file, we must assume all dipoles are alive.");
+                                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                            }
+                            VisInputType::Uvfits => {
+                                warn!("uvfits files cannot supply dead dipole information.");
+                                warn!("Without a metafits file, we must assume all dipoles are alive.");
+                                warn!("This will make beam Jones matrices inaccurate in sky-model generation.");
+                            }
+                            VisInputType::Raw => unreachable!(),
+                        }
+                    }
+                    obs_context.dipole_gains.clone()
+                };
+                if dipole_gains.is_none() {
+                    // If we don't have dipole gains, we must assume all dipoles are
+                    // "alive". But, if any dipole delays are 32, then the beam code
+                    // will still ignore those dipoles. So use ideal dipole delays
+                    // for all tiles.
+                    let ideal_delays = dipole_delays.get_ideal_delays();
 
-            create_fee_beam_object(beam_file, total_num_tiles, dipole_delays, dipole_gains)?
+                    // Warn the user if they wanted unity dipole gains but the ideal
+                    // dipole delays contain 32.
+                    if unity_dipole_gains && ideal_delays.iter().any(|&v| v == 32) {
+                        warn!(
+                            "Some ideal dipole delays are 32; these dipoles will not have unity gains"
+                        );
+                    }
+                    dipole_delays.set_to_ideal_delays();
+                }
+
+                create_fee_beam_object(beam_file, total_num_tiles, dipole_delays, dipole_gains)?
+            }
         };
         let beam_file = beam.get_beam_file();
         debug!("Beam file: {beam_file:?}");

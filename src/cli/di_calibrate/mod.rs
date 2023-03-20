@@ -168,6 +168,16 @@ pub struct DiCalArgs {
     #[clap(long, help_heading = "BEAM")]
     pub beam_file: Option<PathBuf>,
 
+    /// Beam type used for analytic beam
+    #[clap(long, help_heading = "BEAM")]
+    pub analytic_beam_type: Option<String>,
+    /// Reference frequency used by analytic beam
+    #[clap(long, help_heading = "BEAM")]
+    pub analytic_ref_freq_hz: Option<f64>,
+    /// Full width half max of the analytic beam in radians
+    #[clap(long, help_heading = "BEAM")]
+    pub analytic_fwhm_rad: Option<f64>,
+
     /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
     /// the metafits file.
     #[clap(long, help_heading = "BEAM")]
@@ -378,6 +388,9 @@ impl DiCalArgs {
                 source_dist_cutoff,
                 veto_threshold,
                 beam_file,
+                analytic_beam_type,
+                analytic_ref_freq_hz,
+                analytic_fwhm_rad,
                 unity_dipole_gains,
                 delays,
                 no_beam,
@@ -426,6 +439,9 @@ impl DiCalArgs {
                 source_dist_cutoff: cli_args.source_dist_cutoff.or(source_dist_cutoff),
                 veto_threshold: cli_args.veto_threshold.or(veto_threshold),
                 beam_file: cli_args.beam_file.or(beam_file),
+                analytic_beam_type: cli_args.analytic_beam_type.or(analytic_beam_type),
+                analytic_ref_freq_hz: cli_args.analytic_ref_freq_hz.or(analytic_ref_freq_hz),
+                analytic_fwhm_rad: cli_args.analytic_fwhm_rad.or(analytic_fwhm_rad),
                 unity_dipole_gains: cli_args.unity_dipole_gains || unity_dipole_gains,
                 delays: cli_args.delays.or(delays),
                 no_beam: cli_args.no_beam || no_beam,

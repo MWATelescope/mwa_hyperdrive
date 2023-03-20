@@ -12,10 +12,12 @@
 //! implication being that a sky-model source's brightness is always assumed to
 //! be correct when at zenith.
 
+mod analytic;
 mod error;
 mod fee;
 #[cfg(test)]
 mod tests;
+pub use analytic::{create_analytic_beam_object, AnalyticBeam};
 
 pub(crate) use error::BeamError;
 pub use fee::create_fee_beam_object;
@@ -37,6 +39,9 @@ pub enum BeamType {
 
     /// a.k.a. `NoBeam`. Only returns identity matrices.
     None,
+
+    /// Fitted Gaussian or Airy disc.
+    Analytic,
 }
 
 /// A trait abstracting beam code functions.
@@ -73,35 +78,44 @@ pub trait Beam: Sync + Send {
     /// Calculate the beam-response Jones matrix for an [`AzEl`] direction. The
     /// pointing information is not needed because it was provided when `self`
     /// was created.
+    ///
+    /// some beams require the precessed latitude, while others require lst, so
+    /// a single float `lat_or_lst_rad` is used for both.
     fn calc_jones(
         &self,
         azel: AzEl,
         freq_hz: f64,
         tile_index: Option<usize>,
-        latitude_rad: f64,
+        lat_or_lst_rad: f64,
     ) -> Result<Jones<f64>, BeamError>;
 
     /// Calculate the beam-response Jones matrices for multiple [`AzEl`]
     /// directions. The pointing information is not needed because it was
     /// provided when `self` was created.
+    ///
+    /// some beams require the precessed latitude, while others require lst, so
+    /// a single float `lat_or_lst_rad` is used for both.
     fn calc_jones_array(
         &self,
         azels: &[AzEl],
         freq_hz: f64,
         tile_index: Option<usize>,
-        latitude_rad: f64,
+        lat_or_lst_rad: f64,
     ) -> Result<Vec<Jones<f64>>, BeamError>;
 
     /// Calculate the beam-response Jones matrices for multiple [`AzEl`]
     /// directions, saving the results into the supplied slice. The slice must
     /// have the same length as `azels`. The pointing information is not needed
     /// because it was provided when `self` was created.
+    ///
+    /// some beams require the precessed latitude, while others require lst, so
+    /// a single float `lat_or_lst_rad` is used for both.
     fn calc_jones_array_inner(
         &self,
         azels: &[AzEl],
         freq_hz: f64,
         tile_index: Option<usize>,
-        latitude_rad: f64,
+        lat_or_lst_rad: f64,
         results: &mut [Jones<f64>],
     ) -> Result<(), BeamError>;
 
@@ -116,6 +130,11 @@ pub trait Beam: Sync + Send {
     /// If this [`Beam`] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self) {
         // NO OP
+    }
+
+    /// Analytic beams use LST instead of latitude, which is super gross.
+    fn uses_lst(&self) -> bool {
+        false
     }
 
     #[cfg(feature = "cuda")]

@@ -26,7 +26,7 @@ use marlu::{Jones, RADec, XyzGeodetic, UVW};
 use ndarray::ArrayViewMut2;
 
 use crate::{
-    beam::Beam,
+    beam::{Beam, BeamType},
     cli::peel::SourceIonoConsts,
     srclist::{ComponentList, Source, SourceList},
 };
@@ -133,6 +133,9 @@ pub fn new_sky_modeller<'a>(
                     flagged_tiles.clone(),
                 );
 
+                if apply_precession && beam.get_beam_type() == BeamType::Analytic {
+                    unimplemented!("Analytic beams do not support precession");
+                }
                 Ok(Box::new(SkyModellerCpu {
                     beam,
                     phase_centre,
@@ -147,6 +150,9 @@ pub fn new_sky_modeller<'a>(
                     components,
                 }))
             } else {
+                if beam.get_beam_type() == BeamType::Analytic {
+                    unimplemented!("Analytic beams are not yet supported with CUDA");
+                }
                 unsafe {
                     let modeller = SkyModellerCuda::new(
                         beam,

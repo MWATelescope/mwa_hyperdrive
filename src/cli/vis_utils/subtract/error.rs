@@ -124,4 +124,7 @@ pub(crate) enum VisSubtractError {
     #[cfg(feature = "cuda")]
     #[error(transparent)]
     Cuda(#[from] crate::cuda::CudaError),
+
+    #[error("Analytic beam parameters are missing: {0}")]
+    AnalyticBeamMissingParams(String),
 }

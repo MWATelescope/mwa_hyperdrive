@@ -89,6 +89,7 @@ impl<'a> SkyModellerCpu<'a> {
         let azels = &self
             .components
             .points
+            // TODO (dev): rename this, it's no longer MWA-specific.
             .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
 
         assert_eq!(
@@ -126,6 +127,11 @@ impl<'a> SkyModellerCpu<'a> {
         let num_tiles = self.beam.get_num_tiles();
         let mut beam_responses =
             Array3::zeros((num_tiles, self.unflagged_fine_chan_freqs.len(), azels.len()));
+        let lst_or_lat_rad = if self.beam.uses_lst() {
+            lst_rad
+        } else {
+            array_latitude_rad
+        };
         for i_tile in 0..num_tiles {
             if self.flagged_tiles.contains(&i_tile) {
                 continue;
@@ -138,7 +144,7 @@ impl<'a> SkyModellerCpu<'a> {
                     azels,
                     *freq,
                     Some(i_tile),
-                    array_latitude_rad,
+                    lst_or_lat_rad,
                     slice,
                 )?;
             }
@@ -221,6 +227,7 @@ impl<'a> SkyModellerCpu<'a> {
         let azels = &self
             .components
             .gaussians
+            // TODO (dev): rename this, it's no longer MWA
             .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
         let gaussian_params = &self.components.gaussians.gaussian_params;
 
@@ -259,6 +266,11 @@ impl<'a> SkyModellerCpu<'a> {
         let num_tiles = self.beam.get_num_tiles();
         let mut beam_responses =
             Array3::zeros((num_tiles, self.unflagged_fine_chan_freqs.len(), azels.len()));
+        let lst_or_lat_rad = if self.beam.uses_lst() {
+            lst_rad
+        } else {
+            array_latitude_rad
+        };
         for i_tile in 0..num_tiles {
             if self.flagged_tiles.contains(&i_tile) {
                 continue;
@@ -271,7 +283,7 @@ impl<'a> SkyModellerCpu<'a> {
                     azels,
                     *freq,
                     Some(i_tile),
-                    array_latitude_rad,
+                    lst_or_lat_rad,
                     slice,
                 )?;
             }
@@ -379,6 +391,7 @@ impl<'a> SkyModellerCpu<'a> {
         let azels = &self
             .components
             .shapelets
+            // TODO (dev): rename this, it's no longer MWA
             .get_azels_mwa_parallel(lst_rad, array_latitude_rad);
         let gaussian_params = &self.components.shapelets.gaussian_params;
         let shapelet_coeffs = &self.components.shapelets.shapelet_coeffs;
@@ -435,6 +448,11 @@ impl<'a> SkyModellerCpu<'a> {
         let num_tiles = self.beam.get_num_tiles();
         let mut beam_responses =
             Array3::zeros((num_tiles, self.unflagged_fine_chan_freqs.len(), azels.len()));
+        let lst_or_lat_rad = if self.beam.uses_lst() {
+            lst_rad
+        } else {
+            array_latitude_rad
+        };
         for i_tile in 0..num_tiles {
             if self.flagged_tiles.contains(&i_tile) {
                 continue;
@@ -447,7 +465,7 @@ impl<'a> SkyModellerCpu<'a> {
                     azels,
                     *freq,
                     Some(i_tile),
-                    array_latitude_rad,
+                    lst_or_lat_rad,
                     slice,
                 )?;
             }

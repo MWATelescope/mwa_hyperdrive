@@ -253,7 +253,8 @@ impl From<VisSubtractError> for HyperdriveError {
             | VisSubtractError::BadArrayPosition { .. }
             | VisSubtractError::MultipleMetafits(_)
             | VisSubtractError::MultipleMeasurementSets(_)
-            | VisSubtractError::MultipleUvfits(_) => Self::VisSubtract(s),
+            | VisSubtractError::MultipleUvfits(_)
+            | VisSubtractError::AnalyticBeamMissingParams(_) => Self::VisSubtract(s),
             VisSubtractError::NoDelays | VisSubtractError::BadDelays => Self::Delays(s),
             VisSubtractError::VisWrite(_) | VisSubtractError::InvalidOutputFormat(_) => {
                 Self::VisWrite(s)
@@ -372,7 +373,8 @@ impl From<DiCalArgsError> for HyperdriveError {
             | DiCalArgsError::NoSources
             | DiCalArgsError::BadArrayPosition { .. }
             | DiCalArgsError::ParseUvwMin(_)
-            | DiCalArgsError::ParseUvwMax(_) => Self::DiCalibrate(s),
+            | DiCalArgsError::ParseUvwMax(_)
+            | DiCalArgsError::AnalyticBeamMissingParams(_) => Self::DiCalibrate(s),
             DiCalArgsError::NoSourceList
             | DiCalArgsError::NoSourcesAfterVeto
             | DiCalArgsError::Veto(_)
