@@ -17,7 +17,7 @@ fn no_beam_means_no_beam() {
         AzEl { az: 1.0, el: 0.1 },
         AzEl { az: -1.0, el: 0.2 },
     ];
-    let beam = create_no_beam_object(1);
+    let beam = NoBeam { num_tiles: 1 };
     for azel in azels {
         let j = beam.calc_jones(azel, 150e6, None, MWA_LAT_RAD).unwrap();
 

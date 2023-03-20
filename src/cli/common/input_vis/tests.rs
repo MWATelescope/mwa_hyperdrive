@@ -614,10 +614,11 @@ fn sparse_timeblocks_with_averaging() {
     let mut args = VisSimulateArgs {
         args_file: None,
         beam_args: BeamArgs {
-            beam_file: None,
-            unity_dipole_gains: true,
-            delays: None,
+            beam_type: None,
             no_beam: true,
+            delays: None,
+            unity_dipole_gains: true,
+            beam_file: None,
         },
         modelling_args: ModellingArgs {
             ..Default::default()

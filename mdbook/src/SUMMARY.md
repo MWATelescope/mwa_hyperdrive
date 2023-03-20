@@ -29,6 +29,7 @@
 - [Convert visibilities](user/vis_convert/intro.md)
 - [Simulate visibilities](user/vis_simulate/intro.md)
 - [Subtract visibilities](user/vis_subtract/intro.md)
+- [Get beam responses](user/beam.md)
 
 ---
 

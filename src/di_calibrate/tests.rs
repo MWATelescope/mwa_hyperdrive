@@ -20,7 +20,7 @@ use vec1::{vec1, Vec1};
 use super::{calibrate, calibrate_timeblocks, DiCalParams, IncompleteSolutions};
 use crate::{
     averaging::{channels_to_chanblocks, timesteps_to_timeblocks, Chanblock, Spw, Timeblock},
-    beam::create_no_beam_object,
+    beam::NoBeam,
     context::Polarisations,
     di_calibrate::calibrate_timeblock,
     io::read::{RawDataCorrections, RawDataReader},
@@ -283,7 +283,7 @@ fn get_default_params() -> DiCalParams {
             ignore_weights: false,
             dut1: Duration::default(),
         },
-        beam: create_no_beam_object(1),
+        beam: Box::new(NoBeam { num_tiles: 1 }),
         source_list: SourceList::new(),
         cal_timeblocks: vec1![Timeblock {
             index: 0,

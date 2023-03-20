@@ -215,7 +215,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        beam::{create_fee_beam_object, create_no_beam_object, Delays},
+        beam::{Delays, FEEBeam, NoBeam},
         srclist::{
             read::read_source_list_file, ComponentType, FluxDensityType, Source, SourceComponent,
         },
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_beam_attenuated_flux_density_no_beam() {
-        let beam = create_no_beam_object(1);
+        let beam = NoBeam { num_tiles: 1 };
         let jones_pointing_centre = beam
             .calc_jones(AzEl::from_degrees(0.0, 90.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
@@ -247,9 +247,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_beam_attenuated_flux_density_fee_beam() {
-        let beam_file: Option<&str> = None;
-        let beam =
-            create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
         let jones_pointing_centre = beam
             .calc_jones(AzEl::from_degrees(0.0, 89.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
@@ -273,9 +271,7 @@ mod tests {
     #[test]
     #[serial]
     fn veto() {
-        let beam_file: Option<&str> = None;
-        let beam =
-            create_fee_beam_object(beam_file, 1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
         let (mut source_list, _) = read_source_list_file("test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
         // For testing's sake, keep only the following bright sources.
@@ -362,7 +358,7 @@ mod tests {
             0.0,
             MWA_LAT_RAD,
             &[167.68e6, 197.12e6],
-            &*beam,
+            &beam,
             None,
             180.0,
             0.1,
@@ -381,7 +377,7 @@ mod tests {
 
     #[test]
     fn top_n_sources() {
-        let beam = create_no_beam_object(1);
+        let beam = NoBeam { num_tiles: 1 };
         let (mut source_list, _) = read_source_list_file("test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
         // For testing's sake, keep only the following sources.
@@ -407,7 +403,7 @@ mod tests {
             0.0,
             MWA_LAT_RAD,
             &[167.68e6, 197.12e6],
-            &*beam,
+            &beam,
             Some(3),
             180.0,
             0.1,
@@ -424,7 +420,7 @@ mod tests {
 
     #[test]
     fn sorted_by_reverse_brightness() {
-        let beam = create_no_beam_object(1);
+        let beam = NoBeam { num_tiles: 1 };
         let (mut source_list, _) = read_source_list_file("test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
         let phase_centre = RADec::from_degrees(0.0, -27.0);
@@ -434,7 +430,7 @@ mod tests {
             0.0,
             MWA_LAT_RAD,
             &[167.68e6, 197.12e6],
-            &*beam,
+            &beam,
             None,
             180.0,
             0.1,

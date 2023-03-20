@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use log::{debug, trace};
+use log::debug;
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 
@@ -17,7 +17,7 @@ use super::{BeamCUDA, CudaFloat, DevicePointer};
 
 /// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [`Beam`]
 /// trait.
-pub(super) struct FEEBeam {
+pub(crate) struct FEEBeam {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
     delays: Array2<u32>,
     gains: Array2<f64>,
@@ -54,7 +54,6 @@ impl FEEBeam {
         };
 
         // Complain if the dimensions of delays and gains don't match.
-        // TODO: Tidy.
         if delays.dim().0 != gains.dim().0 {
             return Err(BeamError::DelayGainsDimensionMismatch {
                 delays: delays.dim().0,
@@ -75,7 +74,7 @@ impl FEEBeam {
         })
     }
 
-    fn new(
+    pub(crate) fn new(
         file: &Path,
         num_tiles: usize,
         delays: Delays,
@@ -85,7 +84,7 @@ impl FEEBeam {
         Self::new_inner(hyperbeam_object, num_tiles, delays, gains, Some(file))
     }
 
-    pub(super) fn new_from_env(
+    pub(crate) fn new_from_env(
         num_tiles: usize,
         delays: Delays,
         gains: Option<Array2<f64>>,
@@ -112,11 +111,6 @@ impl FEEBeam {
             Some(latitude_rad),
             false,
         )
-        // // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
-        // // but the Marlu used all over hyperdrive is imported differently
-        // // from that of hyperbeam. Testing shows that this operation takes
-        // // tens of nanoseconds.
-        // .map(|j| unsafe { std::mem::transmute(j) })
     }
 
     fn calc_jones_array(
@@ -128,7 +122,7 @@ impl FEEBeam {
         latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::fee::FEEBeamError> {
         self.hyperbeam_object.calc_jones_array(
-            unsafe { std::mem::transmute(azels) },
+            azels,
             freq_hz as _,
             delays,
             amps,
@@ -136,11 +130,6 @@ impl FEEBeam {
             Some(latitude_rad),
             false,
         )
-        // // Convert hyperbeam's `Jones` to our `Jones`. Both come from Marlu,
-        // // but the Marlu used all over hyperdrive is imported differently
-        // // from that of hyperbeam. Testing shows that this operation takes
-        // // tens of nanoseconds.
-        // .map(|v| unsafe { std::mem::transmute(v) })
     }
 
     fn calc_jones_array_inner(
@@ -153,7 +142,7 @@ impl FEEBeam {
         results: &mut [Jones<f64>],
     ) -> Result<(), mwa_hyperbeam::fee::FEEBeamError> {
         self.hyperbeam_object.calc_jones_array_inner(
-            unsafe { std::mem::transmute(azels) },
+            azels,
             freq_hz as _,
             delays,
             amps,
@@ -179,11 +168,11 @@ impl Beam for FEEBeam {
     }
 
     fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>> {
-        Some(self.delays.view().to_shared())
+        Some(self.delays.to_shared())
     }
 
-    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>> {
-        self.gains.view().to_shared()
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>> {
+        Some(self.gains.to_shared())
     }
 
     fn get_beam_file(&self) -> Option<&Path> {
@@ -375,30 +364,6 @@ impl BeamCUDA for FEEBeamCUDA {
     fn get_num_unique_freqs(&self) -> i32 {
         self.hyperbeam_object.get_num_unique_freqs()
     }
-}
-
-/// Create an FEE beam object. The dipole delays and amps (a.k.a. gains) must
-/// have the same number of rows; these correspond to individual tiles.
-///
-/// `amps` *must* have 16 or 32 elements per row (each corresponds to an MWA
-/// dipole in a tile, in the M&C order; see
-/// <https://wiki.mwatelescope.org/pages/viewpage.action?pageId=48005139>).
-pub fn create_fee_beam_object<P: AsRef<Path>>(
-    beam_file: Option<P>,
-    num_tiles: usize,
-    delays: Delays,
-    gains: Option<Array2<f64>>,
-) -> Result<Box<dyn Beam>, BeamError> {
-    trace!("Setting up FEE beam");
-    let beam = if let Some(bf) = beam_file {
-        // Set up the FEE beam struct from the specified beam file.
-        Box::new(FEEBeam::new(bf.as_ref(), num_tiles, delays, gains)?)
-    } else {
-        // Set up the FEE beam struct from the MWA_BEAM_FILE environment
-        // variable.
-        Box::new(FEEBeam::new_from_env(num_tiles, delays, gains)?)
-    };
-    Ok(beam)
 }
 
 /// Assume that the dipole delays for all tiles is the same as the delays for

@@ -247,7 +247,7 @@ impl<'a> IncompleteSolutions<'a> {
             min_threshold: Some(min_threshold),
             raw_data_corrections: input_vis_params.vis_reader.get_raw_data_corrections(),
             tile_names: Some(obs_context.tile_names.clone()),
-            dipole_gains: Some(params.beam.get_dipole_gains()),
+            dipole_gains: params.beam.get_dipole_gains(),
             dipole_delays: params.beam.get_dipole_delays(),
             beam_file: params.beam.get_beam_file().map(|p| p.to_path_buf()),
             calibration_results,

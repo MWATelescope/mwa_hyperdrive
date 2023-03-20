@@ -253,8 +253,11 @@ fn by_beam(
         trace!("Attempting to open the metafits file");
         let metafits = mwalib::MetafitsContext::new(metafits, None)?;
 
-        let mut dipole_delays = Delays::Full(get_dipole_delays(&metafits));
-        dipole_delays.set_to_ideal_delays();
+        let dipole_delays = {
+            let d = Delays::Full(get_dipole_delays(&metafits));
+            let ideal = d.get_ideal_delays();
+            Delays::Partial(ideal.to_vec())
+        };
 
         let mut metadata = Metadata {
             phase_centre: RADec::from_degrees(

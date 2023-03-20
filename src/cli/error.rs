@@ -421,10 +421,12 @@ impl From<BeamError> for HyperdriveError {
     fn from(e: BeamError) -> Self {
         let s = e.to_string();
         match e {
-            BeamError::NoDelays
+            BeamError::NoDelays(_)
             | BeamError::BadDelays
+            | BeamError::InconsistentDelays { .. }
             | BeamError::DelayGainsDimensionMismatch { .. } => Self::Delays(s),
-            BeamError::BadTileIndex { .. }
+            BeamError::Unrecognised(_)
+            | BeamError::BadTileIndex { .. }
             | BeamError::Hyperbeam(_)
             | BeamError::HyperbeamInit(_) => Self::Beam(s),
             #[cfg(feature = "cuda")]

@@ -35,7 +35,7 @@ fn test_1090008640_woden() {
     assert!(cmd.is_err());
     let (_, stderr) = get_cmd_output(cmd);
     assert!(stderr.contains(
-        "Tried to create a beam object, but MWA dipole delay information isn't available!"
+        "Tried to set up a 'FEE' beam, which requires MWA dipole delays, but none are available"
     ));
 
     // This time give the metafits file.

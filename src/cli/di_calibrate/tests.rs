@@ -59,7 +59,16 @@ fn get_reduced_1090008640(use_fee_beam: bool, include_mwaf: bool) -> DiCalArgs {
             ..Default::default()
         },
         beam_args: BeamArgs {
-            no_beam: !use_fee_beam,
+            beam_type: Some(
+                {
+                    if use_fee_beam {
+                        "fee"
+                    } else {
+                        "none"
+                    }
+                }
+                .to_string(),
+            ),
             ..Default::default()
         },
         ..Default::default()
@@ -926,7 +935,7 @@ fn test_1090008640_calibration_quality_raw() {
             ..Default::default()
         },
         beam_args: BeamArgs {
-            no_beam: true,
+            beam_type: Some("none".to_string()),
             ..Default::default()
         },
         calibration_args: DiCalCliArgs {
@@ -970,7 +979,7 @@ fn test_1090008640_calibration_quality_ms() {
             ..Default::default()
         },
         beam_args: BeamArgs {
-            no_beam: true,
+            beam_type: Some("none".to_string()),
             ..Default::default()
         },
         calibration_args: DiCalCliArgs {
@@ -1013,7 +1022,7 @@ fn test_1090008640_calibration_quality_uvfits() {
             ..Default::default()
         },
         beam_args: BeamArgs {
-            no_beam: true,
+            beam_type: Some("none".to_string()),
             ..Default::default()
         },
         calibration_args: DiCalCliArgs {

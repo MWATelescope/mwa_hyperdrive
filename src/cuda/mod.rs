@@ -301,6 +301,37 @@ impl<T> DevicePointer<T> {
     }
 }
 
+impl<T: Default> DevicePointer<T> {
+    /// Copy a slice of data from the device. There must be an equal number of
+    /// bytes in the `DevicePointer` and `v`.
+    #[track_caller]
+    pub fn copy_from_device_new(&self) -> Result<Vec<T>, CudaError> {
+        if self.ptr.is_null() {
+            let location = Location::caller();
+            return Err(CudaError::CopyFromDevice {
+                msg: "Attempted to copy data from a null device pointer".into(),
+                file: location.file(),
+                line: location.line(),
+            });
+        }
+
+        let mut v: Vec<T> = Vec::default();
+        v.resize_with(self.size / std::mem::size_of::<T>(), || T::default());
+
+        unsafe {
+            cuda_runtime_sys::cudaMemcpy(
+                v.as_mut_ptr().cast(),
+                self.ptr.cast(),
+                self.size,
+                cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToHost,
+            );
+            check_for_errors(CudaCall::CopyFromDevice)?;
+        }
+
+        Ok(v)
+    }
+}
+
 impl<T> Default for DevicePointer<T> {
     fn default() -> Self {
         Self {

@@ -18,7 +18,7 @@ use tempfile::Builder;
 use vec1::{vec1, Vec1};
 
 use mwa_hyperdrive::{
-    calibrate_timeblocks, create_fee_beam_object,
+    calibrate_timeblocks, create_beam_object,
     model::{self, SkyModeller},
     srclist::{
         get_instrumental_flux_densities, ComponentType, FluxDensity, FluxDensityType,
@@ -37,9 +37,7 @@ fn model_benchmarks(c: &mut Criterion) {
     let timestamp = Epoch::from_gpst_seconds(1065880128.0);
     let xyzs = vec![XyzGeodetic::default(); num_tiles];
     let flagged_tiles = HashSet::new();
-    let beam_file: Option<&str> = None; // Assume the env. variable is set.
-    let beam =
-        create_fee_beam_object(beam_file, num_tiles, Delays::Partial(vec![0; 16]), None).unwrap();
+    let beam = create_beam_object(Some("fee"), num_tiles, Delays::Partial(vec![0; 16])).unwrap();
 
     let mut points = c.benchmark_group("model FEE points");
     for (num_power_law_points, num_chans) in [(10, 2), (100, 2)] {

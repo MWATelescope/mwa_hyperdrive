@@ -18,25 +18,49 @@ mod fee;
 mod tests;
 
 pub(crate) use error::BeamError;
-pub use fee::create_fee_beam_object;
+pub(crate) use fee::FEEBeam;
 
-use std::path::Path;
+use std::{path::Path, str::FromStr};
 
+use itertools::Itertools;
+use log::debug;
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
+use strum::IntoEnumIterator;
 
 #[cfg(feature = "cuda")]
 use crate::cuda::{CudaFloat, DevicePointer};
 
 /// Supported beam types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumIter,
+    strum_macros::EnumString,
+)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum BeamType {
     /// Fully-embedded element beam.
+    #[strum(serialize = "fee")]
     FEE,
 
-    /// a.k.a. `NoBeam`. Only returns identity matrices.
+    /// a.k.a. [`NoBeam`]. Only returns identity matrices.
+    #[strum(serialize = "none")]
     None,
+}
+
+impl Default for BeamType {
+    fn default() -> Self {
+        Self::FEE
+    }
+}
+
+lazy_static::lazy_static! {
+    pub(crate) static ref BEAM_TYPES_COMMA_SEPARATED: String = BeamType::iter().map(|s| s.to_string().to_lowercase()).join(", ");
 }
 
 /// A trait abstracting beam code functions.
@@ -57,14 +81,15 @@ pub trait Beam: Sync + Send {
     /// Get the dipole gains used in this beam object. The rows correspond to
     /// tiles and there are 32 columns, one for each dipole. The first 16 values
     /// are for X dipoles, the second 16 are for Y dipoles.
-    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>>;
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>>;
 
     /// Get the beam file associated with this beam, if there is one.
     fn get_beam_file(&self) -> Option<&Path>;
 
     /// Calculate the beam-response Jones matrix for an [`AzEl`] direction. The
-    /// pointing information is not needed because it was provided when `self`
-    /// was created.
+    /// delays and gains that will used depend on `tile_index`; if not supplied,
+    /// ideal dipole delays and gains are used, otherwise `tile_index` accesses
+    /// the information provided when this [`Beam`] was created.
     fn calc_jones(
         &self,
         azel: AzEl,
@@ -74,8 +99,10 @@ pub trait Beam: Sync + Send {
     ) -> Result<Jones<f64>, BeamError>;
 
     /// Calculate the beam-response Jones matrices for multiple [`AzEl`]
-    /// directions. The pointing information is not needed because it was
-    /// provided when `self` was created.
+    /// directions. The delays and gains that will used depend on `tile_index`;
+    /// if not supplied, ideal dipole delays and gains are used, otherwise
+    /// `tile_index` accesses the information provided when this [`Beam`] was
+    /// created.
     fn calc_jones_array(
         &self,
         azels: &[AzEl],
@@ -86,8 +113,10 @@ pub trait Beam: Sync + Send {
 
     /// Calculate the beam-response Jones matrices for multiple [`AzEl`]
     /// directions, saving the results into the supplied slice. The slice must
-    /// have the same length as `azels`. The pointing information is not needed
-    /// because it was provided when `self` was created.
+    /// have the same length as `azels`. The delays and gains that will used
+    /// depend on `tile_index`; if not supplied, ideal dipole delays and gains
+    /// are used, otherwise `tile_index` accesses the information provided when
+    /// this [`Beam`] was created.
     fn calc_jones_array_inner(
         &self,
         azels: &[AzEl],
@@ -108,7 +137,7 @@ pub trait Beam: Sync + Send {
 
     #[cfg(feature = "cuda")]
     /// Using the tile information from this [`Beam`] and frequencies to be
-    /// used, return a [`BeamCUDA`]. This object only needs pointings to
+    /// used, return a [`BeamCUDA`]. This object only needs frequencies to
     /// calculate beam response [`Jones`] matrices.
     fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
 }
@@ -116,9 +145,9 @@ pub trait Beam: Sync + Send {
 /// A trait abstracting beam code functions on a CUDA-capable device.
 #[cfg(feature = "cuda")]
 pub trait BeamCUDA {
-    /// Calculate the Jones matrices for each `az` and `za` direction. The
-    /// pointing information is not needed because it was provided when `self`
-    /// was created.
+    /// Calculate the Jones matrices for each `az` and `za` direction and
+    /// frequency (these were defined when the [`BeamCUDA`] was created). The
+    /// results are ordered tile, frequency, direction, slowest to fastest.
     ///
     /// # Safety
     ///
@@ -132,7 +161,7 @@ pub trait BeamCUDA {
         d_jones: *mut std::ffi::c_void,
     ) -> Result<(), BeamError>;
 
-    /// Get the type of beam.
+    /// Get the type of beam used to create this [`BeamCUDA`].
     fn get_beam_type(&self) -> BeamType;
 
     /// Get a pointer to the device tile map. This is necessary to access
@@ -157,8 +186,8 @@ pub enum Delays {
     /// Delays are fully specified.
     Full(Array2<u32>),
 
-    /// Delays are specified for a single tile. If this can't be refined, then
-    /// we must assume that these dipoles apply to all tiles.
+    /// Delays are specified for a single tile. We must assume that these
+    /// dipoles apply to all tiles.
     Partial(Vec<u32>),
 }
 
@@ -216,7 +245,7 @@ impl Delays {
         }
     }
 
-    // Parse user-provided dipole delays.
+    /// Parse user-provided dipole delays.
     pub(crate) fn parse(delays: Vec<u32>) -> Result<Delays, BeamError> {
         if delays.len() != 16 || delays.iter().any(|&v| v > 32) {
             return Err(BeamError::BadDelays);
@@ -228,7 +257,7 @@ impl Delays {
 /// A beam implementation that returns only identity Jones matrices for all beam
 /// calculations.
 pub(crate) struct NoBeam {
-    num_tiles: usize,
+    pub(crate) num_tiles: usize,
 }
 
 impl Beam for NoBeam {
@@ -248,8 +277,8 @@ impl Beam for NoBeam {
         None
     }
 
-    fn get_dipole_gains(&self) -> ArcArray<f64, Dim<[usize; 2]>> {
-        Array2::ones((self.num_tiles, 32)).into_shared()
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>> {
+        None
     }
 
     fn get_beam_file(&self) -> Option<&Path> {
@@ -352,7 +381,57 @@ impl BeamCUDA for NoBeamCUDA {
     }
 }
 
-/// Create a "no beam" object.
-pub fn create_no_beam_object(num_tiles: usize) -> Box<dyn Beam> {
-    Box::new(NoBeam { num_tiles })
+pub fn create_beam_object(
+    beam_type: Option<&str>,
+    num_tiles: usize,
+    dipole_delays: Delays,
+) -> Result<Box<dyn Beam>, BeamError> {
+    let beam_type = match (
+        beam_type,
+        beam_type.and_then(|b| BeamType::from_str(b).ok()),
+    ) {
+        (None, _) => BeamType::default(),
+        (Some(_), Some(b)) => b,
+        (Some(s), None) => return Err(BeamError::Unrecognised(s.to_string())),
+    };
+
+    match beam_type {
+        BeamType::None => {
+            debug!("Setting up a \"NoBeam\" object");
+            Ok(Box::new(NoBeam { num_tiles }))
+        }
+
+        BeamType::FEE => {
+            debug!("Setting up a FEE beam object");
+
+            // Check that the delays are sensible.
+            match &dipole_delays {
+                Delays::Partial(v) => {
+                    if v.len() != 16 || v.iter().any(|&v| v > 32) {
+                        return Err(BeamError::BadDelays);
+                    }
+                }
+
+                Delays::Full(a) => {
+                    if a.len_of(Axis(1)) != 16 || a.iter().any(|&v| v > 32) {
+                        return Err(BeamError::BadDelays);
+                    }
+                    if a.len_of(Axis(0)) != num_tiles {
+                        return Err(BeamError::InconsistentDelays {
+                            num_rows: a.len_of(Axis(0)),
+                            num_tiles,
+                        });
+                    }
+                }
+            }
+
+            // Set up the FEE beam struct from the `MWA_BEAM_FILE` environment
+            // variable.
+            Ok(Box::new(FEEBeam::new_from_env(
+                num_tiles,
+                dipole_delays,
+                None,
+            )?))
+        }
+    }
 }

@@ -14,6 +14,7 @@
 
 #[macro_use]
 mod common;
+mod beam;
 mod di_calibrate;
 mod dipole_gains;
 mod error;
@@ -133,6 +134,10 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
     SrclistShift(srclist::SrclistShiftArgs),
 
     DipoleGains(dipole_gains::DipoleGainsArgs),
+
+    #[clap(about = "Generate beam-response values.
+https://mwatelescope.github.io/mwa_hyperdrive/user/beam.html")]
+    Beam(beam::BeamArgs),
 }
 
 impl Hyperdrive {
@@ -164,6 +169,7 @@ impl Hyperdrive {
             Command::SrclistShift(_) => "srclist-shift",
             Command::SrclistVerify(_) => "srclist-verify",
             Command::DipoleGains(_) => "dipole-gains",
+            Command::Beam(_) => "beam",
         };
         info!("hyperdrive {} {}", sub_command, env!("CARGO_PKG_VERSION"));
         display_build_info();
@@ -222,6 +228,7 @@ impl Hyperdrive {
 
             // Misc. utilities.
             Command::DipoleGains(args) => args.run()?,
+            Command::Beam(args) => args.run()?,
         }
 
         info!("hyperdrive {} complete.", sub_command);

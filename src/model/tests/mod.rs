@@ -30,7 +30,7 @@ use crate::cuda::DevicePointer;
 #[cfg(feature = "cuda")]
 use crate::model::cuda::SkyModellerCuda;
 use crate::{
-    beam::{create_fee_beam_object, create_no_beam_object, Delays},
+    beam::{create_beam_object, Delays},
     srclist::{
         ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
         SourceList,
@@ -274,13 +274,12 @@ impl ObsParams {
             },
         ];
         let uvws = xyzs_to_cross_uvws(&xyzs, phase_centre.to_hadec(lst));
-        let beam = if no_beam {
-            create_no_beam_object(xyzs.len())
-        } else {
-            let beam_file: Option<&str> = None;
-            create_fee_beam_object(beam_file, xyzs.len(), Delays::Partial(vec![0; 16]), None)
-                .unwrap()
-        };
+        let beam = create_beam_object(
+            Some(if no_beam { "none" } else { "fee" }),
+            xyzs.len(),
+            Delays::Partial(vec![0; 16]),
+        )
+        .unwrap();
         let flagged_tiles = HashSet::new();
         let array_longitude_rad = MWA_LONG_RAD;
         let array_latitude_rad = MWA_LAT_RAD;

@@ -12,7 +12,7 @@ fn test_handle_delays() {
     let args = BeamArgs {
         // only 3 delays instead of 16 expected
         delays: Some((0..3).collect::<Vec<u32>>()),
-        no_beam: false,
+        beam_type: Some("fee".to_string()),
         ..Default::default()
     };
 
@@ -23,7 +23,7 @@ fn test_handle_delays() {
     let args = BeamArgs {
         // delays > 32
         delays: Some((20..36).collect::<Vec<u32>>()),
-        no_beam: false,
+        beam_type: Some("fee".to_string()),
         ..Default::default()
     };
     let result = args.parse(1, None, None, None);
@@ -35,7 +35,7 @@ fn test_handle_delays() {
     let args = BeamArgs {
         // delays > 32
         delays: Some(delays.clone()),
-        no_beam: false,
+        beam_type: Some("fee".to_string()),
         ..Default::default()
     };
     let result = args.parse(1, None, None, None);
@@ -57,7 +57,7 @@ fn test_handle_delays() {
 fn test_unity_dipole_gains() {
     let args = BeamArgs {
         delays: Some(vec![0; 16]),
-        no_beam: false,
+        beam_type: Some("fee".to_string()),
         ..Default::default()
     };
 
@@ -68,7 +68,7 @@ fn test_unity_dipole_gains() {
     ];
     let beam = args.parse(2, None, Some(dipole_gains), None).unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::FEE);
-    let beam_gains = beam.get_dipole_gains();
+    let beam_gains = beam.get_dipole_gains().unwrap();
 
     // We should find that not all dipole gains are 1.
     assert!(!beam_gains.iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
@@ -76,7 +76,7 @@ fn test_unity_dipole_gains() {
     // Now ignore dead dipoles.
     let args = BeamArgs {
         delays: Some(vec![0; 16]),
-        no_beam: false,
+        beam_type: Some("fee".to_string()),
         unity_dipole_gains: true,
         ..Default::default()
     };
@@ -84,7 +84,7 @@ fn test_unity_dipole_gains() {
     let dipole_gains = array![[1.0; 16], [1.0; 16]];
     let beam = args.parse(2, None, Some(dipole_gains), None).unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::FEE);
-    let beam_gains = beam.get_dipole_gains();
+    let beam_gains = beam.get_dipole_gains().unwrap();
 
     // We expect all gains to be 1s, as we're ignoring dead dipoles.
     assert!(beam_gains.iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));

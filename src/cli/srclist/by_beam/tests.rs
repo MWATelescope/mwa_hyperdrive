@@ -40,10 +40,11 @@ fn test_srclist_by_beam() {
         collapse_into_single_source: false,
         rts_base_source: None,
         beam_args: BeamArgs {
-            beam_file: None,
-            unity_dipole_gains: false,
-            delays: None,
+            beam_type: Some("fee".to_string()),
             no_beam: false,
+            delays: None,
+            unity_dipole_gains: false,
+            beam_file: None,
         },
     }
     .run()

@@ -90,8 +90,12 @@ impl<'a> SkyModellerCpu<'a> {
         // Before we get the beam responses, work out the unique tiles and beam-
         // unique frequencies. This means we potentially de-duplicate a bunch
         // of work.
-        let gains = beam.get_dipole_gains();
-        let total_num_tiles = gains.len_of(Axis(0));
+        let total_num_tiles = unflagged_tile_xyzs.len() + flagged_tiles.len();
+        // When there are no beam gains or delays, there's a way to cheaply
+        // generate the tile map, but I'm lazy right now.
+        let gains = beam
+            .get_dipole_gains()
+            .unwrap_or(ArcArray2::ones((total_num_tiles, 16)));
         let delays = beam
             .get_dipole_delays()
             .unwrap_or(ArcArray2::zeros((total_num_tiles, 16)));
