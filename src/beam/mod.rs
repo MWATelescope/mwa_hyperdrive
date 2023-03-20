@@ -49,18 +49,26 @@ pub trait Beam: Sync + Send {
     fn get_num_tiles(&self) -> usize;
 
     /// Get the dipole delays associated with this beam.
-    fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>>;
+    fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>> {
+        None
+    }
 
     /// Get the ideal dipole delays associated with this beam.
-    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]>;
+    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]> {
+        None
+    }
 
     /// Get the dipole gains used in this beam object. The rows correspond to
     /// tiles and there are 32 columns, one for each dipole. The first 16 values
     /// are for X dipoles, the second 16 are for Y dipoles.
-    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>>;
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>> {
+        None
+    }
 
     /// Get the beam file associated with this beam, if there is one.
-    fn get_beam_file(&self) -> Option<&Path>;
+    fn get_beam_file(&self) -> Option<&Path> {
+        None
+    }
 
     /// Calculate the beam-response Jones matrix for an [`AzEl`] direction. The
     /// pointing information is not needed because it was provided when `self`
@@ -101,10 +109,14 @@ pub trait Beam: Sync + Send {
     /// is defined for. An example of when this is important is with the FEE
     /// beam code, which can only give beam responses at specific frequencies.
     /// On the other hand, the analytic beam can be used at any frequency.
-    fn find_closest_freq(&self, desired_freq_hz: f64) -> f64;
+    fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
+        desired_freq_hz
+    }
 
     /// If this [`Beam`] supports it, empty the coefficient cache.
-    fn empty_coeff_cache(&self);
+    fn empty_coeff_cache(&self) {
+        // NO OP
+    }
 
     #[cfg(feature = "cuda")]
     /// Using the tile information from this [`Beam`] and frequencies to be
@@ -237,20 +249,8 @@ impl Beam for NoBeam {
         self.num_tiles
     }
 
-    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]> {
-        None
-    }
-
-    fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>> {
-        None
-    }
-
     fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>> {
         Some(Array2::ones((self.num_tiles, 32)).into_shared())
-    }
-
-    fn get_beam_file(&self) -> Option<&Path> {
-        None
     }
 
     fn calc_jones(
@@ -284,12 +284,6 @@ impl Beam for NoBeam {
         results.fill(Jones::identity());
         Ok(())
     }
-
-    fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
-        desired_freq_hz
-    }
-
-    fn empty_coeff_cache(&self) {}
 
     #[cfg(feature = "cuda")]
     fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
