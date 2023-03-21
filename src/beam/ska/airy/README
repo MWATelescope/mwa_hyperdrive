@@ -1,0 +1,4 @@
+const.c, j1.c, mconf.h, mtherr.c and polevl.c are source files taken from
+"cephes", hosted at https://netlib.org/cephes/
+
+We use the j1 function to get the same results as the scipy.special.j1 function.

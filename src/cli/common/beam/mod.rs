@@ -228,6 +228,16 @@ impl BeamArgs {
                 };
                 Box::new(beam)
             }
+
+            BeamType::SkaGaussian => {
+                printer.push_line("Type: SKA Gaussian".into());
+                Box::new(crate::beam::SkaGaussianBeam)
+            }
+
+            BeamType::SkaAiry => {
+                printer.push_line("Type: SKA Airy".into());
+                Box::new(crate::beam::SkaAiryBeam)
+            }
         };
 
         if let Some(d) = beam.get_ideal_dipole_delays() {

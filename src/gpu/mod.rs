@@ -109,7 +109,7 @@ pub(crate) enum GpuCall {
 /// This function interfaces directly with the CUDA/HIP API. Rust errors attempt
 /// to catch problems but there are no guarantees.
 #[track_caller]
-unsafe fn check_for_errors(gpu_call: GpuCall) -> Result<(), GpuError> {
+pub(crate) unsafe fn check_for_errors(gpu_call: GpuCall) -> Result<(), GpuError> {
     // Only do a device sync if we're in debug mode, for performance.
     let debug_mode = matches!(std::env::var("DEBUG").as_deref(), Ok("true"));
     if debug_mode {

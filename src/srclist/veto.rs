@@ -15,7 +15,7 @@ use marlu::{Jones, RADec};
 use rayon::{iter::Either, prelude::*};
 
 use crate::{
-    beam::Beam,
+    beam::{Beam, BeamType},
     constants::*,
     srclist::{FluxDensity, ReadSourceListError, SourceList},
 };
@@ -97,10 +97,13 @@ pub(crate) fn veto_sources(
                     // Get the beam response at this source position and
                     // frequency.
                     let j = match beam.calc_jones(
-                            *azel,
-                            cc_freq,
+                        *azel,
+                        cc_freq,
                         None,
-                        array_latitude_rad) {
+                        match beam.get_beam_type() {
+                            BeamType::SkaAiry | BeamType::SkaGaussian => lst_rad,
+                            _ => array_latitude_rad
+                            }) {
                             Ok(j) => j,
                             Err(e) => {
                                 trace!("Beam error for source {}", source_name);

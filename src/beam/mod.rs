@@ -14,11 +14,13 @@
 
 mod error;
 mod fee;
+mod ska;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use error::BeamError;
 pub(crate) use fee::FEEBeam;
+pub(crate) use ska::{SkaAiryBeam, SkaGaussianBeam};
 
 use std::{path::Path, str::FromStr};
 
@@ -51,11 +53,17 @@ pub enum BeamType {
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
     #[strum(serialize = "none")]
     None,
+
+    #[strum(serialize = "ska_gaussian")]
+    SkaGaussian,
+
+    #[strum(serialize = "ska_airy")]
+    SkaAiry,
 }
 
 impl Default for BeamType {
     fn default() -> Self {
-        Self::FEE
+        Self::SkaAiry
     }
 }
 
@@ -443,5 +451,8 @@ pub fn create_beam_object(
                 None,
             )?))
         }
+
+        BeamType::SkaGaussian => Ok(Box::new(SkaGaussianBeam)),
+        BeamType::SkaAiry => Ok(Box::new(SkaAiryBeam)),
     }
 }

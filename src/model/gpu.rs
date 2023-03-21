@@ -17,7 +17,7 @@ use ndarray::prelude::*;
 
 use super::{mask_pols, shapelets, ModelError, SkyModeller};
 use crate::{
-    beam::{Beam, BeamGpu},
+    beam::{Beam, BeamGpu, BeamType},
     context::Polarisations,
     gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
     srclist::{
@@ -599,7 +599,14 @@ impl<'a> SkyModellerGpu<'a> {
             self.gpu_beam.calc_jones_pair(
                 &azs,
                 &zas,
-                array_latitude_rad,
+                if matches!(
+                    self.gpu_beam.get_beam_type(),
+                    BeamType::SkaAiry | BeamType::SkaGaussian
+                ) {
+                    lst_rad
+                } else {
+                    array_latitude_rad
+                },
                 d_beam_jones.get_mut().cast(),
             )?;
         }
@@ -686,7 +693,14 @@ impl<'a> SkyModellerGpu<'a> {
             self.gpu_beam.calc_jones_pair(
                 &azs,
                 &zas,
-                array_latitude_rad,
+                if matches!(
+                    self.gpu_beam.get_beam_type(),
+                    BeamType::SkaAiry | BeamType::SkaGaussian
+                ) {
+                    lst_rad
+                } else {
+                    array_latitude_rad
+                },
                 d_beam_jones.get_mut().cast(),
             )?;
         }
@@ -776,7 +790,14 @@ impl<'a> SkyModellerGpu<'a> {
             self.gpu_beam.calc_jones_pair(
                 &azs,
                 &zas,
-                array_latitude_rad,
+                if matches!(
+                    self.gpu_beam.get_beam_type(),
+                    BeamType::SkaAiry | BeamType::SkaGaussian
+                ) {
+                    lst_rad
+                } else {
+                    array_latitude_rad
+                },
                 d_beam_jones.get_mut().cast(),
             )?
         };

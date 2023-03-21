@@ -335,6 +335,7 @@ fn test_1090008640_di_calibrate_writes_solutions() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
+        "--beam-type", "fee"
     ]);
 
     // Run di-cal and check that it succeeds

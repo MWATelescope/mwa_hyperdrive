@@ -282,6 +282,14 @@ impl<'a> SkyModellerCpu<'a> {
             "uvws.len() != self.unflagged_baseline_to_tile_map.len()"
         );
 
+        let array_latitude_rad = if matches!(
+            self.beam.get_beam_type(),
+            BeamType::SkaAiry | BeamType::SkaGaussian
+        ) {
+            lst_rad
+        } else {
+            array_latitude_rad
+        };
         let beam_responses = self.get_beam_responses(azels, array_latitude_rad)?;
 
         // Iterate over the unflagged baseline axis.
@@ -401,6 +409,14 @@ impl<'a> SkyModellerCpu<'a> {
             "uvws.len() != self.unflagged_baseline_to_tile_map.len()"
         );
 
+        let array_latitude_rad = if matches!(
+            self.beam.get_beam_type(),
+            BeamType::SkaAiry | BeamType::SkaGaussian
+        ) {
+            lst_rad
+        } else {
+            array_latitude_rad
+        };
         let beam_responses = self.get_beam_responses(azels, array_latitude_rad)?;
 
         // Iterate over the unflagged baseline axis.
@@ -563,6 +579,14 @@ impl<'a> SkyModellerCpu<'a> {
             c64::new(0.0, -1.0),
         ];
 
+        let array_latitude_rad = if matches!(
+            self.beam.get_beam_type(),
+            BeamType::SkaAiry | BeamType::SkaGaussian
+        ) {
+            lst_rad
+        } else {
+            array_latitude_rad
+        };
         let beam_responses = self.get_beam_responses(azels, array_latitude_rad)?;
 
         // Iterate over the unflagged baseline axis.

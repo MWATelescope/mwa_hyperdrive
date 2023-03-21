@@ -31,6 +31,8 @@ fn test_1090008640_woden() {
         .arg("--outputs")
         .arg(&format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
+        .arg("--beam-type")
+        .arg("fee")
         .ok();
     assert!(cmd.is_err());
     let (_, stderr) = get_cmd_output(cmd);
@@ -49,6 +51,8 @@ fn test_1090008640_woden() {
         .arg("--outputs")
         .arg(&format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
+        .arg("--beam-type")
+        .arg("fee")
         .ok();
     assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
     let (stdout, _) = get_cmd_output(cmd);
@@ -109,6 +113,8 @@ fn test_1090008640_woden() {
         .arg("--outputs")
         .arg(&format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
+        .arg("--beam-type")
+        .arg("fee")
         .ok();
 
     // Run di-cal and check that it succeeds

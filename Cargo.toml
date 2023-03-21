@@ -30,10 +30,10 @@ inherits = "production"
 default = ["plotting"]
 
 # Use CUDA code with double-precision floats.
-cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys", "cc"]
+cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys"]
 
 # Use HIP code with double-precision floats.
-hip = ["mwa_hyperbeam/hip", "hip-sys", "cc"]
+hip = ["mwa_hyperbeam/hip", "hip-sys"]
 
 # Opt-out of GPU double precision, use only single precision (faster on desktop
 # GPUs).
@@ -125,7 +125,7 @@ tempfile = "3.6.0"
 
 [build-dependencies]
 built = { version = "0.6.0", features = ["chrono", "git2"] }
-cc = { version = "1.0.72", features = ["parallel"], optional = true }
+cc = { version = "1.0.72", features = ["parallel"] }
 hip-sys = { version = "0.1.0", optional = true }
 
 [[bench]]

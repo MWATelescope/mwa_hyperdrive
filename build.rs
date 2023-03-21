@@ -40,6 +40,18 @@ fn main() {
 
     #[cfg(any(feature = "cuda", feature = "hip"))]
     gpu::build_and_link();
+
+    // Build the C code associated with the j1 function for the SKA-Low Airy
+    // disk beam.
+    let mut builder = cc::Build::new();
+    for entry in std::fs::read_dir("src/beam/ska/airy").unwrap() {
+        let entry = entry.unwrap();
+        if let Some("c" | "h") = entry.path().extension().and_then(|os_str| os_str.to_str()) {
+            println!("cargo:rerun-if-changed={}", entry.path().display());
+            builder.file(entry.path());
+        }
+    }
+    builder.flag("-march=native").compile("cephes");
 }
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
