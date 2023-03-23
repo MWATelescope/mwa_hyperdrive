@@ -98,6 +98,9 @@ thiserror = "1.0.7"
 toml = "0.7.2"
 vec1 = { version = "1.5.0", features = ["serde"] }
 
+# hacks:
+mapproj = "0.3.0"
+
 # "cuda" feature
 cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
 

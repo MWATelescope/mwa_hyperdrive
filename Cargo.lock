@@ -1400,6 +1400,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "mapproj"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3c713291f52f6d5d1054476236228037131db3d05cc64ce5f58f020b7b99223"
+
+[[package]]
 name = "marlu"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1517,6 +1523,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
+ "mapproj",
  "marlu",
  "mwa_hyperbeam",
  "mwalib",
