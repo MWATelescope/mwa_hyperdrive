@@ -14,6 +14,7 @@ mod constants;
 mod context;
 mod di_calibrate;
 mod flagging;
+pub mod hacks;
 mod io;
 mod math;
 mod metafits;

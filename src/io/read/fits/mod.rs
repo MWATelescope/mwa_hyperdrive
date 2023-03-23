@@ -254,6 +254,35 @@ pub(crate) fn _fits_get_image_size<'a>(
     }
 }
 
+/// Get a vector of the axis types of the image on the supplied FITS file
+#[track_caller]
+pub(crate) fn _fits_get_axis_types(
+    fits_fptr: &mut FitsFile,
+    hdu: &FitsHdu,
+) -> Result<Vec<String>, FitsError> {
+    let naxis: f32 = fits_get_required_key(fits_fptr, hdu, "NAXIS")?;
+    (0..naxis as usize)
+        .map(|i| fits_get_required_key(fits_fptr, hdu, &format!("CTYPE{}", i + 1)))
+        .collect()
+}
+
+/// Get a vector of values for the given axis
+#[track_caller]
+pub(crate) fn _fits_get_axis_array(
+    fits_fptr: &mut FitsFile,
+    hdu: &FitsHdu,
+    axis: usize,
+) -> Result<Vec<f32>, FitsError> {
+    let count: f32 = fits_get_required_key(fits_fptr, hdu, &format!("NAXIS{axis}"))?;
+    let crval: f32 = fits_get_required_key(fits_fptr, hdu, &format!("CRVAL{axis}"))?;
+    let cdelt: f32 = fits_get_required_key(fits_fptr, hdu, &format!("CDELT{axis}"))?;
+    let crpix: f32 = fits_get_required_key(fits_fptr, hdu, &format!("CRPIX{axis}"))?;
+    let result = (0..count as usize)
+        .map(|i| crval + cdelt * (i as f32 + 1.0 - crpix))
+        .collect();
+    Ok(result)
+}
+
 /// Given a FITS file pointer and a HDU, read the associated image.
 #[track_caller]
 pub(crate) fn fits_get_image<T: fitsio::images::ReadImage>(

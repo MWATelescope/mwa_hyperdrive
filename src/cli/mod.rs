@@ -138,6 +138,11 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
     #[clap(about = "Generate beam-response values.
 https://mwatelescope.github.io/mwa_hyperdrive/user/beam.html")]
     Beam(beam::BeamArgs),
+
+    BeamFits {
+        #[clap(flatten)]
+        args: crate::hacks::beam_fits::BeamFitsArgs,
+    },
 }
 
 impl Hyperdrive {
@@ -170,6 +175,7 @@ impl Hyperdrive {
             Command::SrclistVerify(_) => "srclist-verify",
             Command::DipoleGains(_) => "dipole-gains",
             Command::Beam(_) => "beam",
+            Command::BeamFits { args } => "beam-fits",
         };
         info!("hyperdrive {} {}", sub_command, env!("CARGO_PKG_VERSION"));
         display_build_info();
@@ -229,6 +235,7 @@ impl Hyperdrive {
             // Misc. utilities.
             Command::DipoleGains(args) => args.run()?,
             Command::Beam(args) => args.run()?,
+            Command::BeamFits { args, .. } => args.run()?,
         }
 
         info!("hyperdrive {} complete.", sub_command);
