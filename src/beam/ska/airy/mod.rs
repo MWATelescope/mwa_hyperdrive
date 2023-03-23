@@ -75,9 +75,8 @@ impl Beam for SkaAiryBeam {
         azel: AzEl,
         freq_hz: f64,
         _tile_index: Option<usize>,
-        latitude_rad: f64,
+        lst_rad: f64,
     ) -> Result<Jones<f64>, BeamError> {
-        let lst_rad = latitude_rad;
         let zenith_radec = RADec::from_radians(lst_rad, SKA_LATITUDE_RAD);
         let LMN {
             l: cent_l,
@@ -112,10 +111,9 @@ impl Beam for SkaAiryBeam {
         azels: &[AzEl],
         freq_hz: f64,
         _tile_index: Option<usize>,
-        latitude_rad: f64,
+        lst_rad: f64,
         results: &mut [Jones<f64>],
     ) -> Result<(), BeamError> {
-        let lst_rad = latitude_rad;
         let zenith_radec = RADec::from_radians(lst_rad, SKA_LATITUDE_RAD);
         let LMN {
             l: cent_l,
