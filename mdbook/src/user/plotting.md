@@ -18,7 +18,10 @@ plot. (By default, the last tile that isn't comprised of only NaNs is selected,
 but this can be manually chosen.) It is also possible to neglect using any
 reference tile. With a reference tile, each tile's solutions are divided by the
 reference's solutions, and the resulting Jones matrix values are plotted (the
-legend is indicated at the top right of each plot).
+legend is indicated at the top right of each plot). \\( g_x \\) is the gain on a
+tile's X polarisation and \\( g_y \\) is the gain on a tile's Y
+polarisation. \\( D_x \\) and \\( D_y \\) are the leakage terms of those
+polarisations.
 
 By default, the y-axis of amplitude plots capture the entire range of values.
 These plots can therefore be skewed by bad tiles; it is possible to control the

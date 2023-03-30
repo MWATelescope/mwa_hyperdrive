@@ -8,6 +8,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.2] - Unreleased
 ### Added
+- Plots can be written to a specific directory, not only the CWD. Fixes #18.
 - Support for visibilities using the ant2-ant1 ordering rather than ant1-ant2.
 - Add new errors
   - If all baselines are flagged due to UVW cutoffs, then the program exits with
@@ -36,6 +37,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - The performance of CPU visibility modelling has been dramatically improved.
+- Plotting
+  - Legend labels have changed to $g_x$, $D_x$, $D_y$, $g_y$ ($g$ for gain, $D$
+    for leakage). Thanks Jack Line.
+  - The way that rows and columns are distributed when there are more than 128
+    tiles has changed, but this can now also be controlled manually.
 - Internal source list types can now be (de)serialised directly. This makes
   interfacing with YAML and JSON files is ~7% faster and simplifies the internal
   code.

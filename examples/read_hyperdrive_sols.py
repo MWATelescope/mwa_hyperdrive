@@ -38,8 +38,8 @@ _, ax = plt.subplots(num_tiles_per_row, 16, sharex=True, sharey=True)
 # Uncomment if you want to manually set the y-limit
 # ax[0, 0].set_ylim(0, 2)
 for i in range(num_tiles):
-    ax[i // 16, i % 16].plot(amps[i, :, 0].flatten())  # XX
-    ax[i // 16, i % 16].plot(amps[i, :, 3].flatten())  # YY
+    ax[i // 16, i % 16].plot(amps[i, :, 0].flatten())  # gain of x
+    ax[i // 16, i % 16].plot(amps[i, :, 3].flatten())  # gain of y
 plt.show()
 
 # Phases
@@ -48,6 +48,6 @@ phases = np.rad2deg(np.angle(data))
 _, ax = plt.subplots(num_tiles_per_row, 16, sharex=True, sharey=True)
 ax[0, 0].set_ylim(-180, 180)
 for i in range(num_tiles):
-    ax[i // 16, i % 16].plot(phases[i, :, 0].flatten())  # XX
-    ax[i // 16, i % 16].plot(phases[i, :, 3].flatten())  # YY
+    ax[i // 16, i % 16].plot(phases[i, :, 0].flatten())  # gain of x
+    ax[i // 16, i % 16].plot(phases[i, :, 3].flatten())  # gain of y
 plt.show()

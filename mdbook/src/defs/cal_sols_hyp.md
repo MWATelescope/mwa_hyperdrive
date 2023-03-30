@@ -4,8 +4,11 @@ Jones matrices are stored in a `fits` file as an "image" with 4 dimensions
 (timeblock, tile, chanblock, float, in that order) in the "SOLUTIONS" HDU (which
 is the second HDU). An element of the solutions is a 64-bit float (a.k.a.
 double-precision float). The last dimension always has a length of 8; these
-correspond to the real part of XX, the imaginary part of XX, then XY, YX and YY
-(4 complex numbers to form a Jones matrix).
+correspond to the complex gains of the X dipoles (\\( g_x \\)), the leakage of
+the X dipoles (\\( D_x \\)), then the leakage of the Y dipoles (\\( D_y \\)) and
+the gains of the Y dipoles (\\( g_y \\)); these form a complex 2x2 Jones matrix:
+
+\\[ \begin{pmatrix} g_x & D_x \\\ D_y & g_y \end{pmatrix} \\]
 
 Tiles are ordered by antenna number, i.e. the second column in the observation's
 corresponding metafits files labelled "Antenna". Times and frequencies are

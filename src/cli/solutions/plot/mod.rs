@@ -29,7 +29,7 @@ pub struct SolutionsPlotArgs {
     #[clap(short, long)]
     no_ref_tile: bool,
 
-    /// Don't plot XY and YX polarisations.
+    /// Don't plot the leakage polarisations (D_x and D_y).
     #[clap(long)]
     ignore_cross_pols: bool,
 
@@ -40,6 +40,22 @@ pub struct SolutionsPlotArgs {
     /// The maximum y-range value on the amplitude gain plots.
     #[clap(long)]
     max_amp: Option<f64>,
+
+    /// The number of rows to use in the plots. The default is determined based
+    /// off of the number of tiles in the solutions.
+    #[clap(long)]
+    num_rows: Option<usize>,
+
+    /// The number of columns to use in the plots. The default is determined
+    /// based off of the number of tiles in the solutions.
+    #[clap(long)]
+    num_cols: Option<usize>,
+
+    /// The directory to write the plots into. If this doesn't exist, then the
+    /// relevant directories will be created. The filenames are based off of the
+    /// input files, just as they would without specifying the output directory.
+    #[clap(short, long)]
+    output_directory: Option<String>,
 
     /// The metafits file associated with the solutions. This provides
     /// additional information on the plots, like the tile names.
@@ -68,7 +84,7 @@ impl SolutionsPlotArgs {
 mod plotting {
     use std::str::FromStr;
 
-    use log::{debug, info, trace, warn};
+    use log::{debug, info, warn};
     use marlu::Jones;
     use ndarray::prelude::*;
     use plotters::{
@@ -90,20 +106,33 @@ mod plotting {
     lazy_static::lazy_static! {
         static ref CLEAR: RGBAColor = WHITE.mix(0.0);
 
-        static ref POLS: [(&'static str, RGBAColor); 4] = [
-            ("XX", BLUE.mix(1.0)),
-            ("XY", BLUE.mix(0.2)),
-            ("YX", RED.mix(0.2)),
-            ("YY", RED.mix(1.0)),
+        static ref POLS: [(&'static str, &'static str, RGBAColor); 4] = [
+            ("g", "X", BLUE.mix(1.0)),
+            ("D", "X", BLUE.mix(0.2)),
+            ("D", "Y", RED.mix(0.2)),
+            ("g", "Y", RED.mix(1.0)),
         ];
     }
 
     pub(crate) fn plot_all_sol_files(args: SolutionsPlotArgs) -> Result<(), SolutionsPlotError> {
-        if args.files.is_empty() {
+        let SolutionsPlotArgs {
+            files,
+            ref_tile,
+            no_ref_tile,
+            ignore_cross_pols,
+            min_amp,
+            max_amp,
+            num_rows,
+            num_cols,
+            output_directory,
+            metafits,
+        } = args;
+
+        if files.is_empty() {
             return Err(SolutionsPlotError::NoInputs);
         }
 
-        let mwalib_context = match args.metafits.as_deref() {
+        let mwalib_context = match metafits.as_deref() {
             Some(m) => Some(mwalib::MetafitsContext::new(m, None)?),
             None => None,
         };
@@ -126,28 +155,44 @@ mod plotting {
         // Have we warned the user that tile names won't be on the plots?
         let mut warned_no_tile_names = false;
 
-        for solutions_file in &args.files {
+        for solutions_file in &files {
             debug!("Plotting solutions for '{}'", solutions_file.display());
             let solutions_file = solutions_file.canonicalize()?;
-            let ext = solutions_file
+            let solutions_type = match solutions_file
                 .extension()
-                .and_then(|os_str| os_str.to_str());
-            let solutions_type = match ext.and_then(|s| CalSolutionType::from_str(s).ok()) {
-                Some(sol_type) => {
-                    trace!("{} is a visibility output", solutions_file.display());
-                    sol_type
-                }
+                .and_then(|os_str| os_str.to_str())
+                .and_then(|s| CalSolutionType::from_str(s).ok())
+            {
+                Some(sol_type) => sol_type,
                 None => return Err(SolutionsPlotError::InvalidSolsFormat(solutions_file)),
             };
             let base = solutions_file
                 .file_stem()
-                .and_then(|os_str| os_str.to_str())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Calibration solutions filename '{}' has no file stem",
+                        solutions_file.display()
+                    );
+                })
+                .to_str()
                 .unwrap_or_else(|| {
                     panic!(
                         "Calibration solutions filename '{}' contains invalid UTF-8",
                         solutions_file.display()
                     )
                 });
+            let base = if let Some(o) = output_directory.as_deref() {
+                let pb = PathBuf::from(o);
+                if !pb.exists() {
+                    std::fs::create_dir_all(&pb)?;
+                }
+                pb.join(base)
+                    .to_str()
+                    .expect("only contains valid UTF-8, as this has been checked above")
+                    .to_string()
+            } else {
+                base.to_string()
+            };
 
             let sols = match solutions_type {
                 CalSolutionType::Fits => hyperdrive::read(&solutions_file)?,
@@ -166,16 +211,30 @@ mod plotting {
                 warned_no_tile_names = true;
             }
 
+            // How should the plot be split up to distribute the tiles?
+            let (auto_num_rows, auto_num_cols, tile_name_font_size) = {
+                let total_num_tiles = sols.di_jones.len_of(Axis(1));
+                let (num_rows, tile_name_font_size) = match total_num_tiles {
+                    0..=128 => (8, 30),
+                    129..=256 => (10, 24),
+                    _ => (16, 18),
+                };
+                let num_cols = (total_num_tiles as f64 / num_rows as f64).ceil() as usize;
+                (num_rows, num_cols, tile_name_font_size)
+            };
             let plot_files = plotting::plot_sols(
                 &sols,
-                base,
+                &base,
                 &plot_title,
-                args.ref_tile,
-                args.no_ref_tile,
+                ref_tile,
+                no_ref_tile,
                 tile_names,
-                args.ignore_cross_pols,
-                args.min_amp,
-                args.max_amp,
+                ignore_cross_pols,
+                min_amp,
+                max_amp,
+                num_rows.unwrap_or(auto_num_rows),
+                num_cols.unwrap_or(auto_num_cols),
+                tile_name_font_size,
             )?;
             info!("Wrote {:?}", plot_files);
         }
@@ -194,15 +253,11 @@ mod plotting {
         ignore_cross_pols: bool,
         min_amp: Option<f64>,
         max_amp: Option<f64>,
+        num_rows: usize,
+        num_cols: usize,
+        tile_name_font_size: i32,
     ) -> Result<Vec<String>, DrawError> {
         let (num_timeblocks, total_num_tiles, _) = sols.di_jones.dim();
-
-        // How should the plot be split up to distribute the tiles?
-        let split = match total_num_tiles {
-            0..=128 => (8, total_num_tiles / 8),
-            _ => (16, total_num_tiles / 16),
-        };
-        let title_style = ("sans-serif", 60).into_font();
 
         let mut amps = Array2::from_elem(
             (sols.di_jones.dim().1, sols.di_jones.dim().2),
@@ -214,8 +269,14 @@ mod plotting {
         );
 
         let ref_tile = match (no_ref_tile, ref_tile) {
-            (true, _) => None,
-            (_, Some(r)) => Some(r),
+            (true, _) => {
+                debug!("Not using a reference tile");
+                None
+            }
+            (_, Some(r)) => {
+                debug!("Using user-specified reference tile: {r}");
+                Some(r)
+            }
             // If the reference tile wasn't defined, use the first valid one from
             // the end.
             (_, None) => {
@@ -227,16 +288,22 @@ mod plotting {
                     // Search by tile from the end
                     .rev()
                     .enumerate()
-                    // Keep only those that aren't all NaN
-                    .filter(|(_, j)| !j.iter().all(|f| f.any_nan()))
+                    // Include solutions for tiles that (1) aren't all NaN and
+                    // (2) aren't singular (this can happen when dealing with
+                    // single-pol data).
+                    .filter(|(_, j)| !j.iter().all(|f| f.any_nan() || f.inv().any_nan()))
                     .map(|(i, _)| i)
                     .next();
                 // If the search for a valid tile didn't find anything, all
                 // solutions must be NaN. In this case, it doesn't matter what the
                 // reference is.
-                possibly_good.map(|g| total_num_tiles - 1 - g)
+                let r = possibly_good.map(|g| total_num_tiles - 1 - g);
+                debug!("Automatically determined reference tile: {r:?}");
+                r
             }
         };
+
+        let title_style = ("sans-serif", 60).into_font();
 
         let mut output_filenames = vec![];
         for timeblock in 0..num_timeblocks {
@@ -272,24 +339,24 @@ mod plotting {
                 .fill(&WHITE)
                 .map_err(|e| DrawError::Plotters(Box::new(e)))?;
             // Draw the coloured text for each polarisation.
-            for (i, (pol, colour)) in POLS.iter().enumerate() {
+            for (i, (first_char, second_char, colour)) in POLS.iter().enumerate() {
                 if ignore_cross_pols && [1, 2].contains(&i) {
                     continue;
                 }
-                amps_root_area
-                    .draw_text(
-                        pol,
-                        &("sans-serif", 55).into_font().color(&colour),
+                for area in [&amps_root_area, &phases_root_area] {
+                    area.draw_text(
+                        first_char,
+                        &("sans-serif", 50).into_font().color(&colour),
                         (X_PIXELS as i32 - 500 + 80 * i as i32, 10),
                     )
                     .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-                phases_root_area
-                    .draw_text(
-                        pol,
-                        &("sans-serif", 55).into_font().color(&colour),
-                        (X_PIXELS as i32 - 500 + 80 * i as i32, 10),
+                    area.draw_text(
+                        second_char,
+                        &("sans-serif", 35).into_font().color(&colour),
+                        (X_PIXELS as i32 - 470 + 80 * i as i32, 30),
                     )
                     .map_err(|e| DrawError::Plotters(Box::new(e)))?;
+                }
             }
             // Also draw the reference tile number and the GPS times for this
             // timeblock.
@@ -360,12 +427,12 @@ mod plotting {
                 .shrink((15, 0), (X_PIXELS - 15, Y_PIXELS))
                 .titled(&format!("Amps for {obs_name}"), title_style.clone())
                 .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            let amps_tile_plots = amps_root_area.split_evenly(split);
+            let amps_tile_plots = amps_root_area.split_evenly((num_rows, num_cols));
 
             let phases_root_area = phases_root_area
                 .titled(&format!("Phases for {obs_name}"), title_style.clone())
                 .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            let phase_tile_plots = phases_root_area.split_evenly(split);
+            let phase_tile_plots = phases_root_area.split_evenly((num_rows, num_cols));
 
             let ones = Array1::from_elem(sols.di_jones.dim().2, Jones::identity());
             let ref_jones = if let Some(ref_tile) = ref_tile {
@@ -457,7 +524,8 @@ mod plotting {
                     min_amp,
                     max_amp,
                     &tile_name,
-                    (i_tile / split.0, i_tile % split.1),
+                    tile_name_font_size,
+                    (i_tile / num_rows, i_tile % num_cols),
                     ignore_cross_pols,
                 )?;
             }
@@ -472,7 +540,8 @@ mod plotting {
                     &phase_tile_plot,
                     phases.view(),
                     &tile_name,
-                    (i_tile / split.0, i_tile % split.1),
+                    tile_name_font_size,
+                    (i_tile / num_rows, i_tile % num_cols),
                     ignore_cross_pols,
                 )?;
             }
@@ -490,19 +559,21 @@ mod plotting {
     }
 
     /// For a single drawing area, plot gains.
+    #[allow(clippy::too_many_arguments)]
     fn plot_amps<DB: DrawingBackend>(
         drawing_area: &DrawingArea<DB, Shift>,
         amps: ArrayView1<[f64; 4]>,
         min_amp: f64,
         max_amp: f64,
         tile_name: &str,
+        tile_name_font_size: i32,
         tile_plot_indices: (usize, usize),
         ignore_cross_pols: bool,
     ) -> Result<(), DrawError> {
         let x_axis = (0..amps.len()).step(1);
         let y_label_area_size = if tile_plot_indices.1 == 0 { 20 } else { 0 };
         let mut cc = ChartBuilder::on(drawing_area)
-            .caption(tile_name, ("sans-serif", 30))
+            .caption(tile_name, ("sans-serif", tile_name_font_size))
             .top_x_label_area_size(15)
             .y_label_area_size(y_label_area_size)
             .build_cartesian_2d(0..amps.len(), min_amp..max_amp)
@@ -523,7 +594,7 @@ mod plotting {
             return Ok(());
         }
 
-        for (pol_index, (_, colour)) in POLS.iter().enumerate() {
+        for (pol_index, (_, _, colour)) in POLS.iter().enumerate() {
             cc.draw_series(PointSeries::of_element(
                 x_axis
                     .values()
@@ -551,13 +622,14 @@ mod plotting {
         drawing_area: &DrawingArea<DB, Shift>,
         phases: ArrayView1<[f64; 4]>,
         tile_name: &str,
+        tile_name_font_size: i32,
         tile_plot_indices: (usize, usize),
         ignore_cross_pols: bool,
     ) -> Result<(), DrawError> {
         let x_axis = (0..phases.len()).step(1);
         let y_label_area_size = if tile_plot_indices.1 == 0 { 45 } else { 0 };
         let mut cc = ChartBuilder::on(drawing_area)
-            .caption(tile_name, ("sans-serif", 30))
+            .caption(tile_name, ("sans-serif", tile_name_font_size))
             .top_x_label_area_size(15)
             .y_label_area_size(y_label_area_size)
             .build_cartesian_2d(0..phases.len(), -180.0..180.0)
@@ -578,7 +650,7 @@ mod plotting {
             return Ok(());
         }
 
-        for (pol_index, (_, colour)) in POLS.iter().enumerate() {
+        for (pol_index, (_, _, colour)) in POLS.iter().enumerate() {
             cc.draw_series(PointSeries::of_element(
                 x_axis
                     .values()

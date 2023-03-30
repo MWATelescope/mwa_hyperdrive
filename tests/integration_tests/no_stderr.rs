@@ -154,6 +154,7 @@ fn test_solutions_plot_no_stderr() {
             "solutions-plot",
             &format!("{}", sols.display()),
             "--metafits", &metafits,
+            "--output-directory", &format!("{}", tmp_dir.path().display()),
         ])
         .ok();
     assert!(
