@@ -18,7 +18,11 @@ pub use uvfits::UvfitsReader;
 
 use std::collections::HashSet;
 
-use marlu::{Jones, MwaObsContext as MarluMwaObsContext};
+use hifitime::{Duration, Epoch};
+use marlu::{
+    precession::precess_time, Jones, LatLngHeight, MwaObsContext as MarluMwaObsContext, RADec,
+    XyzGeodetic, UVW,
+};
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
 use vec1::Vec1;
@@ -104,4 +108,58 @@ pub struct AutoData<'a, 'b, 'c> {
     pub vis_fb: ArrayViewMut2<'a, Jones<f32>>,
     pub weights_fb: ArrayViewMut2<'b, f32>,
     pub tile_baseline_flags: &'c TileBaselineFlags,
+}
+
+/// With a dataset's UVW and the XYZs that correspond to it, compare with a UVW
+/// that we form from the XYZs. This allows us to determine the "baseline order"
+/// that the software that wrote this dataset used. `hyperdrive` and friends use
+/// ant1-ant2, but others may use ant2-ant1. If we detect ant2-ant1, we know
+/// that we have to conjugate this dataset's visibilities if want to continue
+/// using ant1-ant2.
+///
+/// It is not anticipated that precession has an impact here.
+fn baseline_convention_is_different(
+    data_uvw: UVW,
+    tile1_xyz: XyzGeodetic,
+    tile2_xyz: XyzGeodetic,
+    array_position: LatLngHeight,
+    phase_centre: RADec,
+    first_timestamp: Epoch,
+    dut1: Option<Duration>,
+) -> bool {
+    let precession_info = precess_time(
+        array_position.longitude_rad,
+        array_position.latitude_rad,
+        phase_centre,
+        first_timestamp,
+        dut1.unwrap_or_default(),
+    );
+    let xyzs = precession_info.precess_xyz(&[tile1_xyz, tile2_xyz]);
+    let UVW {
+        u: u_p1,
+        v: v_p1,
+        w: w_p1,
+    } = UVW::from_xyz(
+        xyzs[0] - xyzs[1],
+        phase_centre.to_hadec(precession_info.lmst_j2000),
+    );
+    let UVW {
+        u: u_p2,
+        v: v_p2,
+        w: w_p2,
+    } = UVW::from_xyz(
+        xyzs[1] - xyzs[0],
+        phase_centre.to_hadec(precession_info.lmst_j2000),
+    );
+
+    // Which UVW is closer to the data?
+    let UVW { u, v, w } = data_uvw;
+    let diff1 = (u - u_p1).abs() + (v - v_p1).abs() + (w - w_p1).abs();
+    let diff2 = (u - u_p2).abs() + (v - v_p2).abs() + (w - w_p2).abs();
+
+    // If `diff2` is smaller than `diff1`, then the standard baseline order is
+    // good, no need to do anything else. Otherwise, the other baseline order is
+    // used; the tile XYZs need to be negated and the visibility data need to be
+    // complex conjugated.
+    diff2 < diff1
 }

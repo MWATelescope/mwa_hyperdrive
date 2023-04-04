@@ -988,9 +988,9 @@ fn test_sdc3() {
 
     assert_abs_diff_eq!(
         cross_vis[(0, 0)],
-        // N.B. This should be conjugated, because the SDC3 data uses ant2-ant1
-        // UVWs, whereas we expect ant1-ant2.
-        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        // N.B. This is conjugated from what's in the data, because the SDC3
+        // data uses ant2-ant1 UVWs, whereas we expect ant1-ant2.
+        Jones::from([-8.517027, -7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }

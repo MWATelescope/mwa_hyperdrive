@@ -8,6 +8,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.2] - Unreleased
 ### Added
+- Support for visibilities using the ant2-ant1 ordering rather than ant1-ant2.
 - Add new errors
   - If all baselines are flagged due to UVW cutoffs, then the program exits with
     this report.

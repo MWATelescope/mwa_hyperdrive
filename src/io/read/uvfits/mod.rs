@@ -25,7 +25,8 @@ use fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile};
 use hifitime::{Duration, Epoch, TimeUnits};
 use log::{debug, trace, warn};
 use marlu::{
-    io::uvfits::decode_uvfits_baseline, Jones, LatLngHeight, RADec, XyzGeocentric, XyzGeodetic,
+    constants::VEL_C, io::uvfits::decode_uvfits_baseline, Jones, LatLngHeight, RADec,
+    XyzGeocentric, XyzGeodetic, UVW,
 };
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
@@ -67,6 +68,10 @@ pub struct UvfitsReader {
     /// not necessarily from 0 to the total number of tiles. This map converts a
     /// uvfits tile number to a 0-to-total index.
     tile_map: HashMap<usize, usize>,
+
+    /// If the incoming data uses ant2-ant1 UVWs instead of ant1-ant2 UVWs, we
+    /// need to conjugate the visibilities to match what will be modelled.
+    conjugate_vis: bool,
 }
 
 impl UvfitsReader {
@@ -563,6 +568,81 @@ impl UvfitsReader {
             metafits_dut1.or(uvfits_dut1).map(Duration::from_seconds)
         };
 
+        // Compare the first cross-correlation row's UVWs against UVWs that we
+        // would make with the existing tiles. If they're negative of one
+        // another, we need to negate our XYZs to match the UVWs the data use.
+        let conjugate_vis = {
+            let mut first_cross_bl_and_uvw = None;
+            let mut group_params = vec![0.0; metadata.pcount];
+            // Ensure we're on the data-containing HDU.
+            let _ = uvfits_fptr.primary_hdu()?;
+            for i_row in 0..metadata.num_rows {
+                unsafe {
+                    let mut status = 0;
+                    // ffggpe = fits_read_grppar_flt
+                    fitsio_sys::ffggpe(
+                        uvfits_fptr.as_raw(), /* I - FITS file pointer                       */
+                        (i_row + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                        1, /* I - first vector element to read (1 = 1st)  */
+                        group_params
+                            .len()
+                            .try_into()
+                            .expect("not larger than i64::MAX"), /* I - number of values to read                */
+                        group_params.as_mut_ptr(), /* O - array of values that are returned       */
+                        &mut status,               /* IO - error status                           */
+                    );
+                    fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
+                        row_num: i_row + 1,
+                        err,
+                    })?;
+                }
+                let (uvfits_ant1, uvfits_ant2) = match metadata.indices.baseline_or_antennas {
+                    BaselineOrAntennas::Baseline { index } => {
+                        let uvfits_bl = group_params[usize::from(index - 1)];
+                        decode_uvfits_baseline(uvfits_bl as usize)
+                    }
+                    BaselineOrAntennas::Antennas { index1, index2 } => (
+                        group_params[usize::from(index1 - 1)] as usize,
+                        group_params[usize::from(index2 - 1)] as usize,
+                    ),
+                };
+                let (ant1, ant2) = (tile_map[&uvfits_ant1], tile_map[&uvfits_ant2]);
+                if ant1 != ant2 {
+                    let indices = &metadata.indices;
+                    first_cross_bl_and_uvw = Some((
+                        ant1,
+                        ant2,
+                        UVW {
+                            u: f64::from(group_params[usize::from(indices.u - 1)]),
+                            v: f64::from(group_params[usize::from(indices.v - 1)]),
+                            w: f64::from(group_params[usize::from(indices.w - 1)]),
+                        },
+                    ));
+                    break;
+                }
+            }
+            // If this data somehow has no cross-correlation data, using
+            // default values won't affect anything.
+            let (ant1, ant2, data_uvw) = first_cross_bl_and_uvw.unwrap_or_default();
+            let tile1_xyz = tile_xyzs[ant1];
+            let tile2_xyz = tile_xyzs[ant2];
+
+            if baseline_convention_is_different(
+                data_uvw * VEL_C,
+                tile1_xyz,
+                tile2_xyz,
+                array_position,
+                phase_centre,
+                *timestamps.first(),
+                dut1,
+            ) {
+                warn!("uvfits UVWs use the other baseline convention; will conjugate incoming visibilities");
+                true
+            } else {
+                false
+            }
+        };
+
         let obs_context = ObsContext {
             obsid,
             timestamps,
@@ -598,6 +678,7 @@ impl UvfitsReader {
             step,
             metafits_context: mwalib_context,
             tile_map,
+            conjugate_vis,
         })
     }
 
@@ -869,35 +950,64 @@ impl UvfitsReader {
             }
         }
 
-        // Transform the data, depending on what the actual polarisations are.
+        // Transform the data, depending on what the actual polarisations are
+        // and if we need to conjugate.
         if let Some(crosses) = crosses.as_mut() {
-            match self.metadata.pols {
-                // These are all handled correctly.
-                Polarisations::XX_XY_YX_YY => (),
-                Polarisations::XX => (),
-                Polarisations::XX_YY => (),
-                Polarisations::XX_YY_XY => (),
+            let c0 = num_complex::Complex32::default();
+            match (self.conjugate_vis, self.metadata.pols) {
+                // These pols are all handled correctly.
+                (false, Polarisations::XX_XY_YX_YY) => (),
+                (false, Polarisations::XX) => (),
+                (false, Polarisations::XX_YY) => (),
+                (false, Polarisations::XX_YY_XY) => (),
+                // Just conjugate.
+                (
+                    true,
+                    Polarisations::XX_XY_YX_YY
+                    | Polarisations::XX
+                    | Polarisations::XX_YY
+                    | Polarisations::XX_YY_XY,
+                ) => crosses.vis_fb.mapv_inplace(|j| {
+                    Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
+                }),
 
                 // Because we read in one polarisation, it was treated as XX,
                 // but this is actually YY.
-                Polarisations::YY => crosses.vis_fb.mapv_inplace(|j| {
-                    Jones::from([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, j[0].re, j[0].im])
-                }),
+                (false, Polarisations::YY) => crosses
+                    .vis_fb
+                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
+                (true, Polarisations::YY) => crosses
+                    .vis_fb
+                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
             }
         }
         if let Some(autos) = autos.as_mut() {
-            match self.metadata.pols {
-                // These are all handled correctly.
-                Polarisations::XX_XY_YX_YY => (),
-                Polarisations::XX => (),
-                Polarisations::XX_YY => (),
-                Polarisations::XX_YY_XY => (),
+            let c0 = num_complex::Complex32::default();
+            match (self.conjugate_vis, self.metadata.pols) {
+                // These pols are all handled correctly.
+                (false, Polarisations::XX_XY_YX_YY) => (),
+                (false, Polarisations::XX) => (),
+                (false, Polarisations::XX_YY) => (),
+                (false, Polarisations::XX_YY_XY) => (),
+                // Just conjugate.
+                (
+                    true,
+                    Polarisations::XX_XY_YX_YY
+                    | Polarisations::XX
+                    | Polarisations::XX_YY
+                    | Polarisations::XX_YY_XY,
+                ) => autos.vis_fb.mapv_inplace(|j| {
+                    Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
+                }),
 
                 // Because we read in one polarisation, it was treated as XX,
                 // but this is actually YY.
-                Polarisations::YY => autos.vis_fb.mapv_inplace(|j| {
-                    Jones::from([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, j[0].re, j[0].im])
-                }),
+                (false, Polarisations::YY) => autos
+                    .vis_fb
+                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
+                (true, Polarisations::YY) => autos
+                    .vis_fb
+                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
             }
         }
 
