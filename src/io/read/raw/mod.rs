@@ -180,7 +180,7 @@ impl RawDataReader {
         let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
         debug!("There are {} unflagged tiles", num_unflagged_tiles);
         if num_unflagged_tiles == 0 {
-            return Err(RawReadError::AllTilesFlagged);
+            warn!("All of this observation's tiles are flagged");
         }
 
         // Check that the tile flags are sensible.

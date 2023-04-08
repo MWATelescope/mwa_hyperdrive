@@ -16,9 +16,6 @@ pub(crate) enum RawReadError {
     #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}!")]
     InvalidTileFlag { got: usize, max: usize },
 
-    #[error("All of this observation's tiles are flagged; cannot continue.")]
-    AllTilesFlagged,
-
     #[error("All of this observation's coarse channels are deemed bad; cannot continue")]
     NoGoodCoarseChannels,
 

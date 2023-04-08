@@ -26,6 +26,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   (not to be confused with the favoured SHAPELET2 component type).
 - Some MWA raw data observations were not handled correctly due to a
   floating-point error.
+- MWA raw data observations with all flagged tiles weren't allowed to be used,
+  even with the explicit "ignore input data tile flags".
 
 ### Changed
 - The performance of CPU visibility modelling has been dramatically improved.
