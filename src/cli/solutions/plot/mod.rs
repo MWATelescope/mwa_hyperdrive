@@ -106,11 +106,11 @@ mod plotting {
     lazy_static::lazy_static! {
         static ref CLEAR: RGBAColor = WHITE.mix(0.0);
 
-        static ref POLS: [(&'static str, &'static str, RGBAColor); 4] = [
+        static ref POLS: [(&'static str, &'static str, RGBAColor); 1] = [
             ("g", "X", BLUE.mix(1.0)),
-            ("D", "X", BLUE.mix(0.2)),
-            ("D", "Y", RED.mix(0.2)),
-            ("g", "Y", RED.mix(1.0)),
+            // ("D", "X", BLUE.mix(0.2)),
+            // ("D", "Y", RED.mix(0.2)),
+            // ("g", "Y", RED.mix(1.0)),
         ];
     }
 
