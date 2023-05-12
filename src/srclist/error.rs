@@ -4,8 +4,8 @@
 
 use thiserror::Error;
 
-use crate::srclist::{
-    HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED, SOURCE_LIST_TYPES_COMMA_SEPARATED,
+use crate::{
+    beam::BeamError, io::GlobError, srclist::HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED,
 };
 
 /// Errors associated with reading in any kind of source list.
@@ -39,6 +39,24 @@ pub(crate) enum ReadSourceListError {
 
     #[error("Could not deserialise the contents as yaml or json.\n\nyaml error: {yaml_err}\n\njson error: {json_err}")]
     FailedToDeserialise { yaml_err: String, json_err: String },
+
+    #[error("No sky-model source list file supplied")]
+    NoSourceList,
+
+    #[error(transparent)]
+    Glob(#[from] GlobError),
+
+    #[error("The number of specified sources was 0, or the size of the source list was 0")]
+    NoSources,
+
+    #[error("After vetoing sources, none were left. Decrease the veto threshold, or supply more sources")]
+    NoSourcesAfterVeto,
+
+    #[error("Tried to use {requested} sources, but only {available} sources were available after vetoing")]
+    VetoTooFewSources { requested: usize, available: usize },
+
+    #[error("Beam error when trying to veto the source list: {0}")]
+    Beam(#[from] BeamError),
 
     #[error(transparent)]
     Common(#[from] ReadSourceListCommonError),
@@ -285,12 +303,6 @@ pub(crate) enum WriteSourceListError {
         fd_type: &'static str,
     },
 
-    #[error("Not enough information was provided to write the output source list. Please specify an output type.")]
-    NotEnoughInfo,
-
-    #[error("Unrecognised source list type. Supported types are: {}", *SOURCE_LIST_TYPES_COMMA_SEPARATED)]
-    InvalidFormat,
-
     #[error("'{0}' is an invalid file type for a hyperdrive-style source list; must have one of the following extensions: {}", *HYPERDRIVE_SOURCE_LIST_FILE_TYPES_COMMA_SEPARATED)]
     InvalidHyperdriveFormat(String),
 
@@ -310,9 +322,6 @@ pub(crate) enum WriteSourceListError {
 
 #[derive(Error, Debug)]
 pub(crate) enum SrclistError {
-    #[error("No sources were left after vetoing; nothing left to do")]
-    NoSourcesAfterVeto,
-
     #[error("Source list error: Need a metafits file to perform work, but none was supplied")]
     MissingMetafits,
 
@@ -321,9 +330,6 @@ pub(crate) enum SrclistError {
 
     #[error(transparent)]
     WriteSourceList(#[from] WriteSourceListError),
-
-    #[error(transparent)]
-    Veto(#[from] super::VetoError),
 
     #[error(transparent)]
     Beam(#[from] crate::beam::BeamError),

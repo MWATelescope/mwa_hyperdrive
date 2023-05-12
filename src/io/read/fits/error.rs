@@ -6,9 +6,7 @@
 
 use std::path::Path;
 
-use thiserror::Error;
-
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum FitsError {
     /// Error when opening a fits file.
     #[error(

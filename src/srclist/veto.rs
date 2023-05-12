@@ -13,12 +13,11 @@ use std::collections::BTreeMap;
 use log::{debug, log_enabled, trace, Level::Trace};
 use marlu::{Jones, RADec};
 use rayon::{iter::Either, prelude::*};
-use thiserror::Error;
 
 use crate::{
-    beam::{Beam, BeamError},
+    beam::Beam,
     constants::*,
-    srclist::{FluxDensity, SourceList},
+    srclist::{FluxDensity, ReadSourceListError, SourceList},
 };
 
 /// This function mutates the input source list, removing any sources that have
@@ -52,11 +51,11 @@ pub(crate) fn veto_sources(
     num_sources: Option<usize>,
     source_dist_cutoff_deg: f64,
     veto_threshold: f64,
-) -> Result<(), VetoError> {
+) -> Result<(), ReadSourceListError> {
     let dist_cutoff = source_dist_cutoff_deg.to_radians();
 
     // TODO: This step is relatively expensive!
-    let (vetoed_sources, not_vetoed_sources): (Vec<Result<String, VetoError>>, BTreeMap<String, f64>) = source_list
+    let (vetoed_sources, not_vetoed_sources): (Vec<Result<String, ReadSourceListError>>, BTreeMap<String, f64>) = source_list
         .par_iter()
         .partition_map(|(source_name, source)| {
             let source_name = source_name.to_owned();
@@ -180,7 +179,7 @@ pub(crate) fn veto_sources(
     // out.
     if let Some(n) = num_sources {
         if n > source_list.len() {
-            return Err(VetoError::TooFewSources {
+            return Err(ReadSourceListError::VetoTooFewSources {
                 requested: n,
                 available: source_list.len(),
             });
@@ -206,15 +205,6 @@ fn get_beam_attenuated_flux_density(fd: &FluxDensity, j: Jones<f64>) -> f64 {
     // realistic; uncomment the line below to do that.
     jijh[0].norm() + jijh[3].norm()
     // (jijh[0].norm() * jijh[3].norm()) - (jijh[1].norm() * jijh[2].norm())
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum VetoError {
-    #[error("Tried to use {requested} sources, but only {available} sources were available after vetoing")]
-    TooFewSources { requested: usize, available: usize },
-
-    #[error("Error when trying to veto the source list: {0}")]
-    Beam(#[from] BeamError),
 }
 
 #[cfg(test)]

@@ -6,9 +6,7 @@
 
 use std::path::PathBuf;
 
-use thiserror::Error;
-
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Error type associated with mwaf files.
 pub enum MwafError {
     #[error("mwaf file '{file:?}' has an unhandled version '{version}'")]
@@ -21,7 +19,7 @@ pub enum MwafError {
     FitsError(#[from] crate::io::read::fits::FitsError),
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 /// Error type associated with merging the contents of mwaf files.
 pub enum MwafMergeError {
     /// Error to describe some kind of inconsistent state within an mwaf file.

@@ -19,12 +19,12 @@ pub(crate) use error::*;
 
 use std::{
     collections::{BTreeSet, HashMap},
-    num::NonZeroUsize,
+    num::NonZeroU16,
     path::{Path, PathBuf},
 };
 
 use hifitime::{Duration, Epoch, TimeUnits};
-use log::{debug, trace, warn};
+use log::{debug, trace};
 use marlu::{c32, rubbl_casatables, Jones, LatLngHeight, RADec, XyzGeocentric, XyzGeodetic};
 use ndarray::prelude::*;
 use rubbl_casatables::{Table, TableError, TableOpenMode};
@@ -32,6 +32,8 @@ use rubbl_casatables::{Table, TableError, TableOpenMode};
 use super::*;
 use crate::{
     beam::Delays,
+    cli::Warn,
+    constants::DEFAULT_MS_DATA_COL_NAME,
     context::{ObsContext, Polarisations},
     metafits,
 };
@@ -87,7 +89,7 @@ pub struct MsReader {
     obs_context: ObsContext,
 
     /// The path to the measurement set on disk.
-    pub(crate) ms: PathBuf,
+    ms: PathBuf,
 
     /// The "stride" of the data, i.e. the number of rows (baselines) before the
     /// time index changes.
@@ -152,7 +154,8 @@ impl MsReader {
             return Err(MsReadError::MainTableEmpty);
         }
         let col_names = main_table.column_names()?;
-        let data_col_name = data_column_name.unwrap_or_else(|| "DATA".to_string());
+        let data_col_name =
+            data_column_name.unwrap_or_else(|| DEFAULT_MS_DATA_COL_NAME.to_string());
         // Validate the data column name, specified or not.
         if !col_names.contains(&data_col_name) {
             return Err(MsReadError::NoDataCol { col: data_col_name });
@@ -604,15 +607,10 @@ impl MsReader {
             }
         };
 
-        let num_coarse_chans = mwa_coarse_chan_nums.as_ref().map(|ccs| {
-            NonZeroUsize::new(ccs.len())
-                .expect("length is always > 0 because collection cannot be empty")
-        });
-        let num_fine_chans_per_coarse_chan = num_coarse_chans.and_then(|num_coarse_chans| {
-            NonZeroUsize::new(
-                (total_bandwidth_hz / num_coarse_chans.get() as f64 / freq_res).round() as usize,
-            )
-        });
+        let num_fine_chans_per_coarse_chan = {
+            let n = (1.28e6 / freq_res).round() as u16;
+            Some(NonZeroU16::new(n).expect("is not 0"))
+        };
 
         match (
             mwa_coarse_chan_nums.as_ref(),
@@ -688,8 +686,12 @@ impl MsReader {
                     dipole_gains = Some(gains2);
                 } else {
                     // We have no choice but to leave the order as is.
-                    warn!("The MS antenna names are different to those supplied in the metafits.");
-                    warn!("Dipole delays/gains may be incorrectly mapped to MS antennas.");
+                    [
+                        "The MS antenna names are different to those supplied in the metafits."
+                            .into(),
+                        "Dipole delays/gains may be incorrectly mapped to MS antennas.".into(),
+                    ]
+                    .warn();
                     dipole_delays = Some(Delays::Full(delays));
                     dipole_gains = Some(gains);
                 }
@@ -772,25 +774,44 @@ impl MsReader {
         let flagged_fine_chans_per_coarse_chan = {
             let mut flagged_fine_chans_per_coarse_chan = vec![];
 
-            if let (Some(num_coarse_chans), Some(num_fine_chans_per_coarse_chan)) = (
-                num_coarse_chans,
-                num_fine_chans_per_coarse_chan.map(|n| n.get()),
-            ) {
-                // Loop over all fine channels within a coarse channel. For each
-                // fine channel, check all coarse channels; is the fine channel
-                // flagged? If so, add it to our collection.
+            if let Some(num_fine_chans_per_coarse_chan) =
+                num_fine_chans_per_coarse_chan.map(|n| n.get())
+            {
+                // Because we allow data to come in that might have channels
+                // missing at the edges, there might be a different number of
+                // fine channels in each coarse channel. Match the channel freqs
+                // with what we think their index should be inside a coarse
+                // channel.
+                let chan_info = fine_chan_freqs_f64
+                    .iter()
+                    .enumerate()
+                    .map(|(i_chan, &freq)| {
+                        // Get the coarse channel number.
+                        let cc_num = (freq / 1.28e6).round();
+                        // Find the offset from the coarse channel centre.
+                        let offset_hz = freq - cc_num * 1.28e6;
+                        let i_offset: u16 = ((offset_hz / freq_res).round() as i32
+                            + i32::from(num_fine_chans_per_coarse_chan) / 2)
+                            .try_into()
+                            .expect("smaller than u16::MAX");
+                        (i_chan, i_offset, cc_num as u32)
+                    })
+                    .collect::<Vec<_>>();
+
                 for i_chan in 0..num_fine_chans_per_coarse_chan {
                     let mut chan_is_flagged = true;
-                    // Note that the coarse channel indices do not matter; the
-                    // data in measurement sets is concatenated even if a coarse
-                    // channel is missing.
-                    for i_cc in 0..num_coarse_chans.get() {
-                        if !flagged_fine_chans[i_cc * num_fine_chans_per_coarse_chan + i_chan] {
+                    let mut chan_is_present = false;
+                    for (full_index, _, _) in chan_info
+                        .iter()
+                        .filter(|(_, this_chan, _)| *this_chan == i_chan)
+                    {
+                        chan_is_present = true;
+                        if !flagged_fine_chans[*full_index] {
                             chan_is_flagged = false;
                             break;
                         }
                     }
-                    if chan_is_flagged {
+                    if chan_is_flagged && chan_is_present {
                         flagged_fine_chans_per_coarse_chan.push(i_chan);
                     }
                 }
@@ -798,9 +819,8 @@ impl MsReader {
 
             Vec1::try_from_vec(flagged_fine_chans_per_coarse_chan).ok()
         };
-        let flagged_fine_chans = flagged_fine_chans
-            .into_iter()
-            .enumerate()
+        let flagged_fine_chans = (0..)
+            .zip(flagged_fine_chans)
             .filter(|(_, f)| *f)
             .map(|(i, _)| i)
             .collect();
@@ -879,7 +899,8 @@ impl MsReader {
                 *timestamps.first(),
                 dut1,
             ) {
-                warn!("uvfits UVWs use the other baseline convention; will conjugate incoming visibilities");
+                "MS UVWs use the other baseline convention; will conjugate incoming visibilities"
+                    .warn();
                 true
             } else {
                 false
@@ -887,6 +908,7 @@ impl MsReader {
         };
 
         let obs_context = ObsContext {
+            input_data_type: VisInputType::MeasurementSet,
             obsid,
             timestamps,
             all_timesteps,
@@ -894,7 +916,7 @@ impl MsReader {
             phase_centre,
             pointing_centre,
             array_position,
-            _supplied_array_position: supplied_array_position,
+            supplied_array_position,
             dut1,
             tile_names,
             tile_xyzs,
@@ -936,7 +958,7 @@ impl MsReader {
         mut crosses: Option<CrossData>,
         mut autos: Option<AutoData>,
         timestep: usize,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         // When reading in a new timestep's data, these indices should be
         // multiplied by `step` to get the amount of rows to stride in the main
@@ -947,7 +969,7 @@ impl MsReader {
 
         let mut main_table = read_table(&self.ms, None).map_err(MsReadError::from)?;
         let chan_flags = (0..self.obs_context.fine_chan_freqs.len())
-            .map(|i_chan| flagged_fine_chans.contains(&i_chan))
+            .map(|i_chan| flagged_fine_chans.contains(&(i_chan as u16)))
             .collect::<Vec<_>>();
         main_table
             .for_each_row_in_range(row_range, |row| {
@@ -1267,6 +1289,12 @@ impl VisRead for MsReader {
         None
     }
 
+    fn get_raw_data_corrections(&self) -> Option<RawDataCorrections> {
+        None
+    }
+
+    fn set_raw_data_corrections(&mut self, _: RawDataCorrections) {}
+
     fn read_crosses_and_autos(
         &self,
         cross_vis_fb: ArrayViewMut2<Jones<f32>>,
@@ -1275,7 +1303,7 @@ impl VisRead for MsReader {
         auto_weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         let cross_data = Some(CrossData {
             vis_fb: cross_vis_fb,
@@ -1305,7 +1333,7 @@ impl VisRead for MsReader {
         weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         let cross_data = Some(CrossData {
             vis_fb,
@@ -1330,7 +1358,7 @@ impl VisRead for MsReader {
         weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         let auto_data = Some(AutoData {
             vis_fb,

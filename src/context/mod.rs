@@ -8,22 +8,17 @@
 mod tests;
 
 use std::{
-    collections::HashSet,
     fmt::{Display, Write},
-    num::NonZeroUsize,
+    num::NonZeroU16,
 };
 
 use hifitime::{Duration, Epoch};
 use log::{debug, error, info, trace, warn};
-use marlu::{
-    constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
-    LatLngHeight, RADec, XyzGeodetic,
-};
+use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use ndarray::Array2;
-use thiserror::Error;
 use vec1::Vec1;
 
-use crate::beam::Delays;
+use crate::{beam::Delays, io::read::VisInputType};
 
 /// Currently supported polarisations.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,6 +74,9 @@ impl Polarisations {
 /// Tile information is ordered according to the "Antenna" column in HDU 1 of
 /// the observation's metafits file.
 pub(crate) struct ObsContext {
+    /// The format of the file containing the visibilities (e.g. uvfits).
+    pub(crate) input_data_type: VisInputType,
+
     /// The observation ID, which is also the observation's scheduled start GPS
     /// time (but shouldn't be used for this purpose).
     pub(crate) obsid: Option<u32>,
@@ -121,7 +119,7 @@ pub(crate) struct ObsContext {
     /// The Earth position of the instrumental array *that is described by the
     /// input data*. It is provided here to distinguish from `array_position`,
     /// which may be different.
-    pub(crate) _supplied_array_position: LatLngHeight,
+    pub(crate) supplied_array_position: LatLngHeight,
 
     /// The difference between UT1 and UTC. If this is 0 seconds, then LSTs are
     /// wrong by up to 0.9 seconds. The code will assume that 0 seconds means
@@ -137,7 +135,8 @@ pub(crate) struct ObsContext {
 
     /// The [`XyzGeodetic`] coordinates of all tiles in the array (all
     /// coordinates are specified in \[metres\]). This includes flagged and
-    /// unavailable tiles.
+    /// unavailable tiles. The values described here may be affected by a
+    /// user-supplied `array_position`.
     pub(crate) tile_xyzs: Vec1<XyzGeodetic>,
 
     /// The flagged tiles, i.e. what the observation data suggests to be
@@ -186,7 +185,7 @@ pub(crate) struct ObsContext {
 
     /// The number of fine-frequency channels per coarse channel. For 40 kHz
     /// legacy MWA data, this is 32.
-    pub(crate) num_fine_chans_per_coarse_chan: Option<NonZeroUsize>,
+    pub(crate) num_fine_chans_per_coarse_chan: Option<NonZeroU16>,
 
     /// The fine-channel resolution of the supplied data \[Hz\]. This is not
     /// necessarily the fine-channel resolution of the original observation's
@@ -202,11 +201,11 @@ pub(crate) struct ObsContext {
 
     /// The flagged fine channels for each baseline in the supplied data. Zero
     /// indexed.
-    pub(crate) flagged_fine_chans: Vec<usize>,
+    pub(crate) flagged_fine_chans: Vec<u16>,
 
     /// The fine channels per coarse channel already flagged in the supplied
     /// data. Zero indexed.
-    pub(crate) flagged_fine_chans_per_coarse_chan: Option<Vec1<usize>>,
+    pub(crate) flagged_fine_chans_per_coarse_chan: Option<Vec1<u16>>,
 
     /// The polarisations included in the data. Any combinations not listed are
     /// not supported.
@@ -218,111 +217,6 @@ impl ObsContext {
     /// unflagged.
     pub(crate) fn get_total_num_tiles(&self) -> usize {
         self.tile_xyzs.len()
-    }
-
-    /// Get the number of unflagged tiles in the observation, i.e. total -
-    /// flagged.
-    pub(crate) fn get_num_unflagged_tiles(&self) -> usize {
-        self.get_total_num_tiles() - self.flagged_tiles.len()
-    }
-
-    /// Attempt to get time resolution using heuristics if it is not present.
-    ///
-    /// If `time_res` is `None`, then attempt to determine it from the minimum
-    /// distance between timestamps. If there is no more than 1 timestamp, then
-    /// return 1s, since the time resolution of single-timestep observations is
-    /// not important anyway.
-    pub(crate) fn guess_time_res(&self) -> Duration {
-        match self.time_res {
-            Some(t) => t,
-            None => {
-                warn!("No integration time specified; assuming {TIME_WEIGHT_FACTOR} second");
-                Duration::from_seconds(TIME_WEIGHT_FACTOR)
-            }
-        }
-    }
-
-    pub(crate) fn guess_freq_res(&self) -> f64 {
-        match self.freq_res {
-            Some(f) => f,
-            None => {
-                warn!(
-                    "No frequency resolution specified; assuming {} kHz",
-                    FREQ_WEIGHT_FACTOR / 1e3
-                );
-                FREQ_WEIGHT_FACTOR
-            }
-        }
-    }
-
-    /// Given whether to use the [ObsContext]'s tile flags and additional tile
-    /// flags (as strings or indices), return de-duplicated and sorted tile flag
-    /// indices.
-    pub(crate) fn get_tile_flags(
-        &self,
-        ignore_input_data_tile_flags: bool,
-        additional_flags: Option<&[String]>,
-    ) -> Result<HashSet<usize>, InvalidTileFlag> {
-        let mut flagged_tiles = HashSet::new();
-
-        if !ignore_input_data_tile_flags {
-            // Add tiles that have already been flagged by the input data.
-            for &obs_tile_flag in &self.flagged_tiles {
-                flagged_tiles.insert(obs_tile_flag);
-            }
-        }
-        // Unavailable tiles must be regarded as flagged.
-        for i in &self.unavailable_tiles {
-            flagged_tiles.insert(*i);
-        }
-
-        if let Some(flag_strings) = additional_flags {
-            // We need to convert the strings into antenna indices. The strings
-            // are either indices themselves or antenna names.
-            for flag_string in flag_strings {
-                // Try to parse a naked number.
-                let result = match flag_string.trim().parse().ok() {
-                    Some(i) => {
-                        let total_num_tiles = self.get_total_num_tiles();
-                        if i >= total_num_tiles {
-                            Err(InvalidTileFlag::Index {
-                                got: i,
-                                max: total_num_tiles - 1,
-                            })
-                        } else {
-                            flagged_tiles.insert(i);
-                            Ok(())
-                        }
-                    }
-                    None => {
-                        // Check if this is an antenna name.
-                        match self
-                            .tile_names
-                            .iter()
-                            .enumerate()
-                            .find(|(_, name)| name.to_lowercase() == flag_string.to_lowercase())
-                        {
-                            // If there are no matches, complain that the user input
-                            // is no good.
-                            None => Err(InvalidTileFlag::BadTileFlag(flag_string.to_string())),
-                            Some((i, _)) => {
-                                flagged_tiles.insert(i);
-                                Ok(())
-                            }
-                        }
-                    }
-                };
-                if result.is_err() {
-                    // If there's a problem, show all the tile names and their
-                    // indices to help out the user.
-                    self.print_info_tile_statuses();
-                    // Propagate the error.
-                    result?;
-                }
-            }
-        }
-
-        Ok(flagged_tiles)
     }
 
     /// Return all frequencies within the fine frequency channel range that are
@@ -340,7 +234,7 @@ impl ObsContext {
 
     /// Print information on the indices, names and statuses of all of the tiles
     /// in this observation at the indicated log level.
-    fn print_tile_statuses(&self, level: log::Level) {
+    pub(crate) fn print_tile_statuses(&self, level: log::Level) {
         let s = "All tile indices, names and default statuses:";
         match level {
             log::Level::Error => error!("{}", s),
@@ -372,25 +266,4 @@ impl ObsContext {
             s.clear();
         });
     }
-
-    /// At info level, print information on the indices, names and statuses of
-    /// all of the tiles in this observation.
-    pub(crate) fn print_info_tile_statuses(&self) {
-        self.print_tile_statuses(log::Level::Info)
-    }
-
-    /// At info level, print information on the indices, names and statuses of
-    /// all of the tiles in this observation.
-    pub(crate) fn print_debug_tile_statuses(&self) {
-        self.print_tile_statuses(log::Level::Debug)
-    }
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum InvalidTileFlag {
-    #[error("Got a tile flag {got}, but the biggest possible antenna index is {max}")]
-    Index { got: usize, max: usize },
-
-    #[error("Bad flag value: '{0}' is neither an integer or an available antenna name. Run with extra verbosity to see all tile statuses.")]
-    BadTileFlag(String),
 }

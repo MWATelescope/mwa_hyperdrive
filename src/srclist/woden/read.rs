@@ -26,10 +26,10 @@
 
 use std::convert::TryInto;
 
-use log::warn;
 use marlu::{constants::DH2R, RADec};
 
 use crate::{
+    cli::Warn,
     constants::DEFAULT_SPEC_INDEX,
     srclist::{
         error::{ReadSourceListCommonError, ReadSourceListError, ReadSourceListWodenError},
@@ -83,10 +83,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
         }
         // We ignore any lines starting with whitespace, but emit a warning.
         else if line.starts_with(' ') | line.starts_with('\t') {
-            warn!(
+            format!(
                 "Source list line {} starts with whitespace; ignoring it",
                 line_num
-            );
+            )
+            .warn();
             line.clear();
             continue;
         }
@@ -192,10 +193,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         }
                     };
                     if items.next().is_some() {
-                        warn!(
+                        format!(
                             "Source list line {}: Ignoring trailing contents after declination",
                             line_num
-                        );
+                        )
+                        .warn();
                     }
 
                     in_source = true;
@@ -253,10 +255,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after declination",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 // Validation and conversion.
@@ -330,10 +333,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after Stokes V",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 if stokes_i.is_nan() || stokes_q.is_nan() || stokes_u.is_nan() || stokes_v.is_nan()
@@ -346,7 +350,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         // If the frequency is set (i.e. not 0), the ignore
                         // additional flux density lines for this component.
                         if fd.freq > f64::EPSILON {
-                            warn!("Ignoring FREQ line {}", line_num);
+                            format!("Ignoring FREQ line {}", line_num).warn();
                         } else {
                             *fd = FluxDensity {
                                 freq,
@@ -416,10 +420,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after spectral index",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 if stokes_i.is_nan()
@@ -436,7 +441,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         // If the frequency is set (i.e. not 0), the ignore
                         // additional flux density lines for this component.
                         if fd.freq > f64::EPSILON {
-                            warn!("Ignoring LINEAR line {}", line_num);
+                            format!("Ignoring LINEAR line {}", line_num).warn();
                         } else {
                             *fd = FluxDensity {
                                 freq,
@@ -489,10 +494,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 // Ensure the position angle is positive.
@@ -556,10 +562,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 // Ensure the position angle is positive.
@@ -624,10 +631,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 let shapelet_coeff = ShapeletCoeff {

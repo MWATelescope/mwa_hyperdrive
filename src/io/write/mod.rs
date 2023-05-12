@@ -11,6 +11,7 @@ pub(crate) use error::{FileWriteError, VisWriteError};
 
 use std::{
     collections::HashSet,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
 };
 
@@ -19,7 +20,7 @@ use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::ProgressBar;
 use itertools::Itertools;
-use log::{debug, trace, warn};
+use log::{debug, trace};
 use marlu::{
     math::num_tiles_from_num_baselines, History, Jones, LatLngHeight, MeasurementSetWriter,
     MwaObsContext as MarluMwaObsContext, ObsContext as MarluObsContext, RADec, UvfitsWriter,
@@ -28,9 +29,12 @@ use marlu::{
 use ndarray::{prelude::*, ArcArray2};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
-use vec1::Vec1;
+use vec1::{vec1, Vec1};
 
-use crate::averaging::Timeblock;
+use crate::{
+    averaging::{Spw, Timeblock},
+    cli::Warn,
+};
 
 #[derive(Debug, Display, EnumIter, EnumString, Clone, Copy)]
 /// All write-supported visibility formats.
@@ -68,10 +72,7 @@ pub(crate) struct VisTimestep {
 ///
 /// * `outputs` - each of the output files to be written, paired with the output
 ///   type.
-/// * `unflagged_baseline_tile_pairs` - the tile indices corresponding to
-///   unflagged baselines. This includes auto-correlation "baselines" if they
-///   are unflagged.
-/// * `array_pos` - the position of the array that produced these visibilities.
+/// * `array_pos` - the position of the array for the incoming visibilities.
 /// * `phase_centre` - the phase centre used for the incoming visibilities.
 /// * `pointing_centre` - the pointing centre used for the incoming
 ///   visibilities.
@@ -83,16 +84,14 @@ pub(crate) struct VisTimestep {
 ///   start time of the observation and as an identifier. If not provided, the
 ///   first timestep is used as the scheduled start time and a placeholder will
 ///   be used for the identifier.
-/// * `timestamps` - all possible timestamps that could be written out. These
-///   represent the centre of the integration bin, i.e. "centroid" and not
-///   "leading edge". Must be ascendingly sorted and be regularly spaced in
-///   terms of `time_res`, but gaps are allowed.
-/// * `timesteps` - the timesteps to be written out. These are indices into
-///   `timestamps`.
+/// * `timeblocks` - the details on all incoming timestamps and how to combine
+///   them.
 /// * `time_res` - the time resolution of the incoming visibilities.
-/// * `fine_chan_freqs` - all of the fine channel frequencies \[Hz\] (flagged
-///   and unflagged).
-/// * `freq_res` - the frequency resolution of the incoming visibilities \[Hz\].
+/// * `dut1` - the DUT1 to use in the UVWs of the outgoing visibilities.
+/// * `spw` - the spectral window information of the outgoing visibilities.
+/// * `unflagged_baseline_tile_pairs` - the tile indices corresponding to
+///   unflagged baselines. This includes auto-correlation "baselines" if they
+///   are unflagged.
 /// * `time_average_factor` - the time average factor (i.e. average this many
 ///   visibilities in time before writing out).
 /// * `freq_average_factor` - the frequency average factor (i.e. average this
@@ -111,67 +110,99 @@ pub(crate) struct VisTimestep {
 ///
 /// * A neatly-formatted string reporting all of the files that got written out.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_vis<'a>(
-    outputs: &'a Vec1<(PathBuf, VisOutputType)>,
+pub(crate) fn write_vis(
+    outputs: &Vec1<(PathBuf, VisOutputType)>,
     array_pos: LatLngHeight,
     phase_centre: RADec,
     pointing_centre: Option<RADec>,
-    tile_positions: &'a [XyzGeodetic],
-    tile_names: &'a [String],
+    tile_positions: &[XyzGeodetic],
+    tile_names: &[String],
     obsid: Option<u32>,
-    timestamps: &'a Vec1<Epoch>,
-    timesteps: &'a Vec1<usize>,
-    timeblocks: &'a Vec1<Timeblock>,
+    timeblocks: &Vec1<Timeblock>,
     time_res: Duration,
     dut1: Duration,
-    freq_res: f64,
-    fine_chan_freqs: &'a Vec1<f64>,
-    unflagged_baseline_tile_pairs: &'a [(usize, usize)],
-    flagged_fine_chans: &HashSet<usize>,
-    time_average_factor: usize,
-    freq_average_factor: usize,
+    spw: &Spw,
+    unflagged_baseline_tile_pairs: &[(usize, usize)],
+    time_average_factor: NonZeroUsize,
+    freq_average_factor: NonZeroUsize,
     marlu_mwa_obs_context: Option<&MarluMwaObsContext>,
+    write_smallest_contiguous_band: bool,
     rx: Receiver<VisTimestep>,
-    error: &'a AtomicCell<bool>,
+    error: &AtomicCell<bool>,
     progress_bar: Option<ProgressBar>,
 ) -> Result<String, VisWriteError> {
-    // Ensure our timestamps are sensible.
-    for &t in timestamps {
-        let diff = (t - *timestamps.first()).total_nanoseconds();
+    // Ensure our timestamps are regularly spaced in terms of `time_res`.
+    for t in timeblocks {
+        let diff = (t.median - timeblocks.first().median).total_nanoseconds();
         if diff % time_res.total_nanoseconds() > 0 {
             return Err(VisWriteError::IrregularTimestamps {
-                first: timestamps.first().to_gpst_seconds(),
-                bad: t.to_gpst_seconds(),
+                first: timeblocks.first().median.to_gpst_seconds(),
+                bad: t.median.to_gpst_seconds(),
                 time_res: time_res.to_seconds(),
             });
         }
     }
 
-    let start_timestamp = timestamps[*timesteps.first()];
+    // When writing out visibility data, the frequency axis *must* be
+    // contiguous. But, the incoming visibility data might not be contiguous due
+    // to flags. Set up the outgoing frequencies and set a flag so we know if
+    // the incoming data needs to be padded.
+    let chanblock_freqs = if write_smallest_contiguous_band {
+        match spw.chanblocks.as_slice() {
+            [] => panic!("There weren't any unflagged chanblocks in the SPW"),
+            [c] => vec1![c.freq],
+            [c1, .., cn] => {
+                let first_freq = c1.freq;
+                let last_freq = cn.freq;
+                let mut v = Array1::range(first_freq, last_freq, spw.freq_res).into_raw_vec();
+                v.push(last_freq); // `Array1::range` is an exclusive range.
+                Vec1::try_from_vec(v).expect("v is never empty")
+            }
+        }
+    } else {
+        spw.get_all_freqs()
+    };
+    let missing_chanblocks = {
+        let mut missing = HashSet::new();
+        let incoming_chanblock_freqs = spw
+            .chanblocks
+            .iter()
+            .map(|c| c.freq as u64)
+            .collect::<HashSet<_>>();
+        for (i_chanblock, chanblock_freq) in (0..).zip(chanblock_freqs.iter()) {
+            let chanblock_freq = *chanblock_freq as u64;
+            if !incoming_chanblock_freqs.contains(&chanblock_freq) {
+                missing.insert(i_chanblock);
+            }
+        }
+        missing
+    };
+
+    let start_timestamp = timeblocks.first().median;
+    let num_baselines = unflagged_baseline_tile_pairs.len();
     let vis_ctx = VisContext {
-        num_sel_timesteps: timeblocks.len() * time_average_factor,
+        num_sel_timesteps: timeblocks.len() * time_average_factor.get(),
         start_timestamp,
         int_time: time_res,
-        num_sel_chans: fine_chan_freqs.len(),
-        start_freq_hz: *fine_chan_freqs.first(),
-        freq_resolution_hz: freq_res,
+        num_sel_chans: chanblock_freqs.len(),
+        start_freq_hz: *chanblock_freqs.first(),
+        freq_resolution_hz: spw.freq_res,
         sel_baselines: unflagged_baseline_tile_pairs.to_vec(),
-        avg_time: time_average_factor,
-        avg_freq: freq_average_factor,
+        avg_time: time_average_factor.get(),
+        avg_freq: freq_average_factor.get(),
         num_vis_pols: 4,
     };
 
-    let obs_name = obsid.map(|o| format!("{o}"));
     let sched_start_timestamp = match obsid {
         Some(gpst) => Epoch::from_gpst_seconds(f64::from(gpst)),
         None => start_timestamp,
     };
-    let sched_duration = timestamps[*timesteps.last()] + time_res - sched_start_timestamp;
+    let sched_duration = timeblocks.last().median + time_res - sched_start_timestamp;
     let (s_lat, c_lat) = array_pos.latitude_rad.sin_cos();
     let marlu_obs_ctx = MarluObsContext {
         sched_start_timestamp,
         sched_duration,
-        name: obs_name,
+        name: obsid.map(|o| format!("{o}")),
         phase_centre,
         pointing_centre,
         array_pos,
@@ -249,14 +280,18 @@ pub(crate) fn write_vis<'a>(
     // These arrays will contain the post-averaged values and are written out by
     // the writer when all relevant timesteps have been added.
     // [time][freq][baseline]
-    let out_shape = vis_ctx.sel_dims();
-    let mut out_data = Array3::zeros((time_average_factor, out_shape.1, out_shape.2));
-    let mut out_weights = Array3::from_elem((time_average_factor, out_shape.1, out_shape.2), -0.0);
+    let out_shape = (
+        timeblocks.len() * time_average_factor.get(),
+        chanblock_freqs.len(),
+        num_baselines,
+    );
+    let mut out_data_tfb = Array3::zeros((time_average_factor.get(), out_shape.1, out_shape.2));
+    let mut out_weights_tfb =
+        Array3::from_elem((time_average_factor.get(), out_shape.1, out_shape.2), -0.0);
 
     // Track a reference to the timeblock we're writing.
     let mut this_timeblock = timeblocks.first();
     // Also track the first timestamp of the tracked timeblock.
-    // let mut this_start_timestamp = None;
     let mut this_average_timestamp = None;
     let mut i_timeblock = 0;
     // And the timestep into the timeblock.
@@ -266,8 +301,8 @@ pub(crate) fn write_vis<'a>(
     for (
         i_timestep,
         VisTimestep {
-            cross_data_fb: cross_data,
-            cross_weights_fb: cross_weights,
+            cross_data_fb,
+            cross_weights_fb,
             autos,
             timestamp,
         },
@@ -281,7 +316,7 @@ pub(crate) fn write_vis<'a>(
             this_average_timestamp = Some(
                 timeblocks
                     .iter()
-                    .find(|tb| tb.timestamps.contains(&timestamp))
+                    .find(|tb| tb.timestamps.iter().any(|e| *e == timestamp))
                     .unwrap()
                     .median,
             );
@@ -290,8 +325,9 @@ pub(crate) fn write_vis<'a>(
         if let Some(autos) = autos.as_ref() {
             // Get the number of tiles from the lengths of the cross and auto
             // arrays.
-            let num_cross_baselines = cross_data.len_of(Axis(1));
+            let num_cross_baselines = cross_data_fb.len_of(Axis(1));
             let num_auto_baselines = autos.0.len_of(Axis(1));
+            assert_eq!(num_cross_baselines + num_auto_baselines, num_baselines);
             let num_tiles = num_tiles_from_num_baselines(num_cross_baselines + num_auto_baselines);
             assert_eq!(
                 (num_tiles * (num_tiles + 1)) / 2,
@@ -301,79 +337,78 @@ pub(crate) fn write_vis<'a>(
             // baseline
             assert_eq!(num_cross_baselines + num_auto_baselines, out_shape.2);
             // freq
-            assert_eq!(
-                cross_data.len_of(Axis(0)) + flagged_fine_chans.len(),
-                out_shape.1
-            );
-            assert_eq!(cross_data.len_of(Axis(0)), autos.0.len_of(Axis(0)));
+            assert_eq!(cross_data_fb.len_of(Axis(0)), autos.0.len_of(Axis(0)));
         } else {
             // baseline
-            assert_eq!(cross_data.len_of(Axis(1)), out_shape.2);
-            // freq
-            assert_eq!(
-                cross_data.len_of(Axis(0)) + flagged_fine_chans.len(),
-                out_shape.1
-            );
+            assert_eq!(cross_data_fb.len_of(Axis(1)), out_shape.2);
         }
+        // freq
+        assert_eq!(cross_data_fb.len_of(Axis(0)), spw.chanblocks.len());
 
         // Pack `out_data` and `out_weights`. Start with cross-correlation data,
         // skipping any auto-correlation indices; we'll fill them soon.
-        out_data
+        out_data_tfb
             .slice_mut(s![this_timestep, .., ..])
             .outer_iter_mut()
             .zip_eq(
-                out_weights
+                out_weights_tfb
                     .slice_mut(s![this_timestep, .., ..])
                     .outer_iter_mut(),
             )
             .enumerate()
-            .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
+            .filter(|(i_chan, _)| !missing_chanblocks.contains(&(*i_chan as u16)))
             // Discard the channel index
-            .map(|(_, t)| t)
-            .zip_eq(cross_data.outer_iter())
-            .zip_eq(cross_weights.outer_iter())
-            .for_each(|(((mut out_data, mut out_weights), in_data), in_weights)| {
-                out_data
-                    .iter_mut()
-                    .zip_eq(out_weights.iter_mut())
-                    .zip_eq(unflagged_baseline_tile_pairs.iter())
-                    .filter(|(_, baseline)| baseline.0 != baseline.1)
-                    .zip_eq(in_data.iter())
-                    .zip_eq(in_weights.iter())
-                    .for_each(|((((out_jones, out_weight), _), in_jones), in_weight)| {
-                        *out_jones = *in_jones;
-                        *out_weight = *in_weight;
-                    });
-            });
-        // Autos.
-        if let Some((auto_data, auto_weights)) = autos {
-            out_data
-                .slice_mut(s![this_timestep, .., ..])
-                .outer_iter_mut()
-                .zip_eq(
-                    out_weights
-                        .slice_mut(s![this_timestep, .., ..])
-                        .outer_iter_mut(),
-                )
-                .enumerate()
-                .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
-                // Discard the channel index
-                .map(|(_, t)| t)
-                .zip_eq(auto_data.outer_iter())
-                .zip_eq(auto_weights.outer_iter())
-                .for_each(|(((mut out_data, mut out_weights), in_data), in_weights)| {
-                    out_data
+            .map(|(_, d)| d)
+            .zip_eq(cross_data_fb.outer_iter())
+            .zip_eq(cross_weights_fb.outer_iter())
+            .for_each(
+                |(((mut out_data_b, mut out_weights_b), in_data_b), in_weights_b)| {
+                    out_data_b
                         .iter_mut()
-                        .zip_eq(out_weights.iter_mut())
+                        .zip_eq(out_weights_b.iter_mut())
                         .zip_eq(unflagged_baseline_tile_pairs.iter())
-                        .filter(|(_, baseline)| baseline.0 == baseline.1)
-                        .zip_eq(in_data.iter())
-                        .zip_eq(in_weights.iter())
+                        .filter(|(_, baseline)| baseline.0 != baseline.1)
+                        .zip_eq(in_data_b.iter())
+                        .zip_eq(in_weights_b.iter())
                         .for_each(|((((out_jones, out_weight), _), in_jones), in_weight)| {
                             *out_jones = *in_jones;
                             *out_weight = *in_weight;
                         });
-                });
+                },
+            );
+        // Autos.
+        if let Some((auto_data_fb, auto_weights_fb)) = autos {
+            (0..)
+                .zip(
+                    out_data_tfb
+                        .slice_mut(s![this_timestep, .., ..])
+                        .outer_iter_mut(),
+                )
+                .zip(
+                    out_weights_tfb
+                        .slice_mut(s![this_timestep, .., ..])
+                        .outer_iter_mut(),
+                )
+                .filter(|((i_chan, _), _)| !missing_chanblocks.contains(i_chan))
+                // Discard the channel index
+                .map(|((_, d), w)| (d, w))
+                .zip_eq(auto_data_fb.outer_iter())
+                .zip_eq(auto_weights_fb.outer_iter())
+                .for_each(
+                    |(((mut out_data_b, mut out_weights_b), in_data_b), in_weights_b)| {
+                        out_data_b
+                            .iter_mut()
+                            .zip_eq(out_weights_b.iter_mut())
+                            .zip_eq(unflagged_baseline_tile_pairs.iter())
+                            .filter(|(_, baseline)| baseline.0 == baseline.1)
+                            .zip_eq(in_data_b.iter())
+                            .zip_eq(in_weights_b.iter())
+                            .for_each(|((((out_jones, out_weight), _), in_jones), in_weight)| {
+                                *out_jones = *in_jones;
+                                *out_weight = *in_weight;
+                            });
+                    },
+                );
         }
 
         // Should we continue?
@@ -384,22 +419,22 @@ pub(crate) fn write_vis<'a>(
         // If the next timestep doesn't belong to our tracked timeblock, write
         // out this timeblock and track the next one.
         if !this_timeblock.range.contains(&(i_timestep + 1))
-            || this_timestep + 1 >= time_average_factor
+            || this_timestep + 1 >= time_average_factor.get()
         {
             debug!("Writing timeblock {i_timeblock}");
             let chunk_vis_ctx = VisContext {
                 // TODO: Marlu expects "leading edge" timestamps, not centroids.
                 // Fix this in Marlu.
                 start_timestamp: this_average_timestamp.unwrap()
-                    - time_res / 2 * time_average_factor as f64,
+                    - time_res / 2 * time_average_factor.get() as f64,
                 num_sel_timesteps: this_timeblock.range.len(),
                 ..vis_ctx.clone()
             };
 
             for vis_writer in writers.iter_mut() {
                 vis_writer.write_vis(
-                    out_data.slice(s![0..this_timeblock.range.len(), .., ..]),
-                    out_weights.slice(s![0..this_timeblock.range.len(), .., ..]),
+                    out_data_tfb.slice(s![0..this_timeblock.range.len(), .., ..]),
+                    out_weights_tfb.slice(s![0..this_timeblock.range.len(), .., ..]),
                     &chunk_vis_ctx,
                 )?;
                 // Should we continue?
@@ -413,8 +448,8 @@ pub(crate) fn write_vis<'a>(
             }
 
             // Clear the output buffers.
-            out_data.fill(Jones::default());
-            out_weights.fill(-0.0);
+            out_data_tfb.fill(Jones::default());
+            out_weights_tfb.fill(-0.0);
 
             i_timeblock += 1;
             this_timeblock = match timeblocks.get(i_timeblock) {
@@ -464,12 +499,12 @@ pub(crate) fn can_write_to_file(file: &Path) -> Result<(), FileWriteError> {
     if file.is_dir() {
         let exists = can_write_to_dir(file)?;
         if exists {
-            warn!("Will overwrite the existing directory '{}'", file.display());
+            format!("Will overwrite the existing directory '{}'", file.display()).warn();
         }
     } else {
         let exists = can_write_to_file_inner(file)?;
         if exists {
-            warn!("Will overwrite the existing file '{}'", file.display());
+            format!("Will overwrite the existing file '{}'", file.display()).warn();
         }
     }
 

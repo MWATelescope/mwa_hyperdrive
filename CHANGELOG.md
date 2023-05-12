@@ -6,8 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.2] - Unreleased
+## [0.3.0] - Unreleased
 ### Added
+- Support for averaging incoming visibilities in time and frequency *before*
+  doing any work on them.
+- When writing out visibilities, it is now possible to write out the smallest
+  contiguous band of unflagged channels.
 - Plots can be written to a specific directory, not only the CWD. Fixes #18.
 - Support for visibilities using the ant2-ant1 ordering rather than ant1-ant2.
 - Add new errors
@@ -18,6 +22,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Benchmarks
   - Raw MWA, uvfits and measurement set reading.
   - More CUDA benchmarks for the modelling code.
+- Support for "argument files". This is an advanced feature that most users
+  probably should avoid. Previously, argument files were supported for the
+  di-calibrate subcommand, but now it is more consistently supported among the
+  "big" subcommands.
 
 ### Fixed
 - When raw MWA data is missing gpubox files in what is otherwise a contiguous
@@ -34,9 +42,16 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   even with the explicit "ignore input data tile flags".
 - Some aspects of hyperdrive weren't using user-specified array positions
   correctly. The help text also indicated the wrong units.
+- Fine-channel flags and fine-channel-per-coarse channel flags are now checked
+  for validity.
 
 ### Changed
 - The performance of CPU visibility modelling has been dramatically improved.
+- The command-line interface has been overhauled. Some things may be different,
+  but generally the options and flags are much more consistent between
+  subcommands.
+- The preamble to "big" subcommands, like di-calibrate, has been overhauled to
+  be much easier to read.
 - Plotting
   - Legend labels have changed to $g_x$, $D_x$, $D_y$, $g_y$ ($g$ for gain, $D$
     for leakage). Thanks Jack Line.

@@ -215,6 +215,14 @@ impl Delays {
             Delays::Partial { .. } => (),
         }
     }
+
+    // Parse user-provided dipole delays.
+    pub(crate) fn parse(delays: Vec<u32>) -> Result<Delays, BeamError> {
+        if delays.len() != 16 || delays.iter().any(|&v| v > 32) {
+            return Err(BeamError::BadDelays);
+        }
+        Ok(Delays::Partial(delays))
+    }
 }
 
 /// A beam implementation that returns only identity Jones matrices for all beam

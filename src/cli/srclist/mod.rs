@@ -4,7 +4,12 @@
 
 //! Utilities surrounding source lists.
 
-pub(crate) mod by_beam;
-pub(crate) mod convert;
-pub(crate) mod shift;
-pub(crate) mod verify;
+mod by_beam;
+mod convert;
+mod shift;
+mod verify;
+
+pub(super) use by_beam::{SrclistByBeamArgs, SrclistByBeamError};
+pub(super) use convert::SrclistConvertArgs;
+pub(super) use shift::SrclistShiftArgs;
+pub(super) use verify::SrclistVerifyArgs;

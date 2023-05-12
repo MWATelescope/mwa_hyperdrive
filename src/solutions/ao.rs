@@ -111,7 +111,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
         (Some(s), Some(e)) => (
             Some(vec1![s]),
             Some(vec1![e]),
-            Some(vec1![average_epoch(&[s, e])]),
+            Some(vec1![average_epoch([s, e])]),
         ),
         (Some(s), None) => (Some(vec1![s]), None, None),
         (None, Some(e)) => (None, Some(vec1![e]), None),

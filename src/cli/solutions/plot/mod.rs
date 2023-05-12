@@ -15,7 +15,7 @@ use clap::Parser;
 use crate::HyperdriveError;
 
 #[derive(Parser, Debug, Default)]
-pub struct SolutionsPlotArgs {
+pub(crate) struct SolutionsPlotArgs {
     #[clap(name = "SOLUTIONS_FILES", parse(from_os_str))]
     files: Vec<PathBuf>,
 
@@ -65,7 +65,7 @@ pub struct SolutionsPlotArgs {
 
 impl SolutionsPlotArgs {
     #[cfg(not(feature = "plotting"))]
-    pub fn run(self) -> Result<(), HyperdriveError> {
+    pub(crate) fn run(self) -> Result<(), HyperdriveError> {
         // Plotting is an optional feature. This is because it doesn't look
         // possible to statically compile the C dependencies needed for
         // plotting. If the "plotting" feature isn't available, warn the user
@@ -74,7 +74,7 @@ impl SolutionsPlotArgs {
     }
 
     #[cfg(feature = "plotting")]
-    pub fn run(self) -> Result<(), HyperdriveError> {
+    pub(crate) fn run(self) -> Result<(), HyperdriveError> {
         plotting::plot_all_sol_files(self)?;
         Ok(())
     }
@@ -207,6 +207,9 @@ mod plotting {
             );
             let tile_names = sols.tile_names.as_ref().or(mwalib_tile_names.as_ref());
             if tile_names.is_none() && !warned_no_tile_names {
+                // N.B. Not using `crate::cli::Warn` here because multiple
+                // calibration solutions may be plotted, and we want the user to
+                // see the warnings for each file.
                 warn!("No metafits supplied; the obsid and tile names won't be on the plots");
                 warned_no_tile_names = true;
             }

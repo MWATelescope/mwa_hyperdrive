@@ -19,7 +19,7 @@ use std::{
 
 use thiserror::Error;
 
-pub(crate) use utils::{get_device_info, CudaDeviceInfo, CudaDriverInfo};
+pub(crate) use utils::get_device_info;
 
 // Import Rust bindings to the CUDA code specific to the precision we're using,
 // and set corresponding compile-time types.

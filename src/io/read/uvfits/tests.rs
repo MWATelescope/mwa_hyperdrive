@@ -2,21 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashSet, ffi::CString, path::PathBuf};
+use std::ffi::CString;
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
 use hifitime::Duration;
 use itertools::Itertools;
-use marlu::{c32, LatLngHeight, RADec, UvfitsWriter, VisContext, VisWrite, XyzGeodetic};
-use ndarray::prelude::*;
+use marlu::{Jones, UvfitsWriter, VisContext, VisWrite, XyzGeodetic};
+use num_complex::Complex32 as c32;
 use tempfile::{tempdir, NamedTempFile};
 
 use super::*;
 use crate::{
-    di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
+    io::read::{UvfitsReader, VisRead},
     math::TileBaselineFlags,
-    tests::reduced_obsids::get_reduced_1090008640_uvfits,
+    tests::{get_reduced_1090008640_uvfits_pbs, DataAsPathBufs},
 };
 
 // TODO(dev): move these to Marlu
@@ -239,20 +239,15 @@ fn uvfits_io_works_for_auto_correlations() {
 
 #[test]
 fn test_1090008640_cross_vis() {
-    let args = get_reduced_1090008640_uvfits();
-    let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
-            Ok(u) => u,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_uvfits_pbs();
+    let uvfits_reader = UvfitsReader::new(vis.swap_remove(0), Some(&metafits), None).unwrap();
 
-    let obs_context = &uvfits_reader.obs_context;
+    let obs_context = uvfits_reader.get_obs_context();
     let total_num_tiles = obs_context.tile_xyzs.len();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -303,19 +298,14 @@ fn test_1090008640_cross_vis() {
 
 #[test]
 fn test_1090008640_auto_vis() {
-    let args = get_reduced_1090008640_uvfits();
-    let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
-            Ok(u) => u,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_uvfits_pbs();
+    let uvfits_reader = UvfitsReader::new(vis.swap_remove(0), Some(&metafits), None).unwrap();
 
-    let obs_context = &uvfits_reader.obs_context;
+    let obs_context = uvfits_reader.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -392,19 +382,14 @@ fn test_1090008640_auto_vis() {
 
 #[test]
 fn test_1090008640_auto_vis_with_flags() {
-    let args = get_reduced_1090008640_uvfits();
-    let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
-            Ok(u) => u,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_uvfits_pbs();
+    let uvfits_reader = UvfitsReader::new(vis.swap_remove(0), Some(&metafits), None).unwrap();
 
-    let obs_context = &uvfits_reader.obs_context;
+    let obs_context = uvfits_reader.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let flagged_tiles = HashSet::from([1, 9]);
     let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();
     let chan_flags = HashSet::from([1]);
@@ -489,20 +474,15 @@ fn test_1090008640_auto_vis_with_flags() {
 
 #[test]
 fn read_1090008640_cross_and_auto_vis() {
-    let args = get_reduced_1090008640_uvfits();
-    let uvfits_reader = if let [metafits, uvfits] = &args.data.unwrap()[..] {
-        match UvfitsReader::new(PathBuf::from(uvfits), Some(&PathBuf::from(metafits)), None) {
-            Ok(u) => u,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_uvfits_pbs();
+    let uvfits_reader = UvfitsReader::new(vis.swap_remove(0), Some(&metafits), None).unwrap();
 
-    let obs_context = &uvfits_reader.obs_context;
+    let obs_context = uvfits_reader.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -611,24 +591,6 @@ fn read_1090008640_cross_and_auto_vis() {
 }
 
 #[test]
-fn test_1090008640_calibration_quality() {
-    let mut args = get_reduced_1090008640_uvfits();
-    let temp_dir = tempdir().expect("Couldn't make temp dir");
-    args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
-    // To be consistent with other data quality tests, add these flags.
-    args.fine_chan_flags = Some(vec![0, 1, 2, 16, 30, 31]);
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(r) => r,
-        Err(e) => panic!("{}", e),
-    };
-
-    let cal_vis = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
-    test_1090008640_quality(params, cal_vis);
-}
-
-#[test]
 fn test_timestep_reading() {
     let temp_dir = tempdir().expect("Couldn't make temp dir");
     let vis_path = temp_dir.path().join("vis.uvfits");
@@ -693,7 +655,7 @@ fn test_timestep_reading() {
 
     writer.finalise().unwrap();
 
-    let uvfits_reader = UvfitsReader::new(vis_path, None, Some(array_pos)).unwrap();
+    let uvfits_reader = UvfitsReader::new(vis_path, None, None).unwrap();
     let uvfits_ctx = uvfits_reader.get_obs_context();
 
     let expected_timestamps = (0..num_timesteps)

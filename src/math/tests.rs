@@ -15,7 +15,7 @@ fn test_average_epoch() {
         Epoch::from_gpst_seconds(1065880132.0),
     ];
 
-    let average = average_epoch(&epochs);
+    let average = average_epoch(epochs);
     assert_abs_diff_eq!(average.to_gpst_seconds(), 1065880130.0);
 }
 
@@ -27,7 +27,7 @@ fn test_average_epoch2() {
         Epoch::from_gpst_seconds(1118529192.0),
     ];
 
-    let average = average_epoch(&epochs);
+    let average = average_epoch(epochs);
     // This epsilon is huge, but the epochs span years. At least the first test
     // is accurate to precision.
     assert_abs_diff_eq!(average.to_gpst_seconds(), 1091472653.0, epsilon = 0.4);

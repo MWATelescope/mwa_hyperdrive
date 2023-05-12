@@ -4,15 +4,17 @@
 
 //! Code to verify sky-model source list files.
 
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use clap::Parser;
 use log::info;
 
 use crate::{
-    help_texts::SOURCE_LIST_INPUT_TYPE_HELP,
+    cli::common::{display_warnings, SOURCE_LIST_INPUT_TYPE_HELP},
     srclist::{
         ao, hyperdrive, read::read_source_list_file, rts, woden, ComponentCounts, SourceListType,
         SrclistError,
@@ -125,6 +127,8 @@ fn verify<P: AsRef<Path>>(
         );
         info!("");
     }
+
+    display_warnings();
 
     Ok(())
 }

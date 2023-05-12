@@ -8,6 +8,14 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum BeamError {
+    #[error("Tried to create a beam object, but MWA dipole delay information isn't available!")]
+    NoDelays,
+
+    #[error(
+        "The specified MWA dipole delays aren't valid; there should be 16 values between 0 and 32"
+    )]
+    BadDelays,
+
     #[error("The number of delays per tile ({delays}) didn't match the number of gains per tile ({gains})")]
     DelayGainsDimensionMismatch { delays: usize, gains: usize },
 

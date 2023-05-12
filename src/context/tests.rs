@@ -2,15 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use hifitime::{Duration, Epoch};
+use hifitime::Epoch;
 use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use vec1::vec1;
 
 use super::Polarisations;
-use crate::{beam::Delays, context::ObsContext};
+use crate::{beam::Delays, context::ObsContext, io::read::VisInputType};
 
 fn get_minimal_obs_context() -> ObsContext {
     ObsContext {
+        input_data_type: VisInputType::Raw,
         obsid: None,
         timestamps: vec1![Epoch::from_gpst_seconds(1090008640.0)],
         all_timesteps: vec1![0],
@@ -18,7 +19,7 @@ fn get_minimal_obs_context() -> ObsContext {
         phase_centre: RADec::default(),
         pointing_centre: Some(RADec::default()),
         array_position: LatLngHeight::mwa(),
-        _supplied_array_position: LatLngHeight::mwa(),
+        supplied_array_position: LatLngHeight::mwa(),
         dut1: None,
         tile_names: vec1!["Tile00".into()],
         tile_xyzs: vec1![XyzGeodetic::default()],
@@ -36,44 +37,6 @@ fn get_minimal_obs_context() -> ObsContext {
         flagged_fine_chans_per_coarse_chan: None,
         polarisations: Polarisations::default(),
     }
-}
-
-#[test]
-fn test_guess_time_res() {
-    let mut obs_ctx = get_minimal_obs_context();
-
-    // test fallback to 1s
-    obs_ctx.time_res = None;
-    obs_ctx.timestamps = vec1![Epoch::from_gpst_seconds(1090000000.0)];
-
-    assert_eq!(obs_ctx.guess_time_res(), Duration::from_seconds(1.));
-
-    // test use direct time_res over min_delta
-    obs_ctx.time_res = Some(Duration::from_seconds(2.));
-    obs_ctx.timestamps = vec1![
-        Epoch::from_gpst_seconds(1090000000.0),
-        Epoch::from_gpst_seconds(1090000010.0),
-        Epoch::from_gpst_seconds(1090000013.0),
-    ];
-
-    assert_eq!(obs_ctx.guess_time_res(), Duration::from_seconds(2.));
-}
-
-#[test]
-fn test_guess_freq_res() {
-    let mut obs_ctx = get_minimal_obs_context();
-
-    // test fallback to 1s
-    obs_ctx.freq_res = None;
-    obs_ctx.fine_chan_freqs = vec1![128_000_000];
-
-    assert_eq!(obs_ctx.guess_freq_res(), 10_000.);
-
-    // test use direct freq_res over min_delta
-    obs_ctx.freq_res = Some(30_000.);
-    obs_ctx.fine_chan_freqs = vec1![128_000_000, 128_100_000, 128_120_000];
-
-    assert_eq!(obs_ctx.guess_freq_res(), 30_000.);
 }
 
 #[test]

@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use clap::Parser;
 use log::info;
 
-use crate::{solutions::CalibrationSolutions, HyperdriveError};
+use crate::{cli::common::display_warnings, solutions::CalibrationSolutions, HyperdriveError};
 
 #[derive(Parser, Debug, Default)]
-pub struct SolutionsConvertArgs {
+pub(crate) struct SolutionsConvertArgs {
     /// The path to the input file. If this is a directory instead, then we
     /// attempt to read RTS calibration files in the directory.
     #[clap(name = "INPUT_SOLUTIONS_FILE", parse(from_os_str))]
@@ -33,6 +33,8 @@ impl SolutionsConvertArgs {
         let sols =
             CalibrationSolutions::read_solutions_from_ext(&self.input, self.metafits.as_ref())?;
         sols.write_solutions_from_ext(&self.output)?;
+
+        display_warnings();
 
         info!(
             "Converted {} to {}",

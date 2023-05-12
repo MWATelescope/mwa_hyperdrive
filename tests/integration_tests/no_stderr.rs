@@ -9,22 +9,21 @@ use std::{collections::HashMap, io::Write};
 use tempfile::TempDir;
 
 use crate::{
-    get_1090008640_identity_solutions_file, get_cmd_output, get_reduced_1090008640, hyperdrive,
+    get_cmd_output, get_identity_solutions_file, get_reduced_1090008640, hyperdrive, Files,
 };
 
 #[test]
 fn test_di_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let sols = tmp_dir.path().join("sols.fits");
-    let args = get_reduced_1090008640(true, false);
-    let data = args.data.unwrap();
+    let Files { data, srclist } = get_reduced_1090008640(false);
 
     #[rustfmt::skip]
     let cmd = hyperdrive()
         .args([
             "di-calibrate",
             "--data", &data[0], &data[1],
-            "--source-list", &args.source_list.unwrap(),
+            "--source-list", &srclist,
             "--outputs", &format!("{}", sols.display()),
         ])
         .ok();
@@ -41,9 +40,8 @@ fn test_di_no_stderr() {
 fn test_solutions_apply_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output = tmp_dir.path().join("out.uvfits");
-    let sols = get_1090008640_identity_solutions_file(tmp_dir.path());
-    let args = get_reduced_1090008640(true, false);
-    let data = args.data.unwrap();
+    let sols = get_identity_solutions_file(tmp_dir.path());
+    let Files { data, .. } = get_reduced_1090008640(false);
 
     #[rustfmt::skip]
     let cmd = hyperdrive()
@@ -64,6 +62,29 @@ fn test_solutions_apply_no_stderr() {
 }
 
 #[test]
+fn test_vis_convert_no_stderr() {
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let output = temp_dir.path().join("converted.uvfits");
+    let Files { data, .. } = get_reduced_1090008640(false);
+
+    #[rustfmt::skip]
+    let cmd = hyperdrive()
+        .args([
+            "vis-convert",
+            "--data", &data[0], &data[1],
+            "--outputs", &format!("{}", output.display()),
+        ])
+        .ok();
+    assert!(
+        cmd.is_ok(),
+        "vis-convert failed on simple test data: {}",
+        cmd.err().unwrap()
+    );
+    let (_, stderr) = get_cmd_output(cmd);
+    assert!(stderr.is_empty(), "stderr wasn't empty: {stderr}");
+}
+
+#[test]
 fn test_vis_simulate_and_vis_subtract_no_stderr() {
     // First test vis-simulate.
     let num_timesteps = 2;
@@ -71,15 +92,15 @@ fn test_vis_simulate_and_vis_subtract_no_stderr() {
 
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let model_path = temp_dir.path().join("model.uvfits");
-    let args = get_reduced_1090008640(true, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
+    let Files { data, srclist } = get_reduced_1090008640(false);
+    let metafits = data[0].clone();
 
     #[rustfmt::skip]
     let cmd = hyperdrive()
         .args([
             "vis-simulate",
             "--metafits", &metafits,
-            "--source-list", args.source_list.as_ref().unwrap(),
+            "--source-list", &srclist,
             "--output-model-files", &format!("{}", model_path.display()),
             "--num-timesteps", &format!("{num_timesteps}"),
             "--num-fine-channels", &format!("{num_chans}"),
@@ -102,7 +123,7 @@ fn test_vis_simulate_and_vis_subtract_no_stderr() {
         .args([
             "vis-subtract",
             "--data", &metafits, &format!("{}", model_path.display()),
-            "--source-list", &args.source_list.unwrap(),
+            "--source-list", &srclist,
             "--invert",
             "--output", &format!("{}", sub_path.display()),
             "--no-progress-bars"
@@ -121,7 +142,7 @@ fn test_vis_simulate_and_vis_subtract_no_stderr() {
 fn test_solutions_convert_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output = tmp_dir.path().join("sols.bin");
-    let sols = get_1090008640_identity_solutions_file(tmp_dir.path());
+    let sols = get_identity_solutions_file(tmp_dir.path());
 
     #[rustfmt::skip]
     let cmd = hyperdrive()
@@ -144,9 +165,9 @@ fn test_solutions_convert_no_stderr() {
 #[cfg(feature = "plotting")]
 fn test_solutions_plot_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let sols = get_1090008640_identity_solutions_file(tmp_dir.path());
-    let args = get_reduced_1090008640(true, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
+    let sols = get_identity_solutions_file(tmp_dir.path());
+    let Files { data, .. } = get_reduced_1090008640(false);
+    let metafits = data[0].clone();
 
     #[rustfmt::skip]
     let cmd = hyperdrive()
@@ -169,9 +190,8 @@ fn test_solutions_plot_no_stderr() {
 #[test]
 fn test_srclist_by_beam_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let args = get_reduced_1090008640(true, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
-    let srclist = args.source_list.unwrap();
+    let Files { data, srclist } = get_reduced_1090008640(false);
+    let metafits = data[0].clone();
     let output = tmp_dir.path().join("srclist.txt");
 
     #[rustfmt::skip]
@@ -197,8 +217,7 @@ fn test_srclist_by_beam_no_stderr() {
 #[test]
 fn test_srclist_convert_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let args = get_reduced_1090008640(true, false);
-    let srclist = args.source_list.unwrap();
+    let Files { srclist, .. } = get_reduced_1090008640(false);
     let output = tmp_dir.path().join("srclist.txt");
 
     #[rustfmt::skip]
@@ -222,8 +241,7 @@ fn test_srclist_convert_no_stderr() {
 #[test]
 fn test_srclist_shift_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let args = get_reduced_1090008640(true, false);
-    let srclist = args.source_list.unwrap();
+    let Files { srclist, .. } = get_reduced_1090008640(false);
     let output = tmp_dir.path().join("shifted.txt");
     let shifts = tmp_dir.path().join("shifts.json");
 
@@ -259,8 +277,7 @@ fn test_srclist_shift_no_stderr() {
 
 #[test]
 fn test_srclist_verify_no_stderr() {
-    let args = get_reduced_1090008640(true, false);
-    let srclist = args.source_list.unwrap();
+    let Files { srclist, .. } = get_reduced_1090008640(false);
 
     #[rustfmt::skip]
     let cmd = hyperdrive()
@@ -280,14 +297,14 @@ fn test_srclist_verify_no_stderr() {
 
 #[test]
 fn test_dipole_gains_no_stderr() {
-    let args = get_reduced_1090008640(true, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
+    let Files { data, .. } = get_reduced_1090008640(false);
+    let metafits = &data[0];
 
     #[rustfmt::skip]
     let cmd = hyperdrive()
         .args([
             "dipole-gains",
-            &metafits,
+            metafits,
         ])
         .ok();
     assert!(

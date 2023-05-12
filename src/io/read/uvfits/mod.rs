@@ -16,7 +16,7 @@ pub(crate) use error::*;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    num::NonZeroUsize,
+    num::NonZeroU16,
     os::raw::c_char,
     path::{Path, PathBuf},
 };
@@ -35,6 +35,7 @@ use num_complex::Complex;
 use super::*;
 use crate::{
     beam::Delays,
+    cli::Warn,
     context::{ObsContext, Polarisations},
     io::read::{
         fits::{
@@ -47,11 +48,11 @@ use crate::{
 
 pub struct UvfitsReader {
     /// Observation metadata.
-    pub(super) obs_context: ObsContext,
+    obs_context: ObsContext,
 
     // uvfits-specific things follow.
     /// The path to the uvfits on disk.
-    pub(crate) uvfits: PathBuf,
+    uvfits: PathBuf,
 
     /// The uvfits-specific metadata, like which indices contain which
     /// parameters.
@@ -139,7 +140,7 @@ impl UvfitsReader {
             let frame: Option<String> =
                 fits_get_optional_key(&mut uvfits_fptr, &antenna_table_hdu, "FRAME")?;
             if !matches!(frame.as_deref(), Some("ITRF")) {
-                warn!("Assuming that the uvfits antenna coordinate system is ITRF");
+                "Assuming that the uvfits antenna coordinate system is ITRF".warn();
             }
 
             // Because ARRAY{X,Y,Z} are defined to be the array position, the
@@ -173,7 +174,7 @@ impl UvfitsReader {
             }
 
             if wrong_array_xyz {
-                warn!("It seems this uvfits file's antenna positions has been blessed by casacore. Unblessing.");
+                "It seems this uvfits file's antenna positions has been blessed by casacore. Unblessing.".warn();
                 // Get the supplied array position from the average tile
                 // position.
                 average_xyz.x /= tile_xyzs.len() as f64;
@@ -310,8 +311,12 @@ impl UvfitsReader {
                 dipole_gains = Some(gains2);
             } else {
                 // We have no choice but to leave the order as is.
-                warn!("The uvfits antenna names are different to those supplied in the metafits.");
-                warn!("Dipole delays/gains may be incorrectly mapped to uvfits antennas.");
+                [
+                    "The uvfits antenna names are different to those supplied in the metafits."
+                        .into(),
+                    "Dipole delays/gains may be incorrectly mapped to uvfits antennas.".into(),
+                ]
+                .warn();
                 dipole_delays = Some(Delays::Full(delays));
                 dipole_gains = Some(gains);
             }
@@ -523,17 +528,10 @@ impl UvfitsReader {
             }
         };
 
-        let num_coarse_chans = mwa_coarse_chan_nums.as_ref().map(|ccs| {
-            NonZeroUsize::new(ccs.len())
-                .expect("length is always > 0 because collection cannot be empty")
-        });
-        let num_fine_chans_per_coarse_chan = num_coarse_chans.and_then(|num_coarse_chans| {
-            let total_bandwidth_hz =
-                *fine_chan_freqs_f64.last() - *fine_chan_freqs_f64.first() + freq_res;
-            NonZeroUsize::new(
-                (total_bandwidth_hz / num_coarse_chans.get() as f64 / freq_res).round() as usize,
-            )
-        });
+        let num_fine_chans_per_coarse_chan = {
+            let n = (1.28e6 / freq_res).round() as u16;
+            Some(NonZeroU16::new(n).expect("is not 0"))
+        };
 
         match (
             mwa_coarse_chan_nums.as_ref(),
@@ -643,7 +641,7 @@ impl UvfitsReader {
                 *timestamps.first(),
                 dut1,
             ) {
-                warn!("uvfits UVWs use the other baseline convention; will conjugate incoming visibilities");
+                "uvfits UVWs use the other baseline convention; will conjugate incoming visibilities".warn();
                 true
             } else {
                 false
@@ -651,6 +649,7 @@ impl UvfitsReader {
         };
 
         let obs_context = ObsContext {
+            input_data_type: VisInputType::Uvfits,
             obsid,
             timestamps,
             all_timesteps,
@@ -658,7 +657,7 @@ impl UvfitsReader {
             phase_centre,
             pointing_centre,
             array_position,
-            _supplied_array_position: supplied_array_position,
+            supplied_array_position,
             dut1,
             tile_names,
             tile_xyzs,
@@ -698,7 +697,7 @@ impl UvfitsReader {
         mut crosses: Option<CrossData>,
         mut autos: Option<AutoData>,
         timestep: usize,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         let row_range_start = timestep * self.step;
         let row_range_end = (timestep + 1) * self.step;
@@ -709,7 +708,7 @@ impl UvfitsReader {
         let mut uvfits_vis: Vec<f32> =
             vec![0.0; self.metadata.num_fine_freq_chans * NUM_POLS * NUM_FLOATS_PER_POL];
         let flags = (0..self.metadata.num_fine_freq_chans)
-            .map(|i_chan| flagged_fine_chans.contains(&i_chan))
+            .map(|i_chan| flagged_fine_chans.contains(&(i_chan as u16)))
             .collect::<Vec<_>>();
         for row in row_range_start..row_range_end {
             // Read in the row's group parameters.
@@ -918,7 +917,7 @@ impl UvfitsReader {
                         uvfits_vis
                             .chunks_exact(NUM_POLS * NUM_FLOATS_PER_POL)
                             .enumerate()
-                            .filter(|(i_chan, _)| !flagged_fine_chans.contains(i_chan))
+                            .filter(|(i_chan, _)| !flagged_fine_chans.contains(&(*i_chan as u16)))
                             .zip(out_vis.iter_mut())
                             .zip(out_weights.iter_mut())
                             .for_each(|(((_, in_data), out_vis), out_weight)| {
@@ -1039,6 +1038,12 @@ impl VisRead for UvfitsReader {
         None
     }
 
+    fn get_raw_data_corrections(&self) -> Option<RawDataCorrections> {
+        None
+    }
+
+    fn set_raw_data_corrections(&mut self, _: RawDataCorrections) {}
+
     fn read_crosses_and_autos(
         &self,
         cross_vis_fb: ArrayViewMut2<Jones<f32>>,
@@ -1047,7 +1052,7 @@ impl VisRead for UvfitsReader {
         auto_weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         let cross_data = Some(CrossData {
             vis_fb: cross_vis_fb,
@@ -1084,7 +1089,7 @@ impl VisRead for UvfitsReader {
         weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         let cross_data = Some(CrossData {
             vis_fb,
@@ -1115,7 +1120,7 @@ impl VisRead for UvfitsReader {
         weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
         let auto_data = Some(AutoData {
             vis_fb,
@@ -1371,14 +1376,15 @@ impl UvfitsMetadata {
                 Some(key) => match key.parse::<f32>() {
                     Ok(n) => {
                         if n.abs() > f32::EPSILON {
-                            warn!("{pzero}, corresponding to the second DATE, was not 0; ignoring it anyway")
+                            format!("uvfits {pzero}, corresponding to the second DATE, was not 0; ignoring it anyway").warn()
                         }
                     }
                     Err(std::num::ParseFloatError { .. }) => {
-                        warn!("Could not parse {pzero} as a float")
+                        format!("Could not parse uvfits {pzero} as a float").warn()
                     }
                 },
-                None => warn!("{pzero} does not exist, corresponding to the second DATE"),
+                None => format!("uvfits {pzero} does not exist, corresponding to the second DATE")
+                    .warn(),
             }
         }
         let jd_zero = jd_zero_str
@@ -1399,7 +1405,7 @@ impl UvfitsMetadata {
 
             // Don't round if the value is 0. Sigh.
             if jd_zero.abs() < f64::EPSILON {
-                warn!("PZERO{} is supposed to be non-zero!", indices.date1);
+                format!("uvfits PZERO{} is supposed to be non-zero!", indices.date1).warn();
                 e
             } else {
                 e.round(1.hours())
@@ -1654,49 +1660,50 @@ impl Indices {
                     if u_index.is_none() {
                         u_index = Some(ii)
                     } else {
-                        warn!("Found another UU key -- only using the first");
+                        "Found another uvfits UU key -- only using the first".warn();
                     }
                 }
                 "VV" => {
                     if v_index.is_none() {
                         v_index = Some(ii)
                     } else {
-                        warn!("Found another VV key -- only using the first");
+                        "Found another uvfits VV key -- only using the first".warn();
                     }
                 }
                 "WW" => {
                     if w_index.is_none() {
                         w_index = Some(ii)
                     } else {
-                        warn!("Found another WW key -- only using the first");
+                        "Found another uvfits WW key -- only using the first".warn();
                     }
                 }
                 "BASELINE" => {
                     if baseline_index.is_none() {
                         baseline_index = Some(ii)
                     } else {
-                        warn!("Found another BASELINE key -- only using the first");
+                        "Found another uvfits BASELINE key -- only using the first".warn();
                     }
                 }
                 "ANTENNA1" => {
                     if antenna1_index.is_none() {
                         antenna1_index = Some(ii)
                     } else {
-                        warn!("Found another ANTENNA1 key -- only using the first");
+                        "Found another uvfits ANTENNA1 key -- only using the first".warn();
                     }
                 }
                 "ANTENNA2" => {
                     if antenna2_index.is_none() {
                         antenna2_index = Some(ii)
                     } else {
-                        warn!("Found another ANTENNA1 key -- only using the first");
+                        "Found another uvfits ANTENNA1 key -- only using the first".warn();
                     }
                 }
                 "DATE" | "_DATE" => match (date1_index, date2_index) {
                     (None, None) => date1_index = Some(ii),
                     (Some(_), None) => date2_index = Some(ii),
                     (Some(_), Some(_)) => {
-                        warn!("Found more than 2 DATE/_DATE keys -- only using the first two")
+                        "Found more than 2 uvfits DATE/_DATE keys -- only using the first two"
+                            .warn()
                     }
                     (None, Some(_)) => unreachable!(),
                 },
@@ -1718,7 +1725,7 @@ impl Indices {
             (Some(index), None, None) => BaselineOrAntennas::Baseline { index },
             (None, Some(index1), Some(index2)) => BaselineOrAntennas::Antennas { index1, index2 },
             (Some(index), Some(_), _) | (Some(index), _, Some(_)) => {
-                warn!("Found both BASELINE and ANTENNA keys; only using BASELINE");
+                "Found both uvfits BASELINE and ANTENNA keys; only using BASELINE".warn();
                 BaselineOrAntennas::Baseline { index }
             }
             // These are not.

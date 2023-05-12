@@ -12,8 +12,6 @@ mod no_stderr;
 mod solutions_apply;
 
 use std::{
-    fs::File,
-    io::Write,
     path::{Path, PathBuf},
     process::Output,
     str::from_utf8,
@@ -23,7 +21,7 @@ use assert_cmd::{output::OutputError, Command};
 use marlu::Jones;
 use ndarray::prelude::*;
 
-use mwa_hyperdrive::{CalibrationSolutions, DiCalArgs};
+use mwa_hyperdrive::CalibrationSolutions;
 
 fn hyperdrive() -> Command {
     Command::cargo_bin("hyperdrive").unwrap()
@@ -40,7 +38,7 @@ fn get_cmd_output(result: Result<Output, OutputError>) -> (String, String) {
     )
 }
 
-fn get_1090008640_identity_solutions_file(tmp_dir: &Path) -> PathBuf {
+fn get_identity_solutions_file(tmp_dir: &Path) -> PathBuf {
     let sols = CalibrationSolutions {
         di_jones: Array3::from_elem((1, 128, 32), Jones::identity()),
         ..Default::default()
@@ -50,26 +48,15 @@ fn get_1090008640_identity_solutions_file(tmp_dir: &Path) -> PathBuf {
     file
 }
 
-fn make_file_in_dir<T: AsRef<Path>, U: AsRef<Path>>(filename: T, dir: U) -> (PathBuf, File) {
-    let path = dir.as_ref().join(filename);
-    let f = File::create(&path).expect("couldn't make file");
-    (path, f)
-}
-
-fn serialise_cal_args_toml(args: &DiCalArgs, file: &mut File) {
-    let ser = toml::to_string_pretty(&args).expect("couldn't serialise DiCalArgs as toml");
-    write!(file, "{ser}").unwrap();
-}
-
-fn serialise_cal_args_json(args: &DiCalArgs, file: &mut File) {
-    let ser = serde_json::to_string_pretty(&args).expect("couldn't serialise DiCalArgs as json");
-    write!(file, "{ser}").unwrap();
+struct Files {
+    data: Vec<String>,
+    srclist: String,
 }
 
 /// Get the calibration arguments associated with the obsid 1090008640 (raw MWA
 /// data). This observational data is inside the hyperdrive git repo, but has
 /// been reduced; there is only 1 coarse channel and 1 timestep.
-fn get_reduced_1090008640(use_fee_beam: bool, include_mwaf: bool) -> DiCalArgs {
+fn get_reduced_1090008640(include_mwaf: bool) -> Files {
     // Use absolute paths.
     let test_files = PathBuf::from("test_files/1090008640")
         .canonicalize()
@@ -104,10 +91,5 @@ fn get_reduced_1090008640(use_fee_beam: bool, include_mwaf: bool) -> DiCalArgs {
         "Could not find {srclist}, which is required for this test"
     );
 
-    DiCalArgs {
-        data: Some(data),
-        source_list: Some(srclist),
-        no_beam: !use_fee_beam,
-        ..Default::default()
-    }
+    Files { data, srclist }
 }

@@ -5,23 +5,23 @@
 //! Code to convert between sky-model source list files.
 
 use std::{
-    fs::File,
-    io::{BufWriter, Write},
     path::{Path, PathBuf},
     str::FromStr,
 };
 
 use clap::Parser;
 use itertools::Itertools;
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
 use marlu::RADec;
 use rayon::prelude::*;
 
 use crate::{
-    help_texts::{SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP},
+    cli::common::{
+        display_warnings, Warn, SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP,
+    },
     srclist::{
-        ao, hyperdrive, read::read_source_list_file, rts, woden, HyperdriveFileType, SourceList,
-        SourceListType, SrclistError, WriteSourceListError,
+        read::read_source_list_file, write_source_list, HyperdriveFileType, SourceList,
+        SourceListType, SrclistError,
     },
     HyperdriveError,
 };
@@ -123,7 +123,7 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
         let output_ext = output_path.extension().and_then(|e| e.to_str());
         let output_file_type = output_ext.and_then(|e| HyperdriveFileType::from_str(e).ok());
         if output_type.is_none() && output_file_type.is_some() {
-            warn!("Assuming that the output file type is 'hyperdrive'");
+            "Assuming that the output file type is 'hyperdrive'".warn();
         }
 
         // Read the input source list.
@@ -220,45 +220,9 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
 
         // Write the output source list.
         trace!("Attempting to write output source list");
-        let mut f = BufWriter::new(File::create(output_path)?);
+        write_source_list(&sl, output_path, sl_type, output_type, None)?;
 
-        match (output_type, output_file_type) {
-            (_, Some(HyperdriveFileType::Yaml)) => {
-                hyperdrive::source_list_to_yaml(&mut f, &sl, None)?;
-                info!(
-                    "Wrote hyperdrive-style source list to {}",
-                    output_path.display()
-                );
-            }
-            (_, Some(HyperdriveFileType::Json)) => {
-                hyperdrive::source_list_to_json(&mut f, &sl, None)?;
-                info!(
-                    "Wrote hyperdrive-style source list to {}",
-                    output_path.display()
-                );
-            }
-            (Some(SourceListType::Hyperdrive), None) => {
-                return Err(WriteSourceListError::InvalidHyperdriveFormat(
-                    output_ext.unwrap_or("<no extension>").to_string(),
-                )
-                .into())
-            }
-            (Some(SourceListType::Rts), _) => {
-                rts::write_source_list(&mut f, &sl, None)?;
-                info!("Wrote rts-style source list to {}", output_path.display());
-            }
-            (Some(SourceListType::AO), _) => {
-                ao::write_source_list(&mut f, &sl, None)?;
-                info!("Wrote ao-style source list to {}", output_path.display());
-            }
-            (Some(SourceListType::Woden), _) => {
-                woden::write_source_list(&mut f, &sl, None)?;
-                info!("Wrote woden-style source list to {}", output_path.display());
-            }
-            (None, None) => return Err(WriteSourceListError::NotEnoughInfo.into()),
-        }
-
-        f.flush()?;
+        display_warnings();
 
         Ok(())
     }

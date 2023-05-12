@@ -7,456 +7,25 @@
 //! This code borrows heavily from Torrance Hodgson's excellent Julia code at
 //! <https://github.com/torrance/MWAjl>
 
-mod error;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub(crate) use error::DiCalibrateError;
-
-use std::thread;
-
-use crossbeam_channel::{unbounded, Sender};
-use crossbeam_utils::atomic::AtomicCell;
-use hifitime::Duration;
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
-use log::{debug, info};
-use marlu::{
-    c64,
-    constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
-    math::num_tiles_from_num_cross_correlation_baselines,
-    Jones,
-};
-use ndarray::{iter::AxisIterMut, prelude::*};
+use log::info;
+use marlu::{c64, math::num_tiles_from_num_cross_correlation_baselines, Jones};
+use ndarray::prelude::*;
 use rayon::prelude::*;
-use scopeguard::defer_on_unwind;
 use vec1::Vec1;
 
 use crate::{
-    averaging::{timesteps_to_timeblocks, Chanblock, Timeblock},
-    cli::di_calibrate::DiCalParams,
+    averaging::{Chanblock, Timeblock},
     context::Polarisations,
-    io::write::{write_vis, VisTimestep},
     math::average_epoch,
-    misc::expensive_op,
-    model::{self, ModellerInfo},
+    params::DiCalParams,
     solutions::CalibrationSolutions,
+    MODEL_DEVICE, PROGRESS_BARS,
 };
-
-pub(crate) struct CalVis {
-    /// Visibilites read from input data.
-    pub(crate) vis_data_tfb: Array3<Jones<f32>>,
-
-    /// The weights on the visibilites read from input data.
-    pub(crate) vis_weights_tfb: Array3<f32>,
-
-    /// Visibilites generated from the sky-model source list.
-    pub(crate) vis_model_tfb: Array3<Jones<f32>>,
-
-    /// The available polarisations within the data.
-    pub(crate) pols: Polarisations,
-}
-
-/// For calibration, read in unflagged visibilities and generate sky-model
-/// visibilities.
-pub(crate) fn get_cal_vis(
-    params: &DiCalParams,
-    draw_progress_bar: bool,
-) -> Result<CalVis, DiCalibrateError> {
-    // TODO: Use all fences, not just the first.
-    let fence = params.fences.first();
-
-    // Get the time and frequency resolutions once; these functions issue
-    // warnings if they have to guess, so doing this once means we aren't
-    // issuing too many warnings.
-    let obs_context = params.get_obs_context();
-    let time_res = obs_context.guess_time_res();
-    let freq_res = obs_context.guess_freq_res();
-
-    let vis_shape = (
-        params.get_num_timesteps(),
-        fence.chanblocks.len(),
-        params.get_num_unflagged_cross_baselines(),
-    );
-    let num_elems = vis_shape.0 * vis_shape.1 * vis_shape.2;
-    // We need this many bytes for each of the data and model arrays to do
-    // calibration.
-    let size = indicatif::HumanBytes((num_elems * std::mem::size_of::<Jones<f32>>()) as u64);
-    debug!(
-        "Shape of data and model arrays: ({} timesteps, {} channels, {} baselines; {size} each)",
-        vis_shape.0, vis_shape.1, vis_shape.2
-    );
-
-    macro_rules! fallible_allocator {
-        ($default:expr) => {{
-            let mut v = Vec::new();
-            match v.try_reserve_exact(num_elems) {
-                Ok(()) => {
-                    v.resize(num_elems, $default);
-                    Ok(Array3::from_shape_vec(vis_shape, v).unwrap())
-                }
-                Err(_) => {
-                    // We need this many gibibytes to do calibration (two
-                    // visibility arrays and one weights array).
-                    let need_gib = indicatif::HumanBytes(
-                        (num_elems
-                            * (2 * std::mem::size_of::<Jones<f32>>() + std::mem::size_of::<f32>()))
-                            as u64,
-                    );
-
-                    Err(DiCalibrateError::InsufficientMemory {
-                        // Instead of erroring out with how many bytes we need
-                        // for the array we just tried to allocate, error out
-                        // with how many bytes we need total.
-                        need_gib,
-                    })
-                }
-            }
-        }};
-    }
-
-    debug!("Allocating memory for input data visibilities and model visibilities");
-    let CalVis {
-        mut vis_data_tfb,
-        mut vis_model_tfb,
-        mut vis_weights_tfb,
-        pols: _,
-    } = expensive_op(
-        || -> Result<_, DiCalibrateError> {
-            let vis_data_tfb: Array3<Jones<f32>> = fallible_allocator!(Jones::default())?;
-            let vis_model_tfb: Array3<Jones<f32>> = fallible_allocator!(Jones::default())?;
-            let vis_weights_tfb: Array3<f32> = fallible_allocator!(0.0)?;
-            Ok(CalVis {
-                vis_data_tfb,
-                vis_weights_tfb,
-                vis_model_tfb,
-                pols: Polarisations::default(),
-            })
-        },
-        "Still waiting to allocate visibility memory",
-    )?;
-
-    // Sky-modelling communication channel. Used to tell the model writer when
-    // visibilities have been generated and they're ready to be written.
-    let (tx_model, rx_model) = unbounded();
-
-    // Progress bars. Courtesy Dev.
-    let multi_progress = MultiProgress::with_draw_target(if draw_progress_bar {
-        ProgressDrawTarget::stdout()
-    } else {
-        ProgressDrawTarget::hidden()
-    });
-    let read_progress = multi_progress.add(
-        ProgressBar::new(vis_shape.0 as _)
-            .with_style(
-                ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
-                    .progress_chars("=> "),
-            )
-            .with_position(0)
-            .with_message("Reading data"),
-    );
-    let model_progress = multi_progress.add(
-        ProgressBar::new(vis_shape.0 as _)
-            .with_style(
-                ProgressStyle::default_bar()
-                    .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timesteps ({elapsed_precise}<{eta_precise})").unwrap()
-                    .progress_chars("=> "),
-            )
-            .with_position(0)
-            .with_message("Sky modelling"),
-    );
-    // Only add a model writing progress bar if we need it.
-    let model_write_progress = params.model_files.as_ref().map(|_| {
-        multi_progress.add(
-            ProgressBar::new(vis_shape.0 as _)
-                .with_style(
-                    ProgressStyle::default_bar()
-                        .template("{msg:17}: [{wide_bar:.blue}] {pos:2}/{len:2} timeblocks ({elapsed_precise}<{eta_precise})").unwrap()
-                        .progress_chars("=> "),
-                )
-                .with_position(0)
-                .with_message("Model writing"),
-        )
-    });
-
-    // Use a variable to track whether any threads have an issue.
-    let error = AtomicCell::new(false);
-    info!("Reading input data and sky modelling");
-    let scoped_threads_result = thread::scope(|s| {
-        // Mutable slices of the "global" arrays. These allow threads to mutate
-        // the global arrays in parallel (using the Arc<Mutex<_>> pattern would
-        // kill performance here).
-        let vis_data_slices = vis_data_tfb.outer_iter_mut();
-        let vis_model_slices = vis_model_tfb.outer_iter_mut();
-        let vis_weight_slices = vis_weights_tfb.outer_iter_mut();
-
-        // Input visibility-data reading thread.
-        let data_handle = s.spawn(|| {
-            // If a panic happens, update our atomic error.
-            defer_on_unwind! { error.store(true); }
-            read_progress.tick();
-
-            let result = read_vis_data(
-                params,
-                vis_data_slices,
-                vis_weight_slices,
-                &error,
-                read_progress,
-            );
-            // If the result of reading data was an error, allow the other
-            // threads to see this so they can abandon their work early.
-            if result.is_err() {
-                error.store(true);
-            }
-            result
-        });
-
-        // Sky-model generation thread.
-        let model_handle = s.spawn(|| {
-            defer_on_unwind! { error.store(true); }
-            model_progress.tick();
-
-            let result = model_vis(
-                params,
-                vis_model_slices,
-                time_res,
-                freq_res,
-                tx_model,
-                &error,
-                model_progress,
-                #[cfg(feature = "cuda")]
-                matches!(params.modeller_info, ModellerInfo::Cpu),
-            );
-            if result.is_err() {
-                error.store(true);
-            }
-            result
-        });
-
-        // Model writing thread. If the user hasn't specified to write the model
-        // to a file, then this thread just consumes messages from the modeller.
-        let writer_handle = s.spawn(|| {
-            defer_on_unwind! { error.store(true); }
-
-            // If the user wants the sky model written out, `model_file` is
-            // populated.
-            if let Some(model_files) = &params.model_files {
-                if let Some(pb) = model_write_progress.as_ref() {
-                    pb.tick();
-                }
-
-                let fine_chan_freqs = obs_context.fine_chan_freqs.mapped_ref(|&f| f as f64);
-                let unflagged_baseline_tile_pairs = params
-                    .tile_baseline_flags
-                    .tile_to_unflagged_cross_baseline_map
-                    .keys()
-                    .copied()
-                    .sorted()
-                    .collect::<Vec<_>>();
-                // These timeblocks are distinct from `params.timeblocks`; the
-                // latter are for calibration time averaging, whereas we want
-                // timeblocks for model visibility averaging.
-                let timeblocks = timesteps_to_timeblocks(
-                    &obs_context.timestamps,
-                    params.output_model_time_average_factor,
-                    &params.timesteps,
-                );
-
-                let result = write_vis(
-                    model_files,
-                    params.array_position,
-                    obs_context.phase_centre,
-                    obs_context.pointing_centre,
-                    &obs_context.tile_xyzs,
-                    &obs_context.tile_names,
-                    obs_context.obsid,
-                    &obs_context.timestamps,
-                    &params.timesteps,
-                    &timeblocks,
-                    time_res,
-                    params.dut1,
-                    freq_res,
-                    &fine_chan_freqs,
-                    &unflagged_baseline_tile_pairs,
-                    &params.flagged_fine_chans,
-                    params.output_model_time_average_factor,
-                    params.output_model_freq_average_factor,
-                    params.input_data.get_marlu_mwa_info().as_ref(),
-                    rx_model,
-                    &error,
-                    model_write_progress,
-                );
-                if result.is_err() {
-                    error.store(true);
-                }
-                match result {
-                    // Discard the result string.
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(DiCalibrateError::from(e)),
-                }
-            } else {
-                // There's no model to write out, but we still need to handle all of the
-                // incoming messages.
-                for _ in rx_model.iter() {}
-                Ok(())
-            }
-        });
-
-        // Join all thread handles. This propagates any errors and lets us know
-        // if any threads panicked, if panics aren't aborting as per the
-        // Cargo.toml. (It would be nice to capture the panic information, if
-        // it's possible, but I don't know how, so panics are currently
-        // aborting.)
-        let result = data_handle.join().unwrap();
-        let result = result.and_then(|_| model_handle.join().unwrap());
-        result.and_then(|_| writer_handle.join().unwrap())
-    });
-
-    // Propagate errors.
-    scoped_threads_result?;
-
-    debug!("Multiplying visibilities by weights");
-
-    // Multiply the visibilities by the weights (and baseline weights based on
-    // UVW cuts). If a weight is negative, it means the corresponding visibility
-    // should be flagged, so that visibility is set to 0; this means it does not
-    // affect calibration. Not iterating over weights during calibration makes
-    // makes calibration run significantly faster.
-    vis_data_tfb
-        .outer_iter_mut()
-        .into_par_iter()
-        .zip(vis_model_tfb.outer_iter_mut())
-        .zip(vis_weights_tfb.outer_iter())
-        .for_each(|((mut vis_data_fb, mut vis_model_fb), vis_weights_fb)| {
-            vis_data_fb
-                .outer_iter_mut()
-                .zip(vis_model_fb.outer_iter_mut())
-                .zip(vis_weights_fb.outer_iter())
-                .for_each(|((mut vis_data_b, mut vis_model_b), vis_weights_b)| {
-                    vis_data_b
-                        .iter_mut()
-                        .zip(vis_model_b.iter_mut())
-                        .zip(vis_weights_b.iter())
-                        .zip(params.baseline_weights.iter())
-                        .for_each(|(((data, model), &weight), baseline_weight)| {
-                            let weight = f64::from(weight) * *baseline_weight;
-                            if weight <= 0.0 {
-                                *data = Jones::default();
-                                *model = Jones::default();
-                            } else {
-                                *data = Jones::<f32>::from(Jones::<f64>::from(*data) * weight);
-                                *model = Jones::<f32>::from(Jones::<f64>::from(*model) * weight);
-                            }
-                        });
-                });
-        });
-
-    info!("Finished reading input data and sky modelling");
-
-    Ok(CalVis {
-        vis_data_tfb,
-        vis_weights_tfb,
-        vis_model_tfb,
-        pols: obs_context.polarisations,
-    })
-}
-
-fn read_vis_data(
-    params: &DiCalParams,
-    vis_data_slices_fb: AxisIterMut<Jones<f32>, Dim<[usize; 2]>>,
-    vis_weight_slices_fb: AxisIterMut<f32, Dim<[usize; 2]>>,
-    error: &AtomicCell<bool>,
-    progress_bar: ProgressBar,
-) -> Result<(), DiCalibrateError> {
-    for ((&timestep, vis_data_slice_fb), vis_weight_slice_fb) in params
-        .timesteps
-        .iter()
-        .zip(vis_data_slices_fb)
-        .zip(vis_weight_slices_fb)
-    {
-        params.read_crosses(vis_data_slice_fb, vis_weight_slice_fb, timestep)?;
-
-        // Should we continue?
-        if error.load() {
-            return Ok(());
-        }
-
-        progress_bar.inc(1);
-    }
-
-    progress_bar.abandon_with_message("Finished reading input data");
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn model_vis(
-    params: &DiCalParams,
-    vis_model_slices_fb: AxisIterMut<Jones<f32>, Dim<[usize; 2]>>,
-    time_res: Duration,
-    freq_res: f64,
-    tx_model: Sender<VisTimestep>,
-    error: &AtomicCell<bool>,
-    progress_bar: ProgressBar,
-    #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
-) -> Result<(), DiCalibrateError> {
-    let obs_context = params.get_obs_context();
-    let modeller = model::new_sky_modeller(
-        #[cfg(feature = "cuda")]
-        use_cpu_for_modelling,
-        &*params.beam,
-        &params.source_list,
-        obs_context.polarisations,
-        &params.unflagged_tile_xyzs,
-        &params.unflagged_fine_chan_freqs,
-        &params.tile_baseline_flags.flagged_tiles,
-        obs_context.phase_centre,
-        params.array_position.longitude_rad,
-        params.array_position.latitude_rad,
-        params.dut1,
-        params.apply_precession,
-    )?;
-
-    let weight_factor =
-        ((freq_res / FREQ_WEIGHT_FACTOR) * (time_res.to_seconds() / TIME_WEIGHT_FACTOR)) as f32;
-
-    // Iterate over all calibration timesteps and write to the model slices.
-    for (&timestep, mut vis_model_slice) in params.timesteps.iter().zip(vis_model_slices_fb) {
-        // If for some reason the timestamp isn't there for this timestep, a
-        // programmer stuffed up, but emit a decent error message.
-        let timestamp = obs_context
-            .timestamps
-            .get(timestep)
-            .ok_or(DiCalibrateError::TimestepUnavailable { timestep })?;
-        match modeller.model_timestep_with(*timestamp, vis_model_slice.view_mut()) {
-            // Send the model information to the writer.
-            Ok(_) => match tx_model.send(VisTimestep {
-                cross_data_fb: vis_model_slice.to_shared(),
-                cross_weights_fb: ArcArray::from_elem(vis_model_slice.dim(), weight_factor),
-                autos: None,
-                timestamp: *timestamp,
-            }) {
-                Ok(()) => (),
-                // If we can't send the message, it's because the channel has
-                // been closed on the other side. That should only happen
-                // because the writer has exited due to error; in that case,
-                // just exit this thread.
-                Err(_) => return Ok(()),
-            },
-            Err(e) => return Err(DiCalibrateError::from(e)),
-        }
-
-        // Should we continue?
-        if error.load() {
-            return Ok(());
-        }
-
-        progress_bar.inc(1);
-    }
-
-    progress_bar.abandon_with_message("Finished generating sky model");
-    Ok(())
-}
 
 /// (Possibly) incomplete calibration solutions.
 ///
@@ -531,15 +100,12 @@ impl<'a> IncompleteSolutions<'a> {
             min_threshold,
         } = self;
 
-        let obs_context = params.get_obs_context();
-        let total_num_tiles = params.get_total_num_tiles();
-        // TODO: Picket fences.
-        let flagged_chanblock_indices = &params.fences.first().flagged_chanblock_indices;
-        // TODO: Don't use the obs_context here. This needs to be the centroid
-        // frequencies of the chanblocks. This only works because frequency
-        // averaging (i.e. more than one channel per chanblock) isn't possible
-        // right now.
-        let chanblock_freqs = obs_context.fine_chan_freqs.mapped_ref(|&u| u as f64);
+        let input_vis_params = &params.input_vis_params;
+        let obs_context = input_vis_params.get_obs_context();
+        let total_num_tiles = obs_context.get_total_num_tiles();
+        let flagged_chanblock_indices = &input_vis_params.spw.flagged_chanblock_indices;
+        let flagged_tiles = &input_vis_params.tile_baseline_flags.flagged_tiles;
+        let chanblock_freqs = input_vis_params.spw.get_all_freqs();
 
         let (num_timeblocks, num_unflagged_tiles, num_unflagged_chanblocks) = di_jones.dim();
         let total_num_chanblocks = chanblocks.len() + flagged_chanblock_indices.len();
@@ -549,10 +115,7 @@ impl<'a> IncompleteSolutions<'a> {
         assert!(!timeblocks.is_empty());
         assert_eq!(num_timeblocks, timeblocks.len());
         assert!(num_unflagged_tiles <= total_num_tiles);
-        assert_eq!(
-            num_unflagged_tiles + params.tile_baseline_flags.flagged_tiles.len(),
-            total_num_tiles
-        );
+        assert_eq!(num_unflagged_tiles + flagged_tiles.len(), total_num_tiles);
         assert_eq!(num_unflagged_chanblocks, chanblocks.len());
         assert_eq!(
             num_unflagged_chanblocks + flagged_chanblock_indices.len(),
@@ -599,7 +162,7 @@ impl<'a> IncompleteSolutions<'a> {
                     .enumerate()
                     .for_each(|(i_tile, mut out_di_jones)| {
                         // Nothing needs to be done if this tile is flagged.
-                        if !params.tile_baseline_flags.flagged_tiles.contains(&i_tile) {
+                        if !flagged_tiles.contains(&i_tile) {
                             // Iterate over the chanblocks.
                             let mut i_unflagged_chanblock = 0;
                             out_di_jones.iter_mut().enumerate().for_each(
@@ -655,9 +218,7 @@ impl<'a> IncompleteSolutions<'a> {
             let mut i_baseline = 0;
             for i_tile_1 in 0..total_num_tiles {
                 for i_tile_2 in i_tile_1 + 1..total_num_tiles {
-                    if params.tile_baseline_flags.flagged_tiles.contains(&i_tile_1)
-                        || params.tile_baseline_flags.flagged_tiles.contains(&i_tile_2)
-                    {
+                    if flagged_tiles.contains(&i_tile_1) || flagged_tiles.contains(&i_tile_2) {
                         i_baseline += 1;
                         continue;
                     } else {
@@ -672,23 +233,19 @@ impl<'a> IncompleteSolutions<'a> {
 
         CalibrationSolutions {
             di_jones: out_di_jones,
-            flagged_tiles: params
-                .tile_baseline_flags
-                .flagged_tiles
-                .iter()
-                .copied()
-                .sorted()
-                .collect(),
-            flagged_chanblocks: flagged_chanblock_indices.clone(),
+            flagged_tiles: flagged_tiles.iter().copied().sorted().collect(),
+            flagged_chanblocks: flagged_chanblock_indices.iter().cloned().collect(),
             chanblock_freqs: Some(chanblock_freqs),
             obsid: obs_context.obsid,
             start_timestamps: Some(timeblocks.mapped_ref(|tb| *tb.timestamps.first())),
             end_timestamps: Some(timeblocks.mapped_ref(|tb| *tb.timestamps.last())),
-            average_timestamps: Some(timeblocks.mapped_ref(|tb| average_epoch(&tb.timestamps))),
+            average_timestamps: Some(
+                timeblocks.mapped_ref(|tb| average_epoch(tb.timestamps.iter().copied())),
+            ),
             max_iterations: Some(max_iterations),
             stop_threshold: Some(stop_threshold),
             min_threshold: Some(min_threshold),
-            raw_data_corrections: params.raw_data_corrections,
+            raw_data_corrections: input_vis_params.vis_reader.get_raw_data_corrections(),
             tile_names: Some(obs_context.tile_names.clone()),
             dipole_gains: Some(params.beam.get_dipole_gains()),
             dipole_delays: params.beam.get_dipole_delays(),
@@ -698,22 +255,9 @@ impl<'a> IncompleteSolutions<'a> {
             uvw_min: Some(params.uvw_min),
             uvw_max: Some(params.uvw_max),
             freq_centroid: Some(params.freq_centroid),
-            modeller: match &params.modeller_info {
-                ModellerInfo::Cpu => Some("CPU".to_string()),
-
-                #[cfg(feature = "cuda")]
-                ModellerInfo::Cuda {
-                    device_info,
-                    driver_info,
-                } => Some(format!(
-                    "{} (capability {}, {} MiB), CUDA driver {}, runtime {}",
-                    device_info.name,
-                    device_info.capability,
-                    device_info.total_global_mem,
-                    driver_info.driver_version,
-                    driver_info.runtime_version
-                )),
-            },
+            modeller: Some(MODEL_DEVICE.load().get_device_info().expect(
+                "unlikely to fail as device info should've successfully been retrieved earlier",
+            )),
         }
     }
 }
@@ -738,7 +282,6 @@ pub fn calibrate_timeblocks<'a>(
     stop_threshold: f64,
     min_threshold: f64,
     pols: Polarisations,
-    draw_progress_bar: bool,
     print_convergence_messages: bool,
 ) -> (IncompleteSolutions<'a>, Array2<CalibrationResult>) {
     let num_unflagged_tiles = num_tiles_from_num_cross_correlation_baselines(vis_data_tfb.dim().2);
@@ -749,11 +292,7 @@ pub fn calibrate_timeblocks<'a>(
 
     let cal_results = if num_timeblocks == 1 {
         // Calibrate all timesteps together.
-        let pb = make_calibration_progress_bar(
-            num_chanblocks,
-            "Calibrating".to_string(),
-            draw_progress_bar,
-        );
+        let pb = make_calibration_progress_bar(num_chanblocks, "Calibrating".to_string());
         let cal_results = calibrate_timeblock(
             vis_data_tfb.view(),
             vis_model_tfb.view(),
@@ -781,7 +320,6 @@ pub fn calibrate_timeblocks<'a>(
         let pb = make_calibration_progress_bar(
             num_chanblocks,
             "Calibrating all timeblocks together".to_string(),
-            draw_progress_bar,
         );
         // This timeblock represents all timeblocks.
         let timeblock = {
@@ -826,7 +364,6 @@ pub fn calibrate_timeblocks<'a>(
                     i_timeblock + 1,
                     num_timeblocks
                 ),
-                draw_progress_bar,
             );
             let mut cal_results = calibrate_timeblock(
                 vis_data_tfb.view(),
@@ -867,16 +404,11 @@ pub fn calibrate_timeblocks<'a>(
     )
 }
 
-/// Convenience function to make a progress bar while calibrating. `draw`
-/// determines if the progress bar is actually displayed.
-fn make_calibration_progress_bar(
-    num_chanblocks: usize,
-    message: String,
-    draw: bool,
-) -> ProgressBar {
+/// Convenience function to make a progress bar while calibrating.
+fn make_calibration_progress_bar(num_chanblocks: usize, message: String) -> ProgressBar {
     ProgressBar::with_draw_target(
         Some(num_chanblocks as _),
-        if draw {
+        if PROGRESS_BARS.load() {
             // Use stdout, not stderr, because the messages printed by the
             // progress bar are valuable.
             ProgressDrawTarget::stdout()
@@ -1003,7 +535,7 @@ fn calibrate_timeblock(
             // that failed. Then find the next that succeeded. With a
             // converged solution on both sides (or either side) of the
             // failures, use a weighted average for a guess of what the
-            // Jones matrices should be, then re-run MitchCal.
+            // Jones matrices should be, then re-run calibration.
             let mut left = None;
             let mut pairs = vec![];
             let mut in_failures = false;

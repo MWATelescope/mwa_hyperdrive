@@ -30,13 +30,15 @@ pub(crate) fn is_prime(n: usize) -> bool {
     true
 }
 
-/// Given a collection of [Epoch]s, return one that is the average of their
+/// Given a collection of [`Epoch`]s, return one that is the average of their
 /// times.
-pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
-    let duration_sum = es.iter().fold(Epoch::from_gpst_seconds(0.0), |acc, t| {
-        acc + t.to_gpst_seconds()
-    });
-    let average = duration_sum.to_gpst_seconds() / es.len() as f64;
+pub(crate) fn average_epoch<I: IntoIterator<Item = Epoch>>(es: I) -> Epoch {
+    let (duration_sum, num_epochs) = es
+        .into_iter()
+        .fold((Epoch::from_gpst_seconds(0.0), 0), |acc, t| {
+            (acc.0 + t.to_gpst_seconds(), acc.1 + 1)
+        });
+    let average = duration_sum.to_gpst_seconds() / num_epochs as f64;
     Epoch::from_gpst_seconds(average).round(10.milliseconds())
 }
 

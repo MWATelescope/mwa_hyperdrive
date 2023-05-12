@@ -26,6 +26,7 @@
 - [Apply solutions](user/solutions_apply/intro.md)
   - [Simple usage](user/solutions_apply/simple.md)
 - [Plot solutions](user/plotting.md)
+- [Convert visibilities](user/vis_convert/intro.md)
 - [Simulate visibilities](user/vis_simulate/intro.md)
 - [Subtract visibilities](user/vis_subtract/intro.md)
 

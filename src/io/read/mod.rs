@@ -11,9 +11,11 @@ mod raw;
 mod uvfits;
 
 pub(crate) use error::VisReadError;
+pub(crate) use ms::MsReadError;
 pub use ms::MsReader;
-pub(crate) use raw::pfb_gains;
+pub(crate) use raw::{pfb_gains, RawReadError};
 pub use raw::{RawDataCorrections, RawDataReader};
+pub(crate) use uvfits::UvfitsReadError;
 pub use uvfits::UvfitsReader;
 
 use std::collections::HashSet;
@@ -29,7 +31,7 @@ use vec1::Vec1;
 
 use crate::{context::ObsContext, flagging::MwafFlags, math::TileBaselineFlags};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum VisInputType {
     Raw,
     MeasurementSet,
@@ -49,6 +51,14 @@ pub(crate) trait VisRead: Sync + Send {
     /// this trait object.
     fn get_flags(&self) -> Option<&MwafFlags>;
 
+    /// Get the raw data corrections that will be applied to the visibilities as
+    /// they're read in. These may be distinct from what the user specified.
+    fn get_raw_data_corrections(&self) -> Option<RawDataCorrections>;
+
+    /// Set the raw data corrections that will be applied to the visibilities as
+    /// they're read in. These are only applied to raw data.
+    fn set_raw_data_corrections(&mut self, corrections: RawDataCorrections);
+
     /// Read cross- and auto-correlation visibilities for all frequencies and
     /// baselines in a single timestep into corresponding arrays.
     #[allow(clippy::too_many_arguments)]
@@ -60,7 +70,7 @@ pub(crate) trait VisRead: Sync + Send {
         auto_weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError>;
 
     /// Read cross-correlation visibilities for all frequencies and baselines in
@@ -71,7 +81,7 @@ pub(crate) trait VisRead: Sync + Send {
         weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError>;
 
     /// Read auto-correlation visibilities for all frequencies and tiles in a
@@ -82,7 +92,7 @@ pub(crate) trait VisRead: Sync + Send {
         weights_fb: ArrayViewMut2<f32>,
         timestep: usize,
         tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<usize>,
+        flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError>;
 
     /// Get optional MWA information to give to `Marlu` when writing out

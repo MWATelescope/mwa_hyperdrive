@@ -7,9 +7,11 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use log::warn;
 
-use crate::srclist::{error::WriteSourceListError, SourceList};
+use crate::{
+    cli::Warn,
+    srclist::{error::WriteSourceListError, SourceList},
+};
 
 /// Write a [`SourceList`] to a yaml file.
 pub(crate) fn source_list_to_yaml<T: std::io::Write>(
@@ -26,10 +28,11 @@ pub(crate) fn source_list_to_yaml<T: std::io::Write>(
         }
 
         if num_sources > sl.len() {
-            warn!(
+            format!(
                 "Couldn't write the requested number of sources ({num_sources}): wrote {}",
                 sl.len()
             )
+            .warn()
         };
     } else {
         serde_yaml::to_writer(buf, &sl)?;
@@ -51,10 +54,11 @@ pub(crate) fn source_list_to_json<T: std::io::Write>(
         serde_json::to_writer_pretty(buf, &map)?;
 
         if num_sources > sl.len() {
-            warn!(
+            format!(
                 "Couldn't write the requested number of sources ({num_sources}): wrote {}",
                 sl.len()
             )
+            .warn()
         };
     } else {
         serde_json::to_writer_pretty(buf, &sl)?;

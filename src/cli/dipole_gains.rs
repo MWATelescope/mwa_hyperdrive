@@ -11,6 +11,8 @@ use clap::Parser;
 use log::info;
 use mwalib::{MetafitsContext, MwalibError};
 
+use super::common::display_warnings;
+
 /// Print information on the dipole gains listed by a metafits file.
 #[derive(Parser, Debug)]
 pub struct DipoleGainsArgs {
@@ -34,6 +36,8 @@ impl DipoleGainsArgs {
                 non_unity.push((i, &meta.antennas[i].tile_name, tile_gains));
             }
         }
+
+        display_warnings();
 
         if all_unity.len() == meta.num_ants {
             info!("All dipoles on all tiles have a gain of 1.0!");

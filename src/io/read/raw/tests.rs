@@ -4,17 +4,22 @@
 
 //! Tests for reading from raw MWA files.
 
+use std::{collections::HashSet, num::NonZeroU16};
+
 use approx::{abs_diff_eq, assert_abs_diff_eq, assert_abs_diff_ne};
 use itertools::Itertools;
-use marlu::c32;
+use marlu::{c32, Jones};
 use ndarray::prelude::*;
-use tempfile::{tempdir, TempDir};
+use tempfile::TempDir;
 
-use super::*;
+use super::{get_80khz_fine_chan_flags_per_coarse_chan, RawDataReader};
 use crate::{
-    cli::di_calibrate::DiCalArgs,
-    di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
-    tests::{deflate_gz_into_file, reduced_obsids::get_reduced_1090008640},
+    io::read::{
+        pfb_gains::{PfbFlavour, EMPIRICAL_40KHZ, LEVINE_40KHZ},
+        RawDataCorrections, VisRead,
+    },
+    math::TileBaselineFlags,
+    tests::{deflate_gz_into_file, get_reduced_1090008640_raw_pbs, DataAsPathBufs},
 };
 
 struct CrossData {
@@ -27,28 +32,27 @@ struct AutoData {
     weights_array: Array2<f32>,
 }
 
-fn get_cross_vis(args: DiCalArgs) -> CrossData {
-    let result = args.into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
-
-    let num_unflagged_cross_baselines = params
-        .tile_baseline_flags
+fn get_cross_vis(
+    raw_reader: &RawDataReader,
+    tile_baseline_flags: &TileBaselineFlags,
+    flagged_fine_chans: &HashSet<u16>,
+) -> CrossData {
+    let obs_context = raw_reader.get_obs_context();
+    let num_unflagged_cross_baselines = tile_baseline_flags
         .tile_to_unflagged_cross_baseline_map
         .len();
-    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
+    let num_unflagged_fine_chans = obs_context.fine_chan_freqs.len() - flagged_fine_chans.len();
     let vis_shape = (num_unflagged_fine_chans, num_unflagged_cross_baselines);
+
     let mut data_array = Array2::zeros(vis_shape);
     let mut weights_array = Array2::zeros(vis_shape);
 
-    let result = params.input_data.read_crosses(
+    let result = raw_reader.read_crosses(
         data_array.view_mut(),
         weights_array.view_mut(),
-        *params.timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        *obs_context.all_timesteps.first(),
+        tile_baseline_flags,
+        flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -59,25 +63,25 @@ fn get_cross_vis(args: DiCalArgs) -> CrossData {
     }
 }
 
-fn get_auto_vis(args: DiCalArgs) -> AutoData {
-    let result = args.into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
-
-    let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
-    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
+fn get_auto_vis(
+    raw_reader: &RawDataReader,
+    tile_baseline_flags: &TileBaselineFlags,
+    flagged_fine_chans: &HashSet<u16>,
+) -> AutoData {
+    let obs_context = raw_reader.get_obs_context();
+    let num_unflagged_tiles = obs_context.tile_xyzs.len() - tile_baseline_flags.flagged_tiles.len();
+    let num_unflagged_fine_chans = obs_context.fine_chan_freqs.len() - flagged_fine_chans.len();
     let vis_shape = (num_unflagged_fine_chans, num_unflagged_tiles);
+
     let mut data_array = Array2::zeros(vis_shape);
     let mut weights_array = Array2::zeros(vis_shape);
 
-    let result = params.input_data.read_autos(
+    let result = raw_reader.read_autos(
         data_array.view_mut(),
         weights_array.view_mut(),
-        *params.timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        *obs_context.all_timesteps.first(),
+        tile_baseline_flags,
+        flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -88,39 +92,38 @@ fn get_auto_vis(args: DiCalArgs) -> AutoData {
     }
 }
 
-fn get_cross_and_auto_vis(args: DiCalArgs) -> (CrossData, AutoData) {
-    let result = args.into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
-
-    let num_unflagged_cross_baselines = params
-        .tile_baseline_flags
+fn get_cross_and_auto_vis(
+    raw_reader: &RawDataReader,
+    tile_baseline_flags: &TileBaselineFlags,
+    flagged_fine_chans: &HashSet<u16>,
+) -> (CrossData, AutoData) {
+    let obs_context = raw_reader.get_obs_context();
+    let num_unflagged_cross_baselines = tile_baseline_flags
         .tile_to_unflagged_cross_baseline_map
         .len();
-    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
+    let num_unflagged_tiles = obs_context.tile_xyzs.len() - tile_baseline_flags.flagged_tiles.len();
+    let num_unflagged_fine_chans = obs_context.fine_chan_freqs.len() - flagged_fine_chans.len();
+
     let vis_shape = (num_unflagged_fine_chans, num_unflagged_cross_baselines);
     let mut cross_data = CrossData {
         data_array: Array2::zeros(vis_shape),
         weights_array: Array2::zeros(vis_shape),
     };
 
-    let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
     let vis_shape = (num_unflagged_fine_chans, num_unflagged_tiles);
     let mut auto_data = AutoData {
         data_array: Array2::zeros(vis_shape),
         weights_array: Array2::zeros(vis_shape),
     };
 
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         cross_data.data_array.view_mut(),
         cross_data.weights_array.view_mut(),
         auto_data.data_array.view_mut(),
         auto_data.weights_array.view_mut(),
-        *params.timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        *obs_context.all_timesteps.first(),
+        tile_baseline_flags,
+        flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -132,16 +135,22 @@ fn get_cross_and_auto_vis(args: DiCalArgs) -> (CrossData, AutoData) {
 fn read_1090008640_cross_vis() {
     // Other tests check that PFB gains and digital gains are correctly applied.
     // These simple _vis tests just check that the values are right.
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.no_cable_length_correction = true;
-    args.no_geometric_correction = true;
-    args.no_digital_gains = true;
-    args.ignore_input_data_fine_channel_flags = true;
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: false,
+        cable_length: false,
+        geometric: false,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let tile_baseline_flags =
+        TileBaselineFlags::new(obs_context.get_total_num_tiles(), HashSet::new());
+
     let CrossData {
         data_array: vis,
         weights_array: weights,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
     assert_abs_diff_eq!(
         vis[(0, 0)],
@@ -168,13 +177,24 @@ fn read_1090008640_cross_vis() {
 // Test the visibility values with corrections applied (except PFB gains).
 #[test]
 fn read_1090008640_cross_vis_with_corrections() {
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.ignore_input_data_fine_channel_flags = true;
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: true,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        obs_context.get_total_num_tiles(),
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+
     let CrossData {
         data_array: vis,
         weights_array: weights,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
     assert_abs_diff_eq!(
         vis[(0, 0)],
@@ -200,16 +220,24 @@ fn read_1090008640_cross_vis_with_corrections() {
 
 #[test]
 fn read_1090008640_auto_vis() {
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.no_cable_length_correction = true;
-    args.no_geometric_correction = true;
-    args.no_digital_gains = true;
-    args.ignore_input_data_fine_channel_flags = true;
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: false,
+        cable_length: false,
+        geometric: false,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        obs_context.get_total_num_tiles(),
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+
     let AutoData {
         data_array: vis,
         weights_array: weights,
-    } = get_auto_vis(args);
+    } = get_auto_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
     assert_abs_diff_eq!(
         vis[(0, 0)],
@@ -253,18 +281,29 @@ fn read_1090008640_auto_vis() {
 
 #[test]
 fn read_1090008640_auto_vis_with_flags() {
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.no_cable_length_correction = true;
-    args.no_geometric_correction = true;
-    args.no_digital_gains = true;
-    args.ignore_input_data_fine_channel_flags = true;
-    args.tile_flags = Some(vec!["1".to_string(), "9".to_string()]);
-    args.fine_chan_flags = Some(vec![1]);
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: false,
+        cable_length: false,
+        geometric: false,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        obs_context.get_total_num_tiles(),
+        obs_context
+            .flagged_tiles
+            .iter()
+            .copied()
+            .chain([1, 9])
+            .collect(),
+    );
+
     let AutoData {
         data_array: vis,
         weights_array: weights,
-    } = get_auto_vis(args);
+    } = get_auto_vis(&raw_reader, &tile_baseline_flags, &HashSet::from([1]));
 
     // Use the same values as the test above, adjusting only the indices.
     assert_abs_diff_eq!(
@@ -312,13 +351,22 @@ fn read_1090008640_auto_vis_with_flags() {
 
 #[test]
 fn read_1090008640_cross_and_auto_vis() {
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.no_cable_length_correction = true;
-    args.no_geometric_correction = true;
-    args.no_digital_gains = true;
-    args.ignore_input_data_fine_channel_flags = true;
-    let (cross_data, auto_data) = get_cross_and_auto_vis(args);
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: false,
+        cable_length: false,
+        geometric: false,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        obs_context.get_total_num_tiles(),
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+
+    let (cross_data, auto_data) =
+        get_cross_and_auto_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
     // Test values should match those used in "cross_vis" and "auto_vis" tests;
     assert_abs_diff_eq!(
@@ -371,27 +419,43 @@ fn read_1090008640_cross_and_auto_vis() {
 
 #[test]
 fn pfb_empirical_gains() {
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("empirical".to_string());
-    args.ignore_input_data_fine_channel_flags = true;
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::Empirical,
+        digital_gains: true,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader_with_pfb = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader_with_pfb.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        raw_reader_with_pfb.get_obs_context().get_total_num_tiles(),
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+
     let CrossData {
         data_array: vis_pfb,
         weights_array: weights_pfb,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader_with_pfb, &tile_baseline_flags, &HashSet::new());
 
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.ignore_input_data_fine_channel_flags = true;
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: true,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+
     let CrossData {
         data_array: vis_no_pfb,
         weights_array: weights_no_pfb,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
     // Test each visibility individually.
     vis_pfb
         .outer_iter()
         .zip_eq(vis_no_pfb.outer_iter())
-        .zip_eq(pfb_gains::EMPIRICAL_40KHZ.iter())
+        .zip_eq(EMPIRICAL_40KHZ.iter())
         .for_each(|((vis_pfb, vis_no_pfb), &gain)| {
             vis_pfb
                 .iter()
@@ -412,29 +476,43 @@ fn pfb_empirical_gains() {
 
 #[test]
 fn pfb_levine_gains() {
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("levine".to_string());
-    args.no_digital_gains = true;
-    args.ignore_input_data_fine_channel_flags = true;
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::Levine,
+        digital_gains: false,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader_with_pfb = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader_with_pfb.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        raw_reader_with_pfb.get_obs_context().get_total_num_tiles(),
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+
     let CrossData {
         data_array: vis_pfb,
         weights_array: weights_pfb,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader_with_pfb, &tile_baseline_flags, &HashSet::new());
 
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = true;
-    args.ignore_input_data_fine_channel_flags = true;
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: false,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+
     let CrossData {
         data_array: vis_no_pfb,
         weights_array: weights_no_pfb,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
     // Test each visibility individually.
     vis_pfb
         .outer_iter()
         .zip_eq(vis_no_pfb.outer_iter())
-        .zip(pfb_gains::LEVINE_40KHZ.iter())
+        .zip(LEVINE_40KHZ.iter())
         .for_each(|((vis_pfb, vis_no_pfb), &gain)| {
             vis_pfb
                 .iter()
@@ -455,23 +533,37 @@ fn pfb_levine_gains() {
 
 #[test]
 fn test_digital_gains() {
-    let mut args = get_reduced_1090008640(false, false);
-    // Some("none") turns off the PFB correction, whereas None would be the
-    // default behaviour (apply PFB correction).
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = false;
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: true,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let tile_baseline_flags = TileBaselineFlags::new(
+        obs_context.get_total_num_tiles(),
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+
     let CrossData {
         data_array: vis_dg,
         weights_array: weights_dg,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
-    let mut args = get_reduced_1090008640(false, false);
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = true;
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: false,
+        cable_length: true,
+        geometric: true,
+    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+
     let CrossData {
         data_array: vis_no_dg,
         weights_array: weights_no_dg,
-    } = get_cross_vis(args);
+    } = get_cross_vis(&raw_reader, &tile_baseline_flags, &HashSet::new());
 
     let i_bl = 0;
     // Promote the Jones matrices for better accuracy.
@@ -498,26 +590,31 @@ fn test_digital_gains() {
 #[test]
 fn test_mwaf_flags() {
     // First test without any mwaf flags.
-    let mut args = get_reduced_1090008640(false, false);
-    args.ignore_input_data_fine_channel_flags = true;
-    args.ignore_input_data_tile_flags = true;
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = false;
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
+    let DataAsPathBufs {
+        metafits,
+        vis,
+        mwafs,
+        ..
+    } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: true,
+        cable_length: true,
+        geometric: true,
     };
-    let timesteps = params.timesteps;
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let flagged_fine_chans = HashSet::new();
+    let num_tiles = obs_context.get_total_num_tiles();
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, HashSet::new());
 
     // Set up our arrays for reading.
-    let num_unflagged_cross_baselines = params
-        .tile_baseline_flags
+    let num_unflagged_cross_baselines = tile_baseline_flags
         .tile_to_unflagged_cross_baseline_map
         .len();
-    let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
-    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
+    let num_unflagged_tiles = obs_context.tile_xyzs.len() - tile_baseline_flags.flagged_tiles.len();
+    let num_unflagged_fine_chans = obs_context.fine_chan_freqs.len() - flagged_fine_chans.len();
+
     let cross_vis_shape = (num_unflagged_fine_chans, num_unflagged_cross_baselines);
     let mut cross_data_array = Array2::from_elem(cross_vis_shape, Jones::identity());
     let mut cross_weights_array = Array2::ones(cross_vis_shape);
@@ -525,44 +622,34 @@ fn test_mwaf_flags() {
     let mut auto_data_array = Array2::from_elem(auto_vis_shape, Jones::identity());
     let mut auto_weights_array = Array2::ones(auto_vis_shape);
 
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         cross_data_array.view_mut(),
         cross_weights_array.view_mut(),
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
-        *timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        *obs_context.all_timesteps.first(),
+        &tile_baseline_flags,
+        &flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
 
     // Now use the flags from our doctored mwaf file.
-    let mut args = get_reduced_1090008640(false, true);
-    args.ignore_input_data_fine_channel_flags = true;
-    args.ignore_input_data_tile_flags = true;
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = false;
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
+    let raw_reader = RawDataReader::new(&metafits, &vis, Some(&mwafs), corrections, None).unwrap();
 
     let mut flagged_cross_data_array = Array2::from_elem(cross_vis_shape, Jones::identity());
     let mut flagged_cross_weights_array = Array2::ones(cross_vis_shape);
     let mut flagged_auto_data_array = Array2::from_elem(auto_vis_shape, Jones::identity());
     let mut flagged_auto_weights_array = Array2::ones(auto_vis_shape);
 
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         flagged_cross_data_array.view_mut(),
         flagged_cross_weights_array.view_mut(),
         flagged_auto_data_array.view_mut(),
         flagged_auto_weights_array.view_mut(),
-        *timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        *obs_context.all_timesteps.first(),
+        &tile_baseline_flags,
+        &flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -574,17 +661,15 @@ fn test_mwaf_flags() {
     assert_eq!(auto_weights_array, flagged_auto_weights_array);
 
     // Iterate over the weight arrays, checking for flags.
-    let num_tiles = params.get_total_num_tiles();
     let num_bls = (num_tiles * (num_tiles + 1)) / 2;
-    let num_freqs = params.get_obs_context().fine_chan_freqs.len();
+    let num_freqs = obs_context.fine_chan_freqs.len();
     // Unfortunately we have to conditionally select either the auto or cross
     // visibilities.
     for i_chan in 0..num_freqs {
         let mut i_auto = 0;
         let mut i_cross = 0;
         for i_bl in 0..num_bls {
-            let (tile1, tile2) =
-                marlu::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
+            let (tile1, tile2) = marlu::math::baseline_to_tiles(num_tiles, i_bl);
 
             let weight = if tile1 == tile2 {
                 i_auto += 1;
@@ -608,26 +693,27 @@ fn test_mwaf_flags() {
 #[test]
 fn test_mwaf_flags_primes() {
     // First test without any mwaf flags.
-    let mut args = get_reduced_1090008640(false, false);
-    args.ignore_input_data_fine_channel_flags = true;
-    args.ignore_input_data_tile_flags = true;
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = false;
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: true,
+        cable_length: false,
+        geometric: false,
     };
-    let timesteps = params.timesteps;
+    let raw_reader = RawDataReader::new(&metafits, &vis, None, corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let timesteps = &obs_context.all_timesteps;
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let num_unflagged_tiles = total_num_tiles - obs_context.flagged_tiles.len();
+    let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
+    let tile_baseline_flags = TileBaselineFlags::new(
+        total_num_tiles,
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+    let flagged_fine_chans = HashSet::new();
+    let num_unflagged_fine_chans = obs_context.fine_chan_freqs.len() - flagged_fine_chans.len();
 
     // Set up our arrays for reading.
-    let num_unflagged_cross_baselines = params
-        .tile_baseline_flags
-        .tile_to_unflagged_cross_baseline_map
-        .len();
-    let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
-    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let cross_vis_shape = (num_unflagged_fine_chans, num_unflagged_cross_baselines);
     let mut cross_data_array = Array2::from_elem(cross_vis_shape, Jones::identity());
     let mut cross_weights_array = Array2::ones(cross_vis_shape);
@@ -635,52 +721,39 @@ fn test_mwaf_flags_primes() {
     let mut auto_data_array = Array2::from_elem(auto_vis_shape, Jones::identity());
     let mut auto_weights_array = Array2::ones(auto_vis_shape);
 
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         cross_data_array.view_mut(),
         cross_weights_array.view_mut(),
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        &tile_baseline_flags,
+        &flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
 
     // Now use the flags from our "primes" mwaf file.
-    let mut args = get_reduced_1090008640(false, false);
-    args.ignore_input_data_fine_channel_flags = true;
-    args.ignore_input_data_tile_flags = true;
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = false;
     let temp_dir = TempDir::new().unwrap();
     let mwaf_pb = temp_dir.path().join("primes.mwaf");
     let mut mwaf_file = std::fs::File::create(&mwaf_pb).unwrap();
     deflate_gz_into_file("test_files/1090008640/primes_01.mwaf.gz", &mut mwaf_file);
-    match &mut args.data {
-        Some(d) => d.push(mwaf_pb.display().to_string()),
-        None => unreachable!(),
-    }
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
+    let raw_reader =
+        RawDataReader::new(&metafits, &vis, Some(&[mwaf_pb]), corrections, None).unwrap();
 
     let mut flagged_cross_data_array = Array2::from_elem(cross_vis_shape, Jones::identity());
     let mut flagged_cross_weights_array = Array2::ones(cross_vis_shape);
     let mut flagged_auto_data_array = Array2::from_elem(auto_vis_shape, Jones::identity());
     let mut flagged_auto_weights_array = Array2::ones(auto_vis_shape);
 
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         flagged_cross_data_array.view_mut(),
         flagged_cross_weights_array.view_mut(),
         flagged_auto_data_array.view_mut(),
         flagged_auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        &tile_baseline_flags,
+        &flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -691,9 +764,9 @@ fn test_mwaf_flags_primes() {
 
     // Iterate over the arrays, where are the differences? They should be
     // primes.
-    let num_tiles = params.get_total_num_tiles();
+    let num_tiles = total_num_tiles;
     let num_bls = (num_tiles * (num_tiles + 1)) / 2;
-    let num_freqs = params.get_obs_context().fine_chan_freqs.len();
+    let num_freqs = obs_context.fine_chan_freqs.len();
     // Unfortunately we have to conditionally select either the auto or cross
     // visibilities.
     for i_chan in 0..num_freqs {
@@ -703,8 +776,7 @@ fn test_mwaf_flags_primes() {
             // This mwaf file was created with baselines moving slower than
             // frequencies.
             let is_prime = crate::math::is_prime(i_bl * num_freqs + i_chan);
-            let (tile1, tile2) =
-                marlu::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
+            let (tile1, tile2) = marlu::math::baseline_to_tiles(num_unflagged_tiles, i_bl);
 
             let weight = if tile1 == tile2 {
                 i_auto += 1;
@@ -724,38 +796,36 @@ fn test_mwaf_flags_primes() {
 /// Test that cotter flags are correctly (as possible) ingested.
 #[test]
 fn test_mwaf_flags_cotter() {
-    let mut args = get_reduced_1090008640(false, false);
-    args.ignore_input_data_fine_channel_flags = true;
-    args.ignore_input_data_tile_flags = true;
-    args.pfb_flavour = Some("none".to_string());
-    args.no_digital_gains = false;
+    let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
+    let corrections = RawDataCorrections {
+        pfb_flavour: PfbFlavour::None,
+        digital_gains: true,
+        cable_length: true,
+        geometric: true,
+    };
 
     let temp_dir = TempDir::new().unwrap();
-    let mwaf_pb = temp_dir.path().join("cotter.mwaf");
-    let mut mwaf_file = std::fs::File::create(&mwaf_pb).unwrap();
+    let mwafs = [temp_dir.path().join("cotter.mwaf")];
+    let mut mwaf_file = std::fs::File::create(&mwafs[0]).unwrap();
     deflate_gz_into_file(
         "test_files/1090008640/1090008640_01_cotter.mwaf.gz",
         &mut mwaf_file,
     );
-    match &mut args.data {
-        Some(d) => d.push(mwaf_pb.display().to_string()),
-        None => unreachable!(),
-    }
 
-    let result = args.clone().into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
-    let timesteps = &params.timesteps;
+    let raw_reader = RawDataReader::new(&metafits, &vis, Some(&mwafs), corrections, None).unwrap();
+    let obs_context = raw_reader.get_obs_context();
+    let timesteps = &obs_context.all_timesteps;
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let num_unflagged_tiles = total_num_tiles - obs_context.flagged_tiles.len();
+    let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
+    let tile_baseline_flags = TileBaselineFlags::new(
+        total_num_tiles,
+        obs_context.flagged_tiles.iter().copied().collect(),
+    );
+    let flagged_fine_chans = HashSet::new();
+    let num_unflagged_fine_chans = obs_context.fine_chan_freqs.len() - flagged_fine_chans.len();
 
     // Set up our arrays for reading.
-    let num_unflagged_cross_baselines = params
-        .tile_baseline_flags
-        .tile_to_unflagged_cross_baseline_map
-        .len();
-    let num_unflagged_tiles = params.unflagged_tile_xyzs.len();
-    let num_unflagged_fine_chans = params.unflagged_fine_chan_freqs.len();
     let cross_vis_shape = (num_unflagged_fine_chans, num_unflagged_cross_baselines);
     let mut cross_data_array = Array2::from_elem(cross_vis_shape, Jones::identity());
     let mut cross_weights_array = Array2::ones(cross_vis_shape);
@@ -763,30 +833,29 @@ fn test_mwaf_flags_cotter() {
     let mut auto_data_array = Array2::from_elem(auto_vis_shape, Jones::identity());
     let mut auto_weights_array = Array2::ones(auto_vis_shape);
 
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         cross_data_array.view_mut(),
         cross_weights_array.view_mut(),
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        &tile_baseline_flags,
+        &flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
 
     // Iterate over the weight arrays.
-    let num_tiles = params.get_total_num_tiles();
+    let num_tiles = obs_context.get_total_num_tiles();
     let num_bls = (num_tiles * (num_tiles + 1)) / 2;
-    let num_freqs = params.get_obs_context().fine_chan_freqs.len();
+    let num_freqs = obs_context.fine_chan_freqs.len();
     // Unfortunately we have to conditionally select either the auto or cross
     // visibilities.
     for i_chan in 0..num_freqs {
         let mut i_auto = 0;
         let mut i_cross = 0;
         for i_bl in 0..num_bls {
-            let (tile1, tile2) =
-                marlu::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
+            let (tile1, tile2) = marlu::math::baseline_to_tiles(num_unflagged_tiles, i_bl);
 
             let weight = if tile1 == tile2 {
                 i_auto += 1;
@@ -807,34 +876,21 @@ fn test_mwaf_flags_cotter() {
     }
 
     // Do it all again, but this time with the forward offset flags.
-    let mut mwaf_file = std::fs::File::create(&mwaf_pb).unwrap();
+    let mut mwaf_file = std::fs::File::create(&mwafs[0]).unwrap();
     deflate_gz_into_file(
         "test_files/1090008640/1090008640_01_cotter_offset_forwards.mwaf.gz",
         &mut mwaf_file,
     );
-    match &mut args.data {
-        Some(d) => {
-            d.pop();
-            d.push(mwaf_pb.display().to_string())
-        }
-        None => unreachable!(),
-    }
+    let raw_reader = RawDataReader::new(&metafits, &vis, Some(&mwafs), corrections, None).unwrap();
 
-    let result = args.clone().into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
-    let timesteps = &params.timesteps;
-
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         cross_data_array.view_mut(),
         cross_weights_array.view_mut(),
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        &tile_baseline_flags,
+        &flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -843,8 +899,7 @@ fn test_mwaf_flags_cotter() {
         let mut i_auto = 0;
         let mut i_cross = 0;
         for i_bl in 0..num_bls {
-            let (tile1, tile2) =
-                marlu::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
+            let (tile1, tile2) = marlu::math::baseline_to_tiles(num_unflagged_tiles, i_bl);
 
             let weight = if tile1 == tile2 {
                 i_auto += 1;
@@ -865,34 +920,21 @@ fn test_mwaf_flags_cotter() {
     }
 
     // Finally the backward offset flags.
-    let mut mwaf_file = std::fs::File::create(&mwaf_pb).unwrap();
+    let mut mwaf_file = std::fs::File::create(&mwafs[0]).unwrap();
     deflate_gz_into_file(
         "test_files/1090008640/1090008640_01_cotter_offset_backwards.mwaf.gz",
         &mut mwaf_file,
     );
-    match &mut args.data {
-        Some(d) => {
-            d.pop();
-            d.push(mwaf_pb.display().to_string())
-        }
-        None => unreachable!(),
-    }
+    let raw_reader = RawDataReader::new(&metafits, &vis, Some(&mwafs), corrections, None).unwrap();
 
-    let result = args.clone().into_params();
-    let params = match result {
-        Ok(p) => p,
-        Err(e) => panic!("{}", e),
-    };
-    let timesteps = &params.timesteps;
-
-    let result = params.input_data.read_crosses_and_autos(
+    let result = raw_reader.read_crosses_and_autos(
         cross_data_array.view_mut(),
         cross_weights_array.view_mut(),
         auto_data_array.view_mut(),
         auto_weights_array.view_mut(),
         *timesteps.first(),
-        &params.tile_baseline_flags,
-        &params.flagged_fine_chans,
+        &tile_baseline_flags,
+        &flagged_fine_chans,
     );
     assert!(result.is_ok(), "{}", result.unwrap_err());
     result.unwrap();
@@ -901,8 +943,7 @@ fn test_mwaf_flags_cotter() {
         let mut i_auto = 0;
         let mut i_cross = 0;
         for i_bl in 0..num_bls {
-            let (tile1, tile2) =
-                marlu::math::baseline_to_tiles(params.unflagged_tile_xyzs.len(), i_bl);
+            let (tile1, tile2) = marlu::math::baseline_to_tiles(num_unflagged_tiles, i_bl);
 
             let weight = if tile1 == tile2 {
                 i_auto += 1;
@@ -926,58 +967,39 @@ fn test_mwaf_flags_cotter() {
 #[test]
 fn test_default_flags_per_coarse_chan() {
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(10000, 128, true),
+        get_80khz_fine_chan_flags_per_coarse_chan(10000, NonZeroU16::new(128).unwrap(), true),
         &[0, 1, 2, 3, 4, 5, 6, 7, 120, 121, 122, 123, 124, 125, 126, 127]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(10000, 128, false),
+        get_80khz_fine_chan_flags_per_coarse_chan(10000, NonZeroU16::new(128).unwrap(), false),
         &[0, 1, 2, 3, 4, 5, 6, 7, 64, 120, 121, 122, 123, 124, 125, 126, 127]
     );
 
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(20000, 64, true),
+        get_80khz_fine_chan_flags_per_coarse_chan(20000, NonZeroU16::new(64).unwrap(), true),
         &[0, 1, 2, 3, 60, 61, 62, 63]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(20000, 64, false),
+        get_80khz_fine_chan_flags_per_coarse_chan(20000, NonZeroU16::new(64).unwrap(), false),
         &[0, 1, 2, 3, 32, 60, 61, 62, 63]
     );
 
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(40000, 32, true),
+        get_80khz_fine_chan_flags_per_coarse_chan(40000, NonZeroU16::new(32).unwrap(), true),
         &[0, 1, 30, 31]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(40000, 32, false),
+        get_80khz_fine_chan_flags_per_coarse_chan(40000, NonZeroU16::new(32).unwrap(), false),
         &[0, 1, 16, 30, 31]
     );
 
     // Future proofing?
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(7200, 100, true),
+        get_80khz_fine_chan_flags_per_coarse_chan(7200, NonZeroU16::new(100).unwrap(), true),
         &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
     );
     assert_eq!(
-        get_80khz_fine_chan_flags_per_coarse_chan(7200, 100, false),
+        get_80khz_fine_chan_flags_per_coarse_chan(7200, NonZeroU16::new(100).unwrap(), false),
         &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 50, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
     );
-}
-
-#[test]
-fn test_1090008640_calibration_quality() {
-    let mut args = get_reduced_1090008640(false, false);
-    let temp_dir = tempdir().expect("Couldn't make temp dir");
-    args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
-    args.pfb_flavour = Some("none".to_string());
-    // To be consistent with other data quality tests, add these flags.
-    args.fine_chan_flags = Some(vec![0, 1, 2, 16, 30, 31]);
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(r) => r,
-        Err(e) => panic!("{}", e),
-    };
-
-    let cal_vis = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
-    test_1090008640_quality(params, cal_vis);
 }

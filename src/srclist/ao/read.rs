@@ -7,13 +7,15 @@
 //! The code here is probably incomplete, but it should work for the majority of
 //! source lists.
 
-use log::warn;
 use marlu::{sexagesimal::*, RADec};
 use vec1::vec1;
 
-use crate::srclist::{
-    error::{ReadSourceListAOError, ReadSourceListCommonError, ReadSourceListError},
-    ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList,
+use crate::{
+    cli::Warn,
+    srclist::{
+        error::{ReadSourceListAOError, ReadSourceListCommonError, ReadSourceListError},
+        ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList,
+    },
 };
 
 /// Parse a buffer containing an AO-style source list into a [SourceList].
@@ -57,8 +59,8 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
             Some("skymodel") => {
                 match items.next() {
                     Some("fileformat") => (),
-                    Some(s) => warn!("Malformed AO source list 'skymodel' line; expected 'fileformat', got '{s}'"),
-                    None => warn!("Malformed AO source list 'skymodel' line; expected 'fileformat', got nothing"),
+                    Some(s) => format!("Malformed AO source list 'skymodel' line; expected 'fileformat', got '{s}'").warn(),
+                    None => "Malformed AO source list 'skymodel' line; expected 'fileformat', got nothing".warn(),
                 }
 
                 match items.next() {
@@ -66,11 +68,13 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     // Stokes.
                     Some("1.0") => one_point_oh = true,
                     Some("1.1") => (),
-                    Some(v) => {
-                        warn!("Unrecognised AO source list fileformat '{v}'; pretending it is 1.1")
-                    }
+                    Some(v) => format!(
+                        "Unrecognised AO source list fileformat '{v}'; pretending it is 1.1"
+                    )
+                    .warn(),
                     None => {
-                        warn!("This AO source list does not specify a fileformat; pretending it is 1.1")
+                        "This AO source list does not specify a fileformat; pretending it is 1.1"
+                            .warn()
                     }
                 }
             }

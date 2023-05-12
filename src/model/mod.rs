@@ -8,15 +8,13 @@ mod cpu;
 #[cfg(feature = "cuda")]
 mod cuda;
 mod error;
-#[cfg(test)]
-mod integration_tests;
 pub(crate) mod shapelets;
 #[cfg(test)]
 mod tests;
 
-use cpu::SkyModellerCpu;
+pub use cpu::SkyModellerCpu;
 #[cfg(feature = "cuda")]
-use cuda::SkyModellerCuda;
+pub use cuda::SkyModellerCuda;
 pub(crate) use error::ModelError;
 
 use std::collections::HashSet;
@@ -25,10 +23,10 @@ use hifitime::{Duration, Epoch};
 use marlu::{c32, Jones, RADec, XyzGeodetic, UVW};
 use ndarray::{Array2, ArrayViewMut2};
 
-use crate::{beam::Beam, srclist::SourceList, Polarisations};
+use crate::{beam::Beam, context::Polarisations, srclist::SourceList, MODEL_DEVICE};
 
-#[derive(Debug, Clone)]
-pub(crate) enum ModellerInfo {
+#[derive(Debug, Clone, Copy)]
+pub enum ModelDevice {
     /// The CPU is used for modelling. This always uses double-precision floats
     /// when modelling.
     Cpu,
@@ -36,10 +34,80 @@ pub(crate) enum ModellerInfo {
     /// A CUDA-capable device is used for modelling. The precision depends on
     /// the compile features used.
     #[cfg(feature = "cuda")]
-    Cuda {
-        device_info: crate::cuda::CudaDeviceInfo,
-        driver_info: crate::cuda::CudaDriverInfo,
-    },
+    Cuda,
+}
+
+impl ModelDevice {
+    pub(crate) fn get_precision(self) -> &'static str {
+        match self {
+            ModelDevice::Cpu => "double",
+
+            #[cfg(feature = "cuda-single")]
+            ModelDevice::Cuda => "single",
+
+            #[cfg(all(feature = "cuda", not(feature = "cuda-single")))]
+            ModelDevice::Cuda => "double",
+        }
+    }
+
+    /// Get a formatted string with information on the device used for
+    /// modelling.
+    pub(crate) fn get_device_info(self) -> Result<String, DeviceError> {
+        match self {
+            ModelDevice::Cpu => Ok(get_cpu_info()),
+
+            #[cfg(feature = "cuda")]
+            ModelDevice::Cuda => {
+                let (device_info, driver_info) = crate::cuda::get_device_info()?;
+                Ok(format!(
+                    "{} (capability {}, {} MiB), CUDA driver {}, runtime {}",
+                    device_info.name,
+                    device_info.capability,
+                    device_info.total_global_mem,
+                    driver_info.driver_version,
+                    driver_info.runtime_version
+                ))
+            }
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum DeviceError {
+    #[cfg(feature = "cuda")]
+    #[error(transparent)]
+    Cuda(#[from] crate::cuda::CudaError),
+}
+
+/// Get a formatted string with information on the device used for modelling.
+// TODO: Is there a way to get the name of the CPU without some crazy
+// dependencies?
+pub(crate) fn get_cpu_info() -> String {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        // Non-exhaustive but perhaps most-interesting CPU features.
+        let avx = std::arch::is_x86_feature_detected!("avx");
+        let avx2 = std::arch::is_x86_feature_detected!("avx2");
+        let avx512 = std::arch::is_x86_feature_detected!("avx512f");
+
+        match (avx512, avx2, avx) {
+            (true, _, _) => {
+                format!("{} CPU (AVX512 available)", std::env::consts::ARCH)
+            }
+            (false, true, _) => {
+                format!("{} CPU (AVX2 available)", std::env::consts::ARCH)
+            }
+            (false, false, true) => {
+                format!("{} CPU (AVX available)", std::env::consts::ARCH)
+            }
+            (false, false, false) => {
+                format!("{} CPU (AVX unavailable!)", std::env::consts::ARCH)
+            }
+        }
+    }
+
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    Ok(format!("{} CPU", std::env::consts::ARCH));
 }
 
 /// An object that simulates sky-model visibilities.
@@ -102,7 +170,6 @@ pub trait SkyModeller<'a> {
 /// executed, or if there was a problem in setting up a `BeamCUDA`.
 #[allow(clippy::too_many_arguments)]
 pub fn new_sky_modeller<'a>(
-    #[cfg(feature = "cuda")] use_cpu_for_modelling: bool,
     beam: &'a dyn Beam,
     source_list: &SourceList,
     pols: Polarisations,
@@ -115,40 +182,24 @@ pub fn new_sky_modeller<'a>(
     dut1: Duration,
     apply_precession: bool,
 ) -> Result<Box<dyn SkyModeller<'a> + 'a>, ModelError> {
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "cuda")] {
-            if use_cpu_for_modelling {
-                Ok(Box::new(SkyModellerCpu::new(
-                    beam,
-                    source_list,
-                    pols,
-                    unflagged_tile_xyzs,
-                    unflagged_fine_chan_freqs,
-                    flagged_tiles,
-                    phase_centre,
-                    array_longitude_rad,
-                    array_latitude_rad,
-                    dut1,
-                    apply_precession,
-                )))
-            } else {
-                let modeller = SkyModellerCuda::new(
-                    beam,
-                    source_list,
-                    pols,
-                    unflagged_tile_xyzs,
-                    unflagged_fine_chan_freqs,
-                    flagged_tiles,
-                    phase_centre,
-                    array_longitude_rad,
-                    array_latitude_rad,
-                    dut1,
-                    apply_precession,
-                )?;
-                Ok(Box::new(modeller))
-            }
-        } else {
-            Ok(Box::new(SkyModellerCpu::new(
+    match MODEL_DEVICE.load() {
+        ModelDevice::Cpu => Ok(Box::new(SkyModellerCpu::new(
+            beam,
+            source_list,
+            pols,
+            unflagged_tile_xyzs,
+            unflagged_fine_chan_freqs,
+            flagged_tiles,
+            phase_centre,
+            array_longitude_rad,
+            array_latitude_rad,
+            dut1,
+            apply_precession,
+        ))),
+
+        #[cfg(feature = "cuda")]
+        ModelDevice::Cuda => {
+            let modeller = SkyModellerCuda::new(
                 beam,
                 source_list,
                 pols,
@@ -160,7 +211,8 @@ pub fn new_sky_modeller<'a>(
                 array_latitude_rad,
                 dut1,
                 apply_precession,
-            )))
+            )?;
+            Ok(Box::new(modeller))
         }
     }
 }

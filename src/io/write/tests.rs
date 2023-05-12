@@ -14,7 +14,7 @@ use vec1::{vec1, Vec1};
 
 use super::*;
 use crate::{
-    averaging::timesteps_to_timeblocks,
+    averaging::{channels_to_chanblocks, timesteps_to_timeblocks},
     io::read::{MsReader, UvfitsReader, VisRead},
     math::TileBaselineFlags,
 };
@@ -46,8 +46,8 @@ fn synthesize_test_data(
 #[test]
 #[serial]
 fn test_vis_output_no_time_averaging_no_gaps() {
-    let vis_time_average_factor = 1;
-    let vis_freq_average_factor = 1;
+    let vis_time_average_factor = NonZeroUsize::new(1).unwrap();
+    let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
 
     let num_timesteps = 5;
     let num_channels = 10;
@@ -64,15 +64,27 @@ fn test_vis_output_no_time_averaging_no_gaps() {
             .collect(),
     )
     .unwrap();
-    let timeblocks = timesteps_to_timeblocks(&timestamps, vis_time_average_factor, &timesteps);
+    let timeblocks = timesteps_to_timeblocks(
+        &timestamps,
+        time_res,
+        vis_time_average_factor,
+        Some(&timesteps),
+    );
 
-    let freq_res = 10e3;
+    let freq_res = 10e3 as u64;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels)
-            .map(|i| 150e6 + freq_res * i as f64)
+        (0..num_channels as u64)
+            .map(|i| 150_000_000 + freq_res * i)
             .collect(),
     )
     .unwrap();
+
+    let spw = &channels_to_chanblocks(
+        &fine_chan_freqs,
+        freq_res,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    )[0];
 
     let vis_ctx = VisContext {
         num_sel_timesteps: timesteps.len(),
@@ -80,7 +92,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res,
+        freq_resolution_hz: freq_res as f64,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
@@ -144,18 +156,15 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 &tile_xyzs,
                 &tile_names,
                 Some(obsid),
-                &timestamps,
-                &timesteps,
                 &timeblocks,
                 time_res,
-                Duration::from_seconds(0.0),
-                freq_res,
-                &fine_chan_freqs,
+                Duration::default(),
+                spw,
                 &ant_pairs,
-                &HashSet::new(),
                 vis_time_average_factor,
                 vis_freq_average_factor,
                 marlu_mwa_obs_context,
+                false,
                 rx,
                 &error,
                 None,
@@ -182,11 +191,9 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     // Read the visibilities in and check everything is fine.
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
-            VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
-            }
+            VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new(path.to_path_buf(), None, None, None).unwrap())
+                Box::new(MsReader::new(path, None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -208,7 +215,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         );
 
         assert_eq!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.freq_res, Some(freq_res));
+        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -216,8 +223,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
-        let flagged_fine_chans: HashSet<usize> =
-            obs_context.flagged_fine_chans.iter().cloned().collect();
+        let flagged_fine_chans: HashSet<u16> =
+            obs_context.flagged_fine_chans.iter().copied().collect();
 
         for i_timestep in 0..timesteps.len() {
             reader
@@ -242,8 +249,8 @@ fn test_vis_output_no_time_averaging_no_gaps() {
 #[test]
 #[serial]
 fn test_vis_output_no_time_averaging_with_gaps() {
-    let vis_time_average_factor = 1;
-    let vis_freq_average_factor = 1;
+    let vis_time_average_factor = NonZeroUsize::new(1).unwrap();
+    let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
 
     let num_timestamps = 10;
     let num_channels = 10;
@@ -260,15 +267,27 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             .collect(),
     )
     .unwrap();
-    let timeblocks = timesteps_to_timeblocks(&timestamps, vis_time_average_factor, &timesteps);
+    let timeblocks = timesteps_to_timeblocks(
+        &timestamps,
+        time_res,
+        vis_time_average_factor,
+        Some(&timesteps),
+    );
 
-    let freq_res = 10e3;
+    let freq_res = 10e3 as u64;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels)
-            .map(|i| 150e6 + freq_res * i as f64)
+        (0..num_channels as u64)
+            .map(|i| 150_000_000 + freq_res * i)
             .collect(),
     )
     .unwrap();
+
+    let spw = &channels_to_chanblocks(
+        &fine_chan_freqs,
+        freq_res,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    )[0];
 
     let vis_ctx = VisContext {
         num_sel_timesteps: timesteps.len(),
@@ -276,7 +295,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res,
+        freq_resolution_hz: freq_res as f64,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
@@ -340,18 +359,15 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 &tile_xyzs,
                 &tile_names,
                 Some(obsid),
-                &timestamps,
-                &timesteps,
                 &timeblocks,
                 time_res,
-                Duration::from_seconds(0.0),
-                freq_res,
-                &fine_chan_freqs,
+                Duration::default(),
+                spw,
                 &ant_pairs,
-                &HashSet::new(),
                 vis_time_average_factor,
                 vis_freq_average_factor,
                 marlu_mwa_obs_context,
+                false,
                 rx,
                 &error,
                 None,
@@ -380,11 +396,9 @@ fn test_vis_output_no_time_averaging_with_gaps() {
     let timesteps = [0, 1, 2];
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
-            VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
-            }
+            VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new(path.to_path_buf(), None, None, None).unwrap())
+                Box::new(MsReader::new(path, None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -403,7 +417,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
         assert_eq!(obs_context.time_res, Some(time_res));
-        assert_eq!(obs_context.freq_res, Some(freq_res));
+        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -411,8 +425,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
-        let flagged_fine_chans: HashSet<usize> =
-            obs_context.flagged_fine_chans.iter().cloned().collect();
+        let flagged_fine_chans: HashSet<u16> =
+            obs_context.flagged_fine_chans.iter().copied().collect();
 
         for i_timestep in 0..timesteps.len() {
             reader
@@ -437,8 +451,8 @@ fn test_vis_output_no_time_averaging_with_gaps() {
 #[test]
 #[serial]
 fn test_vis_output_time_averaging() {
-    let vis_time_average_factor = 3;
-    let vis_freq_average_factor = 1;
+    let vis_time_average_factor = NonZeroUsize::new(3).unwrap();
+    let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
 
     let num_timestamps = 10;
     let num_channels = 10;
@@ -457,15 +471,27 @@ fn test_vis_output_time_averaging() {
             .collect(),
     )
     .unwrap();
-    let timeblocks = timesteps_to_timeblocks(&timestamps, vis_time_average_factor, &timesteps);
+    let timeblocks = timesteps_to_timeblocks(
+        &timestamps,
+        time_res,
+        vis_time_average_factor,
+        Some(&timesteps),
+    );
 
-    let freq_res = 10e3;
+    let freq_res = 10e3 as u64;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels)
-            .map(|i| 150e6 + freq_res * i as f64)
+        (0..num_channels as u64)
+            .map(|i| 150_000_000 + freq_res * i)
             .collect(),
     )
     .unwrap();
+
+    let spw = &channels_to_chanblocks(
+        &fine_chan_freqs,
+        freq_res,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    )[0];
 
     let vis_ctx = VisContext {
         num_sel_timesteps: timesteps.len(),
@@ -473,7 +499,7 @@ fn test_vis_output_time_averaging() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res,
+        freq_resolution_hz: freq_res as f64,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
@@ -540,18 +566,15 @@ fn test_vis_output_time_averaging() {
                 &tile_xyzs,
                 &tile_names,
                 Some(obsid),
-                &timestamps,
-                &timesteps,
                 &timeblocks,
                 time_res,
-                Duration::from_seconds(0.0),
-                freq_res,
-                &fine_chan_freqs,
+                Duration::default(),
+                spw,
                 &ant_pairs,
-                &HashSet::new(),
                 vis_time_average_factor,
                 vis_freq_average_factor,
                 marlu_mwa_obs_context,
+                false,
                 rx,
                 &error,
                 None,
@@ -580,11 +603,9 @@ fn test_vis_output_time_averaging() {
     let timesteps = [0, 1];
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
-            VisOutputType::Uvfits => {
-                Box::new(UvfitsReader::new(path.to_path_buf(), None, None).unwrap())
-            }
+            VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),
             VisOutputType::MeasurementSet => {
-                Box::new(MsReader::new(path.to_path_buf(), None, None, None).unwrap())
+                Box::new(MsReader::new(path, None, None, None).unwrap())
             }
         };
         let obs_context = reader.get_obs_context();
@@ -602,7 +623,7 @@ fn test_vis_output_time_averaging() {
             expected.mapped_ref(|t| t.to_gpst_seconds())
         );
         assert_eq!(obs_context.time_res, Some(Duration::from_seconds(3.0)));
-        assert_eq!(obs_context.freq_res, Some(freq_res));
+        assert_eq!(obs_context.freq_res, Some(freq_res as f64));
 
         let avg_shape = (
             obs_context.fine_chan_freqs.len(),
@@ -610,8 +631,8 @@ fn test_vis_output_time_averaging() {
         );
         let mut avg_data = Array2::zeros(avg_shape);
         let mut avg_weights = Array2::zeros(avg_shape);
-        let flagged_fine_chans: HashSet<usize> =
-            obs_context.flagged_fine_chans.iter().cloned().collect();
+        let flagged_fine_chans: HashSet<u16> =
+            obs_context.flagged_fine_chans.iter().copied().collect();
 
         for i_timestep in 0..timesteps.len() {
             reader

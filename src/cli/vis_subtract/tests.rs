@@ -15,7 +15,7 @@ use vec1::vec1;
 
 use super::*;
 use crate::{
-    cli::vis_utils::simulate::VisSimulateArgs,
+    cli::vis_simulate::VisSimulateArgs,
     io::read::fits::{fits_open, fits_open_hdu},
     srclist::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList},
     tests::reduced_obsids::get_reduced_1090008640,
@@ -32,8 +32,8 @@ fn test_1090008640_vis_subtract() {
     let subtracted = temp_dir.path().join("subtracted.uvfits");
 
     let mut args = get_reduced_1090008640(false, false);
-    args.no_beam = true;
-    let metafits = args.data.as_ref().unwrap()[0].as_str();
+    args.beam_args.no_beam = true;
+    let metafits = args.data_args.files.as_ref().unwrap()[0].as_str();
     let mut srclist = SourceList::new();
     srclist.insert(
         "src1".to_string(),
@@ -87,7 +87,6 @@ fn test_1090008640_vis_subtract() {
         "--output-model-files", &format!("{}", model_1.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
-        "--no-progress-bars"
     ]);
     let result = sim_args.run(false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
@@ -100,7 +99,6 @@ fn test_1090008640_vis_subtract() {
         "--output-model-files", &format!("{}", model_2.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
-        "--no-progress-bars"
     ]);
     let result = sim_args.run(false);
     assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
@@ -115,7 +113,6 @@ fn test_1090008640_vis_subtract() {
             "--outputs", &format!("{}", subtracted.display()),
             "--source-list", &format!("{}", source_list_2.display()),
             "--sources-to-subtract", "src2",
-            "--no-progress-bars",
         ]);
         let result = sub_args.run(false);
         assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());
@@ -190,7 +187,6 @@ fn test_1090008640_vis_subtract() {
             "--outputs", &format!("{}", subtracted.display()),
             "--source-list", &format!("{}", source_list_2.display()),
             "--sources-to-subtract", "src1", "src2",
-            "--no-progress-bars",
         ]);
         let result = sub_args.run(false);
         assert!(result.is_ok(), "result={:?} not ok", result.err().unwrap());

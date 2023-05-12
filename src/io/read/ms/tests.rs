@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashSet, ffi::CString};
+use std::ffi::CString;
 
 use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
@@ -14,34 +14,20 @@ use serial_test::serial; // Need to test serially because casacore is a steaming
 use tempfile::tempdir;
 
 use super::*;
-use crate::{
-    di_calibrate::{get_cal_vis, tests::test_1090008640_quality},
-    math::TileBaselineFlags,
-    tests::{deflate_gz_into_tempfile, reduced_obsids::get_reduced_1090008640_ms},
-};
+use crate::tests::{deflate_gz_into_tempfile, get_reduced_1090008640_ms_pbs, DataAsPathBufs};
 
 #[test]
 #[serial]
 fn test_1090008640_cross_vis() {
-    let args = get_reduced_1090008640_ms();
-    let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(
-            PathBuf::from(ms),
-            None,
-            Some(&PathBuf::from(metafits)),
-            None,
-        ) {
-            Ok(m) => m,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_ms_pbs();
+    let ms_reader = MsReader::new(vis.swap_remove(0), None, Some(&metafits), None).unwrap();
 
-    let obs_context = &ms_reader.obs_context;
+    let obs_context = ms_reader.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -93,24 +79,14 @@ fn test_1090008640_cross_vis() {
 #[test]
 #[serial]
 fn read_1090008640_auto_vis() {
-    let args = get_reduced_1090008640_ms();
-    let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(
-            PathBuf::from(ms),
-            None,
-            Some(&PathBuf::from(metafits)),
-            None,
-        ) {
-            Ok(m) => m,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_ms_pbs();
+    let ms_reader = MsReader::new(vis.swap_remove(0), None, Some(&metafits), None).unwrap();
 
-    let obs_context = &ms_reader.obs_context;
+    let obs_context = ms_reader.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -188,24 +164,14 @@ fn read_1090008640_auto_vis() {
 #[test]
 #[serial]
 fn read_1090008640_auto_vis_with_flags() {
-    let args = get_reduced_1090008640_ms();
-    let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(
-            PathBuf::from(ms),
-            None,
-            Some(&PathBuf::from(metafits)),
-            None,
-        ) {
-            Ok(m) => m,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_ms_pbs();
+    let ms_reader = MsReader::new(vis.swap_remove(0), None, Some(&metafits), None).unwrap();
 
-    let obs_context = &ms_reader.obs_context;
+    let obs_context = ms_reader.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let tile_flags = HashSet::from([1, 9]);
     let num_unflagged_tiles = total_num_tiles - tile_flags.len();
     let chan_flags = HashSet::from([1]);
@@ -291,25 +257,15 @@ fn read_1090008640_auto_vis_with_flags() {
 #[test]
 #[serial]
 fn read_1090008640_cross_and_auto_vis() {
-    let args = get_reduced_1090008640_ms();
-    let ms_reader = if let [metafits, ms] = &args.data.unwrap()[..] {
-        match MsReader::new(
-            PathBuf::from(ms),
-            None,
-            Some(&PathBuf::from(metafits)),
-            None,
-        ) {
-            Ok(m) => m,
-            Err(e) => panic!("{}", e),
-        }
-    } else {
-        panic!("There weren't 2 elements in args.data");
-    };
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_ms_pbs();
+    let ms_reader = MsReader::new(vis.swap_remove(0), None, Some(&metafits), None).unwrap();
 
-    let obs_context = &ms_reader.obs_context;
+    let obs_context = ms_reader.get_obs_context();
     let total_num_tiles = obs_context.get_total_num_tiles();
     let num_baselines = (total_num_tiles * (total_num_tiles - 1)) / 2;
-    let num_chans = obs_context.num_fine_chans_per_coarse_chan.unwrap().get();
+    let num_chans = usize::from(obs_context.num_fine_chans_per_coarse_chan.unwrap().get());
     let tile_baseline_flags = TileBaselineFlags::new(total_num_tiles, HashSet::new());
 
     assert_abs_diff_eq!(
@@ -424,25 +380,6 @@ fn read_1090008640_cross_and_auto_vis() {
 
 #[test]
 #[serial]
-fn test_1090008640_calibration_quality() {
-    let mut args = get_reduced_1090008640_ms();
-    let temp_dir = tempdir().expect("Couldn't make temp dir");
-    args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
-    // To be consistent with other data quality tests, add these flags.
-    args.fine_chan_flags = Some(vec![0, 1, 2, 16, 30, 31]);
-
-    let result = args.into_params();
-    let params = match result {
-        Ok(r) => r,
-        Err(e) => panic!("{}", e),
-    };
-
-    let cal_vis = get_cal_vis(&params, false).expect("Couldn't read data and generate a model");
-    test_1090008640_quality(params, cal_vis);
-}
-
-#[test]
-#[serial]
 fn test_timestep_reading() {
     let temp_dir = tempdir().expect("Couldn't make temp dir");
     let vis_path = temp_dir.path().join("vis.ms");
@@ -542,110 +479,15 @@ fn test_timestep_reading() {
 
 #[test]
 #[serial]
-fn test_trunc_data() {
-    let expected_num_tiles = 128;
-    let expected_unavailable_tiles = (2..128).collect::<Vec<usize>>();
-
-    let result = MsReader::new(
-        PathBuf::from("test_files/1090008640/1090008640_cotter_trunc_autos.ms"),
-        None,
-        None,
-        None,
-    );
-    assert!(result.is_ok(), "{:?}", result.err());
-    let reader = result.unwrap();
-    assert!(reader.obs_context.autocorrelations_present);
-    assert_eq!(reader.obs_context.get_total_num_tiles(), expected_num_tiles);
-    assert_eq!(reader.obs_context.get_num_unflagged_tiles(), 2);
-    assert_eq!(
-        &reader.obs_context.unavailable_tiles,
-        &expected_unavailable_tiles
-    );
-    assert_eq!(
-        &reader.obs_context.flagged_tiles,
-        &expected_unavailable_tiles
-    );
-    assert_eq!(&reader.obs_context.all_timesteps, &[0, 1, 2]);
-    assert_eq!(&reader.obs_context.unflagged_timesteps, &[2]);
-
-    let result = MsReader::new(
-        PathBuf::from("test_files/1090008640/1090008640_cotter_trunc_noautos.ms"),
-        None,
-        None,
-        None,
-    );
-    assert!(result.is_ok(), "{:?}", result.err());
-    let reader = result.unwrap();
-    assert!(!reader.obs_context.autocorrelations_present);
-    assert_eq!(reader.obs_context.get_total_num_tiles(), expected_num_tiles);
-    assert_eq!(reader.obs_context.get_num_unflagged_tiles(), 2);
-    assert_eq!(
-        &reader.obs_context.unavailable_tiles,
-        &expected_unavailable_tiles
-    );
-    assert_eq!(
-        &reader.obs_context.flagged_tiles,
-        &expected_unavailable_tiles
-    );
-    assert_eq!(&reader.obs_context.all_timesteps, &[0, 1, 2]);
-    assert_eq!(&reader.obs_context.unflagged_timesteps, &[2]);
-
-    let result = MsReader::new(
-        PathBuf::from("test_files/1090008640/1090008640_birli_trunc.ms"),
-        None,
-        None,
-        None,
-    );
-    assert!(result.is_ok(), "{:?}", result.err());
-    let reader = result.unwrap();
-    assert!(reader.obs_context.autocorrelations_present);
-    assert_eq!(reader.obs_context.get_total_num_tiles(), expected_num_tiles);
-    assert_eq!(reader.obs_context.get_num_unflagged_tiles(), 2);
-    assert_eq!(
-        &reader.obs_context.unavailable_tiles,
-        &expected_unavailable_tiles
-    );
-    assert_eq!(
-        &reader.obs_context.flagged_tiles,
-        &expected_unavailable_tiles
-    );
-    assert_eq!(&reader.obs_context.all_timesteps, &[0, 1, 2]);
-    assert_eq!(&reader.obs_context.unflagged_timesteps, &[1, 2]);
-
-    // Test that attempting to use all tiles still results in only 2 tiles being available.
-    let mut args = get_reduced_1090008640_ms();
-    let temp_dir = tempdir().expect("Couldn't make temp dir");
-    match args.data.as_mut() {
-        Some(d) => d[1] = "test_files/1090008640/1090008640_birli_trunc.ms".to_string(),
-        None => unreachable!(),
-    }
-    args.outputs = Some(vec![temp_dir.path().join("hyp_sols.fits")]);
-    args.ignore_input_data_tile_flags = true;
-    args.uvw_min = Some("0L".to_string());
-    let result = args.into_params();
-    assert!(result.is_ok(), "{:?}", result.err());
-    let params = result.unwrap();
-
-    assert_eq!(
-        params.tile_baseline_flags.flagged_tiles.len(),
-        expected_unavailable_tiles.len()
-    );
-}
-
-#[test]
-#[serial]
 fn test_map_metafits_antenna_order() {
     // First, check the delays and gains of the existing test data. Because this
     // MS has its tiles in the same order as the "metafits order", the delays
     // and gains are already correct without re-ordering.
-    let metafits_path = "test_files/1090008640/1090008640.metafits";
-    let ms = MsReader::new(
-        PathBuf::from("test_files/1090008640/1090008640.ms"),
-        None,
-        Some(&PathBuf::from(metafits_path)),
-        None,
-    )
-    .unwrap();
+    let DataAsPathBufs {
+        metafits, mut vis, ..
+    } = get_reduced_1090008640_ms_pbs();
+    let ms_pb = vis.swap_remove(0);
+    let ms = MsReader::new(ms_pb.clone(), None, Some(&metafits), None).unwrap();
     let obs_context = ms.get_obs_context();
     let delays = match obs_context.dipole_delays.as_ref() {
         Some(Delays::Full(d)) => d,
@@ -662,10 +504,10 @@ fn test_map_metafits_antenna_order() {
     // Test that the dipole delays/gains get mapped correctly. As the test MS is
     // already in the same order as the metafits file, the easiest thing to do
     // is to modify the metafits file.
-    let metafits = tempfile::NamedTempFile::new().expect("couldn't make a temp file");
-    std::fs::copy(metafits_path, metafits.path()).unwrap();
+    let metafits_tmp = tempfile::NamedTempFile::new().expect("couldn't make a temp file");
+    std::fs::copy(&metafits, metafits_tmp.path()).unwrap();
     unsafe {
-        let metafits = CString::new(metafits.path().display().to_string())
+        let metafits_c_str = CString::new(metafits_tmp.path().display().to_string())
             .unwrap()
             .into_raw();
         let mut fptr = std::ptr::null_mut();
@@ -673,13 +515,13 @@ fn test_map_metafits_antenna_order() {
 
         // ffopen = fits_open_file
         fitsio_sys::ffopen(
-            &mut fptr,   /* O - FITS file pointer                   */
-            metafits,    /* I - full name of file to open           */
-            1,           /* I - 0 = open readonly; 1 = read/write   */
-            &mut status, /* IO - error status                       */
+            &mut fptr,      /* O - FITS file pointer                   */
+            metafits_c_str, /* I - full name of file to open           */
+            1,              /* I - 0 = open readonly; 1 = read/write   */
+            &mut status,    /* IO - error status                       */
         );
         fits_check_status(status).unwrap();
-        drop(CString::from_raw(metafits));
+        drop(CString::from_raw(metafits_c_str));
         // ffmahd = fits_movabs_hdu
         fitsio_sys::ffmahd(
             fptr,                 /* I - FITS file pointer             */
@@ -743,13 +585,7 @@ fn test_map_metafits_antenna_order() {
         fits_check_status(status).unwrap();
     }
 
-    let ms = MsReader::new(
-        PathBuf::from("test_files/1090008640/1090008640.ms"),
-        None,
-        Some(metafits.path()),
-        None,
-    )
-    .unwrap();
+    let ms = MsReader::new(ms_pb.clone(), None, Some(metafits_tmp.path()), None).unwrap();
     let obs_context = ms.get_obs_context();
     let delays = match obs_context.dipole_delays.as_ref() {
         Some(Delays::Full(d)) => d,
@@ -790,10 +626,10 @@ fn test_map_metafits_antenna_order() {
 
     // Test that the dipole delays/gains aren't mapped when an unknown tile name
     // is encountered.
-    let metafits = tempfile::NamedTempFile::new().expect("couldn't make a temp file");
-    std::fs::copy(metafits_path, metafits.path()).unwrap();
+    let metafits_tmp2 = tempfile::NamedTempFile::new().expect("couldn't make a temp file");
+    std::fs::copy(metafits, metafits_tmp2.path()).unwrap();
     unsafe {
-        let metafits = CString::new(metafits.path().display().to_string())
+        let metafits_c_str = CString::new(metafits_tmp2.path().display().to_string())
             .unwrap()
             .into_raw();
         let mut fptr = std::ptr::null_mut();
@@ -801,13 +637,13 @@ fn test_map_metafits_antenna_order() {
 
         // ffopen = fits_open_file
         fitsio_sys::ffopen(
-            &mut fptr,   /* O - FITS file pointer                   */
-            metafits,    /* I - full name of file to open           */
-            1,           /* I - 0 = open readonly; 1 = read/write   */
-            &mut status, /* IO - error status                       */
+            &mut fptr,      /* O - FITS file pointer                   */
+            metafits_c_str, /* I - full name of file to open           */
+            1,              /* I - 0 = open readonly; 1 = read/write   */
+            &mut status,    /* IO - error status                       */
         );
         fits_check_status(status).unwrap();
-        drop(CString::from_raw(metafits));
+        drop(CString::from_raw(metafits_c_str));
         // ffmahd = fits_movabs_hdu
         fitsio_sys::ffmahd(
             fptr,                 /* I - FITS file pointer             */
@@ -846,13 +682,7 @@ fn test_map_metafits_antenna_order() {
         fits_check_status(status).unwrap();
     }
 
-    let ms = MsReader::new(
-        PathBuf::from("test_files/1090008640/1090008640.ms"),
-        None,
-        Some(metafits.path()),
-        None,
-    )
-    .unwrap();
+    let ms = MsReader::new(ms_pb, None, Some(metafits_tmp2.path()), None).unwrap();
     let obs_context = ms.get_obs_context();
     let delays = match obs_context.dipole_delays.as_ref() {
         Some(Delays::Full(d)) => d,
@@ -866,6 +696,83 @@ fn test_map_metafits_antenna_order() {
     };
     // The gains should be the same as the unaltered-metafits case.
     assert_abs_diff_eq!(gains, perturbed_gains);
+}
+
+#[test]
+#[serial]
+fn test_trunc_data() {
+    let expected_num_tiles = 128;
+    let expected_unavailable_tiles = (2..128).collect::<Vec<usize>>();
+
+    let result = MsReader::new(
+        PathBuf::from("test_files/1090008640/1090008640_cotter_trunc_autos.ms"),
+        None,
+        None,
+        None,
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+    let reader = result.unwrap();
+    let obs_context = reader.get_obs_context();
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let num_unflagged_tiles = total_num_tiles - obs_context.flagged_tiles.len();
+    assert!(obs_context.autocorrelations_present);
+    assert_eq!(total_num_tiles, expected_num_tiles);
+    assert_eq!(num_unflagged_tiles, 2);
+    assert_eq!(&obs_context.unavailable_tiles, &expected_unavailable_tiles);
+    assert_eq!(&obs_context.flagged_tiles, &expected_unavailable_tiles);
+    assert_eq!(&obs_context.all_timesteps, &[0, 1, 2]);
+    assert_eq!(&obs_context.unflagged_timesteps, &[2]);
+
+    let result = MsReader::new(
+        PathBuf::from("test_files/1090008640/1090008640_cotter_trunc_noautos.ms"),
+        None,
+        None,
+        None,
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+    let reader = result.unwrap();
+    let obs_context = reader.get_obs_context();
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let num_unflagged_tiles = total_num_tiles - obs_context.flagged_tiles.len();
+    assert!(!obs_context.autocorrelations_present);
+    assert_eq!(total_num_tiles, expected_num_tiles);
+    assert_eq!(num_unflagged_tiles, 2);
+    assert_eq!(&obs_context.unavailable_tiles, &expected_unavailable_tiles);
+    assert_eq!(&obs_context.flagged_tiles, &expected_unavailable_tiles);
+    assert_eq!(&obs_context.all_timesteps, &[0, 1, 2]);
+    assert_eq!(&obs_context.unflagged_timesteps, &[2]);
+
+    let result = MsReader::new(
+        PathBuf::from("test_files/1090008640/1090008640_birli_trunc.ms"),
+        None,
+        None,
+        None,
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+    let reader = result.unwrap();
+    let obs_context = reader.get_obs_context();
+    let total_num_tiles = obs_context.get_total_num_tiles();
+    let num_unflagged_tiles = total_num_tiles - obs_context.flagged_tiles.len();
+    assert!(obs_context.autocorrelations_present);
+    assert_eq!(total_num_tiles, expected_num_tiles);
+    assert_eq!(num_unflagged_tiles, 2);
+    assert_eq!(&obs_context.unavailable_tiles, &expected_unavailable_tiles);
+    assert_eq!(&obs_context.flagged_tiles, &expected_unavailable_tiles);
+    assert_eq!(&obs_context.all_timesteps, &[0, 1, 2]);
+    assert_eq!(&obs_context.unflagged_timesteps, &[1, 2]);
+
+    // Test that attempting to use all tiles still results in only 2 tiles being available.
+    let ms_reader = MsReader::new(
+        PathBuf::from("test_files/1090008640/1090008640_birli_trunc.ms"),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        ms_reader.get_obs_context().flagged_tiles.len(),
+        expected_unavailable_tiles.len()
+    );
 }
 
 #[test]
@@ -888,7 +795,7 @@ fn test_sdc3() {
     let obs_context = ms.get_obs_context();
     assert_eq!(obs_context.timestamps.len(), 1);
     assert_eq!(obs_context.fine_chan_freqs.len(), 1);
-    let supplied_array_position = obs_context._supplied_array_position;
+    let supplied_array_position = obs_context.supplied_array_position;
     assert_abs_diff_eq!(
         supplied_array_position.longitude_rad.to_degrees(),
         116.76444819999999,

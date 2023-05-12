@@ -9,14 +9,12 @@ use std::io::Write;
 
 use tempfile::Builder;
 
-use crate::{get_cmd_output, get_reduced_1090008640, hyperdrive};
+use crate::{get_cmd_output, get_reduced_1090008640, hyperdrive, Files};
 
 /// Try to calibrate raw MWA data without a metafits file.
 #[test]
 fn arg_file_missing_metafits() {
-    let args = get_reduced_1090008640(false, true);
-    let source_list = args.source_list.unwrap();
-    let data = args.data.unwrap();
+    let Files { data, srclist } = get_reduced_1090008640(true);
     let metafits = data
         .iter()
         .find(|d| d.contains("metafits"))
@@ -30,7 +28,7 @@ fn arg_file_missing_metafits() {
     let cmd = hyperdrive()
         .arg("di-calibrate")
         .arg("--source-list")
-        .arg(&source_list)
+        .arg(&srclist)
         .arg("--data")
         .args(&data)
         .arg("--dry-run")
@@ -47,7 +45,7 @@ fn arg_file_missing_metafits() {
     let cmd = hyperdrive()
         .arg("di-calibrate")
         .arg("--source-list")
-        .arg(&source_list)
+        .arg(&srclist)
         .arg("--data")
         .arg(metafits)
         .args(&data)
@@ -59,9 +57,7 @@ fn arg_file_missing_metafits() {
 /// Try to calibrate raw MWA data without gpubox files.
 #[test]
 fn arg_file_missing_gpuboxes() {
-    let args = get_reduced_1090008640(false, true);
-    let source_list = args.source_list.unwrap();
-    let data = args.data.unwrap();
+    let Files { data, srclist } = get_reduced_1090008640(true);
     let gpuboxes: Vec<String> = data
         .iter()
         .filter(|d| d.contains("gpubox"))
@@ -72,7 +68,7 @@ fn arg_file_missing_gpuboxes() {
     let cmd = hyperdrive()
         .arg("di-calibrate")
         .arg("--source-list")
-        .arg(&source_list)
+        .arg(&srclist)
         .arg("--data")
         .args(&data)
         .arg("--dry-run")
@@ -89,7 +85,7 @@ fn arg_file_missing_gpuboxes() {
     let cmd = hyperdrive()
         .arg("di-calibrate")
         .arg("--source-list")
-        .arg(&source_list)
+        .arg(&srclist)
         .arg("--data")
         .args(&gpuboxes)
         .args(&data)
@@ -101,9 +97,7 @@ fn arg_file_missing_gpuboxes() {
 /// Ensure that di-calibrate issues a warning when no mwaf files are supplied.
 #[test]
 fn missing_mwafs() {
-    let args = get_reduced_1090008640(false, true);
-    let source_list = args.source_list.unwrap();
-    let data = args.data.unwrap();
+    let Files { data, srclist } = get_reduced_1090008640(true);
     let metafits = &data[0];
     let gpubox = &data[1];
     let mwaf = &data[2];
@@ -113,7 +107,7 @@ fn missing_mwafs() {
     let cmd = hyperdrive()
         .arg("di-calibrate")
         .arg("--source-list")
-        .arg(&source_list)
+        .arg(&srclist)
         .arg("--data")
         .arg(metafits)
         .arg(gpubox)
@@ -127,7 +121,7 @@ fn missing_mwafs() {
     let cmd = hyperdrive()
         .arg("di-calibrate")
         .arg("--source-list")
-        .arg(&source_list)
+        .arg(&srclist)
         .arg("--data")
         .arg(metafits)
         .arg(gpubox)
@@ -143,10 +137,24 @@ fn missing_mwafs() {
 /// via argument files.
 #[test]
 fn arg_file_missing_mwafs() {
-    let args = get_reduced_1090008640(false, false);
-    let args_str = toml::to_string(&args).unwrap();
+    let Files { data, srclist } = get_reduced_1090008640(true);
+    let metafits = &data[0];
+    let gpubox = &data[1];
+    let mwaf = &data[2];
     let mut args_file = Builder::new().suffix(".toml").tempfile().unwrap();
-    args_file.write_all(args_str.as_bytes()).unwrap();
+    args_file
+        .write_all(
+            format!(
+                r#"[data]
+files = ["{metafits}", "{gpubox}"]
+
+[sky-model]
+source_list = "{srclist}"
+"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
 
     // Don't include an mwaf file; we expect a warning to be logged for this
     // reason.
@@ -160,10 +168,20 @@ fn arg_file_missing_mwafs() {
     assert!(stdout.contains("No mwaf files supplied"), "{}", stdout);
 
     // Include an mwaf file; we don't expect a warning this time.
-    let args = get_reduced_1090008640(false, true);
-    let args_str = toml::to_string(&args).unwrap();
     let mut args_file = Builder::new().suffix(".toml").tempfile().unwrap();
-    args_file.write_all(args_str.as_bytes()).unwrap();
+    args_file
+        .write_all(
+            format!(
+                r#"[data]
+files = ["{metafits}", "{gpubox}", "{mwaf}"]
+
+[sky-model]
+source_list = "{srclist}"
+"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
 
     let cmd = hyperdrive()
         .arg("di-calibrate")

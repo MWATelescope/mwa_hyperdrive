@@ -7,14 +7,16 @@
 //! See for more info:
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_rts.html>
 
-use log::warn;
 use marlu::RADec;
 use vec1::vec1;
 
-use crate::srclist::{
-    error::{ReadSourceListCommonError, ReadSourceListError, ReadSourceListRtsError},
-    ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
-    SourceList,
+use crate::{
+    cli::Warn,
+    srclist::{
+        error::{ReadSourceListCommonError, ReadSourceListError, ReadSourceListRtsError},
+        ComponentType, FluxDensity, FluxDensityType, ShapeletCoeff, Source, SourceComponent,
+        SourceList,
+    },
 };
 
 /// Parse a buffer containing an RTS-style source list into a `SourceList`.
@@ -62,10 +64,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
         }
         // We ignore any lines starting with whitespace, but emit a warning.
         else if line.starts_with(' ') | line.starts_with('\t') {
-            warn!(
+            format!(
                 "Source list line {} starts with whitespace; ignoring it",
                 line_num
-            );
+            )
+            .warn();
             line.clear();
             continue;
         }
@@ -104,10 +107,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         }
                     };
                     if items.next().is_some() {
-                        warn!(
+                        format!(
                             "Source list line {}: Ignoring trailing contents after declination",
                             line_num
-                        );
+                        )
+                        .warn();
                     }
 
                     // Validation and conversion.
@@ -178,10 +182,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after Stokes V",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 if stokes_i.is_nan() || stokes_q.is_nan() || stokes_u.is_nan() || stokes_v.is_nan()
@@ -237,10 +242,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 // Ensure the position angle is positive.
@@ -293,10 +299,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 // Ensure the position angle is positive.
@@ -340,7 +347,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 };
                 components.iter_mut().last().unwrap().comp_type = comp_type;
 
-                warn!("Source list line {}: Ignoring SHAPELET component", line_num);
+                format!("Source list line {}: Ignoring SHAPELET component", line_num).warn();
                 component_type_set = true;
                 in_shapelet = true;
             }
@@ -380,10 +387,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after minor axis",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 // Because we ignore SHAPELET components, only add this COEFF
@@ -468,10 +476,11 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     }
                 };
                 if items.next().is_some() {
-                    warn!(
+                    format!(
                         "Source list line {}: Ignoring trailing contents after declination",
                         line_num
-                    );
+                    )
+                    .warn();
                 }
 
                 // Validation and conversion.

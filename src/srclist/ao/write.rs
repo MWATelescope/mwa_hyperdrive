@@ -4,10 +4,13 @@
 
 //! Writing "André Offringa"-style text source lists.
 
-use log::{debug, warn};
+use log::debug;
 use marlu::sexagesimal::*;
 
-use crate::srclist::{error::WriteSourceListError, ComponentType, FluxDensityType, SourceList};
+use crate::{
+    cli::Warn,
+    srclist::{error::WriteSourceListError, ComponentType, FluxDensityType, SourceList},
+};
 
 pub(crate) fn write_source_list<T: std::io::Write>(
     buf: &mut T,
@@ -34,8 +37,11 @@ pub(crate) fn write_source_list<T: std::io::Write>(
             });
         if any_curved_power_laws {
             if !warned_curved_power_laws {
-                warn!("AO source lists don't support curved-power-law flux densities.");
-                warn!("Any sources containing them won't be written.");
+                [
+                    "AO source lists don't support curved-power-law flux densities.".into(),
+                    "Any sources containing them won't be written.".into(),
+                ]
+                .warn();
                 warned_curved_power_laws = true;
             }
             debug!("Ignoring source {name} as it contains a curved power law");
@@ -43,8 +49,11 @@ pub(crate) fn write_source_list<T: std::io::Write>(
         }
         if any_shapelets {
             if !warned_shapelets {
-                warn!("AO source lists don't support shapelet components.");
-                warn!("Any sources containing them won't be written.");
+                [
+                    "AO source lists don't support shapelet components.".into(),
+                    "Any sources containing them won't be written.".into(),
+                ]
+                .warn();
                 warned_shapelets = true;
             }
             debug!("Ignoring source {name} as it contains a shapelet component");
@@ -137,7 +146,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
 
     if let Some(num_sources) = num_sources {
         if num_sources > num_written_sources {
-            warn!("Couldn't write the requested number of sources ({num_sources}): wrote {num_written_sources}")
+            format!("Couldn't write the requested number of sources ({num_sources}): wrote {num_written_sources}").warn()
         }
     }
 

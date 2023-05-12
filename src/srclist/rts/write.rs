@@ -4,9 +4,12 @@
 
 //! Writing RTS-style text source lists.
 
-use log::{debug, warn};
+use log::debug;
 
-use crate::srclist::{ComponentType, FluxDensityType, SourceList, WriteSourceListError};
+use crate::{
+    cli::Warn,
+    srclist::{ComponentType, FluxDensityType, SourceList, WriteSourceListError},
+};
 
 fn write_comp_type<T: std::io::Write>(
     buf: &mut T,
@@ -101,8 +104,11 @@ pub(crate) fn write_source_list<T: std::io::Write>(
             .any(|comp| matches!(comp.flux_type, FluxDensityType::CurvedPowerLaw { .. }))
         {
             if !warned_curved_power_laws {
-                warn!("RTS source lists don't support curved-power-law flux densities.");
-                warn!("Any sources containing them won't be written.");
+                [
+                    "RTS source lists don't support curved-power-law flux densities.".into(),
+                    "Any sources containing them won't be written.".into(),
+                ]
+                .warn();
                 warned_curved_power_laws = true;
             }
             debug!("Ignoring source {name} as it contains a curved power law");
@@ -155,7 +161,7 @@ pub(crate) fn write_source_list<T: std::io::Write>(
 
     if let Some(num_sources) = num_sources {
         if num_sources > num_written_sources {
-            warn!("Couldn't write the requested number of sources ({num_sources}): wrote {num_written_sources}")
+            format!("Couldn't write the requested number of sources ({num_sources}): wrote {num_written_sources}").warn()
         }
     }
 
@@ -181,8 +187,11 @@ pub(crate) fn write_source_list_with_order<T: std::io::Write>(
             .any(|comp| matches!(comp.flux_type, FluxDensityType::CurvedPowerLaw { .. }))
         {
             if !warned_curved_power_laws {
-                warn!("RTS source lists don't support curved-power-law flux densities.");
-                warn!("Any sources containing them won't be written.");
+                [
+                    "RTS source lists don't support curved-power-law flux densities.".into(),
+                    "Any sources containing them won't be written.".into(),
+                ]
+                .warn();
                 warned_curved_power_laws = true;
             }
             debug!("Ignoring source {name} as it contains a curved power law");

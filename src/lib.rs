@@ -7,49 +7,57 @@
 //!
 //! <https://mwatelescope.github.io/mwa_hyperdrive/index.html>
 
-pub mod averaging;
-pub mod beam;
+mod averaging;
+mod beam;
 mod cli;
-pub(crate) mod constants;
-pub(crate) mod context;
-pub mod di_calibrate;
-pub(crate) mod error;
-pub(crate) mod filenames;
-pub(crate) mod flagging;
-mod help_texts;
-pub(crate) mod io;
-pub(crate) mod math;
-pub(crate) mod messages;
-pub(crate) mod metafits;
-pub(crate) mod misc;
+mod constants;
+mod context;
+mod di_calibrate;
+mod flagging;
+mod io;
+mod math;
+mod metafits;
+mod misc;
 pub mod model;
-pub(crate) mod solutions;
+mod params;
+mod solutions;
 pub mod srclist;
-pub(crate) mod unit_parsing;
+mod unit_parsing;
 
 #[cfg(feature = "cuda")]
-pub(crate) mod cuda;
+mod cuda;
 
 #[cfg(test)]
 mod tests;
 
+use crossbeam_utils::atomic::AtomicCell;
+lazy_static::lazy_static! {
+    /// Are progress bars being drawn? This should only ever be enabled by CLI
+    /// code.
+    static ref PROGRESS_BARS: AtomicCell<bool> = AtomicCell::new(false);
+
+    /// What device (GPU or CPU) are we using for modelling and beam responses?
+    /// This should only ever be changed from its default by CLI code.
+    static ref MODEL_DEVICE: AtomicCell<model::ModelDevice> = {
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "cuda")] {
+                AtomicCell::new(ModelDevice::Cuda)
+            } else {
+                AtomicCell::new(ModelDevice::Cpu)
+            }
+        }
+    };
+}
+
 // Re-exports.
-pub use cli::{
-    di_calibrate::DiCalArgs,
-    dipole_gains::DipoleGainsArgs,
-    solutions::{
-        apply::SolutionsApplyArgs, convert::SolutionsConvertArgs, plot::SolutionsPlotArgs,
-    },
-    srclist::{
-        by_beam::SrclistByBeamArgs, convert::SrclistConvertArgs, shift::SrclistShiftArgs,
-        verify::SrclistVerifyArgs,
-    },
-    vis_utils::{simulate::VisSimulateArgs, subtract::VisSubtractArgs},
-};
+pub use averaging::{Chanblock, Timeblock};
+pub use beam::{create_fee_beam_object, Delays};
+#[doc(hidden)]
+pub use cli::Hyperdrive;
+pub use cli::HyperdriveError;
 pub use context::Polarisations;
-pub use error::HyperdriveError;
-pub use io::read::{
-    AutoData, CrossData, MsReader, RawDataCorrections, RawDataReader, UvfitsReader,
-};
+pub use di_calibrate::calibrate_timeblocks;
+pub use io::read::{CrossData, MsReader, RawDataCorrections, RawDataReader, UvfitsReader};
 pub use math::TileBaselineFlags;
+pub use model::ModelDevice;
 pub use solutions::CalibrationSolutions;

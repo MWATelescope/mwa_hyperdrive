@@ -68,18 +68,17 @@ fn test_1090008640_vis_simulate() {
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output_path = temp_dir.path().join("model.uvfits");
     let args = get_reduced_1090008640(false, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
+    let metafits = args.data_args.files.as_ref().unwrap()[0].clone();
 
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
         "--metafits", &metafits,
-        "--source-list", &args.source_list.unwrap(),
+        "--source-list", &args.srclist_args.source_list.unwrap(),
         "--output-model-files", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
-        "--no-progress-bars"
     ]);
 
     // Run vis-simulate and check that it succeeds
@@ -349,16 +348,15 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output_path = temp_dir.path().join("model.uvfits");
     let args = get_reduced_1090008640(false, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
+    let metafits = args.data_args.files.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
         "--metafits", &metafits,
-        "--source-list", &args.source_list.unwrap(),
+        "--source-list", &args.srclist_args.source_list.unwrap(),
         "--output-model-files", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
-        "--no-progress-bars",
         "--cpu",
     ]);
     let result = sim_args.run(false);
@@ -398,16 +396,15 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     drop(uvfits);
 
     let args = get_reduced_1090008640(false, false);
-    let metafits = args.data.as_ref().unwrap()[0].clone();
+    let metafits = args.data_args.files.as_ref().unwrap()[0].clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
         "--metafits", &metafits,
-        "--source-list", &args.source_list.unwrap(),
+        "--source-list", &args.srclist_args.source_list.unwrap(),
         "--output-model-files", &format!("{}", output_path.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
-        "--no-progress-bars"
     ]);
 
     // Run vis-simulate and check that it succeeds

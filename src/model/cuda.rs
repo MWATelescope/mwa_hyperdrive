@@ -28,7 +28,7 @@ use crate::{
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
 /// second is the source component. The length of `hadecs`, `lmns`,
 /// `*_list_fds`'s second axis are the same.
-pub(crate) struct SkyModellerCuda<'a> {
+pub struct SkyModellerCuda<'a> {
     /// The trait object to use for beam calculations.
     cuda_beam: Box<dyn BeamCUDA>,
 
@@ -141,7 +141,7 @@ impl<'a> SkyModellerCuda<'a> {
     /// function, because using power laws is more efficient and probably more
     /// accurate.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub fn new(
         beam: &dyn Beam,
         source_list: &SourceList,
         pols: Polarisations,

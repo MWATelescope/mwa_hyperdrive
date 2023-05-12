@@ -4,11 +4,7 @@
 
 //! Error-handling code associated with reading from raw MWA files.
 
-use thiserror::Error;
-
-use crate::flagging::MwafMergeError;
-
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum RawReadError {
     #[error("gpubox file {0} does not have a corresponding mwaf file specified")]
     GpuboxFileMissingMwafFile(usize),
@@ -25,12 +21,21 @@ pub enum RawReadError {
     #[error("Attempted to read in MWA VCS data; this is unsupported")]
     Vcs,
 
+    #[error("The supplied mwaf files don't have flags for timestep {timestep} (GPS time {gps})")]
+    MwafFlagsMissingForTimestep { timestep: usize, gps: f64 },
+
     #[error(transparent)]
-    MwafMerge(#[from] Box<MwafMergeError>),
+    MwafMerge(#[from] Box<crate::flagging::MwafMergeError>),
 
     #[error(transparent)]
     Glob(#[from] crate::io::GlobError),
 
     #[error("mwalib error: {0}")]
     Mwalib(#[from] Box<mwalib::MwalibError>),
+
+    #[error(transparent)]
+    Selection(#[from] Box<marlu::SelectionError>),
+
+    #[error(transparent)]
+    Birli(#[from] Box<birli::BirliError>),
 }

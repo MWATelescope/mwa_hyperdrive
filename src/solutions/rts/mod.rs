@@ -27,7 +27,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use log::{debug, trace, warn};
+use log::{debug, trace};
 use marlu::Jones;
 use mwalib::MetafitsContext;
 use ndarray::prelude::*;
@@ -36,7 +36,7 @@ use thiserror::Error;
 use vec1::Vec1;
 
 use super::CalibrationSolutions;
-use crate::io::get_all_matches_from_glob;
+use crate::{cli::Warn, io::get_all_matches_from_glob};
 
 lazy_static::lazy_static! {
     static ref NODE_NUM: Regex = Regex::new(r"node(\d{3})\.dat$").unwrap();
@@ -174,9 +174,16 @@ fn read_no_files(
     let available_num_coarse_chans = receiver_channel_to_data.len();
     let total_num_coarse_chans = context.num_metafits_coarse_chans;
     if available_num_coarse_chans != total_num_coarse_chans {
-        warn!("The number of coarse channels expected by the metafits ({total_num_coarse_chans})");
-        warn!("    wasn't equal to the number of node files ({available_num_coarse_chans}).");
-        warn!("    We will use NaNs for the missing coarse channels.");
+        [
+            format!(
+                "The number of coarse channels expected by the metafits ({total_num_coarse_chans})"
+            )
+            .into(),
+            format!("wasn't equal to the number of node files ({available_num_coarse_chans}).")
+                .into(),
+            "We will use NaNs for the missing coarse channels.".into(),
+        ]
+        .warn();
     };
 
     // Check that the number of tiles is the same everywhere.

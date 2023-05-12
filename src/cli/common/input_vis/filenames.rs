@@ -4,46 +4,46 @@
 
 //! Code to parse filenames.
 //!
-//! [InputDataTypes] is the struct to be used here. It is constructed from a
+//! [`InputDataTypes`] is the struct to be used here. It is constructed from a
 //! slice of string filenames, and it enforces things like allowing only one
 //! metafits file to be present.
 
-use std::fs::OpenOptions;
-use std::path::{Path, PathBuf};
+use std::{
+    fs::OpenOptions,
+    path::{Path, PathBuf},
+};
 
 use regex::{Regex, RegexBuilder};
-use thiserror::Error;
 use vec1::Vec1;
 
-use crate::io::{get_all_matches_from_glob, read::VisReadError, GlobError};
+use super::InputVisArgsError;
+use crate::io::get_all_matches_from_glob;
+
+pub(super) const GPUBOX_REGEX: &str = r".*gpubox.*\.fits$";
+pub(super) const MWAX_REGEX: &str = r"\d{10}_\d{8}(.)?\d{6}_ch\d{3}_\d{3}\.fits$";
 
 lazy_static::lazy_static! {
     // gpubox files should not be renamed in any way! This includes the case of
     // the letters in the filename. mwalib should complain if this is not the
     // case.
     static ref RE_GPUBOX: Regex =
-        RegexBuilder::new(r".*gpubox.*\.fits$")
+        RegexBuilder::new(GPUBOX_REGEX)
             .case_insensitive(false).build().unwrap();
 
     static ref RE_MWAX: Regex =
-        RegexBuilder::new(r"\d{10}_\d{8}(.)?\d{6}_ch\d{3}_\d{3}\.fits$")
+        RegexBuilder::new(MWAX_REGEX)
             .case_insensitive(false).build().unwrap();
 }
 
-pub(super) const SUPPORTED_INPUT_FILE_COMBINATIONS: &str =
-    "gpubox + metafits (+ mwaf)\nms (+ metafits)\nuvfits (+ metafits)";
-
-pub(super) const SUPPORTED_CALIBRATED_INPUT_FILE_COMBINATIONS: &str =
-    "ms (+ metafits)\nuvfits (+ metafits)";
-
 #[derive(Debug)]
 /// Supported input data types for calibration.
-pub(crate) struct InputDataTypes {
-    pub(crate) metafits: Option<Vec1<PathBuf>>,
-    pub(crate) gpuboxes: Option<Vec1<PathBuf>>,
-    pub(crate) mwafs: Option<Vec1<PathBuf>>,
-    pub(crate) ms: Option<Vec1<PathBuf>>,
-    pub(crate) uvfits: Option<Vec1<PathBuf>>,
+pub(super) struct InputDataTypes {
+    pub(super) metafits: Option<Vec1<PathBuf>>,
+    pub(super) gpuboxes: Option<Vec1<PathBuf>>,
+    pub(super) mwafs: Option<Vec1<PathBuf>>,
+    pub(super) ms: Option<Vec1<PathBuf>>,
+    pub(super) uvfits: Option<Vec1<PathBuf>>,
+    pub(super) solutions: Option<Vec1<PathBuf>>,
 }
 
 // The same as `InputDataTypes`, but all types are allowed to be multiples. This
@@ -55,12 +55,13 @@ struct InputDataTypesTemp {
     mwafs: Vec<PathBuf>,
     ms: Vec<PathBuf>,
     uvfits: Vec<PathBuf>,
+    solutions: Vec<PathBuf>,
 }
 
 impl InputDataTypes {
     /// From an input collection of filename or glob strings, disentangle the
-    /// file types and populate [InputDataTypes].
-    pub(super) fn new(files: &[String]) -> Result<InputDataTypes, VisReadError> {
+    /// file types and populate [`InputDataTypes`].
+    pub(super) fn parse(files: &[String]) -> Result<InputDataTypes, InputVisArgsError> {
         let mut temp = InputDataTypesTemp::default();
 
         for file in files.iter().map(|f| f.as_str()) {
@@ -93,13 +94,18 @@ impl InputDataTypes {
             } else {
                 Some(Vec1::try_from_vec(temp.uvfits).unwrap())
             },
+            solutions: if temp.solutions.is_empty() {
+                None
+            } else {
+                Some(Vec1::try_from_vec(temp.solutions).unwrap())
+            },
         })
     }
 }
 
-fn exists_and_is_readable(file: &Path) -> Result<(), InputFileError> {
+fn exists_and_is_readable(file: &Path) -> Result<(), InputVisArgsError> {
     if !file.exists() {
-        return Err(InputFileError::DoesNotExist(file.display().to_string()));
+        return Err(InputVisArgsError::DoesNotExist(file.display().to_string()));
     }
     match OpenOptions::new()
         .read(true)
@@ -108,9 +114,9 @@ fn exists_and_is_readable(file: &Path) -> Result<(), InputFileError> {
     {
         Ok(_) => (),
         Err(std::io::ErrorKind::PermissionDenied) => {
-            return Err(InputFileError::CouldNotRead(file.display().to_string()))
+            return Err(InputVisArgsError::CouldNotRead(file.display().to_string()))
         }
-        Err(e) => return Err(InputFileError::IO(file.display().to_string(), e.into())),
+        Err(e) => return Err(InputVisArgsError::IO(file.display().to_string(), e.into())),
     }
 
     Ok(())
@@ -120,20 +126,20 @@ fn exists_and_is_readable(file: &Path) -> Result<(), InputFileError> {
 // what type it is, and add it to the provided file types struct. If the file
 // string doesn't exist, then check if it's a glob string, and act recursively
 // on the glob results.
-fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), InputFileError> {
+fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), InputVisArgsError> {
     let file_pb = PathBuf::from(file);
     // Is this a file, and is it readable?
     match exists_and_is_readable(&file_pb) {
         Ok(_) => (),
 
         // If this string isn't a file, maybe it's a glob.
-        Err(InputFileError::DoesNotExist(f)) => {
+        Err(InputVisArgsError::DoesNotExist(f)) => {
             match get_all_matches_from_glob(file) {
                 Ok(glob_results) => {
                     // If there were no glob matches, then just return the
                     // original error (the file does not exist).
                     if glob_results.is_empty() {
-                        return Err(InputFileError::DoesNotExist(f));
+                        return Err(InputVisArgsError::DoesNotExist(f));
                     }
 
                     // Iterate over all glob results, adding them to the file
@@ -145,7 +151,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
                 }
 
                 // Propagate all other errors.
-                Err(e) => return Err(InputFileError::from(e)),
+                Err(e) => return Err(InputVisArgsError::from(e)),
             }
         }
 
@@ -153,7 +159,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         Err(e) => return Err(e),
     };
     if file.contains("_metafits_ppds.fits") {
-        return Err(InputFileError::PpdMetafitsUnsupported(file.to_string()));
+        return Err(InputVisArgsError::PpdMetafitsUnsupported(file.to_string()));
     }
     match (
         file.ends_with(".metafits") || file.ends_with("_metafits.fits"),
@@ -169,31 +175,19 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         (false, false, false, true, false, false) => file_types.mwafs.push(file_pb),
         (false, false, false, false, true, false) => file_types.ms.push(file_pb),
         (false, false, false, false, false, true) => file_types.uvfits.push(file_pb),
-        _ => return Err(InputFileError::NotRecognised(file.to_string())),
+        _ => {
+            // We don't recognise this file as a "vis input" type. Try to match
+            // a calibration solutions type.
+            if file.ends_with(".fits") || file.ends_with(".bin") {
+                file_types.solutions.push(file_pb);
+            } else {
+                // If that doesn't work, bail out.
+                return Err(InputVisArgsError::NotRecognised(file.to_string()));
+            }
+        }
     }
 
     Ok(())
-}
-
-#[derive(Debug, Error)]
-pub enum InputFileError {
-    #[error("Specified file does not exist: {0}")]
-    DoesNotExist(String),
-
-    #[error("Could not read specified file: {0}")]
-    CouldNotRead(String),
-
-    #[error("The specified file '{0}' is a \"PPDs metafits\" and is not supported. Please use a newer metafits file.")]
-    PpdMetafitsUnsupported(String),
-
-    #[error("The specified file '{0}' was not a recognised file type.")]
-    NotRecognised(String),
-
-    #[error(transparent)]
-    Glob(#[from] GlobError),
-
-    #[error("IO error when attempting to read file '{0}': {1}")]
-    IO(String, std::io::Error),
 }
 
 #[cfg(test)]
@@ -255,7 +249,7 @@ mod tests {
         let result = exists_and_is_readable(&PathBuf::from("/does/not/exist.metafits"));
         assert!(result.is_err());
         match result {
-            Err(InputFileError::DoesNotExist(_)) => (),
+            Err(InputVisArgsError::DoesNotExist(_)) => (),
             Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
@@ -284,7 +278,7 @@ mod tests {
         let result = exists_and_is_readable(tmp_file.path());
         assert!(result.is_err());
         match result {
-            Err(InputFileError::CouldNotRead(_)) => (),
+            Err(InputVisArgsError::CouldNotRead(_)) => (),
             Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
@@ -309,7 +303,7 @@ mod tests {
         let result = file_checker(&mut input, "/tmp");
         assert!(result.is_err());
         match result {
-            Err(InputFileError::NotRecognised(_)) => (),
+            Err(InputVisArgsError::NotRecognised(_)) => (),
             Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
@@ -321,7 +315,7 @@ mod tests {
         let result = file_checker(&mut input, "/does/not/exist.metafits");
         assert!(result.is_err());
         match result {
-            Err(InputFileError::DoesNotExist(_)) => (),
+            Err(InputVisArgsError::DoesNotExist(_)) => (),
             Err(e) => panic!("Unexpected error kind! {e:?}"),
             Ok(_) => unreachable!(),
         }
@@ -370,7 +364,7 @@ mod tests {
         let dir = make_new_dir();
         let gpubox = make_legacy_gpubox(dir.path());
         let result = file_checker(&mut input, gpubox.to_str().unwrap());
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(input.gpuboxes.len(), 1);
     }
 

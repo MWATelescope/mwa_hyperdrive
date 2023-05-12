@@ -18,16 +18,14 @@ use tempfile::Builder;
 use vec1::{vec1, Vec1};
 
 use mwa_hyperdrive::{
-    averaging::{Chanblock, Timeblock},
-    beam::{create_fee_beam_object, Delays},
-    di_calibrate::calibrate_timeblocks,
-    model,
+    calibrate_timeblocks, create_fee_beam_object,
+    model::{self, SkyModeller},
     srclist::{
         get_instrumental_flux_densities, ComponentType, FluxDensity, FluxDensityType,
         ShapeletCoeff, Source, SourceComponent, SourceList,
     },
-    CrossData, MsReader, Polarisations, RawDataCorrections, RawDataReader, TileBaselineFlags,
-    UvfitsReader,
+    Chanblock, CrossData, Delays, MsReader, Polarisations, RawDataCorrections, RawDataReader,
+    TileBaselineFlags, Timeblock, UvfitsReader,
 };
 
 fn model_benchmarks(c: &mut Criterion) {
@@ -73,9 +71,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         },
                     );
                 }
-                let modeller = model::new_sky_modeller(
-                    #[cfg(feature = "cuda")]
-                    true,
+                let modeller = model::SkyModellerCpu::new(
                     &*beam,
                     &source_list,
                     Polarisations::default(),
@@ -87,8 +83,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     MWA_LAT_RAD,
                     dut1,
                     apply_precession,
-                )
-                .unwrap();
+                );
 
                 b.iter(|| {
                     modeller
@@ -137,8 +132,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         },
                     );
                 }
-                let modeller = model::new_sky_modeller(
-                    false,
+                let modeller = model::SkyModellerCuda::new(
                     &*beam,
                     &source_list,
                     Polarisations::default(),
@@ -196,9 +190,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 },
             );
         }
-        let modeller = model::new_sky_modeller(
-            #[cfg(feature = "cuda")]
-            true,
+        let modeller = model::SkyModellerCpu::new(
             &*beam,
             &source_list,
             Polarisations::default(),
@@ -210,8 +202,7 @@ fn model_benchmarks(c: &mut Criterion) {
             MWA_LAT_RAD,
             dut1,
             apply_precession,
-        )
-        .unwrap();
+        );
 
         b.iter(|| {
             modeller
@@ -262,8 +253,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         },
                     );
                 }
-                let modeller = model::new_sky_modeller(
-                    false,
+                let modeller = model::SkyModellerCuda::new(
                     &*beam,
                     &source_list,
                     Polarisations::default(),
@@ -332,9 +322,7 @@ fn model_benchmarks(c: &mut Criterion) {
                     },
                 );
             }
-            let modeller = model::new_sky_modeller(
-                #[cfg(feature = "cuda")]
-                true,
+            let modeller = model::SkyModellerCpu::new(
                 &*beam,
                 &source_list,
                 Polarisations::default(),
@@ -346,8 +334,7 @@ fn model_benchmarks(c: &mut Criterion) {
                 MWA_LAT_RAD,
                 dut1,
                 apply_precession,
-            )
-            .unwrap();
+            );
 
             b.iter(|| {
                 modeller
@@ -408,8 +395,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         },
                     );
                 }
-                let modeller = model::new_sky_modeller(
-                    false,
+                let modeller = model::SkyModellerCuda::new(
                     &*beam,
                     &source_list,
                     Polarisations::default(),
@@ -443,16 +429,16 @@ fn calibrate_benchmarks(c: &mut Criterion) {
         index: 0,
         range: 0..num_timesteps,
         timestamps: vec1![
-            Epoch::from_gpst_seconds(1090008640.0),
-            Epoch::from_gpst_seconds(1090008641.0),
-            Epoch::from_gpst_seconds(1090008642.0),
-            Epoch::from_gpst_seconds(1090008643.0),
-            Epoch::from_gpst_seconds(1090008644.0),
-            Epoch::from_gpst_seconds(1090008645.0),
-            Epoch::from_gpst_seconds(1090008646.0),
-            Epoch::from_gpst_seconds(1090008647.0),
-            Epoch::from_gpst_seconds(1090008648.0),
-            Epoch::from_gpst_seconds(1090008649.0),
+            (Epoch::from_gpst_seconds(1090008640.0), 0),
+            (Epoch::from_gpst_seconds(1090008641.0), 1),
+            (Epoch::from_gpst_seconds(1090008642.0), 2),
+            (Epoch::from_gpst_seconds(1090008643.0), 3),
+            (Epoch::from_gpst_seconds(1090008644.0), 4),
+            (Epoch::from_gpst_seconds(1090008645.0), 5),
+            (Epoch::from_gpst_seconds(1090008646.0), 6),
+            (Epoch::from_gpst_seconds(1090008647.0), 7),
+            (Epoch::from_gpst_seconds(1090008648.0), 8),
+            (Epoch::from_gpst_seconds(1090008649.0), 9),
         ],
         median: Epoch::from_gpst_seconds(1090008644.5),
     });
@@ -464,7 +450,7 @@ fn calibrate_benchmarks(c: &mut Criterion) {
         chanblocks.push(Chanblock {
             chanblock_index: i_chanblock as _,
             unflagged_index: i_chanblock as _,
-            _freq: 150e6 + i_chanblock as f64,
+            freq: 150e6 + i_chanblock as f64,
         })
     }
     let chanblocks = Vec1::try_from_vec(chanblocks).unwrap();
@@ -489,7 +475,6 @@ fn calibrate_benchmarks(c: &mut Criterion) {
                     1e-8,
                     1e-4,
                     Polarisations::default(),
-                    false,
                     false,
                 );
             });
@@ -562,9 +547,10 @@ fn io_benchmarks(c: &mut Criterion) {
     };
 
     // Open the readers.
+    let gpuboxes = [gpubox];
     let raw = RawDataReader::new(
-        &&metafits,
-        &[&gpubox],
+        &metafits,
+        &gpuboxes,
         None,
         RawDataCorrections::do_nothing(),
         None,
@@ -619,8 +605,8 @@ fn io_benchmarks(c: &mut Criterion) {
         |b| {
             // Need to re-make the reader with the new corrections.
             let raw = RawDataReader::new(
-                &&metafits,
-                &[&gpubox],
+                &metafits,
+                &gpuboxes,
                 None,
                 RawDataCorrections::default(),
                 None,

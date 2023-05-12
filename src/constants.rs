@@ -27,3 +27,6 @@ pub(crate) const DEFAULT_CUTOFF_DISTANCE: f64 = 50.0;
 pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.6682231283184983;
 
 pub(crate) use marlu::constants::*;
+
+/// The default column to use when reading visibilities from a measurement set.
+pub(crate) const DEFAULT_MS_DATA_COL_NAME: &str = "DATA";

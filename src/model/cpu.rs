@@ -34,7 +34,7 @@ use crate::{
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 const SHAPELET_CONST: f64 = SQRT_FRAC_PI_SQ_2_LN_2 / shapelets::SBF_DX;
 
-pub(crate) struct SkyModellerCpu<'a> {
+pub struct SkyModellerCpu<'a> {
     pub(super) beam: &'a dyn Beam,
 
     /// The phase centre used for all modelling.
@@ -68,7 +68,7 @@ pub(crate) struct SkyModellerCpu<'a> {
 
 impl<'a> SkyModellerCpu<'a> {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub fn new(
         beam: &'a dyn Beam,
         source_list: &SourceList,
         pols: Polarisations,

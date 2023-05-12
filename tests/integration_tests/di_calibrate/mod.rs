@@ -4,7 +4,6 @@
 
 //! Code for calibration testing.
 
-mod arg_files;
 mod cli_args;
 mod missing_files;
 

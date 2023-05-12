@@ -11,6 +11,7 @@ pub(crate) mod read;
 pub(crate) mod rts;
 pub(crate) mod types;
 pub(crate) mod woden;
+mod write;
 
 mod error;
 #[cfg(test)]
@@ -20,6 +21,7 @@ mod veto;
 pub(crate) use error::*;
 pub use types::*;
 pub(crate) use veto::*;
+pub(crate) use write::write_source_list;
 
 use itertools::Itertools;
 use strum::IntoEnumIterator;

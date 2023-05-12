@@ -7,7 +7,10 @@ use std::{fs::File, io::BufReader, path::PathBuf};
 use approx::assert_abs_diff_eq;
 
 use super::SrclistByBeamArgs;
-use crate::srclist::{hyperdrive::source_list_from_json, read::read_source_list_file};
+use crate::{
+    cli::common::BeamArgs,
+    srclist::{hyperdrive::source_list_from_json, read::read_source_list_file},
+};
 
 #[test]
 fn test_srclist_by_beam() {
@@ -23,8 +26,11 @@ fn test_srclist_by_beam() {
         output_source_list: Some(temp.path().to_path_buf()),
         input_type: None,
         output_type: None,
-        metafits: PathBuf::from("test_files/1090008640/1090008640.metafits"),
-        beam_file: None,
+        metafits: Some(PathBuf::from("test_files/1090008640/1090008640.metafits")),
+        array_position: None,
+        lst_rad: None,
+        phase_centre: None,
+        freqs_hz: None,
         number: n,
         source_dist_cutoff: None,
         veto_threshold: None,
@@ -33,6 +39,12 @@ fn test_srclist_by_beam() {
         filter_shapelets: false,
         collapse_into_single_source: false,
         rts_base_source: None,
+        beam_args: BeamArgs {
+            beam_file: None,
+            unity_dipole_gains: false,
+            delays: None,
+            no_beam: false,
+        },
     }
     .run()
     .unwrap();
