@@ -203,7 +203,7 @@ mod plotting {
                 sols.obsid
                     .or_else(|| mwalib_context.as_ref().map(|m| m.obs_id))
                     .map(|o| o.to_string())
-                    .unwrap_or_else(|| "<unknown>".to_string())
+                    .unwrap_or_else(|| base.clone())
             );
             let tile_names = sols.tile_names.as_ref().or(mwalib_tile_names.as_ref());
             if tile_names.is_none() && !warned_no_tile_names {
