@@ -90,6 +90,16 @@ impl RawDataCorrections {
             && !cable_length
             && !geometric
     }
+
+    /// Return a [`RawDataCorrections`] that won't do any corrections.
+    pub fn do_nothing() -> RawDataCorrections {
+        RawDataCorrections {
+            pfb_flavour: pfb_gains::PfbFlavour::None,
+            digital_gains: false,
+            cable_length: false,
+            geometric: false,
+        }
+    }
 }
 
 impl Default for RawDataCorrections {
@@ -104,7 +114,7 @@ impl Default for RawDataCorrections {
 }
 
 /// Raw MWA data, i.e. gpubox files.
-pub(crate) struct RawDataReader {
+pub struct RawDataReader {
     /// Observation metadata.
     obs_context: ObsContext,
 
@@ -129,7 +139,7 @@ pub(crate) struct RawDataReader {
 
 impl RawDataReader {
     /// Create a new [`RawDataReader`].
-    pub(crate) fn new<T: AsRef<Path>>(
+    pub fn new<T: AsRef<Path>>(
         metadata: &T,
         gpuboxes: &[T],
         mwafs: Option<&[T]>,
@@ -539,7 +549,7 @@ impl RawDataReader {
     /// An internal method for reading visibilities. Cross- and/or
     /// auto-correlation visibilities and weights are written to the supplied
     /// arrays.
-    fn read_inner(
+    pub fn read_inner(
         &self,
         crosses: Option<CrossData>,
         autos: Option<AutoData>,

@@ -10,9 +10,10 @@ mod raw;
 mod uvfits;
 
 pub(crate) use error::VisReadError;
-pub(crate) use ms::MsReader;
-pub(crate) use raw::{pfb_gains, RawDataCorrections, RawDataReader};
-pub(crate) use uvfits::UvfitsReader;
+pub use ms::MsReader;
+pub(crate) use raw::pfb_gains;
+pub use raw::{RawDataCorrections, RawDataReader};
+pub use uvfits::UvfitsReader;
 
 use std::collections::HashSet;
 
@@ -90,16 +91,16 @@ pub(crate) trait VisRead: Sync + Send {
 
 /// A private container for cross-correlation data. It only exists to give
 /// meaning to the types.
-struct CrossData<'a, 'b, 'c> {
-    vis_fb: ArrayViewMut2<'a, Jones<f32>>,
-    weights_fb: ArrayViewMut2<'b, f32>,
-    tile_baseline_flags: &'c TileBaselineFlags,
+pub struct CrossData<'a, 'b, 'c> {
+    pub vis_fb: ArrayViewMut2<'a, Jones<f32>>,
+    pub weights_fb: ArrayViewMut2<'b, f32>,
+    pub tile_baseline_flags: &'c TileBaselineFlags,
 }
 
 /// A private container for auto-correlation data. It only exists to give
 /// meaning to the types.
-struct AutoData<'a, 'b, 'c> {
-    vis_fb: ArrayViewMut2<'a, Jones<f32>>,
-    weights_fb: ArrayViewMut2<'b, f32>,
-    tile_baseline_flags: &'c TileBaselineFlags,
+pub struct AutoData<'a, 'b, 'c> {
+    pub vis_fb: ArrayViewMut2<'a, Jones<f32>>,
+    pub weights_fb: ArrayViewMut2<'b, f32>,
+    pub tile_baseline_flags: &'c TileBaselineFlags,
 }

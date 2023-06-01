@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use criterion::*;
 use hifitime::{Duration, Epoch};
@@ -11,6 +14,7 @@ use marlu::{
     Jones, RADec, XyzGeodetic,
 };
 use ndarray::prelude::*;
+use tempfile::Builder;
 use vec1::{vec1, Vec1};
 
 use mwa_hyperdrive::{
@@ -22,6 +26,7 @@ use mwa_hyperdrive::{
         get_instrumental_flux_densities, ComponentType, FluxDensity, FluxDensityType,
         ShapeletCoeff, Source, SourceComponent, SourceList,
     },
+    CrossData, MsReader, RawDataCorrections, RawDataReader, TileBaselineFlags, UvfitsReader,
 };
 
 fn model_benchmarks(c: &mut Criterion) {
@@ -524,6 +529,183 @@ fn source_list_benchmarks(c: &mut Criterion) {
     );
 }
 
+fn io_benchmarks(c: &mut Criterion) {
+    let metafits = PathBuf::from("test_files/1090008640/1090008640.metafits");
+    // Put the disk data into RAM to help reduce transient IO effects.
+    let temp_dir = tempfile::tempdir().unwrap();
+    let gpubox = {
+        let on_disk =
+            PathBuf::from("test_files/1090008640/1090008640_20140721201027_gpubox01_00.fits");
+        let in_ram = temp_dir.path().join(on_disk.file_name().unwrap());
+        std::fs::copy(&on_disk, &in_ram).unwrap();
+        in_ram
+    };
+    let uvfits = {
+        let on_disk = PathBuf::from("test_files/1090008640/1090008640.uvfits");
+        let in_ram = Builder::new().suffix(".uvfits").tempfile().unwrap();
+        std::fs::copy(on_disk, in_ram.path()).unwrap();
+        in_ram
+    };
+    let ms = {
+        let on_disk = PathBuf::from("test_files/1090008640/1090008640.ms");
+        let in_ram = Builder::new().suffix(".ms").tempdir().unwrap();
+        copy_recursively(on_disk, in_ram.path()).unwrap();
+        in_ram
+    };
+
+    // Open the readers.
+    let raw = RawDataReader::new(
+        &&metafits,
+        &[&gpubox],
+        None,
+        RawDataCorrections::do_nothing(),
+        None,
+    )
+    .unwrap();
+    let uvfits = UvfitsReader::new(uvfits.path(), Some(&metafits), None).unwrap();
+    let ms = MsReader::new(ms.path(), Some(&metafits), None).unwrap();
+
+    let tile_baseline_flags = TileBaselineFlags::new(128, HashSet::new());
+
+    let mut raw_bench_group = c.benchmark_group("Raw IO");
+    raw_bench_group.bench_function(
+        "Read crosses for timestep, no channel flags, no corrections",
+        |b| {
+            // Prepare arrays to be read into.
+            let flagged_fine_chans = HashSet::new();
+            let mut vis_fb = Array2::default((32 - flagged_fine_chans.len(), 8128));
+            let mut weights_fb = Array2::default(vis_fb.raw_dim());
+
+            b.iter(|| {
+                let crosses = CrossData {
+                    vis_fb: vis_fb.view_mut(),
+                    weights_fb: weights_fb.view_mut(),
+                    tile_baseline_flags: &tile_baseline_flags,
+                };
+
+                raw.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+            });
+        },
+    );
+    raw_bench_group.bench_function(
+        "Read crosses for timestep, MWA channel flags, no corrections",
+        |b| {
+            // Prepare arrays to be read into.
+            let flagged_fine_chans = HashSet::from([0, 1, 16, 30, 31]);
+            let mut vis_fb = Array2::default((32 - flagged_fine_chans.len(), 8128));
+            let mut weights_fb = Array2::default(vis_fb.raw_dim());
+
+            b.iter(|| {
+                let crosses = CrossData {
+                    vis_fb: vis_fb.view_mut(),
+                    weights_fb: weights_fb.view_mut(),
+                    tile_baseline_flags: &tile_baseline_flags,
+                };
+
+                raw.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+            });
+        },
+    );
+    raw_bench_group.bench_function(
+        "Read crosses for timestep, no channel flags, default corrections",
+        |b| {
+            // Need to re-make the reader with the new corrections.
+            let raw = RawDataReader::new(
+                &&metafits,
+                &[&gpubox],
+                None,
+                RawDataCorrections::default(),
+                None,
+            )
+            .unwrap();
+
+            // Prepare arrays to be read into.
+            let flagged_fine_chans = HashSet::new();
+            let mut vis_fb = Array2::default((32 - flagged_fine_chans.len(), 8128));
+            let mut weights_fb = Array2::default(vis_fb.raw_dim());
+
+            b.iter(|| {
+                let crosses = CrossData {
+                    vis_fb: vis_fb.view_mut(),
+                    weights_fb: weights_fb.view_mut(),
+                    tile_baseline_flags: &tile_baseline_flags,
+                };
+
+                raw.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+            });
+        },
+    );
+    raw_bench_group.finish();
+
+    let mut uvfits_bench_group = c.benchmark_group("uvfits IO");
+    uvfits_bench_group.bench_function("Read crosses for timestep, no channel flags", |b| {
+        // Prepare arrays to be read into.
+        let flagged_fine_chans = HashSet::new();
+        let mut vis_fb = Array2::default((32 - flagged_fine_chans.len(), 8128));
+        let mut weights_fb = Array2::default(vis_fb.raw_dim());
+
+        b.iter(|| {
+            let crosses = CrossData {
+                vis_fb: vis_fb.view_mut(),
+                weights_fb: weights_fb.view_mut(),
+                tile_baseline_flags: &tile_baseline_flags,
+            };
+
+            uvfits.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+        });
+    });
+    uvfits_bench_group.bench_function("Read crosses for timestep, MWA channel flags", |b| {
+        let flagged_fine_chans = HashSet::from([0, 1, 16, 30, 31]);
+        let mut cross_vis = Array2::default((32 - flagged_fine_chans.len(), 8128));
+        let mut cross_weights = Array2::default(cross_vis.raw_dim());
+
+        b.iter(|| {
+            let crosses = CrossData {
+                vis_fb: cross_vis.view_mut(),
+                weights_fb: cross_weights.view_mut(),
+                tile_baseline_flags: &tile_baseline_flags,
+            };
+
+            uvfits.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+        });
+    });
+    uvfits_bench_group.finish();
+
+    let mut ms_bench_group = c.benchmark_group("MS IO");
+    ms_bench_group.bench_function("Read crosses for timestep, no channel flags", |b| {
+        // Prepare arrays to be read into.
+        let flagged_fine_chans = HashSet::new();
+        let mut cross_vis = Array2::default((32 - flagged_fine_chans.len(), 8128));
+        let mut cross_weights = Array2::default(cross_vis.raw_dim());
+
+        b.iter(|| {
+            let crosses = CrossData {
+                vis_fb: cross_vis.view_mut(),
+                weights_fb: cross_weights.view_mut(),
+                tile_baseline_flags: &tile_baseline_flags,
+            };
+
+            ms.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+        });
+    });
+    ms_bench_group.bench_function("Read crosses for timestep, MWA channel flags", |b| {
+        let flagged_fine_chans = HashSet::from([0, 1, 16, 30, 31]);
+        let mut cross_vis = Array2::default((32 - flagged_fine_chans.len(), 8128));
+        let mut cross_weights = Array2::default(cross_vis.raw_dim());
+
+        b.iter(|| {
+            let crosses = CrossData {
+                vis_fb: cross_vis.view_mut(),
+                weights_fb: cross_weights.view_mut(),
+                tile_baseline_flags: &tile_baseline_flags,
+            };
+
+            ms.read_inner(Some(crosses), None, 0, &flagged_fine_chans)
+        });
+    });
+    ms_bench_group.finish();
+}
+
 criterion_group!(
     name = model;
     config = Criterion::default().sample_size(10);
@@ -539,4 +721,28 @@ criterion_group!(
     config = Criterion::default().sample_size(100);
     targets = source_list_benchmarks,
 );
-criterion_main!(model, calibrate, source_lists);
+criterion_group!(
+    name = io;
+    config = Criterion::default().sample_size(10);
+    targets = io_benchmarks,
+);
+criterion_main!(model, calibrate, source_lists, io);
+
+/// Copy files from source to destination recursively.
+/// <https://nick.groenen.me/notes/recursively-copy-files-in-rust/>
+fn copy_recursively(
+    source: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(&destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let filetype = entry.file_type()?;
+        if filetype.is_dir() {
+            copy_recursively(entry.path(), destination.as_ref().join(entry.file_name()))?;
+        } else {
+            std::fs::copy(entry.path(), destination.as_ref().join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}

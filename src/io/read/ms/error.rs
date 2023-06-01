@@ -10,7 +10,7 @@ use marlu::rubbl_casatables;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum MsReadError {
+pub enum MsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
     BadFile(PathBuf),
 

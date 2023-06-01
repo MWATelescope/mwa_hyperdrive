@@ -176,7 +176,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum InputFileError {
+pub enum InputFileError {
     #[error("Specified file does not exist: {0}")]
     DoesNotExist(String),
 

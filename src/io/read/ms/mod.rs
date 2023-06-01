@@ -92,7 +92,7 @@ fn get_ms_flavour(history_table: &mut Table) -> Result<MsFlavour, MsReadError> {
     Ok(MsFlavour::Casa)
 }
 
-pub(crate) struct MsReader {
+pub struct MsReader {
     /// Input data metadata.
     obs_context: ObsContext,
 
@@ -119,7 +119,7 @@ impl MsReader {
     /// flagged antenna and an antenna which has no data. The former may be
     /// used, but its flagged status hints that maybe it shouldn't be used.
     // TODO: Handle multiple measurement sets.
-    pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
+    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         ms: P,
         metafits: Option<P2>,
         array_position: Option<LatLngHeight>,
@@ -762,7 +762,7 @@ impl MsReader {
     /// An internal method for reading visibilities. Cross- and/or
     /// auto-correlation visibilities and weights are written to the supplied
     /// arrays.
-    fn read_inner(
+    pub fn read_inner(
         &self,
         mut crosses: Option<CrossData>,
         mut autos: Option<AutoData>,

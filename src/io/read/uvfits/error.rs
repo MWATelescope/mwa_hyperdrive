@@ -20,7 +20,7 @@ pub(crate) enum FitsError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum UvfitsReadError {
+pub enum UvfitsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
     BadFile(PathBuf),
 

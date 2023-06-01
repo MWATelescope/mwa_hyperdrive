@@ -10,7 +10,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 /// Error type associated with mwaf files.
-pub(crate) enum MwafError {
+pub enum MwafError {
     #[error("mwaf file '{file:?}' has an unhandled version '{version}'")]
     UnhandledVersion { file: PathBuf, version: String },
 
@@ -23,7 +23,7 @@ pub(crate) enum MwafError {
 
 #[derive(Error, Debug)]
 /// Error type associated with merging the contents of mwaf files.
-pub(crate) enum MwafMergeError {
+pub enum MwafMergeError {
     /// Error to describe some kind of inconsistent state within an mwaf file.
     #[error(
         r#"Inconsistent mwaf contents (first gpubox num: {gpubox1}, second gpubox num: {gpubox2}

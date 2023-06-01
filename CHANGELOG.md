@@ -13,7 +13,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     this report.
   - If all sources are vetoed from a source list, then the program exits with
     this report.
-- More CUDA benchmarks for the modelling code.
+- Benchmarks
+  - Raw MWA, uvfits and measurement set reading.
+  - More CUDA benchmarks for the modelling code.
 
 ### Fixed
 - When raw MWA data is missing gpubox files in what is otherwise a contiguous

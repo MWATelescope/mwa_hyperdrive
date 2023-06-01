@@ -9,7 +9,7 @@ use thiserror::Error;
 use crate::flagging::MwafMergeError;
 
 #[derive(Error, Debug)]
-pub(crate) enum RawReadError {
+pub enum RawReadError {
     #[error("gpubox file {0} does not have a corresponding mwaf file specified")]
     GpuboxFileMissingMwafFile(usize),
 

@@ -43,7 +43,7 @@ pub(crate) fn average_epoch(es: &[Epoch]) -> Epoch {
 }
 
 /// Information on flagged tiles, baselines and maps to and from array indices.
-pub(crate) struct TileBaselineFlags {
+pub struct TileBaselineFlags {
     /// Map between a pair of tile numbers and its unflagged *cross-correlation*
     /// baseline index. e.g. If tiles 0 and 2 are flagged, (1, 3) maps to 0
     /// (i.e. the first unflagged cross-correlation baseline is between tiles 1
@@ -76,10 +76,7 @@ pub(crate) struct TileBaselineFlags {
 impl TileBaselineFlags {
     /// Create a new set of maps and sets containing flags and indices. Will
     /// panic if `total_num_tiles` is 0.
-    pub(crate) fn new(
-        total_num_tiles: usize,
-        mut flagged_tiles: HashSet<usize>,
-    ) -> TileBaselineFlags {
+    pub fn new(total_num_tiles: usize, mut flagged_tiles: HashSet<usize>) -> TileBaselineFlags {
         flagged_tiles.shrink_to_fit();
 
         let num_unflagged_tiles = total_num_tiles - flagged_tiles.len();

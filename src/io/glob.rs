@@ -39,7 +39,7 @@ pub(crate) fn get_single_match_from_glob(g: &str) -> Result<PathBuf, GlobError> 
 
 #[derive(Error, Debug)]
 /// Error type associated with glob helper functions.
-pub(crate) enum GlobError {
+pub enum GlobError {
     #[error("No glob matches were found for {glob}")]
     NoMatches { glob: String },
 

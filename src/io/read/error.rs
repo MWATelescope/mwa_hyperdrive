@@ -9,7 +9,7 @@ use marlu::SelectionError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum VisReadError {
+pub enum VisReadError {
     #[error("The supplied mwaf files don't have flags for timestep {timestep} (GPS time {gps})")]
     MwafFlagsMissingForTimestep { timestep: usize, gps: f64 },
 

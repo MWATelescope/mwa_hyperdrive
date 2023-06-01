@@ -39,7 +39,7 @@ use crate::{
     misc::quantize_duration,
 };
 
-pub(crate) struct UvfitsReader {
+pub struct UvfitsReader {
     /// Observation metadata.
     pub(super) obs_context: ObsContext,
 
@@ -69,7 +69,7 @@ impl UvfitsReader {
     ///
     /// The measurement set is expected to be formatted in the way that
     /// cotter/Birli write measurement sets.
-    pub(crate) fn new<P: AsRef<Path>, P2: AsRef<Path>>(
+    pub fn new<P: AsRef<Path>, P2: AsRef<Path>>(
         uvfits: P,
         metafits: Option<P2>,
         array_position: Option<LatLngHeight>,
@@ -565,7 +565,7 @@ impl UvfitsReader {
         .map_err(VisReadError::from)
     }
 
-    fn read_inner(
+    pub fn read_inner(
         &self,
         mut crosses: Option<CrossData>,
         mut autos: Option<AutoData>,
