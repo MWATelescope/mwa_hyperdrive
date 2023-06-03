@@ -717,6 +717,7 @@ impl RawDataReader {
         // below (this is 0 cost). This is measurably faster than using
         // `outer_iter` on an `ndarray`. Ignore the time dimension; there's only
         // ever one timestep.
+        let (_, num_chans, num_baselines) = jones_array_tfb.dim();
         let data_vis_fb = jones_array_tfb.into_raw_vec();
 
         // bake flags into weights
@@ -729,9 +730,12 @@ impl RawDataReader {
         }
 
         let mut data_weights_fb = weight_array_tfb.remove_axis(Axis(0));
-
         self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, data_weights_fb.view_mut());
         let data_weights_fb = data_weights_fb.into_raw_vec();
+
+        let chan_flags = (0..num_chans)
+            .map(|i_chan| flagged_fine_chans.contains(&(i_chan as u16)))
+            .collect::<Vec<_>>();
 
         // If applicable, write the cross-correlation visibilities to our
         // `data_array`, ignoring any flagged baselines.
@@ -741,40 +745,55 @@ impl RawDataReader {
             tile_baseline_flags,
         }) = crosses
         {
-            (0..)
-                .zip(data_vis_fb.chunks_exact(metafits_context.num_baselines))
-                .zip(data_weights_fb.chunks_exact(metafits_context.num_baselines))
+            let baseline_flags = (0..num_baselines)
+                .map(|i_bl| {
+                    let (tile1, tile2) = baseline_to_tiles(metafits_context.num_ants, i_bl);
+                    (tile1 == tile2)
+                        || !tile_baseline_flags
+                            .tile_to_unflagged_cross_baseline_map
+                            .contains_key(&(tile1, tile2))
+                })
+                .collect::<Vec<_>>();
+            let num_unflagged_baselines = tile_baseline_flags
+                .tile_to_unflagged_cross_baseline_map
+                .len();
+
+            data_vis_fb
+                .chunks_exact(num_baselines)
+                .zip(data_weights_fb.chunks_exact(num_baselines))
                 // Let only unflagged channels proceed.
-                .filter(|((i_chan, _), _)| !flagged_fine_chans.contains(i_chan))
-                // Discard the channel index and then zip with the outgoing
-                // array.
-                .map(|((_, data), weights)| (data, weights))
-                .zip(vis_fb.outer_iter_mut())
-                .zip(weights_fb.outer_iter_mut())
-                .for_each(
-                    |(((data_vis_b, data_weights_b), mut vis_b), mut weight_b)| {
-                        data_vis_b
-                            .iter()
-                            .zip_eq(data_weights_b)
-                            .enumerate()
-                            // Let only unflagged baselines proceed.
-                            .filter(|(i_baseline, _)| {
-                                let (tile1, tile2) =
-                                    baseline_to_tiles(metafits_context.num_ants, *i_baseline);
-                                tile_baseline_flags
-                                    .tile_to_unflagged_cross_baseline_map
-                                    .contains_key(&(tile1, tile2))
-                            })
-                            // Discard the baseline index and then zip with the outgoing array.
-                            .map(|(_, data)| data)
-                            .zip_eq(vis_b.iter_mut())
-                            .zip_eq(weight_b.iter_mut())
-                            .for_each(|(((data_vis, data_weight), vis), weight)| {
-                                *vis = *data_vis;
-                                *weight = *data_weight;
-                            });
-                    },
-                );
+                .zip(chan_flags.iter())
+                .filter(|((_, _), &flag)| !flag)
+                // Discard the flag and then zip with the outgoing array.
+                .map(|((data, weights), _)| (data, weights))
+                .zip(
+                    vis_fb
+                        .as_slice_mut()
+                        .expect("is_contiguous")
+                        .chunks_exact_mut(num_unflagged_baselines),
+                )
+                .zip(
+                    weights_fb
+                        .as_slice_mut()
+                        .expect("is_contiguous")
+                        .chunks_exact_mut(num_unflagged_baselines),
+                )
+                .for_each(|(((data_vis_b, data_weights_b), vis_b), weight_b)| {
+                    data_vis_b
+                        .iter()
+                        .zip_eq(data_weights_b)
+                        // Let only unflagged baselines proceed.
+                        .zip_eq(baseline_flags.iter())
+                        .filter(|((_, _), &bl_flag)| !bl_flag)
+                        // Discard the baseline flag and then zip with the outgoing array.
+                        .map(|(data, _)| data)
+                        .zip_eq(vis_b.iter_mut())
+                        .zip_eq(weight_b.iter_mut())
+                        .for_each(|(((data_vis, data_weight), vis), weight)| {
+                            *vis = *data_vis;
+                            *weight = *data_weight;
+                        });
+                });
         }
 
         // If applicable, write the auto-correlation visibilities to our
@@ -785,39 +804,50 @@ impl RawDataReader {
             tile_baseline_flags,
         }) = autos
         {
-            (0..)
-                .zip(data_vis_fb.chunks_exact(metafits_context.num_baselines))
-                .zip(data_weights_fb.chunks_exact(metafits_context.num_baselines))
+            let baseline_flags = (0..num_baselines)
+                .map(|i_bl| {
+                    let (tile1, tile2) = baseline_to_tiles(metafits_context.num_ants, i_bl);
+                    (tile1 != tile2) || tile_baseline_flags.flagged_tiles.contains(&tile1)
+                })
+                .collect::<Vec<_>>();
+            let num_unflagged_tiles = vis_fb.len_of(Axis(1));
+
+            data_vis_fb
+                .chunks_exact(num_baselines)
+                .zip(data_weights_fb.chunks_exact(num_baselines))
                 // Let only unflagged channels proceed.
-                .filter(|((i_chan, _), _)| !flagged_fine_chans.contains(i_chan))
-                // Discard the channel index and then zip with the outgoing
-                // array.
-                .map(|((_, data), weights)| (data, weights))
-                .zip_eq(vis_fb.outer_iter_mut())
-                .zip_eq(weights_fb.outer_iter_mut())
-                .for_each(
-                    |(((data_vis_b, data_weight_b), mut vis_b), mut weights_b)| {
-                        data_vis_b
-                            .iter()
-                            .zip(data_weight_b)
-                            .enumerate()
-                            // Let only unflagged autos proceed.
-                            .filter(|(i_baseline, _)| {
-                                let (tile1, tile2) =
-                                    baseline_to_tiles(metafits_context.num_ants, *i_baseline);
-                                tile1 == tile2
-                                    && !tile_baseline_flags.flagged_tiles.contains(&tile1)
-                            })
-                            // Discard the baseline index and then zip with the outgoing array.
-                            .map(|(_, data)| data)
-                            .zip_eq(vis_b.iter_mut())
-                            .zip_eq(weights_b.iter_mut())
-                            .for_each(|(((data_vis, data_weight), vis), weight)| {
-                                *vis = *data_vis;
-                                *weight = *data_weight;
-                            });
-                    },
-                );
+                .zip(chan_flags.iter())
+                .filter(|((_, _), &flag)| !flag)
+                // Discard the flag and then zip with the outgoing array.
+                .map(|((data, weights), _)| (data, weights))
+                .zip_eq(
+                    vis_fb
+                        .as_slice_mut()
+                        .expect("is contiguous")
+                        .chunks_exact_mut(num_unflagged_tiles),
+                )
+                .zip_eq(
+                    weights_fb
+                        .as_slice_mut()
+                        .expect("is contiguous")
+                        .chunks_exact_mut(num_unflagged_tiles),
+                )
+                .for_each(|(((data_vis_b, data_weight_b), vis_b), weights_b)| {
+                    data_vis_b
+                        .iter()
+                        .zip_eq(data_weight_b)
+                        // Let only unflagged baselines proceed.
+                        .zip_eq(baseline_flags.iter())
+                        .filter(|((_, _), &bl_flag)| !bl_flag)
+                        // Discard the baseline flag and then zip with the outgoing array.
+                        .map(|(data, _)| data)
+                        .zip_eq(vis_b.iter_mut())
+                        .zip_eq(weights_b.iter_mut())
+                        .for_each(|(((data_vis, data_weight), vis), weight)| {
+                            *vis = *data_vis;
+                            *weight = *data_weight;
+                        });
+                });
         }
 
         Ok(())
