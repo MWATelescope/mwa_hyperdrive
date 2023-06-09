@@ -10,8 +10,8 @@ account for dead dipoles if possible.
 Beam responses are generated with
 [`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam) and dead dipole
 information is encoded as a "dipole gain" of 1 ("alive") or 0 ("dead"). It is
-possible to supply other values for dipole gains, although at the time of
-writing `hyperdrive` only uses ones or zeros.
+possible to supply other values for dipole gains with a "DipAmps" column; see
+the [metafits page](metafits.md).
 
 For the relevant functions, dead dipole information can be ignored by supplying
 a flag `--unity-dipole-gains`. This sets all dipole gains to 1.

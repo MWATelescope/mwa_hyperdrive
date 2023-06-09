@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use approx::assert_abs_diff_eq;
 use ndarray::array;
 
 use super::BeamArgs;
@@ -90,4 +91,24 @@ fn test_unity_dipole_gains() {
     assert!(beam_gains.iter().all(|g| (*g - 1.0).abs() < f64::EPSILON));
     // Verify that there are no dead dipoles in the delays.
     assert!(beam.get_dipole_delays().unwrap().iter().all(|d| *d != 32));
+}
+
+#[test]
+fn test_aman_dipole_gains() {
+    let f = |metafits| {
+        let metafits = mwalib::MetafitsContext::new(metafits, None).unwrap();
+        let delays = crate::metafits::get_dipole_delays(&metafits);
+        let gains = crate::metafits::get_dipole_gains(&metafits);
+        (delays, gains)
+    };
+
+    let (vanilla_delays, vanilla_gains) = f("test_files/1120082744/1120082744.metafits");
+    let (dipamps_delays, dipamps_gains) = f("test_files/1120082744/1120082744_DipAmps.metafits");
+    assert_eq!(vanilla_delays, dipamps_delays);
+    assert_ne!(vanilla_gains, dipamps_gains);
+
+    // First X dipole for Tile011
+    assert_abs_diff_eq!(dipamps_gains[(0, 0)] as f32, 0.89985347);
+    // First Y dipole for Tile011
+    assert_abs_diff_eq!(dipamps_gains[(0, 16)] as f32, 0.8930142);
 }

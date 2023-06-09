@@ -75,4 +75,11 @@ pub enum FitsError {
         source_line: u32,
         source_column: u32,
     },
+
+    #[error("When attempting to read column {col_name} from HDU {hdu_num}, cfitsio gave an error: {err}")]
+    ReadCellArray {
+        col_name: &'static str,
+        hdu_num: usize,
+        err: Box<fitsio::errors::Error>,
+    },
 }

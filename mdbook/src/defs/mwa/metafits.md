@@ -29,3 +29,12 @@ that is required to be present by
 [`mwalib`](https://github.com/MWATelescope/mwalib), which is used by
 `hyperdrive` when reading metafits files.
 ~~~
+
+## Controlling dipole gains
+
+If the "TILEDATA" HDU of a metafits contains a "DipAmps" column, each row
+containing 16 double-precision values for bowties in the M&C order, these are
+used as the dipole gains in beam calculations. If the "DipAmps" column isn't
+available, the default behaviour is to use gains of 1.0 for all dipoles, except
+those that have delays of 32 in the "Delays" column (they will have a gain of
+0.0, and are considered [dead](dead_dipoles.md)).

@@ -17,7 +17,6 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     num::NonZeroU16,
-    os::raw::c_char,
     path::{Path, PathBuf},
 };
 
@@ -40,6 +39,7 @@ use crate::{
     io::read::{
         fits::{
             fits_get_col, fits_get_optional_key, fits_get_required_key, fits_open, fits_open_hdu,
+            fits_read_cell_f64_array,
         },
         VisRead, VisReadError,
     },
@@ -149,7 +149,7 @@ impl UvfitsReader {
             let mut tile_xyzs: Vec<XyzGeodetic> = Vec::with_capacity(total_num_tiles);
             let mut average_xyz = XyzGeocentric::default();
             for i in 0..total_num_tiles {
-                let fits_xyz = read_cell_array::<3>(
+                let fits_xyz = fits_read_cell_f64_array::<3>(
                     &mut uvfits_fptr,
                     &antenna_table_hdu,
                     "STABXYZ",
@@ -1843,59 +1843,5 @@ impl Indices {
             dec,
             inttim: inttim_index,
         })
-    }
-}
-
-/// Pull out fits array-in-a-cell values; useful for e.g. STABXYZ. This function
-/// assumes that the output datatype is f64, and that the fits datatype is
-/// TDOUBLE, so it is not to be used generally!
-fn read_cell_array<const NUM_ELEM: usize>(
-    fits_ptr: &mut fitsio::FitsFile,
-    hdu: &fitsio::hdu::FitsHdu,
-    col_name: &'static str,
-    row: i64,
-) -> Result<[f64; NUM_ELEM], UvfitsReadError> {
-    unsafe {
-        // With the column name, get the column number.
-        let mut status = 0;
-        let mut col_num = -1;
-        let keyword = std::ffi::CString::new(col_name).expect("CString::new failed");
-        // ffgcno = fits_get_colnum
-        fitsio_sys::ffgcno(
-            fits_ptr.as_raw(),
-            0,
-            keyword.as_ptr() as *mut c_char,
-            &mut col_num,
-            &mut status,
-        );
-        // Check the status.
-        fits_check_status(status).map_err(|err| UvfitsReadError::ReadCellArray {
-            col_name,
-            hdu_num: hdu.number + 1,
-            err,
-        })?;
-
-        // Now get the specified row from that column.
-        let mut array = [0.0; NUM_ELEM];
-        // ffgcv = fits_read_col
-        fitsio_sys::ffgcv(
-            fits_ptr.as_raw(),
-            82, // TDOUBLE (fitsio.h)
-            col_num,
-            row + 1,
-            1,
-            NUM_ELEM.try_into().expect("not larger than i64::MAX"),
-            std::ptr::null_mut(),
-            array.as_mut_ptr().cast(),
-            &mut 0,
-            &mut status,
-        );
-        fits_check_status(status).map_err(|err| UvfitsReadError::ReadCellArray {
-            col_name,
-            hdu_num: hdu.number + 1,
-            err,
-        })?;
-
-        Ok(array)
     }
 }

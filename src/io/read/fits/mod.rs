@@ -11,6 +11,7 @@ pub(crate) use error::FitsError;
 use std::{
     ffi::{CStr, CString},
     fmt::Display,
+    os::raw::c_char,
     ptr,
 };
 
@@ -328,4 +329,58 @@ pub(crate) fn _fits_get_float_image_into_buffer(
     }
 
     Ok(())
+}
+
+/// Pull out fits array-in-a-cell values; useful for e.g. STABXYZ. This function
+/// must be pointed at data containing f64s (i.e. TDOUBLE).
+#[track_caller]
+pub(crate) fn fits_read_cell_f64_array<const NUM_ELEM: usize>(
+    fits_ptr: &mut fitsio::FitsFile,
+    hdu: &fitsio::hdu::FitsHdu,
+    col_name: &'static str,
+    row: i64,
+) -> Result<[f64; NUM_ELEM], FitsError> {
+    unsafe {
+        // With the column name, get the column number.
+        let mut status = 0;
+        let mut col_num = -1;
+        let keyword = std::ffi::CString::new(col_name).expect("CString::new failed");
+        // ffgcno = fits_get_colnum
+        fitsio_sys::ffgcno(
+            fits_ptr.as_raw(),
+            0,
+            keyword.as_ptr() as *mut c_char,
+            &mut col_num,
+            &mut status,
+        );
+        // Check the status.
+        fitsio::errors::check_status(status).map_err(|err| FitsError::ReadCellArray {
+            col_name,
+            hdu_num: hdu.number + 1,
+            err: Box::new(err),
+        })?;
+
+        // Now get the specified row from that column.
+        let mut array = [0.0; NUM_ELEM];
+        // ffgcv = fits_read_col
+        fitsio_sys::ffgcv(
+            fits_ptr.as_raw(),
+            82, // TDOUBLE (fitsio.h)
+            col_num,
+            row + 1,
+            1,
+            NUM_ELEM.try_into().expect("not larger than i64::MAX"),
+            std::ptr::null_mut(),
+            array.as_mut_ptr().cast(),
+            &mut 0,
+            &mut status,
+        );
+        fitsio::errors::check_status(status).map_err(|err| FitsError::ReadCellArray {
+            col_name,
+            hdu_num: hdu.number + 1,
+            err: Box::new(err),
+        })?;
+
+        Ok(array)
+    }
 }

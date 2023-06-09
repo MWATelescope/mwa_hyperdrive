@@ -95,13 +95,6 @@ pub enum UvfitsReadError {
     #[error("When attempting to read uvfits baseline metadata, cfitsio gave an error: {0}")]
     Metadata(fitsio::errors::Error),
 
-    #[error("When attempting to read uvfits column {col_name} from HDU {hdu_num}, cfitsio gave an error: {err}")]
-    ReadCellArray {
-        col_name: &'static str,
-        hdu_num: usize,
-        err: fitsio::errors::Error,
-    },
-
     #[error("When attempting to read uvfits row {row_num}, cfitsio gave an error: {err}")]
     ReadVis {
         row_num: usize,

@@ -177,18 +177,31 @@ impl BeamArgs {
                     dipole_gains
                 };
                 if let Some(dipole_gains) = dipole_gains.as_ref() {
-                    let num_tiles_with_dead_dipoles = dipole_gains
-                        .outer_iter()
-                        .filter(|tile_dipole_gains| {
-                            tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
-                        })
-                        .count();
-                    printer.push_line(
-                        format!(
-                            "Using dead dipole information ({num_tiles_with_dead_dipoles} tiles affected)"
-                        )
-                        .into(),
-                    );
+                    trace!("Attempting to use dipole gains:");
+                    for row in dipole_gains.outer_iter() {
+                        trace!("{row}");
+                    }
+
+                    // Currently, the only way to have dipole gains other than
+                    // zero or one is by using Aman's "DipAmps" metafits column.
+                    if dipole_gains.iter().any(|&g| g != 0.0 && g != 1.0) {
+                        printer.push_line(
+                            "Using Aman's 'DipAmps' dipole gains from the metafits".into(),
+                        );
+                    } else {
+                        let num_tiles_with_dead_dipoles = dipole_gains
+                            .outer_iter()
+                            .filter(|tile_dipole_gains| {
+                                tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
+                            })
+                            .count();
+                        printer.push_line(
+                            format!(
+                                "Using dead dipole information ({num_tiles_with_dead_dipoles} tiles affected)"
+                            )
+                            .into(),
+                        );
+                    }
                 } else {
                     // If we don't have dipole gains, we must assume all dipoles
                     // are "alive". But, if any dipole delays are 32, then the
