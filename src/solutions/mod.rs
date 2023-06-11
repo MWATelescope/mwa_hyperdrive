@@ -133,8 +133,7 @@ pub struct CalibrationSolutions {
     /// specified in lambdas to metres \[Hz\].
     pub freq_centroid: Option<f64>,
 
-    /// What was used to model the visibilities? This is currently either
-    /// "CPU" or "CUDA GPU".
+    /// What was used to model the visibilities?
     pub modeller: Option<String>,
 }
 

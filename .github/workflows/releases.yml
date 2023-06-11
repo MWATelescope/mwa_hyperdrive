@@ -67,7 +67,7 @@ jobs:
           LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
           hyperdrive
 
-          cargo build --profile production --locked --no-default-features --features=hdf5-static,cfitsio-static,cuda-single
+          cargo build --profile production --locked --no-default-features --features=hdf5-static,cfitsio-static,cuda,gpu-single
           mv target/production/hyperdrive .
           tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-single.tar.gz \
           LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \

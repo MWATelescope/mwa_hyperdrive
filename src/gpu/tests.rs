@@ -25,12 +25,18 @@ fn copy_to_and_from_device_succeeds() {
 
 #[test]
 #[serial]
-fn cuda_malloc_huge_fails() {
+fn gpu_malloc_huge_fails() {
     let size = 1024_usize.pow(4); // 1 TB;
-    let result: Result<DevicePointer<u8>, CudaError> = DevicePointer::malloc(size);
+    let result: Result<DevicePointer<u8>, GpuError> = DevicePointer::malloc(size);
     assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(err.to_string().ends_with("cudaMalloc error: out of memory"));
+    let err = result.unwrap_err().to_string();
+    #[cfg(feature = "cuda")]
+    assert!(err.ends_with("cudaMalloc error: out of memory"), "{err}");
+    #[cfg(feature = "hip")]
+    assert!(
+        err.contains("hipMalloc error"),
+        "Error string wasn't expected; got: {err}"
+    );
 }
 
 #[test]
@@ -43,7 +49,10 @@ fn copy_from_non_existent_pointer_fails() {
     let result = d_ptr.copy_from_device(&mut dest);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
+    #[cfg(feature = "cuda")]
     assert!(err.contains("cudaMemcpy from device failed"));
+    #[cfg(feature = "hip")]
+    assert!(err.contains("hipMemcpy from device failed"));
     assert!(err.contains("Attempted to copy data from a null device pointer"));
 }
 

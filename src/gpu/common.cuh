@@ -7,32 +7,92 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include <cuComplex.h>
-
 #include "types.h"
+
+// HIP-specific defines.
+#if __HIPCC__
+#define gpuMalloc             hipMalloc
+#define gpuFree               hipFree
+#define gpuMemcpy             hipMemcpy
+#define gpuMemcpyHostToDevice hipMemcpyHostToDevice
+#define gpuGetErrorString     hipGetErrorString
+#define gpuGetLastError       hipGetLastError
+#define gpuDeviceSynchronize  hipDeviceSynchronize
+#define gpuError_t            hipError_t
+#define gpuSuccess            hipSuccess
 
 // If SINGLE is enabled, use single-precision floats everywhere. Otherwise
 // default to double-precision.
 #ifdef SINGLE
-#define FLOAT4  float4
-#define SINCOS  sincosf
-#define EXP     expf
-#define POW     powf
-#define FLOOR   floorf
-#define COMPLEX cuFloatComplex
-#define CUCONJ  cuConjf
-#define LOG     logf
-#define EXP     expf
+#define FLOAT4       float4
+#define SINCOS       sincosf
+#define EXP          expf
+#define POW          powf
+#define FLOOR        floorf
+#define COMPLEX      hipFloatComplex
+#define MAKE_COMPLEX make_hipFloatComplex
+#define CUCONJ       hipConjf
+#define LOG          logf
+#define EXP          expf
 #else
-#define FLOAT4  double4
-#define SINCOS  sincos
-#define EXP     exp
-#define POW     pow
-#define FLOOR   floor
-#define COMPLEX cuDoubleComplex
-#define CUCONJ  cuConj
-#define LOG     log
-#define EXP     exp
+#define FLOAT4       double4
+#define SINCOS       sincos
+#define EXP          exp
+#define POW          pow
+#define FLOOR        floor
+#define COMPLEX      hipDoubleComplex
+#define MAKE_COMPLEX make_hipDoubleComplex
+#define CUCONJ       hipConj
+#define LOG          log
+#define EXP          exp
+#endif // SINGLE
+
+// CUDA-specific defines.
+#elif __CUDACC__
+
+#define gpuMalloc             cudaMalloc
+#define gpuFree               cudaFree
+#define gpuMemcpy             cudaMemcpy
+#define gpuMemcpyHostToDevice cudaMemcpyHostToDevice
+#define gpuGetErrorString     cudaGetErrorString
+#define gpuGetLastError       cudaGetLastError
+#define gpuDeviceSynchronize  cudaDeviceSynchronize
+#define gpuError_t            cudaError_t
+#define gpuSuccess            cudaSuccess
+#define warpSize              32
+
+#ifdef SINGLE
+#define FLOAT4       float4
+#define SINCOS       sincosf
+#define EXP          expf
+#define POW          powf
+#define FLOOR        floorf
+#define COMPLEX      cuFloatComplex
+#define MAKE_COMPLEX make_cuFloatComplex
+#define CUCONJ       cuConjf
+#define LOG          logf
+#define EXP          expf
+#else
+#define FLOAT4       double4
+#define SINCOS       sincos
+#define EXP          exp
+#define POW          pow
+#define FLOOR        floor
+#define COMPLEX      cuDoubleComplex
+#define MAKE_COMPLEX make_cuDoubleComplex
+#define CUCONJ       cuConj
+#define LOG          log
+#define EXP          exp
+#endif // SINGLE
+#endif // __HIPCC__
+// #define C32 cuFloatComplex
+// #define C64 cuDoubleComplex
+
+#ifdef __CUDACC__
+#include <cuComplex.h>
+#elif __HIPCC__
+#include <hip/hip_complex.h>
+#include <hip/hip_runtime.h>
 #endif
 
 const FLOAT VEL_C = 299792458.0;                           // speed of light in a vacuum
@@ -54,33 +114,17 @@ typedef struct JONES_C {
     COMPLEX j11;
 } JONES_C;
 
-inline __device__ COMPLEX operator+(const COMPLEX a, const COMPLEX b) {
-    return COMPLEX{
-        .x = a.x + b.x,
-        .y = a.y + b.y,
-    };
-}
+inline __device__ COMPLEX operator+(const COMPLEX a, const COMPLEX b) { return MAKE_COMPLEX(a.x + b.x, a.y + b.y); }
 
 inline __device__ COMPLEX operator*(const COMPLEX a, const COMPLEX b) {
-    return COMPLEX{
-        .x = a.x * b.x - a.y * b.y,
-        .y = a.x * b.y + a.y * b.x,
-    };
+    return MAKE_COMPLEX(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
 inline __device__ void operator*=(COMPLEX &a, const COMPLEX b) {
-    a = COMPLEX{
-        .x = a.x * b.x - a.y * b.y,
-        .y = a.x * b.y + a.y * b.x,
-    };
+    a = MAKE_COMPLEX(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-inline __device__ COMPLEX operator*(const COMPLEX a, const FLOAT b) {
-    return COMPLEX{
-        .x = a.x * b,
-        .y = a.y * b,
-    };
-}
+inline __device__ COMPLEX operator*(const COMPLEX a, const FLOAT b) { return MAKE_COMPLEX(a.x * b, a.y * b); }
 
 inline __device__ void operator+=(COMPLEX &a, const COMPLEX b) {
     a.x += b.x;

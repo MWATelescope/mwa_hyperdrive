@@ -361,8 +361,8 @@ fn shapelet_multiple_components() {
         .components
         .shapelets
         .get_shapelet_uvws(0.0, &obs.xyzs);
-    // Set the w terms to 0, because they 0 on the CUDA side, and this way the
-    // CPU and CUDA tests can use the same test values.
+    // Set the w terms to 0, because they are 0 on the GPU side, and this way
+    // the CPU and GPU tests can use the same test values.
     shapelet_uvws.iter_mut().for_each(|uvw| uvw.w = 0.0);
 
     test_multiple_shapelet_components(visibilities.view(), shapelet_uvws.view(), 0.0, 0.0);

@@ -11,7 +11,7 @@ pub enum ModelError {
     #[error(transparent)]
     Beam(#[from] crate::beam::BeamError),
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     #[error(transparent)]
-    Cuda(#[from] crate::cuda::CudaError),
+    Gpu(#[from] crate::gpu::GpuError),
 }

@@ -14,6 +14,11 @@ the "CUDA-single" release. You can still use the double-precision version on a
 desktop GPU, but it will be much slower than single-precision. Instructions to
 install CUDA are on [the next page](from_source.md#cuda).
 
+It is possible to run `hyperdrive` with HIP (i.e. the AMD equivalent to
+NVIDIA's CUDA), but HIP does not appear to offer static libraries, so no static
+feature is provided, and users will need to compile hyperdrive themselves with
+instructions on [the next page](from_source.md#gpu).
+
 ~~~admonish
 The pre-compiled binaries are made by GitHub actions using:
 ```shell
@@ -21,6 +26,6 @@ cargo build --release --locked --no-default-features --features=hdf5-static,cfit
 ```
 This means they cannot plot calibration solutions.
 "CUDA-double" binaries have the `cuda` feature and "CUDA-single" binaries have
-the `cuda-single` feature. CUDA cannot legally be statically linked so a local
-installation of CUDA is required.
+the `cuda` and `gpu-single` features. CUDA cannot legally be statically linked
+so a local installation of CUDA is required.
 ~~~

@@ -74,8 +74,8 @@ fn fee_beam_values_are_sensible() {
 
 #[test]
 #[serial]
-#[cfg(feature = "cuda")]
-fn fee_cuda_beam_values_are_sensible() {
+#[cfg(any(feature = "cuda", feature = "hip"))]
+fn fee_gpu_beam_values_are_sensible() {
     let delays = Array2::zeros((1, 16));
     let amps = Array2::ones((1, 16));
     let freqs = [150e6 as u32];
@@ -86,7 +86,7 @@ fn fee_cuda_beam_values_are_sensible() {
     ];
     let (azs, zas): (Vec<_>, Vec<_>) = azels
         .iter()
-        .map(|azel| (azel.az as CudaFloat, azel.za() as CudaFloat))
+        .map(|azel| (azel.az as GpuFloat, azel.za() as GpuFloat))
         .unzip();
 
     // Get the beam values right out of hyperbeam.
@@ -100,13 +100,13 @@ fn fee_cuda_beam_values_are_sensible() {
     // Compare these with the hyperdrive `Beam` trait.
     let hyperdrive =
         super::fee::FEEBeam::new_from_env(1, Delays::Full(delays), Some(amps)).unwrap();
-    let hyperdrive = hyperdrive.prepare_cuda_beam(&freqs).unwrap();
+    let hyperdrive = hyperdrive.prepare_gpu_beam(&freqs).unwrap();
     let hyperdrive_values_device = unsafe {
-        let mut hyperdrive_values_device: DevicePointer<Jones<CudaFloat>> = DevicePointer::malloc(
+        let mut hyperdrive_values_device: DevicePointer<Jones<GpuFloat>> = DevicePointer::malloc(
             hyperdrive.get_num_unique_tiles() as usize
                 * hyperdrive.get_num_unique_freqs() as usize
                 * azs.len()
-                * std::mem::size_of::<Jones<CudaFloat>>(),
+                * std::mem::size_of::<Jones<GpuFloat>>(),
         )
         .unwrap();
         hyperdrive

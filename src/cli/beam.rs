@@ -60,18 +60,18 @@ pub struct BeamArgs {
     #[clap(short, long, default_value = "beam_responses.tsv")]
     output: PathBuf,
 
-    /// Use CUDA to generate the beam responses.
-    #[cfg(feature = "cuda")]
+    /// Use a GPU (i.e. CUDA or HIP) to generate the beam responses.
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     #[clap(short, long)]
-    cuda: bool,
+    gpu: bool,
 }
 
 impl BeamArgs {
     pub(super) fn run(&self) -> Result<(), HyperdriveError> {
         cfg_if::cfg_if! {
-            if #[cfg(feature = "cuda")] {
-                if self.cuda {
-                    calc_cuda(self)
+            if #[cfg(any(feature = "cuda", feature = "hip"))] {
+                if self.gpu {
+                    calc_gpu(self)
                 } else {
                     calc_cpu(self)
                 }
@@ -109,8 +109,8 @@ fn calc_cpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
         max_za,
         step,
         output,
-        #[cfg(feature = "cuda")]
-            cuda: _,
+        #[cfg(any(feature = "cuda", feature = "hip"))]
+            gpu: _,
     } = args;
 
     let beam = create_beam_object(
@@ -137,12 +137,12 @@ fn calc_cpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
     Ok(())
 }
 
-#[cfg(feature = "cuda")]
-fn calc_cuda(args: &BeamArgs) -> Result<(), HyperdriveError> {
+#[cfg(any(feature = "cuda", feature = "hip"))]
+fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
     use itertools::izip;
     use num_complex::Complex;
 
-    use crate::cuda::{CudaFloat, CudaJones, DevicePointer};
+    use crate::gpu::{DevicePointer, GpuFloat, GpuJones};
 
     let BeamArgs {
         beam_type,
@@ -152,7 +152,7 @@ fn calc_cuda(args: &BeamArgs) -> Result<(), HyperdriveError> {
         max_za,
         step,
         output,
-        cuda: _,
+        gpu: _,
     } = args;
 
     let beam = create_beam_object(
@@ -160,20 +160,20 @@ fn calc_cuda(args: &BeamArgs) -> Result<(), HyperdriveError> {
         1,
         Delays::Partial(delays.clone().unwrap_or(vec![0; 16])),
     )?;
-    let cuda_beam = beam.prepare_cuda_beam(&[(freq_mhz * 1e6) as u32])?;
+    let gpu_beam = beam.prepare_gpu_beam(&[(freq_mhz * 1e6) as u32])?;
     let mut out = BufWriter::new(File::create(output)?);
 
     let (azs, zas): (Vec<_>, Vec<_>) =
-        gen_azzas::<CudaFloat>(max_za.to_radians(), step.to_radians()).unzip();
-    let mut d_jones: DevicePointer<CudaJones> = DevicePointer::malloc(
-        cuda_beam.get_num_unique_tiles() as usize
-            * cuda_beam.get_num_unique_freqs() as usize
+        gen_azzas::<GpuFloat>(max_za.to_radians(), step.to_radians()).unzip();
+    let mut d_jones: DevicePointer<GpuJones> = DevicePointer::malloc(
+        gpu_beam.get_num_unique_tiles() as usize
+            * gpu_beam.get_num_unique_freqs() as usize
             * azs.len()
-            * std::mem::size_of::<CudaJones>(),
+            * std::mem::size_of::<GpuJones>(),
     )?;
 
     unsafe {
-        cuda_beam.calc_jones_pair(
+        gpu_beam.calc_jones_pair(
             &azs,
             &zas,
             latitude_deg.to_radians(),

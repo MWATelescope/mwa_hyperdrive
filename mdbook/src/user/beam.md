@@ -9,9 +9,9 @@ in steps of `--step`, then for each of these zenith angles, moving from 0 to
 \\( 2 \pi \\) in steps of `--step` for the azimuth. Using a smaller `--step`
 will generate many more responses, so be aware that it might take a while.
 
-~~~admonish danger title="CUDA"
-If CUDA is available to you, the `--cuda` flag will generate the beam responses
-on the GPU, vastly decreasing the time taken.
+~~~admonish danger title="CUDA/HIP"
+If CUDA or HIP is available to you, the `--gpu` flag will generate the beam
+responses on the GPU, vastly decreasing the time taken.
 ~~~
 
 ~~~admonish example title="`Python` example to plot beam responses"

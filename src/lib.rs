@@ -24,8 +24,8 @@ mod solutions;
 pub mod srclist;
 mod unit_parsing;
 
-#[cfg(feature = "cuda")]
-mod cuda;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+mod gpu;
 
 #[cfg(test)]
 mod tests;
@@ -40,8 +40,8 @@ lazy_static::lazy_static! {
     /// This should only ever be changed from its default by CLI code.
     static ref MODEL_DEVICE: AtomicCell<model::ModelDevice> = {
         cfg_if::cfg_if! {
-            if #[cfg(feature = "cuda")] {
-                AtomicCell::new(ModelDevice::Cuda)
+            if #[cfg(any(feature = "cuda", feature = "hip"))] {
+                AtomicCell::new(ModelDevice::Gpu)
             } else {
                 AtomicCell::new(ModelDevice::Cpu)
             }

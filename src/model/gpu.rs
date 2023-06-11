@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code to generate sky-model visibilities with CUDA.
+//! Code to generate sky-model visibilities with CUDA/HIP.
 
 use std::{borrow::Cow, collections::HashSet};
 
@@ -17,9 +17,9 @@ use ndarray::prelude::*;
 
 use super::{mask_pols, shapelets, ModelError, SkyModeller};
 use crate::{
-    beam::{Beam, BeamCUDA},
+    beam::{Beam, BeamGpu},
     context::Polarisations,
-    cuda::{self, cuda_kernel_call, CudaError, CudaFloat, CudaJones, DevicePointer},
+    gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
     srclist::{
         get_instrumental_flux_densities, ComponentType, FluxDensityType, ShapeletCoeff, SourceList,
     },
@@ -28,9 +28,9 @@ use crate::{
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
 /// second is the source component. The length of `hadecs`, `lmns`,
 /// `*_list_fds`'s second axis are the same.
-pub struct SkyModellerCuda<'a> {
+pub struct SkyModellerGpu<'a> {
     /// The trait object to use for beam calculations.
-    cuda_beam: Box<dyn BeamCUDA>,
+    gpu_beam: Box<dyn BeamGpu>,
 
     /// The phase centre used for all modelling.
     phase_centre: RADec,
@@ -41,7 +41,7 @@ pub struct SkyModellerCuda<'a> {
     array_latitude: f64,
     /// The UT1 - UTC offset. If this is 0, effectively UT1 == UTC, which is a
     /// wrong assumption by up to 0.9s. We assume the this value does not change
-    /// over the timestamps given to this `SkyModellerCuda`.
+    /// over the timestamps given to this `SkyModellerGpu`.
     dut1: Duration,
     /// Shift baselines, LSTs and array latitudes back to J2000.
     precess: bool,
@@ -55,85 +55,85 @@ pub struct SkyModellerCuda<'a> {
     pols: Polarisations,
 
     /// A simple map from an absolute tile index into an unflagged tile index.
-    /// This is important because CUDA will use tile indices from 0 to the
+    /// This is important because CUDA/HIP will use tile indices from 0 to the
     /// length of `unflagged_tile_xyzs`, but the beam code has dipole delays and
     /// dipole gains available for *all* tiles. So if tile 32 is flagged, any
-    /// CUDA thread with a tile index of 32 would naively get the flagged beam
-    /// info. This map would make tile index go to the next unflagged tile,
+    /// CUDA/HIP thread with a tile index of 32 would naively get the flagged
+    /// beam info. This map would make tile index go to the next unflagged tile,
     /// perhaps 33.
     tile_index_to_unflagged_tile_index_map: DevicePointer<i32>,
 
-    d_freqs: DevicePointer<CudaFloat>,
-    d_shapelet_basis_values: DevicePointer<CudaFloat>,
+    d_freqs: DevicePointer<GpuFloat>,
+    d_shapelet_basis_values: DevicePointer<GpuFloat>,
 
     point_power_law_radecs: Vec<RADec>,
-    point_power_law_lmns: DevicePointer<cuda::LmnRime>,
+    point_power_law_lmns: DevicePointer<gpu::LmnRime>,
     /// Instrumental flux densities calculated at 150 MHz.
-    point_power_law_fds: DevicePointer<CudaJones>,
+    point_power_law_fds: DevicePointer<GpuJones>,
     /// Spectral indices.
-    point_power_law_sis: DevicePointer<CudaFloat>,
+    point_power_law_sis: DevicePointer<GpuFloat>,
 
     point_curved_power_law_radecs: Vec<RADec>,
-    point_curved_power_law_lmns: DevicePointer<cuda::LmnRime>,
-    pub(super) point_curved_power_law_fds: DevicePointer<CudaJones>,
-    pub(super) point_curved_power_law_sis: DevicePointer<CudaFloat>,
-    point_curved_power_law_qs: DevicePointer<CudaFloat>,
+    point_curved_power_law_lmns: DevicePointer<gpu::LmnRime>,
+    pub(super) point_curved_power_law_fds: DevicePointer<GpuJones>,
+    pub(super) point_curved_power_law_sis: DevicePointer<GpuFloat>,
+    point_curved_power_law_qs: DevicePointer<GpuFloat>,
 
     point_list_radecs: Vec<RADec>,
-    point_list_lmns: DevicePointer<cuda::LmnRime>,
+    point_list_lmns: DevicePointer<gpu::LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
-    point_list_fds: DevicePointer<CudaJones>,
+    point_list_fds: DevicePointer<GpuJones>,
 
     gaussian_power_law_radecs: Vec<RADec>,
-    gaussian_power_law_lmns: DevicePointer<cuda::LmnRime>,
+    gaussian_power_law_lmns: DevicePointer<gpu::LmnRime>,
     /// Instrumental flux densities calculated at 150 MHz.
-    gaussian_power_law_fds: DevicePointer<CudaJones>,
+    gaussian_power_law_fds: DevicePointer<GpuJones>,
     /// Spectral indices.
-    gaussian_power_law_sis: DevicePointer<CudaFloat>,
-    gaussian_power_law_gps: DevicePointer<cuda::GaussianParams>,
+    gaussian_power_law_sis: DevicePointer<GpuFloat>,
+    gaussian_power_law_gps: DevicePointer<gpu::GaussianParams>,
 
     gaussian_curved_power_law_radecs: Vec<RADec>,
-    gaussian_curved_power_law_lmns: DevicePointer<cuda::LmnRime>,
-    gaussian_curved_power_law_fds: DevicePointer<CudaJones>,
-    gaussian_curved_power_law_sis: DevicePointer<CudaFloat>,
-    gaussian_curved_power_law_qs: DevicePointer<CudaFloat>,
-    gaussian_curved_power_law_gps: DevicePointer<cuda::GaussianParams>,
+    gaussian_curved_power_law_lmns: DevicePointer<gpu::LmnRime>,
+    gaussian_curved_power_law_fds: DevicePointer<GpuJones>,
+    gaussian_curved_power_law_sis: DevicePointer<GpuFloat>,
+    gaussian_curved_power_law_qs: DevicePointer<GpuFloat>,
+    gaussian_curved_power_law_gps: DevicePointer<gpu::GaussianParams>,
 
     gaussian_list_radecs: Vec<RADec>,
-    gaussian_list_lmns: DevicePointer<cuda::LmnRime>,
+    gaussian_list_lmns: DevicePointer<gpu::LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
-    gaussian_list_fds: DevicePointer<CudaJones>,
-    gaussian_list_gps: DevicePointer<cuda::GaussianParams>,
+    gaussian_list_fds: DevicePointer<GpuJones>,
+    gaussian_list_gps: DevicePointer<gpu::GaussianParams>,
 
     shapelet_power_law_radecs: Vec<RADec>,
-    shapelet_power_law_lmns: DevicePointer<cuda::LmnRime>,
+    shapelet_power_law_lmns: DevicePointer<gpu::LmnRime>,
     /// Instrumental flux densities calculated at 150 MHz.
-    shapelet_power_law_fds: DevicePointer<CudaJones>,
+    shapelet_power_law_fds: DevicePointer<GpuJones>,
     /// Spectral indices.
-    shapelet_power_law_sis: DevicePointer<CudaFloat>,
-    shapelet_power_law_gps: DevicePointer<cuda::GaussianParams>,
-    shapelet_power_law_coeffs: DevicePointer<cuda::ShapeletCoeff>,
+    shapelet_power_law_sis: DevicePointer<GpuFloat>,
+    shapelet_power_law_gps: DevicePointer<gpu::GaussianParams>,
+    shapelet_power_law_coeffs: DevicePointer<gpu::ShapeletCoeff>,
     shapelet_power_law_coeff_lens: DevicePointer<i32>,
 
     shapelet_curved_power_law_radecs: Vec<RADec>,
-    shapelet_curved_power_law_lmns: DevicePointer<cuda::LmnRime>,
-    shapelet_curved_power_law_fds: DevicePointer<CudaJones>,
-    shapelet_curved_power_law_sis: DevicePointer<CudaFloat>,
-    shapelet_curved_power_law_qs: DevicePointer<CudaFloat>,
-    shapelet_curved_power_law_gps: DevicePointer<cuda::GaussianParams>,
-    shapelet_curved_power_law_coeffs: DevicePointer<cuda::ShapeletCoeff>,
+    shapelet_curved_power_law_lmns: DevicePointer<gpu::LmnRime>,
+    shapelet_curved_power_law_fds: DevicePointer<GpuJones>,
+    shapelet_curved_power_law_sis: DevicePointer<GpuFloat>,
+    shapelet_curved_power_law_qs: DevicePointer<GpuFloat>,
+    shapelet_curved_power_law_gps: DevicePointer<gpu::GaussianParams>,
+    shapelet_curved_power_law_coeffs: DevicePointer<gpu::ShapeletCoeff>,
     shapelet_curved_power_law_coeff_lens: DevicePointer<i32>,
 
     shapelet_list_radecs: Vec<RADec>,
-    shapelet_list_lmns: DevicePointer<cuda::LmnRime>,
+    shapelet_list_lmns: DevicePointer<gpu::LmnRime>,
     /// Instrumental (i.e. XX, XY, YX, XX).
-    shapelet_list_fds: DevicePointer<CudaJones>,
-    shapelet_list_gps: DevicePointer<cuda::GaussianParams>,
-    shapelet_list_coeffs: DevicePointer<cuda::ShapeletCoeff>,
+    shapelet_list_fds: DevicePointer<GpuJones>,
+    shapelet_list_gps: DevicePointer<gpu::GaussianParams>,
+    shapelet_list_coeffs: DevicePointer<gpu::ShapeletCoeff>,
     shapelet_list_coeff_lens: DevicePointer<i32>,
 }
 
-impl<'a> SkyModellerCuda<'a> {
+impl<'a> SkyModellerGpu<'a> {
     /// Given a source list, split the components into each component type (e.g.
     /// points, shapelets) and by each flux density type (e.g. list, power law),
     /// then copy them to a GPU ready for modelling. Where possible, list flux
@@ -153,71 +153,71 @@ impl<'a> SkyModellerCuda<'a> {
         array_latitude_rad: f64,
         dut1: Duration,
         apply_precession: bool,
-    ) -> Result<SkyModellerCuda<'a>, ModelError> {
+    ) -> Result<SkyModellerGpu<'a>, ModelError> {
         let mut point_power_law_radecs: Vec<RADec> = vec![];
-        let mut point_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut point_power_law_lmns: Vec<gpu::LmnRime> = vec![];
         let mut point_power_law_fds: Vec<_> = vec![];
         let mut point_power_law_sis: Vec<_> = vec![];
 
         let mut point_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut point_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut point_curved_power_law_lmns: Vec<gpu::LmnRime> = vec![];
         let mut point_curved_power_law_fds: Vec<_> = vec![];
         let mut point_curved_power_law_sis: Vec<_> = vec![];
         let mut point_curved_power_law_qs: Vec<_> = vec![];
 
         let mut point_list_radecs: Vec<RADec> = vec![];
-        let mut point_list_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut point_list_lmns: Vec<gpu::LmnRime> = vec![];
         let mut point_list_fds: Vec<&FluxDensityType> = vec![];
 
         let mut gaussian_power_law_radecs: Vec<RADec> = vec![];
-        let mut gaussian_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut gaussian_power_law_lmns: Vec<gpu::LmnRime> = vec![];
         let mut gaussian_power_law_fds: Vec<_> = vec![];
         let mut gaussian_power_law_sis: Vec<_> = vec![];
-        let mut gaussian_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut gaussian_power_law_gps: Vec<gpu::GaussianParams> = vec![];
 
         let mut gaussian_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut gaussian_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut gaussian_curved_power_law_lmns: Vec<gpu::LmnRime> = vec![];
         let mut gaussian_curved_power_law_fds: Vec<_> = vec![];
         let mut gaussian_curved_power_law_sis: Vec<_> = vec![];
         let mut gaussian_curved_power_law_qs: Vec<_> = vec![];
-        let mut gaussian_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut gaussian_curved_power_law_gps: Vec<gpu::GaussianParams> = vec![];
 
         let mut gaussian_list_radecs: Vec<RADec> = vec![];
-        let mut gaussian_list_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut gaussian_list_lmns: Vec<gpu::LmnRime> = vec![];
         let mut gaussian_list_fds: Vec<&FluxDensityType> = vec![];
-        let mut gaussian_list_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut gaussian_list_gps: Vec<gpu::GaussianParams> = vec![];
 
         let mut shapelet_power_law_radecs: Vec<RADec> = vec![];
-        let mut shapelet_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut shapelet_power_law_lmns: Vec<gpu::LmnRime> = vec![];
         let mut shapelet_power_law_fds: Vec<_> = vec![];
         let mut shapelet_power_law_sis: Vec<_> = vec![];
-        let mut shapelet_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_power_law_gps: Vec<gpu::GaussianParams> = vec![];
         let mut shapelet_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
         let mut shapelet_curved_power_law_radecs: Vec<RADec> = vec![];
-        let mut shapelet_curved_power_law_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut shapelet_curved_power_law_lmns: Vec<gpu::LmnRime> = vec![];
         let mut shapelet_curved_power_law_fds: Vec<_> = vec![];
         let mut shapelet_curved_power_law_sis: Vec<_> = vec![];
         let mut shapelet_curved_power_law_qs: Vec<_> = vec![];
-        let mut shapelet_curved_power_law_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_curved_power_law_gps: Vec<gpu::GaussianParams> = vec![];
         let mut shapelet_curved_power_law_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
         let mut shapelet_list_radecs: Vec<RADec> = vec![];
-        let mut shapelet_list_lmns: Vec<cuda::LmnRime> = vec![];
+        let mut shapelet_list_lmns: Vec<gpu::LmnRime> = vec![];
         let mut shapelet_list_fds: Vec<&FluxDensityType> = vec![];
-        let mut shapelet_list_gps: Vec<cuda::GaussianParams> = vec![];
+        let mut shapelet_list_gps: Vec<gpu::GaussianParams> = vec![];
         let mut shapelet_list_coeffs: Vec<&[ShapeletCoeff]> = vec![];
 
-        let jones_to_cuda_jones = |j: Jones<f64>| -> CudaJones {
-            CudaJones {
-                j00_re: j[0].re as CudaFloat,
-                j00_im: j[0].im as CudaFloat,
-                j01_re: j[1].re as CudaFloat,
-                j01_im: j[1].im as CudaFloat,
-                j10_re: j[2].re as CudaFloat,
-                j10_im: j[2].im as CudaFloat,
-                j11_re: j[3].re as CudaFloat,
-                j11_im: j[3].im as CudaFloat,
+        let jones_to_gpu_jones = |j: Jones<f64>| -> GpuJones {
+            GpuJones {
+                j00_re: j[0].re as GpuFloat,
+                j00_im: j[0].im as GpuFloat,
+                j01_re: j[1].re as GpuFloat,
+                j01_im: j[1].im as GpuFloat,
+                j10_re: j[2].re as GpuFloat,
+                j10_im: j[2].im as GpuFloat,
+                j11_re: j[3].re as GpuFloat,
+                j11_im: j[3].im as GpuFloat,
             }
         };
 
@@ -235,39 +235,39 @@ impl<'a> SkyModellerCuda<'a> {
         {
             let radec = comp.radec;
             let LmnRime { l, m, n } = comp.radec.to_lmn(phase_centre).prepare_for_rime();
-            let lmn = cuda::LmnRime {
-                l: l as CudaFloat,
-                m: m as CudaFloat,
-                n: n as CudaFloat,
+            let lmn = gpu::LmnRime {
+                l: l as GpuFloat,
+                m: m as GpuFloat,
+                n: n as GpuFloat,
             };
             match &comp.flux_type {
                 FluxDensityType::PowerLaw { si, fd: _ } => {
                     // Rather than using this PL's reference freq, use a pre-
-                    // defined one, so the CUDA code doesn't need to keep track
-                    // of all reference freqs.
-                    let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                    // defined one, so the the GPU code doesn't need to keep
+                    // track of all reference freqs.
+                    let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
                     let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                    let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                    let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
 
                     match &comp.comp_type {
                         ComponentType::Point => {
                             point_power_law_radecs.push(radec);
                             point_power_law_lmns.push(lmn);
-                            point_power_law_fds.push(cuda_inst_fd);
-                            point_power_law_sis.push(*si as CudaFloat);
+                            point_power_law_fds.push(gpu_inst_fd);
+                            point_power_law_sis.push(*si as GpuFloat);
                         }
 
                         ComponentType::Gaussian { maj, min, pa } => {
-                            let gp = cuda::GaussianParams {
-                                maj: *maj as CudaFloat,
-                                min: *min as CudaFloat,
-                                pa: *pa as CudaFloat,
+                            let gp = gpu::GaussianParams {
+                                maj: *maj as GpuFloat,
+                                min: *min as GpuFloat,
+                                pa: *pa as GpuFloat,
                             };
                             gaussian_power_law_radecs.push(radec);
                             gaussian_power_law_lmns.push(lmn);
                             gaussian_power_law_gps.push(gp);
-                            gaussian_power_law_fds.push(cuda_inst_fd);
-                            gaussian_power_law_sis.push(*si as CudaFloat);
+                            gaussian_power_law_fds.push(gpu_inst_fd);
+                            gaussian_power_law_sis.push(*si as GpuFloat);
                         }
 
                         ComponentType::Shapelet {
@@ -276,34 +276,34 @@ impl<'a> SkyModellerCuda<'a> {
                             pa,
                             coeffs,
                         } => {
-                            let gp = cuda::GaussianParams {
-                                maj: *maj as CudaFloat,
-                                min: *min as CudaFloat,
-                                pa: *pa as CudaFloat,
+                            let gp = gpu::GaussianParams {
+                                maj: *maj as GpuFloat,
+                                min: *min as GpuFloat,
+                                pa: *pa as GpuFloat,
                             };
                             shapelet_power_law_radecs.push(radec);
                             shapelet_power_law_lmns.push(lmn);
                             shapelet_power_law_gps.push(gp);
                             shapelet_power_law_coeffs.push(coeffs);
-                            shapelet_power_law_fds.push(cuda_inst_fd);
-                            shapelet_power_law_sis.push(*si as CudaFloat);
+                            shapelet_power_law_fds.push(gpu_inst_fd);
+                            shapelet_power_law_sis.push(*si as GpuFloat);
                         }
                     };
                 }
 
                 FluxDensityType::CurvedPowerLaw { si, fd, q } => {
-                    let fd_at_150mhz = comp.estimate_at_freq(cuda::POWER_LAW_FD_REF_FREQ as _);
+                    let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
                     let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
-                    let cuda_inst_fd = jones_to_cuda_jones(inst_fd);
+                    let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
 
                     // A new SI is needed when changing the reference freq.
                     // Thanks Jack.
                     #[allow(clippy::unnecessary_cast)]
-                    let si = if fd.freq == cuda::POWER_LAW_FD_REF_FREQ as f64 {
+                    let si = if fd.freq == gpu::POWER_LAW_FD_REF_FREQ as f64 {
                         *si
                     } else {
                         #[allow(clippy::unnecessary_cast)]
-                        let logratio = (fd.freq / cuda::POWER_LAW_FD_REF_FREQ as f64).ln();
+                        let logratio = (fd.freq / gpu::POWER_LAW_FD_REF_FREQ as f64).ln();
                         ((fd.i / fd_at_150mhz.i).ln() - q * logratio.powi(2)) / logratio
                     };
 
@@ -311,23 +311,23 @@ impl<'a> SkyModellerCuda<'a> {
                         ComponentType::Point => {
                             point_curved_power_law_radecs.push(radec);
                             point_curved_power_law_lmns.push(lmn);
-                            point_curved_power_law_fds.push(cuda_inst_fd);
-                            point_curved_power_law_sis.push(si as CudaFloat);
-                            point_curved_power_law_qs.push(*q as CudaFloat);
+                            point_curved_power_law_fds.push(gpu_inst_fd);
+                            point_curved_power_law_sis.push(si as GpuFloat);
+                            point_curved_power_law_qs.push(*q as GpuFloat);
                         }
 
                         ComponentType::Gaussian { maj, min, pa } => {
-                            let gp = cuda::GaussianParams {
-                                maj: *maj as CudaFloat,
-                                min: *min as CudaFloat,
-                                pa: *pa as CudaFloat,
+                            let gp = gpu::GaussianParams {
+                                maj: *maj as GpuFloat,
+                                min: *min as GpuFloat,
+                                pa: *pa as GpuFloat,
                             };
                             gaussian_curved_power_law_radecs.push(radec);
                             gaussian_curved_power_law_lmns.push(lmn);
                             gaussian_curved_power_law_gps.push(gp);
-                            gaussian_curved_power_law_fds.push(cuda_inst_fd);
-                            gaussian_curved_power_law_sis.push(si as CudaFloat);
-                            gaussian_curved_power_law_qs.push(*q as CudaFloat);
+                            gaussian_curved_power_law_fds.push(gpu_inst_fd);
+                            gaussian_curved_power_law_sis.push(si as GpuFloat);
+                            gaussian_curved_power_law_qs.push(*q as GpuFloat);
                         }
 
                         ComponentType::Shapelet {
@@ -336,18 +336,18 @@ impl<'a> SkyModellerCuda<'a> {
                             pa,
                             coeffs,
                         } => {
-                            let gp = cuda::GaussianParams {
-                                maj: *maj as CudaFloat,
-                                min: *min as CudaFloat,
-                                pa: *pa as CudaFloat,
+                            let gp = gpu::GaussianParams {
+                                maj: *maj as GpuFloat,
+                                min: *min as GpuFloat,
+                                pa: *pa as GpuFloat,
                             };
                             shapelet_curved_power_law_radecs.push(radec);
                             shapelet_curved_power_law_lmns.push(lmn);
                             shapelet_curved_power_law_gps.push(gp);
                             shapelet_curved_power_law_coeffs.push(coeffs);
-                            shapelet_curved_power_law_fds.push(cuda_inst_fd);
-                            shapelet_curved_power_law_sis.push(si as CudaFloat);
-                            shapelet_curved_power_law_qs.push(*q as CudaFloat);
+                            shapelet_curved_power_law_fds.push(gpu_inst_fd);
+                            shapelet_curved_power_law_sis.push(si as GpuFloat);
+                            shapelet_curved_power_law_qs.push(*q as GpuFloat);
                         }
                     };
                 }
@@ -360,10 +360,10 @@ impl<'a> SkyModellerCuda<'a> {
                     }
 
                     ComponentType::Gaussian { maj, min, pa } => {
-                        let gp = cuda::GaussianParams {
-                            maj: *maj as CudaFloat,
-                            min: *min as CudaFloat,
-                            pa: *pa as CudaFloat,
+                        let gp = gpu::GaussianParams {
+                            maj: *maj as GpuFloat,
+                            min: *min as GpuFloat,
+                            pa: *pa as GpuFloat,
                         };
                         gaussian_list_radecs.push(radec);
                         gaussian_list_lmns.push(lmn);
@@ -377,10 +377,10 @@ impl<'a> SkyModellerCuda<'a> {
                         pa,
                         coeffs,
                     } => {
-                        let gp = cuda::GaussianParams {
-                            maj: *maj as CudaFloat,
-                            min: *min as CudaFloat,
-                            pa: *pa as CudaFloat,
+                        let gp = gpu::GaussianParams {
+                            maj: *maj as GpuFloat,
+                            min: *min as GpuFloat,
+                            pa: *pa as GpuFloat,
                         };
                         shapelet_list_radecs.push(radec);
                         shapelet_list_lmns.push(lmn);
@@ -394,13 +394,13 @@ impl<'a> SkyModellerCuda<'a> {
 
         let point_list_fds =
             get_instrumental_flux_densities(&point_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_cuda_jones);
+                .mapv(jones_to_gpu_jones);
         let gaussian_list_fds =
             get_instrumental_flux_densities(&gaussian_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_cuda_jones);
+                .mapv(jones_to_gpu_jones);
         let shapelet_list_fds =
             get_instrumental_flux_densities(&shapelet_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_cuda_jones);
+                .mapv(jones_to_gpu_jones);
 
         let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
             get_flattened_coeffs(shapelet_power_law_coeffs);
@@ -409,16 +409,16 @@ impl<'a> SkyModellerCuda<'a> {
         let (shapelet_list_coeffs, shapelet_list_coeff_lens) =
             get_flattened_coeffs(shapelet_list_coeffs);
 
-        // Variables for CUDA. They're made flexible in their types for
-        // whichever precision is being used in the CUDA code.
+        // Variables for CUDA/HIP. They're made flexible in their types for
+        // whichever precision is being used.
         let (unflagged_fine_chan_freqs_ints, unflagged_fine_chan_freqs_floats): (Vec<_>, Vec<_>) =
             unflagged_fine_chan_freqs
                 .iter()
-                .map(|&f| (f as u32, f as CudaFloat))
+                .map(|&f| (f as u32, f as GpuFloat))
                 .unzip();
-        let shapelet_basis_values: Vec<CudaFloat> = shapelets::SHAPELET_BASIS_VALUES
+        let shapelet_basis_values: Vec<GpuFloat> = shapelets::SHAPELET_BASIS_VALUES
             .iter()
-            .map(|&f| f as CudaFloat)
+            .map(|&f| f as GpuFloat)
             .collect();
 
         let num_baselines = (unflagged_tile_xyzs.len() * (unflagged_tile_xyzs.len() - 1)) / 2;
@@ -441,8 +441,8 @@ impl<'a> SkyModellerCuda<'a> {
         let d_tile_index_to_unflagged_tile_index_map =
             DevicePointer::copy_to_device(&tile_index_to_unflagged_tile_index_map)?;
 
-        Ok(SkyModellerCuda {
-            cuda_beam: beam.prepare_cuda_beam(&unflagged_fine_chan_freqs_ints)?,
+        Ok(SkyModellerGpu {
+            gpu_beam: beam.prepare_gpu_beam(&unflagged_fine_chan_freqs_ints)?,
 
             phase_centre,
             array_longitude: array_longitude_rad,
@@ -557,8 +557,8 @@ impl<'a> SkyModellerCuda<'a> {
     /// This function is mostly used for testing. For a single timestep, over
     /// the already-provided baselines and frequencies, generate visibilities
     /// for each specified sky-model point-source component. The
-    /// `SkyModellerCuda` object *must* already have its UVW coordinates set;
-    /// see [`SkyModellerCuda::set_uvws`].
+    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
+    /// [`SkyModellerGpu::set_uvws`].
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     ///
@@ -568,8 +568,8 @@ impl<'a> SkyModellerCuda<'a> {
         &self,
         lst_rad: f64,
         array_latitude_rad: f64,
-        d_uvws: &DevicePointer<cuda::UVW>,
-        d_beam_jones: &mut DevicePointer<CudaJones>,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
         if self.point_power_law_radecs.is_empty()
@@ -580,23 +580,23 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         {
-            let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
+            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
                 .point_power_law_radecs
                 .iter()
                 .chain(self.point_curved_power_law_radecs.iter())
                 .chain(self.point_list_radecs.iter())
                 .map(|radec| {
                     let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as CudaFloat, azel.za() as CudaFloat)
+                    (azel.az as GpuFloat, azel.za() as GpuFloat)
                 })
                 .unzip();
             d_beam_jones.realloc(
-                self.cuda_beam.get_num_unique_tiles() as usize
-                    * self.cuda_beam.get_num_unique_freqs() as usize
+                self.gpu_beam.get_num_unique_tiles() as usize
+                    * self.gpu_beam.get_num_unique_freqs() as usize
                     * azs.len()
-                    * std::mem::size_of::<CudaJones>(),
+                    * std::mem::size_of::<GpuJones>(),
             )?;
-            self.cuda_beam.calc_jones_pair(
+            self.gpu_beam.calc_jones_pair(
                 &azs,
                 &zas,
                 array_latitude_rad,
@@ -604,9 +604,9 @@ impl<'a> SkyModellerCuda<'a> {
             )?;
         }
 
-        cuda_kernel_call!(
-            cuda::model_points,
-            &cuda::Points {
+        gpu_kernel_call!(
+            gpu::model_points,
+            &gpu::Points {
                 num_power_laws: self
                     .point_power_law_radecs
                     .len()
@@ -644,8 +644,8 @@ impl<'a> SkyModellerCuda<'a> {
     /// This function is mostly used for testing. For a single timestep, over
     /// the already-provided baselines and frequencies, generate visibilities
     /// for each specified sky-model Gaussian-source component. The
-    /// `SkyModellerCuda` object *must* already have its UVW coordinates set;
-    /// see [`SkyModellerCuda::set_uvws`].
+    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
+    /// [`SkyModellerGpu::set_uvws`].
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     ///
@@ -655,8 +655,8 @@ impl<'a> SkyModellerCuda<'a> {
         &self,
         lst_rad: f64,
         array_latitude_rad: f64,
-        d_uvws: &DevicePointer<cuda::UVW>,
-        d_beam_jones: &mut DevicePointer<CudaJones>,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
         if self.gaussian_power_law_radecs.is_empty()
@@ -667,23 +667,23 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         {
-            let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
+            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
                 .gaussian_power_law_radecs
                 .iter()
                 .chain(self.gaussian_curved_power_law_radecs.iter())
                 .chain(self.gaussian_list_radecs.iter())
                 .map(|radec| {
                     let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as CudaFloat, azel.za() as CudaFloat)
+                    (azel.az as GpuFloat, azel.za() as GpuFloat)
                 })
                 .unzip();
             d_beam_jones.realloc(
-                self.cuda_beam.get_num_unique_tiles() as usize
-                    * self.cuda_beam.get_num_unique_freqs() as usize
+                self.gpu_beam.get_num_unique_tiles() as usize
+                    * self.gpu_beam.get_num_unique_freqs() as usize
                     * azs.len()
-                    * std::mem::size_of::<CudaJones>(),
+                    * std::mem::size_of::<GpuJones>(),
             )?;
-            self.cuda_beam.calc_jones_pair(
+            self.gpu_beam.calc_jones_pair(
                 &azs,
                 &zas,
                 array_latitude_rad,
@@ -691,9 +691,9 @@ impl<'a> SkyModellerCuda<'a> {
             )?;
         }
 
-        cuda_kernel_call!(
-            cuda::model_gaussians,
-            &cuda::Gaussians {
+        gpu_kernel_call!(
+            gpu::model_gaussians,
+            &gpu::Gaussians {
                 num_power_laws: self
                     .gaussian_power_law_radecs
                     .len()
@@ -734,8 +734,8 @@ impl<'a> SkyModellerCuda<'a> {
     /// This function is mostly used for testing. For a single timestep, over
     /// the already-provided baselines and frequencies, generate visibilities
     /// for each specified sky-model Gaussian-source component. The
-    /// `SkyModellerCuda` object *must* already have its UVW coordinates set;
-    /// see [`SkyModellerCuda::set_uvws`].
+    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
+    /// [`SkyModellerGpu::set_uvws`].
     ///
     /// `lst_rad`: The local sidereal time in \[radians\].
     ///
@@ -745,8 +745,8 @@ impl<'a> SkyModellerCuda<'a> {
         &self,
         lst_rad: f64,
         array_latitude_rad: f64,
-        d_uvws: &DevicePointer<cuda::UVW>,
-        d_beam_jones: &mut DevicePointer<CudaJones>,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
         if self.shapelet_power_law_radecs.is_empty()
@@ -757,23 +757,23 @@ impl<'a> SkyModellerCuda<'a> {
         }
 
         {
-            let (azs, zas): (Vec<CudaFloat>, Vec<CudaFloat>) = self
+            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
                 .shapelet_power_law_radecs
                 .iter()
                 .chain(self.shapelet_curved_power_law_radecs.iter())
                 .chain(self.shapelet_list_radecs.iter())
                 .map(|radec| {
                     let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as CudaFloat, azel.za() as CudaFloat)
+                    (azel.az as GpuFloat, azel.za() as GpuFloat)
                 })
                 .unzip();
             d_beam_jones.realloc(
-                self.cuda_beam.get_num_unique_tiles() as usize
-                    * self.cuda_beam.get_num_unique_freqs() as usize
+                self.gpu_beam.get_num_unique_tiles() as usize
+                    * self.gpu_beam.get_num_unique_freqs() as usize
                     * azs.len()
-                    * std::mem::size_of::<CudaJones>(),
+                    * std::mem::size_of::<GpuJones>(),
             )?;
-            self.cuda_beam.calc_jones_pair(
+            self.gpu_beam.calc_jones_pair(
                 &azs,
                 &zas,
                 array_latitude_rad,
@@ -788,9 +788,9 @@ impl<'a> SkyModellerCuda<'a> {
             DevicePointer::copy_to_device(uvs.curved_power_law.as_slice().expect("is contiguous"))?;
         let list_uvs = DevicePointer::copy_to_device(uvs.list.as_slice().expect("is contiguous"))?;
 
-        cuda_kernel_call!(
-            cuda::model_shapelets,
-            &cuda::Shapelets {
+        gpu_kernel_call!(
+            gpu::model_shapelets,
+            &gpu::Shapelets {
                 num_power_laws: self
                     .shapelet_power_law_radecs
                     .len()
@@ -840,15 +840,15 @@ impl<'a> SkyModellerCuda<'a> {
     }
 
     /// This is a "specialised" version of [`SkyModeller::model_timestep_with`];
-    /// it accepts CUDA buffers directly, saving some allocations. Unlike the
+    /// it accepts GPU buffers directly, saving some allocations. Unlike the
     /// aforementioned function, the incoming visibilities *are not* cleared;
     /// visibilities are accumulated.
     fn model_timestep_with(
         &self,
         lst_rad: f64,
         array_latitude_rad: f64,
-        d_uvws: &DevicePointer<cuda::UVW>,
-        d_beam_jones: &mut DevicePointer<CudaJones>,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
         d_vis_fb: &mut DevicePointer<Jones<f32>>,
     ) -> Result<(), ModelError> {
         unsafe {
@@ -867,8 +867,8 @@ impl<'a> SkyModellerCuda<'a> {
     fn get_lst_uvws_latitude(
         &self,
         timestamp: Epoch,
-        d_uvws: &mut DevicePointer<cuda::UVW>,
-    ) -> Result<(f64, Vec<UVW>, f64), CudaError> {
+        d_uvws: &mut DevicePointer<gpu::UVW>,
+    ) -> Result<(f64, Vec<UVW>, f64), GpuError> {
         let (lst, xyzs, latitude) = if self.precess {
             let precession_info = precess_time(
                 self.array_longitude,
@@ -905,30 +905,30 @@ impl<'a> SkyModellerCuda<'a> {
         };
 
         let uvws = xyzs_to_cross_uvws(&xyzs, self.phase_centre.to_hadec(lst));
-        let cuda_uvws: Vec<cuda::UVW> = uvws
+        let gpu_uvws: Vec<gpu::UVW> = uvws
             .iter()
-            .map(|&uvw| cuda::UVW {
-                u: uvw.u as CudaFloat,
-                v: uvw.v as CudaFloat,
-                w: uvw.w as CudaFloat,
+            .map(|&uvw| gpu::UVW {
+                u: uvw.u as GpuFloat,
+                v: uvw.v as GpuFloat,
+                w: uvw.w as GpuFloat,
             })
             .collect();
-        d_uvws.overwrite(&cuda_uvws)?;
+        d_uvws.overwrite(&gpu_uvws)?;
 
         Ok((lst, uvws, latitude))
     }
 
-    /// Get a populated [`cuda::Addresses`]. This should never outlive `self`.
-    fn get_addresses(&self) -> cuda::Addresses {
-        cuda::Addresses {
+    /// Get a populated [`gpu::Addresses`]. This should never outlive `self`.
+    fn get_addresses(&self) -> gpu::Addresses {
+        gpu::Addresses {
             num_freqs: self.num_freqs,
             num_vis: self.num_baselines * self.num_freqs,
             num_baselines: self.num_baselines,
             d_freqs: self.d_freqs.get(),
             d_shapelet_basis_values: self.d_shapelet_basis_values.get(),
-            num_unique_beam_freqs: self.cuda_beam.get_num_unique_freqs(),
-            d_tile_map: self.cuda_beam.get_tile_map(),
-            d_freq_map: self.cuda_beam.get_freq_map(),
+            num_unique_beam_freqs: self.gpu_beam.get_num_unique_freqs(),
+            d_tile_map: self.gpu_beam.get_tile_map(),
+            d_freq_map: self.gpu_beam.get_freq_map(),
             d_tile_index_to_unflagged_tile_index_map: self
                 .tile_index_to_unflagged_tile_index_map
                 .get(),
@@ -937,7 +937,7 @@ impl<'a> SkyModellerCuda<'a> {
 
     /// Shapelets need their own special kind of UVW coordinates. Each shapelet
     /// component's position is treated as the phase centre. This function uses
-    /// the FFI type [`cuda::ShapeletUV`]; the W isn't actually used in
+    /// the FFI type [`gpu::ShapeletUV`]; the W isn't actually used in
     /// computation, and omitting it is hopefully a little more efficient.
     ///
     /// The returned arrays have baseline as the first axis and component as the
@@ -963,7 +963,7 @@ impl<'a> SkyModellerCuda<'a> {
     }
 }
 
-impl<'a> SkyModeller<'a> for SkyModellerCuda<'a> {
+impl<'a> SkyModeller<'a> for SkyModellerGpu<'a> {
     fn model_timestep(
         &self,
         timestamp: Epoch,
@@ -1006,36 +1006,36 @@ impl<'a> SkyModeller<'a> for SkyModellerCuda<'a> {
     }
 }
 
-/// The return type of [SkyModellerCuda::get_shapelet_uvs]. These arrays have
+/// The return type of [SkyModellerGpu::get_shapelet_uvs]. These arrays have
 /// baseline as the first axis and component as the second.
 pub(super) struct ShapeletUVs {
-    power_law: Array2<cuda::ShapeletUV>,
-    curved_power_law: Array2<cuda::ShapeletUV>,
-    pub(super) list: Array2<cuda::ShapeletUV>,
+    power_law: Array2<gpu::ShapeletUV>,
+    curved_power_law: Array2<gpu::ShapeletUV>,
+    pub(super) list: Array2<gpu::ShapeletUV>,
 }
 
 fn get_shapelet_uvs_inner(
     radecs: &[RADec],
     lst_rad: f64,
     tile_xyzs: &[XyzGeodetic],
-) -> Array2<cuda::ShapeletUV> {
+) -> Array2<gpu::ShapeletUV> {
     let n = tile_xyzs.len();
     let num_baselines = (n * (n - 1)) / 2;
 
-    let mut shapelet_uvs: Array2<cuda::ShapeletUV> = Array2::from_elem(
+    let mut shapelet_uvs: Array2<gpu::ShapeletUV> = Array2::from_elem(
         (num_baselines, radecs.len()),
-        cuda::ShapeletUV { u: 0.0, v: 0.0 },
+        gpu::ShapeletUV { u: 0.0, v: 0.0 },
     );
     shapelet_uvs
         .axis_iter_mut(Axis(1))
         .zip(radecs.iter())
         .for_each(|(mut baseline_uv, radec)| {
             let hadec = radec.to_hadec(lst_rad);
-            let shapelet_uvs: Vec<cuda::ShapeletUV> = xyzs_to_cross_uvws(tile_xyzs, hadec)
+            let shapelet_uvs: Vec<gpu::ShapeletUV> = xyzs_to_cross_uvws(tile_xyzs, hadec)
                 .into_iter()
-                .map(|uvw| cuda::ShapeletUV {
-                    u: uvw.u as CudaFloat,
-                    v: uvw.v as CudaFloat,
+                .map(|uvw| gpu::ShapeletUV {
+                    u: uvw.u as GpuFloat,
+                    v: uvw.v as GpuFloat,
                 })
                 .collect();
             baseline_uv.assign(&Array1::from(shapelet_uvs));
@@ -1049,8 +1049,8 @@ fn get_shapelet_uvs_inner(
 /// array-of-arrays).
 fn get_flattened_coeffs(
     shapelet_coeffs: Vec<&[ShapeletCoeff]>,
-) -> (Vec<cuda::ShapeletCoeff>, Vec<i32>) {
-    let mut coeffs: Vec<cuda::ShapeletCoeff> = vec![];
+) -> (Vec<gpu::ShapeletCoeff>, Vec<i32>) {
+    let mut coeffs: Vec<gpu::ShapeletCoeff> = vec![];
     let mut coeff_lengths = Vec::with_capacity(coeffs.len());
 
     for coeffs_for_comp in shapelet_coeffs {
@@ -1061,10 +1061,10 @@ fn get_flattened_coeffs(
                 .expect("not bigger than i32::MAX"),
         );
         for &ShapeletCoeff { n1, n2, value } in coeffs_for_comp {
-            coeffs.push(cuda::ShapeletCoeff {
+            coeffs.push(gpu::ShapeletCoeff {
                 n1,
                 n2,
-                value: value as CudaFloat,
+                value: value as GpuFloat,
             })
         }
     }

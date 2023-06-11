@@ -1,5 +1,6 @@
 -I/usr/local/cuda/include
 -I/opt/cuda/include
+-I/opt/rocm/include
 -Wall
 -Wextra
 -Wpedantic

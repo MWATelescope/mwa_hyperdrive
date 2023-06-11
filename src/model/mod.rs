@@ -5,17 +5,17 @@
 //! Code to generate sky-model visibilities.
 
 mod cpu;
-#[cfg(feature = "cuda")]
-mod cuda;
 mod error;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+mod gpu;
 pub(crate) mod shapelets;
 #[cfg(test)]
 mod tests;
 
 pub use cpu::SkyModellerCpu;
-#[cfg(feature = "cuda")]
-pub use cuda::SkyModellerCuda;
 pub(crate) use error::ModelError;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+pub use gpu::SkyModellerGpu;
 
 use std::collections::HashSet;
 
@@ -31,10 +31,10 @@ pub enum ModelDevice {
     /// when modelling.
     Cpu,
 
-    /// A CUDA-capable device is used for modelling. The precision depends on
-    /// the compile features used.
-    #[cfg(feature = "cuda")]
-    Cuda,
+    /// A CUDA- or HIP-capable device is used for modelling. The precision
+    /// depends on the compile features used.
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    Gpu,
 }
 
 impl ModelDevice {
@@ -42,11 +42,11 @@ impl ModelDevice {
         match self {
             ModelDevice::Cpu => "double",
 
-            #[cfg(feature = "cuda-single")]
-            ModelDevice::Cuda => "single",
+            #[cfg(feature = "gpu-single")]
+            ModelDevice::Gpu => "single",
 
-            #[cfg(all(feature = "cuda", not(feature = "cuda-single")))]
-            ModelDevice::Cuda => "double",
+            #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))]
+            ModelDevice::Gpu => "double",
         }
     }
 
@@ -56,11 +56,15 @@ impl ModelDevice {
         match self {
             ModelDevice::Cpu => Ok(get_cpu_info()),
 
-            #[cfg(feature = "cuda")]
-            ModelDevice::Cuda => {
-                let (device_info, driver_info) = crate::cuda::get_device_info()?;
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            ModelDevice::Gpu => {
+                let (device_info, driver_info) = crate::gpu::get_device_info()?;
+                #[cfg(feature = "cuda")]
+                let device_type = "CUDA";
+                #[cfg(feature = "hip")]
+                let device_type = "HIP";
                 Ok(format!(
-                    "{} (capability {}, {} MiB), CUDA driver {}, runtime {}",
+                    "{} (capability {}, {} MiB), {device_type} driver {}, runtime {}",
                     device_info.name,
                     device_info.capability,
                     device_info.total_global_mem,
@@ -74,9 +78,9 @@ impl ModelDevice {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum DeviceError {
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     #[error(transparent)]
-    Cuda(#[from] crate::cuda::CudaError),
+    Gpu(#[from] crate::gpu::GpuError),
 }
 
 /// Get a formatted string with information on the device used for modelling.
@@ -127,7 +131,8 @@ pub trait SkyModeller<'a> {
     /// # Errors
     ///
     /// This function will return an error if there was a problem with
-    /// beam-response calculation or a CUDA error (if using CUDA functionality).
+    /// beam-response calculation or a CUDA/HIP error (if using CUDA/HIP
+    /// functionality).
     fn model_timestep(
         &self,
         timestamp: Epoch,
@@ -151,7 +156,8 @@ pub trait SkyModeller<'a> {
     /// # Errors
     ///
     /// This function will return an error if there was a problem with
-    /// beam-response calculation or a CUDA error (if using CUDA functionality).
+    /// beam-response calculation or a CUDA/HIP error (if using CUDA/HIP
+    /// functionality).
     fn model_timestep_with(
         &self,
         timestamp: Epoch,
@@ -160,14 +166,13 @@ pub trait SkyModeller<'a> {
 }
 
 /// Create a [`SkyModeller`] trait object that generates sky-model visibilities
-/// on either the CPU or a CUDA-compatible GPU. This function conveniently
-/// provides either a [`SkyModellerCpu`] or [`SkyModellerCuda`] depending on how
-/// `hyperdrive` was compiled and the `use_cpu_for_modelling` flag.
+/// on the CPU, a CUDA-compatible GPU or a HIP-compatible GPU, depending on the
+/// value of [`MODEL_DEVICE`].
 ///
 /// # Errors
 ///
-/// This function will return an error if CUDA mallocs and copies can't be
-/// executed, or if there was a problem in setting up a `BeamCUDA`.
+/// This function will return an error if GPU mallocs and copies can't be
+/// executed, or if there was a problem in setting up a `BeamGpu`.
 #[allow(clippy::too_many_arguments)]
 pub fn new_sky_modeller<'a>(
     beam: &'a dyn Beam,
@@ -197,9 +202,9 @@ pub fn new_sky_modeller<'a>(
             apply_precession,
         ))),
 
-        #[cfg(feature = "cuda")]
-        ModelDevice::Cuda => {
-            let modeller = SkyModellerCuda::new(
+        #[cfg(any(feature = "cuda", feature = "hip"))]
+        ModelDevice::Gpu => {
+            let modeller = SkyModellerGpu::new(
                 beam,
                 source_list,
                 pols,

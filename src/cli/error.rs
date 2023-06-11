@@ -256,8 +256,8 @@ impl From<VisSubtractError> for HyperdriveError {
             VisSubtractError::VisWrite(e) => Self::from(e),
             VisSubtractError::Model(e) => Self::from(e),
             VisSubtractError::IO(e) => Self::from(e),
-            #[cfg(feature = "cuda")]
-            VisSubtractError::Cuda(e) => Self::from(e),
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            VisSubtractError::Gpu(e) => Self::from(e),
         }
     }
 }
@@ -429,8 +429,8 @@ impl From<BeamError> for HyperdriveError {
             | BeamError::BadTileIndex { .. }
             | BeamError::Hyperbeam(_)
             | BeamError::HyperbeamInit(_) => Self::Beam(s),
-            #[cfg(feature = "cuda")]
-            BeamError::Cuda(_) => Self::Beam(s),
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            BeamError::Gpu(_) => Self::Beam(s),
         }
     }
 }
@@ -440,8 +440,8 @@ impl From<ModelError> for HyperdriveError {
         match e {
             ModelError::Beam(e) => Self::from(e),
 
-            #[cfg(feature = "cuda")]
-            ModelError::Cuda(e) => Self::from(e),
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            ModelError::Gpu(e) => Self::from(e),
         }
     }
 }
@@ -464,9 +464,9 @@ impl From<mwalib::MwalibError> for HyperdriveError {
     }
 }
 
-#[cfg(feature = "cuda")]
-impl From<crate::cuda::CudaError> for HyperdriveError {
-    fn from(e: crate::cuda::CudaError) -> Self {
+#[cfg(any(feature = "cuda", feature = "hip"))]
+impl From<crate::gpu::GpuError> for HyperdriveError {
+    fn from(e: crate::gpu::GpuError) -> Self {
         Self::Generic(e.to_string())
     }
 }

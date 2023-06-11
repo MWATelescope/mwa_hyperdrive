@@ -8,6 +8,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0] - Unreleased
 ### Added
+- Support for HIP, which allows AMD GPUs to be used instead of only NVIDIA GPUs
+  via CUDA.
 - Support for the "DipAmps" column in a metafits file. This allows users to
   control dipole gains in beam code.
 - Support for averaging incoming visibilities in time and frequency *before*

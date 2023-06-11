@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Tests on generating sky-model visibilities with CUDA.
+//! Tests on generating sky-model visibilities with a GPU.
 //!
 //! These tests use the same expected values as the CPU tests.
 
@@ -10,7 +10,7 @@ use ndarray::prelude::*;
 
 use super::*;
 use crate::{
-    cuda::{self, CudaFloat, DevicePointer},
+    gpu::{self, DevicePointer, GpuFloat},
     srclist::Source,
 };
 
@@ -40,9 +40,9 @@ macro_rules! test_modelling {
         d_vis_fb
             .copy_from_device(visibilities.as_slice_mut().unwrap())
             .unwrap();
-        #[cfg(not(feature = "cuda-single"))]
+        #[cfg(not(feature = "gpu-single"))]
         let epsilon = if $no_beam { 0.0 } else { 1e-15 };
-        #[cfg(feature = "cuda-single")]
+        #[cfg(feature = "gpu-single")]
         let epsilon = if $no_beam { 6e-8 } else { 2e-3 };
         $list_test_fn(visibilities.view(), epsilon);
         d_vis_fb.clear();
@@ -88,7 +88,7 @@ macro_rules! test_modelling {
 fn point_zenith_gpu() {
     test_modelling!(
         true,
-        SkyModellerCuda::model_points,
+        SkyModellerGpu::model_points,
         &POINT_ZENITH_LIST,
         &POINT_ZENITH_POWER_LAW,
         &POINT_ZENITH_CURVED_POWER_LAW,
@@ -102,7 +102,7 @@ fn point_zenith_gpu() {
 fn point_off_zenith_gpu() {
     test_modelling!(
         true,
-        SkyModellerCuda::model_points,
+        SkyModellerGpu::model_points,
         &POINT_OFF_ZENITH_LIST,
         &POINT_OFF_ZENITH_POWER_LAW,
         &POINT_OFF_ZENITH_CURVED_POWER_LAW,
@@ -116,7 +116,7 @@ fn point_off_zenith_gpu() {
 fn gaussian_zenith_gpu() {
     test_modelling!(
         true,
-        SkyModellerCuda::model_gaussians,
+        SkyModellerGpu::model_gaussians,
         &GAUSSIAN_ZENITH_LIST,
         &GAUSSIAN_ZENITH_POWER_LAW,
         &GAUSSIAN_ZENITH_CURVED_POWER_LAW,
@@ -130,7 +130,7 @@ fn gaussian_zenith_gpu() {
 fn gaussian_off_zenith_gpu() {
     test_modelling!(
         true,
-        SkyModellerCuda::model_gaussians,
+        SkyModellerGpu::model_gaussians,
         &GAUSSIAN_OFF_ZENITH_LIST,
         &GAUSSIAN_OFF_ZENITH_POWER_LAW,
         &GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW,
@@ -144,7 +144,7 @@ fn gaussian_off_zenith_gpu() {
 fn shapelet_zenith_gpu() {
     test_modelling!(
         true,
-        SkyModellerCuda::model_shapelets,
+        SkyModellerGpu::model_shapelets,
         &SHAPELET_ZENITH_LIST,
         &SHAPELET_ZENITH_POWER_LAW,
         &SHAPELET_ZENITH_CURVED_POWER_LAW,
@@ -158,7 +158,7 @@ fn shapelet_zenith_gpu() {
 fn shapelet_off_zenith_gpu() {
     test_modelling!(
         true,
-        SkyModellerCuda::model_shapelets,
+        SkyModellerGpu::model_shapelets,
         &SHAPELET_OFF_ZENITH_LIST,
         &SHAPELET_OFF_ZENITH_POWER_LAW,
         &SHAPELET_OFF_ZENITH_CURVED_POWER_LAW,
@@ -172,7 +172,7 @@ fn shapelet_off_zenith_gpu() {
 fn point_zenith_gpu_fee() {
     test_modelling!(
         false,
-        SkyModellerCuda::model_points,
+        SkyModellerGpu::model_points,
         &POINT_ZENITH_LIST,
         &POINT_ZENITH_POWER_LAW,
         &POINT_ZENITH_CURVED_POWER_LAW,
@@ -186,7 +186,7 @@ fn point_zenith_gpu_fee() {
 fn point_off_zenith_gpu_fee() {
     test_modelling!(
         false,
-        SkyModellerCuda::model_points,
+        SkyModellerGpu::model_points,
         &POINT_OFF_ZENITH_LIST,
         &POINT_OFF_ZENITH_POWER_LAW,
         &POINT_OFF_ZENITH_CURVED_POWER_LAW,
@@ -200,7 +200,7 @@ fn point_off_zenith_gpu_fee() {
 fn gaussian_zenith_gpu_fee() {
     test_modelling!(
         false,
-        SkyModellerCuda::model_gaussians,
+        SkyModellerGpu::model_gaussians,
         &GAUSSIAN_ZENITH_LIST,
         &GAUSSIAN_ZENITH_POWER_LAW,
         &GAUSSIAN_ZENITH_CURVED_POWER_LAW,
@@ -214,7 +214,7 @@ fn gaussian_zenith_gpu_fee() {
 fn gaussian_off_zenith_gpu_fee() {
     test_modelling!(
         false,
-        SkyModellerCuda::model_gaussians,
+        SkyModellerGpu::model_gaussians,
         &GAUSSIAN_OFF_ZENITH_LIST,
         &GAUSSIAN_OFF_ZENITH_POWER_LAW,
         &GAUSSIAN_OFF_ZENITH_CURVED_POWER_LAW,
@@ -228,7 +228,7 @@ fn gaussian_off_zenith_gpu_fee() {
 fn shapelet_zenith_gpu_fee() {
     test_modelling!(
         false,
-        SkyModellerCuda::model_shapelets,
+        SkyModellerGpu::model_shapelets,
         &SHAPELET_ZENITH_LIST,
         &SHAPELET_ZENITH_POWER_LAW,
         &SHAPELET_ZENITH_CURVED_POWER_LAW,
@@ -242,7 +242,7 @@ fn shapelet_zenith_gpu_fee() {
 fn shapelet_off_zenith_gpu_fee() {
     test_modelling!(
         false,
-        SkyModellerCuda::model_shapelets,
+        SkyModellerGpu::model_shapelets,
         &SHAPELET_OFF_ZENITH_LIST,
         &SHAPELET_OFF_ZENITH_POWER_LAW,
         &SHAPELET_OFF_ZENITH_CURVED_POWER_LAW,
@@ -256,7 +256,7 @@ fn shapelet_off_zenith_gpu_fee() {
 fn non_trivial_gaussian() {
     test_modelling!(
         false,
-        SkyModellerCuda::model_gaussians,
+        SkyModellerGpu::model_gaussians,
         &SourceList::from([(
             "list".to_string(),
             Source {
@@ -497,9 +497,9 @@ fn gaussian_multiple_components() {
         .copy_from_device(visibilities.as_slice_mut().unwrap())
         .unwrap();
 
-    #[cfg(not(feature = "cuda-single"))]
+    #[cfg(not(feature = "gpu-single"))]
     test_multiple_gaussian_components(visibilities.view(), 0.0);
-    #[cfg(feature = "cuda-single")]
+    #[cfg(feature = "gpu-single")]
     test_multiple_gaussian_components(visibilities.view(), 5e-7);
 }
 
@@ -543,15 +543,15 @@ fn shapelet_multiple_components() {
     let shapelet_uvs = modeller
         .get_shapelet_uvs(obs.lst)
         .list
-        .map(|&cuda::ShapeletUV { u, v }| UVW {
-            u: CudaFloat::into(u),
-            v: CudaFloat::into(v),
+        .map(|&gpu::ShapeletUV { u, v }| UVW {
+            u: GpuFloat::into(u),
+            v: GpuFloat::into(v),
             w: 0.0,
         });
 
-    #[cfg(not(feature = "cuda-single"))]
+    #[cfg(not(feature = "gpu-single"))]
     test_multiple_shapelet_components(visibilities.view(), shapelet_uvs.view(), 0.0, 0.0);
-    #[cfg(feature = "cuda-single")]
+    #[cfg(feature = "gpu-single")]
     test_multiple_shapelet_components(visibilities.view(), shapelet_uvs.view(), 5e-7, 3e-8);
 }
 
@@ -584,7 +584,7 @@ fn test_curved_power_law_changing_ref_freq() {
     obs.freqs.clear();
     obs.freqs.push(150e6);
     let (modeller, _) = obs.get_gpu_modeller(&srclist);
-    let mut modeller_fds = [crate::cuda::CudaJones::default(); 1];
+    let mut modeller_fds = [crate::gpu::GpuJones::default(); 1];
     let mut modeller_sis = [0.0; 1];
     modeller
         .point_curved_power_law_fds

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! CUDA code to be used by hyperdrive.
+//! GPU code to be used by hyperdrive.
 
 #![allow(non_snake_case)]
 #![allow(clippy::upper_case_acronyms)]
@@ -21,45 +21,67 @@ use thiserror::Error;
 
 pub(crate) use utils::get_device_info;
 
-// Import Rust bindings to the CUDA code specific to the precision we're using,
-// and set corresponding compile-time types.
+// Import Rust bindings to the CUDA/HIP code specific to the precision we're
+// using, and set corresponding compile-time types.
 cfg_if::cfg_if! {
-    if #[cfg(feature = "cuda-single")] {
-        /// f32 (using the "cuda-single" feature)
-        pub(crate) type CudaFloat = f32;
-        pub(crate) type CudaJones = JonesF32;
+    if #[cfg(feature = "gpu-single")] {
+        /// f32 (using the "gpu-single" feature)
+        pub(crate) type GpuFloat = f32;
+        pub(crate) type GpuJones = JonesF32;
 
         include!("types_single.rs");
         include!("model_single.rs");
-    } else if #[cfg(all(feature = "cuda", not(feature = "cuda-single")))] {
-        /// f64 (using the "cuda" feature and not "cuda-single")
-        pub(crate) type CudaFloat = f64;
-        pub(crate) type CudaJones = JonesF64;
+    } else if #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))] {
+        /// f64 (not using "gpu-single")
+        pub(crate) type GpuFloat = f64;
+        pub(crate) type GpuJones = JonesF64;
 
         include!("types_double.rs");
         include!("model_double.rs");
     }
 }
 
-// Ensure that the shapelet constants are the same in the Rust code and CUDA
+// Import CUDA/HIP functions into the same names.
+#[cfg(feature = "cuda")]
+use cuda_runtime_sys::{
+    cudaDeviceSynchronize as gpuDeviceSynchronize, cudaError::cudaSuccess as gpuSuccess,
+    cudaFree as gpuFree, cudaGetErrorString as gpuGetErrorString,
+    cudaGetLastError as gpuGetLastError, cudaMalloc as gpuMalloc, cudaMemcpy as gpuMemcpy,
+    cudaMemcpyKind::cudaMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
+    cudaMemcpyKind::cudaMemcpyHostToDevice as gpuMemcpyHostToDevice,
+};
+#[cfg(feature = "hip")]
+use hip_sys::hiprt::{
+    hipDeviceSynchronize as gpuDeviceSynchronize, hipError_t::hipSuccess as gpuSuccess,
+    hipFree as gpuFree, hipGetErrorString as gpuGetErrorString, hipGetLastError as gpuGetLastError,
+    hipMalloc as gpuMalloc, hipMemcpy as gpuMemcpy,
+    hipMemcpyKind::hipMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
+    hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
+};
+
+// Ensure that the shapelet constants are the same in the Rust code and GPU
 // code.
 static_assertions::const_assert_eq!(crate::model::shapelets::SBF_L as i32, SBF_L);
 static_assertions::const_assert_eq!(crate::model::shapelets::SBF_N as i32, SBF_N);
-static_assertions::const_assert_eq!(crate::model::shapelets::SBF_C as CudaFloat, SBF_C);
-static_assertions::const_assert_eq!(crate::model::shapelets::SBF_DX as CudaFloat, SBF_DX);
+static_assertions::const_assert_eq!(crate::model::shapelets::SBF_C as GpuFloat, SBF_C);
+static_assertions::const_assert_eq!(crate::model::shapelets::SBF_DX as GpuFloat, SBF_DX);
 
-macro_rules! cuda_kernel_call {
-    ($cuda_fn:path, $($args:expr),* $(,)?) => {{
+macro_rules! gpu_kernel_call {
+    ($gpu_fn:path, $($args:expr),* $(,)?) => {{
         #[allow(unused_unsafe)]
         unsafe {
-            let error_message_ptr = $cuda_fn($($args),*);
+            let error_message_ptr = $gpu_fn($($args),*);
             if error_message_ptr.is_null() {
                 Ok(())
             } else {
-                // Get the CUDA error message behind the pointer.
-                let error_message = std::ffi::CStr::from_ptr(error_message_ptr).to_str().unwrap_or("<cannot read CUDA error string>");
-                let our_error_message = format!("{}: {error_message}", stringify!($cuda_fn));
-                Err(CudaError::Kernel {
+                // Get the GPU error message behind the pointer.
+                let error_message = std::ffi::CStr::from_ptr(error_message_ptr).to_str();
+                #[cfg(feature = "cuda")]
+                let error_message = error_message.unwrap_or("<cannot read CUDA error string>");
+                #[cfg(feature = "hip")]
+                let error_message = error_message.unwrap_or("<cannot read HIP error string>");
+                let our_error_message = format!("{}: {error_message}", stringify!($gpu_fn));
+                Err(GpuError::Kernel {
                     msg: our_error_message.into(),
                     file: file!(),
                     line: line!(),
@@ -68,47 +90,50 @@ macro_rules! cuda_kernel_call {
         }
     }};
 }
-pub(crate) use cuda_kernel_call;
+pub(crate) use gpu_kernel_call;
 
 #[derive(Clone, Copy)]
-pub(crate) enum CudaCall {
+pub(crate) enum GpuCall {
     Malloc,
     CopyToDevice,
     CopyFromDevice,
 }
 
-/// Run [`cuda_runtime_sys::cudaGetLastError`] and
-/// [`cuda_runtime_sys::cudaDeviceSynchronize`]. If either of these calls return
-/// an error, it is converted to a Rust error and returned from this function.
-/// The single argument describes what the just-performed operation was and
-/// makes the returned error a helpful one.
+/// Run [`gpuGetLastError`] and [`gpuDeviceSynchronize`]. If either of these
+/// calls return an error, it is converted to a Rust error and returned from
+/// this function. The single argument describes what the just-performed
+/// operation was and makes the returned error a helpful one.
 ///
 /// # Safety
 ///
-/// This function interfaces directly with the CUDA API. Rust errors attempt to
-/// catch problems but there are no guarantees.
+/// This function interfaces directly with the CUDA/HIP API. Rust errors attempt
+/// to catch problems but there are no guarantees.
 #[track_caller]
-unsafe fn check_for_errors(cuda_call: CudaCall) -> Result<(), CudaError> {
+unsafe fn check_for_errors(gpu_call: GpuCall) -> Result<(), GpuError> {
     // Only do a device sync if we're in debug mode, for performance.
     let debug_mode = matches!(std::env::var("DEBUG").as_deref(), Ok("true"));
     if debug_mode {
-        let code = cuda_runtime_sys::cudaDeviceSynchronize();
-        if code != cuda_runtime_sys::cudaError::cudaSuccess {
-            let c_str = CStr::from_ptr(cuda_runtime_sys::cudaGetErrorString(code));
-            let msg = c_str.to_str().unwrap_or("<cannot read CUDA error string>");
+        let code = gpuDeviceSynchronize();
+        if code != gpuSuccess {
+            let c_str = CStr::from_ptr(gpuGetErrorString(code));
+            let msg = c_str.to_str();
+            #[cfg(feature = "cuda")]
+            let msg = msg.unwrap_or("<cannot read CUDA error string>");
+            #[cfg(feature = "hip")]
+            let msg = msg.unwrap_or("<cannot read HIP error string>");
             let location = Location::caller();
-            return Err(match cuda_call {
-                CudaCall::Malloc => CudaError::Malloc {
+            return Err(match gpu_call {
+                GpuCall::Malloc => GpuError::Malloc {
                     msg: msg.into(),
                     file: location.file(),
                     line: location.line(),
                 },
-                CudaCall::CopyToDevice => CudaError::CopyToDevice {
+                GpuCall::CopyToDevice => GpuError::CopyToDevice {
                     msg: msg.into(),
                     file: location.file(),
                     line: location.line(),
                 },
-                CudaCall::CopyFromDevice => CudaError::CopyFromDevice {
+                GpuCall::CopyFromDevice => GpuError::CopyFromDevice {
                     msg: msg.into(),
                     file: location.file(),
                     line: location.line(),
@@ -117,23 +142,27 @@ unsafe fn check_for_errors(cuda_call: CudaCall) -> Result<(), CudaError> {
         }
     }
 
-    let code = cuda_runtime_sys::cudaGetLastError();
-    if code != cuda_runtime_sys::cudaError::cudaSuccess {
-        let c_str = CStr::from_ptr(cuda_runtime_sys::cudaGetErrorString(code));
-        let msg = c_str.to_str().unwrap_or("<cannot read CUDA error string>");
+    let code = gpuGetLastError();
+    if code != gpuSuccess {
+        let c_str = CStr::from_ptr(gpuGetErrorString(code));
+        let msg = c_str.to_str();
+        #[cfg(feature = "cuda")]
+        let msg = msg.unwrap_or("<cannot read CUDA error string>");
+        #[cfg(feature = "hip")]
+        let msg = msg.unwrap_or("<cannot read HIP error string>");
         let location = Location::caller();
-        return Err(match cuda_call {
-            CudaCall::Malloc => CudaError::Malloc {
+        return Err(match gpu_call {
+            GpuCall::Malloc => GpuError::Malloc {
                 msg: msg.into(),
                 file: location.file(),
                 line: location.line(),
             },
-            CudaCall::CopyToDevice => CudaError::CopyToDevice {
+            GpuCall::CopyToDevice => GpuError::CopyToDevice {
                 msg: msg.into(),
                 file: location.file(),
                 line: location.line(),
             },
-            CudaCall::CopyFromDevice => CudaError::CopyFromDevice {
+            GpuCall::CopyFromDevice => GpuError::CopyFromDevice {
                 msg: msg.into(),
                 file: location.file(),
                 line: location.line(),
@@ -145,7 +174,7 @@ unsafe fn check_for_errors(cuda_call: CudaCall) -> Result<(), CudaError> {
 }
 
 /// A Rust-managed pointer to CUDA device memory. When this is dropped,
-/// [`cuda_runtime_sys::cudaFree`] is called on the pointer.
+/// [`gpuFree`] is called on the pointer.
 #[derive(Debug)]
 pub(crate) struct DevicePointer<T> {
     ptr: *mut T,
@@ -158,7 +187,7 @@ impl<T> Drop for DevicePointer<T> {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
             unsafe {
-                cuda_runtime_sys::cudaFree(self.ptr.cast());
+                gpuFree(self.ptr.cast());
             }
         }
     }
@@ -177,14 +206,14 @@ impl<T> DevicePointer<T> {
 
     /// Allocate a number of bytes on the device.
     #[track_caller]
-    pub(crate) fn malloc(size: usize) -> Result<DevicePointer<T>, CudaError> {
+    pub(crate) fn malloc(size: usize) -> Result<DevicePointer<T>, GpuError> {
         if size == 0 {
             Ok(Self::default())
         } else {
             let mut d_ptr = std::ptr::null_mut();
             unsafe {
-                cuda_runtime_sys::cudaMalloc(&mut d_ptr, size);
-                check_for_errors(CudaCall::Malloc)?;
+                gpuMalloc(&mut d_ptr, size);
+                check_for_errors(GpuCall::Malloc)?;
             }
             Ok(Self {
                 ptr: d_ptr.cast(),
@@ -197,12 +226,12 @@ impl<T> DevicePointer<T> {
     /// is smaller than `self.size`. Note that unlike `libc`'s `remalloc`, if a
     /// new buffer is created, the original bytes are not preserved.
     #[track_caller]
-    pub(crate) fn realloc(&mut self, size: usize) -> Result<(), CudaError> {
+    pub(crate) fn realloc(&mut self, size: usize) -> Result<(), GpuError> {
         if size <= self.size {
             return Ok(());
         }
 
-        // CUDA doesn't provide a realloc, so just make a new `DevicePointer`
+        // CUDA/HIP don't provide a realloc, so just make a new `DevicePointer`
         // and swap it with the old one; the old buffer will be dropped.
         let mut new = Self::malloc(size)?;
         std::mem::swap(self, &mut new);
@@ -212,17 +241,17 @@ impl<T> DevicePointer<T> {
     /// Copy a slice of data to the device. Any type is allowed, and the returned
     /// pointer is to the device memory.
     #[track_caller]
-    pub(crate) fn copy_to_device(v: &[T]) -> Result<DevicePointer<T>, CudaError> {
+    pub(crate) fn copy_to_device(v: &[T]) -> Result<DevicePointer<T>, GpuError> {
         let size = std::mem::size_of_val(v);
         unsafe {
             let mut d_ptr = Self::malloc(size)?;
-            cuda_runtime_sys::cudaMemcpy(
+            gpuMemcpy(
                 d_ptr.get_mut().cast(),
                 v.as_ptr().cast(),
                 size,
-                cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyHostToDevice,
+                gpuMemcpyHostToDevice,
             );
-            check_for_errors(CudaCall::CopyToDevice)?;
+            check_for_errors(GpuCall::CopyToDevice)?;
             Ok(d_ptr)
         }
     }
@@ -231,10 +260,10 @@ impl<T> DevicePointer<T> {
     /// bytes in the `DevicePointer` and `v`. The contents of `v` are
     /// overwritten.
     #[track_caller]
-    pub fn copy_from_device(&self, v: &mut [T]) -> Result<(), CudaError> {
+    pub fn copy_from_device(&self, v: &mut [T]) -> Result<(), GpuError> {
         let location = Location::caller();
         if self.ptr.is_null() {
-            return Err(CudaError::CopyFromDevice {
+            return Err(GpuError::CopyFromDevice {
                 msg: "Attempted to copy data from a null device pointer".into(),
                 file: location.file(),
                 line: location.line(),
@@ -243,7 +272,7 @@ impl<T> DevicePointer<T> {
 
         let size = std::mem::size_of_val(v);
         if size != self.size {
-            return Err(CudaError::CopyFromDevice {
+            return Err(GpuError::CopyFromDevice {
                 msg: format!(
                     "Device buffer size {} is not equal to provided buffer size {size} (length {})",
                     self.size,
@@ -256,13 +285,13 @@ impl<T> DevicePointer<T> {
         }
 
         unsafe {
-            cuda_runtime_sys::cudaMemcpy(
+            gpuMemcpy(
                 v.as_mut_ptr().cast(),
                 self.ptr.cast(),
                 size,
-                cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToHost,
+                gpuMemcpyDeviceToHost,
             );
-            check_for_errors(CudaCall::CopyFromDevice)
+            check_for_errors(GpuCall::CopyFromDevice)
         }
     }
 
@@ -271,7 +300,7 @@ impl<T> DevicePointer<T> {
     /// what is already allocated against the pointer, then the buffer is freed
     /// and another is created to fit `v` (i.e. re-alloc).
     #[track_caller]
-    pub(crate) fn overwrite(&mut self, v: &[T]) -> Result<(), CudaError> {
+    pub(crate) fn overwrite(&mut self, v: &[T]) -> Result<(), GpuError> {
         // Nothing to do if the collection is empty.
         if v.is_empty() {
             return Ok(());
@@ -280,22 +309,27 @@ impl<T> DevicePointer<T> {
         let size = std::mem::size_of_val(v);
         self.realloc(size)?;
         unsafe {
-            cuda_runtime_sys::cudaMemcpy(
+            gpuMemcpy(
                 self.get_mut() as *mut c_void,
                 v.as_ptr().cast(),
                 size,
-                cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyHostToDevice,
+                gpuMemcpyHostToDevice,
             );
-            check_for_errors(CudaCall::CopyToDevice)
+            check_for_errors(GpuCall::CopyToDevice)
         }
     }
 
     /// Clear all of the bytes in the buffer by writing zeros.
     #[cfg(test)]
     pub(crate) fn clear(&mut self) {
+        #[cfg(feature = "cuda")]
+        use cuda_runtime_sys::cudaMemset as gpuMemset;
+        #[cfg(feature = "hip")]
+        use hip_sys::hiprt::hipMemset as gpuMemset;
+
         unsafe {
             if self.size > 0 {
-                cuda_runtime_sys::cudaMemset(self.get_mut().cast(), 0, self.size);
+                gpuMemset(self.get_mut().cast(), 0, self.size);
             }
         }
     }
@@ -305,10 +339,10 @@ impl<T: Default> DevicePointer<T> {
     /// Copy a slice of data from the device. There must be an equal number of
     /// bytes in the `DevicePointer` and `v`.
     #[track_caller]
-    pub fn copy_from_device_new(&self) -> Result<Vec<T>, CudaError> {
+    pub fn copy_from_device_new(&self) -> Result<Vec<T>, GpuError> {
         if self.ptr.is_null() {
             let location = Location::caller();
-            return Err(CudaError::CopyFromDevice {
+            return Err(GpuError::CopyFromDevice {
                 msg: "Attempted to copy data from a null device pointer".into(),
                 file: location.file(),
                 line: location.line(),
@@ -319,13 +353,13 @@ impl<T: Default> DevicePointer<T> {
         v.resize_with(self.size / std::mem::size_of::<T>(), || T::default());
 
         unsafe {
-            cuda_runtime_sys::cudaMemcpy(
+            gpuMemcpy(
                 v.as_mut_ptr().cast(),
                 self.ptr.cast(),
                 self.size,
-                cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToHost,
+                gpuMemcpyDeviceToHost,
             );
-            check_for_errors(CudaCall::CopyFromDevice)?;
+            check_for_errors(GpuCall::CopyFromDevice)?;
         }
 
         Ok(v)
@@ -342,7 +376,8 @@ impl<T> Default for DevicePointer<T> {
 }
 
 #[derive(Error, Debug)]
-pub enum CudaError {
+pub enum GpuError {
+    #[cfg(feature = "cuda")]
     #[error("{file}:{line}: cudaMemcpy to device failed: {msg}")]
     CopyToDevice {
         msg: Box<str>,
@@ -350,6 +385,15 @@ pub enum CudaError {
         line: u32,
     },
 
+    #[cfg(feature = "hip")]
+    #[error("{file}:{line}: hipMemcpy to device failed: {msg}")]
+    CopyToDevice {
+        msg: Box<str>,
+        file: &'static str,
+        line: u32,
+    },
+
+    #[cfg(feature = "cuda")]
     #[error("{file}:{line}: cudaMemcpy from device failed: {msg}")]
     CopyFromDevice {
         msg: Box<str>,
@@ -357,6 +401,15 @@ pub enum CudaError {
         line: u32,
     },
 
+    #[cfg(feature = "hip")]
+    #[error("{file}:{line}: hipMemcpy from device failed: {msg}")]
+    CopyFromDevice {
+        msg: Box<str>,
+        file: &'static str,
+        line: u32,
+    },
+
+    #[cfg(feature = "cuda")]
     #[error("{file}:{line}: cudaMalloc error: {msg}")]
     Malloc {
         msg: Box<str>,
@@ -364,6 +417,15 @@ pub enum CudaError {
         line: u32,
     },
 
+    #[cfg(feature = "hip")]
+    #[error("{file}:{line}: hipMalloc error: {msg}")]
+    Malloc {
+        msg: Box<str>,
+        file: &'static str,
+        line: u32,
+    },
+
+    #[cfg(feature = "cuda")]
     #[error("{file}:{line}: CUDA kernel error: {msg}")]
     Kernel {
         msg: Box<str>,
@@ -371,6 +433,23 @@ pub enum CudaError {
         line: u32,
     },
 
+    #[cfg(feature = "hip")]
+    #[error("{file}:{line}: HIP kernel error: {msg}")]
+    Kernel {
+        msg: Box<str>,
+        file: &'static str,
+        line: u32,
+    },
+
+    #[cfg(feature = "cuda")]
+    #[error("{file}:{line}: {msg}")]
+    Generic {
+        msg: Box<str>,
+        file: &'static str,
+        line: u32,
+    },
+
+    #[cfg(feature = "hip")]
     #[error("{file}:{line}: {msg}")]
     Generic {
         msg: Box<str>,
@@ -379,7 +458,7 @@ pub enum CudaError {
     },
 }
 
-// Suppress warnings for unused CUDA shapelet consts.
+// Suppress warnings for unused GPU shapelet consts.
 mod unused {
     #[allow(unused)]
     fn unused() {

@@ -92,7 +92,7 @@ fn model_benchmarks(c: &mut Criterion) {
         );
     }
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     for (num_sources, num_chans) in [
         (1, 768),
         (32, 768),
@@ -130,7 +130,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         },
                     );
                 }
-                let modeller = model::SkyModellerCuda::new(
+                let modeller = model::SkyModellerGpu::new(
                     &*beam,
                     &source_list,
                     Polarisations::default(),
@@ -209,7 +209,7 @@ fn model_benchmarks(c: &mut Criterion) {
         })
     });
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     for (num_sources, num_chans) in [
         (1, 768),
         (32, 768),
@@ -251,7 +251,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         },
                     );
                 }
-                let modeller = model::SkyModellerCuda::new(
+                let modeller = model::SkyModellerGpu::new(
                     &*beam,
                     &source_list,
                     Polarisations::default(),
@@ -342,7 +342,7 @@ fn model_benchmarks(c: &mut Criterion) {
         },
     );
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     for (num_sources, num_chans) in [
         (1, 768),
         (32, 768),
@@ -393,7 +393,7 @@ fn model_benchmarks(c: &mut Criterion) {
                         },
                     );
                 }
-                let modeller = model::SkyModellerCuda::new(
+                let modeller = model::SkyModellerGpu::new(
                     &*beam,
                     &source_list,
                     Polarisations::default(),

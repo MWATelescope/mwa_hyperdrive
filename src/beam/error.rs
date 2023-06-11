@@ -41,7 +41,7 @@ pub enum BeamError {
     #[error("hyperbeam init error: {0}")]
     HyperbeamInit(#[from] mwa_hyperbeam::fee::InitFEEBeamError),
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     #[error(transparent)]
-    Cuda(#[from] crate::cuda::CudaError),
+    Gpu(#[from] crate::gpu::GpuError),
 }

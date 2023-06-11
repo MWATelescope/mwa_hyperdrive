@@ -710,17 +710,17 @@ fn test_1090008640_calibrate_model_ms() {
         // introduced. If a metafits' positions are used instead, the results
         // are *exactly* the same, but we should trust the MS's positions, so
         // these errors must remain.
-        #[cfg(feature = "cuda-single")]
+        #[cfg(feature = "gpu-single")]
         assert_abs_diff_eq!(vis_m, vis_c, epsilon = 2e-4);
-        #[cfg(not(feature = "cuda-single"))]
+        #[cfg(not(feature = "gpu-single"))]
         assert_abs_diff_eq!(vis_m, vis_c, epsilon = 4e-6);
         assert_abs_diff_eq!(weight_m, weight_c);
     }
 
     // Inspect the solutions; they should all be close to identity.
-    #[cfg(feature = "cuda-single")]
+    #[cfg(feature = "gpu-single")]
     let epsilon = 6e-8;
-    #[cfg(not(feature = "cuda-single"))]
+    #[cfg(not(feature = "gpu-single"))]
     let epsilon = 2e-9;
     assert_abs_diff_eq!(
         sols.di_jones,
@@ -772,9 +772,9 @@ fn test_cal_timeblocks() {
     // We didn't specify anything with calibration timeblocks, so this should be
     // 1 (all input data timesteps are used at once in calibration).
     assert_eq!(num_cal_timeblocks, 1);
-    #[cfg(not(feature = "cuda-single"))]
+    #[cfg(not(feature = "gpu-single"))]
     let eps = 0.0; // I am amazed
-    #[cfg(feature = "cuda-single")]
+    #[cfg(feature = "gpu-single")]
     let eps = 2e-8;
     assert_abs_diff_eq!(
         sols.di_jones,
@@ -796,9 +796,9 @@ fn test_cal_timeblocks() {
     let num_cal_timeblocks = sols.di_jones.len_of(Axis(0));
     // 3 / 2 = 1.5 = 2 rounded up
     assert_eq!(num_cal_timeblocks, 2);
-    #[cfg(not(feature = "cuda-single"))]
+    #[cfg(not(feature = "gpu-single"))]
     let eps = 0.0;
-    #[cfg(feature = "cuda-single")]
+    #[cfg(feature = "gpu-single")]
     let eps = 4e-8;
     assert_abs_diff_eq!(
         sols.di_jones,

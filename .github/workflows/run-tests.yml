@@ -80,4 +80,7 @@ jobs:
           cargo clean
           cargo +${MIN_RUST} test --locked
           cargo +${MIN_RUST} test --locked --features=all-static
-          cargo +${MIN_RUST} test --locked --all-features --no-run
+          # Can't test with --all-features, cuda and hip aren't allowed together
+          # hip is also difficult to install so ignore it
+          cargo +${MIN_RUST} test --locked --features=all-static,cuda --no-run
+          cargo +${MIN_RUST} test --locked --features=all-static,cuda,gpu-single --no-run

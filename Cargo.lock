@@ -1079,6 +1079,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hip-runtime-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "901a5d54cfff799dd9e6f6e1d53883bb50afdd92edce7680b1ca299d1805f65a"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "hip-sys"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f399629f98b6249efc10039e949baa70e2ff2bf84d3c30e7a0ca49f179a04287"
+dependencies = [
+ "hip-runtime-sys",
+]
+
+[[package]]
 name = "humantime"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1456,6 +1474,7 @@ dependencies = [
  "cuda-runtime-sys",
  "hdf5",
  "hdf5-sys",
+ "hip-sys",
  "marlu",
  "ndarray",
  "num-complex",
@@ -1490,6 +1509,7 @@ dependencies = [
  "flate2",
  "glob",
  "hifitime",
+ "hip-sys",
  "indexmap 1.9.3",
  "indicatif",
  "indoc",

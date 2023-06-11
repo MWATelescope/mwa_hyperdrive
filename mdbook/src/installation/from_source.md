@@ -35,14 +35,28 @@
   time.
 ```
 
-```admonish tip title="CUDA (for accelerated sky modelling)"
-- Only required if either the `cuda` or `cuda-single` feature is enabled
+```admonish tip title="CUDA (for accelerated sky modelling with NVIDIA GPUs)"
+- Only required if the `cuda` feature is enabled
 - Requires a [CUDA-capable device](https://developer.nvidia.com/cuda-gpus)
 - Arch: `cuda`
 - Ubuntu and others: [Download link](https://developer.nvidia.com/cuda-zone)
 - The library dir can be specified manually with `CUDA_LIB`
   - If not specified, `/usr/local/cuda` and `/opt/cuda` are searched.
 - Can link statically; use the `cuda-static` or `all-static` features.
+```
+
+```admonish tip title="HIP (for accelerated sky modelling with AMD GPUs)"
+- Only required if either the `hip` feature is enabled
+- Requires a [HIP-capable device](https://docs.amd.com/en/latest/release/gpu_os_support.html) (N.B. This seems to be incomplete)
+- Arch:
+  - See [https://wiki.archlinux.org/title/GPGPU#ROCm](https://wiki.archlinux.org/title/GPGPU#ROCm)
+  - It is possible to get pre-compiled products from the [arch4edu repo](https://github.com/arch4edu/arch4edu).
+- Ubuntu and others: [Download link](https://docs.amd.com/projects/HIP/en/docs-5.3.0/how_to_guides/install.html)
+- The installation dir can be specified manually with `HIP_PATH`
+  - If not specified, `/opt/rocm/hip` is used.
+- N.B. Despite HIP installations being able to run HIP code on NVIDIA GPUs,
+  this is not supported by `hyperdrive`; please compile with the CUDA
+  instructions above.
 ```
 
 ## Installing Rust
@@ -103,7 +117,7 @@ export HYPERDRIVE_CUDA_COMPUTE=75
 Now you can compile `hyperdrive` with CUDA enabled (single-precision floats):
 
 ```shell
-cargo install --path . --locked --features=cuda-single
+cargo install --path . --locked --features=cuda,gpu-single
 ```
 
 If you're using "datacentre" products (e.g. a V100 available on the
@@ -121,6 +135,27 @@ If you get a compiler error, it may be due to a compiler mismatch. CUDA releases
 are compatible with select versions of `gcc`, so it's important to keep the CUDA
 compiler happy. You can select a custom C++ compiler with the `CXX` variable,
 e.g. `CXX=/opt/cuda/bin/g++`.
+~~~
+
+~~~admonish danger title="HIP"
+Do you have a HIP-capable AMD GPU? Ensure you have installed HIP (instructions
+are above), and compile with the `hip` feature (single-precision floats):
+
+```shell
+cargo install --path . --locked --features=hip,gpu-single
+```
+
+If you're using "datacentre" products (e.g. the GPUs on the "setonix"
+supercomputer), you probably want double-precision floats:
+
+```shell
+cargo install --path . --locked --features=hip
+```
+
+You can still compile with double-precision on a desktop GPU, but it will be
+much slower than single-precision.
+
+If you are encountering problems, you may need to set your `HIP_PATH` variable.
 ~~~
 
 ~~~admonish tip title="Static dependencies"

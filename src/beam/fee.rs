@@ -12,8 +12,8 @@ use ndarray::prelude::*;
 
 use super::{Beam, BeamError, BeamType, Delays};
 
-#[cfg(feature = "cuda")]
-use super::{BeamCUDA, CudaFloat, DevicePointer};
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use super::{BeamGpu, DevicePointer, GpuFloat};
 
 /// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [`Beam`]
 /// trait.
@@ -301,9 +301,9 @@ impl Beam for FEEBeam {
         self.hyperbeam_object.empty_cache();
     }
 
-    #[cfg(feature = "cuda")]
-    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
-        let cuda_beam = unsafe {
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    fn prepare_gpu_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamGpu>, BeamError> {
+        let gpu_beam = unsafe {
             self.hyperbeam_object.gpu_prepare(
                 freqs_hz,
                 self.delays.view(),
@@ -311,29 +311,29 @@ impl Beam for FEEBeam {
                 true,
             )?
         };
-        Ok(Box::new(FEEBeamCUDA {
-            hyperbeam_object: cuda_beam,
+        Ok(Box::new(FEEBeamGpu {
+            hyperbeam_object: gpu_beam,
         }))
     }
 }
 
-#[cfg(feature = "cuda")]
-pub(crate) struct FEEBeamCUDA {
+#[cfg(any(feature = "cuda", feature = "hip"))]
+struct FEEBeamGpu {
     hyperbeam_object: mwa_hyperbeam::fee::FEEBeamGpu,
 }
 
-#[cfg(feature = "cuda")]
-impl BeamCUDA for FEEBeamCUDA {
+#[cfg(any(feature = "cuda", feature = "hip"))]
+impl BeamGpu for FEEBeamGpu {
     unsafe fn calc_jones_pair(
         &self,
-        az_rad: &[CudaFloat],
-        za_rad: &[CudaFloat],
+        az_rad: &[GpuFloat],
+        za_rad: &[GpuFloat],
         latitude_rad: f64,
         d_jones: *mut std::ffi::c_void,
     ) -> Result<(), BeamError> {
         let d_az_rad = DevicePointer::copy_to_device(az_rad)?;
         let d_za_rad = DevicePointer::copy_to_device(za_rad)?;
-        let d_array_latitude_rad = DevicePointer::copy_to_device(&[latitude_rad as CudaFloat])?;
+        let d_array_latitude_rad = DevicePointer::copy_to_device(&[latitude_rad as GpuFloat])?;
         self.hyperbeam_object.calc_jones_device_pair_inner(
             d_az_rad.get(),
             d_za_rad.get(),

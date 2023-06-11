@@ -203,9 +203,9 @@ fn test_1090008640_vis_simulate() {
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406018466);
 
     // The values of the visibilities changes slightly depending on the precision.
-    #[cfg(feature = "cuda-single")]
+    #[cfg(feature = "gpu-single")]
     let epsilon = 2e-4;
-    #[cfg(not(feature = "cuda-single"))]
+    #[cfg(not(feature = "gpu-single"))]
     let epsilon = 0.0;
     assert_abs_diff_eq!(
         vis[0..29],
@@ -288,9 +288,9 @@ fn test_1090008640_vis_simulate() {
     );
     assert_abs_diff_eq!(group_params[4] as f64 + jd_zero, 2456860.3406944424);
 
-    #[cfg(feature = "cuda-single")]
+    #[cfg(feature = "gpu-single")]
     let epsilon = 3e-4;
-    #[cfg(not(feature = "cuda-single"))]
+    #[cfg(not(feature = "gpu-single"))]
     let epsilon = 0.0;
     assert_abs_diff_eq!(
         vis[0..29],
@@ -338,7 +338,7 @@ fn test_1090008640_vis_simulate() {
 // exactly the same.
 #[test]
 #[serial]
-#[cfg(all(feature = "cuda", not(feature = "cuda-single")))]
+#[cfg(all(feature = "cuda", not(feature = "gpu-single")))]
 fn test_1090008640_vis_simulate_cpu_gpu_match() {
     use ndarray::prelude::*;
 

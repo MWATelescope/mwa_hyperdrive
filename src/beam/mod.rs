@@ -28,8 +28,8 @@ use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 use strum::IntoEnumIterator;
 
-#[cfg(feature = "cuda")]
-use crate::cuda::{CudaFloat, DevicePointer};
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use crate::gpu::{DevicePointer, GpuFloat};
 
 /// Supported beam types.
 #[derive(
@@ -135,33 +135,33 @@ pub trait Beam: Sync + Send {
     /// If this [`Beam`] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self);
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     /// Using the tile information from this [`Beam`] and frequencies to be
-    /// used, return a [`BeamCUDA`]. This object only needs frequencies to
+    /// used, return a [`BeamGpu`]. This object only needs frequencies to
     /// calculate beam response [`Jones`] matrices.
-    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError>;
+    fn prepare_gpu_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamGpu>, BeamError>;
 }
 
-/// A trait abstracting beam code functions on a CUDA-capable device.
-#[cfg(feature = "cuda")]
-pub trait BeamCUDA {
+/// A trait abstracting beam code functions on a GPU.
+#[cfg(any(feature = "cuda", feature = "hip"))]
+pub trait BeamGpu {
     /// Calculate the Jones matrices for each `az` and `za` direction and
     /// frequency (these were defined when the [`BeamCUDA`] was created). The
     /// results are ordered tile, frequency, direction, slowest to fastest.
     ///
     /// # Safety
     ///
-    /// This function interfaces directly with the CUDA API. Rust errors attempt
-    /// to catch problems but there are no guarantees.
+    /// This function interfaces directly with the CUDA/HIP API. Rust errors
+    /// attempt to catch problems but there are no guarantees.
     unsafe fn calc_jones_pair(
         &self,
-        az_rad: &[CudaFloat],
-        za_rad: &[CudaFloat],
+        az_rad: &[GpuFloat],
+        za_rad: &[GpuFloat],
         latitude_rad: f64,
         d_jones: *mut std::ffi::c_void,
     ) -> Result<(), BeamError>;
 
-    /// Get the type of beam used to create this [`BeamCUDA`].
+    /// Get the type of beam used to create this [`BeamGpu`].
     fn get_beam_type(&self) -> BeamType;
 
     /// Get a pointer to the device tile map. This is necessary to access
@@ -172,11 +172,11 @@ pub trait BeamCUDA {
     /// de-duplicated beam Jones matrices on the device.
     fn get_freq_map(&self) -> *const i32;
 
-    /// Get the number of de-duplicated tiles associated with this [`BeamCUDA`].
+    /// Get the number of de-duplicated tiles associated with this [`BeamGpu`].
     fn get_num_unique_tiles(&self) -> i32;
 
     /// Get the number of de-duplicated frequencies associated with this
-    /// [`BeamCUDA`].
+    /// [`BeamGpu`].
     fn get_num_unique_freqs(&self) -> i32;
 }
 
@@ -323,9 +323,9 @@ impl Beam for NoBeam {
 
     fn empty_coeff_cache(&self) {}
 
-    #[cfg(feature = "cuda")]
-    fn prepare_cuda_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamCUDA>, BeamError> {
-        let obj = NoBeamCUDA {
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    fn prepare_gpu_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamGpu>, BeamError> {
+        let obj = NoBeamGpu {
             tile_map: DevicePointer::copy_to_device(&vec![0; self.num_tiles])?,
             freq_map: DevicePointer::copy_to_device(&vec![0; freqs_hz.len()])?,
         };
@@ -335,27 +335,37 @@ impl Beam for NoBeam {
 
 /// A beam implementation that returns only identity Jones matrices for all beam
 /// calculations.
-#[cfg(feature = "cuda")]
-pub(crate) struct NoBeamCUDA {
+#[cfg(any(feature = "cuda", feature = "hip"))]
+pub(crate) struct NoBeamGpu {
     tile_map: DevicePointer<i32>,
     freq_map: DevicePointer<i32>,
 }
 
-#[cfg(feature = "cuda")]
-impl BeamCUDA for NoBeamCUDA {
+#[cfg(any(feature = "cuda", feature = "hip"))]
+impl BeamGpu for NoBeamGpu {
     unsafe fn calc_jones_pair(
         &self,
-        az_rad: &[CudaFloat],
-        _za_rad: &[CudaFloat],
+        az_rad: &[GpuFloat],
+        _za_rad: &[GpuFloat],
         _latitude_rad: f64,
         d_jones: *mut std::ffi::c_void,
     ) -> Result<(), BeamError> {
-        let identities: Vec<Jones<CudaFloat>> = vec![Jones::identity(); az_rad.len()];
-        cuda_runtime_sys::cudaMemcpy(
+        #[cfg(feature = "cuda")]
+        use cuda_runtime_sys::{
+            cudaMemcpy as gpuMemcpy,
+            cudaMemcpyKind::cudaMemcpyHostToDevice as gpuMemcpyHostToDevice,
+        };
+        #[cfg(feature = "hip")]
+        use hip_sys::hiprt::{
+            hipMemcpy as gpuMemcpy, hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
+        };
+
+        let identities: Vec<Jones<GpuFloat>> = vec![Jones::identity(); az_rad.len()];
+        gpuMemcpy(
             d_jones,
             identities.as_ptr().cast(),
-            identities.len() * std::mem::size_of::<Jones<CudaFloat>>(),
-            cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyHostToDevice,
+            identities.len() * std::mem::size_of::<Jones<GpuFloat>>(),
+            gpuMemcpyHostToDevice,
         );
         Ok(())
     }

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Update the Rust bindings to CUDA code. This script must be run whenever the C
-# headers for CUDA code change.
+# Update the Rust bindings to GPU code. This script must be run whenever the C
+# headers for GPU code change.
 
 # This script requires bindgen. This can be provided by a package manager or
 # installed with "cargo install bindgen".
@@ -10,7 +10,7 @@
 SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
 
 bindgen "${SCRIPTPATH}"/utils.h \
-    --allowlist-function "get_cuda_device_info" \
+    --allowlist-function "get_gpu_device_info" \
     > "${SCRIPTPATH}"/utils_bindings.rs
 
 for PRECISION in SINGLE DOUBLE; do

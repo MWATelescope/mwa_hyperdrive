@@ -345,7 +345,7 @@ pub(crate) enum VisSubtractError {
     #[error(transparent)]
     IO(#[from] std::io::Error),
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     #[error(transparent)]
-    Cuda(#[from] crate::cuda::CudaError),
+    Gpu(#[from] crate::gpu::GpuError),
 }

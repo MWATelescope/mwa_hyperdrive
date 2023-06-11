@@ -459,7 +459,7 @@ pub(super) struct ModellingArgs {
 
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     #[clap(long, help_heading = "MODELLING")]
     #[serde(default)]
     pub(super) cpu: bool,
@@ -469,7 +469,7 @@ impl ModellingArgs {
     pub(super) fn merge(self, other: Self) -> Self {
         Self {
             no_precession: self.no_precession || other.no_precession,
-            #[cfg(feature = "cuda")]
+            #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu: self.cpu || other.cpu,
         }
     }
@@ -477,11 +477,11 @@ impl ModellingArgs {
     pub(super) fn parse(self) -> ModellingParams {
         let ModellingArgs {
             no_precession,
-            #[cfg(feature = "cuda")]
+            #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu,
         } = self;
 
-        #[cfg(feature = "cuda")]
+        #[cfg(any(feature = "cuda", feature = "hip"))]
         if cpu {
             MODEL_DEVICE.store(ModelDevice::Cpu);
         }
@@ -495,36 +495,43 @@ impl ModellingArgs {
                 block.push(crate::model::get_cpu_info().into());
             }
 
-            #[cfg(feature = "cuda")]
-            ModelDevice::Cuda => {
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            ModelDevice::Gpu => {
                 block.push(format!("Using GPU with {} precision", d.get_precision()).into());
-                let (device_info, driver_info) = match crate::cuda::get_device_info() {
+                let (device_info, driver_info) = match crate::gpu::get_device_info() {
                     Ok(i) => i,
                     Err(e) => {
                         // For some reason, despite hyperdrive being compiled
-                        // with the "cuda" feature, we failed to get the device
-                        // info. Maybe there's no CUDA-capable device present.
-                        // Either way, we cannot continue. I'd rather not have
-                        // error handling here because (1) without the "cuda"
+                        // with the "cuda" or "hip" feature, we failed to get
+                        // the device info. Maybe there's no GPU present. Either
+                        // way, we cannot continue. I'd rather not have error
+                        // handling here because (1) without the "cuda" or "hip"
                         // feature, this function will never fail on the CPU
                         // path, so adding error handling means the caller would
                         // have to handle a `Result` uselessly and (2) if this
                         // "petty" display function fails, then we can't use the
                         // GPU for real work anyway.
+                        #[cfg(feature = "cuda")]
                         eprintln!("Couldn't retrieve CUDA device info for device 0, is a device present? {e}");
+                        #[cfg(feature = "hip")]
+                        eprintln!("Couldn't retrieve HIP device info for device 0, is a device present? {e}");
                         std::process::exit(1);
                     }
                 };
+                #[cfg(feature = "cuda")]
+                let device_type = "CUDA";
+                #[cfg(feature = "hip")]
+                let device_type = "HIP";
                 block.push(
                     format!(
-                        "CUDA device: {} (capability {}, {} MiB)",
+                        "{device_type} device: {} (capability {}, {} MiB)",
                         device_info.name, device_info.capability, device_info.total_global_mem
                     )
                     .into(),
                 );
                 block.push(
                     format!(
-                        "CUDA driver: {}, runtime: {}",
+                        "{device_type} driver: {}, runtime: {}",
                         driver_info.driver_version, driver_info.runtime_version
                     )
                     .into(),

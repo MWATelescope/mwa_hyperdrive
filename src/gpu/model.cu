@@ -4,8 +4,6 @@
 
 #include <stdlib.h>
 
-#include <cuComplex.h>
-
 #include "common.cuh"
 #include "model.h"
 #include "types.h"
@@ -64,10 +62,7 @@ inline __device__ COMPLEX get_shapelet_envelope(const GaussianParams g_params, c
     int x_pos_int = x_pos < 0 ? 0 : (int)FLOOR(x_pos);
     int y_pos_int = y_pos < 0 ? 0 : (int)FLOOR(y_pos);
 
-    COMPLEX envelope = COMPLEX{
-        .x = 0.0,
-        .y = 0.0,
-    };
+    COMPLEX envelope = MAKE_COMPLEX(0.0, 0.0);
     for (int i_coeff = 0; i_coeff < num_coeffs; i_coeff++) {
         const ShapeletCoeff coeff = coeffs[i_coeff];
 
@@ -92,10 +87,7 @@ inline __device__ COMPLEX get_shapelet_envelope(const GaussianParams g_params, c
         //
         // The following is my attempt at doing this efficiently.
         int i_power_index = (int)((coeff.n1 + coeff.n2) % 4);
-        COMPLEX i_power = COMPLEX{
-            .x = I_POWERS_REAL[i_power_index],
-            .y = I_POWERS_IMAG[i_power_index],
-        };
+        COMPLEX i_power = MAKE_COMPLEX(I_POWERS_REAL[i_power_index], I_POWERS_IMAG[i_power_index]);
 
         envelope += i_power * rest;
     }
@@ -395,16 +387,16 @@ extern "C" const char *model_points(const Points *comps, const Addresses *a, con
                                                a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
                                                a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
-    cudaError_t error_id;
+    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = cudaDeviceSynchronize();
-    if (error_id != cudaSuccess) {
-        return cudaGetErrorString(error_id);
+    error_id = gpuDeviceSynchronize();
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
     }
 #endif
-    error_id = cudaGetLastError();
-    if (error_id != cudaSuccess) {
-        return cudaGetErrorString(error_id);
+    error_id = gpuGetLastError();
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
     }
 
     return NULL;
@@ -421,16 +413,16 @@ extern "C" const char *model_gaussians(const Gaussians *comps, const Addresses *
                                                   d_beam_jones, a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
                                                   a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
-    cudaError_t error_id;
+    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = cudaDeviceSynchronize();
-    if (error_id != cudaSuccess) {
-        return cudaGetErrorString(error_id);
+    error_id = gpuDeviceSynchronize();
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
     }
 #endif
-    error_id = cudaGetLastError();
-    if (error_id != cudaSuccess) {
-        return cudaGetErrorString(error_id);
+    error_id = gpuGetLastError();
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
     }
 
     return NULL;
@@ -447,16 +439,16 @@ extern "C" const char *model_shapelets(const Shapelets *comps, const Addresses *
         a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, a->d_shapelet_basis_values, d_beam_jones,
         a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
-    cudaError_t error_id;
+    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = cudaDeviceSynchronize();
-    if (error_id != cudaSuccess) {
-        return cudaGetErrorString(error_id);
+    error_id = gpuDeviceSynchronize();
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
     }
 #endif
-    error_id = cudaGetLastError();
-    if (error_id != cudaSuccess) {
-        return cudaGetErrorString(error_id);
+    error_id = gpuGetLastError();
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
     }
 
     return NULL;

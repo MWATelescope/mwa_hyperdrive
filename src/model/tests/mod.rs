@@ -11,8 +11,8 @@
 //! highlighted.
 
 mod cpu;
-#[cfg(feature = "cuda")]
-mod cuda;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+mod gpu;
 
 use approx::assert_abs_diff_eq;
 use marlu::{
@@ -25,10 +25,10 @@ use num_complex::Complex;
 use vec1::vec1;
 
 use super::*;
-#[cfg(feature = "cuda")]
-use crate::cuda::DevicePointer;
-#[cfg(feature = "cuda")]
-use crate::model::cuda::SkyModellerCuda;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use crate::gpu::DevicePointer;
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use crate::model::gpu::SkyModellerGpu;
 use crate::{
     beam::{create_beam_object, Delays},
     srclist::{
@@ -313,13 +313,13 @@ impl ObsParams {
         )
     }
 
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
     #[track_caller]
     fn get_gpu_modeller(
         &self,
         srclist: &SourceList,
-    ) -> (SkyModellerCuda, DevicePointer<crate::cuda::UVW>) {
-        let m = SkyModellerCuda::new(
+    ) -> (SkyModellerGpu, DevicePointer<crate::gpu::UVW>) {
+        let m = SkyModellerGpu::new(
             &*self.beam,
             srclist,
             Polarisations::default(),
@@ -333,16 +333,16 @@ impl ObsParams {
             true,
         )
         .unwrap();
-        let cuda_uvws = self
+        let gpu_uvws = self
             .uvws
             .iter()
-            .map(|&uvw| crate::cuda::UVW {
-                u: uvw.u as crate::cuda::CudaFloat,
-                v: uvw.v as crate::cuda::CudaFloat,
-                w: uvw.w as crate::cuda::CudaFloat,
+            .map(|&uvw| crate::gpu::UVW {
+                u: uvw.u as crate::gpu::GpuFloat,
+                v: uvw.v as crate::gpu::GpuFloat,
+                w: uvw.w as crate::gpu::GpuFloat,
             })
             .collect::<Vec<_>>();
-        let d_uvws = DevicePointer::copy_to_device(&cuda_uvws).unwrap();
+        let d_uvws = DevicePointer::copy_to_device(&gpu_uvws).unwrap();
         (m, d_uvws)
     }
 }
