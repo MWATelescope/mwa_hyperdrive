@@ -43,6 +43,7 @@ pub(crate) fn write_source_list(
                 output_ext.unwrap_or("<no extension>").to_string(),
             ))
         }
+        (SourceListType::Fits, _) => todo!(),
         (SourceListType::Rts, _) => {
             rts::write_source_list(&mut f, sl, num_sources)?;
             info!("Wrote rts-style source list to {}", path.display());

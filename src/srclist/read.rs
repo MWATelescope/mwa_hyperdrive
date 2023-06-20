@@ -9,7 +9,7 @@ use std::{fs::File, path::Path};
 use log::{debug, trace};
 
 use super::{error::ReadSourceListError, SourceList, SourceListType};
-use crate::srclist::{ao, hyperdrive, rts, woden};
+use crate::srclist::{ao, fits, hyperdrive, rts, woden};
 
 /// Given the path to a sky-model source list file (and optionally its type,
 /// e.g. "RTS style"), return a [SourceList] object. The [SourceListType] is
@@ -23,7 +23,6 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
         sl_type: Option<SourceListType>,
     ) -> Result<(SourceList, SourceListType), ReadSourceListError> {
         debug!("Attempting to read source list");
-        let mut f = std::io::BufReader::new(File::open(path)?);
 
         // If the file extension corresponds to YAML or JSON, we know what to
         // target.
@@ -34,11 +33,13 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
         match ext.as_deref() {
             Some("yaml" | "yml") => {
                 debug!("Read as hyperdrive yaml");
+                let mut f = std::io::BufReader::new(File::open(path)?);
                 return hyperdrive::source_list_from_yaml(&mut f)
                     .map(|r| (r, SourceListType::Hyperdrive));
             }
             Some("json") => {
                 debug!("Read as hyperdrive json");
+                let mut f = std::io::BufReader::new(File::open(path)?);
                 return hyperdrive::source_list_from_json(&mut f)
                     .map(|r| (r, SourceListType::Hyperdrive));
             }
@@ -49,11 +50,13 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
         match sl_type {
             Some(SourceListType::Hyperdrive) => {
                 // Can be either yaml or json.
+                let mut f = std::io::BufReader::new(File::open(path)?);
                 let json_err = match hyperdrive::source_list_from_json(&mut f) {
                     Ok(sl) => return Ok((sl, SourceListType::Hyperdrive)),
                     Err(e @ ReadSourceListError::Json(_)) => e.to_string(),
                     Err(e) => return Err(e),
                 };
+                let mut f = std::io::BufReader::new(File::open(path)?);
                 let yaml_err = match hyperdrive::source_list_from_yaml(&mut f) {
                     Ok(sl) => return Ok((sl, SourceListType::Hyperdrive)),
                     // If there was an error in parsing, then pass the parse
@@ -64,23 +67,43 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
                 Err(ReadSourceListError::FailedToDeserialise { yaml_err, json_err })
             }
 
-            Some(SourceListType::Rts) => match rts::parse_source_list(&mut f) {
-                Ok(sl) => Ok((sl, SourceListType::Rts)),
-                Err(e) => Err(e),
+            Some(SourceListType::Fits) => match fits::parse_source_list(path) {
+                Ok(sl) => Ok((sl, SourceListType::Fits)),
+                Err(e) => Err(e).unwrap(),
             },
 
-            Some(SourceListType::AO) => match ao::parse_source_list(&mut f) {
-                Ok(sl) => Ok((sl, SourceListType::AO)),
-                Err(e) => Err(e),
-            },
+            Some(SourceListType::Rts) => {
+                let mut f = std::io::BufReader::new(File::open(path)?);
+                match rts::parse_source_list(&mut f) {
+                    Ok(sl) => Ok((sl, SourceListType::Rts)),
+                    Err(e) => Err(e),
+                }
+            }
 
-            Some(SourceListType::Woden) => match woden::parse_source_list(&mut f) {
-                Ok(sl) => Ok((sl, SourceListType::Woden)),
-                Err(e) => Err(e),
-            },
+            Some(SourceListType::AO) => {
+                let mut f = std::io::BufReader::new(File::open(path)?);
+                match ao::parse_source_list(&mut f) {
+                    Ok(sl) => Ok((sl, SourceListType::AO)),
+                    Err(e) => Err(e),
+                }
+            }
+
+            Some(SourceListType::Woden) => {
+                let mut f = std::io::BufReader::new(File::open(path)?);
+                match woden::parse_source_list(&mut f) {
+                    Ok(sl) => Ok((sl, SourceListType::Woden)),
+                    Err(e) => Err(e),
+                }
+            }
 
             None => {
                 // Try all kinds.
+                match fits::parse_source_list(path) {
+                    Ok(sl) => return Ok((sl, SourceListType::Fits)),
+                    Err(_) => trace!("Failed to read source list as a fits file"),
+                }
+
+                let mut f = std::io::BufReader::new(File::open(path)?);
                 match rts::parse_source_list(&mut f) {
                     Ok(sl) => return Ok((sl, SourceListType::Rts)),
                     Err(_) => {
