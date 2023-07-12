@@ -354,10 +354,10 @@ impl InputVisArgs {
                     PfbFlavour::None => {
                         raw_data_corrections_block.push("Not doing any PFB correction".into())
                     }
-                    PfbFlavour::Jake => raw_data_corrections_block
-                        .push("Correcting PFB gains with 'Jake Jones' gains".into()),
-                    PfbFlavour::Cotter2014 => raw_data_corrections_block
-                        .push("Correcting PFB gains with 'Cotter 2014' gains".into()),
+                    //PfbFlavour::Jake => raw_data_corrections_block
+                    //    .push("Correcting PFB gains with 'Jake Jones' gains".into()),
+                    //PfbFlavour::Cotter2014 => raw_data_corrections_block
+                    //    .push("Correcting PFB gains with 'Cotter 2014' gains".into()),
                     PfbFlavour::Empirical => raw_data_corrections_block
                         .push("Correcting PFB gains with 'RTS empirical' gains".into()),
                     PfbFlavour::Levine => raw_data_corrections_block

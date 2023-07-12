@@ -191,7 +191,7 @@ pub(crate) fn write_vis(
         sel_baselines: unflagged_baseline_tile_pairs.to_vec(),
         avg_time: time_average_factor.get(),
         avg_freq: freq_average_factor.get(),
-        num_vis_pols: 4,
+        num_vis_pols: 1,
     };
 
     let sched_start_timestamp = match obsid {
@@ -260,6 +260,7 @@ pub(crate) fn write_vis(
                     tile_positions.to_vec(),
                     dut1,
                     true,
+                    1,
                 );
                 if let Some(marlu_mwa_obs_context) = marlu_mwa_obs_context {
                     ms.initialize_mwa(

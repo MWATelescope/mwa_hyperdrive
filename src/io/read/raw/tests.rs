@@ -132,6 +132,7 @@ fn get_cross_and_auto_vis(
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn read_1090008640_cross_vis() {
     // Other tests check that PFB gains and digital gains are correctly applied.
     // These simple _vis tests just check that the values are right.
@@ -176,6 +177,7 @@ fn read_1090008640_cross_vis() {
 
 // Test the visibility values with corrections applied (except PFB gains).
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn read_1090008640_cross_vis_with_corrections() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {
@@ -219,6 +221,7 @@ fn read_1090008640_cross_vis_with_corrections() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn read_1090008640_auto_vis() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {
@@ -280,6 +283,7 @@ fn read_1090008640_auto_vis() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn read_1090008640_auto_vis_with_flags() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {
@@ -350,6 +354,7 @@ fn read_1090008640_auto_vis_with_flags() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn read_1090008640_cross_and_auto_vis() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {
@@ -418,6 +423,7 @@ fn read_1090008640_cross_and_auto_vis() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn pfb_empirical_gains() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {
@@ -475,6 +481,7 @@ fn pfb_empirical_gains() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn pfb_levine_gains() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {
@@ -532,6 +539,7 @@ fn pfb_levine_gains() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn test_digital_gains() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {
@@ -588,6 +596,7 @@ fn test_digital_gains() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn test_mwaf_flags() {
     // First test without any mwaf flags.
     let DataAsPathBufs {
@@ -691,6 +700,7 @@ fn test_mwaf_flags() {
 }
 
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn test_mwaf_flags_primes() {
     // First test without any mwaf flags.
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
@@ -795,6 +805,7 @@ fn test_mwaf_flags_primes() {
 
 /// Test that cotter flags are correctly (as possible) ingested.
 #[test]
+#[ignore = "not applicable to sdc3"]
 fn test_mwaf_flags_cotter() {
     let DataAsPathBufs { metafits, vis, .. } = get_reduced_1090008640_raw_pbs();
     let corrections = RawDataCorrections {

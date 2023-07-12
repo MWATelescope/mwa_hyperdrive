@@ -16,7 +16,7 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use thiserror::Error;
 
-pub(crate) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Jake;
+pub(crate) const DEFAULT_PFB_FLAVOUR: PfbFlavour = PfbFlavour::Levine;
 
 lazy_static::lazy_static! {
     // Useful for help texts.
@@ -26,14 +26,13 @@ lazy_static::lazy_static! {
 /// All available kinds of PFB gains.
 #[derive(Debug, Display, Clone, Copy, EnumIter, EnumString, PartialEq, Eq)]
 pub(crate) enum PfbFlavour {
-    /// Use the "Jake Jones" gains (200 Hz).
-    #[strum(serialize = "jake")]
-    Jake,
+    // /// Use the "Jake Jones" gains (200 Hz).
+    // #[strum(serialize = "jake")]
+    // Jake,
 
-    /// Use the "Cotter 2014" gains (10 kHz).
-    #[strum(serialize = "cotter2014")]
-    Cotter2014,
-
+    // /// Use the "Cotter 2014" gains (10 kHz).
+    // #[strum(serialize = "cotter2014")]
+    // Cotter2014,
     /// Use the "RTS empirical" gains (40 kHz).
     #[strum(serialize = "empirical")]
     Empirical,
@@ -59,10 +58,9 @@ impl PfbFlavour {
             // Not using any gains.
             PfbFlavour::None => None,
 
-            PfbFlavour::Jake => Some(birli::passband_gains::PFB_JAKE_2022_200HZ),
+            // PfbFlavour::Jake => Some(birli::passband_gains::PFB_JAKE_2022_200HZ),
 
-            PfbFlavour::Cotter2014 => Some(birli::passband_gains::PFB_COTTER_2014_10KHZ),
-
+            // PfbFlavour::Cotter2014 => Some(birli::passband_gains::PFB_COTTER_2014_10KHZ),
             PfbFlavour::Empirical => Some(EMPIRICAL_40KHZ.as_slice()),
 
             PfbFlavour::Levine => Some(LEVINE_40KHZ.as_slice()),
@@ -150,21 +148,21 @@ pub(crate) const LEVINE_40KHZ: [f64; 32] = [
     0.5082890508180502,
 ];
 
-#[cfg(test)]
-mod tests {
-    use super::PfbFlavour;
-
-    #[test]
-    fn test_handle_pfb() {
-        let result = PfbFlavour::parse("invalid_pfb");
-        assert!(result.is_err());
-
-        let result = PfbFlavour::parse("Cotter2014");
-        assert!(result.is_ok());
-        let flavour = result.unwrap();
-        assert!(matches!(flavour, PfbFlavour::Cotter2014));
-
-        let gains = flavour.get_gains().unwrap();
-        assert_eq!(&gains[..2], &[0.5002092286_f64, 0.5025463233]);
-    }
-}
+//#[cfg(test)]
+//mod tests {
+//    use super::PfbFlavour;
+//
+//    #[test]
+//    fn test_handle_pfb() {
+//        let result = PfbFlavour::parse("invalid_pfb");
+//        assert!(result.is_err());
+//
+//        let result = PfbFlavour::parse("Cotter2014");
+//        assert!(result.is_ok());
+//        let flavour = result.unwrap();
+//        assert!(matches!(flavour, PfbFlavour::Cotter2014));
+//
+//        let gains = flavour.get_gains().unwrap();
+//        assert_eq!(&gains[..2], &[0.5002092286_f64, 0.5025463233]);
+//    }
+//}

@@ -18,6 +18,7 @@ use crate::{
 };
 
 #[test]
+#[ignore = "raw-data-reading in this test can't be used due to sdc3"]
 fn test_per_coarse_chan_flags_and_smallest_contiguous_band_writing() {
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let uvfits_converted = temp_dir.path().join("converted.uvfits");

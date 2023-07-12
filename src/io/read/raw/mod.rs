@@ -19,15 +19,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use birli::PreprocessContext;
+//use birli::PreprocessContext;
 use hifitime::{Duration, Epoch};
 use itertools::Itertools;
 use log::{debug, trace};
-use marlu::{math::baseline_to_tiles, Jones, LatLngHeight, RADec, VisSelection, XyzGeodetic};
-use mwalib::{
-    CorrelatorContext, GeometricDelaysApplied, GpuboxError, MWAVersion, MetafitsContext,
-    MwalibError, Pol,
-};
+use marlu::{math::baseline_to_tiles, Jones, LatLngHeight, RADec, XyzGeodetic};
+use mwalib::{CorrelatorContext, GpuboxError, MWAVersion, MetafitsContext, MwalibError, Pol};
 use ndarray::prelude::*;
 use vec1::Vec1;
 
@@ -561,6 +558,8 @@ impl RawDataReader {
     /// An internal method for reading visibilities. Cross- and/or
     /// auto-correlation visibilities and weights are written to the supplied
     /// arrays.
+    #[allow(dead_code)]
+    #[allow(unreachable_code)]
     pub fn read_inner(
         &self,
         crosses: Option<CrossData>,
@@ -670,48 +669,46 @@ impl RawDataReader {
             Array3::from_shape_vec(shape, jones_array_tfb).expect("correct shape");
         let mut flag_array_tfb =
             Array3::from_shape_vec(shape, flag_array_tfb).expect("correct shape");
-        let mut weight_array_tfb = Array3::from_elem(
-            shape,
-            birli::flags::get_weight_factor(&self.mwalib_context) as f32,
-        );
+        let mut weight_array_tfb = Array3::from_elem(shape, 1.0_f32);
 
         // Correct the raw data.
-        if !self.corrections.nothing_to_do() {
-            let prep_ctx = PreprocessContext {
-                array_pos: self.obs_context.array_position,
-                phase_centre: self.obs_context.phase_centre,
-                correct_cable_lengths: self.corrections.cable_length
-                    && match metafits_context.cable_delays_applied {
-                        mwalib::CableDelaysApplied::NoCableDelaysApplied => true,
-                        mwalib::CableDelaysApplied::CableAndRecClock
-                        | mwalib::CableDelaysApplied::CableAndRecClockAndBeamformerDipoleDelays => {
-                            false
-                        }
-                    },
-                correct_digital_gains: self.corrections.digital_gains,
-                passband_gains: self.pfb_gains,
-                correct_geometry: self.corrections.geometric
-                    && matches!(
-                        metafits_context.geometric_delays_applied,
-                        GeometricDelaysApplied::No
-                    ),
-                ..PreprocessContext::default()
-            };
-            let vis_sel = VisSelection {
-                timestep_range: timestep..timestep + 1,
-                coarse_chan_range,
-                baseline_idxs: (0..self.all_baseline_tile_pairs.len()).collect(),
-            };
-            prep_ctx
-                .preprocess(
-                    &self.mwalib_context,
-                    jones_array_tfb.view_mut(),
-                    weight_array_tfb.view_mut(),
-                    flag_array_tfb.view_mut(),
-                    &vis_sel,
-                )
-                .map_err(Box::new)?;
-        }
+        unimplemented!("raw data shouldn't be processed on the SDC3 branch");
+        // if !self.corrections.nothing_to_do() {
+        //     let prep_ctx = PreprocessContext {
+        //         array_pos: self.obs_context.array_position,
+        //         phase_centre: self.obs_context.phase_centre,
+        //         correct_cable_lengths: self.corrections.cable_length
+        //             && match metafits_context.cable_delays_applied {
+        //                 mwalib::CableDelaysApplied::NoCableDelaysApplied => true,
+        //                 mwalib::CableDelaysApplied::CableAndRecClock
+        //                 | mwalib::CableDelaysApplied::CableAndRecClockAndBeamformerDipoleDelays => {
+        //                     false
+        //                 }
+        //             },
+        //         correct_digital_gains: self.corrections.digital_gains,
+        //         passband_gains: self.pfb_gains,
+        //         correct_geometry: self.corrections.geometric
+        //             && matches!(
+        //                 metafits_context.geometric_delays_applied,
+        //                 GeometricDelaysApplied::No
+        //             ),
+        //         ..PreprocessContext::default()
+        //     };
+        //     let vis_sel = VisSelection {
+        //         timestep_range: timestep..timestep + 1,
+        //         coarse_chan_range,
+        //         baseline_idxs: (0..self.all_baseline_tile_pairs.len()).collect(),
+        //     };
+        //     prep_ctx
+        //         .preprocess(
+        //             &self.mwalib_context,
+        //             jones_array_tfb.view_mut(),
+        //             weight_array_tfb.view_mut(),
+        //             flag_array_tfb.view_mut(),
+        //             &vis_sel,
+        //         )
+        //         .map_err(Box::new)?;
+        // }
 
         // Convert the data array into a vector so we can use `chunks_exact`
         // below (this is 0 cost). This is measurably faster than using

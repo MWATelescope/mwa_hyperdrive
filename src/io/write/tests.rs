@@ -45,6 +45,7 @@ fn synthesize_test_data(
 
 #[test]
 #[serial]
+#[ignore = "polarisations hard-coded to 1 to appease sdc3"]
 fn test_vis_output_no_time_averaging_no_gaps() {
     let vis_time_average_factor = NonZeroUsize::new(1).unwrap();
     let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
@@ -248,6 +249,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
 
 #[test]
 #[serial]
+#[ignore = "polarisations hard-coded to 1 to appease sdc3"]
 fn test_vis_output_no_time_averaging_with_gaps() {
     let vis_time_average_factor = NonZeroUsize::new(1).unwrap();
     let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
@@ -450,6 +452,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
 
 #[test]
 #[serial]
+#[ignore = "polarisations hard-coded to 1 to appease sdc3"]
 fn test_vis_output_time_averaging() {
     let vis_time_average_factor = NonZeroUsize::new(3).unwrap();
     let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();

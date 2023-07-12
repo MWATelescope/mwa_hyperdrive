@@ -69,7 +69,7 @@ fn make_solutions() -> CalibrationSolutions {
         stop_threshold: Some(1e-10),
         min_threshold: Some(1e-5),
         raw_data_corrections: Some(RawDataCorrections {
-            pfb_flavour: PfbFlavour::Cotter2014,
+            pfb_flavour: PfbFlavour::Levine,
             digital_gains: true,
             cable_length: false,
             geometric: false,
@@ -117,7 +117,7 @@ fn test_write_and_read_hyperdrive_solutions() {
 
     assert_eq!(
         sols_from_disk.raw_data_corrections.unwrap().pfb_flavour,
-        PfbFlavour::Cotter2014
+        PfbFlavour::Levine
     );
     assert!(sols_from_disk.raw_data_corrections.unwrap().digital_gains);
     assert!(!sols_from_disk.raw_data_corrections.unwrap().cable_length);

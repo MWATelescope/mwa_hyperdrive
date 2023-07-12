@@ -35,7 +35,6 @@ pub enum RawReadError {
 
     #[error(transparent)]
     Selection(#[from] Box<marlu::SelectionError>),
-
-    #[error(transparent)]
-    Birli(#[from] Box<birli::BirliError>),
+    // #[error(transparent)]
+    // Birli(#[from] Box<birli::BirliError>),
 }

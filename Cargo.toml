@@ -58,7 +58,7 @@ cuda-static = ["mwa_hyperbeam/cuda-static"]
 all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.10.0", default_features = false }
+# birli = { version = "0.10.0", default_features = false }
 bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
@@ -140,6 +140,8 @@ harness = false
 # birli = { git = "https://github.com/MWATelescope/Birli" }
 # marlu = { path = "../Marlu" }
 # marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
+marlu = { git = "https://github.com/cjordan/Marlu", branch = "SDC3" }
+# marlu = { path = "/home/chj/Software/personal/Marlu" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }

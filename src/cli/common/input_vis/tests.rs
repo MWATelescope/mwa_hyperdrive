@@ -270,6 +270,7 @@ fn test_parse_freq_average() {
 }
 
 #[test]
+#[ignore = "raw-data-reading in this test can't be used due to sdc3"]
 fn test_freq_averaging_works() {
     let DataAsStrings {
         metafits, mut vis, ..

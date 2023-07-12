@@ -316,6 +316,7 @@ fn arg_file_relative_globs() {
 
 #[test]
 #[serial]
+#[ignore = "raw-data-reading in this test can't be used due to sdc3"]
 fn test_1090008640_di_calibrate_writes_solutions() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let DataAsStrings {
@@ -423,6 +424,7 @@ fn test_1090008640_di_calibrate_array_pos_requires_3_args() {
 }
 
 #[test]
+#[ignore = "polarisations hard-coded to 1 to appease sdc3"]
 /// Generate a model with "vis-simulate" (in uvfits), then feed it to
 /// "di-calibrate" and write out the model used for calibration (as uvfits). The
 /// visibilities should be exactly the same.
@@ -582,6 +584,7 @@ fn test_1090008640_calibrate_model_uvfits() {
 
 #[test]
 #[serial]
+#[ignore = "polarisations hard-coded to 1 to appease sdc3"]
 /// Generate a model with "vis-simulate" (in a measurement set), then feed it to
 /// "di-calibrate" and write out the model used for calibration (into a
 /// measurement set). The visibilities should be exactly the same.
@@ -731,6 +734,7 @@ fn test_1090008640_calibrate_model_ms() {
 }
 
 #[test]
+#[ignore = "polarisations hard-coded to 1 to appease sdc3"]
 /// Generate a model with "vis-simulate" (in uvfits), then feed it to
 /// "di-calibrate", testing the solution timeblocks that come out.
 fn test_cal_timeblocks() {
@@ -914,6 +918,7 @@ Calibration quality has changed. This test expects:
 }
 
 #[test]
+#[ignore = "raw-data-reading in this test can't be used due to sdc3"]
 fn test_1090008640_calibration_quality_raw() {
     let temp_dir = tempdir().expect("Couldn't make temp dir");
 
