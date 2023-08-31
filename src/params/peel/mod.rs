@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 use crate::{
-    averaging::{vis_average_no_negative_weights, Spw, Timeblock},
+    averaging::{Spw, Timeblock},
     beam::Beam,
     context::ObsContext,
     di_calibrate::calibrate_timeblock,
@@ -294,8 +294,8 @@ impl PeelParams {
                     defer_on_unwind! { error.store(true); }
 
                     joiner_thread(
-                        &iono_timeblocks,
-                        &spw,
+                        iono_timeblocks,
+                        spw,
                         num_unflagged_cross_baselines,
                         rx_residual,
                         tx_full_residual,
@@ -368,7 +368,7 @@ impl PeelParams {
                             &output_vis_params.output_timeblocks,
                             input_vis_params.time_res,
                             input_vis_params.dut1,
-                            &spw,
+                            spw,
                             &tile_baseline_flags
                                 .unflagged_cross_baseline_to_tile_map
                                 .values()
@@ -1655,7 +1655,7 @@ fn peel_gpu(
         vis_weights_tfb
     };
 
-    let (average_lmst, average_latitude, average_tile_xyzs) = if no_precession {
+    let (average_lmst, _average_latitude, average_tile_xyzs) = if no_precession {
         let average_timestamp = timeblock.median;
         let average_tile_xyzs =
             ArrayView2::from_shape((1, num_tiles), unflagged_tile_xyzs).expect("correct shape");
@@ -2373,7 +2373,7 @@ fn read_thread(
             vis_data_fb.view_mut(),
             vis_weights_fb.view_mut(),
             None,
-            &error,
+            error,
         )?;
 
         // Should we continue?
@@ -2422,11 +2422,11 @@ fn subtract_thread(
 
     let mut cpu_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Cpu) {
         Some(SkyModellerCpu::new(
-            &*beam,
+            beam,
             &SourceList::new(),
             obs_context.polarisations,
-            &unflagged_tile_xyzs,
-            &all_fine_chan_freqs_hz,
+            unflagged_tile_xyzs,
+            all_fine_chan_freqs_hz,
             &tile_baseline_flags.flagged_tiles,
             obs_context.phase_centre,
             array_position.longitude_rad,
@@ -2454,12 +2454,12 @@ fn subtract_thread(
     #[cfg(any(feature = "cuda", feature = "hip"))]
     let mut gpu_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
         let modeller = SkyModellerGpu::new(
-            &*beam,
+            beam,
             //&SourceList::new(),
             source_list,
             obs_context.polarisations,
-            &unflagged_tile_xyzs,
-            &all_fine_chan_freqs_hz,
+            unflagged_tile_xyzs,
+            all_fine_chan_freqs_hz,
             &tile_baseline_flags.flagged_tiles,
             obs_context.phase_centre,
             array_position.longitude_rad,
@@ -2525,7 +2525,7 @@ fn subtract_thread(
                 dut1,
             );
             // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs = precession_info.precess_xyz(&unflagged_tile_xyzs);
+            let precessed_tile_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
             debug!(
                 "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
                 timestamp.to_gpst_seconds(),
@@ -2603,7 +2603,7 @@ fn subtract_thread(
                     z: xyz.z as GpuFloat,
                 })
             }
-            d_xyzs.overwrite(&gpu_xyzs)?;
+            d_xyzs.overwrite(gpu_xyzs)?;
             gpu_xyzs.clear();
             d_lmst.overwrite(&[lst as GpuFloat])?;
 
@@ -2651,7 +2651,7 @@ fn subtract_thread(
                 )?;
                 std::mem::swap(d_uvws_from, d_uvws_to);
 
-                modeller.update_with_a_source(&source, *source_pos)?;
+                modeller.update_with_a_source(source, *source_pos)?;
                 modeller.model_timestep_with(lst, latitude, d_uvws_to, d_beam_jones, d_vis_fb)?;
                 sub_progress.inc(1);
             }
@@ -2793,7 +2793,7 @@ fn peel_thread(
             ])
             .expect("not possible to have no unflagged tiles here");
             let uvws = xyzs_to_cross_uvws(
-                &unflagged_tile_xyzs,
+                unflagged_tile_xyzs,
                 obs_context.phase_centre.to_hadec(get_lmst(
                     array_position.longitude_rad,
                     *timeblock.timestamps.first(),
@@ -2818,11 +2818,11 @@ fn peel_thread(
         if num_sources_to_iono_subtract > 0 {
             if matches!(MODEL_DEVICE.load(), ModelDevice::Cpu) {
                 let mut low_res_modeller = SkyModellerCpu::new(
-                    &*beam,
+                    beam,
                     &SourceList::new(),
                     obs_context.polarisations,
-                    &unflagged_tile_xyzs,
-                    &low_res_freqs_hz,
+                    unflagged_tile_xyzs,
+                    low_res_freqs_hz,
                     &tile_baseline_flags.flagged_tiles,
                     RADec::default(),
                     array_position.longitude_rad,
@@ -2831,10 +2831,10 @@ fn peel_thread(
                     apply_precession,
                 );
                 let mut high_res_modeller = SkyModellerCpu::new(
-                    &*beam,
+                    beam,
                     &SourceList::new(),
                     obs_context.polarisations,
-                    &unflagged_tile_xyzs,
+                    unflagged_tile_xyzs,
                     &all_fine_chan_freqs_hz,
                     &tile_baseline_flags.flagged_tiles,
                     RADec::default(),
@@ -2850,29 +2850,29 @@ fn peel_thread(
                     timeblock,
                     source_list,
                     &mut iono_consts,
-                    &source_weighted_positions,
+                    source_weighted_positions,
                     num_passes.get(),
-                    &low_res_freqs_hz,
-                    &all_fine_chan_lambdas_m,
-                    &low_res_lambdas_m,
+                    low_res_freqs_hz,
+                    all_fine_chan_lambdas_m,
+                    low_res_lambdas_m,
                     obs_context,
                     array_position,
-                    &unflagged_tile_xyzs,
+                    unflagged_tile_xyzs,
                     &mut low_res_modeller,
                     &mut high_res_modeller,
                     dut1,
                     !apply_precession,
-                    &multi_progress,
+                    multi_progress,
                 )?;
             }
 
             #[cfg(any(feature = "cuda", feature = "hip"))]
             if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
                 let mut high_res_modeller = SkyModellerGpu::new(
-                    &*beam,
+                    beam,
                     &SourceList::new(),
                     obs_context.polarisations,
-                    &unflagged_tile_xyzs,
+                    unflagged_tile_xyzs,
                     &all_fine_chan_freqs_hz,
                     &tile_baseline_flags.flagged_tiles,
                     RADec::default(),
@@ -2887,19 +2887,19 @@ fn peel_thread(
                     timeblock,
                     source_list,
                     &mut iono_consts,
-                    &source_weighted_positions,
+                    source_weighted_positions,
                     num_passes.get(),
                     chanblocks,
-                    &all_fine_chan_lambdas_m,
-                    &low_res_lambdas_m,
+                    all_fine_chan_lambdas_m,
+                    low_res_lambdas_m,
                     obs_context,
                     array_position,
-                    &unflagged_tile_xyzs,
-                    &baseline_weights,
+                    unflagged_tile_xyzs,
+                    baseline_weights,
                     &mut high_res_modeller,
                     dut1,
                     !apply_precession,
-                    &multi_progress,
+                    multi_progress,
                 )?;
             }
 
