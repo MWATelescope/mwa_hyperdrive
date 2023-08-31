@@ -106,7 +106,7 @@ fn test_write_and_read_hyperdrive_solutions() {
     // equality.
     sols.di_jones
         .into_iter()
-        .zip(sols_from_disk.di_jones.into_iter())
+        .zip(sols_from_disk.di_jones)
         .for_each(|(expected, result)| {
             if expected.any_nan() {
                 assert!(result.any_nan());
@@ -209,7 +209,7 @@ fn test_write_and_read_hyperdrive_solutions_no_metadata() {
     // equality.
     sols.di_jones
         .into_iter()
-        .zip(sols_from_disk.di_jones.into_iter())
+        .zip(sols_from_disk.di_jones)
         .for_each(|(expected, result)| {
             if expected.any_nan() {
                 assert!(result.any_nan());
@@ -285,7 +285,7 @@ fn test_write_and_read_ao_solutions() {
     // equality.
     sols.di_jones
         .into_iter()
-        .zip(sols_from_disk.di_jones.into_iter())
+        .zip(sols_from_disk.di_jones)
         .for_each(|(expected, result)| {
             if expected.any_nan() {
                 assert!(result.any_nan());

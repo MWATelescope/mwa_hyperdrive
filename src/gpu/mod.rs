@@ -6,6 +6,7 @@
 
 #![allow(non_snake_case)]
 #![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::excessive_precision)]
 
 #[cfg(test)]
 mod tests;

@@ -287,7 +287,7 @@ fn test_solutions_apply_trivial(mut args: SolutionsApplyArgs) {
     // Remove the newly-flagged chanblocks. (This is awkward because SPWs
     // weren't designed to be modified.)
     params.input_vis_params.spw.chanblocks = (0..)
-        .zip(params.input_vis_params.spw.chanblocks.into_iter())
+        .zip(params.input_vis_params.spw.chanblocks)
         .filter(|(i, _)| !flagged_fine_chans.contains(i))
         .map(|(_, c)| c)
         .collect();

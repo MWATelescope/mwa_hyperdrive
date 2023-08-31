@@ -605,7 +605,7 @@ mod tests {
         assert_eq!(s[6], 128);
         assert_eq!(s[7], 3);
 
-        let expected = vec![
+        let expected = [
             0.99999946,
             0.99999946,
             0.08406332,
@@ -670,8 +670,7 @@ mod tests {
         assert_eq!(s[6], 128);
         assert_eq!(s[7], 3);
 
-        let expected = vec![
-            0.99999946,
+        let expected = [0.99999946,
             0.99999946,
             0.08051342,
             0.07879118,
@@ -702,8 +701,7 @@ mod tests {
             0.082425445,
             0.08412713,
             0.99999946,
-            0.99999946,
-        ];
+            0.99999946];
         for (&res, &exp) in m.occupancy[&2].iter().zip(expected.iter()) {
             assert_abs_diff_eq!(res, exp);
         }
