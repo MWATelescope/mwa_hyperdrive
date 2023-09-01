@@ -4,7 +4,7 @@
 # headers for GPU code change.
 
 # This script requires bindgen. This can be provided by a package manager or
-# installed with "cargo install bindgen".
+# installed with "cargo install bindgen-cli".
 
 # https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
 SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"

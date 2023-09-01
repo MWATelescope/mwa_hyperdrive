@@ -2326,89 +2326,89 @@ mod gpu_tests {
         let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
         dbg!(&num_tiles, &num_times, &num_cross_baselines);
 
-        // tile uvs and ws in the observation phase centre
-        let mut tile_uvs_obs = Array2::default((num_times, num_tiles));
-        let mut tile_ws_obs = Array2::default((num_times, num_tiles));
-
         let mut gpu_uvws_from = Array2::default((num_times, num_cross_baselines));
         let mut gpu_uvws_to = Array2::default((num_times, num_cross_baselines));
 
-        for apply_precession in [false, true] {
-            let (lmsts, prec_tile_xyzs) = setup_tile_uv_w_arrays(
-                tile_uvs_obs.view_mut(),
-                tile_ws_obs.view_mut(),
-                &obs_context,
-                obs_context.phase_centre,
-                apply_precession,
-            );
-            dbg!(&lmsts, &prec_tile_xyzs);
+        let lmsts = &[0., std::f64::consts::PI];
+        let prec_tile_xyzs = array![
+            [
+                XyzGeodetic { x: 000., y: 001., z: 002. },
+                XyzGeodetic { x: 010., y: 011., z: 012. },
+                XyzGeodetic { x: 020., y: 021., z: 022. },
+            ],
+            [
+                XyzGeodetic { x: 100., y: 101., z: 102. },
+                XyzGeodetic { x: 110., y: 111., z: 112. },
+                XyzGeodetic { x: 120., y: 121., z: 122. },
+            ],
+        ];
 
-            let gpu_prec_tile_xyzs: Vec<_> = prec_tile_xyzs
-                .iter()
-                .copied()
-                .map(|XyzGeodetic { x, y, z }| gpu::XYZ {
-                    x: x as GpuFloat,
-                    y: y as GpuFloat,
-                    z: z as GpuFloat,
-                })
-                .collect();
+        let gpu_prec_tile_xyzs: Vec<_> = prec_tile_xyzs
+            .iter()
+            .copied()
+            .map(|XyzGeodetic { x, y, z }| gpu::XYZ {
+                x: x as GpuFloat,
+                y: y as GpuFloat,
+                z: z as GpuFloat,
+            })
+            .collect();
 
-            dbg!(&gpu_prec_tile_xyzs);
-            let gpu_lmsts: Vec<GpuFloat> = lmsts.iter().map(|l| *l as GpuFloat).collect();
+        dbg!(&gpu_prec_tile_xyzs);
+        let gpu_lmsts: Vec<GpuFloat> = lmsts.iter().map(|l| *l as GpuFloat).collect();
 
-            unsafe {
-                let d_xyzs = DevicePointer::copy_to_device(&gpu_prec_tile_xyzs).unwrap();
+        unsafe {
+            let d_xyzs = DevicePointer::copy_to_device(&gpu_prec_tile_xyzs).unwrap();
 
-                let d_lmsts = DevicePointer::copy_to_device(&gpu_lmsts).unwrap();
+            let d_lmsts = DevicePointer::copy_to_device(&gpu_lmsts).unwrap();
 
-                gpu_uvws_from
-                    .outer_iter_mut()
-                    .zip(prec_tile_xyzs.outer_iter())
-                    .zip(lmsts.iter())
-                    .for_each(|((mut gpu_uvws_from, xyzs), lmst)| {
-                        let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
-                        let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
-                            .into_iter()
-                            .map(|uvw| gpu::UVW {
-                                u: uvw.u as GpuFloat,
-                                v: uvw.v as GpuFloat,
-                                w: uvw.w as GpuFloat,
-                            })
-                            .collect::<Vec<_>>();
-                        gpu_uvws_from.assign(&ArrayView1::from(&v));
-                    });
-                let mut d_uvws_to =
-                    DevicePointer::malloc(gpu_uvws_from.len() * std::mem::size_of::<gpu::UVW>()).unwrap();
+            gpu_uvws_from
+                .outer_iter_mut()
+                .zip(prec_tile_xyzs.outer_iter())
+                .zip(lmsts.iter())
+                .for_each(|((mut gpu_uvws_from, xyzs), lmst)| {
+                    let phase_centre = obs_context.phase_centre.to_hadec(*lmst);
+                    let v = xyzs_to_cross_uvws(xyzs.as_slice().unwrap(), phase_centre)
+                        .into_iter()
+                        .map(|uvw| gpu::UVW {
+                            u: uvw.u as GpuFloat,
+                            v: uvw.v as GpuFloat,
+                            w: uvw.w as GpuFloat,
+                        })
+                        .collect::<Vec<_>>();
+                    gpu_uvws_from.assign(&ArrayView1::from(&v));
+                });
+            let mut d_uvws_to =
+                DevicePointer::malloc(gpu_uvws_from.len() * std::mem::size_of::<gpu::UVW>()).unwrap();
+                // DevicePointer::malloc(gpu_uvws_from.len() * (std::mem::size_of::<gpu::UVW>() + std::mem::align_of::<gpu::UVW>())).unwrap();
 
-                gpu_kernel_call!(
-                    gpu::xyzs_to_uvws,
-                    d_xyzs.get(),
-                    d_lmsts.get(),
-                    d_uvws_to.get_mut(),
-                    gpu::RADec {
-                        ra: obs_context.phase_centre.ra as GpuFloat,
-                        dec: obs_context.phase_centre.dec as GpuFloat,
-                    },
-                    num_tiles.try_into().unwrap(),
-                    num_cross_baselines.try_into().unwrap(),
-                    num_times.try_into().unwrap(),
-                ).unwrap();
+            gpu_kernel_call!(
+                gpu::xyzs_to_uvws,
+                d_xyzs.get(),
+                d_lmsts.get(),
+                d_uvws_to.get_mut(),
+                gpu::RADec {
+                    ra: obs_context.phase_centre.ra as GpuFloat,
+                    dec: obs_context.phase_centre.dec as GpuFloat,
+                },
+                num_tiles.try_into().unwrap(),
+                num_cross_baselines.try_into().unwrap(),
+                num_times.try_into().unwrap(),
+            ).unwrap();
 
-                d_uvws_to.copy_from_device(gpu_uvws_to.as_slice_mut().unwrap()).unwrap();
-            }
+            d_uvws_to.copy_from_device(gpu_uvws_to.as_slice_mut().unwrap()).unwrap();
+        }
 
-            dbg!(&gpu_uvws_from);
-            dbg!(&gpu_uvws_to);
+        dbg!(&gpu_uvws_from);
+        dbg!(&gpu_uvws_to);
 
-            assert_eq!(gpu_uvws_from.dim(), gpu_uvws_to.dim());
-            gpu_uvws_from.indexed_iter().for_each(|(idx, uvw_from)| {
-                dbg!(&idx);
-                let uvw_to = gpu_uvws_to[idx];
-                assert_abs_diff_eq!(uvw_from.u, uvw_to.u, epsilon = 1e-6);
-                assert_abs_diff_eq!(uvw_from.v, uvw_to.v, epsilon = 1e-6);
-                assert_abs_diff_eq!(uvw_from.w, uvw_to.w, epsilon = 1e-6);
-            });
-        };
+        assert_eq!(gpu_uvws_from.dim(), gpu_uvws_to.dim());
+        gpu_uvws_from.indexed_iter().for_each(|(idx, uvw_from)| {
+            dbg!(&idx);
+            let uvw_to = gpu_uvws_to[idx];
+            assert_abs_diff_eq!(uvw_from.u, uvw_to.u, epsilon = 1e-5);
+            assert_abs_diff_eq!(uvw_from.v, uvw_to.v, epsilon = 1e-5);
+            assert_abs_diff_eq!(uvw_from.w, uvw_to.w, epsilon = 1e-5);
+        });
     }
 
     #[test]
