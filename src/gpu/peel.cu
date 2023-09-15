@@ -10,6 +10,9 @@
 /**
  * Turn XYZs into UVWs. Multiple sets of XYZs over time can be converted.
  * Expects the device to be parallel over baselines.
+ * xyzs has shape (num_timesteps, num_tiles).
+ * lmsts has shape (num_timesteps).
+ * uvws has shape (num_timesteps, num_baselines).
  */
 __global__ void xyzs_to_uvws_kernel(const XYZ *xyzs, const FLOAT *lmsts, UVW *uvws, RADec pointing_centre,
                                     int num_tiles, int num_baselines, int num_timesteps) {
@@ -455,12 +458,22 @@ __global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int n
         data[0] = sdata[0];
 #endif
 
-        // The trailing *2 is to slow down the convergence; the idea is to
-        // prevent falling into another local minimum.
-        const double denom = TAU * (a_uu * a_vv - a_uv * a_uv) * 2;
+        const double denom = TAU * (a_uu * a_vv - a_uv * a_uv);
+        // to slow down the convergence, change this to a lower positive value
+        // #define CONVERGENCE 0.7
+#ifdef CONVERGENCE
+        // replaces a = a + b
+        // with     a = (1 - c) * a + c * (a + b)
+        iono_consts->alpha = (1.0-CONVERGENCE) * iono_consts->alpha + CONVERGENCE * (A_u * a_vv - A_v * a_uv) / denom;
+        iono_consts->beta = (1.0-CONVERGENCE) * iono_consts->beta + CONVERGENCE * (A_v * a_uu - A_u * a_uv) / denom;
+        // iono_consts->gain = (1.0-CONVERGENCE) * iono_consts->gain + CONVERGENCE * s_vm / s_mm;
+#else
         iono_consts->alpha += (A_u * a_vv - A_v * a_uv) / denom;
         iono_consts->beta += (A_v * a_uu - A_u * a_uv) / denom;
-        iono_consts->gain *= s_vm / s_mm;
+        // iono_consts->gain *= s_vm / s_mm;
+#endif
+        // disable gain
+        iono_consts->gain *= 1.0;
         // printf("iono consts: %f %f %f\n", iono_consts->alpha, iono_consts->beta, iono_consts->gain);
     }
 }
