@@ -1441,7 +1441,8 @@ fn peel_cpu(
 
                 iono_consts.alpha += iono_fits[0];
                 iono_consts.beta += iono_fits[1];
-                // gain_update *= iono_fits[2] / iono_fits[3];
+                // iono_consts.gain *= iono_fits[2] / iono_fits[3];
+                iono_consts.gain = 1.0;
                 // vis_model_low_res
                 //     .iter_mut()
                 //     .for_each(|v| *v *= gain_update as f32);
@@ -2117,9 +2118,9 @@ fn peel_gpu(
                 let gpu_iono_consts = gpu::IonoConsts {
                     alpha: iono_consts.alpha,
                     beta: iono_consts.beta,
-                    //gain: 1.0,
+                    gain: 1.0,
                     //gain: gpu_iono_consts.gain,
-                    gain: iono_consts.gain,
+                    // gain: iono_consts.gain,
                 };
                 //dbg!(gpu_iono_consts);
                 let gpu_old_iono_consts = gpu::IonoConsts {
