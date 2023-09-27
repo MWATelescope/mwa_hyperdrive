@@ -11,22 +11,6 @@
 
 Calibration software for the Murchison Widefield Array (MWA) radio telescope.
 
-Currently in heavy development. Major milestones are listed below:
-
-- [x] Direction-independent calibration (on both CPUs and GPUs)
-  - [x] Single timeblock
-  - [x] Multiple timeblocks
-  - [ ] Frequency averaging before calibration
-  - [ ] Chunking for memory constrained calibration
-- [x] Reading visibilities from raw MWA data (legacy and MWAX), uvfits and
-      measurement sets
-- [x] Reading and writing RTS, AOcal and WODEN style sky-model source lists
-- [x] Reading and writing RTS, AOcal and hyperdrive style calibration
-      solutions
-- [x] Writing visibilities to uvfits and measurement sets
-- [ ] Direction-dependent calibration
-- [ ] Writing to multiple uvfits or measurement sets for each MWA coarse channel
-
 ## Installation
 See the instructions
 [here](https://MWATelescope.github.io/mwa_hyperdrive/installation/intro.html).
