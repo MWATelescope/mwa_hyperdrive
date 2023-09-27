@@ -10,9 +10,13 @@ on:
     branches:
     - '**'
 
+# The CI jobs can use a lot of disk space; we take tips from this site to run
+# the jobs faster and use less space.
+# https://matklad.github.io/2021/09/04/fast-rust-builds.html
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-C debuginfo=0 --deny warnings"
   MWA_BEAM_FILE: /mwa_full_embedded_element_pattern.h5
 
 jobs:
@@ -20,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -44,9 +48,9 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.5
+        uses: Jimver/cuda-toolkit@v0.2.11
         with:
-          cuda: '11.5.1'
+          cuda: '12.2.0'
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -58,29 +62,32 @@ jobs:
       - name: Get the beam HDF5 file
         run: sudo curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o $MWA_BEAM_FILE
 
-      # Test that building works. Build statically first so less compiling is
-      # needed when running tests.
-      - name: Debug build with static features
+      # Test that building works before running tests. Build statically first so
+      # less compiling is needed when running tests.
+      - name: Build with static features
         run: cargo test --locked --release --features=cuda,all-static --no-run
 
-      - name: Debug build
+      # Can't test with CUDA, no GPUs available in CI
+      - name: Build
         run: cargo test --locked --release --features=cuda --no-run
 
-      # Can't test with CUDA, no GPUs available in CI
       - name: Run tests
         run: cargo test --locked --release
 
       - name: Run ignored tests
-        run: cargo test --locked --release -- --ignored
+        run: |
+          # It seems that we use up a lot of space by this point.
+          cargo clean
+          cargo test --locked --release -- --ignored
 
       - name: Minimum-specified Rust version works
         run: |
           MIN_RUST=$(grep -m1 "rust-version" Cargo.toml | sed 's|.*\"\(.*\)\"|\1|')
           ~/.cargo/bin/rustup install $MIN_RUST --profile minimal
           cargo clean
-          cargo +${MIN_RUST} test --locked
-          cargo +${MIN_RUST} test --locked --features=all-static
-          # Can't test with --all-features, cuda and hip aren't allowed together
-          # hip is also difficult to install so ignore it
-          cargo +${MIN_RUST} test --locked --features=all-static,cuda --no-run
-          cargo +${MIN_RUST} test --locked --features=all-static,cuda,gpu-single --no-run
+          cargo +${MIN_RUST} test --locked --release
+          cargo +${MIN_RUST} test --locked --release --features=all-static
+          # Can't test with --all-features because cuda and hip aren't allowed
+          # together. hip is also difficult to install so ignore it.
+          cargo +${MIN_RUST} test --locked --release --features=all-static,cuda --no-run
+          cargo +${MIN_RUST} test --locked --release --features=all-static,cuda,gpu-single --no-run

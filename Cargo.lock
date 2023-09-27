@@ -1486,7 +1486,7 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperdrive"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "approx",
  "assert_cmd",

@@ -14,11 +14,11 @@ env:
 jobs:
   build-linux-release:
     name: Build release for Linux
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -32,14 +32,39 @@ jobs:
             cmake \
             curl \
             git \
+            libz-dev \
+            software-properties-common \
             ;
+
+          # This comes from software-properties-common, and is only necessary
+          # to install gcc-12. Remove this when we use a newer ubuntu image.
+          # https://stackoverflow.com/a/67453352
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt update -y
+          sudo apt install -y gcc-11 g++-11
+          sudo update-alternatives \
+            --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-11 \
+            --slave /usr/bin/gcov gcov /usr/bin/gcov-11 \
+            --slave /usr/bin/gcc-ar gcc-ar /usr/bin/gcc-ar-11 \
+            --slave /usr/bin/gcc-ranlib gcc-ranlib /usr/bin/gcc-ranlib-11
+          gcc --version
+          g++ --version
+          gcov --version
+
+          # Compile cfitsio from source to get its static library.
+          curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-4.3.0.tar.gz -O
+          tar -xvf cfitsio-4.3.0.tar.gz && cd cfitsio-4.3.0
+          CFLAGS="-fPIE -O3 -march=x86-64-v2" ./configure --enable-reentrant --disable-curl --enable-sse2 --enable-ssse3 --libdir=/usr/lib/x86_64-linux-gnu/
+          sudo make -j install
+
         env:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.5
+        uses: Jimver/cuda-toolkit@v0.2.11
         with:
-          cuda: '11.2.0'
+          cuda: '12.2.0'
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -55,25 +80,41 @@ jobs:
           curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
           cp .github/workflows/releases-readme.md README.md
 
-          cargo build --profile production --locked --no-default-features --features=hdf5-static,cfitsio-static
-          mv target/production/hyperdrive .
-          tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3.tar.gz \
-          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
-          hyperdrive
+          # Build with our recently-built static cfitsio
+          export CFITSIO_STATIC=1
+          # Don't build against the host CPU
+          rm .cargo/config.toml
+          # Don't make it look like the git tree is dirty because we aren't
+          # building against the host CPU
+          perl -0777 -pe 's/let dirty = .*\n.*\n.*\n.*/let dirty = "";/' src/cli/mod.rs
 
-          cargo build --profile production --locked --no-default-features --features=hdf5-static,cfitsio-static,cuda
-          mv target/production/hyperdrive .
-          tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-double.tar.gz \
-          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
-          hyperdrive
+          for ARCH in {2,3}; do
+            echo "Building x86-64-v${ARCH}"
+            export CFLAGS="-march=x86-64-v${ARCH}"
+            export CXXFLAGS="-march=x86-64-v${ARCH}"
+            export RUSTFLAGS="-C target-cpu=x86-64-v${ARCH}"
 
-          cargo build --profile production --locked --no-default-features --features=hdf5-static,cfitsio-static,cuda,gpu-single
-          mv target/production/hyperdrive .
-          tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v3-CUDA-single.tar.gz \
-          LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
-          hyperdrive
-        env:
-          RUSTFLAGS: "-C target-cpu=x86-64-v3"
+            # Use --no-default-features to disable plotting; it's too hard to make this portable.
+            cargo build --profile production --locked --no-default-features --features=hdf5-static
+            mv target/production/hyperdrive .
+            tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v${ARCH}.tar.gz \
+            LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio README.md \
+            hyperdrive
+
+            cargo build --profile production --locked --no-default-features --features=hdf5-static,cuda
+            mv target/production/hyperdrive .
+            tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v${ARCH}-CUDA-double.tar.gz \
+            LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
+            hyperdrive
+
+            cargo build --profile production --locked --no-default-features --features=hdf5-static,cuda,gpu-single
+            mv target/production/hyperdrive .
+            tar -acvf mwa_hyperdrive-$(git describe --tags)-Linux-x86-64-v${ARCH}-CUDA-single.tar.gz \
+            LICENSE COPYING-hdf5 LICENSE-erfa LICENSE-cfitsio LICENSE-NVIDIA README.md \
+            hyperdrive
+
+            cargo clean
+          done
 
       - name: Upload tarball
         uses: actions/upload-artifact@v2

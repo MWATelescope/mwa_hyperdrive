@@ -1,12 +1,12 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.2.1"
+version = "0.3.0"
 authors = [
     "Christopher H. Jordan <christopherjordan87@gmail.com>",
     "Dev Null <dev.null@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.65"
+rust-version = "1.68"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"

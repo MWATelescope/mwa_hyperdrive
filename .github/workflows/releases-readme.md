@@ -31,23 +31,23 @@ compiled inside the `hyperdrive` binary.
 An NVIDIA license may also be included as, per the terms of the license,
 `hyperdrive` utilises code that was modified from an existing CUDA example.
 
-# x86-64-v3?
+# What are these different x86-64 versions?
 
-This is a [microarchitecture
-level](https://en.wikipedia.org/wiki/X86-64#Microarchitecture_levels). By
+They are [microarchitecture
+levels](https://en.wikipedia.org/wiki/X86-64#Microarchitecture_levels). By
 default, Rust compiles for all x86-64 CPUs; this allows maximum compatibility,
 but potentially limits the runtime performance because many modern CPU features
 can't be used. Compiling at different levels allows the code to be optimised for
 different classes of CPUs so users can get something that works best for them.
 
-If your CPU does not support x86-64-v3, you will need to compile `hyperdrive`
-from source.
+If your CPU does not support the available microarchitecture levels on the
+GitHub release page, you will need to compile `hyperdrive` from source.
 
 # CUDA?
 
 The releases with "CUDA" in the name are CUDA enabled. The `hyperdrive` binaries
-have been dynamically linked against CUDA 11.2.0; to run them, a CUDA
-installation on version 11 is required.
+have been dynamically linked against CUDA 12.2.0; to run them, a CUDA
+installation on version 12 is required.
 
 There is also a double- or single-precision version of `hyperdrive` provided. If
 you're running a desktop NVIDIA GPU (e.g. RTX 2070), then you probably want the
