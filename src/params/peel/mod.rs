@@ -171,11 +171,11 @@ impl PeelParams {
         };
 
         assert!(
-            iono_time_average_factor.get() * input_vis_params.timeblocks.len() == iono_timeblocks.len(),
-            "iono_time_average_factor {} * num_read_timeblocks {} != num_iono_timeblocks {}",
-            iono_time_average_factor.get(),
+            input_vis_params.timeblocks.len() == iono_time_average_factor.get() * iono_timeblocks.len(),
+            "num_read_times {} != num_iono_times {} * iono_time_average_factor {}",
             input_vis_params.timeblocks.len(),
-            iono_timeblocks.len()
+            iono_timeblocks.len(),
+            iono_time_average_factor.get(),
         );
 
         let error = AtomicCell::new(false);
