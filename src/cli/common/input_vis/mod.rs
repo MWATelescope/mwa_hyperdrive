@@ -818,13 +818,16 @@ impl InputVisArgs {
                     .unwrap_or(Duration::from_seconds(TIME_WEIGHT_FACTOR))
             }
             (Some(r), 1) => {
-                time_printer.push_line(format!("Resolution: {r}").into());
+                time_printer.push_block(vec![
+                    format!("Resolution: {r}").into(),
+                    "No reader averaging".into(),
+                ]);
                 r
             }
             (Some(r), f) => {
                 time_printer.push_block(vec![
                     format!("Resolution: {r}").into(),
-                    format!("Averaging {f}x ({})", r * f as i64).into(),
+                    format!("Reader averaging {f}x ({})", r * f as i64).into(),
                 ]);
                 r
             }
@@ -1021,13 +1024,16 @@ impl InputVisArgs {
                 FREQ_WEIGHT_FACTOR
             }
             (Some(r), 1) => {
-                chan_printer.push_line(format!("Resolution: {:.2} kHz", r / 1e3).into());
+                chan_printer.push_block(vec![
+                    format!("Resolution: {:.2} kHz", r / 1e3).into(),
+                    "No Reader averaging".into(),
+                ]);
                 r
             }
             (Some(r), f) => {
                 chan_printer.push_block(vec![
                     format!("Resolution: {:.2} kHz", r / 1e3).into(),
-                    format!("Averaging {f}x ({:.2} kHz)", r / 1e3 * f as f64).into(),
+                    format!("Reader averaging {f}x ({:.2} kHz)", r / 1e3 * f as f64).into(),
                 ]);
                 r
             }
