@@ -170,6 +170,14 @@ impl PeelParams {
             source_weighted_positions
         };
 
+        assert!(
+            iono_time_average_factor.get() * input_vis_params.timeblocks.len() == iono_timeblocks.len(),
+            "iono_time_average_factor {} * num_read_timeblocks {} != num_iono_timeblocks {}",
+            iono_time_average_factor.get(),
+            input_vis_params.timeblocks.len(),
+            iono_timeblocks.len()
+        );
+
         let error = AtomicCell::new(false);
         let (tx_data, rx_data) = bounded(1);
         let (tx_residual, rx_residual) = bounded(1);
@@ -2399,6 +2407,8 @@ fn read_thread(
     Ok(())
 }
 
+// subtract the model from the visibilities to get residuals
+// acts on a stream of 2D visibilities and weights [chan, baseline]
 #[allow(clippy::too_many_arguments)]
 fn subtract_thread(
     beam: &dyn Beam,
@@ -2410,6 +2420,7 @@ fn subtract_thread(
     array_position: LatLngHeight,
     dut1: Duration,
     all_fine_chan_freqs_hz: &[f64],
+    // TODO(Dev): why have both of these?
     all_fine_chan_lambdas_m: &[f64],
     apply_precession: bool,
     rx_data: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
@@ -2700,6 +2711,14 @@ fn subtract_thread(
     Ok(())
 }
 
+/// reshapes residuals for peel.
+/// receives a stream of 2D residuals and weights [chan, baseline]
+/// joins them into a 3D array [time, chan, baseline] whose time axis
+/// is determined by iono_timeblocks.
+///
+/// # Warning
+/// Each time rx_residual.iter() is called, it will
+/// consume the stream. If called multiple times it will skip items.
 fn joiner_thread<'a>(
     iono_timeblocks: &'a [Timeblock],
     spw: &Spw,
@@ -2716,15 +2735,19 @@ fn joiner_thread<'a>(
         ));
         let mut vis_weights_tfb = Array3::zeros(vis_residual_tfb.raw_dim());
 
+        let timestamps = timeblock.timestamps.iter().map(|(t, _)| *t).collect_vec();
+        trace!("[joiner] timestamps={timestamps:?}");
+
         for (
-            (vis_residual_fb, mut vis_weights_fb, _timestamp),
             mut full_residual_fb,
             mut full_weights_fb,
         ) in izip!(
-            rx_residual.iter(),
             vis_residual_tfb.outer_iter_mut(),
             vis_weights_tfb.outer_iter_mut()
         ) {
+            let (vis_residual_fb, mut vis_weights_fb, timestamp) = rx_residual.recv().unwrap();
+            assert!(timestamps.contains(&timestamp));
+
             // Should we continue?
             if error.load() {
                 return;
