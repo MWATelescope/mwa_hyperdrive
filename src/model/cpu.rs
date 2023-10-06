@@ -707,7 +707,7 @@ impl<'a> SkyModellerCpu<'a> {
         Ok(())
     }
 
-    /// For a timestamp, get the LST, [`UVW`]s and array latitude. These things
+    /// For a timestamp, get the LST, tile [`UVW`]s and array latitude. These things
     /// depend on whether we're precessing, so rather than copy+pasting this
     /// code around the place, put it in one spot.
     fn get_lst_uvws_latitude(&self, timestamp: Epoch) -> (f64, Vec<UVW>, f64) {
