@@ -143,6 +143,16 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
     #[clap(about = "Generate beam-response values.
 https://mwatelescope.github.io/mwa_hyperdrive/user/beam.html")]
     Beam(beam::BeamArgs),
+
+    #[clap(arg_required_else_help = true)]
+    #[clap(infer_long_args = true)]
+    SolutionsEnhance {
+        sols: std::path::PathBuf,
+        output_sols: std::path::PathBuf,
+
+        #[clap(flatten)]
+        data_args: common::InputVisArgs,
+    },
 }
 
 impl Hyperdrive {
@@ -176,6 +186,7 @@ impl Hyperdrive {
             Command::SrclistVerify(_) => "srclist-verify",
             Command::DipoleGains(_) => "dipole-gains",
             Command::Beam(_) => "beam",
+            Command::SolutionsEnhance { .. } => "solutions-enhance",
         };
         info!("hyperdrive {} {}", sub_command, env!("CARGO_PKG_VERSION"));
         display_build_info();
@@ -239,6 +250,84 @@ impl Hyperdrive {
             // Misc. utilities.
             Command::DipoleGains(args) => args.run()?,
             Command::Beam(args) => args.run()?,
+
+            Command::SolutionsEnhance {
+                sols,
+                output_sols,
+                mut data_args,
+            } => {
+                use marlu::Jones;
+                use ndarray::prelude::*;
+
+                if data_args.no_autos {
+                    "The user specified not to use auto-correlations, but these must be used; ignoring".warn();
+                }
+                data_args.no_autos = false;
+                let data_params = data_args.parse("enhancing").unwrap();
+                // TODO: verify that the input data has autos
+                // TODO: verify that all solution antennas are available in the input data
+                assert!(data_params.get_num_unflagged_tiles() >= 2);
+
+                let num_timeblocks = data_params.timeblocks.len();
+                let num_chanblocks = data_params.spw.chanblocks.len();
+                let num_unflagged_tiles = data_params.get_num_unflagged_tiles();
+                let (autos_tfb, weights_tfb) = {
+                    // TODO: create a method to read only auto timeblocks
+                    let mut autos_tfb =
+                        Array3::default((num_timeblocks, num_chanblocks, num_unflagged_tiles));
+                    let mut weights_tfb = Array3::default(autos_tfb.raw_dim());
+                    for timeblock in &data_params.timeblocks {
+                        let timestep = timeblock.index;
+                        data_params
+                            .vis_reader
+                            .read_autos(
+                                autos_tfb.slice_mut(s![timestep, .., ..]),
+                                weights_tfb.slice_mut(s![timestep, .., ..]),
+                                timestep,
+                                &data_params.tile_baseline_flags,
+                                &data_params.spw.flagged_chan_indices,
+                            )
+                            .unwrap();
+                    }
+
+                    (autos_tfb, weights_tfb)
+                };
+
+                // Get the auto ratios.
+                let auto_ratios = {
+                    let antenna_i = 0;
+                    let mut auto_ratios_bf: Array2<Jones<f64>> =
+                        Array2::default((num_unflagged_tiles, num_chanblocks));
+
+                    for i_chan in 0..num_chanblocks {
+                        for antenna_j in antenna_i + 1..num_unflagged_tiles {
+                            let mut sum = Jones::default();
+                            let mut sum_weights = 0.0;
+
+                            for i_timeblock in 0..num_timeblocks {
+                                let i_weight = weights_tfb[(i_timeblock, i_chan, antenna_i)];
+                                let j_weight = weights_tfb[(i_timeblock, i_chan, antenna_j)];
+                                if i_weight <= 0.0 || j_weight <= 0.0 {
+                                    continue;
+                                }
+
+                                let i_auto =
+                                    Jones::<f64>::from(autos_tfb[(i_timeblock, i_chan, antenna_i)]);
+                                let j_auto =
+                                    Jones::<f64>::from(autos_tfb[(i_timeblock, i_chan, antenna_j)]);
+                                let i_weight = (i_weight as f64).sqrt();
+                                let j_weight = (j_weight as f64).sqrt();
+                                sum += (i_auto / j_auto) * (i_weight / j_weight);
+                                sum_weights += i_weight + j_weight;
+                            }
+                        }
+
+                        auto_ratios[()] = sum / sum_weights;
+                    }
+
+                    auto_ratios
+                };
+            }
         }
 
         info!("hyperdrive {} complete.", sub_command);
