@@ -2169,14 +2169,14 @@ fn test_peel_multi_source(peel_type: PeelType) {
             let average_precession_info = precess_time(
                 obs_context.array_position.longitude_rad,
                 obs_context.array_position.latitude_rad,
-            obs_context.phase_centre,
+                obs_context.phase_centre,
                 average_timestamp,
                 obs_context.dut1.unwrap(),
             );
             (
                 average_precession_info.lmst_j2000,
                 average_precession_info.array_latitude_j2000,
-        )
+            )
         };
 
         let mut high_res_modeller = new_sky_modeller(
@@ -2365,24 +2365,24 @@ fn test_peel_multi_source(peel_type: PeelType) {
 
         // display_vis_tfb(
         //     &"peeled@obs".into(),
-            //     vis_residual_obs_tfb.view(),
-            //     &obs_context,
-            //     obs_context.phase_centre,
-            //     apply_precession,
-            // );
+        //     vis_residual_obs_tfb.view(),
+        //     &obs_context,
+        //     obs_context.phase_centre,
+        //     apply_precession,
+        // );
 
         // let out_path =  match peel_type {
         //     PeelType::CPU => PathBuf::from(&format!("{OUT_PREFIX}/test_peel_cpu_multi_source{}.ms", if apply_precession { "_prec" } else { "" })),
-            //     #[cfg(any(feature = "cuda", feature = "hip"))]
+        //     #[cfg(any(feature = "cuda", feature = "hip"))]
         //     PeelType::Gpu => PathBuf::from(&format!("{OUT_PREFIX}/test_peel_gpu_multi_source{}.ms", if apply_precession { "_prec" } else { "" })),
         // }.to_path_buf();
 
         // write_vis_tfb(out_path, vis_residual_obs_tfb.view(), &obs_context);
 
-            // peel should perfectly remove the iono rotate model vis
+        // peel should perfectly remove the iono rotate model vis
         let mut norm_sum = 0.;
-            for jones_residual in vis_residual_obs_tfb.iter() {
-                for pol_residual in jones_residual.iter() {
+        for jones_residual in vis_residual_obs_tfb.iter() {
+            for pol_residual in jones_residual.iter() {
                 norm_sum += pol_residual.norm();
                 // #[cfg(not(feature = "gpu-single"))]
                 // assert_abs_diff_eq!(pol_residual.norm(), 0., epsilon = 4e-7);
@@ -3169,8 +3169,8 @@ mod gpu_tests {
                 vis_rot_tfb.view_mut(),
                 tile_ws_obs.view(),
                 tile_ws_src.view(),
-                    &lambdas_m,
-                );
+                &lambdas_m,
+            );
 
             display_vis_tfb(
                 &format!("model@obs prec={apply_precession}"),
