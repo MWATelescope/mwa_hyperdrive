@@ -13,6 +13,9 @@ pub(crate) enum PeelArgsError {
     #[error("The number of iono sub passes cannot be 0")]
     ZeroPasses,
 
+    #[error("The number of iono loops cannot be 0")]
+    ZeroLoops,
+
     #[error("Error when parsing iono time average factor: {0}")]
     ParseIonoTimeAverageFactor(crate::unit_parsing::UnitParseError),
 

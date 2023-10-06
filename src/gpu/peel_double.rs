@@ -66,6 +66,7 @@ extern "C" {
         d_lmsts: *const f64,
         d_uvws: *const UVW,
         d_lambdas_m: *const f64,
+        convergence: f64,
     ) -> *const ::std::os::raw::c_char;
 }
 extern "C" {

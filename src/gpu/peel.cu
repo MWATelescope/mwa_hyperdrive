@@ -379,7 +379,10 @@ template <int BLOCK_SIZE> __global__ void reduce_baselines(JonesF64 *data, const
  * thread block running this kernel.
  */
 template <int BLOCK_SIZE>
-__global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int num_freqs, IonoConsts *iono_consts) {
+__global__ void reduce_freqs(
+        JonesF64 *data, const FLOAT *lambdas_m, const int num_freqs,
+        IonoConsts *iono_consts, const FLOAT convergence
+    ) {
     // Every thread has an element of shared memory. This is useful for speeding
     // up accumulation.
     __shared__ JonesF64 sdata[BLOCK_SIZE];
@@ -459,22 +462,17 @@ __global__ void reduce_freqs(JonesF64 *data, const FLOAT *lambdas_m, const int n
 #endif
 
         const double denom = TAU * (a_uu * a_vv - a_uv * a_uv);
-        // to slow down the convergence, change this to a lower positive value
-        // #define CONVERGENCE 0.7
-#ifdef CONVERGENCE
-        // replaces a = a + b
-        // with     a = (1 - c) * a + c * (a + b)
-        iono_consts->alpha = (1.0-CONVERGENCE) * iono_consts->alpha + CONVERGENCE * (A_u * a_vv - A_v * a_uv) / denom;
-        iono_consts->beta = (1.0-CONVERGENCE) * iono_consts->beta + CONVERGENCE * (A_v * a_uu - A_u * a_uv) / denom;
-        // iono_consts->gain = (1.0-CONVERGENCE) * iono_consts->gain + CONVERGENCE * s_vm / s_mm;
-#else
-        iono_consts->alpha += (A_u * a_vv - A_v * a_uv) / denom;
-        iono_consts->beta += (A_v * a_uu - A_u * a_uv) / denom;
-        // iono_consts->gain *= s_vm / s_mm;
-#endif
-        // disable gain
-        iono_consts->gain *= 1.0;
-        // printf("iono consts: %f %f %f\n", iono_consts->alpha, iono_consts->beta, iono_consts->gain);
+        iono_consts->alpha += convergence * (A_u * a_vv - A_v * a_uv) / denom;
+        iono_consts->beta += convergence * (A_v * a_uu - A_u * a_uv) / denom;
+        // warning: gain is actually needed for model real to line up with vis real.
+        iono_consts->gain *= 1. + convergence * (s_vm / s_mm - 1);
+        // printf(
+        //     "iono: a %+6.4e b %+6.4e a_uu %+6.4e a_uv %+6.4e a_vv %+6.4e A_u %+6.4e A_v %+6.4e denom %+6.4e s_vm %+6.4e s_mm %+6.4e s_vm/s_mm %+6.4e \n",
+        //     iono_consts->alpha, iono_consts->beta,
+        //     a_uu, a_uv, a_vv, A_u, A_v, denom,
+        //     // iono_consts->gain,
+        //     s_vm, s_mm, s_vm / s_mm
+        // );
     }
 }
 
@@ -754,7 +752,8 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
                                  const JonesF32 *d_vis_model, JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits,
                                  IonoConsts *iono_consts, const int num_tiles,
                                  const int num_baselines, const int num_freqs, const int num_iterations,
-                                 const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m) {
+                                 const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m,
+                                 const FLOAT convergence) {
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
@@ -806,7 +805,7 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         }
 
         reduce_freqs<NUM_ADD_THREADS2>
-            <<<gridDimAdd2, blockDimAdd2>>>(d_iono_fits, d_lambdas_m, num_freqs, d_iono_consts);
+            <<<gridDimAdd2, blockDimAdd2>>>(d_iono_fits, d_lambdas_m, num_freqs, d_iono_consts, convergence);
 #ifdef DEBUG
         error_id = gpuDeviceSynchronize();
         if (error_id != gpuSuccess) {

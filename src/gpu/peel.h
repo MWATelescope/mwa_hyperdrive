@@ -28,7 +28,8 @@ const char *rotate_average(const JonesF32 *d_high_res_vis, const float *d_high_r
 const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weights, const JonesF32 *d_vis_model,
                       JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits, IonoConsts *iono_consts,
                       const int num_tiles, const int num_baselines, const int num_freqs, const int num_iterations,
-                      const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m);
+                      const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m,
+                      const FLOAT convergence);
 
 const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const IonoConsts iono_consts,
                           const IonoConsts old_iono_consts, const UVW *d_uvws, const FLOAT *d_lambdas_m,
