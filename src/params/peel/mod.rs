@@ -2445,32 +2445,34 @@ fn subtract_thread(
         sub_progress.tick();
 
         if let Some(modeller) = cpu_modeller.as_mut() {
-            let mut uvws_from = Vec::with_capacity(num_unflagged_cross_baselines);
-            let mut uvws_to = Vec::with_capacity(num_unflagged_cross_baselines);
-            let mut tile_buffer = vec![UVW::default(); num_unflagged_tiles];
-            xyzs_to_cross_uvws_buffer(
-                &xyzs,
-                obs_context.phase_centre.to_hadec(lst),
-                &mut tile_buffer,
-                &mut uvws_from,
-            );
-            for (source, source_pos) in source_list
-                .values()
-                .zip_eq(source_weighted_positions.iter())
-            {
-                xyzs_to_cross_uvws_buffer(
-                    &xyzs,
-                    source_pos.to_hadec(lst),
-                    &mut tile_buffer,
-                    &mut uvws_to,
-                );
-                todo!("rotate vis in place");
-                //vis_rotate_fb(vis_data_fb.view_mut(), , , , );
+            // let mut uvws_from = Vec::with_capacity(num_unflagged_cross_baselines);
+            // let mut uvws_to = Vec::with_capacity(num_unflagged_cross_baselines);
+            // let mut tile_buffer = vec![UVW::default(); num_unflagged_tiles];
+            // xyzs_to_cross_uvws_buffer(
+            //     &xyzs,
+            //     obs_context.phase_centre.to_hadec(lst),
+            //     &mut tile_buffer,
+            //     &mut uvws_from,
+            // );
+            // for (source, source_pos) in source_list
+            //     .values()
+            //     .zip_eq(source_weighted_positions.iter())
+            // {
+            //     xyzs_to_cross_uvws_buffer(
+            //         &xyzs,
+            //         source_pos.to_hadec(lst),
+            //         &mut tile_buffer,
+            //         &mut uvws_to,
+            //     );
+            //     // HMMMMMM
+            //     todo!("rotate vis in place");
+            //     //vis_rotate_fb(vis_data_fb.view_mut(), , , , );
 
-                modeller.update_with_a_source(source, *source_pos)?;
+            //     modeller.update_with_a_source(source, *source_pos)?;
+            //     modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
+            //     std::mem::swap(&mut uvws_from, &mut uvws_to);
+            // }
                 modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
-                std::mem::swap(&mut uvws_from, &mut uvws_to);
-            }
         }
 
         #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -2486,94 +2488,98 @@ fn subtract_thread(
             d_vis_fb,
         }) = gpu_modeller.as_mut()
         {
-            d_vis_fb.overwrite(vis_data_fb.as_slice().expect("is contiguous"))?;
-            for xyz in xyzs.iter() {
-                gpu_xyzs.push(gpu::XYZ {
-                    x: xyz.x as GpuFloat,
-                    y: xyz.y as GpuFloat,
-                    z: xyz.z as GpuFloat,
-                })
-            }
-            d_xyzs.overwrite(gpu_xyzs)?;
-            gpu_xyzs.clear();
-            d_lmst.overwrite(&[lst as GpuFloat])?;
+            // d_vis_fb.overwrite(vis_data_fb.as_slice().expect("is contiguous"))?;
+            // for xyz in xyzs.iter() {
+            //     gpu_xyzs.push(gpu::XYZ {
+            //         x: xyz.x as GpuFloat,
+            //         y: xyz.y as GpuFloat,
+            //         z: xyz.z as GpuFloat,
+            //     })
+            // }
+            // d_xyzs.overwrite(gpu_xyzs)?;
+            // gpu_xyzs.clear();
+            // d_lmst.overwrite(&[lst as GpuFloat])?;
 
-            gpu_kernel_call!(
-                gpu::xyzs_to_uvws,
-                d_xyzs.get(),
-                d_lmst.get(),
-                d_uvws_from.get_mut(),
-                gpu::RADec {
-                    ra: obs_context.phase_centre.ra as GpuFloat,
-                    dec: obs_context.phase_centre.dec as GpuFloat,
-                },
-                num_unflagged_tiles as i32,
-                num_unflagged_cross_baselines as i32,
-                1
-            )?;
+            // gpu_kernel_call!(
+            //     gpu::xyzs_to_uvws,
+            //     d_xyzs.get(),
+            //     d_lmst.get(),
+            //     d_uvws_from.get_mut(),
+            //     gpu::RADec {
+            //         ra: obs_context.phase_centre.ra as GpuFloat,
+            //         dec: obs_context.phase_centre.dec as GpuFloat,
+            //     },
+            //     num_unflagged_tiles as i32,
+            //     num_unflagged_cross_baselines as i32,
+            //     1
+            // )?;
 
-            for (source, source_pos) in source_list
-                .values()
-                .zip_eq(source_weighted_positions.iter())
-            {
-                gpu_kernel_call!(
-                    gpu::xyzs_to_uvws,
-                    d_xyzs.get(),
-                    d_lmst.get(),
-                    d_uvws_to.get_mut(),
-                    gpu::RADec {
-                        ra: source_pos.ra as GpuFloat,
-                        dec: source_pos.dec as GpuFloat,
-                    },
-                    num_unflagged_tiles as i32,
-                    num_unflagged_cross_baselines as i32,
-                    1,
-                )?;
+            // for (source, source_pos) in source_list
+            //     .values()
+            //     .zip_eq(source_weighted_positions.iter())
+            // {
+            //     gpu_kernel_call!(
+            //         gpu::xyzs_to_uvws,
+            //         d_xyzs.get(),
+            //         d_lmst.get(),
+            //         d_uvws_to.get_mut(),
+            //         gpu::RADec {
+            //             ra: source_pos.ra as GpuFloat,
+            //             dec: source_pos.dec as GpuFloat,
+            //         },
+            //         num_unflagged_tiles as i32,
+            //         num_unflagged_cross_baselines as i32,
+            //         1,
+            //     )?;
 
-                gpu_kernel_call!(
-                    gpu::rotate,
-                    d_vis_fb.get_mut().cast(),
-                    1,
-                    num_unflagged_cross_baselines as i32,
-                    all_fine_chan_lambdas_m.len() as i32,
-                    d_uvws_from.get(),
-                    d_uvws_to.get(),
-                    d_lambdas.get()
-                )?;
-                std::mem::swap(d_uvws_from, d_uvws_to);
+            //     gpu_kernel_call!(
+            //         gpu::rotate,
+            //         d_vis_fb.get_mut().cast(),
+            //         1,
+            //         num_unflagged_cross_baselines as i32,
+            //         all_fine_chan_lambdas_m.len() as i32,
+            //         d_uvws_from.get(),
+            //         d_uvws_to.get(),
+            //         d_lambdas.get()
+            //     )?;
+            //     std::mem::swap(d_uvws_from, d_uvws_to);
 
-                modeller.update_with_a_source(source, *source_pos)?;
-                modeller.model_timestep_with(lst, latitude, d_uvws_to, d_beam_jones, d_vis_fb)?;
-                sub_progress.inc(1);
-            }
+            //     // modeller.update_with_a_source(source, *source_pos)?;
+            //     // modeller.model_timestep_with(lst, latitude, d_uvws_to, d_beam_jones, d_vis_fb)?;
+            //
+            //     sub_progress.inc(1);
+            // }
+            // SkyModeller::model_timestep_with(modeller, timestamp, vis_data_fb.view_mut());
+            let (model_vis, _) = modeller.model_timestep(timestamp)?;
+            vis_data_fb += &model_vis;
 
-            gpu_kernel_call!(
-                gpu::xyzs_to_uvws,
-                d_xyzs.get(),
-                d_lmst.get(),
-                d_uvws_to.get_mut(),
-                gpu::RADec {
-                    ra: obs_context.phase_centre.ra as GpuFloat,
-                    dec: obs_context.phase_centre.dec as GpuFloat,
-                },
-                num_unflagged_tiles as i32,
-                num_unflagged_cross_baselines as i32,
-                1
-            )?;
+            // gpu_kernel_call!(
+            //     gpu::xyzs_to_uvws,
+            //     d_xyzs.get(),
+            //     d_lmst.get(),
+            //     d_uvws_to.get_mut(),
+            //     gpu::RADec {
+            //         ra: obs_context.phase_centre.ra as GpuFloat,
+            //         dec: obs_context.phase_centre.dec as GpuFloat,
+            //     },
+            //     num_unflagged_tiles as i32,
+            //     num_unflagged_cross_baselines as i32,
+            //     1
+            // )?;
 
-            gpu_kernel_call!(
-                gpu::rotate,
-                d_vis_fb.get_mut().cast(),
-                1,
-                num_unflagged_cross_baselines as i32,
-                all_fine_chan_lambdas_m.len() as i32,
-                d_uvws_from.get(),
-                d_uvws_to.get(),
-                d_lambdas.get()
-            )?;
+            // gpu_kernel_call!(
+            //     gpu::rotate,
+            //     d_vis_fb.get_mut().cast(),
+            //     1,
+            //     num_unflagged_cross_baselines as i32,
+            //     all_fine_chan_lambdas_m.len() as i32,
+            //     d_uvws_from.get(),
+            //     d_uvws_to.get(),
+            //     d_lambdas.get()
+            // )?;
 
-            d_vis_fb.copy_from_device(vis_data_fb.as_slice_mut().expect("is contiguous"))?;
-            d_vis_fb.clear();
+            // d_vis_fb.copy_from_device(vis_data_fb.as_slice_mut().expect("is contiguous"))?;
+            // d_vis_fb.clear();
         }
 
         vis_data_fb.iter_mut().for_each(|j| *j *= -1.0);
