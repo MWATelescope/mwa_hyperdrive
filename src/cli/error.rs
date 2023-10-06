@@ -175,6 +175,7 @@ impl From<PeelArgsError> for HyperdriveError {
             PeelArgsError::NoOutput
             | PeelArgsError::NoChannels
             | PeelArgsError::ZeroPasses
+            | PeelArgsError::ZeroLoops
             | PeelArgsError::ParseIonoTimeAverageFactor(_)
             | PeelArgsError::ParseIonoFreqAverageFactor(_)
             | PeelArgsError::IonoTimeFactorNotInteger
