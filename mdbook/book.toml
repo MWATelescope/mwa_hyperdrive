@@ -9,7 +9,7 @@ git-repository-url = "https://github.com/MWATelescope/mwa_hyperdrive"
 default-theme = "ayu"
 # https://github.com/badboy/mdbook-mermaid
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
-additional-css = ["././theme/css/mdbook-admonish.css"]
+additional-css = ["././theme/css/mdbook-admonish.css", "./mdbook-admonish.css"]
 
 [output.html.fold]
 enable = true
