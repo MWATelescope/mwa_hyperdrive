@@ -1001,6 +1001,14 @@ impl<'a> SkyModeller<'a> for SkyModellerGpu<'a> {
 
         Ok(uvws)
     }
+
+    fn model_timestep_autos_with(
+        &self,
+        timestamp: Epoch,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        todo!()
+    }
 }
 
 /// The return type of [SkyModellerGpu::get_shapelet_uvs]. These arrays have

@@ -10,13 +10,13 @@ use std::{
 use crossbeam_channel::{unbounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::{izip, Itertools};
+use itertools::izip;
 use log::{debug, info, log_enabled, Level::Debug};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     Jones,
 };
-use ndarray::{iter::AxisIterMut, prelude::*};
+use ndarray::{iter::AxisIterMut, prelude::*, ArcArray2};
 use rayon::prelude::*;
 use scopeguard::defer_on_unwind;
 use vec1::Vec1;
@@ -163,6 +163,15 @@ impl DiCalParams {
     /// visibilities.
     pub(crate) fn get_cal_vis(&self) -> Result<CalVis, DiCalibrateError> {
         let input_vis_params = &self.input_vis_params;
+
+        // Are we going to write out simulated auto-correlations? Use this
+        // variable so the rest of the code is clearer.
+        let using_autos = input_vis_params.using_autos
+            && self
+                .output_model_vis_params
+                .as_ref()
+                .map(|p| p.output_autos)
+                .unwrap_or_default();
 
         // Get the time and frequency resolutions once; these functions issue
         // warnings if they have to guess, so doing this once means we aren't
@@ -342,6 +351,7 @@ impl DiCalParams {
                         &self.source_list,
                         input_vis_params,
                         self.modelling_params.apply_precession,
+                        using_autos,
                         vis_model_slices,
                         tx_model,
                         &error,
@@ -367,6 +377,7 @@ impl DiCalParams {
                         output_files,
                         output_time_average_factor,
                         output_freq_average_factor,
+                        output_autos: _,
                         output_timeblocks,
                         write_smallest_contiguous_band,
                     }) = &self.output_model_vis_params
@@ -375,14 +386,19 @@ impl DiCalParams {
                             pb.tick();
                         }
 
-                        let unflagged_baseline_tile_pairs = input_vis_params
-                            .tile_baseline_flags
-                            .tile_to_unflagged_cross_baseline_map
-                            .keys()
-                            .copied()
-                            .sorted()
-                            .collect::<Vec<_>>();
-
+                        // Form sorted unflagged tile pairs from our
+                        // cross-correlation baselines (and maybe autos too).
+                        let unflagged_baseline_tile_pairs: Vec<_> = if using_autos {
+                            input_vis_params
+                                .tile_baseline_flags
+                                .get_unflagged_baseline_tile_pairs()
+                                .collect()
+                        } else {
+                            input_vis_params
+                                .tile_baseline_flags
+                                .get_unflagged_cross_baseline_tile_pairs()
+                                .collect()
+                        };
                         let result = write_vis(
                             output_files,
                             obs_context.array_position,
@@ -485,6 +501,7 @@ fn model_thread(
     source_list: &SourceList,
     input_vis_params: &InputVisParams,
     apply_precession: bool,
+    model_autos: bool,
     vis_model_slices: AxisIterMut<'_, Jones<f32>, Ix2>,
     tx: Sender<VisTimestep>,
     error: &AtomicCell<bool>,
@@ -522,6 +539,8 @@ fn model_thread(
         input_vis_params.dut1,
         apply_precession,
     )?;
+    let num_tiles = unflagged_tile_xyzs.len();
+    let auto_vis_shape = (freqs.len(), num_tiles);
 
     let weight_factor = ((input_vis_params.spw.freq_res / FREQ_WEIGHT_FACTOR)
         * (input_vis_params.time_res.to_seconds() / TIME_WEIGHT_FACTOR))
@@ -536,6 +555,13 @@ fn model_thread(
     {
         debug!("Modelling timestamp {}", timestamp.to_gpst_seconds());
         modeller.model_timestep_with(timestamp, vis_model_fb.view_mut())?;
+        let auto_data_fb = if model_autos {
+            let mut auto_data_fb = ArcArray2::zeros(auto_vis_shape);
+            modeller.model_timestep_autos_with(timestamp, auto_data_fb.view_mut())?;
+            Some(auto_data_fb)
+        } else {
+            None
+        };
 
         // Should we continue?
         if error.load() {
@@ -545,7 +571,12 @@ fn model_thread(
         match tx.send(VisTimestep {
             cross_data_fb: vis_model_fb.to_shared(),
             cross_weights_fb: ArcArray::from_elem(vis_model_fb.dim(), weight_factor),
-            autos: None,
+            autos: auto_data_fb.map(|d| {
+                (
+                    d,
+                    ArcArray2::from_elem(auto_vis_shape, weight_factor as f32),
+                )
+            }),
             timestamp,
         }) {
             Ok(()) => (),

@@ -655,6 +655,7 @@ fn sparse_timeblocks_with_averaging() {
         outputs: Some(vec![tmp_dir.path().join("output.uvfits")]),
         output_vis_time_average: None,
         output_vis_freq_average: None,
+        output_autos: true,
     }
     .parse(
         params.time_res,

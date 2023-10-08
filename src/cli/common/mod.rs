@@ -157,6 +157,7 @@ pub(super) struct OutputVisArgs {
     pub(super) outputs: Option<Vec<PathBuf>>,
     pub(super) output_vis_time_average: Option<String>,
     pub(super) output_vis_freq_average: Option<String>,
+    pub(super) output_autos: bool,
 }
 
 impl OutputVisArgs {
@@ -173,6 +174,7 @@ impl OutputVisArgs {
             outputs,
             output_vis_time_average,
             output_vis_freq_average,
+            output_autos,
         } = self;
 
         let (time_average_factor, freq_average_factor) = {
@@ -277,6 +279,11 @@ impl OutputVisArgs {
         if write_smallest_contiguous_band {
             vis_printer.push_line("Writing the smallest possible contiguous band, ignoring any flagged fine channels at the edges of the SPW".into());
         }
+        if output_autos {
+            vis_printer.push_line("Writing out auto-correlations".into());
+        } else {
+            vis_printer.push_line("Not writing out auto-correlations".into());
+        }
         vis_printer.display();
 
         let timeblocks =
@@ -286,6 +293,7 @@ impl OutputVisArgs {
             output_files,
             output_time_average_factor: time_average_factor,
             output_freq_average_factor: freq_average_factor,
+            output_autos,
             output_timeblocks: timeblocks,
             write_smallest_contiguous_band,
         })
