@@ -6,7 +6,7 @@
 
 use std::{
     borrow::Cow,
-    collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    collections::{hash_map::DefaultHasher, HashSet},
     f64::consts::{FRAC_PI_2, LN_2},
     hash::{Hash, Hasher},
 };
@@ -30,6 +30,7 @@ use crate::{
     context::Polarisations,
     model::mask_pols,
     srclist::{ComponentList, GaussianParams, PerComponentParams, Source, SourceList},
+    TileBaselineFlags,
 };
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
@@ -55,7 +56,8 @@ pub struct SkyModellerCpu<'a> {
 
     /// The [`XyzGeodetic`] positions of each of the unflagged tiles.
     pub(super) unflagged_tile_xyzs: &'a [XyzGeodetic],
-    pub(super) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    /// Information on tile/baseline indices and flags.
+    pub(super) tile_baseline_flags: TileBaselineFlags,
 
     pub(super) components: ComponentList,
 
@@ -90,7 +92,7 @@ impl<'a> SkyModellerCpu<'a> {
             unflagged_fine_chan_freqs,
             phase_centre,
         );
-        let maps = crate::math::TileBaselineFlags::new(
+        let tile_baseline_flags = crate::math::TileBaselineFlags::new(
             unflagged_tile_xyzs.len() + flagged_tiles.len(),
             flagged_tiles.clone(),
         );
@@ -176,7 +178,7 @@ impl<'a> SkyModellerCpu<'a> {
             precess: apply_precession,
             unflagged_fine_chan_freqs,
             unflagged_tile_xyzs,
-            unflagged_baseline_to_tile_map: maps.unflagged_cross_baseline_to_tile_map,
+            tile_baseline_flags,
             components,
             tile_index_to_array_index_map,
             unique_tiles,
@@ -331,8 +333,10 @@ impl<'a> SkyModellerCpu<'a> {
         );
         assert_eq!(
             uvws.len(),
-            self.unflagged_baseline_to_tile_map.len(),
-            "uvws.len() != self.unflagged_baseline_to_tile_map.len()"
+            self.tile_baseline_flags
+                .unflagged_cross_baseline_to_tile_map
+                .len(),
+            "uvws.len() != self.tile_baseline_flags.unflagged_cross_baseline_to_tile_map.len()"
         );
 
         let beam_responses = self.get_beam_responses(azels, array_latitude_rad)?;
@@ -344,7 +348,9 @@ impl<'a> SkyModellerCpu<'a> {
             .zip(uvws.par_iter())
             .enumerate()
             .for_each(|(i_baseline, (mut vis_model_f, &uvw))| {
-                let (i_tile1, i_tile2) = self.unflagged_baseline_to_tile_map[&i_baseline];
+                let (i_tile1, i_tile2) = self
+                    .tile_baseline_flags
+                    .unflagged_cross_baseline_to_tile_map[&i_baseline];
                 // We only need the tile indices for beam responses; use the
                 // tile map to access de-duplicated beam responses.
                 let i_tile1 = self.tile_index_to_array_index_map[i_tile1];
@@ -450,8 +456,10 @@ impl<'a> SkyModellerCpu<'a> {
         );
         assert_eq!(
             uvws.len(),
-            self.unflagged_baseline_to_tile_map.len(),
-            "uvws.len() != self.unflagged_baseline_to_tile_map.len()"
+            self.tile_baseline_flags
+                .unflagged_cross_baseline_to_tile_map
+                .len(),
+            "uvws.len() != self.tile_baseline_flags.unflagged_cross_baseline_to_tile_map.len()"
         );
 
         let beam_responses = self.get_beam_responses(azels, array_latitude_rad)?;
@@ -463,7 +471,9 @@ impl<'a> SkyModellerCpu<'a> {
             .zip(uvws.par_iter())
             .enumerate()
             .for_each(|(i_baseline, (mut vis_model_f, &uvw))| {
-                let (i_tile1, i_tile2) = self.unflagged_baseline_to_tile_map[&i_baseline];
+                let (i_tile1, i_tile2) = self
+                    .tile_baseline_flags
+                    .unflagged_cross_baseline_to_tile_map[&i_baseline];
                 // We only need the tile indices for beam responses; use the
                 // tile map to access de-duplicated beam responses.
                 let i_tile1 = self.tile_index_to_array_index_map[i_tile1];
@@ -595,8 +605,10 @@ impl<'a> SkyModellerCpu<'a> {
         );
         assert_eq!(
             uvws.len(),
-            self.unflagged_baseline_to_tile_map.len(),
-            "uvws.len() != self.unflagged_baseline_to_tile_map.len()"
+            self.tile_baseline_flags
+                .unflagged_cross_baseline_to_tile_map
+                .len(),
+            "uvws.len() != self.tile_baseline_flags.unflagged_cross_baseline_to_tile_map.len()"
         );
         assert_eq!(
             vis_model_fb.len_of(Axis(1)),
@@ -627,7 +639,9 @@ impl<'a> SkyModellerCpu<'a> {
             .enumerate()
             .for_each(
                 |(i_baseline, ((mut vis_model_f, &uvw), shapelet_uvws_per_comp))| {
-                    let (i_tile1, i_tile2) = self.unflagged_baseline_to_tile_map[&i_baseline];
+                    let (i_tile1, i_tile2) = self
+                        .tile_baseline_flags
+                        .unflagged_cross_baseline_to_tile_map[&i_baseline];
                     // We only need the tile indices for beam responses; use the
                     // tile map to access de-duplicated beam responses.
                     let i_tile1 = self.tile_index_to_array_index_map[i_tile1];
@@ -860,6 +874,103 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
             self.unflagged_fine_chan_freqs,
             phase_centre,
         );
+        Ok(())
+    }
+
+    fn model_timestep_autos_with(
+        &self,
+        timestamp: Epoch,
+        mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        assert_eq!(
+            vis_model_fb.len_of(Axis(1)),
+            self.tile_baseline_flags
+                .tile_to_unflagged_auto_index_map
+                .len(),
+            "vis_fb.len_of(Axis(1)) != self.tile_baseline_flags.tile_to_unflagged_auto_index_map.len()"
+        );
+
+        let (lst, latitude) = if self.precess {
+            let precession_info = precess_time(
+                self.array_longitude,
+                self.array_latitude,
+                self.phase_centre,
+                timestamp,
+                self.dut1,
+            );
+            debug!(
+                "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
+                timestamp.to_gpst_seconds(),
+                precession_info.lmst.to_degrees(),
+                precession_info.lmst_j2000.to_degrees()
+            );
+            (
+                precession_info.lmst_j2000,
+                precession_info.array_latitude_j2000,
+            )
+        } else {
+            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
+            debug!(
+                "Modelling GPS timestamp {}, LMST {}°",
+                timestamp.to_gpst_seconds(),
+                lst.to_degrees()
+            );
+            (lst, self.array_latitude)
+        };
+
+        macro_rules! model {
+            ($fds:expr, $beam_responses:expr) => {{
+                // Iterate over the unflagged baseline axis.
+                vis_model_fb
+                    .axis_iter_mut(Axis(1))
+                    .into_par_iter()
+                    .enumerate()
+                    .for_each(|(i_unflagged_tile, mut vis_model_f)| {
+                        let i_tile = self.tile_index_to_array_index_map[i_unflagged_tile];
+
+                        // Unflagged fine-channel axis.
+                        vis_model_f
+                            .iter_mut()
+                            .zip($fds.outer_iter())
+                            .zip(self.unflagged_fine_chan_freqs)
+                            .enumerate()
+                            .for_each(|(i_freq, ((vis_model, comp_fds), freq))| {
+                                // Access the beam-deduplicated-freq index.
+                                let i_freq = self.freq_map[i_freq];
+                                let tile_beam = $beam_responses.slice(s![i_tile, i_freq, ..]);
+
+                                // Accumulate the double-precision visibilities
+                                // into a double-precision Jones matrix before
+                                // putting that into the `vis_model_fb`.
+                                let mut jones_accum: Jones<f64> = Jones::default();
+
+                                comp_fds.iter().zip(tile_beam).for_each(|(comp_fd, beam)| {
+                                    jones_accum += *beam * *comp_fd * beam.h();
+                                });
+                                // Demote to single precision now that all
+                                // operations are done.
+                                *vis_model += Jones::from(jones_accum);
+                            });
+                    });
+            }};
+        }
+
+        // Point sources.
+        let fds = &self.components.points.flux_densities;
+        let azels = &self.components.points.get_azels_mwa_parallel(lst, latitude);
+        let beam_responses = self.get_beam_responses(azels, latitude)?;
+        model!(fds, beam_responses);
+        // Gaussians.
+        let fds = &self.components.gaussians.flux_densities;
+        let azels = &self.components.points.get_azels_mwa_parallel(lst, latitude);
+        let beam_responses = self.get_beam_responses(azels, latitude)?;
+        model!(fds, beam_responses);
+        // Shapelets sources.
+        let fds = &self.components.shapelets.flux_densities;
+        let azels = &self.components.points.get_azels_mwa_parallel(lst, latitude);
+        let beam_responses = self.get_beam_responses(azels, latitude)?;
+        model!(fds, beam_responses);
+
         Ok(())
     }
 }

@@ -36,6 +36,7 @@ pub(crate) struct OutputVisParams {
     pub(crate) output_files: Vec1<(PathBuf, VisOutputType)>,
     pub(crate) output_time_average_factor: NonZeroUsize,
     pub(crate) output_freq_average_factor: NonZeroUsize,
+    pub(crate) output_autos: bool,
     pub(crate) output_timeblocks: Vec1<Timeblock>,
 
     /// Rather than writing out the entire input bandwidth, write out only the
@@ -47,6 +48,7 @@ pub(crate) struct OutputVisParams {
     pub(crate) write_smallest_contiguous_band: bool,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct ModellingParams {
     pub(crate) apply_precession: bool,
 }
