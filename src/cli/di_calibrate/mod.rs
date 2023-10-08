@@ -129,6 +129,10 @@ struct DiCalCliArgs {
     #[clap(long, help_heading = "OUTPUT FILES")]
     output_model_freq_average: Option<String>,
 
+    /// Don't write simulated auto-correlatsions to the output visibilities.
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    output_no_autos: bool,
+
     /// When writing out model visibilities, rather than writing out the entire
     /// input bandwidth, write out only the smallest contiguous band. e.g.
     /// Typical 40 kHz MWA data has 768 channels, but the first 2 and last 2
@@ -240,16 +244,17 @@ impl DiCalArgs {
         let modelling_params @ ModellingParams { apply_precession } = model_args.parse();
 
         let DiCalCliArgs {
+            solutions,
             timesteps_per_timeblock,
             uvw_min,
             uvw_max,
             max_iterations,
             stop_threshold,
             min_threshold,
-            solutions,
             model_filenames,
             output_model_time_average,
             output_model_freq_average,
+            output_no_autos,
             output_smallest_contiguous_band,
         } = calibration_args;
 
@@ -574,6 +579,7 @@ impl DiCalArgs {
                     outputs: Some(model_filenames),
                     output_vis_time_average: output_model_time_average,
                     output_vis_freq_average: output_model_freq_average,
+                    output_autos: input_vis_params.using_autos && !output_no_autos,
                 }
                 .parse(
                     input_vis_params.time_res,
@@ -711,6 +717,7 @@ impl DiCalCliArgs {
             output_model_freq_average: self
                 .output_model_freq_average
                 .or(other.output_model_freq_average),
+            output_no_autos: self.output_no_autos || other.output_no_autos,
             output_smallest_contiguous_band: self.output_smallest_contiguous_band
                 || other.output_smallest_contiguous_band,
         }
