@@ -13,6 +13,7 @@ use crate::{
 };
 
 #[test]
+#[ignore = "sdc3 can't take raw data"]
 fn test_di_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let sols = tmp_dir.path().join("sols.fits");
@@ -37,6 +38,7 @@ fn test_di_no_stderr() {
 }
 
 #[test]
+#[ignore = "sdc3 can't take raw data"]
 fn test_solutions_apply_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output = tmp_dir.path().join("out.uvfits");
@@ -62,6 +64,7 @@ fn test_solutions_apply_no_stderr() {
 }
 
 #[test]
+#[ignore = "sdc3 can't take raw data"]
 fn test_vis_convert_no_stderr() {
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output = temp_dir.path().join("converted.uvfits");

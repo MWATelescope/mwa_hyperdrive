@@ -140,7 +140,7 @@ harness = false
 # birli = { git = "https://github.com/MWATelescope/Birli" }
 # marlu = { path = "../Marlu" }
 # marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
-marlu = { git = "https://github.com/cjordan/Marlu", branch = "SDC3" }
+marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "SDC3" }
 # marlu = { path = "/home/chj/Software/personal/Marlu" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
