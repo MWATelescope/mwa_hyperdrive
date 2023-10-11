@@ -633,6 +633,8 @@ fn weights_average(weight_tfb: ArrayView3<f32>, mut weight_avg_tfb: ArrayViewMut
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+// TODO: rename vis_rotate_tfb
 fn vis_rotate2(
     vis_tfb: ArrayView3<Jones<f32>>,
     mut vis_rot_tfb: ArrayViewMut3<Jones<f32>>,
@@ -705,6 +707,7 @@ fn vis_rotate_fb(
 
 /// Rotate the supplied visibilities (3D: time, freq, bl) according to the `λ²` constants of
 /// proportionality with `exp(-2πi(αu+βv)λ²)`.
+/// TODO(Dev): rename apply_iono_tfb
 fn apply_iono2(
     vis_tfb: ArrayView3<Jones<f32>>,
     mut vis_iono_tfb: ArrayViewMut3<Jones<f32>>,
@@ -1014,11 +1017,12 @@ fn model_timesteps(
         })
 }
 
+// TODO (Dev): make this take a single timeblock
 #[allow(clippy::too_many_arguments)]
 fn peel_cpu(
-    // TODO (Dev): I would name this vis_residual_tfb
+    // TODO (Dev): I would name this resid_hi_obs_tfb
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
-    // TODO (Dev): I would name this vis_weights
+    // TODO (Dev): I would name this vis_weights_tfb
     vis_weights: ArrayView3<f32>,
     timeblock: &Timeblock,
     source_list: &SourceList,
@@ -1087,16 +1091,17 @@ fn peel_cpu(
     peel_progress.tick();
 
     // observation phase center
+    // TODO(Dev): rename tile_uvs_hi_obs
     let mut tile_uvs_high_res = Array2::<UV>::default((timestamps.len(), num_tiles));
-    // TODO (Dev): I would name this "tile_ws_high_res"
+    // TODO(Dev): rename tile_ws_hi_obs
     let mut tile_ws_from = Array2::<W>::default((timestamps.len(), num_tiles));
     // source phase center
-    // TODO (Dev): I would name this tile_uvs_high_res_rot
+    // TODO (Dev): rename tile_uvs_hi_src
     let mut tile_uvs_high_res_rot = tile_uvs_high_res.clone();
-    // TODO (Dev): I would name this tile_ws_high_res_rot
+    // TODO (Dev): rename tile_ws_hi_src
     let mut tile_ws_to = tile_ws_from.clone();
-    // TODO (Dev): I would name this tile_uvs_low_res_rot
-    let mut tile_uvs_low_res = Array2::<UV>::default((1, num_tiles));
+    // TODO (Dev): rename tile_uvs_lo_src
+    let mut tile_uvs_low_res = Array2::<UV>::default((num_timestamps_low_res, num_tiles));
 
     // Pre-compute high-res tile UVs and Ws at observation phase centre.
     for (&time, mut tile_uvs, mut tile_ws) in izip!(
@@ -1405,14 +1410,18 @@ fn peel_gpu(
     source_weighted_positions: &[RADec],
     num_passes: usize,
     num_loops: usize,
+    // TODO (Dev): bake this into weights
     short_baseline_sigma: f64,
     convergence: f64,
+    // TODO (Dev): rename chanblocks
     high_res_chanblocks: &[Chanblock],
+    // TODO (Dev): derive from high_res_chanblocks
     all_fine_chan_lambdas_m: &[f64],
     low_res_lambdas_m: &[f64],
     obs_context: &ObsContext,
     array_position: LatLngHeight,
     unflagged_tile_xyzs: &[XyzGeodetic],
+    // TODO (Dev): bake this into weights
     baseline_weights: &[f64],
     high_res_modeller: &mut SkyModellerGpu,
     dut1: Duration,
@@ -1714,11 +1723,13 @@ fn peel_gpu(
 
         let mut d_high_res_vis_tfb =
             DevicePointer::copy_to_device(vis_residual_tfb.as_slice().unwrap())?;
+        // TODO: rename d_high_res_resid_tfb
         let mut d_high_res_vis2_tfb =
             DevicePointer::copy_to_device(vis_residual_tfb.as_slice().unwrap())?;
         let d_high_res_weights_tfb =
             DevicePointer::copy_to_device(vis_weights_tfb.as_slice().unwrap())?;
 
+        // TODO: rename d_low_res_resid_fb
         let mut d_low_res_vis_fb =
             DevicePointer::copy_to_device(vis_residual_low_res_fb.as_slice().unwrap())?;
         let d_low_res_weights_fb =
@@ -2472,7 +2483,7 @@ fn subtract_thread(
             //     modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
             //     std::mem::swap(&mut uvws_from, &mut uvws_to);
             // }
-                modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
+            modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
         }
 
         #[cfg(any(feature = "cuda", feature = "hip"))]
