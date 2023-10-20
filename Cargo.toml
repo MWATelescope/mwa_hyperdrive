@@ -80,7 +80,7 @@ indicatif = { version = "0.17.5", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
 marlu = { version = "0.10.1", features = ["serde"] }
-mwa_hyperbeam = "0.6.0"
+mwa_hyperbeam = "0.7.0"
 mwalib = "0.16.0"
 ndarray = { version = "0.15.4", features = ["rayon"] }
 num-complex = "0.4.1"
@@ -140,4 +140,4 @@ harness = false
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }
-# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "DUT1" }
+# mwa_hyperbeam = { git = "https://github.com/cjordan/mwa_hyperbeam", branch = "analytic" }

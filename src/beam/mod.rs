@@ -12,11 +12,13 @@
 //! implication being that a sky-model source's brightness is always assumed to
 //! be correct when at zenith.
 
+mod analytic;
 mod error;
 mod fee;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use analytic::AnalyticBeam;
 pub(crate) use error::BeamError;
 pub(crate) use fee::FEEBeam;
 
@@ -47,6 +49,14 @@ pub enum BeamType {
     /// Fully-embedded element beam.
     #[strum(serialize = "fee")]
     FEE,
+
+    /// The mwa_pb flavour of the analytic beam.
+    #[strum(serialize = "analytic-mwa_pb")]
+    AnalyticMwaPb,
+
+    /// The RTS flavour of the analytic beam.
+    #[strum(serialize = "analytic-rts")]
+    AnalyticRts,
 
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
     #[strum(serialize = "none")]
@@ -391,6 +401,11 @@ impl BeamGpu for NoBeamGpu {
     }
 }
 
+/// Create a beam object given the beam type (if not supplied, fall back to a
+/// default). This function _should not_ be used generally; setting up beam
+/// objects with this function cannot use dipole amps, and the FEE beam will
+/// always be set up with the `MWA_BEAM_FILE` environment variable, which the
+/// user may not have set.
 pub fn create_beam_object(
     beam_type: Option<&str>,
     num_tiles: usize,
@@ -413,27 +428,7 @@ pub fn create_beam_object(
 
         BeamType::FEE => {
             debug!("Setting up a FEE beam object");
-
-            // Check that the delays are sensible.
-            match &dipole_delays {
-                Delays::Partial(v) => {
-                    if v.len() != 16 || v.iter().any(|&v| v > 32) {
-                        return Err(BeamError::BadDelays);
-                    }
-                }
-
-                Delays::Full(a) => {
-                    if a.len_of(Axis(1)) != 16 || a.iter().any(|&v| v > 32) {
-                        return Err(BeamError::BadDelays);
-                    }
-                    if a.len_of(Axis(0)) != num_tiles {
-                        return Err(BeamError::InconsistentDelays {
-                            num_rows: a.len_of(Axis(0)),
-                            num_tiles,
-                        });
-                    }
-                }
-            }
+            validate_delays(&dipole_delays, num_tiles)?;
 
             // Set up the FEE beam struct from the `MWA_BEAM_FILE` environment
             // variable.
@@ -443,5 +438,60 @@ pub fn create_beam_object(
                 None,
             )?))
         }
+
+        BeamType::AnalyticMwaPb => {
+            debug!("Setting up an \"mwa_pb\" analytic beam object");
+            validate_delays(&dipole_delays, num_tiles)?;
+            Ok(Box::new(AnalyticBeam::new_mwa_pb(
+                num_tiles,
+                dipole_delays,
+                None,
+            )?))
+        }
+
+        BeamType::AnalyticRts => {
+            debug!("Setting up an \"RTS\" analytic beam object");
+            validate_delays(&dipole_delays, num_tiles)?;
+            Ok(Box::new(AnalyticBeam::new_rts(
+                num_tiles,
+                dipole_delays,
+                None,
+            )?))
+        }
     }
+}
+
+/// Assume that the dipole delays for all tiles is the same as the delays for
+/// one tile.
+fn partial_to_full(delays: Vec<u32>, num_tiles: usize) -> Array2<u32> {
+    let mut out = Array2::zeros((num_tiles, 16));
+    let d = Array1::from(delays);
+    out.outer_iter_mut().for_each(|mut tile_delays| {
+        tile_delays.assign(&d);
+    });
+    out
+}
+
+fn validate_delays(delays: &Delays, num_tiles: usize) -> Result<(), BeamError> {
+    match delays {
+        Delays::Partial(v) => {
+            if v.len() != 16 || v.iter().any(|&v| v > 32) {
+                return Err(BeamError::BadDelays);
+            }
+        }
+
+        Delays::Full(a) => {
+            if a.len_of(Axis(1)) != 16 || a.iter().any(|&v| v > 32) {
+                return Err(BeamError::BadDelays);
+            }
+            if a.len_of(Axis(0)) != num_tiles {
+                return Err(BeamError::InconsistentDelays {
+                    num_rows: a.len_of(Axis(0)),
+                    num_tiles,
+                });
+            }
+        }
+    }
+
+    Ok(())
 }

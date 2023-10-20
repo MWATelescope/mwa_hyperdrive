@@ -204,6 +204,11 @@ impl<T> DevicePointer<T> {
         self.ptr
     }
 
+    /// Get the number of elements allocated against the buffer.
+    pub(crate) fn get_num_elements(&self) -> usize {
+        self.size / std::mem::size_of::<T>()
+    }
+
     /// Allocate a number of bytes on the device.
     #[track_caller]
     pub(crate) fn malloc(size: usize) -> Result<DevicePointer<T>, GpuError> {
