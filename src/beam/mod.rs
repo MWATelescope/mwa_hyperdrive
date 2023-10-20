@@ -12,11 +12,13 @@
 //! implication being that a sky-model source's brightness is always assumed to
 //! be correct when at zenith.
 
+mod analytic;
 mod error;
 mod fee;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use analytic::AnalyticBeam;
 pub(crate) use error::BeamError;
 pub(crate) use fee::FEEBeam;
 
@@ -47,6 +49,14 @@ pub enum BeamType {
     /// Fully-embedded element beam.
     #[strum(serialize = "fee")]
     FEE,
+
+    /// The mwa_pb flavour of the analytic beam.
+    #[strum(serialize = "analytic-mwa_pb")]
+    AnalyticMwaPb,
+
+    /// The RTS flavour of the analytic beam.
+    #[strum(serialize = "analytic-rts")]
+    AnalyticRts,
 
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
     #[strum(serialize = "none")]
@@ -391,6 +401,11 @@ impl BeamGpu for NoBeamGpu {
     }
 }
 
+/// Create a beam object given the beam type (if not supplied, fall back to a
+/// default). This function _should not_ be used generally; setting up beam
+/// objects with this function cannot use dipole amps, and the FEE beam will
+/// always be set up with the `MWA_BEAM_FILE` environment variable, which the
+/// user may not have set.
 pub fn create_beam_object(
     beam_type: Option<&str>,
     num_tiles: usize,
@@ -413,13 +428,32 @@ pub fn create_beam_object(
 
         BeamType::FEE => {
             debug!("Setting up a FEE beam object");
-
             // Check that the delays are sensible.
             validate_delays(&dipole_delays, num_tiles)?;
 
             // Set up the FEE beam struct from the `MWA_BEAM_FILE` environment
             // variable.
             Ok(Box::new(FEEBeam::new_from_env(
+                num_tiles,
+                dipole_delays,
+                None,
+            )?))
+        }
+
+        BeamType::AnalyticMwaPb => {
+            debug!("Setting up an \"mwa_pb\" analytic beam object");
+            validate_delays(&dipole_delays, num_tiles)?;
+            Ok(Box::new(AnalyticBeam::new_mwa_pb(
+                num_tiles,
+                dipole_delays,
+                None,
+            )?))
+        }
+
+        BeamType::AnalyticRts => {
+            debug!("Setting up an \"RTS\" analytic beam object");
+            validate_delays(&dipole_delays, num_tiles)?;
+            Ok(Box::new(AnalyticBeam::new_rts(
                 num_tiles,
                 dipole_delays,
                 None,
