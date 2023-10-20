@@ -35,11 +35,14 @@ pub enum BeamError {
     #[error("Got tile index {got}, but the biggest tile index is {max}")]
     BadTileIndex { got: usize, max: usize },
 
-    #[error("hyperbeam error: {0}")]
-    Hyperbeam(#[from] mwa_hyperbeam::fee::FEEBeamError),
+    #[error("hyperbeam FEE error: {0}")]
+    HyperbeamFee(#[from] mwa_hyperbeam::fee::FEEBeamError),
 
-    #[error("hyperbeam init error: {0}")]
-    HyperbeamInit(#[from] mwa_hyperbeam::fee::InitFEEBeamError),
+    #[error("hyperbeam init FEE error: {0}")]
+    HyperbeamInitFee(#[from] mwa_hyperbeam::fee::InitFEEBeamError),
+
+    #[error("hyperbeam analytic error: {0}")]
+    HyperbeamAnalytic(#[from] mwa_hyperbeam::analytic::AnalyticBeamError),
 
     #[cfg(any(feature = "cuda", feature = "hip"))]
     #[error(transparent)]
