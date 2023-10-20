@@ -27,7 +27,7 @@ codegen-units = 1
 inherits = "production"
 
 [features]
-default = ["plotting"]
+default = ["plotting", "cuda"]
 
 # Use CUDA code with double-precision floats.
 cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys", "cc"]
@@ -148,4 +148,4 @@ birli = { git = "https://github.com/MWATelescope/Birli", branch = "bmetrics" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }
-# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "DUT1" }
+# mwa_hyperbeam = { git = "https://github.com/cjordan/mwa_hyperbeam", branch = "analytic" }
