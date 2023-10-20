@@ -117,7 +117,7 @@ impl<'a> SkyModellerCpu<'a> {
                 continue;
             }
 
-            let (gains, delays) = fix_amps_ndarray(gains, delays);
+            let (gains, delays) = mwa_hyperbeam::fix_amps_ndarray(gains, delays);
 
             let mut unique_tile_hasher = DefaultHasher::new();
             delays.hash(&mut unique_tile_hasher);
@@ -816,32 +816,4 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         );
         Ok(())
     }
-}
-
-/// Ensure that any delays of 32 have an amplitude (dipole gain) of 0. The
-/// results are bad otherwise! Also ensure that we have 32 dipole gains (amps)
-/// here. Also return a Rust array of delays for convenience.
-///
-/// TODO: This is copy+pasted from `hyperbeam`; make that function public and
-/// use it instead.
-fn fix_amps_ndarray(amps: ArrayView1<f64>, delays: ArrayView1<u32>) -> ([f64; 32], [u32; 16]) {
-    let mut full_amps: [f64; 32] = [1.0; 32];
-    full_amps
-        .iter_mut()
-        .zip(amps.iter().cycle())
-        .zip(delays.iter().cycle())
-        .for_each(|((out_amp, &in_amp), &delay)| {
-            if delay == 32 {
-                *out_amp = 0.0;
-            } else {
-                *out_amp = in_amp;
-            }
-        });
-
-    // So that we don't have to do .as_slice().unwrap() on our ndarrays outside
-    // of this function, return a Rust array of delays here.
-    let mut delays_a: [u32; 16] = [0; 16];
-    delays_a.iter_mut().zip(delays).for_each(|(da, d)| *da = *d);
-
-    (full_amps, delays_a)
 }

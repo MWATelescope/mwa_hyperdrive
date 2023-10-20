@@ -2,38 +2,51 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Code for FEE beam calculations.
-
-use std::path::{Path, PathBuf};
+//! Code for analytic beam calculations.
 
 use log::debug;
 use marlu::{AzEl, Jones};
+use mwa_hyperbeam::analytic::AnalyticType;
 use ndarray::prelude::*;
 
-use super::{partial_to_full, validate_delays, Beam, BeamError, BeamType, Delays};
 use super::{partial_to_full, validate_delays, Beam, BeamError, BeamType, Delays};
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
 
-/// A wrapper of the `FEEBeam` struct in hyperbeam that implements the [`Beam`]
-/// trait.
-pub(crate) struct FEEBeam {
-    hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
+/// A wrapper of the `AnalyticBeam` struct in hyperbeam that implements the
+/// [`Beam`] trait.
+pub(crate) struct AnalyticBeam {
+    hyperbeam_object: mwa_hyperbeam::analytic::AnalyticBeam,
+    analytic_type: AnalyticType,
     delays: Array2<u32>,
     gains: Array2<f64>,
     ideal_delays: [u32; 16],
-    file: PathBuf,
 }
 
-impl FEEBeam {
-    fn new_inner(
-        hyperbeam_object: mwa_hyperbeam::fee::FEEBeam,
+impl AnalyticBeam {
+    pub(crate) fn new_mwa_pb(
         num_tiles: usize,
         delays: Delays,
         gains: Option<Array2<f64>>,
-        file: Option<&Path>,
-    ) -> Result<FEEBeam, BeamError> {
+    ) -> Result<AnalyticBeam, BeamError> {
+        Self::new_inner(AnalyticType::MwaPb, num_tiles, delays, gains)
+    }
+
+    pub(crate) fn new_rts(
+        num_tiles: usize,
+        delays: Delays,
+        gains: Option<Array2<f64>>,
+    ) -> Result<AnalyticBeam, BeamError> {
+        Self::new_inner(AnalyticType::Rts, num_tiles, delays, gains)
+    }
+
+    fn new_inner(
+        at: AnalyticType,
+        num_tiles: usize,
+        delays: Delays,
+        gains: Option<Array2<f64>>,
+    ) -> Result<AnalyticBeam, BeamError> {
         // Check that the delays are sensible.
         validate_delays(&delays, num_tiles)?;
 
@@ -65,36 +78,19 @@ impl FEEBeam {
             });
         }
 
-        // Wrap the `FEEBeam` out of hyperbeam with our own `FEEBeam`.
-        Ok(FEEBeam {
+        // Wrap the `AnalyticBeam` out of hyperbeam with our own `AnalyticBeam`.
+        let hyperbeam_object = mwa_hyperbeam::analytic::AnalyticBeam::new_custom(
+            at,
+            at.get_default_dipole_height(),
+            4,
+        );
+        Ok(AnalyticBeam {
             hyperbeam_object,
+            analytic_type: at,
             delays,
             gains,
             ideal_delays,
-            file: match file {
-                Some(p) => p.to_path_buf(),
-                None => PathBuf::from(std::env::var("MWA_BEAM_FILE").unwrap()),
-            },
         })
-    }
-
-    pub(crate) fn new(
-        file: &Path,
-        num_tiles: usize,
-        delays: Delays,
-        gains: Option<Array2<f64>>,
-    ) -> Result<FEEBeam, BeamError> {
-        let hyperbeam_object = mwa_hyperbeam::fee::FEEBeam::new(file)?;
-        Self::new_inner(hyperbeam_object, num_tiles, delays, gains, Some(file))
-    }
-
-    pub(crate) fn new_from_env(
-        num_tiles: usize,
-        delays: Delays,
-        gains: Option<Array2<f64>>,
-    ) -> Result<FEEBeam, BeamError> {
-        let hyperbeam_object = mwa_hyperbeam::fee::FEEBeam::new_from_env()?;
-        Self::new_inner(hyperbeam_object, num_tiles, delays, gains, None)
     }
 
     fn calc_jones_inner(
@@ -104,16 +100,15 @@ impl FEEBeam {
         delays: &[u32],
         amps: &[f64],
         latitude_rad: f64,
-    ) -> Result<Jones<f64>, mwa_hyperbeam::fee::FEEBeamError> {
+    ) -> Result<Jones<f64>, mwa_hyperbeam::analytic::AnalyticBeamError> {
         self.hyperbeam_object.calc_jones_pair(
             azel.az,
             azel.za(),
             freq_hz as _,
             delays,
             amps,
+            latitude_rad,
             true,
-            Some(latitude_rad),
-            false,
         )
     }
 
@@ -124,15 +119,14 @@ impl FEEBeam {
         delays: &[u32],
         amps: &[f64],
         latitude_rad: f64,
-    ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::fee::FEEBeamError> {
+    ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::analytic::AnalyticBeamError> {
         self.hyperbeam_object.calc_jones_array(
             azels,
             freq_hz as _,
             delays,
             amps,
+            latitude_rad,
             true,
-            Some(latitude_rad),
-            false,
         )
     }
 
@@ -144,23 +138,25 @@ impl FEEBeam {
         amps: &[f64],
         latitude_rad: f64,
         results: &mut [Jones<f64>],
-    ) -> Result<(), mwa_hyperbeam::fee::FEEBeamError> {
+    ) -> Result<(), mwa_hyperbeam::analytic::AnalyticBeamError> {
         self.hyperbeam_object.calc_jones_array_inner(
             azels,
             freq_hz as _,
             delays,
             amps,
+            latitude_rad,
             true,
-            Some(latitude_rad),
-            false,
             results,
         )
     }
 }
 
-impl Beam for FEEBeam {
+impl Beam for AnalyticBeam {
     fn get_beam_type(&self) -> BeamType {
-        BeamType::FEE
+        match self.analytic_type {
+            AnalyticType::MwaPb => BeamType::AnalyticMwaPb,
+            AnalyticType::Rts => BeamType::AnalyticRts,
+        }
     }
 
     fn get_num_tiles(&self) -> usize {
@@ -179,24 +175,18 @@ impl Beam for FEEBeam {
         Some(self.gains.to_shared())
     }
 
-    fn get_beam_file(&self) -> Option<&Path> {
-        Some(&self.file)
+    fn get_beam_file(&self) -> Option<&std::path::Path> {
+        None
     }
 
     fn calc_jones(
         &self,
-        azel: AzEl,
+        azel: marlu::AzEl,
         freq_hz: f64,
         tile_index: Option<usize>,
         latitude_rad: f64,
     ) -> Result<Jones<f64>, BeamError> {
-        // The FEE beam is defined only at specific frequencies. For this
-        // reason, rather than making a unique hash for every single different
-        // frequency, round specified frequency (`freq_hz`) to the nearest beam
-        // frequency and use that for the hash.
-        let beam_freq = self.find_closest_freq(freq_hz);
-
-        let jones = if let Some(tile_index) = tile_index {
+        if let Some(tile_index) = tile_index {
             if tile_index > self.delays.len_of(Axis(0)) {
                 return Err(BeamError::BadTileIndex {
                     got: tile_index,
@@ -205,19 +195,20 @@ impl Beam for FEEBeam {
             }
             let delays = self.delays.slice(s![tile_index, ..]);
             let amps = self.gains.slice(s![tile_index, ..]);
-            self.calc_jones_inner(
+            let j = self.calc_jones_inner(
                 azel,
-                beam_freq,
+                freq_hz,
                 delays.as_slice().unwrap(),
                 amps.as_slice().unwrap(),
                 latitude_rad,
-            )?
+            )?;
+            Ok(j)
         } else {
             let delays = &self.ideal_delays;
             let amps = [1.0; 32];
-            self.calc_jones_inner(azel, beam_freq, delays, &amps, latitude_rad)?
-        };
-        Ok(jones)
+            let j = self.calc_jones_inner(azel, freq_hz, delays, &amps, latitude_rad)?;
+            Ok(j)
+        }
     }
 
     fn calc_jones_array(
@@ -226,7 +217,7 @@ impl Beam for FEEBeam {
         freq_hz: f64,
         tile_index: Option<usize>,
         latitude_rad: f64,
-    ) -> Result<Vec<Jones<f64>>, BeamError> {
+    ) -> Result<Vec<marlu::Jones<f64>>, BeamError> {
         let mut jones = vec![Jones::default(); azels.len()];
         Beam::calc_jones_array_inner(self, azels, freq_hz, tile_index, latitude_rad, &mut jones)?;
         Ok(jones)
@@ -234,18 +225,12 @@ impl Beam for FEEBeam {
 
     fn calc_jones_array_inner(
         &self,
-        azels: &[AzEl],
+        azels: &[marlu::AzEl],
         freq_hz: f64,
         tile_index: Option<usize>,
         latitude_rad: f64,
-        results: &mut [Jones<f64>],
+        results: &mut [marlu::Jones<f64>],
     ) -> Result<(), BeamError> {
-        // The FEE beam is defined only at specific frequencies. For this
-        // reason, rather than making a unique hash for every single different
-        // frequency, round specified frequency (`freq_hz`) to the nearest beam
-        // frequency and use that for the hash.
-        let beam_freq = self.find_closest_freq(freq_hz);
-
         if let Some(tile_index) = tile_index {
             if tile_index > self.delays.len_of(Axis(0)) {
                 return Err(BeamError::BadTileIndex {
@@ -257,7 +242,7 @@ impl Beam for FEEBeam {
             let amps = self.gains.slice(s![tile_index, ..]);
             self.calc_jones_array_inner(
                 azels,
-                beam_freq,
+                freq_hz,
                 delays.as_slice().unwrap(),
                 amps.as_slice().unwrap(),
                 latitude_rad,
@@ -266,43 +251,42 @@ impl Beam for FEEBeam {
         } else {
             let delays = &self.ideal_delays;
             let amps = [1.0; 32];
-            self.calc_jones_array_inner(azels, beam_freq, delays, &amps, latitude_rad, results)?;
+            self.calc_jones_array_inner(azels, freq_hz, delays, &amps, latitude_rad, results)?;
         }
         Ok(())
     }
 
     fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
-        self.hyperbeam_object
-            .find_closest_freq(desired_freq_hz as _) as _
+        desired_freq_hz
     }
 
-    fn empty_coeff_cache(&self) {
-        self.hyperbeam_object.empty_cache();
-    }
+    fn empty_coeff_cache(&self) {}
 
     #[cfg(any(feature = "cuda", feature = "hip"))]
     fn prepare_gpu_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamGpu>, BeamError> {
         let gpu_beam = unsafe {
-            self.hyperbeam_object.gpu_prepare(
-                freqs_hz,
-                self.delays.view(),
-                self.gains.view(),
-                true,
-            )?
+            self.hyperbeam_object
+                .gpu_prepare(self.delays.view(), self.gains.view())?
         };
-        Ok(Box::new(FEEBeamGpu {
+        let freq_map = (0..freqs_hz.len()).map(|i| i as i32).collect::<Vec<_>>();
+        let d_freq_map = DevicePointer::copy_to_device(&freq_map)?;
+        Ok(Box::new(AnalyticBeamGpu {
             hyperbeam_object: gpu_beam,
+            d_freqs_hz: DevicePointer::copy_to_device(freqs_hz)?,
+            d_freq_map,
         }))
     }
 }
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
-struct FEEBeamGpu {
-    hyperbeam_object: mwa_hyperbeam::fee::FEEBeamGpu,
+struct AnalyticBeamGpu {
+    hyperbeam_object: mwa_hyperbeam::analytic::AnalyticBeamGpu,
+    d_freqs_hz: DevicePointer<u32>,
+    d_freq_map: DevicePointer<i32>,
 }
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
-impl BeamGpu for FEEBeamGpu {
+impl BeamGpu for AnalyticBeamGpu {
     unsafe fn calc_jones_pair(
         &self,
         az_rad: &[GpuFloat],
@@ -312,13 +296,17 @@ impl BeamGpu for FEEBeamGpu {
     ) -> Result<(), BeamError> {
         let d_az_rad = DevicePointer::copy_to_device(az_rad)?;
         let d_za_rad = DevicePointer::copy_to_device(za_rad)?;
-        let d_array_latitude_rad = DevicePointer::copy_to_device(&[latitude_rad as GpuFloat])?;
         self.hyperbeam_object.calc_jones_device_pair_inner(
             d_az_rad.get(),
             d_za_rad.get(),
             az_rad.len().try_into().expect("not bigger than i32::MAX"),
-            d_array_latitude_rad.get(),
-            false,
+            self.d_freqs_hz.get(),
+            self.d_freqs_hz
+                .get_num_elements()
+                .try_into()
+                .expect("not bigger than i32::MAX"),
+            latitude_rad as GpuFloat,
+            true,
             d_jones,
         )?;
         Ok(())
@@ -333,7 +321,7 @@ impl BeamGpu for FEEBeamGpu {
     }
 
     fn get_freq_map(&self) -> *const i32 {
-        self.hyperbeam_object.get_device_freq_map()
+        self.d_freq_map.get()
     }
 
     fn get_num_unique_tiles(&self) -> i32 {
@@ -341,6 +329,9 @@ impl BeamGpu for FEEBeamGpu {
     }
 
     fn get_num_unique_freqs(&self) -> i32 {
-        self.hyperbeam_object.get_num_unique_freqs()
+        self.d_freqs_hz
+            .get_num_elements()
+            .try_into()
+            .expect("not bigger than i32::MAX")
     }
 }
