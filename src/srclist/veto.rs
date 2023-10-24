@@ -247,7 +247,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_beam_attenuated_flux_density_fee_beam() {
-        let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None, None).unwrap();
         let jones_pointing_centre = beam
             .calc_jones(AzEl::from_degrees(0.0, 89.0), 180e6, None, MWA_LAT_RAD)
             .unwrap();
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     #[serial]
     fn veto() {
-        let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam = FEEBeam::new_from_env(1, Delays::Partial(vec![0; 16]), None, None).unwrap();
         let (mut source_list, _) = read_source_list_file("test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_peel100.txt", None).unwrap();
 
         // For testing's sake, keep only the following bright sources.

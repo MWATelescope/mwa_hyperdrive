@@ -56,6 +56,23 @@ pub(crate) struct BeamArgs {
     /// provided by the MWA_BEAM_FILE environment variable.
     #[clap(long, help_heading = "BEAM", help = BEAM_FILE_HELP.as_str())]
     pub(crate) beam_file: Option<PathBuf>,
+
+    /// Treat this tile as the CRAM tile. A tile index or tile name may be used.
+    /// If this isn't specified, the default is to use the tile named "CRAM".
+    #[clap(long, help_heading = "BEAM (CRAM)")]
+    pub(crate) cram_tile: Option<String>,
+
+    /// Use these values as the dipole gains for the CRAM tile (e.g. 1 for a
+    /// normal dipole, 0 for a dead dipole). 64 values must be given. The
+    /// default is to assume all dipoles are alive and have gains of 1, and
+    /// there is currently no other way to supply CRAM dead dipole information.
+    #[clap(long, multiple_values(true), help_heading = "BEAM (CRAM)")]
+    pub(crate) cram_dipole_gains: Option<Vec<f64>>,
+
+    /// If the CRAM tile is present, elect to ignore it.
+    #[clap(long, conflicts_with("cram-tile"), help_heading = "BEAM (CRAM)")]
+    #[serde(default)]
+    pub(crate) ignore_cram: bool,
 }
 
 impl BeamArgs {
@@ -66,6 +83,9 @@ impl BeamArgs {
             delays: self.delays.or(other.delays),
             unity_dipole_gains: self.unity_dipole_gains || other.unity_dipole_gains,
             beam_file: self.beam_file.or(other.beam_file),
+            cram_tile: self.cram_tile.or(other.cram_tile),
+            cram_dipole_gains: self.cram_dipole_gains.or(other.cram_dipole_gains),
+            ignore_cram: self.ignore_cram || other.ignore_cram,
         }
     }
 
@@ -75,6 +95,7 @@ impl BeamArgs {
         data_dipole_delays: Option<Delays>,
         dipole_gains: Option<Array2<f64>>,
         input_data_type: Option<VisInputType>,
+        tile_names: Option<&[String]>,
     ) -> Result<Box<dyn Beam>, BeamError> {
         let Self {
             beam_type,
@@ -82,6 +103,9 @@ impl BeamArgs {
             delays: user_dipole_delays,
             unity_dipole_gains,
             beam_file,
+            cram_tile,
+            cram_dipole_gains,
+            ignore_cram,
         } = self;
 
         let mut printer = InfoPrinter::new("Beam info".into());
@@ -99,6 +123,75 @@ impl BeamArgs {
             (false, Some(_), Some(b)) => b,
             (false, Some(s), None) => return Err(BeamError::Unrecognised(s.to_string())),
         };
+
+        let i_cram_tile = match (tile_names, cram_tile) {
+            // Attempt to automatically detect the CRAM tile (tile name "CRAM").
+            // Only do this logic if the user didn't supply a CRAM tile name.
+            (Some(tile_names), None) => {
+                let mut i_cram_tile = None;
+                for (i_tile, tile_name) in tile_names.iter().enumerate() {
+                    if tile_name.as_str() == "CRAM" {
+                        i_cram_tile = Some(i_tile);
+                        break;
+                    }
+                }
+                // Handle the ignore option.
+                if ignore_cram {
+                    None
+                } else {
+                    i_cram_tile
+                }
+            }
+
+            (_, Some(tile_string)) => {
+                // We need to work out if this is a number or a tile name.
+                match (tile_string.trim().parse().ok(), tile_names) {
+                    (Some(i), _) => {
+                        if i >= total_num_tiles {
+                            return Err(BeamError::BadCramTileIndex {
+                                got: i,
+                                max: total_num_tiles - 1,
+                            });
+                        }
+                        Some(i)
+                    }
+
+                    (None, Some(tile_names)) => {
+                        // Now we need to match the given tile name against all
+                        // of them.
+                        match tile_names
+                            .iter()
+                            .enumerate()
+                            .find(|(_, name)| name.to_lowercase() == tile_string.to_lowercase())
+                        {
+                            // If there are no matches, complain that the user input
+                            // is no good.
+                            None => return Err(BeamError::BadTileNameForCram(tile_string.clone())),
+                            Some((i, _)) => Some(i),
+                        }
+                    }
+
+                    (None, None) => {
+                        // This situation only arises if a user specified a tile
+                        // name as the CRAM tile, but we have no tile names.
+                        // There's no way to continue.
+                        return Err(BeamError::NoTileNamesForCram(tile_string.clone()));
+                    }
+                }
+            }
+
+            // We have no tile names, and the user hasn't specified a CRAM tile,
+            // so we have no idea if the CRAM tile is there. Proceed naively.
+            (None, None) => {
+                "No tile names are available; unsure if a CRAM tile is present".warn();
+                None
+            }
+        };
+        // Ensure there are 64 CRAM dipole gains.
+        let cram_dipole_gains: Option<Box<[f64; 64]>> = cram_dipole_gains
+            .map(|g| g.try_into().map_err(|_| BeamError::Not64CramDipoleGains))
+            .transpose()?;
+        let cram_tile = i_cram_tile.map(|i| (i, cram_dipole_gains.unwrap_or([1.0; 64].into())));
 
         let beam: Box<dyn Beam> = match beam_type {
             BeamType::None => {
@@ -223,11 +316,11 @@ impl BeamArgs {
 
                 let beam = if let Some(bf) = beam_file {
                     // Set up the FEE beam struct from the specified beam file.
-                    FEEBeam::new(&bf, total_num_tiles, dipole_delays, dipole_gains)?
+                    FEEBeam::new(&bf, total_num_tiles, dipole_delays, dipole_gains, cram_tile)?
                 } else {
                     // Set up the FEE beam struct from the MWA_BEAM_FILE environment
                     // variable.
-                    FEEBeam::new_from_env(total_num_tiles, dipole_delays, dipole_gains)?
+                    FEEBeam::new_from_env(total_num_tiles, dipole_delays, dipole_gains, cram_tile)?
                 };
                 Box::new(beam)
             }
@@ -333,12 +426,18 @@ impl BeamArgs {
                 }
 
                 let beam = match beam_type {
-                    BeamType::AnalyticMwaPb => {
-                        AnalyticBeam::new_mwa_pb(total_num_tiles, dipole_delays, dipole_gains)?
-                    }
-                    BeamType::AnalyticRts => {
-                        AnalyticBeam::new_rts(total_num_tiles, dipole_delays, dipole_gains)?
-                    }
+                    BeamType::AnalyticMwaPb => AnalyticBeam::new_mwa_pb(
+                        total_num_tiles,
+                        dipole_delays,
+                        dipole_gains,
+                        cram_tile,
+                    )?,
+                    BeamType::AnalyticRts => AnalyticBeam::new_rts(
+                        total_num_tiles,
+                        dipole_delays,
+                        dipole_gains,
+                        cram_tile,
+                    )?,
                     _ => unreachable!("only analytic beams should be here"),
                 };
                 Box::new(beam)
@@ -372,6 +471,23 @@ impl BeamArgs {
 
         if let Some(f) = beam.get_beam_file() {
             printer.push_line(format!("File: {}", f.display()).into());
+        }
+
+        match (i_cram_tile, beam.get_beam_type()) {
+            (Some(_), BeamType::None) => {
+                "Not simulating the CRAM tile as we're not using any beam".warn()
+            }
+            (Some(i), _) => {
+                if let Some(tile_name) = tile_names {
+                    let cram_tile_name = tile_name[i].as_str();
+                    printer.push_line(
+                        format!("Using '{cram_tile_name}' (index {i}) as the CRAM tile").into(),
+                    );
+                } else {
+                    printer.push_line(format!("Using tile index {i} as the CRAM tile").into());
+                }
+            }
+            (None, _) => (),
         }
 
         printer.display();

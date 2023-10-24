@@ -17,7 +17,7 @@ fn test_handle_delays() {
         ..Default::default()
     };
 
-    let result = args.parse(1, None, None, None);
+    let result = args.parse(1, None, None, None, None);
     assert!(result.is_err());
     assert!(matches!(result, Err(BadDelays)));
 
@@ -27,7 +27,7 @@ fn test_handle_delays() {
         beam_type: Some("fee".to_string()),
         ..Default::default()
     };
-    let result = args.parse(1, None, None, None);
+    let result = args.parse(1, None, None, None, None);
 
     assert!(result.is_err());
     assert!(matches!(result, Err(BadDelays)));
@@ -39,7 +39,7 @@ fn test_handle_delays() {
         beam_type: Some("fee".to_string()),
         ..Default::default()
     };
-    let result = args.parse(1, None, None, None);
+    let result = args.parse(1, None, None, None, None);
 
     assert!(result.is_ok(), "result={:?} not Ok", result.err().unwrap());
 
@@ -67,7 +67,7 @@ fn test_unity_dipole_gains() {
         [1.0; 16],
         [1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     ];
-    let beam = args.parse(2, None, Some(dipole_gains), None).unwrap();
+    let beam = args.parse(2, None, Some(dipole_gains), None, None).unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::FEE);
     let beam_gains = beam.get_dipole_gains().unwrap();
 
@@ -83,7 +83,7 @@ fn test_unity_dipole_gains() {
     };
 
     let dipole_gains = array![[1.0; 16], [1.0; 16]];
-    let beam = args.parse(2, None, Some(dipole_gains), None).unwrap();
+    let beam = args.parse(2, None, Some(dipole_gains), None, None).unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::FEE);
     let beam_gains = beam.get_dipole_gains().unwrap();
 
