@@ -416,6 +416,8 @@ impl<'a> SkyModellerGpu<'a> {
         let d_freqs = DevicePointer::copy_to_device(&unflagged_fine_chan_freqs_floats)?;
         let d_shapelet_basis_values = DevicePointer::copy_to_device(&shapelet_basis_values)?;
 
+        let gpu_beam = beam.prepare_gpu_beam(&unflagged_fine_chan_freqs_ints)?;
+
         let mut tile_index_to_unflagged_tile_index_map: Vec<i32> =
             Vec::with_capacity(unflagged_tile_xyzs.len());
         let mut i_unflagged_tile = 0;
@@ -901,12 +903,11 @@ impl<'a> SkyModellerGpu<'a> {
                     * azs.len()
                     * std::mem::size_of::<GpuJones>(),
             )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
+            let d_azs = DevicePointer::copy_to_device(&azs)?;
+            let d_zas = DevicePointer::copy_to_device(&zas)?;
+
+            self.gpu_beam
+                .calc_jones_pair(&d_azs, &d_zas, array_latitude_rad, d_beam_jones)?;
         }
 
         gpu_kernel_call!(
@@ -988,12 +989,10 @@ impl<'a> SkyModellerGpu<'a> {
                     * azs.len()
                     * std::mem::size_of::<GpuJones>(),
             )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
+            let d_azs = DevicePointer::copy_to_device(&azs)?;
+            let d_zas = DevicePointer::copy_to_device(&zas)?;
+            self.gpu_beam
+                .calc_jones_pair(&d_azs, &d_zas, array_latitude_rad, d_beam_jones)?;
         }
 
         gpu_kernel_call!(
@@ -1078,12 +1077,10 @@ impl<'a> SkyModellerGpu<'a> {
                     * azs.len()
                     * std::mem::size_of::<GpuJones>(),
             )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?
+            let d_azs = DevicePointer::copy_to_device(&azs)?;
+            let d_zas = DevicePointer::copy_to_device(&zas)?;
+            self.gpu_beam
+                .calc_jones_pair(&d_azs, &d_zas, array_latitude_rad, d_beam_jones)?
         };
 
         let uvs = self.get_shapelet_uvs(lst_rad);
