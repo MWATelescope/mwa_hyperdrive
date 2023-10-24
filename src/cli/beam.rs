@@ -103,7 +103,7 @@ fn calc_cpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
 
     let beam = beam_args
         .clone()
-        .parse(1, Some(Delays::Partial(vec![0; 16])), None, None)?;
+        .parse(1, Some(Delays::Partial(vec![0; 16])), None, None, None)?;
     let mut out = BufWriter::new(File::create(output)?);
 
     let azels: Vec<_> = gen_azzas(max_za.to_radians(), step.to_radians())
@@ -142,7 +142,7 @@ fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
 
     let beam = beam_args
         .clone()
-        .parse(1, Some(Delays::Partial(vec![0; 16])), None, None)?;
+        .parse(1, Some(Delays::Partial(vec![0; 16])), None, None, None)?;
     let gpu_beam = beam.prepare_gpu_beam(&[(freq_mhz * 1e6) as u32])?;
     let mut out = BufWriter::new(File::create(output)?);
 
@@ -154,14 +154,11 @@ fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
             * azs.len()
             * std::mem::size_of::<GpuJones>(),
     )?;
+    let d_azs = DevicePointer::copy_to_device(&azs)?;
+    let d_zas = DevicePointer::copy_to_device(&zas)?;
 
     unsafe {
-        gpu_beam.calc_jones_pair(
-            &azs,
-            &zas,
-            latitude_deg.to_radians(),
-            d_jones.get_mut().cast(),
-        )?;
+        gpu_beam.calc_jones_pair(&d_azs, &d_zas, latitude_deg.to_radians(), &mut d_jones)?;
     }
 
     let jones = d_jones.copy_from_device_new()?;

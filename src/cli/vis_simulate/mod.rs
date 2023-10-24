@@ -518,6 +518,7 @@ impl VisSimulateArgs {
             Some(Delays::Full(get_dipole_delays(&metafits))),
             Some(get_dipole_gains(&metafits)),
             None,
+            Some(&tile_names),
         )?;
         let modelling_params = modelling_args.parse();
 

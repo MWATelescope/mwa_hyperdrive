@@ -30,3 +30,20 @@ Beam code usually does not error, but if it does it's likely because:
 2. There aren't exactly 16 or 32 dipole gains per tile; or
 3. There's something wrong with the FEE HDF5 file. The official file is well
    tested.
+
+## CRAM tile
+
+[The CRAM tile](https://www.mwatelescope.org/science/eor/cram/) is a special
+64-bowtie tile, as opposed to the usual 16-bowtie tiles. `hyperdrive` attempts
+to detect and simulate the CRAM's beam response using the RTS-flavoured analytic
+beam (using 64 bowties).
+
+Currently, it is anticipated that the CRAM does not ever point away from zenith,
+so no bowtie/dipole delays are accepted. Metafits files also have no way of
+specifying dead dipoles in the CRAM (to my knowledge), so `hyperdrive` allows
+users to specify bowtie gains on the command line with `--cram-dipole-gains`
+(64 values, 1 for "alive", 0 for "dead", see [dead dipoles](mwa/dead_dipoles.md)
+for more info). `hyperdrive` will automatically detect a tile named "CRAM"
+and use the special beam responses for it, but a different tile can be elected
+with `--cram-tile`. Finally, the presence of the CRAM tile can be ignored with
+`--ignore-cram`, but this is not likely to do anything useful.

@@ -470,7 +470,11 @@ impl From<BeamError> for HyperdriveError {
             | BeamError::BadTileIndex { .. }
             | BeamError::HyperbeamFee(_)
             | BeamError::HyperbeamInitFee(_)
-            | BeamError::HyperbeamAnalytic(_) => Self::Beam(s),
+            | BeamError::HyperbeamAnalytic(_)
+            | BeamError::BadCramTileIndex { .. }
+            | BeamError::BadTileNameForCram(_)
+            | BeamError::NoTileNamesForCram(_)
+            | BeamError::Not64CramDipoleGains => Self::Beam(s),
             #[cfg(any(feature = "cuda", feature = "hip"))]
             BeamError::Gpu(_) => Self::Beam(s),
         }

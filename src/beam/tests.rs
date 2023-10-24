@@ -58,7 +58,7 @@ fn fee_beam_values_are_sensible() {
     // Compare these with the hyperdrive `Beam` trait.
     let gains = array![amps];
     let hyperdrive =
-        super::fee::FEEBeam::new_from_env(1, Delays::Partial(delays.to_vec()), Some(gains))
+        super::fee::FEEBeam::new_from_env(1, Delays::Partial(delays.to_vec()), Some(gains), None)
             .unwrap();
     let hyperdrive_values: Vec<Jones<f64>> = azels
         .iter()
@@ -88,6 +88,8 @@ fn fee_gpu_beam_values_are_sensible() {
         .iter()
         .map(|azel| (azel.az as GpuFloat, azel.za() as GpuFloat))
         .unzip();
+    let d_azs = DevicePointer::copy_to_device(&azs).unwrap();
+    let d_zas = DevicePointer::copy_to_device(&zas).unwrap();
 
     // Get the beam values right out of hyperbeam.
     let hyperbeam = FEEBeam::new_from_env().unwrap();
@@ -99,7 +101,7 @@ fn fee_gpu_beam_values_are_sensible() {
 
     // Compare these with the hyperdrive `Beam` trait.
     let hyperdrive =
-        super::fee::FEEBeam::new_from_env(1, Delays::Full(delays), Some(amps)).unwrap();
+        super::fee::FEEBeam::new_from_env(1, Delays::Full(delays), Some(amps), None).unwrap();
     let hyperdrive = hyperdrive.prepare_gpu_beam(&freqs).unwrap();
     let hyperdrive_values_device = unsafe {
         let mut hyperdrive_values_device: DevicePointer<Jones<GpuFloat>> = DevicePointer::malloc(
@@ -109,14 +111,14 @@ fn fee_gpu_beam_values_are_sensible() {
                 * std::mem::size_of::<Jones<GpuFloat>>(),
         )
         .unwrap();
-        hyperdrive
-            .calc_jones_pair(
-                &azs,
-                &zas,
-                MWA_LAT_RAD,
-                hyperdrive_values_device.get_mut().cast(),
-            )
-            .unwrap();
+
+        {
+            // Ugh.
+            let gpu_type = std::mem::transmute(&mut hyperdrive_values_device);
+            hyperdrive
+                .calc_jones_pair(&d_azs, &d_zas, MWA_LAT_RAD, gpu_type)
+                .unwrap();
+        }
         hyperdrive_values_device
     };
     let mut hyperdrive_values = vec![Jones::default(); hyperbeam_values.len()];

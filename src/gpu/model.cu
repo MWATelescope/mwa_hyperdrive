@@ -272,13 +272,12 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_baseli
  * `*_shapelet_coeffs` is actually a flattened array-of-arrays. The size of each
  * sub-array is given by an element of `*_num_shapelet_coeffs`.
  */
-__global__ void model_shapelets_kernel(const int num_freqs, const int num_baselines, const FLOAT *__restrict__ freqs,
-                                       const UVW *uvws, const Shapelets comps,
-                                       const FLOAT *__restrict__ shapelet_basis_values,
-                                       const JONES *__restrict__ beam_jones, const int *__restrict__ tile_map,
-                                       const int *__restrict__ freq_map, const int num_fee_freqs,
-                                       const int *__restrict__ tile_index_to_unflagged_tile_index_map,
-                                       JonesF32 *__restrict__ vis_fb) {
+__global__ void
+model_shapelets_kernel(const int num_freqs, const int num_baselines, const FLOAT *__restrict__ freqs, const UVW *uvws,
+                       const Shapelets comps, const FLOAT *__restrict__ shapelet_basis_values,
+                       const JONES *__restrict__ beam_jones, const int *__restrict__ tile_map,
+                       const int *__restrict__ freq_map, const int num_fee_freqs,
+                       const int *__restrict__ tile_index_to_unflagged_tile_index_map, JonesF32 *__restrict__ vis_fb) {
     // The 0-indexed number of tiles as a float.
     const float num_tiles = (sqrtf(1.0f + 8.0f * (float)num_baselines) - 1.0f) / 2.0f;
     const int num_directions = comps.num_power_laws + comps.num_curved_power_laws + comps.num_lists;
@@ -383,9 +382,9 @@ extern "C" const char *model_points(const Points *comps, const Addresses *a, con
     blockDim.x = NUM_THREADS_PER_BLOCK_POINTS;
     gridDim.x = (int)ceil((double)(a->num_baselines * a->num_freqs) / (double)blockDim.x);
 
-    model_points_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, d_beam_jones,
-                                               a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
-                                               a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
+    model_points_kernel<<<gridDim, blockDim>>>(
+        a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, d_beam_jones, a->d_tile_map, a->d_freq_map,
+        a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
 #ifdef DEBUG
         CHECK_GPU_ERROR(gpuDeviceSynchronize());
@@ -402,9 +401,9 @@ extern "C" const char *model_gaussians(const Gaussians *comps, const Addresses *
     blockDim.x = NUM_THREADS_PER_BLOCK_GAUSSIANS;
     gridDim.x = (int)ceil((double)(a->num_baselines * a->num_freqs) / (double)blockDim.x);
 
-    model_gaussians_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps,
-                                                  d_beam_jones, a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
-                                                  a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
+    model_gaussians_kernel<<<gridDim, blockDim>>>(
+        a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, d_beam_jones, a->d_tile_map, a->d_freq_map,
+        a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
 #ifdef DEBUG
         CHECK_GPU_ERROR(gpuDeviceSynchronize());

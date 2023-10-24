@@ -35,6 +35,20 @@ pub enum BeamError {
     #[error("Got tile index {got}, but the biggest tile index is {max}")]
     BadTileIndex { got: usize, max: usize },
 
+    #[error("Got tile index {got} for the CRAM tile, but the biggest tile index is {max}")]
+    BadCramTileIndex { got: usize, max: usize },
+
+    #[error(
+        "Got tile name '{0}' for the CRAM tile, but this name was not in the list of tile names"
+    )]
+    BadTileNameForCram(String),
+
+    #[error("Got tile name '{0}' for the CRAM tile, but no tile names were available to match against. Tile names are needed to determine the tile index")]
+    NoTileNamesForCram(String),
+
+    #[error("CRAM dipole gains were specified, but 64 values are needed")]
+    Not64CramDipoleGains,
+
     #[error("hyperbeam FEE error: {0}")]
     HyperbeamFee(#[from] mwa_hyperbeam::fee::FEEBeamError),
 

@@ -332,7 +332,7 @@ fn by_beam(
     // Set up the beam. We use the ideal delays for all tiles because we
     // don't want to use any dead dipoles.
     info!("");
-    let beam = beam_args.parse(1, metadata.dipole_delays, None, None)?;
+    let beam = beam_args.parse(1, metadata.dipole_delays, None, None, None)?;
 
     // Apply any filters.
     let mut sl = if filter_points || filter_gaussians || filter_shapelets {

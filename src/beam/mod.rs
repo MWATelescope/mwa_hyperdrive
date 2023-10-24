@@ -31,7 +31,7 @@ use ndarray::prelude::*;
 use strum::IntoEnumIterator;
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
-use crate::gpu::{DevicePointer, GpuFloat};
+use crate::gpu::{DevicePointer, GpuFloat, GpuJones};
 
 /// Supported beam types.
 #[derive(
@@ -86,7 +86,7 @@ pub trait Beam: Sync + Send {
     fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>>;
 
     /// Get the ideal dipole delays associated with this beam.
-    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]>;
+    fn get_ideal_dipole_delays(&self) -> Option<&[u32; 16]>;
 
     /// Get the dipole gains used in this beam object. The rows correspond to
     /// tiles and there are 32 columns, one for each dipole. The first 16 values
@@ -145,6 +145,10 @@ pub trait Beam: Sync + Send {
     /// If this [`Beam`] supports it, empty the coefficient cache.
     fn empty_coeff_cache(&self);
 
+    /// If CRAM tile info is available, return the tile index and the dipole
+    /// gains.
+    fn get_cram_tile(&self) -> Option<(usize, &[f64; 64])>;
+
     #[cfg(any(feature = "cuda", feature = "hip"))]
     /// Using the tile information from this [`Beam`] and frequencies to be
     /// used, return a [`BeamGpu`]. This object only needs frequencies to
@@ -165,10 +169,10 @@ pub trait BeamGpu {
     /// attempt to catch problems but there are no guarantees.
     unsafe fn calc_jones_pair(
         &self,
-        az_rad: &[GpuFloat],
-        za_rad: &[GpuFloat],
+        d_az_rad: &DevicePointer<GpuFloat>,
+        d_za_rad: &DevicePointer<GpuFloat>,
         latitude_rad: f64,
-        d_jones: *mut std::ffi::c_void,
+        d_jones: &mut DevicePointer<GpuJones>,
     ) -> Result<(), BeamError>;
 
     /// Get the type of beam used to create this [`BeamGpu`].
@@ -279,7 +283,7 @@ impl Beam for NoBeam {
         self.num_tiles
     }
 
-    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]> {
+    fn get_ideal_dipole_delays(&self) -> Option<&[u32; 16]> {
         None
     }
 
@@ -333,6 +337,12 @@ impl Beam for NoBeam {
 
     fn empty_coeff_cache(&self) {}
 
+    fn get_cram_tile(&self) -> Option<(usize, &[f64; 64])> {
+        // We deliberately don't do anything special for NoBeam. No beam means
+        // no beam!
+        None
+    }
+
     #[cfg(any(feature = "cuda", feature = "hip"))]
     fn prepare_gpu_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamGpu>, BeamError> {
         let obj = NoBeamGpu {
@@ -355,10 +365,10 @@ pub(crate) struct NoBeamGpu {
 impl BeamGpu for NoBeamGpu {
     unsafe fn calc_jones_pair(
         &self,
-        az_rad: &[GpuFloat],
-        _za_rad: &[GpuFloat],
+        d_az_rad: &DevicePointer<GpuFloat>,
+        _d_za_rad: &DevicePointer<GpuFloat>,
         _latitude_rad: f64,
-        d_jones: *mut std::ffi::c_void,
+        d_jones: &mut DevicePointer<GpuJones>,
     ) -> Result<(), BeamError> {
         #[cfg(feature = "cuda")]
         use cuda_runtime_sys::{
@@ -370,9 +380,9 @@ impl BeamGpu for NoBeamGpu {
             hipMemcpy as gpuMemcpy, hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
         };
 
-        let identities: Vec<Jones<GpuFloat>> = vec![Jones::identity(); az_rad.len()];
+        let identities: Vec<Jones<GpuFloat>> = vec![Jones::identity(); d_az_rad.get_num_elements()];
         gpuMemcpy(
-            d_jones,
+            d_jones.get_mut().cast(),
             identities.as_ptr().cast(),
             identities.len() * std::mem::size_of::<Jones<GpuFloat>>(),
             gpuMemcpyHostToDevice,
@@ -437,6 +447,7 @@ pub fn create_beam_object(
                 num_tiles,
                 dipole_delays,
                 None,
+                None,
             )?))
         }
 
@@ -447,6 +458,7 @@ pub fn create_beam_object(
                 num_tiles,
                 dipole_delays,
                 None,
+                None,
             )?))
         }
 
@@ -456,6 +468,7 @@ pub fn create_beam_object(
             Ok(Box::new(AnalyticBeam::new_rts(
                 num_tiles,
                 dipole_delays,
+                None,
                 None,
             )?))
         }

@@ -12,6 +12,7 @@ use std::{
 };
 
 use hifitime::{Duration, Epoch};
+use itertools::Itertools;
 use log::debug;
 use marlu::{
     c64,
@@ -139,6 +140,14 @@ impl<'a> SkyModellerCpu<'a> {
             };
             tile_index_to_array_index_map.push(index);
         }
+        // Add another unique tile if the CRAM is present. We shouldn't expect
+        // that the CRAM itself is considered unique with the logic above, so do
+        // this manually.
+        if let Some((i_cram_tile, _)) = beam.get_cram_tile() {
+            let biggest_unique_index = unique_tiles.iter().copied().max().expect("not empty");
+            unique_tiles.push(biggest_unique_index + 1);
+            tile_index_to_array_index_map[i_cram_tile] = unique_tiles.len() - 1;
+        }
 
         let mut unique_beam_freqs = vec![];
         let mut unique_freqs = vec![];
@@ -203,6 +212,11 @@ impl<'a> SkyModellerCpu<'a> {
         // index into `beam_responses`, and `i_unique_tile` is the index to feed
         // into the beam calculations.
         for (i_tile, &i_unique_tile) in self.unique_tiles.iter().enumerate() {
+            // Don't generate beam responses for the CRAM tile here.
+            if i_tile == self.unique_tiles.len() - 1 && self.beam.get_cram_tile().is_some() {
+                break;
+            }
+
             for (slice, freq) in beam_responses
                 .slice_mut(s![i_tile, .., ..])
                 .as_slice_mut()
@@ -215,6 +229,38 @@ impl<'a> SkyModellerCpu<'a> {
                     *freq,
                     Some(i_unique_tile),
                     array_latitude_rad,
+                    slice,
+                )?;
+            }
+        }
+
+        // Overwrite beam responses for the tile corresponding to the CRAM tile,
+        // if we have that info.
+        if let Some((_, cram_amps)) = self.beam.get_cram_tile() {
+            // We don't need to check if the beam type is "NoBeam", because we
+            // return early above if that's true.
+
+            // Set up a new beam object, RTS style because mwa_pb doesn't look
+            // as good.
+            use mwa_hyperbeam::analytic::{AnalyticBeam, AnalyticType};
+            let at = AnalyticType::Rts;
+            let cram_beam = AnalyticBeam::new_custom(at, at.get_default_dipole_height(), 8);
+
+            // The CRAM tile always comes last.
+            for (slice, freq) in beam_responses
+                .slice_mut(s![self.unique_tiles.len() - 1, .., ..])
+                .as_slice_mut()
+                .expect("is contiguous")
+                .chunks_exact_mut(azels.len())
+                .zip_eq(self.unique_freqs.iter())
+            {
+                cram_beam.calc_jones_array_inner(
+                    azels,
+                    freq.round() as u32,
+                    &[0; 64],
+                    cram_amps.as_slice(),
+                    array_latitude_rad,
+                    true,
                     slice,
                 )?;
             }
