@@ -170,6 +170,7 @@ impl VisSubtractArgs {
             obs_context.dipole_delays.clone(),
             obs_context.dipole_gains.clone(),
             Some(obs_context.input_data_type),
+            Some(&obs_context.tile_names),
         )?;
         let modelling_params @ ModellingParams {
             apply_precession, ..

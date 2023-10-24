@@ -620,6 +620,9 @@ fn sparse_timeblocks_with_averaging() {
             delays: None,
             unity_dipole_gains: true,
             beam_file: None,
+            cram_tile: None,
+            cram_dipole_gains: None,
+            ignore_cram: false,
         },
         modelling_args: ModellingArgs {
             ..Default::default()

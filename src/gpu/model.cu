@@ -491,9 +491,9 @@ extern "C" const char *model_points(const Points *comps, const Addresses *a, con
     blockDim.x = NUM_THREADS_PER_BLOCK_POINTS;
     gridDim.x = (int)ceil((double)(a->num_baselines * a->num_freqs) / (double)blockDim.x);
 
-    model_points_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, d_beam_jones,
-                                               a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
-                                               a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
+    model_points_kernel<<<gridDim, blockDim>>>(
+        a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, d_beam_jones, a->d_tile_map, a->d_freq_map,
+        a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
 #ifdef DEBUG
     CHECK_GPU_ERROR(gpuDeviceSynchronize());
@@ -510,9 +510,9 @@ extern "C" const char *model_gaussians(const Gaussians *comps, const Addresses *
     blockDim.x = NUM_THREADS_PER_BLOCK_GAUSSIANS;
     gridDim.x = (int)ceil((double)(a->num_baselines * a->num_freqs) / (double)blockDim.x);
 
-    model_gaussians_kernel<<<gridDim, blockDim>>>(a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps,
-                                                  d_beam_jones, a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
-                                                  a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
+    model_gaussians_kernel<<<gridDim, blockDim>>>(
+        a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, d_beam_jones, a->d_tile_map, a->d_freq_map,
+        a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
 #ifdef DEBUG
     CHECK_GPU_ERROR(gpuDeviceSynchronize());
