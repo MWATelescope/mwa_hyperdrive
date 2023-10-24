@@ -181,7 +181,7 @@ unsafe fn check_for_errors(gpu_call: GpuCall) -> Result<(), GpuError> {
 /// A Rust-managed pointer to CUDA device memory. When this is dropped,
 /// [`gpuFree`] is called on the pointer.
 #[derive(Debug)]
-pub(crate) struct DevicePointer<T> {
+pub struct DevicePointer<T> {
     pub(crate) ptr: *mut T,
 
     /// The number of bytes allocated against `ptr`.

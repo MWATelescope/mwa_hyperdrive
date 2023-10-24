@@ -27,7 +27,7 @@ codegen-units = 1
 inherits = "production"
 
 [features]
-default = ["plotting", "cuda"]
+default = ["plotting"]
 
 # Use CUDA code with double-precision floats.
 cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys", "cc"]
