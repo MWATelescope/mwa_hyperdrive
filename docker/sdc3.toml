@@ -1,0 +1,19 @@
+[data]
+array_position = [116.764, -26.825, 0.0] # Discovered in OSKAR logs
+# array_position = [116.7644482, -26.670051, 0.0] # Jack's coords; these appear to produce worse results
+dut1 = -0.9504120730644577 # Determined with scipy.optimize based off of provided station positions and UVWs
+
+[sky-model]
+source_list = "/sdc3_inner_lobes+trecs_rot-0.15_10.fits"
+veto_threshold = 0
+source_dist_cutoff = 90
+#num_sources = 3000
+
+[model]
+no_precession = true
+
+[beam]
+beam_type = "ska_airy"
+
+[vis-subtract]
+invert = true
