@@ -216,6 +216,11 @@ mod gpu {
                 hip_target.flag(&format!("--offload-arch={arch}"));
             }
 
+            match env::var("DEBUG").as_deref() {
+                Ok("false") => (),
+                _ => gpu_target.flag("-ggdb"),
+            };
+
             hip_target
         };
 
@@ -231,8 +236,7 @@ mod gpu {
             _ => {
                 gpu_target
                     .define("DEBUG", "")
-                    .flag("-v")
-                    .flag("-ggdb");
+                    .flag("-v");
             },
         };
 
