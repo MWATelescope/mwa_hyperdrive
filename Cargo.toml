@@ -15,8 +15,8 @@ homepage = "https://mwatelescope.github.io/mwa_hyperdrive"
 exclude = [".github/*", "test_files/*", "examples/*", "mdbook/*"]
 
 [profile.release]
-panic = "abort"
-codegen-units = 256
+# panic = "abort"
+# codegen-units = 256
 
 [profile.production]
 inherits = "release"
@@ -139,5 +139,5 @@ harness = false
 # marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
-# mwa_hyperbeam = { path = "../mwa_hyperbeam" }
-# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "DUT1" }
+# mwa_hyperbeam = { path = "../../hyperbeam/hyperbeam-git" }
+# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "setonix" }

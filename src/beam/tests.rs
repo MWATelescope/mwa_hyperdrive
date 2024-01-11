@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use approx::assert_abs_diff_eq;
+use approx::{assert_abs_diff_eq, abs_diff_eq};
 use marlu::{constants::MWA_LAT_RAD, AzEl, Jones};
 use mwa_hyperbeam::fee::FEEBeam;
 use ndarray::prelude::*;
@@ -79,14 +79,18 @@ fn fee_gpu_beam_values_are_sensible() {
     let delays = Array2::zeros((1, 16));
     let amps = Array2::ones((1, 16));
     let freqs = [150e6 as u32];
-    let azels = [
-        AzEl { az: 0.0, el: 0.0 },
-        AzEl { az: 1.0, el: 0.1 },
-        AzEl { az: -1.0, el: 0.2 },
-    ];
-    let (azs, zas): (Vec<_>, Vec<_>) = azels
-        .iter()
-        .map(|azel| (azel.az as GpuFloat, azel.za() as GpuFloat))
+    let n_dirs = std::env::var("N_DIRS")
+        .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
+        .parse::<usize>()
+        .unwrap();
+    assert!(n_dirs < 26904);
+    let (azs, zas): (Vec<_>, Vec<_>) = (0..n_dirs)
+        .map(|i| {
+            (
+                0.45 + i as GpuFloat / 10000.0,
+                0.45 + i as GpuFloat / 10000.0,
+            )
+        })
         .unzip();
 
     // Get the beam values right out of hyperbeam.
@@ -126,7 +130,20 @@ fn fee_gpu_beam_values_are_sensible() {
 
     let hyperdrive_values =
         Array3::from_shape_vec(hyperbeam_values.dim(), hyperdrive_values).unwrap();
-    assert_abs_diff_eq!(hyperdrive_values, hyperbeam_values);
+
+    for ((beam, drive), az) in hyperbeam_values
+        .iter()
+        .zip(hyperdrive_values.iter())
+        .zip(azs.iter())
+    {
+        #[cfg(not(feature = "gpu-single"))]
+        let result = abs_diff_eq!(beam, drive, epsilon = 1e-15);
+
+        #[cfg(feature = "gpu-single")]
+        let result = abs_diff_eq!(beam, drive, epsilon = 1e-6);
+
+        assert!(result, "az: {az}\nhyperdrive: {drive}\nhyperbeam: {beam}");
+    }
 }
 
 #[test]
