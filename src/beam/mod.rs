@@ -415,25 +415,7 @@ pub fn create_beam_object(
             debug!("Setting up a FEE beam object");
 
             // Check that the delays are sensible.
-            match &dipole_delays {
-                Delays::Partial(v) => {
-                    if v.len() != 16 || v.iter().any(|&v| v > 32) {
-                        return Err(BeamError::BadDelays);
-                    }
-                }
-
-                Delays::Full(a) => {
-                    if a.len_of(Axis(1)) != 16 || a.iter().any(|&v| v > 32) {
-                        return Err(BeamError::BadDelays);
-                    }
-                    if a.len_of(Axis(0)) != num_tiles {
-                        return Err(BeamError::InconsistentDelays {
-                            num_rows: a.len_of(Axis(0)),
-                            num_tiles,
-                        });
-                    }
-                }
-            }
+            validate_delays(&dipole_delays, num_tiles)?;
 
             // Set up the FEE beam struct from the `MWA_BEAM_FILE` environment
             // variable.
@@ -444,4 +426,39 @@ pub fn create_beam_object(
             )?))
         }
     }
+}
+
+/// Assume that the dipole delays for all tiles is the same as the delays for
+/// one tile.
+fn partial_to_full(delays: Vec<u32>, num_tiles: usize) -> Array2<u32> {
+    let mut out = Array2::zeros((num_tiles, 16));
+    let d = Array1::from(delays);
+    out.outer_iter_mut().for_each(|mut tile_delays| {
+        tile_delays.assign(&d);
+    });
+    out
+}
+
+fn validate_delays(delays: &Delays, num_tiles: usize) -> Result<(), BeamError> {
+    match delays {
+        Delays::Partial(v) => {
+            if v.len() != 16 || v.iter().any(|&v| v > 32) {
+                return Err(BeamError::BadDelays);
+            }
+        }
+
+        Delays::Full(a) => {
+            if a.len_of(Axis(1)) != 16 || a.iter().any(|&v| v > 32) {
+                return Err(BeamError::BadDelays);
+            }
+            if a.len_of(Axis(0)) != num_tiles {
+                return Err(BeamError::InconsistentDelays {
+                    num_rows: a.len_of(Axis(0)),
+                    num_tiles,
+                });
+            }
+        }
+    }
+
+    Ok(())
 }
