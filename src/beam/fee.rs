@@ -10,7 +10,7 @@ use log::debug;
 use marlu::{AzEl, Jones};
 use ndarray::prelude::*;
 
-use super::{Beam, BeamError, BeamType, Delays};
+use super::{partial_to_full, validate_delays, Beam, BeamError, BeamType, Delays};
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
@@ -33,6 +33,8 @@ impl FEEBeam {
         gains: Option<Array2<f64>>,
         file: Option<&Path>,
     ) -> Result<FEEBeam, BeamError> {
+        validate_delays(&delays, num_tiles)?;
+
         let ideal_delays = delays.get_ideal_delays();
         debug!("Ideal dipole delays: {:?}", ideal_delays);
 
@@ -350,11 +352,11 @@ impl BeamGpu for FEEBeamGpu {
     }
 
     fn get_tile_map(&self) -> *const i32 {
-        self.hyperbeam_object.get_tile_map()
+        self.hyperbeam_object.get_device_tile_map()
     }
 
     fn get_freq_map(&self) -> *const i32 {
-        self.hyperbeam_object.get_freq_map()
+        self.hyperbeam_object.get_device_freq_map()
     }
 
     fn get_num_unique_tiles(&self) -> i32 {
@@ -364,15 +366,4 @@ impl BeamGpu for FEEBeamGpu {
     fn get_num_unique_freqs(&self) -> i32 {
         self.hyperbeam_object.get_num_unique_freqs()
     }
-}
-
-/// Assume that the dipole delays for all tiles is the same as the delays for
-/// one tile.
-fn partial_to_full(delays: Vec<u32>, num_tiles: usize) -> Array2<u32> {
-    let mut out = Array2::zeros((num_tiles, 16));
-    let d = Array1::from(delays);
-    out.outer_iter_mut().for_each(|mut tile_delays| {
-        tile_delays.assign(&d);
-    });
-    out
 }

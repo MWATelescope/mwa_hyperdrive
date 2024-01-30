@@ -2,13 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use approx::{assert_abs_diff_eq, abs_diff_eq};
+use approx::assert_abs_diff_eq;
 use marlu::{constants::MWA_LAT_RAD, AzEl, Jones};
 use mwa_hyperbeam::fee::FEEBeam;
 use ndarray::prelude::*;
 use serial_test::serial;
 
 use super::*;
+
+#[cfg(any(feature = "cuda", feature = "hip"))]
+use approx::abs_diff_eq;
 
 #[test]
 fn no_beam_means_no_beam() {

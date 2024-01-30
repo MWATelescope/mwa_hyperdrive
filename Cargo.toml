@@ -80,7 +80,7 @@ indicatif = { version = "0.17.5", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
 marlu = { version = "0.10.1", features = ["serde"] }
-mwa_hyperbeam = "0.6.0"
+mwa_hyperbeam = "0.7.1"
 mwalib = "0.16.0"
 ndarray = { version = "0.15.4", features = ["rayon"] }
 num-complex = "0.4.1"

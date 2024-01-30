@@ -218,7 +218,7 @@ mod gpu {
 
             match env::var("DEBUG").as_deref() {
                 Ok("false") => (),
-                _ => gpu_target.flag("-ggdb"),
+                _ => {hip_target.flag("-ggdb");},
             };
 
             hip_target
