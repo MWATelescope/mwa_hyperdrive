@@ -188,8 +188,6 @@ mod gpu {
                 // .include(hip_path.join("../include/hip"))
                 ;
 
-            hip_target.flag("-O0"); // <- hip can't handle optimizations
-
             println!("cargo:rerun-if-env-changed=HYPERBEAM_HIP_ARCH");
             println!("cargo:rerun-if-env-changed=HYPERDRIVE_HIP_ARCH");
             let arches: Vec<String> = match (
@@ -218,7 +216,7 @@ mod gpu {
 
             match env::var("DEBUG").as_deref() {
                 Ok("false") => (),
-                _ => {hip_target.flag("-ggdb");},
+                _ => { hip_target.flag("-ggdb").flag("-O0"); },
             };
 
             hip_target
