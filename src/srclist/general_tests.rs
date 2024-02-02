@@ -7,14 +7,15 @@
 use std::{
     fs::File,
     io::{BufReader, Cursor, Read},
+    path::PathBuf
 };
 
-use approx::assert_abs_diff_eq;
+use approx::{abs_diff_eq, assert_abs_diff_eq};
 use marlu::RADec;
 use tempfile::NamedTempFile;
 use vec1::vec1;
 
-use super::*;
+use super::{*, fits::parse_source_list};
 use crate::constants::DEFAULT_SPEC_INDEX;
 
 fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
@@ -107,10 +108,10 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
                 }
 
                 FluxDensityType::PowerLaw { .. } => {
-                    assert!(matches!(
-                        s2_comp.flux_type,
-                        FluxDensityType::PowerLaw { .. }
-                    ));
+                    assert!(
+                        matches!( s2_comp.flux_type, FluxDensityType::PowerLaw { .. } ),
+                        "{sl1_name}: fdtype mismatch {s1_comp:?} {s2_comp:?}"
+                    );
                     match s2_comp.flux_type {
                         FluxDensityType::PowerLaw { .. } => {
                             // The parameters of the power law may not
@@ -119,7 +120,7 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
                             let s1_fd = s1_comp.flux_type.estimate_at_freq(150e6);
                             let s2_fd = s2_comp.flux_type.estimate_at_freq(150e6);
                             assert_abs_diff_eq!(s1_fd.freq, s2_fd.freq, epsilon = 1e-10);
-                            assert_abs_diff_eq!(s1_fd.i, s2_fd.i, epsilon = 1e-10);
+                            assert!(abs_diff_eq!(s1_fd.i, s2_fd.i, epsilon = 1e-10), "{sl1_name}: i flux mismatch {s1_comp:?} != {s2_comp:?}");
                             assert_abs_diff_eq!(s1_fd.q, s2_fd.q, epsilon = 1e-10);
                             assert_abs_diff_eq!(s1_fd.u, s2_fd.u, epsilon = 1e-10);
                             assert_abs_diff_eq!(s1_fd.v, s2_fd.v, epsilon = 1e-10);
@@ -136,10 +137,10 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
                 }
 
                 FluxDensityType::CurvedPowerLaw { .. } => {
-                    assert!(matches!(
-                        s2_comp.flux_type,
-                        FluxDensityType::PowerLaw { .. }
-                    ));
+                    assert!(
+                        matches!( s2_comp.flux_type, FluxDensityType::CurvedPowerLaw { .. } ),
+                        "{sl1_name}: fdtype mismatch {s1_comp:?} {s2_comp:?}"
+                    );
                     match s2_comp.flux_type {
                         FluxDensityType::CurvedPowerLaw { .. } => {
                             // The parameters of the curved power law may
@@ -872,4 +873,121 @@ fn read_invalid_json_file() {
             Err(ReadSourceListError::InvalidDec(_))
         ));
     }
+}
+
+fn get_fits_expected_srclist(ref_freq: f64, include_list: bool, include_cpl: bool) -> SourceList {
+    let mut expected_srclist = SourceList::new();
+    let cmp_type_gaussian = ComponentType::Gaussian {
+        maj: 20.0_f64.to_radians(),
+        min: 10.0_f64.to_radians(),
+        pa: 75.0_f64.to_radians(),
+    };
+    let flux_type_list = FluxDensityType::List(vec1![
+        FluxDensity { freq: ref_freq, i: 1.0, q: 0.0, u: 0.0, v: 0.0, },
+    ]);
+    let flux_type_pl = FluxDensityType::PowerLaw {
+        si: -0.8,
+        fd: FluxDensity { freq: ref_freq, i: 2.0, q: 0.0, u: 0.0, v: 0.0, },
+    };
+    let flux_type_cpl = FluxDensityType::CurvedPowerLaw {
+        si: -0.9,
+        fd: FluxDensity { freq: ref_freq, i: 3.0, q: 0.0, u: 0.0, v: 0.0, },
+        q: 0.2,
+    };
+    if include_list {
+        expected_srclist.insert(
+            "point-list".into(),
+            Source { components: vec![SourceComponent {
+                radec: RADec::from_degrees(0.0, 1.0),
+                comp_type: ComponentType::Point,
+                flux_type: flux_type_list.clone()
+            }].into()}
+        );
+    }
+    expected_srclist.insert(
+        "point-pl".into(),
+        Source { components: vec![SourceComponent {
+            radec: RADec::from_degrees(1.0, 2.0),
+            comp_type: ComponentType::Point,
+            flux_type: flux_type_pl.clone(),
+        }].into()}
+    );
+    if include_cpl {
+        expected_srclist.insert(
+            "point-cpl".into(),
+            Source { components: vec![SourceComponent {
+                radec: RADec::from_degrees(3.0, 4.0),
+                comp_type: ComponentType::Point,
+                flux_type: flux_type_cpl.clone(),
+            }].into()}
+        );
+    }
+    if include_list {
+        expected_srclist.insert(
+            "gauss-list".into(),
+            Source { components: vec![SourceComponent {
+                radec: RADec::from_degrees(0.0, 1.0),
+                comp_type: cmp_type_gaussian.clone(),
+                flux_type: flux_type_list
+            }].into()}
+        );
+    }
+    expected_srclist.insert(
+        "gauss-pl".into(),
+        Source { components: vec![SourceComponent {
+            radec: RADec::from_degrees(1.0, 2.0),
+            comp_type: cmp_type_gaussian.clone(),
+            flux_type: flux_type_pl,
+        }].into()}
+    );
+    if include_cpl {
+        expected_srclist.insert(
+            "gauss-cpl".into(),
+            Source { components: vec![SourceComponent {
+                radec: RADec::from_degrees(3.0, 4.0),
+                comp_type: cmp_type_gaussian,
+                flux_type: flux_type_cpl,
+            }].into()}
+        );
+    }
+    expected_srclist
+}
+
+#[test]
+fn test_parse_gleam_fits() {
+    // TODO(Dev): CPL and List
+
+    // python -c 'from astropy.io import fits; import sys; from tabulate import tabulate; print(tabulate((i:=fits.open(sys.argv[-1])[1]).data, headers=[c.name for c in i.columns]))' /home/dev/src/hyperdrive_main/test_files/gleam.fits
+    // Name          RAJ2000    DEJ2000    S_200    alpha    beta    a    b    pa
+    // ----------  ---------  ---------  -------  -------  ------  ---  ---  ----
+    // point-pl            1          2        1     -0.8     0      0    0     0
+    // gauss-pl            1          2        1     -0.8     0     20   10    75
+
+
+    let res_srclist = parse_source_list(&PathBuf::from("test_files/gleam.fits")).unwrap();
+    let expected_srclist = get_fits_expected_srclist(200e6, false, false);
+    dbg!(&res_srclist, &expected_srclist);
+    test_two_sources_lists_are_the_same(&res_srclist, &expected_srclist);
+}
+
+#[test]
+fn test_parse_jack_fits() {
+    // TODO(Dev): List
+
+    // python -c 'from astropy.io import fits; import sys; from tabulate import tabulate; print(tabulate((i:=fits.open(sys.argv[-1])[1]).data, headers=[c.name for c in i.columns]))' /home/dev/src/hyperdrive_main/test_files/jack.fits
+    // UNQ_SOURCE_ID    NAME             RA    DEC    INT_FLX150    MAJOR_DC    MINOR_DC    PA_DC  MOD_TYPE      NORM_COMP_PL    ALPHA_PL    NORM_COMP_CPL    ALPHA_CPL    CURVE_CPL
+    // ---------------  -------------  ----  -----  ------------  ----------  ----------  -------  ----------  --------------  ----------  ---------------  -----------  -----------
+    // point-pl         point-pl_C0       1      2             1           0           0        0  pl                       1        -0.8                0          0            0
+    // point-cpl        point-cpl_C0      3      4             1           0           0        0  cpl                      0         0                  1         -0.8          0.2
+    // gauss-pl         gauss-pl_C0       1      2             1          20          10       75  pl                       1        -0.8                0          0            0
+    // gauss-cpl        gauss-cpl_C0      3      4             1          20          10       75  cpl                      0         0                  1         -0.8          0.2
+
+    // setup logging
+    // use crate::cli::setup_logging;
+    // setup_logging(3).expect("Failed to setup logging");
+
+    let res_srclist = parse_source_list(&PathBuf::from("test_files/jack.fits")).unwrap();
+    let expected_srclist = get_fits_expected_srclist(200e6, false, true);
+    dbg!(&res_srclist, &expected_srclist);
+    test_two_sources_lists_are_the_same(&res_srclist, &expected_srclist);
 }

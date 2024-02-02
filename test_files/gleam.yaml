@@ -1,0 +1,72 @@
+point-list:
+- ra: 0.0
+  dec: 1.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: 0.0
+      fd:
+        freq: 200000000.0
+        i: 1.0
+point-pl:
+- ra: 1.0
+  dec: 2.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.8
+      fd:
+        freq: 200000000.0
+        i: 1.0
+point-cpl:
+- ra: 3.0000000000000004
+  dec: 4.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.8
+      fd:
+        freq: 200000000.0
+        i: 1.0
+gauss-list:
+- ra: 0.0
+  dec: 1.0
+  comp_type:
+    gaussian:
+      maj: 20.000000000000004
+      min: 10.000000000000002
+      pa: 75.0
+  flux_type:
+    power_law:
+      si: 0.0
+      fd:
+        freq: 200000000.0
+        i: 1.0
+gauss-pl:
+- ra: 1.0
+  dec: 2.0
+  comp_type:
+    gaussian:
+      maj: 20.000000000000004
+      min: 10.000000000000002
+      pa: 75.0
+  flux_type:
+    power_law:
+      si: -0.8
+      fd:
+        freq: 200000000.0
+        i: 1.0
+gauss-cpl:
+- ra: 3.0000000000000004
+  dec: 4.0
+  comp_type:
+    gaussian:
+      maj: 20.000000000000004
+      min: 10.000000000000002
+      pa: 75.0
+  flux_type:
+    power_law:
+      si: -0.8
+      fd:
+        freq: 200000000.0
+        i: 1.0

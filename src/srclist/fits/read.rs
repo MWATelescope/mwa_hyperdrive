@@ -105,7 +105,7 @@ impl CommonCols {
         hdu: &FitsHdu,
         col_names: &[String],
     ) -> Result<Self, FitsError> {
-        macro_rules! read_col {
+        macro_rules! read_optional_col {
             ($possible_col_names: expr) => {{
                 let mut maybe_col = None;
                 for possible_col_name in $possible_col_names {
@@ -116,10 +116,18 @@ impl CommonCols {
                         maybe_col = Some(fe!(file, hdu.read_col(fptr, possible_col_name)));
                     }
                 }
-                maybe_col.unwrap_or_else(|| {
+                if !maybe_col.is_some() {
+                    debug!("None of {:?} were available columns!", $possible_col_names)
+                }
+                maybe_col
+            }}
+        }
+        macro_rules! read_mandatory_col {
+            ($possible_col_names: expr) => {{
+                read_optional_col!($possible_col_names).unwrap_or_else(|| {
                     panic!("None of {:?} were available columns!", $possible_col_names)
                 })
-            }};
+            }}
         }
 
         let unq_source_id = if col_names.iter().any(|col_name| col_name == "UNQ_SOURCE_ID") {
@@ -128,12 +136,21 @@ impl CommonCols {
             vec![]
         };
 
-        let names = read_col!(["NAME", "Name"]);
-        let ra_degrees = read_col!(["RA", "RAJ2000"]);
-        let dec_degrees = read_col!(["DEC", "DEJ2000"]);
-        let majors = read_col!(["MAJOR_DC", "a"]);
-        let minors = read_col!(["MINOR_DC", "b"]);
-        let pas = read_col!(["PA_DC", "pa"]);
+        let names = read_mandatory_col!(["NAME", "Name"]);
+        let ra_degrees = read_mandatory_col!(["RA", "RAJ2000"]);
+        let dec_degrees = read_mandatory_col!(["DEC", "DEJ2000"]);
+        let majors = read_mandatory_col!(["MAJOR_DC", "a"]);
+        let minors = read_mandatory_col!(["MINOR_DC", "b"]);
+        let pas = read_mandatory_col!(["PA_DC", "pa"]);
+        // let majors = read_optional_col!(["MAJOR_DC", "a"]).unwrap_or_else(|| {
+        //     vec![0.0; names.len()]
+        // });
+        // let minors = read_optional_col!(["MINOR_DC", "b"]).unwrap_or_else(|| {
+        //     vec![0.0; names.len()]
+        // });
+        // let pas = read_optional_col!(["PA_DC", "pa"]).unwrap_or_else(|| {
+        //     vec![0.0; names.len()]
+        // });
 
         // Get any shapelet info ready. We assume that the info lives in HDU 3
         // (index 2 in sane languages), and if there's an error, we assume it's
@@ -230,8 +247,8 @@ impl CommonCols {
             comp_types
         };
 
-        let power_law_stokes_is: Vec<f64> = read_col!(["NORM_COMP_PL", "S_200"]);
-        let power_law_alphas = read_col!(["ALPHA_PL", "alpha"]);
+        let power_law_stokes_is: Vec<f64> = read_mandatory_col!(["NORM_COMP_PL", "S_200"]);
+        let power_law_alphas = read_mandatory_col!(["ALPHA_PL", "alpha"]);
 
         let (curved_power_law_stokes_is, curved_power_law_alphas, curved_power_law_qs): (
             Vec<f64>,
@@ -241,7 +258,7 @@ impl CommonCols {
             (
                 fe!(file, hdu.read_col(fptr, "NORM_COMP_CPL")),
                 fe!(file, hdu.read_col(fptr, "ALPHA_CPL")),
-                fe!(file, hdu.read_col(fptr, "CURVE_CPL")),
+                fe!(file, hdu.read_col(fptr, "CURVE_CPL")), // todo: gsm beta for cpl?
             )
         } else {
             (vec![], vec![], vec![])
