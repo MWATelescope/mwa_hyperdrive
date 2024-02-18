@@ -13,6 +13,7 @@ use std::{
     ops::{Div, Neg, Sub},
     path::PathBuf,
     thread::{self, ScopedJoinHandle},
+    cmp::Ordering,
 };
 
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
@@ -21,7 +22,7 @@ use hifitime::{Duration, Epoch};
 use indexmap::IndexMap;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::{izip, Itertools};
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use marlu::{
     constants::VEL_C,
     pos::xyz::xyzs_to_cross_uvws,
@@ -48,6 +49,7 @@ use crate::{
     model::{ModelDevice, ModelError, SkyModeller, SkyModellerCpu},
     srclist::SourceList,
     Chanblock, TileBaselineFlags, MODEL_DEVICE, PROGRESS_BARS,
+    math::div_ceil,
 };
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use crate::{
@@ -81,6 +83,48 @@ pub(crate) struct SourceIonoConsts {
     pub(crate) gains: Vec<f64>,
     pub(crate) weighted_catalogue_pos_j2000: RADec,
     // pub(crate) centroid_timestamps: Vec<Epoch>,
+}
+
+#[derive(Debug, PartialEq)] //, Serialize, Deserialize)]
+pub(crate) struct BadSource {
+    // timeblock: Timeblock,
+    pub(crate) gpstime: f64,
+    pub(crate) pass: usize,
+    // pub(crate) gsttime: Epoch,
+    // pub(crate) times: Vec<Epoch>,
+    // source: Source,
+    pub(crate) i_source: usize,
+    pub(crate) source_name: String,
+    // pub(crate) weighted_catalogue_pos_j2000: RADec,
+    // iono_consts: IonoConsts,
+    pub(crate) alpha: f64,
+    pub(crate) beta: f64,
+    pub(crate) gain: f64,
+    // pub(crate) alphas: Vec<f64>,
+    // pub(crate) betas: Vec<f64>,
+    // pub(crate) gains: Vec<f64>,
+
+    pub(crate) residuals_i: Vec<Complex<f64>>,
+    pub(crate) residuals_q: Vec<Complex<f64>>,
+    pub(crate) residuals_u: Vec<Complex<f64>>,
+    pub(crate) residuals_v: Vec<Complex<f64>>,
+}
+
+// custom sorting implementations
+impl PartialOrd for BadSource {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.source_name.partial_cmp(&other.source_name) {
+            // Some(Ordering::Equal) => match self.gpstime.partial_cmp(&other.gpstime) {
+                Some(Ordering::Equal) => match self.pass.partial_cmp(&other.pass) {
+                    Some(Ordering::Less) => Some(Ordering::Greater),
+                    Some(Ordering::Greater) => Some(Ordering::Less),
+                    other => other,
+                },
+            //     other => other,
+            // },
+            other => other,
+        }
+    }
 }
 
 pub(crate) struct PeelParams {
@@ -179,8 +223,7 @@ impl PeelParams {
         };
 
         assert!(
-            input_vis_params.timeblocks.len()
-                == iono_time_average_factor.get() * iono_timeblocks.len(),
+            div_ceil(input_vis_params.timeblocks.len(), iono_time_average_factor.get()) == iono_timeblocks.len(),
             "num_read_times {} != num_iono_times {} * iono_time_average_factor {}",
             input_vis_params.timeblocks.len(),
             iono_timeblocks.len(),
@@ -188,8 +231,8 @@ impl PeelParams {
         );
 
         let error = AtomicCell::new(false);
-        let (tx_data, rx_data) = bounded(1);
-        let (tx_residual, rx_residual) = bounded(1);
+        let (tx_data, rx_data) = bounded(2);
+        let (tx_residual, rx_residual) = bounded(2);
         let (tx_full_residual, rx_full_residual) = bounded(iono_time_average_factor.get());
         let (tx_write, rx_write) = bounded(2);
         let (tx_iono_consts, rx_iono_consts) = unbounded();
@@ -511,12 +554,6 @@ fn get_weights_rts(tile_uvs: ArrayView2<UV>, lambdas_m: &[f64], short_sigma: f64
             });
         });
     weights
-}
-
-// TODO (dev): a.div_ceil(b) would be better, but it's nightly:
-// https://doc.rust-lang.org/std/primitive.i32.html#method.div_ceil
-fn div_ceil(a: usize, b: usize) -> usize {
-    (a + b - 1) / b
 }
 
 /// Like `vis_weight_average_tfb`, but for when we don't need to keep the low-res weights
@@ -1428,6 +1465,10 @@ fn peel_gpu(
     no_precession: bool,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
+    use std::collections::{HashMap, HashSet};
+
+    use crate::srclist::{ComponentType, FluxDensityType, FluxDensity};
+
     let timestamps = &timeblock.timestamps;
 
     let num_timesteps = vis_residual_tfb.len_of(Axis(0));
@@ -1490,6 +1531,8 @@ fn peel_gpu(
     );
     peel_progress.tick();
 
+    macro_rules! pb_warn { ($($arg:tt)+) => (multi_progress_bar.suspend(|| warn!($($arg)+))) }
+    macro_rules! pb_info { ($($arg:tt)+) => (multi_progress_bar.suspend(|| info!($($arg)+))) }
     macro_rules! pb_debug { ($($arg:tt)+) => (multi_progress_bar.suspend(|| debug!($($arg)+))) }
     macro_rules! pb_trace { ($($arg:tt)+) => (multi_progress_bar.suspend(|| trace!($($arg)+))) }
 
@@ -1653,8 +1696,10 @@ fn peel_gpu(
         .try_into()
         .expect("smaller than i32::MAX");
 
+    let mut bad_sources = Vec::<BadSource>::new();
+
     unsafe {
-        let mut gpu_uvws = Array2::default((num_timesteps, num_cross_baselines));
+        let mut gpu_uvws: ArrayBase<ndarray::OwnedRepr<gpu::UVW>, Dim<[usize; 2]>> = Array2::default((num_timesteps, num_cross_baselines));
         gpu_uvws
             .outer_iter_mut()
             .zip(tile_xyzs_high_res.outer_iter())
@@ -1774,6 +1819,11 @@ fn peel_gpu(
                 pass + 1
             ));
 
+            let mut pass_issues = 0;
+            let mut pass_alpha_mag = 0.;
+            let mut pass_bega_mag = 0.;
+            let mut pass_gain_mag = 0.;
+
             // this needs to be inside the pass loop, because d_uvws_from gets swapped with d_uvws_to
             gpu_kernel_call!(
                 gpu::xyzs_to_uvws,
@@ -1797,9 +1847,9 @@ fn peel_gpu(
                 .enumerate()
             {
                 let start = std::time::Instant::now();
-                pb_debug!(
-                    "peel loop {pass}: {source_name} at {source_pos} (has iono {iono_consts:?})"
-                );
+                // pb_debug!(
+                //     "peel loop {pass}: {source_name} at {source_pos} (has iono {iono_consts:?})"
+                // );
 
                 // let old_iono_consts = *iono_consts;
                 let old_iono_consts = IonoConsts {
@@ -1944,7 +1994,7 @@ fn peel_gpu(
                 // we have low res residual and model, now print what iono fit will see.
                 // {
                 //     use marlu::math::cross_correlation_baseline_to_tiles;
-                //     let vis_residual_low_res_fb = d_low_res_resid_fb.copy_from_device_new()?;
+                //     let vis_residual_low_res_fb = d_low_res_vis_fb.copy_from_device_new()?;
                 //     dbg!(vis_residual_low_res_fb.len(), num_low_res_chans, num_cross_baselines);
                 //     let vis_residual_low_res_fb = Array2::from_shape_vec(
                 //         (num_low_res_chans, num_cross_baselines),
@@ -1992,7 +2042,7 @@ fn peel_gpu(
                 //             let model_i = model[0] + model[3];
                 //             let u = u as GpuFloat;
                 //             let v = v as GpuFloat;
-                //             println!("uv {ant1:3} {ant2:3} ({u:+9.3}, {v:+9.3}) l{lambda:+7.5} wt{weight:3.1} | RI {:+11.7} @{:+5.3}pi | MI {:+11.7} @{:+5.3}pi", residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
+                //             println!("uv {ant1:3} {ant2:3} ({u:+9.3}, {v:+9.3}) l{lambda:+7.5} wt{weight:+3.1} | RI {:+11.7} @{:+5.3}pi | MI {:+11.7} @{:+5.3}pi", residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
                 //         }
                 //     }
                 // }
@@ -2002,6 +2052,18 @@ fn peel_gpu(
                     beta: 0.0,
                     gain: 1.0,
                 };
+                // get size of device ptr
+                let lrblch = (num_cross_baselines_i32 * num_low_res_chans_i32) as f64;
+                pb_trace!("before iono_loop nt{:?} nxbl{:?} nlrch{:?} = lrxblch{:?}; lrvfb{:?} lrwfb{:?} lrmfb{:?} lrmrfb{:?}",
+                    num_tiles_i32,
+                    num_cross_baselines_i32,
+                    num_low_res_chans_i32,
+                    lrblch,
+                    d_low_res_vis_fb.get_size() as f64 / lrblch,
+                    d_low_res_weights_fb.get_size() as f64 / lrblch,
+                    d_low_res_model_fb.get_size() as f64 / lrblch,
+                    d_low_res_model_rotated.get_size() as f64 / lrblch,
+                );
                 gpu_kernel_call!(
                     gpu::iono_loop,
                     d_low_res_vis_fb.get().cast(),
@@ -2024,6 +2086,76 @@ fn peel_gpu(
                 iono_consts.alpha = old_iono_consts.alpha + gpu_iono_consts.alpha;
                 iono_consts.beta = old_iono_consts.beta + gpu_iono_consts.beta;
                 iono_consts.gain = old_iono_consts.gain * gpu_iono_consts.gain;
+
+                let issues = format!(
+                    "{}{}{}",
+                    if iono_consts.alpha.abs() > 1e-3 {
+                        if iono_consts.alpha > 0.0 { "A" } else { "a" }
+                    } else {
+                        ""
+                    },
+                    if iono_consts.beta.abs() > 1e-3 {
+                        if iono_consts.beta > 0.0 { "B" } else { "b" }
+                    } else {
+                        ""
+                    },
+                    if iono_consts.gain < 0.0 {
+                        "g"
+                    } else if iono_consts.gain > 1.5 {
+                        "G"
+                    } else {
+                        ""
+                    },
+                );
+                let message = format!(
+                    // "t{:03} p{pass} s{i_source:6}|{source_name:16} @ ra {:+7.2} d {:+7.2} | a {:+7.2e} b {:+7.2e} g {:+3.2} | da {:+8.2e} db {:+8.2e} dg {:+3.2} | {}",
+                    "t{:3} pass {:2} s{i_source:6}|{source_name:16} @ ra {:+7.2} d {:+7.2} | a {:+8.6} b {:+8.6} g {:+3.2} | da {:+8.6} db {:+8.6} dg {:+3.2} | {}",
+                    timeblock.index,
+                    pass+1,
+                    (source_pos.ra.to_degrees() + 180.) % 360. - 180.,
+                    source_pos.dec.to_degrees(),
+                    iono_consts.alpha,
+                    iono_consts.beta,
+                    iono_consts.gain,
+                    iono_consts.alpha - old_iono_consts.alpha,
+                    iono_consts.beta - old_iono_consts.beta,
+                    iono_consts.gain - old_iono_consts.gain,
+                    issues,
+                );
+                if issues.is_empty() {
+                    pb_debug!("[peel_gpu] {}", message);
+                    pass_alpha_mag += (iono_consts.alpha - old_iono_consts.alpha).abs();
+                    pass_bega_mag += (iono_consts.beta - old_iono_consts.beta).abs();
+                    pass_gain_mag += iono_consts.gain - old_iono_consts.gain;
+                } else {
+                    pb_debug!(
+                        "[peel_gpu] {} (reverting to a {:+8.6} b {:+8.6} g {:+3.2})",
+                        message,
+                        old_iono_consts.alpha,
+                        old_iono_consts.beta,
+                        old_iono_consts.gain,
+                    );
+                    bad_sources.push(BadSource {
+                        gpstime: timeblock.median.to_gpst_seconds(),
+                        pass,
+                        i_source,
+                        source_name: source_name.to_string(),
+                        // weighted_catalogue_pos_j2000: source_pos,
+                        alpha: iono_consts.alpha,
+                        beta: iono_consts.beta,
+                        gain: iono_consts.gain,
+                        residuals_i: Vec::default(), // todo!(),
+                        residuals_q: Vec::default(), // todo!(),
+                        residuals_u: Vec::default(), // todo!(),
+                        residuals_v: Vec::default(), // todo!(),
+                    });
+
+                    iono_consts.alpha = old_iono_consts.alpha;
+                    iono_consts.beta = old_iono_consts.beta;
+                    iono_consts.gain = old_iono_consts.gain;
+                    pass_issues += 1;
+                }
+
                 let gpu_iono_consts = gpu::IonoConsts {
                     alpha: iono_consts.alpha,
                     beta: iono_consts.beta,
@@ -2097,10 +2229,30 @@ fn peel_gpu(
                 // The new phase centre becomes the old one.
                 std::mem::swap(&mut d_uvws_from, &mut d_uvws_to);
 
-                pb_debug!(
-                    "peel loop finished: {source_name} at {source_pos} (has iono {iono_consts:?})"
-                );
                 peel_progress.inc(1);
+            }
+
+            let num_good_sources = (num_sources_to_iono_subtract - pass_issues) as f64;
+            if num_good_sources > 0. {
+                let msg = format!(
+                    "t{:3} pass {:2} ma {:+7.2e} mb {:+7.2e} mg {:+7.2e}",
+                    timeblock.index,
+                    pass + 1,
+                    pass_alpha_mag / num_good_sources,
+                    pass_bega_mag / num_good_sources,
+                    pass_gain_mag / num_good_sources
+                );
+                if pass_issues > 0 {
+                    pb_warn!("[peel_gpu] {} ({} issues)", msg, pass_issues);
+                } else {
+                    pb_info!("[peel_gpu] {} (no issues)", msg);
+                }
+            } else {
+                pb_warn!(
+                    "[peel_gpu] t{:03} pass {:2} all sources had issues",
+                    timeblock.index,
+                    pass + 1
+                );
             }
 
             // Rotate back to the phase centre.
@@ -2132,6 +2284,100 @@ fn peel_gpu(
 
         // copy results back to host
         d_high_res_vis_tfb.copy_from_device(vis_residual_tfb.as_slice_mut().unwrap())?;
+    }
+
+    let mut pass_counts = HashMap::<String, usize>::new();
+    for bad_source in bad_sources.iter() {
+        *pass_counts.entry(bad_source.source_name.clone()).or_default() += 1;
+    }
+    let mut printed = HashSet::<String>::new();
+    bad_sources.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    for bad_source in bad_sources.into_iter() {
+        let BadSource {
+            gpstime,
+            // pass,
+            i_source,
+            source_name,
+            alpha,
+            beta,
+            gain,
+            ..
+        } = bad_source;
+        // if source_name is in printed
+        if printed.contains(&source_name) {
+            continue;
+        } else {
+            printed.insert(source_name.clone());
+        }
+        let passes = pass_counts[&source_name];
+
+        let pos = source_weighted_positions[i_source];
+        let RADec { ra, dec } = pos;
+        pb_warn!(
+            "[peel_gpu] Bad source: {:.2} p{:2} {} at radec({:+7.2}, {:+7.2}) iono({:+8.6},{:+8.6},{:+3.2})",
+            gpstime,
+            passes,
+            source_name,
+            (ra + 180.) % 360. - 180.,
+            dec,
+            alpha,
+            beta,
+            gain
+        );
+        let matches = source_list.search_asec(pos, 300.);
+        for (sep, src_name, idx, comp) in matches {
+            let compstr = match comp.comp_type {
+                ComponentType::Gaussian { maj, min, pa } => format!(
+                    "G {:6.1}as {:6.1}as {:+6.1}d",
+                    maj.to_degrees() * 3600.,
+                    min.to_degrees() * 3600.,
+                    pa.to_degrees()
+                ),
+                ComponentType::Point => format!(
+                    "P {:8} {:8} {:7}",
+                    "", "", ""
+                ),
+                _ => format!(
+                    "? {:8} {:8} {:7}",
+                    "", "", ""
+                ),
+            };
+            let fluxstr = match comp.flux_type {
+                FluxDensityType::CurvedPowerLaw { si, fd: FluxDensity { freq, i, .. }, q } => format!(
+                    "cpl S={:+6.2}(νn)^{:+5.2} exp[{:+5.2}ln(νn)]; @{:.1}MHz", i, si, q, freq / 1e6
+                ),
+                FluxDensityType::PowerLaw { si, fd: FluxDensity { freq, i, .. } } => format!(
+                    "pl  S={:+6.2}(νn)^{:+5.2}; @{:.1}MHz", i, si, freq / 1e6
+                ),
+                FluxDensityType::List(fds) => {
+                    let FluxDensity { i, freq, .. } = fds[0];
+                    format!("lst S={:+6.2} @{:.1}MHz", i, freq / 1e6)
+                },
+            };
+            pb_warn!(
+                "[peel_gpu]  {sep:5.1} {src_name:16} c{idx:2} at radec({:+7.2},{:+7.2}) comp({}) flx ({})",
+                (comp.radec.ra + 180.) % 360. - 180.,
+                comp.radec.dec,
+                compstr,
+                fluxstr,
+            );
+        }
+        // pb_warn!(
+        //     "  residuals_i: {:?}",
+        //     bad_source.residuals_i.iter().map(|c| c.norm()).collect_vec()
+        // );
+        // pb_warn!(
+        //     "  residuals_q: {:?}",
+        //     bad_source.residuals_q.iter().map(|c| c.norm()).collect_vec()
+        // );
+        // pb_warn!(
+        //     "  residuals_u: {:?}",
+        //     bad_source.residuals_u.iter().map(|c| c.norm()).collect_vec()
+        // );
+        // pb_warn!(
+        //     "  residuals_v: {:?}",
+        //     bad_source.residuals_v.iter().map(|c| c.norm()).collect_vec()
+        // );
     }
 
     Ok(())
@@ -2279,6 +2525,14 @@ fn read_thread(
             return Ok(());
         }
 
+        debug!(
+            "[read] vdfb shp={:?} sum={:?} vwfb shp={:?} sum={:?}",
+            vis_data_fb.shape(),
+            vis_data_fb.sum(),
+            vis_weights_fb.shape(),
+            vis_weights_fb.sum(),
+        );
+
         match tx_data.send((vis_data_fb, vis_weights_fb, timeblock.median)) {
             Ok(()) => (),
             // If we can't send the message, it's because the
@@ -2418,7 +2672,8 @@ fn subtract_thread(
         // residuals.
         vis_data_fb.iter_mut().for_each(|j| *j *= -1.0);
 
-        let (lst, xyzs, latitude) = if apply_precession {
+        // let (lst, xyzs, latitude) =
+        if apply_precession {
             let precession_info = precess_time(
                 array_position.longitude_rad,
                 array_position.latitude_rad,
@@ -2489,14 +2744,15 @@ fn subtract_thread(
         #[cfg(any(feature = "cuda", feature = "hip"))]
         if let Some(GpuStuff {
             modeller,
-            d_uvws_from,
-            d_uvws_to,
-            d_beam_jones,
-            d_xyzs,
-            gpu_xyzs,
-            d_lmst,
-            d_lambdas,
-            d_vis_fb,
+            // d_uvws_from,
+            // d_uvws_to,
+            // d_beam_jones,
+            // d_xyzs,
+            // gpu_xyzs,
+            // d_lmst,
+            // d_lambdas,
+            // d_vis_fb,
+            ..
         }) = gpu_modeller.as_mut()
         {
             // d_vis_fb.overwrite(vis_data_fb.as_slice().expect("is contiguous"))?;
@@ -2655,6 +2911,10 @@ fn joiner_thread<'a>(
 
             full_residual_fb.assign(&vis_residual_fb);
             full_weights_fb.assign(&vis_weights_fb);
+        }
+
+        if vis_weights_tfb.sum() < 0.0 {
+            warn!("[joiner] all flagged: timestamps={timestamps:?}")
         }
 
         match tx_full_residual.send((vis_residual_tfb, vis_weights_tfb, timeblock)) {
