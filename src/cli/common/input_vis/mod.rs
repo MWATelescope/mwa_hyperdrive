@@ -832,8 +832,9 @@ impl InputVisArgs {
                 r
             }
         };
+        let first_obs_ts = obs_context.timestamps.first();
         time_printer
-            .push_line(format!("First obs timestamp: {}", obs_context.timestamps.first()).into());
+            .push_line(format!("First obs timestamp: {} | {:.2}", first_obs_ts, first_obs_ts.to_gpst_seconds()).into());
         time_printer.push_block(vec![
             format!(
                 "Available timesteps: {}",
@@ -852,26 +853,34 @@ impl InputVisArgs {
         )
         .into()];
         match timesteps_to_use.as_slice() {
-            [t] => block.push(
-                format!(
-                    "Only timestamp (GPS): {:.2}",
-                    obs_context.timestamps[*t].to_gpst_seconds()
-                )
-                .into(),
-            ),
-
-            [f, .., l] => {
+            [t] => {
+                let only_use_ts = obs_context.timestamps[*t];
                 block.push(
                     format!(
-                        "First timestamp (GPS): {:.2}",
-                        obs_context.timestamps[*f].to_gpst_seconds()
+                        "Only timestamp:      {} ({:+.2}s)",
+                        only_use_ts,
+                        only_use_ts.to_gpst_seconds() - first_obs_ts.to_gpst_seconds(),
+                    )
+                    .into(),
+                )
+            },
+
+            [f, .., l] => {
+                let first_use_ts = obs_context.timestamps[*f];
+                block.push(
+                    format!(
+                        "First timestamp:     {} ({:+.2}s)",
+                        first_use_ts,
+                        first_use_ts.to_gpst_seconds() - first_obs_ts.to_gpst_seconds(),
                     )
                     .into(),
                 );
+                let last_use_ts = obs_context.timestamps[*l];
                 block.push(
                     format!(
-                        "Last timestamp  (GPS): {:.2}",
-                        obs_context.timestamps[*l].to_gpst_seconds()
+                        "Last timestamp :     {} ({:+.2}s)",
+                        last_use_ts,
+                        last_use_ts.to_gpst_seconds() - first_obs_ts.to_gpst_seconds(),
                     )
                     .into(),
                 );

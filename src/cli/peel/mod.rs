@@ -28,6 +28,7 @@ use crate::{
     params::{ModellingParams, PeelParams},
     unit_parsing::{parse_wavelength, WavelengthUnit, WAVELENGTH_FORMATS},
     HyperdriveError,
+    math::div_ceil,
 };
 
 const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
@@ -481,8 +482,8 @@ impl PeelArgs {
         let n_low_freqs = low_res_spw.get_all_freqs().len();
         let n_input_freqs = input_vis_params.spw.get_all_freqs().len();
         assert_eq!(
-            n_low_freqs * low_res_freq_average_factor.get(),
-            n_input_freqs,
+            n_low_freqs,
+            div_ceil(n_input_freqs, low_res_freq_average_factor.get()),
             "low chans (flagged+unflagged) {} * low_res_freq_average_factor {} != input chans (flagged+unflagged) {}. also iono_freq_average_factor {}",
             n_low_freqs,
             low_res_freq_average_factor.get(),
@@ -687,12 +688,15 @@ impl PeelArgs {
                 block.push(
                     format!(
                         "- low: {} kHz (averaging {}x)",
-                        low_res_spw.freq_res / 1e3 * low_res_freq_average_factor.get() as f64,
+                        low_res_spw.freq_res / 1e3,
                         low_res_freq_average_factor
                     )
                     .into(),
                 );
             }
+            block.push(
+                format!("- {num_passes} passes of {num_loops} loops at {convergence:.2} convergence").into()
+            );
             peel_printer.push_block(block);
         }
 
