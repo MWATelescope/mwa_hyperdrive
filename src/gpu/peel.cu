@@ -467,11 +467,12 @@ __global__ void reduce_freqs(
         // warning: gain is actually needed for model real to line up with vis real.
         iono_consts->gain *= 1. + convergence * (s_vm / s_mm - 1);
         // printf(
-        //     "iono: a %+6.4e b %+6.4e a_uu %+6.4e a_uv %+6.4e a_vv %+6.4e A_u %+6.4e A_v %+6.4e denom %+6.4e s_vm %+6.4e s_mm %+6.4e s_vm/s_mm %+6.4e \n",
+        //     "iono: a %+6.4e b %+6.4e a_uu %+6.4e a_uv %+6.4e a_vv %+6.4e A_u %+6.4e A_v %+6.4e denom %+6.4e s_vm %+6.4e s_mm %+6.4e s_vm/s_mm %+6.4e nf %d \n",
         //     iono_consts->alpha, iono_consts->beta,
         //     a_uu, a_uv, a_vv, A_u, A_v, denom,
         //     // iono_consts->gain,
-        //     s_vm, s_mm, s_vm / s_mm
+        //     s_vm, s_mm, s_vm / s_mm,
+        //     num_freqs
         // );
     }
 }
@@ -820,9 +821,10 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         // Sane?
         gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
         if (iono_consts->gain < 0.0) {
-            iono_consts->alpha = 0.0;
-            iono_consts->beta = 0.0;
-            iono_consts->gain = 1.0;
+            // let's handle this in cpu world. This gets overwritten by the gpuMemcpy at the end of this function anyway
+            // iono_consts->alpha = 0.0;
+            // iono_consts->beta = 0.0;
+            // iono_consts->gain = 1.0;
             break;
         }
         // printf("iter %d: %.4e %.4e %.4e\n", iteration, iono_consts->alpha, iono_consts->beta, iono_consts->gain);
