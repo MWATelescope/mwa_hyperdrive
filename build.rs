@@ -151,36 +151,46 @@ mod gpu {
 
         #[cfg(feature = "hip")]
         let mut gpu_target = {
-            const DEFAULT_HIP_ARCHES: &[&str] = &["gfx90a"];
-
-            let hip_path = match env::var_os("HIP_PATH") {
+            println!("cargo:rerun-if-env-changed=HIP_PATH");
+            let mut hip_path = match env::var_os("HIP_PATH") {
                 Some(p) => {
-                    println!("cargo:warning=HIP_PATH set from env {}", p.to_string_lossy());
+                    println!(
+                        "cargo:warning=HIP_PATH set from env {}",
+                        p.to_string_lossy()
+                    );
                     std::path::PathBuf::from(p)
                 }
                 None => {
                     let hip_path = hip_sys::hiprt::get_hip_path();
-                    println!("cargo:warning=HIP_PATH set from hip_sys {}", hip_path.display());
+                    println!(
+                        "cargo:warning=HIP_PATH set from hip_sys {}",
+                        hip_path.display()
+                    );
                     hip_path
-                },
+                }
             };
-            if !hip_path.exists() {
-                panic!("Couldn't find HIP path at {}", hip_path.display());
-            }
 
             // It seems that various ROCm releases change where hipcc is...
             let mut compiler = hip_path.join("bin/hipcc");
             if !compiler.exists() {
                 // Try the dir above, which might be the ROCm dir.
-                compiler = hip_path.join("../bin/hipcc");
+                hip_path = hip_path.parent().unwrap().into();
+                compiler = hip_path.join("bin/hipcc");
+                if !compiler.exists() {
+                    panic!(
+                        "Couldn't find hipcc in either {} or {}",
+                        hip_sys::hiprt::get_hip_path().display(),
+                        hip_path.parent().unwrap().display()
+                    );
+                }
             }
-            if !compiler.exists() {
+            if !hip_path.join("include/hip/hip_runtime_api.h").exists() {
                 panic!(
-                    "Couldn't find hipcc in {}/bin/hipcc or {}",
-                    hip_path.display(),
-                    compiler.display()
+                    "Couldn't find include/hip/hip_runtime_api.h in {}",
+                    hip_path.display()
                 );
             }
+
             let mut hip_target = cc::Build::new();
             hip_target
                 .compiler(compiler)
@@ -202,11 +212,8 @@ mod gpu {
                 _ => {
                     // Print out all of the default arches and computes as a
                     // warning.
-                    println!("cargo:warning=No HYPERBEAM_HIP_ARCH; Passing --offload-arch={DEFAULT_HIP_ARCHES:?} to hip");
-                    DEFAULT_HIP_ARCHES
-                        .iter()
-                        .map(|&s| String::from(s))
-                        .collect()
+                    println!("cargo:warning=No offload arch found, try HYPERBEAM_HIP_ARCH");
+                    vec![]
                 }
             };
 
@@ -216,7 +223,12 @@ mod gpu {
 
             match env::var("DEBUG").as_deref() {
                 Ok("false") => (),
-                _ => { hip_target.flag("-ggdb").flag("-O0"); },
+                _ => {
+                    hip_target
+                        .flag("-ggdb")
+                        .flag("-O1") // <- don't use -O0 https://github.com/ROCm/HIP/issues/3183
+                        .flag("-gmodules");
+                }
             };
 
             hip_target
@@ -228,14 +240,12 @@ mod gpu {
         // if appropriate, define that here. We also define "DEBUG" so that
         // can be used.
         match env::var("DEBUG").as_deref() {
-            Ok("false") => {
+            Ok("false") | Ok("0") => {
                 gpu_target.define("NDEBUG", "");
-            },
+            }
             _ => {
-                gpu_target
-                    .define("DEBUG", "")
-                    .flag("-v");
-            },
+                gpu_target.define("DEBUG", "").flag("-v");
+            }
         };
 
         // If we're told to, use single-precision floats. The default in the GPU

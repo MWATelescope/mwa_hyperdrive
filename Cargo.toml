@@ -27,7 +27,7 @@ codegen-units = 1
 inherits = "production"
 
 [features]
-default = ["plotting"]
+default = ["plotting", "hip"]
 
 # Use CUDA code with double-precision floats.
 cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys", "cc"]
@@ -140,4 +140,6 @@ harness = false
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
 # mwa_hyperbeam = { path = "../../hyperbeam/hyperbeam-git" }
-# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "setonix" }
+mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "setonix" }
+hip-sys = { git = "https://github.com/d3v-null/hip-sys", branch = "rocm6" }
+hip-runtime-sys = { git = "https://github.com/d3v-null/hip-sys", branch = "rocm6", package = "hip-runtime-sys" }

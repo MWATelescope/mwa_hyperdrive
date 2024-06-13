@@ -1081,8 +1081,7 @@ dependencies = [
 [[package]]
 name = "hip-runtime-sys"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "901a5d54cfff799dd9e6f6e1d53883bb50afdd92edce7680b1ca299d1805f65a"
+source = "git+https://github.com/d3v-null/hip-sys?branch=rocm6#7dfb4ecf9f63357445c0bac0f656ebe4e90e1959"
 dependencies = [
  "libc",
 ]
@@ -1090,8 +1089,7 @@ dependencies = [
 [[package]]
 name = "hip-sys"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f399629f98b6249efc10039e949baa70e2ff2bf84d3c30e7a0ca49f179a04287"
+source = "git+https://github.com/d3v-null/hip-sys?branch=rocm6#7dfb4ecf9f63357445c0bac0f656ebe4e90e1959"
 dependencies = [
  "hip-runtime-sys",
 ]
@@ -1465,8 +1463,7 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce1abd6525d18135eec831432a52f6c05fc0419af8ed499a1d911293328b394"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=setonix#5e4eca809b119e5231a9c23bc274ad18f85992ce"
 dependencies = [
  "cbindgen 0.25.0",
  "cc",
