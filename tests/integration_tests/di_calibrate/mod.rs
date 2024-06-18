@@ -20,6 +20,11 @@ fn test_1090008640_woden() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let solutions_path = tmp_dir.path().join("sols.bin");
 
+    let n_dirs = std::env::var("N_DIRS")
+        .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
+        .parse::<usize>()
+        .unwrap();
+
     // Reading from a uvfits file without a metafits file should fail because
     // there's no beam information.
     let cmd = hyperdrive()
@@ -31,6 +36,7 @@ fn test_1090008640_woden() {
         .arg("--outputs")
         .arg(&format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
+        .arg(&format!("--num-sources={}", n_dirs))
         .ok();
     assert!(cmd.is_err());
     let (_, stderr) = get_cmd_output(cmd);
@@ -49,6 +55,7 @@ fn test_1090008640_woden() {
         .arg("--outputs")
         .arg(&format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
+        .arg(&format!("--num-sources={}", n_dirs))
         .ok();
     assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
     let (stdout, _) = get_cmd_output(cmd);
@@ -109,6 +116,7 @@ fn test_1090008640_woden() {
         .arg("--outputs")
         .arg(&format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
+        .arg(&format!("--num-sources={}", n_dirs))
         .ok();
 
     // Run di-cal and check that it succeeds

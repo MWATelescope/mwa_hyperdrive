@@ -82,6 +82,9 @@ fn fee_gpu_beam_values_are_sensible() {
     let delays = Array2::zeros((1, 16));
     let amps = Array2::ones((1, 16));
     let freqs = [150e6 as u32];
+    // let freqs = (150..181)
+    //     .map(|f| (f as u32 * 1e6 as u32))
+    //     .collect::<Vec<_>>();
     let n_dirs = std::env::var("N_DIRS")
         .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
         .parse::<usize>()

@@ -318,6 +318,12 @@ fn arg_file_relative_globs() {
 #[serial]
 fn test_1090008640_di_calibrate_writes_solutions() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+
+    let n_dirs = std::env::var("N_DIRS")
+        .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
+        .parse::<usize>()
+        .unwrap();
+
     let DataAsStrings {
         metafits,
         vis,
@@ -335,6 +341,7 @@ fn test_1090008640_di_calibrate_writes_solutions() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
+        "--num-sources", &format!("{n_dirs}"),
     ]);
 
     // Run di-cal and check that it succeeds
@@ -429,6 +436,11 @@ fn test_1090008640_calibrate_model_uvfits() {
     let num_timesteps = 2;
     let num_chans = 10;
 
+    let n_dirs = std::env::var("N_DIRS")
+        .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
+        .parse::<usize>()
+        .unwrap();
+
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let model = temp_dir.path().join("model.uvfits");
     let DataAsStrings {
@@ -442,6 +454,7 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--output-model-files", &format!("{}", model.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
+        "--num-sources", &format!("{n_dirs}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         // The array position is needed because, if not specified, it's read
         // slightly different out of the uvfits.
@@ -462,6 +475,7 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
+        "--num-sources", &format!("{n_dirs}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
     ]);
@@ -588,6 +602,11 @@ fn test_1090008640_calibrate_model_ms() {
     let num_timesteps = 2;
     let num_chans = 10;
 
+    let n_dirs = std::env::var("N_DIRS")
+        .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
+        .parse::<usize>()
+        .unwrap();
+
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let model = temp_dir.path().join("model.ms");
     let DataAsStrings {
@@ -610,6 +629,7 @@ fn test_1090008640_calibrate_model_ms() {
         "--output-model-files", &format!("{}", model.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
+        "--num-sources", &format!("{n_dirs}"),
         "--array-position",
             &format!("{long_deg}"),
             &format!("{lat_deg}"),
@@ -629,6 +649,7 @@ fn test_1090008640_calibrate_model_ms() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
+        "--num-sources", &format!("{n_dirs}"),
         "--array-position",
             &format!("{long_deg}"),
             &format!("{lat_deg}"),
@@ -735,6 +756,10 @@ fn test_1090008640_calibrate_model_ms() {
 fn test_cal_timeblocks() {
     let num_timesteps = 3;
     let num_chans = 5;
+    let n_dirs = std::env::var("N_DIRS")
+        .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
+        .parse::<usize>()
+        .unwrap();
 
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let model = temp_dir.path().join("model.uvfits");
@@ -749,6 +774,7 @@ fn test_cal_timeblocks() {
         "--output-model-files", &format!("{}", model.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
+        "--num-sources", &format!("{n_dirs}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         // The array position is needed because, if not specified, it's read
         // slightly different out of the uvfits.
@@ -764,6 +790,7 @@ fn test_cal_timeblocks() {
         "--data", &format!("{}", model.display()), &metafits,
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols_file.display()),
+        "--num-sources", &format!("{n_dirs}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
     ]);
@@ -789,6 +816,7 @@ fn test_cal_timeblocks() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols_file.display()),
         "--timesteps-per-timeblock", "2",
+        "--num-sources", &format!("{n_dirs}"),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
     ]);
