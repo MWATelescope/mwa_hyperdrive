@@ -2,29 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::env;
-use std::path::{Path, PathBuf};
-
-// Use the "built" crate to generate some useful build-time information,
-// including the git hash and compiler version.
-fn write_built(out_dir: &Path) {
-    let mut opts = built::Options::default();
-    opts.set_compiler(true)
-        .set_git(true)
-        .set_time(true)
-        .set_ci(false)
-        .set_env(false)
-        .set_dependencies(false)
-        .set_features(false)
-        .set_cfg(false);
-    built::write_built_file_with_opts(
-        &opts,
-        env::var("CARGO_MANIFEST_DIR").unwrap().as_ref(),
-        &out_dir.join("built.rs"),
-    )
-    .expect("Failed to acquire build-time information");
-}
-
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -35,8 +12,7 @@ fn main() {
         "The 'gpu-single' feature must be used with either of the 'cuda' or 'hip' features."
     );
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR env. variable not defined!"));
-    write_built(&out_dir);
+    built::write_built_file().expect("Failed to acquire build-time information");
 
     #[cfg(any(feature = "cuda", feature = "hip"))]
     gpu::build_and_link();
@@ -146,6 +122,13 @@ mod gpu {
                 }
             }
 
+            match env::var("DEBUG").as_deref() {
+                Ok("false") => (),
+                _ => {
+                    cuda_target.flag("-G");
+                }
+            };
+
             cuda_target
         };
 
@@ -192,12 +175,24 @@ mod gpu {
             }
 
             let mut hip_target = cc::Build::new();
+            println!("cargo:warning={compiler:?}");
             hip_target
                 .compiler(compiler)
                 // .include(hip_path.join("include/hip"))
                 // .include(hip_path.join("../include/hip"))
                 ;
 
+            println!("cargo:rerun-if-env-changed=HIP_FLAGS");
+            if let Some(p) = env::var_os("HIP_FLAGS") {
+                println!(
+                    "cargo:warning=HIP_FLAGS set from env {}",
+                    p.to_string_lossy()
+                );
+                hip_target.flag(&p.to_string_lossy());
+            }
+
+            println!("cargo:rerun-if-env-changed=ROCM_VER");
+            println!("cargo:rerun-if-env-changed=ROCM_PATH");
             println!("cargo:rerun-if-env-changed=HYPERBEAM_HIP_ARCH");
             println!("cargo:rerun-if-env-changed=HYPERDRIVE_HIP_ARCH");
             let arches: Vec<String> = match (
@@ -242,6 +237,7 @@ mod gpu {
         match env::var("DEBUG").as_deref() {
             Ok("false") | Ok("0") => {
                 gpu_target.define("NDEBUG", "");
+                println!("cargo:warning={gpu_target:?}");
             }
             _ => {
                 gpu_target.define("DEBUG", "").flag("-v");
