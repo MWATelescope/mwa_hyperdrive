@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2024-06-19
+### Fixed
+- rocm6 support
+- Huge thanks to @robotopia for fixing https://github.com/MWATelescope/mwa_hyperbeam/issues/9
+  via hyperbeam 0.9.0
+
 ## [0.3.0] - 2023-09-27
 ### Added
 - Support for HIP, which allows AMD GPUs to be used instead of only NVIDIA GPUs

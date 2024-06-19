@@ -1,6 +1,6 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
     "Christopher H. Jordan <christopherjordan87@gmail.com>",
     "Dev Null <dev.null@curtin.edu.au>",
@@ -80,7 +80,7 @@ indicatif = { version = "0.17.5", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
 marlu = { version = "0.11.0", features = ["serde"] }
-mwa_hyperbeam = "0.8.0"
+mwa_hyperbeam = "0.9.0"
 mwalib = "1.3.3"
 ndarray = { version = "0.15.4", features = ["rayon"] }
 num-complex = "0.4.1"
