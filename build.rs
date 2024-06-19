@@ -2,29 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::env;
-use std::path::{Path, PathBuf};
-
-// Use the "built" crate to generate some useful build-time information,
-// including the git hash and compiler version.
-fn write_built(out_dir: &Path) {
-    let mut opts = built::Options::default();
-    opts.set_compiler(true)
-        .set_git(true)
-        .set_time(true)
-        .set_ci(false)
-        .set_env(false)
-        .set_dependencies(false)
-        .set_features(false)
-        .set_cfg(false);
-    built::write_built_file_with_opts(
-        &opts,
-        env::var("CARGO_MANIFEST_DIR").unwrap().as_ref(),
-        &out_dir.join("built.rs"),
-    )
-    .expect("Failed to acquire build-time information");
-}
-
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -35,8 +12,7 @@ fn main() {
         "The 'gpu-single' feature must be used with either of the 'cuda' or 'hip' features."
     );
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR env. variable not defined!"));
-    write_built(&out_dir);
+    built::write_built_file().expect("Failed to acquire build-time information");
 
     #[cfg(any(feature = "cuda", feature = "hip"))]
     gpu::build_and_link();
@@ -146,38 +122,123 @@ mod gpu {
                 }
             }
 
+            match env::var("DEBUG").as_deref() {
+                Ok("false") => (),
+                _ => {
+                    cuda_target.flag("-G");
+                }
+            };
+
             cuda_target
         };
 
         #[cfg(feature = "hip")]
         let mut gpu_target = {
-            let hip_path = hip_sys::hiprt::get_hip_path();
+            println!("cargo:rerun-if-env-changed=HIP_PATH");
+            let mut hip_path = match env::var_os("HIP_PATH") {
+                Some(p) => {
+                    println!(
+                        "cargo:warning=HIP_PATH set from env {}",
+                        p.to_string_lossy()
+                    );
+                    std::path::PathBuf::from(p)
+                }
+                None => {
+                    let hip_path = hip_sys::hiprt::get_hip_path();
+                    println!(
+                        "cargo:warning=HIP_PATH set from hip_sys {}",
+                        hip_path.display()
+                    );
+                    hip_path
+                }
+            };
 
             // It seems that various ROCm releases change where hipcc is...
             let mut compiler = hip_path.join("bin/hipcc");
             if !compiler.exists() {
                 // Try the dir above, which might be the ROCm dir.
-                compiler = hip_path.join("../bin/hipcc");
+                hip_path = hip_path.parent().unwrap().into();
+                compiler = hip_path.join("bin/hipcc");
+                if !compiler.exists() {
+                    panic!(
+                        "Couldn't find hipcc in either {} or {}",
+                        hip_sys::hiprt::get_hip_path().display(),
+                        hip_path.parent().unwrap().display()
+                    );
+                }
             }
+            if !hip_path.join("include/hip/hip_runtime_api.h").exists() {
+                panic!(
+                    "Couldn't find include/hip/hip_runtime_api.h in {}",
+                    hip_path.display()
+                );
+            }
+
             let mut hip_target = cc::Build::new();
-            hip_target
-                .compiler(compiler)
-                .include(hip_path.join("include/hip"));
+            println!("cargo:warning={compiler:?}");
+            hip_target.compiler(compiler);
+
+            println!("cargo:rerun-if-env-changed=HIP_FLAGS");
+            if let Some(p) = env::var_os("HIP_FLAGS") {
+                println!(
+                    "cargo:warning=HIP_FLAGS set from env {}",
+                    p.to_string_lossy()
+                );
+                hip_target.flag(&p.to_string_lossy());
+            }
+
+            println!("cargo:rerun-if-env-changed=ROCM_VER");
+            println!("cargo:rerun-if-env-changed=ROCM_PATH");
+            println!("cargo:rerun-if-env-changed=HYPERBEAM_HIP_ARCH");
+            println!("cargo:rerun-if-env-changed=HYPERDRIVE_HIP_ARCH");
+            let arches: Vec<String> = match (
+                env::var("HYPERBEAM_HIP_ARCH"),
+                env::var("HYPERDRIVE_HIP_ARCH"),
+            ) {
+                // When a user-supplied variable exists, use it as the CUDA arch and
+                // compute level.
+                (Ok(c), _) | (Err(_), Ok(c)) => {
+                    vec![c]
+                }
+                _ => {
+                    // Print out all of the default arches and computes as a
+                    // warning.
+                    println!("cargo:warning=No offload arch found, try HYPERBEAM_HIP_ARCH");
+                    vec![]
+                }
+            };
+
+            for arch in arches {
+                hip_target.flag(&format!("--offload-arch={arch}"));
+            }
+
+            match env::var("DEBUG").as_deref() {
+                Ok("false") => (),
+                _ => {
+                    hip_target
+                        .flag("-ggdb")
+                        .flag("-O1") // <- don't use -O0 https://github.com/ROCm/HIP/issues/3183
+                        .flag("-gmodules");
+                }
+            };
+
             hip_target
         };
 
-        gpu_target.define(
-            // The DEBUG env. variable is set by cargo. If running "cargo build
-            // --release", DEBUG is "false", otherwise "true". C/C++/CUDA like
-            // the compile option "NDEBUG" to be defined when using assert.h, so
-            // if appropriate, define that here. We also define "DEBUG" so that
-            // can be used.
-            match env::var("DEBUG").as_deref() {
-                Ok("false") => "NDEBUG",
-                _ => "DEBUG",
-            },
-            None,
-        );
+        // The DEBUG env. variable is set by cargo. If running "cargo build
+        // --release", DEBUG is "false", otherwise "true". C/C++/CUDA like
+        // the compile option "NDEBUG" to be defined when using assert.h, so
+        // if appropriate, define that here. We also define "DEBUG" so that
+        // can be used.
+        match env::var("DEBUG").as_deref() {
+            Ok("false") | Ok("0") => {
+                gpu_target.define("NDEBUG", "");
+            }
+            _ => {
+                gpu_target.define("DEBUG", "").flag("-v");
+                println!("cargo:warning={gpu_target:?}");
+            }
+        };
 
         // If we're told to, use single-precision floats. The default in the GPU
         // code is to use double-precision.
