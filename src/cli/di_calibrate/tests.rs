@@ -602,11 +602,6 @@ fn test_1090008640_calibrate_model_ms() {
     let num_timesteps = 2;
     let num_chans = 10;
 
-    let n_dirs = std::env::var("N_DIRS")
-        .unwrap_or_else(|_| "1025".to_string()) // 192 passes, 193 fails.
-        .parse::<usize>()
-        .unwrap();
-
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let model = temp_dir.path().join("model.ms");
     let DataAsStrings {
@@ -629,7 +624,6 @@ fn test_1090008640_calibrate_model_ms() {
         "--output-model-files", &format!("{}", model.display()),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
-        "--num-sources", &format!("{n_dirs}"),
         "--array-position",
             &format!("{long_deg}"),
             &format!("{lat_deg}"),
@@ -649,7 +643,6 @@ fn test_1090008640_calibrate_model_ms() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
-        "--num-sources", &format!("{n_dirs}"),
         "--array-position",
             &format!("{long_deg}"),
             &format!("{lat_deg}"),
