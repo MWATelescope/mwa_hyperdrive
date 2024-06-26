@@ -9,8 +9,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.4.0] - 2024-06-19
 ### Fixed
 - rocm6 support
+- a bunch of really nasty segfaults that took a big toll of my sanity
 - Huge thanks to @robotopia for fixing https://github.com/MWATelescope/mwa_hyperbeam/issues/9
   via hyperbeam 0.9.0
+- performance optimizations in hyperbeam 0.9.3
+### Added
+- hyperbeam@0.9.3 built@0.7 marlu@0.11.0 mwalib@1.3.3 birli@0.11.0
 
 ## [0.3.0] - 2023-09-27
 ### Added
