@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+coverage
+.cargo
+doc
+img
+scripts
+target
+tests
+test_files
+.venv
+src/tests
