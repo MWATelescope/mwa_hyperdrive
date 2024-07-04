@@ -6,7 +6,7 @@ authors = [
     "Dev Null <dev.null@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.68" # `cargo +1.68 build --locked` works, but technically development needs 1.73
+rust-version = "1.68"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -58,7 +58,7 @@ cuda-static = ["mwa_hyperbeam/cuda-static"]
 all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.11.0", default_features = false }
+birli = { version = "0.11.0", default-features = false }
 bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
@@ -115,8 +115,8 @@ plotters = { version = "0.3.5", default-features = false, features = [
 
 [dev-dependencies]
 approx = "0.5.1"
-assert_cmd = "2.0.0"                                        # 2.0.14 requires Rust 1.73.0
-criterion = { version = "0.4.0", default_features = false }
+assert_cmd = "2.0.0"                                        # warning: 2.0.14 requires Rust 1.73.0
+criterion = { version = "0.4.0", default-features = false }
 indoc = "2.0.1"
 marlu = { version = "0.11.0", features = ["approx"] }
 ndarray = { version = "0.15.4", features = ["approx-0_5"] }

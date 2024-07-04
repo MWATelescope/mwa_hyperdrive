@@ -82,7 +82,7 @@ jobs:
 
       - name: Minimum-specified Rust version works
         run: |
-          MIN_RUST=$(grep -m1 "rust-version" Cargo.toml | sed 's|.*\"\(.*\)\"|\1|')
+          MIN_RUST=$(grep -m1 "rust-version" Cargo.toml | sed 's|.*\"\(.*\)\".*|\1|')
           ~/.cargo/bin/rustup install $MIN_RUST --profile minimal
           cargo clean
           cargo +${MIN_RUST} test --locked --release

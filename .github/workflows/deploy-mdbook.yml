@@ -21,6 +21,7 @@ jobs:
       - name: Build and Test
         run: |
           cd mdbook
+          mdbook-admonish install
           mdbook build
           mdbook test
       - uses: JamesIves/github-pages-deploy-action@4.1.7
