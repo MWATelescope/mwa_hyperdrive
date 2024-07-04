@@ -605,7 +605,7 @@ mod tests {
         assert_eq!(s[6], 128);
         assert_eq!(s[7], 3);
 
-        let expected = vec![
+        let expected = [
             0.99999946,
             0.99999946,
             0.08406332,
@@ -670,7 +670,7 @@ mod tests {
         assert_eq!(s[6], 128);
         assert_eq!(s[7], 3);
 
-        let expected = vec![
+        let expected = [
             0.99999946,
             0.99999946,
             0.08051342,

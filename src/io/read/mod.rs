@@ -86,6 +86,7 @@ pub(crate) trait VisRead: Sync + Send {
 
     /// Read auto-correlation visibilities for all frequencies and tiles in a
     /// single timestep into the `data_array` and similar for the weights.
+    #[allow(dead_code)] // this is used in tests
     fn read_autos(
         &self,
         vis_fb: ArrayViewMut2<Jones<f32>>,

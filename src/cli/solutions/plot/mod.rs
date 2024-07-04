@@ -602,8 +602,7 @@ mod plotting {
                 x_axis
                     .values()
                     .zip(amps.iter().map(|g| g[pol_index]))
-                    .filter(|(_, y)| !y.is_nan())
-                    .map(|(x, y)| (x, y)),
+                    .filter(|(_, y)| !y.is_nan()),
                 1,
                 if [0, 3].contains(&pol_index) {
                     ShapeStyle::from(&colour).filled()

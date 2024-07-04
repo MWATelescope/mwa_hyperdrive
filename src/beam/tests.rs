@@ -10,9 +10,6 @@ use serial_test::serial;
 
 use super::*;
 
-#[cfg(any(feature = "cuda", feature = "hip"))]
-use approx::abs_diff_eq;
-
 #[test]
 fn no_beam_means_no_beam() {
     let azels = [

@@ -415,12 +415,12 @@ fn test_timestep_reading() {
     let phase_centre = RADec::from_degrees(0., -27.);
     let array_pos = LatLngHeight::mwa();
     #[rustfmt::skip]
-    let tile_xyzs = vec![
+    let tile_xyzs = [
         XyzGeodetic { x: 0., y: 0., z: 0., },
         XyzGeodetic { x: 1., y: 0., z: 0., },
         XyzGeodetic { x: 0., y: 1., z: 0., },
     ];
-    let tile_names = vec!["tile_0_0", "tile_1_0", "tile_0_1"];
+    let tile_names = ["tile_0_0", "tile_1_0", "tile_0_1"];
 
     let marlu_obs_ctx = MarluObsContext {
         sched_start_timestamp: Epoch::from_gpst_seconds(obsid as f64),

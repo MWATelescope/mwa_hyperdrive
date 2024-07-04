@@ -548,6 +548,7 @@ fn can_write_to_file_inner(file: &Path) -> Result<bool, FileWriteError> {
     match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(file)
         .map_err(|e| e.kind())
     {

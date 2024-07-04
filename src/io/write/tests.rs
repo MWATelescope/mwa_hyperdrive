@@ -176,11 +176,10 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         });
 
         let result: Result<Result<(), VisWriteError>, _> = data_handle.join();
-        let result = match result {
+        match result {
             Err(_) | Ok(Err(_)) => result.map(|_| Ok(String::new())),
             Ok(Ok(())) => write_handle.join(),
-        };
-        result
+        }
     });
 
     match scoped_threads_result {
@@ -379,11 +378,10 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         });
 
         let result: Result<Result<(), VisWriteError>, _> = data_handle.join();
-        let result = match result {
+        match result {
             Err(_) | Ok(Err(_)) => result.map(|_| Ok(String::new())),
             Ok(Ok(())) => write_handle.join(),
-        };
-        result
+        }
     });
 
     match scoped_threads_result {
@@ -586,11 +584,10 @@ fn test_vis_output_time_averaging() {
         });
 
         let result: Result<Result<(), VisWriteError>, _> = data_handle.join();
-        let result = match result {
+        match result {
             Err(_) | Ok(Err(_)) => result.map(|_| Ok(String::new())),
             Ok(Ok(())) => write_handle.join(),
-        };
-        result
+        }
     });
 
     match scoped_threads_result {

@@ -65,7 +65,7 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
     };
 
     let float_to_int = |float: f64, line_num: u32| -> Result<u32, ReadSourceListCommonError> {
-        if float < 0.0 || float > std::u32::MAX as f64 {
+        if float < 0.0 || float > u32::MAX as f64 {
             Err(ReadSourceListCommonError::FloatToIntError { line_num, float })
         } else {
             Ok(float as u32)

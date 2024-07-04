@@ -63,7 +63,7 @@ pub(crate) fn veto_sources(
             // For this source, work out its smallest flux density at any of the
             // coarse channel frequencies. This is how we determine which
             // sources are "best".
-            let mut smallest_fd = std::f64::INFINITY;
+            let mut smallest_fd = f64::INFINITY;
 
             // Filter trivial sources: are any of this source's components too
             // low in elevation? Or too far from the phase centre?

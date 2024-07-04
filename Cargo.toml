@@ -6,7 +6,7 @@ authors = [
     "Dev Null <dev.null@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.68"
+rust-version = "1.68" # `cargo +1.68 build --locked` works, but technically development needs 1.73
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -96,7 +96,8 @@ strum = "0.24.0"
 strum_macros = "0.24.0"
 thiserror = "1.0.7"
 toml = "0.7.2"
-vec1 = { version = "1.5.0", features = ["serde"] }
+# TODO: bump vec1 after msrv update
+vec1 = { version = "~1.10.0", features = ["serde"] }
 
 # "cuda" feature
 cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
@@ -114,7 +115,7 @@ plotters = { version = "0.3.5", default-features = false, features = [
 
 [dev-dependencies]
 approx = "0.5.1"
-assert_cmd = "2.0.0"
+assert_cmd = "2.0.0"                                        # 2.0.14 requires Rust 1.73.0
 criterion = { version = "0.4.0", default_features = false }
 indoc = "2.0.1"
 marlu = { version = "0.11.0", features = ["approx"] }

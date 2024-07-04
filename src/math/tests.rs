@@ -48,23 +48,21 @@ fn test_tile_baseline_flags_without_flags() {
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 1)], 0);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 127)], 126);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(126, 127)], 8127);
-    assert!(maps
+    assert!(!maps
         .tile_to_unflagged_cross_baseline_map
-        .get(&(0, 0))
-        .is_none());
+        .contains_key(&(0, 0)));
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&0], (0, 1));
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&8127], (126, 127));
-    assert!(maps
+    assert!(!maps
         .unflagged_cross_baseline_to_tile_map
-        .get(&8128)
-        .is_none());
+        .contains_key(&8128));
 
     assert_eq!(maps.tile_to_unflagged_auto_index_map[&0], 0);
     assert_eq!(maps.tile_to_unflagged_auto_index_map[&127], 127);
-    assert!(maps.tile_to_unflagged_auto_index_map.get(&128).is_none());
+    assert!(!maps.tile_to_unflagged_auto_index_map.contains_key(&128));
     assert_eq!(maps.unflagged_auto_index_to_tile_map[&0], 0);
     assert_eq!(maps.unflagged_auto_index_to_tile_map[&127], 127);
-    assert!(maps.unflagged_auto_index_to_tile_map.get(&128).is_none());
+    assert!(!maps.unflagged_auto_index_to_tile_map.contains_key(&128));
 
     assert!(maps.flagged_tiles.is_empty());
 
@@ -84,24 +82,22 @@ fn test_tile_baseline_flags() {
     let maps = TileBaselineFlags::new(total_num_tiles, tile_flags);
     assert_eq!(maps.tile_to_unflagged_auto_index_map[&0], 0);
     assert_eq!(maps.tile_to_unflagged_auto_index_map[&2], 1);
-    assert!(maps.tile_to_unflagged_auto_index_map.get(&1).is_none());
-    assert!(maps.tile_to_unflagged_auto_index_map.get(&128).is_none());
+    assert!(!maps.tile_to_unflagged_auto_index_map.contains_key(&1));
+    assert!(!maps.tile_to_unflagged_auto_index_map.contains_key(&128));
 
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 2)], 0);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(0, 127)], 125);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(2, 3)], 126);
     assert_eq!(maps.tile_to_unflagged_cross_baseline_map[&(126, 127)], 8000);
-    assert!(maps
+    assert!(!maps
         .tile_to_unflagged_cross_baseline_map
-        .get(&(0, 1))
-        .is_none());
+        .contains_key(&(0, 1)));
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&0], (0, 2));
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&126], (2, 3));
     assert_eq!(maps.unflagged_cross_baseline_to_tile_map[&8000], (126, 127));
-    assert!(maps
+    assert!(!maps
         .unflagged_cross_baseline_to_tile_map
-        .get(&8001)
-        .is_none());
+        .contains_key(&8001));
 
     assert_eq!(maps.unflagged_auto_index_to_tile_map[&0], 0);
     assert_eq!(maps.unflagged_auto_index_to_tile_map[&1], 2);
