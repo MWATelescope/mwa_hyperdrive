@@ -69,7 +69,7 @@ pub(crate) fn read_source_list_file<P: AsRef<Path>>(
 
             Some(SourceListType::Fits) => match fits::parse_source_list(path) {
                 Ok(sl) => Ok((sl, SourceListType::Fits)),
-                Err(e) => Err(e).unwrap(),
+                Err(e) => panic!("{:?}", e),
             },
 
             Some(SourceListType::Rts) => {

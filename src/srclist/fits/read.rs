@@ -120,14 +120,14 @@ impl CommonCols {
                     debug!("None of {:?} were available columns!", $possible_col_names)
                 }
                 maybe_col
-            }}
+            }};
         }
         macro_rules! read_mandatory_col {
             ($possible_col_names: expr) => {{
                 read_optional_col!($possible_col_names).unwrap_or_else(|| {
                     panic!("None of {:?} were available columns!", $possible_col_names)
                 })
-            }}
+            }};
         }
 
         let unq_source_id = if col_names.iter().any(|col_name| col_name == "UNQ_SOURCE_ID") {
@@ -372,8 +372,8 @@ fn parse_lobes_source_list(
         majors,
         minors,
         pas,
-        shapelet_sources,
-        comp_types,
+        // shapelet_sources,
+        // comp_types,
         flux_types,
         power_law_stokes_is,
         power_law_alphas,
@@ -382,6 +382,7 @@ fn parse_lobes_source_list(
         curved_power_law_qs,
         list_flux_densities,
         list_flux_density_freqs,
+        ..
     } = CommonCols::new(file, &mut fptr, &hdu, &col_names)?;
 
     // UNQ_SOURCE_ID comes in as strings of ints. Parse them.
@@ -716,8 +717,8 @@ fn parse_gleam_x_source_list(
         majors,
         minors,
         pas,
-        shapelet_sources,
-        comp_types,
+        // shapelet_sources,
+        // comp_types,
         flux_types: _,
         power_law_stokes_is,
         power_law_alphas,
@@ -726,6 +727,7 @@ fn parse_gleam_x_source_list(
         curved_power_law_qs: _,
         list_flux_densities: _,
         list_flux_density_freqs: _,
+        ..
     } = CommonCols::new(file, &mut fptr, &hdu, &col_names)?;
 
     let mut source_list = IndexMap::with_capacity(src_names.len());
