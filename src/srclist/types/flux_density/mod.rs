@@ -133,7 +133,7 @@ pub enum FluxDensityType {
 
     /// Similar to a power law. See Callingham et al. 2017, section 4.1.
     ///
-    /// S_\nu = a \nu^{\alpha} e^{q(\ln{v})^2}
+    /// S_\nu = a \nu^{\alpha} e^{q(\ln{\nu})^2}
     CurvedPowerLaw {
         /// Spectral index (alpha)
         si: f64,

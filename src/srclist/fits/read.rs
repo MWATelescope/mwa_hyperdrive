@@ -11,6 +11,8 @@ use log::debug;
 use marlu::RADec;
 use vec1::Vec1;
 
+// The reference frequency of the power laws and curved power laws.
+use super::REF_FREQ_HZ;
 use crate::{
     io::read::fits::{fits_open, fits_open_hdu, FitsError},
     srclist::{
@@ -361,9 +363,6 @@ fn parse_lobes_source_list(
     hdu: FitsHdu,
     col_names: Vec<String>,
 ) -> Result<SourceList, FitsError> {
-    // The reference frequency of the power laws and curved power laws.
-    const REF_FREQ_HZ: f64 = 200e6;
-
     let CommonCols {
         unq_source_id: _,
         names,
@@ -512,9 +511,6 @@ fn parse_jack_source_list(
     hdu: FitsHdu,
     col_names: Vec<String>,
 ) -> Result<SourceList, FitsError> {
-    // The reference frequency of the power laws and curved power laws.
-    const REF_FREQ_HZ: f64 = 200e6;
-
     let CommonCols {
         unq_source_id: src_names,
         names: comp_names,
@@ -557,7 +553,10 @@ fn parse_jack_source_list(
     )
     .enumerate()
     {
-        let prefix = comp_name.rsplit_once("_C").expect("contains '_C'").0;
+        let prefix = comp_name
+            .rsplit_once("_C")
+            .unwrap_or_else(|| panic!("{comp_name:?} does not contain '_C'"))
+            .0;
         let src_comps = map.get_mut(prefix).unwrap_or_else(|| {
             panic!("Component '{comp_name}' couldn't be matched against any of the UNQ_SOURCE_ID")
         });
@@ -706,9 +705,6 @@ fn parse_gleam_x_source_list(
     hdu: FitsHdu,
     col_names: Vec<String>,
 ) -> Result<SourceList, FitsError> {
-    // The reference frequency of the power laws.
-    const REF_FREQ_HZ: f64 = 200e6;
-
     let CommonCols {
         unq_source_id: _,
         names: src_names,

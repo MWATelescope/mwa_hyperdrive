@@ -4,9 +4,12 @@
 
 //! Code to handle FITS source list files.
 
+// The reference frequency of the power laws.
+const REF_FREQ_HZ: f64 = 200e6;
+
 mod read;
-// mod write;
+mod write;
 
 // Re-exports.
 pub(crate) use read::parse_source_list;
-// pub(crate) use write::write_source_list;
+pub(crate) use write::write_source_list_jack;

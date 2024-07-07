@@ -11,8 +11,9 @@ use std::{
 };
 
 use approx::{abs_diff_eq, assert_abs_diff_eq};
+use assert_cmd::Command;
 use marlu::RADec;
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 use vec1::vec1;
 
 use super::{fits::parse_source_list, *};
@@ -1097,5 +1098,33 @@ fn test_parse_lobes_fits() {
     let res_srclist = parse_source_list(&PathBuf::from("test_files/lobes.fits")).unwrap();
     let expected_srclist = get_fits_expected_srclist(200e6, true, true, false);
     // dbg!(&res_srclist, &expected_srclist);
+    test_two_sources_lists_are_the_same(&res_srclist, &expected_srclist);
+}
+
+#[test]
+fn test_convert_yaml_to_fits() {
+    let tmp_dir = TempDir::new().unwrap();
+    let yaml_path = PathBuf::from("test_files/jack.yaml");
+    let fits_path = tmp_dir.path().join("test.fits");
+    let cmd = Command::cargo_bin("hyperdrive")
+        .unwrap()
+        .args([
+            "srclist-convert",
+            yaml_path.to_str().unwrap(),
+            "-o",
+            "fits",
+            fits_path.to_str().unwrap(),
+        ])
+        .ok();
+    assert!(
+        cmd.is_ok(),
+        "srclist-convert failed on simple test data: {}",
+        cmd.err().unwrap()
+    );
+
+    let res_srclist = parse_source_list(&fits_path).unwrap();
+
+    let mut f = BufReader::new(File::open(yaml_path).unwrap());
+    let expected_srclist = hyperdrive::source_list_from_yaml(&mut f).unwrap();
     test_two_sources_lists_are_the_same(&res_srclist, &expected_srclist);
 }
