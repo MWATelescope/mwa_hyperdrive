@@ -16,8 +16,8 @@ use log::info;
 use crate::{
     cli::common::{display_warnings, SOURCE_LIST_INPUT_TYPE_HELP},
     srclist::{
-        ao, hyperdrive, read::read_source_list_file, rts, woden, ComponentCounts, SourceListType,
-        SrclistError,
+        ao, fits, hyperdrive, read::read_source_list_file, rts, woden, ComponentCounts,
+        SourceListType, SrclistError,
     },
     HyperdriveError,
 };
@@ -67,24 +67,45 @@ fn verify<P: AsRef<Path>>(
         info!("{}:", source_list.as_ref().display());
 
         let (sl, sl_type) = if let Some(input_type) = input_type {
-            let mut buf = std::io::BufReader::new(File::open(source_list)?);
             let result = match input_type {
-                SourceListType::Hyperdrive => crate::misc::expensive_op(
-                    || hyperdrive::source_list_from_yaml(&mut buf),
-                    "Still reading source list file",
-                ),
-                SourceListType::AO => crate::misc::expensive_op(
-                    || ao::parse_source_list(&mut buf),
-                    "Still reading source list file",
-                ),
-                SourceListType::Rts => crate::misc::expensive_op(
-                    || rts::parse_source_list(&mut buf),
-                    "Still reading source list file",
-                ),
-                SourceListType::Woden => crate::misc::expensive_op(
-                    || woden::parse_source_list(&mut buf),
-                    "Still reading source list file",
-                ),
+                SourceListType::Hyperdrive => {
+                    let mut buf = std::io::BufReader::new(File::open(source_list)?);
+                    crate::misc::expensive_op(
+                        || hyperdrive::source_list_from_yaml(&mut buf),
+                        "Still reading source list file",
+                    )
+                }
+                SourceListType::Fits => {
+                    let source_list = source_list.as_ref();
+                    let sl = crate::misc::expensive_op(
+                        || fits::parse_source_list(source_list),
+                        "Still reading source list file",
+                    )
+                    .unwrap();
+                    // TODO: Proper error handling
+                    Ok(sl)
+                }
+                SourceListType::AO => {
+                    let mut buf = std::io::BufReader::new(File::open(source_list)?);
+                    crate::misc::expensive_op(
+                        || ao::parse_source_list(&mut buf),
+                        "Still reading source list file",
+                    )
+                }
+                SourceListType::Rts => {
+                    let mut buf = std::io::BufReader::new(File::open(source_list)?);
+                    crate::misc::expensive_op(
+                        || rts::parse_source_list(&mut buf),
+                        "Still reading source list file",
+                    )
+                }
+                SourceListType::Woden => {
+                    let mut buf = std::io::BufReader::new(File::open(source_list)?);
+                    crate::misc::expensive_op(
+                        || woden::parse_source_list(&mut buf),
+                        "Still reading source list file",
+                    )
+                }
             };
             match result {
                 Ok(sl) => (sl, input_type),

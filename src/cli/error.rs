@@ -368,7 +368,10 @@ impl From<WriteSourceListError> for HyperdriveError {
             | WriteSourceListError::InvalidHyperdriveFormat(_)
             | WriteSourceListError::Sexagesimal(_) => Self::Srclist(s),
             WriteSourceListError::IO(e) => Self::from(e),
-            WriteSourceListError::Yaml(_) | WriteSourceListError::Json(_) => Self::Generic(s),
+            WriteSourceListError::Yaml(_)
+            | WriteSourceListError::Json(_)
+            | WriteSourceListError::Fitsio(_)
+            | WriteSourceListError::Fits(_) => Self::Generic(s),
         }
     }
 }

@@ -309,6 +309,12 @@ pub(crate) enum WriteSourceListError {
     #[error(transparent)]
     Sexagesimal(#[from] marlu::sexagesimal::SexagesimalError),
 
+    #[error(transparent)]
+    Fitsio(#[from] fitsio::errors::Error),
+
+    #[error(transparent)]
+    Fits(#[from] crate::io::read::fits::FitsError),
+
     /// An IO error.
     #[error(transparent)]
     IO(#[from] std::io::Error),

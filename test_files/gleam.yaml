@@ -1,0 +1,50 @@
+point-pl:
+- ra: 1.0
+  dec: 2.0
+  comp_type: point
+  flux_type:
+    power_law:
+      si: -0.8
+      fd:
+        freq: 200000000.0
+        i: 2.0
+point-cpl:
+- ra: 3.0000000000000004
+  dec: 4.0
+  comp_type: point
+  flux_type:
+    curved_power_law:
+      si: -0.9
+      fd:
+        freq: 200000000.0
+        i: 3.0
+      q: 0.2
+gauss-pl:
+- ra: 1.0
+  dec: 2.0
+  comp_type:
+    gaussian:
+      maj: 72000.0
+      min: 36000.0
+      pa: 75.0
+  flux_type:
+    power_law:
+      si: -0.8
+      fd:
+        freq: 200000000.0
+        i: 2.0
+gauss-cpl:
+- ra: 3.0000000000000004
+  dec: 4.0
+  comp_type:
+    gaussian:
+      maj: 72000.0
+      min: 36000.0
+      pa: 75.0
+  flux_type:
+    curved_power_law:
+      si: -0.9
+      fd:
+        freq: 200000000.0
+        i: 3.0
+      q: 0.2

@@ -184,7 +184,7 @@ mod gpu {
                     "cargo:warning=HIP_FLAGS set from env {}",
                     p.to_string_lossy()
                 );
-                hip_target.flag(&p.to_string_lossy());
+                hip_target.flag(&*p.to_string_lossy());
             }
 
             println!("cargo:rerun-if-env-changed=ROCM_VER");

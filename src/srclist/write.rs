@@ -12,7 +12,7 @@ use std::{
 use log::{info, trace};
 
 use super::{
-    ao, hyperdrive, rts, woden, HyperdriveFileType, SourceList, SourceListType,
+    ao, fits, hyperdrive, rts, woden, HyperdriveFileType, SourceList, SourceListType,
     WriteSourceListError,
 };
 
@@ -43,6 +43,7 @@ pub(crate) fn write_source_list(
                 output_ext.unwrap_or("<no extension>").to_string(),
             ))
         }
+        (SourceListType::Fits, _) => fits::write_source_list_jack(path, sl, num_sources)?,
         (SourceListType::Rts, _) => {
             rts::write_source_list(&mut f, sl, num_sources)?;
             info!("Wrote rts-style source list to {}", path.display());

@@ -6,6 +6,7 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_lists.html>
 
 pub(crate) mod ao;
+pub(crate) mod fits;
 pub(crate) mod hyperdrive;
 pub(crate) mod read;
 pub(crate) mod rts;
@@ -40,6 +41,9 @@ use strum::IntoEnumIterator;
 pub(crate) enum SourceListType {
     #[strum(serialize = "hyperdrive")]
     Hyperdrive,
+
+    #[strum(serialize = "fits")]
+    Fits,
 
     #[strum(serialize = "rts")]
     Rts,
