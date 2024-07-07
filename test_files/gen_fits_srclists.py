@@ -131,8 +131,6 @@ for (i,(name,    cmp, ra, de, fd100, fd150, fd200, maj, min,  pa, mtyp, ctyp, al
         arrays_lobes["ALPHA_CPL"].append(0.0)
         arrays_lobes["CURVE_CPL"].append(0.0)
 
-    if mtyp == "cpl": # no cpl support in gleam
-        continue
     if mtyp == "nan": # no list support in gleam
         continue
 

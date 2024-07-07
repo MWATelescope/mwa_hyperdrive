@@ -144,15 +144,6 @@ impl CommonCols {
         let majors = read_mandatory_col!(["MAJOR_DC", "a"]);
         let minors = read_mandatory_col!(["MINOR_DC", "b"]);
         let pas = read_mandatory_col!(["PA_DC", "pa"]);
-        // let majors = read_optional_col!(["MAJOR_DC", "a"]).unwrap_or_else(|| {
-        //     vec![0.0; names.len()]
-        // });
-        // let minors = read_optional_col!(["MINOR_DC", "b"]).unwrap_or_else(|| {
-        //     vec![0.0; names.len()]
-        // });
-        // let pas = read_optional_col!(["PA_DC", "pa"]).unwrap_or_else(|| {
-        //     vec![0.0; names.len()]
-        // });
 
         // Get any shapelet info ready. We assume that the info lives in HDU 3
         // (index 2 in sane languages), and if there's an error, we assume it's
@@ -260,8 +251,10 @@ impl CommonCols {
             (
                 fe!(file, hdu.read_col(fptr, "NORM_COMP_CPL")),
                 fe!(file, hdu.read_col(fptr, "ALPHA_CPL")),
-                fe!(file, hdu.read_col(fptr, "CURVE_CPL")), // todo: gsm beta for cpl?
+                fe!(file, hdu.read_col(fptr, "CURVE_CPL")),
             )
+        } else if col_names.iter().any(|col_name| col_name == "beta") {
+            (vec![], vec![], fe!(file, hdu.read_col(fptr, "beta")))
         } else {
             (vec![], vec![], vec![])
         };
@@ -371,8 +364,6 @@ fn parse_lobes_source_list(
         majors,
         minors,
         pas,
-        // shapelet_sources,
-        // comp_types,
         flux_types,
         power_law_stokes_is,
         power_law_alphas,
@@ -713,23 +704,16 @@ fn parse_gleam_x_source_list(
         majors,
         minors,
         pas,
-        // shapelet_sources,
-        // comp_types,
-        flux_types: _,
         power_law_stokes_is,
         power_law_alphas,
-        curved_power_law_stokes_is: _,
-        curved_power_law_alphas: _,
-        curved_power_law_qs: _,
-        list_flux_densities: _,
-        list_flux_density_freqs: _,
+        curved_power_law_qs,
         ..
     } = CommonCols::new(file, &mut fptr, &hdu, &col_names)?;
 
     let mut source_list = IndexMap::with_capacity(src_names.len());
 
     // It appears that each source has one component and everything is a power law.
-    for (src_name, ra_degrees, dec_degrees, maj, min, pa, stokes_i, si) in izip!(
+    for (src_name, ra_degrees, dec_degrees, maj, min, pa, stokes_i, si, q) in izip!(
         src_names,
         ra_degrees,
         dec_degrees,
@@ -737,7 +721,8 @@ fn parse_gleam_x_source_list(
         minors,
         pas,
         power_law_stokes_is,
-        power_law_alphas
+        power_law_alphas,
+        curved_power_law_qs
     ) {
         let radec = RADec::from_degrees(ra_degrees, dec_degrees);
         let comp_type = if (maj.is_nan() && min.is_nan() && pa.is_nan())
@@ -751,15 +736,29 @@ fn parse_gleam_x_source_list(
                 pa: pa.to_radians(),
             }
         };
-        let flux_type = FluxDensityType::PowerLaw {
-            si,
-            fd: FluxDensity {
-                freq: REF_FREQ_HZ,
-                i: stokes_i,
-                q: 0.0,
-                u: 0.0,
-                v: 0.0,
-            },
+        let flux_type = if q.is_nan() || q.abs() < f64::EPSILON {
+            FluxDensityType::PowerLaw {
+                si,
+                fd: FluxDensity {
+                    freq: REF_FREQ_HZ,
+                    i: stokes_i,
+                    q: 0.0,
+                    u: 0.0,
+                    v: 0.0,
+                },
+            }
+        } else {
+            FluxDensityType::CurvedPowerLaw {
+                si,
+                fd: FluxDensity {
+                    freq: REF_FREQ_HZ,
+                    i: stokes_i,
+                    q: 0.0,
+                    u: 0.0,
+                    v: 0.0,
+                },
+                q,
+            }
         };
 
         source_list.insert(

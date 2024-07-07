@@ -11,7 +11,7 @@ use std::{
 };
 
 use approx::{abs_diff_eq, assert_abs_diff_eq};
-use assert_cmd::Command;
+use fits::write_source_list_jack;
 use marlu::RADec;
 use tempfile::{NamedTempFile, TempDir};
 use vec1::vec1;
@@ -117,7 +117,7 @@ fn test_two_sources_lists_are_the_same(sl1: &SourceList, sl2: &SourceList) {
                 FluxDensityType::PowerLaw { .. } => {
                     assert!(
                         matches!(s2_comp.flux_type, FluxDensityType::PowerLaw { .. }),
-                        "{sl1_name}: fdtype mismatch {s1_comp:?} {s2_comp:?}"
+                        "{sl1_name}: fdtype mismatch \n    {s1_comp:?}\n != {s2_comp:?}"
                     );
                     match s2_comp.flux_type {
                         FluxDensityType::PowerLaw { .. } => {
@@ -1047,7 +1047,7 @@ fn test_parse_gleam_fits() {
     // gauss-pl            1          2        1     -0.8     0     20   10    75
 
     let res_srclist = parse_source_list(&PathBuf::from("test_files/gleam.fits")).unwrap();
-    let expected_srclist = get_fits_expected_srclist(200e6, false, false, false);
+    let expected_srclist = get_fits_expected_srclist(200e6, false, true, false);
     // dbg!(&res_srclist, &expected_srclist);
     test_two_sources_lists_are_the_same(&res_srclist, &expected_srclist);
 }
@@ -1103,28 +1103,14 @@ fn test_parse_lobes_fits() {
 
 #[test]
 fn test_convert_yaml_to_fits() {
-    let tmp_dir = TempDir::new().unwrap();
     let yaml_path = PathBuf::from("test_files/jack.yaml");
-    let fits_path = tmp_dir.path().join("test.fits");
-    let cmd = Command::cargo_bin("hyperdrive")
-        .unwrap()
-        .args([
-            "srclist-convert",
-            yaml_path.to_str().unwrap(),
-            "-o",
-            "fits",
-            fits_path.to_str().unwrap(),
-        ])
-        .ok();
-    assert!(
-        cmd.is_ok(),
-        "srclist-convert failed on simple test data: {}",
-        cmd.err().unwrap()
-    );
-
-    let res_srclist = parse_source_list(&fits_path).unwrap();
-
     let mut f = BufReader::new(File::open(yaml_path).unwrap());
     let expected_srclist = hyperdrive::source_list_from_yaml(&mut f).unwrap();
+
+    let tmp_dir = TempDir::new().unwrap();
+    let fits_path = tmp_dir.path().join("test.fits");
+    write_source_list_jack(&fits_path, &expected_srclist, None).unwrap();
+
+    let res_srclist = parse_source_list(&fits_path).unwrap();
     test_two_sources_lists_are_the_same(&res_srclist, &expected_srclist);
 }
