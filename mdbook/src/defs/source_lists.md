@@ -23,6 +23,7 @@ types.
 - [`hyperdrive` format](source_list_hyperdrive.md)
 - [André Offringa (`ao`) format](source_list_ao.md)
 - [`RTS` format](source_list_rts.md)
+- [Jack, Gleam or LoBES style fits](source_list_fits.md)
 ~~~
 
 ~~~admonish info title="Conversion"
