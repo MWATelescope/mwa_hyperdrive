@@ -111,7 +111,7 @@ pub(crate) fn get_cpu_info() -> String {
     }
 
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-    Ok(format!("{} CPU", std::env::consts::ARCH));
+    format!("{} CPU", std::env::consts::ARCH)
 }
 
 /// An object that simulates sky-model visibilities.
