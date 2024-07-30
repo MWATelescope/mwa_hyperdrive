@@ -180,11 +180,9 @@ mod gpu {
 
             println!("cargo:rerun-if-env-changed=HIP_FLAGS");
             if let Some(p) = env::var_os("HIP_FLAGS") {
-                println!(
-                    "cargo:warning=HIP_FLAGS set from env {}",
-                    p.to_string_lossy()
-                );
-                hip_target.flag(&*p.to_string_lossy());
+                let s: String = p.to_string_lossy().into();
+                println!("cargo:warning=HIP_FLAGS set from env {s}",);
+                hip_target.flag(&s);
             }
 
             println!("cargo:rerun-if-env-changed=ROCM_VER");
