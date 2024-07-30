@@ -1434,9 +1434,9 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperbeam"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0a651dd5bf13c3599a240d12367ad422f0b238eab94471a5062af06dc7ee31f"
+checksum = "0d6381480885ab225ca5f1c6861a243848dc05951dc556b8fdd448ac82b632fb"
 dependencies = [
  "cbindgen 0.25.0",
  "cc",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperdrive"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "approx",
  "assert_cmd",
