@@ -207,13 +207,12 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.104"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74b6a57f98764a267ff415d50a25e6e166f3831a5071af4995296ea97d210490"
+checksum = "e9e8aabfac534be767c909e0690571677d49f41bd8465ae876fe043d52ba5292"
 dependencies = [
  "jobserver",
  "libc",
- "once_cell",
 ]
 
 [[package]]
@@ -1949,9 +1948,9 @@ dependencies = [
 
 [[package]]
 name = "rubbl_casatables_impl"
-version = "0.3.31101"
+version = "0.4.35000"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b78213d960c3b87c06528ccf32d1f051bd3e8c3e9b12918a69a2ffaef25764a7"
+checksum = "9c00881962eba4d23230c81fa42d5813a62d637dc28ff77b1efecd2b5f622223"
 dependencies = [
  "cc",
 ]
