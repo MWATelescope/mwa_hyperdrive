@@ -106,7 +106,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu 0.13.0",
+ "marlu",
  "regex",
  "thiserror",
 ]
@@ -1379,27 +1379,6 @@ checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
 name = "marlu"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e611f77c79511e2d3f22dda0ef8ebe311b40cf6abffa4dbe10484f18a9377eb"
-dependencies = [
- "built",
- "cfg-if",
- "erfa",
- "hifitime",
- "itertools",
- "lazy_static",
- "log",
- "ndarray 0.15.6",
- "num-complex",
- "num-traits",
- "rayon",
- "tar",
- "thiserror",
-]
-
-[[package]]
-name = "marlu"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6271f1b61a6dcfd248b1c3a2f8c49bd5b425abe2d2c970263a14390369eab6a6"
@@ -1454,9 +1433,8 @@ dependencies = [
 
 [[package]]
 name = "mwa_hyperbeam"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d6381480885ab225ca5f1c6861a243848dc05951dc556b8fdd448ac82b632fb"
+version = "0.10.0"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=marlu0.13#06702efaf2475577ec99f15339699239007f1a59"
 dependencies = [
  "cbindgen 0.25.0",
  "cc",
@@ -1465,8 +1443,8 @@ dependencies = [
  "hdf5",
  "hdf5-sys",
  "hip-sys",
- "marlu 0.11.0",
- "ndarray 0.15.6",
+ "marlu",
+ "ndarray 0.16.0",
  "num-complex",
  "panic-message",
  "parking_lot 0.12.3",
@@ -1507,7 +1485,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu 0.13.0",
+ "marlu",
  "mwa_hyperbeam",
  "mwalib",
  "ndarray 0.16.0",
@@ -1563,7 +1541,6 @@ dependencies = [
  "num-integer",
  "num-traits",
  "rawpointer",
- "rayon",
 ]
 
 [[package]]
