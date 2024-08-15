@@ -94,9 +94,9 @@ checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
 name = "birli"
-version = "0.11.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1421b107ce12e0f14da52e9ae1c1552c5b2c442e70a7e02767744d7bb74245a4"
+checksum = "5edc0a0c18d993233d209c448d1ba8fffa75d8508b5a4b548190bf6a291d7303"
 dependencies = [
  "built",
  "byteorder",
@@ -106,7 +106,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu",
+ "marlu 0.13.0",
  "regex",
  "thiserror",
 ]
@@ -958,7 +958,7 @@ dependencies = [
  "hdf5-types",
  "lazy_static",
  "libc",
- "ndarray",
+ "ndarray 0.15.6",
  "parking_lot 0.11.2",
  "paste",
 ]
@@ -1383,6 +1383,27 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e611f77c79511e2d3f22dda0ef8ebe311b40cf6abffa4dbe10484f18a9377eb"
 dependencies = [
+ "built",
+ "cfg-if",
+ "erfa",
+ "hifitime",
+ "itertools",
+ "lazy_static",
+ "log",
+ "ndarray 0.15.6",
+ "num-complex",
+ "num-traits",
+ "rayon",
+ "tar",
+ "thiserror",
+]
+
+[[package]]
+name = "marlu"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6271f1b61a6dcfd248b1c3a2f8c49bd5b425abe2d2c970263a14390369eab6a6"
+dependencies = [
  "approx",
  "built",
  "cfg-if",
@@ -1395,7 +1416,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mwalib",
- "ndarray",
+ "ndarray 0.16.0",
  "num-complex",
  "num-traits",
  "rayon",
@@ -1444,8 +1465,8 @@ dependencies = [
  "hdf5",
  "hdf5-sys",
  "hip-sys",
- "marlu",
- "ndarray",
+ "marlu 0.11.0",
+ "ndarray 0.15.6",
  "num-complex",
  "panic-message",
  "parking_lot 0.12.3",
@@ -1486,10 +1507,10 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "marlu",
+ "marlu 0.13.0",
  "mwa_hyperbeam",
  "mwalib",
- "ndarray",
+ "ndarray 0.16.0",
  "num-complex",
  "num-traits",
  "plotters",
@@ -1537,7 +1558,6 @@ version = "0.15.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb12d4e967ec485a5f71c6311fe28158e9d6f4bc4a447b474184d0f91a8fa32"
 dependencies = [
- "approx",
  "matrixmultiply",
  "num-complex",
  "num-integer",
@@ -1545,6 +1565,29 @@ dependencies = [
  "rawpointer",
  "rayon",
 ]
+
+[[package]]
+name = "ndarray"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "087ee1ca8a7c22830c2bba4a96ed8e72ce0968ae944349324d52522f66aa3944"
+dependencies = [
+ "approx",
+ "matrixmultiply",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rawpointer",
+ "rayon",
+]
+
+[[package]]
+name = "never"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c96aba5aa877601bb3f6dd6a63a969e1f82e60646e81e71b14496995e9853c91"
 
 [[package]]
 name = "num-complex"
@@ -1765,6 +1808,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7170ef9988bc169ba16dd36a7fa041e5c4cbeb6a35b76d4c03daded371eae7c0"
 
 [[package]]
+name = "portable-atomic-util"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcdd8420072e66d54a407b3316991fe946ce3ab1083a7f575b2463866624704d"
+dependencies = [
+ "portable-atomic",
+]
+
+[[package]]
 name = "predicates"
 version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1935,12 +1987,13 @@ checksum = "dbb5fb1acd8a1a18b3dd5be62d25485eb770e05afb408a9627d14d451bae12da"
 
 [[package]]
 name = "rubbl_casatables"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a048158e9953c00dec139ff81a37cb4cc28e00c18be189ef704b167911ba9863"
+checksum = "3b735aaa1993effdc3715a270e9ae6f2afa44de55228d916b32f088e8d2694c7"
 dependencies = [
  "cc",
- "ndarray",
+ "ndarray 0.16.0",
+ "never",
  "rubbl_casatables_impl",
  "rubbl_core",
  "thiserror",
@@ -1957,12 +2010,12 @@ dependencies = [
 
 [[package]]
 name = "rubbl_core"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51804c5510b8e90db157d56ec29560916da9c35a2e53bf57380978c214c9ec2e"
+checksum = "07d81c00458933f85fd0021152cca476d4943d2141343976caae74c5a14a2d4e"
 dependencies = [
  "byteorder",
- "ndarray",
+ "ndarray 0.16.0",
  "num-complex",
  "thiserror",
 ]
@@ -2247,18 +2300,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.61"
+version = "1.0.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c546c80d6be4bc6a00c0f01730c08df82eaa7a7a61f11d656526506112cc1709"
+checksum = "c0342370b38b6a11b6cc11d6a805569958d54cfa061a29969c3b5ce2ea405724"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.61"
+version = "1.0.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46c3384250002a6d5af4d114f2845d37b57521033f30d5c3f46c4d70e1197533"
+checksum = "a4558b58466b9ad7ca0f102865eccc95938dca1a74a856f2b57b6629050da261"
 dependencies = [
  "proc-macro2",
  "quote",
