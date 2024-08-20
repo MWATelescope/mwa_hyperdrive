@@ -295,6 +295,19 @@ information to do this. Similar, perhaps more direct information is
 </code></pre>
 <p>If you want to download the source code and install it yourself, read on.</p>
 <h2 id="manually-installing-from-the-hyperdrive-repo"><a class="header" href="#manually-installing-from-the-hyperdrive-repo">Manually installing from the <code>hyperdrive</code> repo</a></h2>
+<div id="admonition-optimal-performance" class="admonition admonish-tip" role="note" aria-labelledby="admonition-optimal-performance-title">
+<div class="admonition-title">
+<div id="admonition-optimal-performance-title">
+<p>Optimal Performance</p>
+</div>
+<a class="admonition-anchor-link" href="#admonition-optimal-performance"></a>
+</div>
+<div>
+<p>(optional) Use native CPU features (not portable!)</p>
+<pre><code class="language-shell">export RUSTFLAGS="-C target-cpu=native"
+</code></pre>
+</div>
+</div>
 <p>Clone the git repo and point <code>cargo</code> to it:</p>
 <pre><code class="language-shell">git clone https://github.com/MWATelescope/mwa_hyperdrive
 cargo install --path mwa_hyperdrive --locked
