@@ -85,6 +85,13 @@ If you want to download the source code and install it yourself, read on.
 
 ## Manually installing from the `hyperdrive` repo
 
+~~~admonish tip title="Optimal Performance"
+(optional) Use native CPU features (not portable!)
+```shell
+export RUSTFLAGS="-C target-cpu=native"
+```
+~~~
+
 Clone the git repo and point `cargo` to it:
 
 ```shell
