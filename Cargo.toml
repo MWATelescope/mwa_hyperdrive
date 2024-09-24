@@ -115,7 +115,7 @@ plotters = { version = "0.3.5", default-features = false, features = [
 
 [dev-dependencies]
 approx = "0.5.1"
-assert_cmd = "2.0.0"                                        # warning: 2.0.14 requires Rust 1.73.0
+assert_cmd = "<2.0.13"                                      # requires Rust 1.70.0
 criterion = { version = "0.4.0", default-features = false }
 indoc = "2.0.1"
 marlu = { version = "0.14.0", features = ["approx"] }
@@ -145,3 +145,12 @@ birli = { git = "https://github.com/MWATelescope/Birli", branch = "main" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }
 mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "marlu0.14" }
+
+# commands to maintain msrv 1.64 after cargo update:
+# cargo update -p plotters --precise 0.3.6
+# cargo update -p predicates --precise 3.0.3
+# cargo update -p ciborium --precise 0.2.1
+# cargo update -p ciborium-ll --precise 0.2.1
+# cargo update -p assert_cmd --precise 2.0.12
+# cargo update -p predicates-core --precise 1.0.6
+# cargo update -p predicates-tree --precise 1.0.9
