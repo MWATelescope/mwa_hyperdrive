@@ -1007,8 +1007,9 @@ impl MsReader {
                                 // Collapse the weights into a single number per
                                 // frequency; having a weight per polarisation
                                 // is not useful.
-                                ms_weights
-                                    .into_raw_vec()
+                                let (ms_weights_raw, ms_weights_offset) = ms_weights.into_raw_vec_and_offset();
+                                assert!(ms_weights_offset.unwrap_or(0) == 0);
+                                ms_weights_raw
                                     .chunks_exact(NUM_POLS)
                                     .map(|weights| {
                                         weights.iter().copied().reduce(f32::min).expect("not empty")
@@ -1049,8 +1050,9 @@ impl MsReader {
                         // outside this scope. Before we can do this, we need to
                         // remove any globally-flagged fine channels.
                         let mut out_vis = crosses.vis_fb.slice_mut(s![.., bl]);
-                        ms_data
-                            .into_raw_vec()
+                        let (ms_data_raw, ms_data_offset) = ms_data.into_raw_vec_and_offset();
+                        assert!(ms_data_offset.unwrap_or(0) == 0);
+                        ms_data_raw
                             .chunks_exact(NUM_POLS)
                             .zip(chan_flags.iter())
                             .filter(|(_, &chan_flag)| !chan_flag)
@@ -1077,9 +1079,11 @@ impl MsReader {
                         // weights (for XX XY YX YY) and we assume that the
                         // first weight is the same as the others.
                         let mut out_weights = crosses.weights_fb.slice_mut(s![.., bl]);
+                        let (ms_flags_raw, ms_flags_offset) = ms_flags.into_raw_vec_and_offset();
+                        assert!(ms_flags_offset.unwrap_or(0) == 0);
                         ms_weights
                             .into_iter()
-                            .zip(ms_flags.into_raw_vec().chunks_exact(NUM_POLS))
+                            .zip(ms_flags_raw.chunks_exact(NUM_POLS))
                             .zip(chan_flags.iter())
                             .filter(|((_, _), &chan_flag)| !chan_flag)
                             .zip(out_weights.iter_mut())
@@ -1107,8 +1111,9 @@ impl MsReader {
                                 if self.weight_col_is_2d {
                                     let ms_weights: Array2<f32> =
                                         row.get_cell(self.weight_col_name)?;
-                                    ms_weights
-                                        .into_raw_vec()
+                                    let (ms_weights_raw, ms_weights_offset) = ms_weights.into_raw_vec_and_offset();
+                                    assert!(ms_weights_offset.unwrap_or(0) == 0);
+                                    ms_weights_raw
                                         .chunks_exact(NUM_POLS)
                                         .map(|weights| {
                                             weights
@@ -1146,8 +1151,9 @@ impl MsReader {
                             }
 
                             let mut out_vis = autos.vis_fb.slice_mut(s![.., i_ant]);
-                            ms_data
-                                .into_raw_vec()
+                            let (ms_data_raw, ms_data_offset) = ms_data.into_raw_vec_and_offset();
+                            assert!(ms_data_offset.unwrap_or(0) == 0);
+                            ms_data_raw
                                 .chunks_exact(4)
                                 .zip(chan_flags.iter())
                                 .filter(|(_, &chan_flag)| !chan_flag)
@@ -1170,9 +1176,11 @@ impl MsReader {
                                 });
 
                             let mut out_weights = autos.weights_fb.slice_mut(s![.., i_ant]);
+                            let (flags_raw, flags_offset) = flags.into_raw_vec_and_offset();
+                            assert!(flags_offset.unwrap_or(0) == 0);
                             ms_weights
                                 .into_iter()
-                                .zip(flags.into_raw_vec().chunks_exact(4))
+                                .zip(flags_raw.chunks_exact(4))
                                 .zip(chan_flags.iter())
                                 .filter(|((_, _), &chan_flag)| !chan_flag)
                                 .zip(out_weights.iter_mut())

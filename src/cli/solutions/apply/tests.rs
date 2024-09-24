@@ -438,11 +438,12 @@ fn test_solutions_apply_trivial_uvfits() {
 }
 
 pub(crate) fn get_1090008640_identity_solutions_file(tmp_dir: &Path) -> PathBuf {
+    let (chanblock_raw, chanblock_offset) =
+        Array1::linspace(196495000.0, 197735000.0, 32).into_raw_vec_and_offset();
+    assert!(chanblock_offset.unwrap_or(0) == 0);
     let sols = CalibrationSolutions {
         di_jones: Array3::from_elem((1, 128, 32), Jones::identity()),
-        chanblock_freqs: Some(
-            Vec1::try_from(Array1::linspace(196495000.0, 197735000.0, 32).into_raw_vec()).unwrap(),
-        ),
+        chanblock_freqs: Some(Vec1::try_from(chanblock_raw).unwrap()),
         ..Default::default()
     };
     let file = tmp_dir.join("sols.fits");

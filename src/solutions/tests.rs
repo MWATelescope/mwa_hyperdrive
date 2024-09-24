@@ -22,7 +22,7 @@ fn make_solutions() -> CalibrationSolutions {
         1.0,
     );
     let mut di_jones = di_jones
-        .into_shape((num_timeblocks, num_tiles, num_chanblocks))
+        .into_shape_with_order((num_timeblocks, num_tiles, num_chanblocks))
         .unwrap()
         .mapv(|v| {
             Jones::from([
