@@ -138,7 +138,7 @@ harness = false
 
 [patch.crates-io]
 # birli = { path = "../Birli" }
-birli = { git = "https://github.com/MWATelescope/Birli", branch = "main" }
+# birli = { git = "https://github.com/MWATelescope/Birli", branch = "main" }
 # marlu = { path = "../Marlu" }
 # marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
 # mwalib = { path = "../mwalib" }
