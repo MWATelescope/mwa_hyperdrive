@@ -3,7 +3,7 @@ on: [push, pull_request]
 name: Docker Multiplatform
 
 env:
-  REGISTRY_IMAGE: mwatelescope/birli
+  REGISTRY_IMAGE: mwatelescope/hyperdrive
 
 jobs:
   build:
