@@ -1,4 +1,4 @@
-FROM mwatelescope/birli:latest-python3.11-slim-bookworm
+FROM mwatelescope/birli:main
 
 ENV DEBIAN_FRONTEND="noninteractive"
 RUN apt-get update -y && \
