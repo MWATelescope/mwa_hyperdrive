@@ -99,10 +99,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
-name = "birli"
-version = "0.14.0"
+name = "autotools"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f124f8932cb6549cae0869d8d7ee54d0376c83e38265faec36fd3e1b34198cbb"
+checksum = "ef941527c41b0fc0dd48511a8154cd5fc7e29200a0ff8b7203c5d777dbc795cf"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "birli"
+version = "0.16.0"
+source = "git+https://github.com/MWATelescope/Birli?branch=mwalib-1.7.1#612ec0bc703f6686fd4a0a230331084c07c15c5a"
 dependencies = [
  "built",
  "byteorder",
@@ -706,9 +714,9 @@ dependencies = [
 
 [[package]]
 name = "fitsio"
-version = "0.20.0"
+version = "0.21.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c31e99e291587ab50840bdf7e647187355978e93fdfc4c9f0d76b8e53e345d"
+checksum = "0cdb3dff2b25ec4e296f3289f7242054e174921ddffdf4772ee715d0c668c629"
 dependencies = [
  "fitsio-sys",
  "libc",
@@ -716,11 +724,11 @@ dependencies = [
 
 [[package]]
 name = "fitsio-sys"
-version = "0.4.0"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3189ae01f4bcdb8e6b90ec9efe5575a1b12c3e63298bde9fc45694fcc488a595"
+checksum = "6f4465f848d35a6e1b41ba0370d8bb1d61774bdfd1549f45222c79b2e46229d4"
 dependencies = [
- "libc",
+ "autotools",
  "pkg-config",
 ]
 
@@ -1242,9 +1250,9 @@ dependencies = [
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lexical-core"
@@ -1374,9 +1382,8 @@ checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
 name = "marlu"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "207d8571a6c2fe51ba60e79bc8f840ae7bb0678168d25d61eb56fabebfd9764d"
+version = "0.15.0"
+source = "git+https://github.com/MWATelescope/Marlu?branch=mwalib-1.7.1#1b41d88946a29e20b1d982767399b70ad1f8e719"
 dependencies = [
  "approx",
  "built",
@@ -1438,7 +1445,7 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.10.0"
-source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=marlu0.14#3918df553ce913135bd58fc47cc4452faca15219"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=mwalib-1.7.1#ef3626936b6e08c349c1dedbaef98a32f7d063f4"
 dependencies = [
  "cbindgen 0.25.0",
  "cc",
@@ -1515,9 +1522,9 @@ dependencies = [
 
 [[package]]
 name = "mwalib"
-version = "1.5.0"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "268aa01c4343e7250273fd839912fe807df701975a586d488a865238ed16471a"
+checksum = "13aadce2f2589bf4d1c11f167c60ec42b9b8e36311cb83e01e76d999c17f2547"
 dependencies = [
  "built",
  "cbindgen 0.26.0",
@@ -2549,7 +2556,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

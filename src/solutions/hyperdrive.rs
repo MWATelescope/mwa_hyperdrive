@@ -936,7 +936,7 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
             .with_type(ColumnDataType::Int)
             .create()?;
         let flag_col = ColumnDescription::new("Flag")
-            .with_type(ColumnDataType::Bool)
+            .with_type(ColumnDataType::Bit)
             .create()?;
         let freq_col = ColumnDescription::new("Freq")
             .with_type(ColumnDataType::Double)
