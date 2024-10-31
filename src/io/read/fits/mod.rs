@@ -5,6 +5,8 @@
 //! Helper functions for reading FITS files.
 
 mod error;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use error::FitsError;
 
@@ -12,7 +14,6 @@ use std::{
     ffi::{CStr, CString},
     fmt::Display,
     os::raw::c_char,
-    path::Path,
     ptr,
 };
 
@@ -43,7 +44,7 @@ pub(crate) fn fits_open_hdu<T: DescribesHdu + Display + Copy>(
         let caller = std::panic::Location::caller();
         FitsError::Fitsio {
             fits_error: Box::new(e),
-            fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+            fits_filename: fits_fptr.file_path().into(),
             hdu_description: format!("{hdu_description}").into_boxed_str(),
             source_file: caller.file(),
             source_line: caller.line(),
@@ -70,7 +71,7 @@ pub(crate) fn fits_get_optional_key<T: std::str::FromStr>(
                     let caller = std::panic::Location::caller();
                     return Err(FitsError::Fitsio {
                         fits_error: Box::new(e),
-                        fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                        fits_filename: fits_fptr.file_path().into(),
                         hdu_description: format!("{}", hdu.number + 1).into_boxed_str(),
                         source_file: caller.file(),
                         source_line: caller.line(),
@@ -82,7 +83,7 @@ pub(crate) fn fits_get_optional_key<T: std::str::FromStr>(
                 let caller = std::panic::Location::caller();
                 return Err(FitsError::Fitsio {
                     fits_error: Box::new(e),
-                    fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                    fits_filename: fits_fptr.file_path().into(),
                     hdu_description: format!("{}", hdu.number + 1).into_boxed_str(),
                     source_file: caller.file(),
                     source_line: caller.line(),
@@ -98,7 +99,7 @@ pub(crate) fn fits_get_optional_key<T: std::str::FromStr>(
             let caller = std::panic::Location::caller();
             Err(FitsError::Parse {
                 key: keyword.to_string().into_boxed_str(),
-                fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                fits_filename: fits_fptr.file_path().into(),
                 hdu_num: hdu.number + 1,
                 source_file: caller.file(),
                 source_line: caller.line(),
@@ -122,7 +123,7 @@ pub(crate) fn fits_get_required_key<T: std::str::FromStr>(
             let caller = std::panic::Location::caller();
             Err(FitsError::MissingKey {
                 key: keyword.to_string().into_boxed_str(),
-                fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                fits_filename: fits_fptr.file_path().into(),
                 hdu_num: hdu.number + 1,
                 source_file: caller.file(),
                 source_line: caller.line(),
@@ -144,7 +145,7 @@ pub(crate) fn fits_get_col<T: fitsio::tables::ReadsCol>(
         let caller = std::panic::Location::caller();
         FitsError::Fitsio {
             fits_error: Box::new(e),
-            fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+            fits_filename: fits_fptr.file_path().into(),
             hdu_description: format!("{}", hdu.number + 1).into_boxed_str(),
             source_file: caller.file(),
             source_line: caller.line(),
@@ -195,7 +196,7 @@ pub(crate) fn fits_get_optional_key_long_string(
                 let caller = std::panic::Location::caller();
                 return Err(FitsError::LongString {
                     key: keyword.to_string().into_boxed_str(),
-                    fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                    fits_filename: fits_fptr.file_path().into(),
                     hdu_num: hdu.number + 1,
                     source_file: caller.file(),
                     source_line: caller.line(),
@@ -223,7 +224,7 @@ pub(crate) fn _fits_get_required_key_long_string(
             let caller = std::panic::Location::caller();
             Err(FitsError::MissingKey {
                 key: keyword.to_string().into_boxed_str(),
-                fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                fits_filename: fits_fptr.file_path().into(),
                 hdu_num: hdu.number + 1,
                 source_file: caller.file(),
                 source_line: caller.line(),
@@ -237,7 +238,7 @@ pub(crate) fn _fits_get_required_key_long_string(
 /// Get the size of the image on the supplied FITS file pointer and HDU.
 #[track_caller]
 pub(crate) fn _fits_get_image_size<'a>(
-    _fits_fptr: &FitsFile,
+    fits_fptr: &FitsFile,
     hdu: &'a FitsHdu,
 ) -> Result<&'a Vec<usize>, FitsError> {
     match &hdu.info {
@@ -245,7 +246,7 @@ pub(crate) fn _fits_get_image_size<'a>(
         _ => {
             let caller = std::panic::Location::caller();
             Err(FitsError::NotImage {
-                fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                fits_filename: fits_fptr.file_path().into(),
                 hdu_num: hdu.number + 1,
                 source_file: caller.file(),
                 source_line: caller.line(),
@@ -266,7 +267,7 @@ pub(crate) fn fits_get_image<T: fitsio::images::ReadImage>(
             let caller = std::panic::Location::caller();
             FitsError::Fitsio {
                 fits_error: Box::new(e),
-                fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                fits_filename: fits_fptr.file_path().into(),
                 hdu_description: format!("{}", hdu.number + 1).into_boxed_str(),
                 source_file: caller.file(),
                 source_line: caller.line(),
@@ -276,7 +277,7 @@ pub(crate) fn fits_get_image<T: fitsio::images::ReadImage>(
         _ => {
             let caller = std::panic::Location::caller();
             Err(FitsError::NotImage {
-                fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                fits_filename: fits_fptr.file_path().into(),
                 hdu_num: hdu.number + 1,
                 source_file: caller.file(),
                 source_line: caller.line(),
@@ -319,7 +320,7 @@ pub(crate) fn _fits_get_float_image_into_buffer(
                 let caller = std::panic::Location::caller();
                 return Err(FitsError::Fitsio {
                     fits_error: Box::new(e),
-                    fits_filename: Path::new("<private>").into(), // https://github.com/simonrw/rust-fitsio/issues/366
+                    fits_filename: fits_fptr.file_path().into(),
                     hdu_description: format!("{}", hdu.number + 1).into_boxed_str(),
                     source_file: caller.file(),
                     source_line: caller.line(),

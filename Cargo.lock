@@ -715,8 +715,7 @@ dependencies = [
 [[package]]
 name = "fitsio"
 version = "0.21.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cdb3dff2b25ec4e296f3289f7242054e174921ddffdf4772ee715d0c668c629"
+source = "git+https://github.com/simonrw/rust-fitsio.git?branch=feat/filename-method#68ef302e927fe7f8b1da4718af5ee2b5726c576f"
 dependencies = [
  "fitsio-sys",
  "libc",
@@ -725,8 +724,7 @@ dependencies = [
 [[package]]
 name = "fitsio-sys"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f4465f848d35a6e1b41ba0370d8bb1d61774bdfd1549f45222c79b2e46229d4"
+source = "git+https://github.com/simonrw/rust-fitsio.git?branch=feat/filename-method#68ef302e927fe7f8b1da4718af5ee2b5726c576f"
 dependencies = [
  "autotools",
  "pkg-config",

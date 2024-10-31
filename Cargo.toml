@@ -146,6 +146,9 @@ marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "mwalib-1.7.1"
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }
 mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib-1.7.1" }
 
+fitsio = { git = "https://github.com/simonrw/rust-fitsio.git", branch = "feat/filename-method" }
+fitsio-sys = { git = "https://github.com/simonrw/rust-fitsio.git", branch = "feat/filename-method" }
+
 # commands to maintain msrv 1.64 after cargo update:
 # cargo update -p plotters --precise 0.3.6
 # cargo update -p predicates --precise 3.0.3
