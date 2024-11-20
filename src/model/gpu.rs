@@ -398,23 +398,6 @@ impl<'a> SkyModellerGpu<'a> {
             }
         }
 
-        let point_list_fds =
-            get_instrumental_flux_densities(&point_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_gpu_jones);
-        let gaussian_list_fds =
-            get_instrumental_flux_densities(&gaussian_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_gpu_jones);
-        let shapelet_list_fds =
-            get_instrumental_flux_densities(&shapelet_list_fds, unflagged_fine_chan_freqs)
-                .mapv(jones_to_gpu_jones);
-
-        let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
-            get_flattened_coeffs(shapelet_power_law_coeffs);
-        let (shapelet_curved_power_law_coeffs, shapelet_curved_power_law_coeff_lens) =
-            get_flattened_coeffs(shapelet_curved_power_law_coeffs);
-        let (shapelet_list_coeffs, shapelet_list_coeff_lens) =
-            get_flattened_coeffs(shapelet_list_coeffs);
-
         // Variables for CUDA/HIP. They're made flexible in their types for
         // whichever precision is being used.
         let (unflagged_fine_chan_freqs_ints, unflagged_fine_chan_freqs_floats): (Vec<_>, Vec<_>) =
@@ -685,10 +668,10 @@ impl<'a> SkyModellerGpu<'a> {
 
                     // A new SI is needed when changing the reference freq.
                     // Thanks Jack.
-                    let si = if fd.freq == gpu::POWER_LAW_FD_REF_FREQ as f64 {
+                    let si = if fd.freq == gpu::POWER_LAW_FD_REF_FREQ {
                         *si
                     } else {
-                        let logratio = (fd.freq / gpu::POWER_LAW_FD_REF_FREQ as f64).ln();
+                        let logratio = (fd.freq / gpu::POWER_LAW_FD_REF_FREQ).ln();
                         ((fd.i / fd_at_150mhz.i).ln() - q * logratio.powi(2)) / logratio
                     };
 

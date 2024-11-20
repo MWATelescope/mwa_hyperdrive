@@ -15,7 +15,8 @@
  * uvws has shape (num_timesteps, num_baselines).
  */
 __global__ void xyzs_to_uvws_kernel(const XYZ *xyzs, const FLOAT *lmsts, UVW *uvws, RADec pointing_centre,
-                                    int num_tiles, int num_baselines, int num_timesteps) {
+                                    int num_tiles, int num_baselines, int num_timesteps)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
@@ -30,7 +31,8 @@ __global__ void xyzs_to_uvws_kernel(const XYZ *xyzs, const FLOAT *lmsts, UVW *uv
     FLOAT s_ha, c_ha, s_dec, c_dec;
     SINCOS(pointing_centre.dec, &s_dec, &c_dec);
 
-    for (int i_time = 0; i_time < num_timesteps; i_time++) {
+    for (int i_time = 0; i_time < num_timesteps; i_time++)
+    {
         XYZ xyz = xyzs[i_time * num_tiles + tile1];
         const XYZ xyz2 = xyzs[i_time * num_tiles + tile2];
         xyz.x -= xyz2.x;
@@ -55,13 +57,16 @@ __global__ void xyzs_to_uvws_kernel(const XYZ *xyzs, const FLOAT *lmsts, UVW *uv
  * to fastest).
  */
 __global__ void rotate_kernel(JonesF32 *vis_fb, const int num_timesteps, const int num_baselines, const int num_freqs,
-                              const UVW *uvws_from, const UVW *uvws_to, const FLOAT *lambdas) {
+                              const UVW *uvws_from, const UVW *uvws_to, const FLOAT *lambdas)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
 
-    for (int i_freq = 0; i_freq < num_freqs; i_freq += 1) {
-        for (int i_time = 0; i_time < num_timesteps; i_time++) {
+    for (int i_freq = 0; i_freq < num_freqs; i_freq += 1)
+    {
+        for (int i_time = 0; i_time < num_timesteps; i_time++)
+        {
             // Prepare an "argument" for later.
             const FLOAT arg = -TAU * ((double)uvws_to[i_time * num_baselines + i_bl].w -
                                       (double)uvws_from[i_time * num_baselines + i_bl].w);
@@ -108,12 +113,14 @@ __global__ void rotate_kernel(JonesF32 *vis_fb, const int num_timesteps, const i
  */
 __global__ void average_kernel(const JonesF32 *high_res_vis, const float *high_res_weights, JonesF32 *low_res_vis,
                                const int num_timesteps, const int num_baselines, const int num_freqs,
-                               const int freq_average_factor) {
+                               const int freq_average_factor)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
 
-    for (int i_freq = 0; i_freq < num_freqs; i_freq += freq_average_factor) {
+    for (int i_freq = 0; i_freq < num_freqs; i_freq += freq_average_factor)
+    {
         JonesF64 vis_weighted_sum = JonesF64{
             .j00_re = 0.0,
             .j00_im = 0.0,
@@ -126,8 +133,10 @@ __global__ void average_kernel(const JonesF32 *high_res_vis, const float *high_r
         };
         double weight_sum = 0.0;
 
-        for (int i_time = 0; i_time < num_timesteps; i_time++) {
-            for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor; i_freq_chunk++) {
+        for (int i_time = 0; i_time < num_timesteps; i_time++)
+        {
+            for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor; i_freq_chunk++)
+            {
                 const int step = (i_time * num_freqs + i_freq_chunk) * num_baselines + i_bl;
                 const double weight = high_res_weights[step];
                 const JonesF32 vis_single = high_res_vis[step];
@@ -181,12 +190,14 @@ __global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float 
                                       JonesF32 *low_res_vis, RADec pointing_centre, const int num_timesteps,
                                       const int num_tiles, const int num_baselines, const int num_freqs,
                                       const int freq_average_factor, const FLOAT *lmsts, const XYZ *xyzs,
-                                      const UVW *uvws_from, UVW *uvws_to, const FLOAT *lambdas) {
+                                      const UVW *uvws_from, UVW *uvws_to, const FLOAT *lambdas)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
 
-    for (int i_freq = 0; i_freq < num_freqs; i_freq += freq_average_factor) {
+    for (int i_freq = 0; i_freq < num_freqs; i_freq += freq_average_factor)
+    {
         JonesF64 vis_weighted_sum = JonesF64{
             .j00_re = 0.0,
             .j00_im = 0.0,
@@ -199,11 +210,13 @@ __global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float 
         };
         double weight_sum = 0.0;
 
-        for (int i_time = 0; i_time < num_timesteps; i_time++) {
+        for (int i_time = 0; i_time < num_timesteps; i_time++)
+        {
             // Prepare an "argument" for later.
             const double arg = -TAU * ((double)uvws_to[i_time * num_baselines + i_bl].w -
                                        (double)uvws_from[i_time * num_baselines + i_bl].w);
-            for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor; i_freq_chunk++) {
+            for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor; i_freq_chunk++)
+            {
                 C64 complex;
                 sincos(arg / lambdas[i_freq_chunk], &complex.y, &complex.x);
 
@@ -253,7 +266,8 @@ __global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float 
  */
 __device__ void apply_iono(const JonesF32 *vis, JonesF32 *vis_out, const IonoConsts *iono_consts,
                            const int num_baselines, const int num_freqs, const UVW *uvws,
-                           const FLOAT *lambdas_m) {
+                           const FLOAT *lambdas_m)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     // No need to check if this thread should continue; this is a device
     // function.
@@ -261,7 +275,8 @@ __device__ void apply_iono(const JonesF32 *vis, JonesF32 *vis_out, const IonoCon
     const UVW uvw = uvws[i_bl];
     const FLOAT arg = -TAU * (uvw.u * iono_consts->alpha + uvw.v * iono_consts->beta);
 
-    for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
+    for (int i_freq = 0; i_freq < num_freqs; i_freq++)
+    {
         COMPLEX complex;
         // The baseline UV is in units of metres, so we need to divide by λ to
         // use it in an exponential. But we're also multiplying by λ², so just
@@ -281,28 +296,36 @@ __device__ void apply_iono(const JonesF32 *vis, JonesF32 *vis_out, const IonoCon
  * (https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf), but
  * I've had to add `__syncwarp` calls otherwise the sum is incorrect.
  */
-template <int BLOCK_SIZE> __device__ void warp_reduce(volatile JonesF64 *sdata, int tid) {
-    if (BLOCK_SIZE >= 64) {
+template <int BLOCK_SIZE>
+__device__ void warp_reduce(volatile JonesF64 *sdata, int tid)
+{
+    if (BLOCK_SIZE >= 64)
+    {
         sdata[tid] += sdata[tid + 32];
         __syncwarp();
     }
-    if (BLOCK_SIZE >= 32) {
+    if (BLOCK_SIZE >= 32)
+    {
         sdata[tid] += sdata[tid + 16];
         __syncwarp();
     }
-    if (BLOCK_SIZE >= 16) {
+    if (BLOCK_SIZE >= 16)
+    {
         sdata[tid] += sdata[tid + 8];
         __syncwarp();
     }
-    if (BLOCK_SIZE >= 8) {
+    if (BLOCK_SIZE >= 8)
+    {
         sdata[tid] += sdata[tid + 4];
         __syncwarp();
     }
-    if (BLOCK_SIZE >= 4) {
+    if (BLOCK_SIZE >= 4)
+    {
         sdata[tid] += sdata[tid + 2];
         __syncwarp();
     }
-    if (BLOCK_SIZE >= 2) {
+    if (BLOCK_SIZE >= 2)
+    {
         sdata[tid] += sdata[tid + 1];
     }
 }
@@ -310,7 +333,9 @@ template <int BLOCK_SIZE> __device__ void warp_reduce(volatile JonesF64 *sdata, 
 /**
  * Kernel to add ionospherically-related values (all baselines for a frequency).
  */
-template <int BLOCK_SIZE> __global__ void reduce_baselines(JonesF64 *data, const int num_baselines) {
+template <int BLOCK_SIZE>
+__global__ void reduce_baselines(JonesF64 *data, const int num_baselines)
+{
     // Every thread has an element of shared memory. This is useful for speeding
     // up accumulation.
     __shared__ JonesF64 sdata[BLOCK_SIZE];
@@ -334,7 +359,8 @@ template <int BLOCK_SIZE> __global__ void reduce_baselines(JonesF64 *data, const
 
     // Accumulate all the baselines for this frequency. `i` is incremented so
     // that all threads can do coalesced reads.
-    while (i < num_baselines * (int)(blockIdx.x + 1)) {
+    while (i < num_baselines * (int)(blockIdx.x + 1))
+    {
         sdata[tid] += data[i];
         i += BLOCK_SIZE;
     }
@@ -343,20 +369,26 @@ template <int BLOCK_SIZE> __global__ void reduce_baselines(JonesF64 *data, const
     // the same reason.
     __syncthreads();
 
-    if (BLOCK_SIZE >= 512) {
-        if (tid < 256) {
+    if (BLOCK_SIZE >= 512)
+    {
+        if (tid < 256)
+        {
             sdata[tid] += sdata[tid + 256];
         }
         __syncthreads();
     }
-    if (BLOCK_SIZE >= 256) {
-        if (tid < 128) {
+    if (BLOCK_SIZE >= 256)
+    {
+        if (tid < 128)
+        {
             sdata[tid] += sdata[tid + 128];
         }
         __syncthreads();
     }
-    if (BLOCK_SIZE >= 128) {
-        if (tid < 64) {
+    if (BLOCK_SIZE >= 128)
+    {
+        if (tid < 64)
+        {
             sdata[tid] += sdata[tid + 64];
         }
         __syncthreads();
@@ -380,9 +412,9 @@ template <int BLOCK_SIZE> __global__ void reduce_baselines(JonesF64 *data, const
  */
 template <int BLOCK_SIZE>
 __global__ void reduce_freqs(
-        JonesF64 *data, const FLOAT *lambdas_m, const int num_freqs,
-        IonoConsts *iono_consts, const FLOAT convergence
-    ) {
+    JonesF64 *data, const FLOAT *lambdas_m, const int num_freqs,
+    IonoConsts *iono_consts, const FLOAT convergence)
+{
     // Every thread has an element of shared memory. This is useful for speeding
     // up accumulation.
     __shared__ JonesF64 sdata[BLOCK_SIZE];
@@ -403,7 +435,8 @@ __global__ void reduce_freqs(
 
     // Accumulate the per-frequency ionospheric fits. `i_freq` is incremented so
     // that all threads can do coalesced reads.
-    for (int i_freq = tid; i_freq < num_freqs; i_freq += BLOCK_SIZE) {
+    for (int i_freq = tid; i_freq < num_freqs; i_freq += BLOCK_SIZE)
+    {
         // The data we're accessing here represents all of the ionospheric
         // values for each frequency. These values have not been scaled by λ, so
         // we do that here. When the values were generated, UV were not scaled
@@ -426,20 +459,26 @@ __global__ void reduce_freqs(
     // the same reason.
     __syncthreads();
 
-    if (BLOCK_SIZE >= 512) {
-        if (tid < 256) {
+    if (BLOCK_SIZE >= 512)
+    {
+        if (tid < 256)
+        {
             sdata[tid] += sdata[tid + 256];
         }
         __syncthreads();
     }
-    if (BLOCK_SIZE >= 256) {
-        if (tid < 128) {
+    if (BLOCK_SIZE >= 256)
+    {
+        if (tid < 128)
+        {
             sdata[tid] += sdata[tid + 128];
         }
         __syncthreads();
     }
-    if (BLOCK_SIZE >= 128) {
-        if (tid < 64) {
+    if (BLOCK_SIZE >= 128)
+    {
+        if (tid < 64)
+        {
             sdata[tid] += sdata[tid + 64];
         }
         __syncthreads();
@@ -447,7 +486,8 @@ __global__ void reduce_freqs(
 
     if (tid < 32)
         warp_reduce<BLOCK_SIZE>(sdata, tid);
-    if (tid == 0) {
+    if (tid == 0)
+    {
         const double a_uu = sdata[0].j00_re;
         const double a_uv = sdata[0].j00_im;
         const double a_vv = sdata[0].j01_re;
@@ -483,7 +523,8 @@ __global__ void reduce_freqs(
 __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_weights, const JonesF32 *vis_model,
                                  JonesF32 *vis_model_rotated, const IonoConsts *iono_consts, JonesF64 *iono_fits,
                                  const int num_baselines, const int num_freqs, const UVW *uvws,
-                                 const FLOAT *lambdas_m) {
+                                 const FLOAT *lambdas_m)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
@@ -500,7 +541,8 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
     apply_iono(vis_model, vis_model_rotated, iono_consts, num_baselines, num_freqs, uvws,
                lambdas_m);
 
-    for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
+    for (int i_freq = 0; i_freq < num_freqs; i_freq++)
+    {
         const int step = i_freq * num_baselines + i_bl;
         const double weight = (double)vis_weights[step];
         const JonesF32 *residual = vis_residual + step;
@@ -532,16 +574,19 @@ __global__ void iono_loop_kernel(const JonesF32 *vis_residual, const float *vis_
 __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const IonoConsts iono_consts,
                                      const IonoConsts old_iono_consts,
                                      const UVW *uvws, const FLOAT *lambdas_m,
-                                     const int num_timesteps, const int num_baselines, const int num_freqs) {
+                                     const int num_timesteps, const int num_baselines, const int num_freqs)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
 
-    for (int i_time = 0; i_time < num_timesteps; i_time++) {
+    for (int i_time = 0; i_time < num_timesteps; i_time++)
+    {
         const UVW uvw = uvws[i_time * num_baselines + i_bl];
         const FLOAT arg = -TAU * (uvw.u * iono_consts.alpha + uvw.v * iono_consts.beta);
         const FLOAT old_arg = -TAU * (uvw.u * old_iono_consts.alpha + uvw.v * old_iono_consts.beta);
-        for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
+        for (int i_freq = 0; i_freq < num_freqs; i_freq++)
+        {
             const FLOAT lambda = lambdas_m[i_freq];
 
             COMPLEX complex;
@@ -581,8 +626,8 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
 
             r2 += m2 * (old_complex * old_iono_consts.gain);
             r2 -= m2 * (complex * iono_consts.gain);
-            //r2 += m2 * MAKE_COMPLEX(old_complex.x - complex.x, old_complex.y - complex.y) * (old_iono_consts.gain / iono_consts.gain);
-            //r2 += m2 * MAKE_COMPLEX(old_complex.x - complex.x, old_complex.y - complex.y) * (iono_consts.gain / old_iono_consts.gain);
+            // r2 += m2 * MAKE_COMPLEX(old_complex.x - complex.x, old_complex.y - complex.y) * (old_iono_consts.gain / iono_consts.gain);
+            // r2 += m2 * MAKE_COMPLEX(old_complex.x - complex.x, old_complex.y - complex.y) * (iono_consts.gain / old_iono_consts.gain);
             vis_residual[step] = JonesF32{
                 .j00_re = (float)r2.j00_re,
                 .j00_im = (float)r2.j00_im,
@@ -599,21 +644,27 @@ __global__ void subtract_iono_kernel(JonesF32 *vis_residual, const JonesF32 *vis
 
 __global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_model, const IonoConsts iono_consts,
                                  const FLOAT *lambdas_m, const UVW *uvws,
-                                 const int num_timesteps, const int num_freqs, const int num_baselines) {
+                                 const int num_timesteps, const int num_freqs, const int num_baselines)
+{
     const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
     if (i_bl >= num_baselines)
         return;
 
-    for (int i_time = 0; i_time < num_timesteps; i_time++) {
+    for (int i_time = 0; i_time < num_timesteps; i_time++)
+    {
         const UVW uvw = uvws[i_time * num_baselines + i_bl];
         const FLOAT arg = -TAU * (uvw.u * iono_consts.alpha + uvw.v * iono_consts.beta);
 
-        for (int i_freq = 0; i_freq < num_freqs; i_freq++) {
+        for (int i_freq = 0; i_freq < num_freqs; i_freq++)
+        {
             COMPLEX complex;
-            if (iono_consts.alpha == 0.0 && iono_consts.beta == 0.0) {
+            if (iono_consts.alpha == 0.0 && iono_consts.beta == 0.0)
+            {
                 complex.x = 1.0;
                 complex.y = 0.0;
-            } else {
+            }
+            else
+            {
                 // The baseline UV is in units of metres, so we need to divide
                 // by λ to use it in an exponential. But we're also multiplying
                 // by λ², so just multiply by λ.
@@ -629,7 +680,8 @@ __global__ void add_model_kernel(JonesF32 *vis_residual, const JonesF32 *vis_mod
 /* Host functions */
 
 extern "C" const char *xyzs_to_uvws(const XYZ *d_xyzs, const FLOAT *d_lmsts, UVW *d_uvws, RADec pointing_centre,
-                                    int num_tiles, int num_baselines, int num_timesteps) {
+                                    int num_tiles, int num_baselines, int num_timesteps)
+{
     dim3 gridDim, blockDim;
     // Thread blocks are distributed by baseline indices.
     blockDim.x = 256;
@@ -645,12 +697,14 @@ extern "C" const char *xyzs_to_uvws(const XYZ *d_xyzs, const FLOAT *d_lmsts, UVW
     gpuError_t error_id;
 #ifdef DEBUG
     error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 #endif
     error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 
@@ -658,7 +712,8 @@ extern "C" const char *xyzs_to_uvws(const XYZ *d_xyzs, const FLOAT *d_lmsts, UVW
 }
 
 extern "C" const char *rotate(JonesF32 *d_vis_fb, const int num_timesteps, const int num_baselines, const int num_freqs,
-                              const UVW *d_uvws_from, const UVW *d_uvws_to, const FLOAT *d_lambdas) {
+                              const UVW *d_uvws_from, const UVW *d_uvws_to, const FLOAT *d_lambdas)
+{
     dim3 gridDim, blockDim;
     // Thread blocks are distributed by baseline indices.
     blockDim.x = 256;
@@ -670,12 +725,14 @@ extern "C" const char *rotate(JonesF32 *d_vis_fb, const int num_timesteps, const
     gpuError_t error_id;
 #ifdef DEBUG
     error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 #endif
     error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 
@@ -684,7 +741,8 @@ extern "C" const char *rotate(JonesF32 *d_vis_fb, const int num_timesteps, const
 
 extern "C" const char *average(const JonesF32 *d_high_res_vis, const float *d_high_res_weights, JonesF32 *d_low_res_vis,
                                const int num_timesteps, const int num_baselines, const int num_freqs,
-                               const int freq_average_factor) {
+                               const int freq_average_factor)
+{
     dim3 gridDim, blockDim;
     // Thread blocks are distributed by baseline indices.
     blockDim.x = 256;
@@ -695,54 +753,14 @@ extern "C" const char *average(const JonesF32 *d_high_res_vis, const float *d_hi
     gpuError_t error_id;
 #ifdef DEBUG
     error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 #endif
     error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
-
-    return NULL;
-}
-
-extern "C" const char *rotate_average(const JonesF32 *d_high_res_vis, const float *d_high_res_weights,
-                                      JonesF32 *d_low_res_vis, RADec pointing_centre, const int num_timesteps,
-                                      const int num_tiles, const int num_baselines, const int num_freqs,
-                                      const int freq_average_factor, const FLOAT *d_lmsts, const XYZ *d_xyzs,
-                                      const UVW *d_uvws_from, UVW *d_uvws_to, const FLOAT *d_lambdas) {
-    dim3 gridDim, blockDim;
-    // Thread blocks are distributed by baseline indices.
-    blockDim.x = 256;
-    gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
-
-    // Prepare the "to" UVWs.
-    xyzs_to_uvws_kernel<<<gridDim, blockDim>>>(d_xyzs, d_lmsts, d_uvws_to, pointing_centre, num_tiles, num_baselines,
-                                               num_timesteps);
-    gpuError_t error_id;
-#ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
-#endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
-
-    rotate_average_kernel<<<gridDim, blockDim>>>(
-        d_high_res_vis, d_high_res_weights, d_low_res_vis, pointing_centre, num_timesteps, num_tiles, num_baselines,
-        num_freqs, freq_average_factor, d_lmsts, d_xyzs, d_uvws_from, d_uvws_to, d_lambdas);
-#ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
-#endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 
@@ -751,10 +769,11 @@ extern "C" const char *rotate_average(const JonesF32 *d_high_res_vis, const floa
 
 extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_vis_weights,
                                  const JonesF32 *d_vis_model, JonesF32 *d_vis_model_rotated, JonesF64 *d_iono_fits,
-                                 IonoConsts *iono_consts, const int num_tiles,
+                                 IonoConsts *iono_consts,
                                  const int num_baselines, const int num_freqs, const int num_iterations,
-                                 const FLOAT *d_lmsts, const UVW *d_uvws, const FLOAT *d_lambdas_m,
-                                 const FLOAT convergence) {
+                                 const UVW *d_uvws, const FLOAT *d_lambdas_m,
+                                 const FLOAT convergence)
+{
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
@@ -774,7 +793,8 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
     gpuMalloc(&d_iono_consts, sizeof(IonoConsts));
     gpuMemcpy(d_iono_consts, iono_consts, sizeof(IonoConsts), gpuMemcpyHostToDevice);
 
-    for (int iteration = 0; iteration < num_iterations; iteration++) {
+    for (int iteration = 0; iteration < num_iterations; iteration++)
+    {
         // Do the work for one loop of the iteration.
         iono_loop_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_weights, d_vis_model, d_vis_model_rotated,
                                                 d_iono_consts, d_iono_fits, num_baselines, num_freqs, d_uvws,
@@ -783,12 +803,14 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         gpuError_t error_id;
 #ifdef DEBUG
         error_id = gpuDeviceSynchronize();
-        if (error_id != gpuSuccess) {
+        if (error_id != gpuSuccess)
+        {
             return gpuGetErrorString(error_id);
         }
 #endif
         error_id = gpuGetLastError();
-        if (error_id != gpuSuccess) {
+        if (error_id != gpuSuccess)
+        {
             return gpuGetErrorString(error_id);
         }
 
@@ -796,12 +818,14 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         reduce_baselines<NUM_ADD_THREADS><<<gridDimAdd, blockDimAdd>>>(d_iono_fits, num_baselines);
 #ifdef DEBUG
         error_id = gpuDeviceSynchronize();
-        if (error_id != gpuSuccess) {
+        if (error_id != gpuSuccess)
+        {
             return gpuGetErrorString(error_id);
         }
 #endif
         error_id = gpuGetLastError();
-        if (error_id != gpuSuccess) {
+        if (error_id != gpuSuccess)
+        {
             return gpuGetErrorString(error_id);
         }
 
@@ -809,33 +833,26 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
             <<<gridDimAdd2, blockDimAdd2>>>(d_iono_fits, d_lambdas_m, num_freqs, d_iono_consts, convergence);
 #ifdef DEBUG
         error_id = gpuDeviceSynchronize();
-        if (error_id != gpuSuccess) {
+        if (error_id != gpuSuccess)
+        {
             return gpuGetErrorString(error_id);
         }
 #endif
         error_id = gpuGetLastError();
-        if (error_id != gpuSuccess) {
+        if (error_id != gpuSuccess)
+        {
             return gpuGetErrorString(error_id);
         }
 
-        // Sane?
         gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
-        if (iono_consts->gain < 0.0) {
-            // let's handle this in cpu world. This gets overwritten by the gpuMemcpy at the end of this function anyway
-            // iono_consts->alpha = 0.0;
-            // iono_consts->beta = 0.0;
-            // iono_consts->gain = 1.0;
+        if (iono_consts->gain < 0.0)
+        {
             break;
         }
-        // printf("iter %d: %.4e %.4e %.4e\n", iteration, iono_consts->alpha, iono_consts->beta, iono_consts->gain);
-        // JonesF64 sum;
-        // gpuMemcpy(&sum, d_iono_fits, sizeof(JonesF64), gpuMemcpyDeviceToHost);
-        // printf("sum: %.4e %.4e %.4e %.4e %.4e %.4e %.4e %d\n", sum.j00_re, sum.j00_im, sum.j01_re, sum.j01_im, sum.j10_re, sum.j10_im, sum.j11_re, (int)sum.j11_im);
     }
 
     gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
     gpuFree(d_iono_consts);
-    // printf("%.4e %.4e\n", iono_consts->alpha, iono_consts->beta);
 
     return NULL;
 }
@@ -843,24 +860,27 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
 extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model,
                                      const IonoConsts iono_consts, IonoConsts old_iono_consts, const UVW *d_uvws,
                                      const FLOAT *d_lambdas_m, const int num_timesteps, const int num_baselines,
-                                     const int num_freqs) {
+                                     const int num_freqs)
+{
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
     gridDim.x = (int)ceil((double)num_baselines / (double)blockDim.x);
 
     subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_consts, old_iono_consts, d_uvws,
-                                     d_lambdas_m, num_timesteps, num_baselines, num_freqs);
+                                                d_lambdas_m, num_timesteps, num_baselines, num_freqs);
 
     gpuError_t error_id;
 #ifdef DEBUG
     error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 #endif
     error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 
@@ -869,7 +889,8 @@ extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d
 
 extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis_model, const IonoConsts iono_consts,
                                  const FLOAT *d_lambdas_m, const UVW *d_uvws, const int num_timesteps,
-                                 const int num_freqs, const int num_baselines) {
+                                 const int num_freqs, const int num_baselines)
+{
     // Thread blocks are distributed by baseline indices.
     dim3 gridDim, blockDim;
     blockDim.x = 256;
@@ -881,12 +902,14 @@ extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis
     gpuError_t error_id;
 #ifdef DEBUG
     error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 #endif
     error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
+    if (error_id != gpuSuccess)
+    {
         return gpuGetErrorString(error_id);
     }
 
