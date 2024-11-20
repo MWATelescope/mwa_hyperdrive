@@ -6,6 +6,8 @@
 # This script requires bindgen. This can be provided by a package manager or
 # installed with "cargo install bindgen-cli".
 
+# don't forget `sudo apt install libclang-dev` https://rust-lang.github.io/rust-bindgen/requirements.html
+
 # https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
 SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
 
@@ -49,7 +51,6 @@ for PRECISION in SINGLE DOUBLE; do
     bindgen "${SCRIPTPATH}"/peel.h \
             --allowlist-function "rotate" \
             --allowlist-function "average" \
-            --allowlist-function "rotate_average" \
             --allowlist-function "xyzs_to_uvws" \
             --allowlist-function "iono_loop" \
             --allowlist-function "subtract_iono" \

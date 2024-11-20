@@ -88,7 +88,11 @@ impl SourceList {
 
     /// Find components within a given angular distance [radians] of a position
     /// Return a vector of tuples containing separation [radians], source name, component index, and component.
-    pub fn search(&self, target: RADec, radians: f64) -> Vec<(f64, String, usize, SourceComponent)> {
+    pub fn search(
+        &self,
+        target: RADec,
+        radians: f64,
+    ) -> Vec<(f64, String, usize, SourceComponent)> {
         let mut matches = Vec::new();
         for (name, src) in self.iter() {
             for (i, comp) in src.components.iter().enumerate() {
@@ -102,11 +106,16 @@ impl SourceList {
     }
 
     /// Find components within a given angular distance [arcseconds] of a position
-    /// Return a vector of tuples containing separation [radians], source name, component index, and component.
-    pub fn search_asec(&self, target: RADec, arcseconds: f64) -> Vec<(f64, String, usize, SourceComponent)> {
-        self.search(target, arcseconds.to_radians() / 3600.0).into_iter().map(|(sep, name, i, comp)|
-            (sep.to_degrees() * 3600.0, name, i, comp)
-        ).collect()
+    /// Return a vector of tuples containing separation [arcseconds], source name, component index, and component.
+    pub fn search_asec(
+        &self,
+        target: RADec,
+        arcseconds: f64,
+    ) -> Vec<(f64, String, usize, SourceComponent)> {
+        self.search(target, arcseconds.to_radians() / 3600.0)
+            .into_iter()
+            .map(|(sep, name, i, comp)| (sep.to_degrees() * 3600.0, name, i, comp))
+            .collect()
     }
 }
 

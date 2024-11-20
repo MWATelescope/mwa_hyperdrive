@@ -18,17 +18,17 @@ use super::common::{BeamArgs, InputVisArgs, ModellingArgs, SkyModelWithVetoArgs,
 use crate::{
     averaging::{
         channels_to_chanblocks, parse_freq_average_factor, parse_time_average_factor,
-        timesteps_to_timeblocks, AverageFactorError, unflag_spw,
+        timesteps_to_timeblocks, unflag_spw, AverageFactorError,
     },
     cli::{
         common::{display_warnings, InfoPrinter, OutputVisArgs},
         Warn,
     },
     io::write::{VisOutputType, VIS_OUTPUT_EXTENSIONS},
+    math::div_ceil,
     params::{ModellingParams, PeelParams},
     unit_parsing::{parse_wavelength, WavelengthUnit, WAVELENGTH_FORMATS},
     HyperdriveError,
-    math::div_ceil,
 };
 
 const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
@@ -79,8 +79,8 @@ pub(crate) struct PeelCliArgs {
     /// "ionospherically subtracted" sources, except before subtracting, a "DI
     /// calibration" is done between the iono-rotated model and the data. This
     /// allows for scintillation and any other phase shift to be corrected.
-    #[clap(long = "peel", help_heading = "PEELING")]
-    pub(super) num_sources_to_peel: Option<usize>,
+    // #[clap(long = "peel", help_heading = "PEELING")]
+    // pub(super) num_sources_to_peel: Option<usize>,
 
     /// The number of sources to "ionospherically subtract". That is, a λ²
     /// dependence is found for each of these sources and removed. The number of
@@ -219,7 +219,6 @@ impl PeelArgs {
             beam_args,
             peel_args:
                 PeelCliArgs {
-                    num_sources_to_peel,
                     num_sources_to_iono_subtract,
                     num_sources_to_subtract,
                     num_passes,
@@ -395,49 +394,6 @@ impl PeelArgs {
                 iono_freq_average_factor
             };
 
-        // let mut iono_spws = {
-        //     let all_freqs = {
-        //         let n = input_vis_params.spw.chanblocks.len()
-        //             + input_vis_params.spw.flagged_chanblock_indices.len();
-        //         let mut freqs = Vec::with_capacity(n);
-        //         let first_freq = input_vis_params.spw.first_freq.round() as u64;
-        //         let freq_res = input_vis_params.spw.freq_res.round() as u64;
-        //         for i in 0..n as u64 {
-        //             freqs.push(first_freq + freq_res * i);
-        //         }
-        //         freqs
-        //     };
-
-        //     channels_to_chanblocks(
-        //         &all_freqs,
-        //         input_vis_params.spw.freq_res,
-        //         freq_average_factor,
-        //         &input_vis_params.spw.flagged_chanblock_indices,
-        //     )
-        // };
-        // // There must be at least one chanblock to do anything.
-        // let iono_spw = match iono_spws.as_slice() {
-        //     // No spectral windows is the same as no chanblocks.
-        //     [] => return Err(PeelArgsError::NoChannels.into()),
-        //     [f] => {
-        //         // Check that the chanblocks aren't all flagged.
-        //         if f.chanblocks.is_empty() {
-        //             return Err(PeelArgsError::NoChannels.into());
-        //         }
-        //         iono_spws.swap_remove(0)
-        //     }
-        //     [f, ..] => {
-        //         // Check that the chanblocks aren't all flagged.
-        //         if f.chanblocks.is_empty() {
-        //             return Err(PeelArgsError::NoChannels.into());
-        //         }
-        //         // TODO: Allow picket fence.
-        //         eprintln!("\"Picket fence\" data detected. hyperdrive does not support this right now -- exiting.");
-        //         eprintln!("See for more info: https://MWATelescope.github.io/mwa_hyperdrive/defs/mwa/picket_fence.html");
-        //         std::process::exit(1);
-        //     }
-        // };
-
         let low_res_freq_average_factor = {
             let default_iono_freq_average_factor = parse_freq_average_factor(
                 Some(input_vis_params.spw.freq_res),
@@ -595,31 +551,6 @@ impl PeelArgs {
         let short_baseline_sigma = short_baseline_sigma.unwrap_or(DEFAULT_SHORT_BASELINE_SIGMA);
         let convergence = convergence.unwrap_or(DEFAULT_CONVERGENCE);
 
-        // let (baseline_weights, num_flagged_baselines) = {
-        //     let mut baseline_weights = Vec1::try_from_vec(vec![
-        //         1.0;
-        //         tile_baseline_flags
-        //             .unflagged_cross_baseline_to_tile_map
-        //             .len()
-        //     ])
-        //     .map_err(|_| PeelError::NoTiles)?;
-        //     let uvws = xyzs_to_cross_uvws(
-        //         &unflagged_tile_xyzs,
-        //         obs_context.phase_centre.to_hadec(lmst),
-        //     );
-        //     assert_eq!(baseline_weights.len(), uvws.len());
-        //     let uvw_min = uvw_min_metres.powi(2);
-        //     let uvw_max = uvw_max_metres.powi(2);
-        //     let mut num_flagged_baselines = 0;
-        //     for (uvw, baseline_weight) in uvws.into_iter().zip_eq(baseline_weights.iter_mut()) {
-        //         let uvw_length = uvw.u.powi(2) + uvw.v.powi(2) + uvw.w.powi(2);
-        //         if uvw_length < uvw_min || uvw_length > uvw_max {
-        //             *baseline_weight = 0.0;
-        //             num_flagged_baselines += 1;
-        //         }
-        //     }
-        //     (baseline_weights, num_flagged_baselines)
-        // };
         let num_unflagged_baselines = {
             let uvws = xyzs_to_cross_uvws(
                 &unflagged_tile_xyzs,
@@ -640,10 +571,6 @@ impl PeelArgs {
 
         let num_sources_to_iono_subtract =
             num_sources_to_iono_subtract.unwrap_or(source_list.len());
-        if num_sources_to_peel.is_some() {
-            "No sources are being peeled; this is not working yet".warn()
-        }
-        let num_sources_to_peel = 0;
 
         let mut peel_printer = InfoPrinter::new("Peeling set up".into());
         peel_printer.push_block(vec![
@@ -653,7 +580,6 @@ impl PeelArgs {
                 num_sources_to_iono_subtract
             )
             .into(),
-            format!("Peeling {} sources", num_sources_to_peel).into(),
         ]);
         if num_sources_to_iono_subtract > 0 {
             let mut block = vec![];
@@ -695,7 +621,10 @@ impl PeelArgs {
                 );
             }
             block.push(
-                format!("- {num_passes} passes of {num_loops} loops at {convergence:.2} convergence").into()
+                format!(
+                    "- {num_passes} passes of {num_loops} loops at {convergence:.2} convergence"
+                )
+                .into(),
             );
             peel_printer.push_block(block);
         }
@@ -718,7 +647,6 @@ impl PeelArgs {
             short_baseline_sigma,
             convergence,
             num_sources_to_iono_subtract,
-            num_sources_to_peel,
             num_passes,
             num_loops,
         })
@@ -742,7 +670,6 @@ impl PeelArgs {
 impl PeelCliArgs {
     fn merge(self, other: Self) -> Self {
         Self {
-            num_sources_to_peel: self.num_sources_to_peel.or(other.num_sources_to_peel),
             num_sources_to_iono_subtract: self
                 .num_sources_to_iono_subtract
                 .or(other.num_sources_to_iono_subtract),

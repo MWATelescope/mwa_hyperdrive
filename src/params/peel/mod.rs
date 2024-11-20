@@ -7,13 +7,13 @@ mod tests;
 
 use std::{
     borrow::Cow,
+    cmp::Ordering,
     f64::consts::TAU,
     io::Write,
     num::NonZeroUsize,
     ops::{Div, Neg, Sub},
     path::PathBuf,
     thread::{self, ScopedJoinHandle},
-    cmp::Ordering,
 };
 
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
@@ -46,14 +46,14 @@ use crate::{
         read::VisReadError,
         write::{write_vis, VisTimestep},
     },
+    math::div_ceil,
     model::{ModelDevice, ModelError, SkyModeller, SkyModellerCpu},
     srclist::SourceList,
     Chanblock, TileBaselineFlags, MODEL_DEVICE, PROGRESS_BARS,
-    math::div_ceil,
 };
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use crate::{
-    gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat, GpuJones},
+    gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat},
     model::SkyModellerGpu,
 };
 
@@ -103,7 +103,6 @@ pub(crate) struct BadSource {
     // pub(crate) alphas: Vec<f64>,
     // pub(crate) betas: Vec<f64>,
     // pub(crate) gains: Vec<f64>,
-
     pub(crate) residuals_i: Vec<Complex<f64>>,
     pub(crate) residuals_q: Vec<Complex<f64>>,
     pub(crate) residuals_u: Vec<Complex<f64>>,
@@ -115,11 +114,11 @@ impl PartialOrd for BadSource {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match self.source_name.partial_cmp(&other.source_name) {
             // Some(Ordering::Equal) => match self.gpstime.partial_cmp(&other.gpstime) {
-                Some(Ordering::Equal) => match self.pass.partial_cmp(&other.pass) {
-                    Some(Ordering::Less) => Some(Ordering::Greater),
-                    Some(Ordering::Greater) => Some(Ordering::Less),
-                    other => other,
-                },
+            Some(Ordering::Equal) => match self.pass.partial_cmp(&other.pass) {
+                Some(Ordering::Less) => Some(Ordering::Greater),
+                Some(Ordering::Greater) => Some(Ordering::Less),
+                other => other,
+            },
             //     other => other,
             // },
             other => other,
@@ -142,7 +141,6 @@ pub(crate) struct PeelParams {
     pub(crate) short_baseline_sigma: f64,
     pub(crate) convergence: f64,
     pub(crate) num_sources_to_iono_subtract: usize,
-    pub(crate) num_sources_to_peel: usize,
     pub(crate) num_passes: NonZeroUsize,
     pub(crate) num_loops: NonZeroUsize,
 }
@@ -165,7 +163,6 @@ impl PeelParams {
             short_baseline_sigma,
             convergence,
             num_sources_to_iono_subtract,
-            num_sources_to_peel: _,
             num_passes,
             num_loops,
         } = self;
@@ -223,7 +220,10 @@ impl PeelParams {
         };
 
         assert!(
-            div_ceil(input_vis_params.timeblocks.len(), iono_time_average_factor.get()) == iono_timeblocks.len(),
+            div_ceil(
+                input_vis_params.timeblocks.len(),
+                iono_time_average_factor.get()
+            ) == iono_timeblocks.len(),
             "num_read_times {} != num_iono_times {} * iono_time_average_factor {}",
             input_vis_params.timeblocks.len(),
             iono_timeblocks.len(),
@@ -324,14 +324,12 @@ impl PeelParams {
                     let result = subtract_thread(
                         &**beam,
                         source_list,
-                        &source_weighted_positions,
                         obs_context,
                         &unflagged_tile_xyzs,
                         tile_baseline_flags,
                         array_position,
                         input_vis_params.dut1,
                         &all_fine_chan_freqs_hz,
-                        &all_fine_chan_lambdas_m,
                         *apply_precession,
                         rx_data,
                         tx_residual,
@@ -907,8 +905,7 @@ fn iono_fit(
                 .zip_eq(weights.outer_iter())
                 .zip_eq(model.outer_iter())
                 .zip_eq(lambdas_m.iter())
-                .enumerate()
-                .for_each(|(_ch_idx, (((residual, weights), model), &lambda))| {
+                .for_each(|(((residual, weights), model), &lambda)| {
                     let lambda_2 = lambda * lambda;
 
                     let mut i_tile1 = 0;
@@ -970,24 +967,6 @@ fn iono_fit(
                                 aa_v_bl += weight * mr * v;
                                 s_vm_bl += weight * s_vm;
                                 s_mm_bl += weight * s_mm;
-
-                                // #[cfg(test)]
-                                // {
-                                //     if ch_idx > 1 || i_tile1 != 0 || (i_tile2 >= 16 && i_tile2 < num_tiles - 16) {
-                                //         return;
-                                //     }
-                                //     println!("uv {i_tile1:3} {i_tile2:3} ({u:+9.3}, {v:+9.3}) l{lambda:+7.5} wt {weight:3.1}| RI {:+11.7} @{:+5.3}pi | MI {:+11.7} @{:+5.3}pi", residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
-                                //     // if i_tile1 == 0 && i_tile2 == 1 {
-                                //     //     let a_uu_delta = weight * mm * u * u;
-                                //     //     let a_uv_delta = weight * mm * u * v;
-                                //     //     let a_vv_delta = weight * mm * v * v;
-                                //     //     let aa_u_delta = weight * mr * u;
-                                //     //     let aa_v_delta = weight * mr * v;
-                                //     //     let s_vm_delta = weight * s_vm;
-                                //     //     let s_mm_delta = weight * s_mm;
-                                //     //     dbg!(weight, mr, mm, a_uu_delta, a_uv_delta, a_vv_delta, aa_u_delta, aa_v_delta, s_vm_delta, s_mm_delta);
-                                //     // }
-                                // }
                             }
                         });
 
@@ -1039,6 +1018,7 @@ fn setup_uvs(tile_uvs: &mut [UV], tile_xyzs: &[XyzGeodetic], phase_centre: HADec
         });
 }
 
+#[cfg(test)]
 fn model_timesteps(
     modeller: &dyn SkyModeller,
     timestamps: &[Epoch],
@@ -1089,7 +1069,6 @@ fn peel_cpu(
     let timestamps = &timeblock.timestamps;
     let num_timestamps_high_res = timestamps.len();
     let num_timestamps_low_res = 1;
-    let avg_time = num_timestamps_high_res / num_timestamps_low_res;
 
     let num_tiles = unflagged_tile_xyzs.len();
     let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
@@ -1467,7 +1446,7 @@ fn peel_gpu(
 ) -> Result<(), PeelError> {
     use std::collections::{HashMap, HashSet};
 
-    use crate::srclist::{ComponentType, FluxDensityType, FluxDensity};
+    use crate::srclist::{ComponentType, FluxDensity, FluxDensityType};
 
     let timestamps = &timeblock.timestamps;
 
@@ -1699,7 +1678,8 @@ fn peel_gpu(
     let mut bad_sources = Vec::<BadSource>::new();
 
     unsafe {
-        let mut gpu_uvws: ArrayBase<ndarray::OwnedRepr<gpu::UVW>, Dim<[usize; 2]>> = Array2::default((num_timesteps, num_cross_baselines));
+        let mut gpu_uvws: ArrayBase<ndarray::OwnedRepr<gpu::UVW>, Dim<[usize; 2]>> =
+            Array2::default((num_timesteps, num_cross_baselines));
         gpu_uvws
             .outer_iter_mut()
             .zip(tile_xyzs_high_res.outer_iter())
@@ -2072,11 +2052,9 @@ fn peel_gpu(
                     d_low_res_model_rotated.get_mut().cast(),
                     d_iono_fits.get_mut().cast(),
                     &mut gpu_iono_consts,
-                    num_tiles_i32,
                     num_cross_baselines_i32,
                     num_low_res_chans_i32,
                     num_loops as i32,
-                    d_average_lmsts.get(),
                     d_low_res_uvws.get(),
                     d_low_res_lambdas.get(),
                     convergence as GpuFloat,
@@ -2087,6 +2065,7 @@ fn peel_gpu(
                 iono_consts.beta = old_iono_consts.beta + gpu_iono_consts.beta;
                 iono_consts.gain = old_iono_consts.gain * gpu_iono_consts.gain;
 
+                #[rustfmt::skip]
                 let issues = format!(
                     "{}{}{}",
                     if iono_consts.alpha.abs() > 1e-3 {
@@ -2288,7 +2267,9 @@ fn peel_gpu(
 
     let mut pass_counts = HashMap::<String, usize>::new();
     for bad_source in bad_sources.iter() {
-        *pass_counts.entry(bad_source.source_name.clone()).or_default() += 1;
+        *pass_counts
+            .entry(bad_source.source_name.clone())
+            .or_default() += 1;
     }
     let mut printed = HashSet::<String>::new();
     bad_sources.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
@@ -2333,26 +2314,29 @@ fn peel_gpu(
                     min.to_degrees() * 3600.,
                     pa.to_degrees()
                 ),
-                ComponentType::Point => format!(
-                    "P {:8} {:8} {:7}",
-                    "", "", ""
-                ),
-                _ => format!(
-                    "? {:8} {:8} {:7}",
-                    "", "", ""
-                ),
+                ComponentType::Point => format!("P {:8} {:8} {:7}", "", "", ""),
+                _ => format!("? {:8} {:8} {:7}", "", "", ""),
             };
             let fluxstr = match comp.flux_type {
-                FluxDensityType::CurvedPowerLaw { si, fd: FluxDensity { freq, i, .. }, q } => format!(
-                    "cpl S={:+6.2}(νn)^{:+5.2} exp[{:+5.2}ln(νn)]; @{:.1}MHz", i, si, q, freq / 1e6
+                FluxDensityType::CurvedPowerLaw {
+                    si,
+                    fd: FluxDensity { freq, i, .. },
+                    q,
+                } => format!(
+                    "cpl S={:+6.2}(νn)^{:+5.2} exp[{:+5.2}ln(νn)]; @{:.1}MHz",
+                    i,
+                    si,
+                    q,
+                    freq / 1e6
                 ),
-                FluxDensityType::PowerLaw { si, fd: FluxDensity { freq, i, .. } } => format!(
-                    "pl  S={:+6.2}(νn)^{:+5.2}; @{:.1}MHz", i, si, freq / 1e6
-                ),
+                FluxDensityType::PowerLaw {
+                    si,
+                    fd: FluxDensity { freq, i, .. },
+                } => format!("pl  S={:+6.2}(νn)^{:+5.2}; @{:.1}MHz", i, si, freq / 1e6),
                 FluxDensityType::List(fds) => {
                     let FluxDensity { i, freq, .. } = fds[0];
                     format!("lst S={:+6.2} @{:.1}MHz", i, freq / 1e6)
-                },
+                }
             };
             pb_warn!(
                 "[peel_gpu]  {sep:5.1} {src_name:16} c{idx:2} at radec({:+7.2},{:+7.2}) comp({}) flx ({})",
@@ -2362,22 +2346,6 @@ fn peel_gpu(
                 fluxstr,
             );
         }
-        // pb_warn!(
-        //     "  residuals_i: {:?}",
-        //     bad_source.residuals_i.iter().map(|c| c.norm()).collect_vec()
-        // );
-        // pb_warn!(
-        //     "  residuals_q: {:?}",
-        //     bad_source.residuals_q.iter().map(|c| c.norm()).collect_vec()
-        // );
-        // pb_warn!(
-        //     "  residuals_u: {:?}",
-        //     bad_source.residuals_u.iter().map(|c| c.norm()).collect_vec()
-        // );
-        // pb_warn!(
-        //     "  residuals_v: {:?}",
-        //     bad_source.residuals_v.iter().map(|c| c.norm()).collect_vec()
-        // );
     }
 
     Ok(())
@@ -2473,27 +2441,6 @@ impl approx::AbsDiffEq for UV {
     }
 }
 
-fn xyzs_to_cross_uvws_buffer(
-    xyzs: &[XyzGeodetic],
-    phase_centre: HADec,
-    tile_buffer: &mut [UVW],
-    uvws: &mut Vec<UVW>,
-) {
-    let (s_ha, c_ha) = phase_centre.ha.sin_cos();
-    let (s_dec, c_dec) = phase_centre.dec.sin_cos();
-    // Get a UVW for each tile.
-    xyzs.iter()
-        .zip_eq(tile_buffer.iter_mut())
-        .for_each(|(xyz, uvw)| *uvw = UVW::from_xyz_inner(*xyz, s_ha, c_ha, s_dec, c_dec));
-    // Take the difference of every pair of UVWs.
-    uvws.clear();
-    for (i, t1) in tile_buffer.iter().enumerate() {
-        for t2 in tile_buffer.iter().skip(i + 1) {
-            uvws.push(*t1 - *t2);
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn read_thread(
     input_vis_params: &InputVisParams,
@@ -2556,15 +2503,12 @@ fn read_thread(
 fn subtract_thread(
     beam: &dyn Beam,
     source_list: &SourceList,
-    source_weighted_positions: &[RADec],
     obs_context: &ObsContext,
     unflagged_tile_xyzs: &[XyzGeodetic],
     tile_baseline_flags: &TileBaselineFlags,
     array_position: LatLngHeight,
     dut1: Duration,
     all_fine_chan_freqs_hz: &[f64],
-    // TODO(Dev): why have both of these?
-    all_fine_chan_lambdas_m: &[f64],
     apply_precession: bool,
     rx_data: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
     tx_residual: Sender<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
@@ -2572,9 +2516,6 @@ fn subtract_thread(
     model_progress: &ProgressBar,
     sub_progress: &ProgressBar,
 ) -> Result<(), ModelError> {
-    let num_unflagged_tiles = unflagged_tile_xyzs.len();
-    let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
-
     let mut cpu_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Cpu) {
         Some(SkyModellerCpu::new(
             beam,
@@ -2595,19 +2536,6 @@ fn subtract_thread(
     };
 
     #[cfg(any(feature = "cuda", feature = "hip"))]
-    struct GpuStuff<'a> {
-        modeller: SkyModellerGpu<'a>,
-        d_uvws_from: DevicePointer<gpu::UVW>,
-        d_uvws_to: DevicePointer<gpu::UVW>,
-        d_beam_jones: DevicePointer<GpuJones>,
-        d_xyzs: DevicePointer<gpu::XYZ>,
-        gpu_xyzs: Vec<gpu::XYZ>,
-        d_lmst: DevicePointer<GpuFloat>,
-        d_lambdas: DevicePointer<GpuFloat>,
-        d_vis_fb: DevicePointer<Jones<f32>>,
-    }
-
-    #[cfg(any(feature = "cuda", feature = "hip"))]
     let mut gpu_modeller = if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
         let modeller = SkyModellerGpu::new(
             beam,
@@ -2623,37 +2551,7 @@ fn subtract_thread(
             dut1,
             apply_precession,
         )?;
-        #[cfg(feature = "gpu-single")]
-        let d_lambdas = {
-            let gpu_lambdas = all_fine_chan_lambdas_m
-                .iter()
-                .map(|l| *l as GpuFloat)
-                .collect::<Vec<_>>();
-            DevicePointer::copy_to_device(&gpu_lambdas)?
-        };
-        #[cfg(not(feature = "gpu-single"))]
-        let d_lambdas = DevicePointer::copy_to_device(&all_fine_chan_lambdas_m)?;
-        Some(GpuStuff {
-            modeller,
-            d_uvws_from: DevicePointer::<gpu::UVW>::malloc(
-                num_unflagged_cross_baselines * std::mem::size_of::<gpu::UVW>(),
-            )?,
-            d_uvws_to: DevicePointer::<gpu::UVW>::malloc(
-                num_unflagged_cross_baselines * std::mem::size_of::<gpu::UVW>(),
-            )?,
-            d_beam_jones: DevicePointer::default(),
-            d_xyzs: DevicePointer::<gpu::XYZ>::malloc(
-                num_unflagged_tiles * std::mem::size_of::<gpu::UVW>(),
-            )?,
-            gpu_xyzs: Vec::with_capacity(num_unflagged_tiles),
-            d_lmst: DevicePointer::<GpuFloat>::malloc(std::mem::size_of::<GpuFloat>())?,
-            d_lambdas,
-            d_vis_fb: DevicePointer::<Jones<f32>>::malloc(
-                all_fine_chan_lambdas_m.len()
-                    * num_unflagged_cross_baselines
-                    * std::mem::size_of::<Jones<f32>>(),
-            )?,
-        })
+        Some(modeller)
     } else {
         None
     };
@@ -2711,142 +2609,13 @@ fn subtract_thread(
         sub_progress.tick();
 
         if let Some(modeller) = cpu_modeller.as_mut() {
-            // let mut uvws_from = Vec::with_capacity(num_unflagged_cross_baselines);
-            // let mut uvws_to = Vec::with_capacity(num_unflagged_cross_baselines);
-            // let mut tile_buffer = vec![UVW::default(); num_unflagged_tiles];
-            // xyzs_to_cross_uvws_buffer(
-            //     &xyzs,
-            //     obs_context.phase_centre.to_hadec(lst),
-            //     &mut tile_buffer,
-            //     &mut uvws_from,
-            // );
-            // for (source, source_pos) in source_list
-            //     .values()
-            //     .zip_eq(source_weighted_positions.iter())
-            // {
-            //     xyzs_to_cross_uvws_buffer(
-            //         &xyzs,
-            //         source_pos.to_hadec(lst),
-            //         &mut tile_buffer,
-            //         &mut uvws_to,
-            //     );
-            //     // HMMMMMM
-            //     todo!("rotate vis in place");
-            //     //vis_rotate_fb(vis_data_fb.view_mut(), , , , );
-
-            //     modeller.update_with_a_source(source, *source_pos)?;
-            //     modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
-            //     std::mem::swap(&mut uvws_from, &mut uvws_to);
-            // }
             modeller.model_timestep_with(timestamp, vis_data_fb.view_mut())?;
         }
 
         #[cfg(any(feature = "cuda", feature = "hip"))]
-        if let Some(GpuStuff {
-            modeller,
-            // d_uvws_from,
-            // d_uvws_to,
-            // d_beam_jones,
-            // d_xyzs,
-            // gpu_xyzs,
-            // d_lmst,
-            // d_lambdas,
-            // d_vis_fb,
-            ..
-        }) = gpu_modeller.as_mut()
-        {
-            // d_vis_fb.overwrite(vis_data_fb.as_slice().expect("is contiguous"))?;
-            // for xyz in xyzs.iter() {
-            //     gpu_xyzs.push(gpu::XYZ {
-            //         x: xyz.x as GpuFloat,
-            //         y: xyz.y as GpuFloat,
-            //         z: xyz.z as GpuFloat,
-            //     })
-            // }
-            // d_xyzs.overwrite(gpu_xyzs)?;
-            // gpu_xyzs.clear();
-            // d_lmst.overwrite(&[lst as GpuFloat])?;
-
-            // gpu_kernel_call!(
-            //     gpu::xyzs_to_uvws,
-            //     d_xyzs.get(),
-            //     d_lmst.get(),
-            //     d_uvws_from.get_mut(),
-            //     gpu::RADec {
-            //         ra: obs_context.phase_centre.ra as GpuFloat,
-            //         dec: obs_context.phase_centre.dec as GpuFloat,
-            //     },
-            //     num_unflagged_tiles as i32,
-            //     num_unflagged_cross_baselines as i32,
-            //     1
-            // )?;
-
-            // for (source, source_pos) in source_list
-            //     .values()
-            //     .zip_eq(source_weighted_positions.iter())
-            // {
-            //     gpu_kernel_call!(
-            //         gpu::xyzs_to_uvws,
-            //         d_xyzs.get(),
-            //         d_lmst.get(),
-            //         d_uvws_to.get_mut(),
-            //         gpu::RADec {
-            //             ra: source_pos.ra as GpuFloat,
-            //             dec: source_pos.dec as GpuFloat,
-            //         },
-            //         num_unflagged_tiles as i32,
-            //         num_unflagged_cross_baselines as i32,
-            //         1,
-            //     )?;
-
-            //     gpu_kernel_call!(
-            //         gpu::rotate,
-            //         d_vis_fb.get_mut().cast(),
-            //         1,
-            //         num_unflagged_cross_baselines as i32,
-            //         all_fine_chan_lambdas_m.len() as i32,
-            //         d_uvws_from.get(),
-            //         d_uvws_to.get(),
-            //         d_lambdas.get()
-            //     )?;
-            //     std::mem::swap(d_uvws_from, d_uvws_to);
-
-            //     // modeller.update_with_a_source(source, *source_pos)?;
-            //     // modeller.model_timestep_with(lst, latitude, d_uvws_to, d_beam_jones, d_vis_fb)?;
-            //
-            //     sub_progress.inc(1);
-            // }
-            // SkyModeller::model_timestep_with(modeller, timestamp, vis_data_fb.view_mut());
+        if let Some(modeller) = gpu_modeller.as_mut() {
             let (model_vis, _) = modeller.model_timestep(timestamp)?;
             vis_data_fb += &model_vis;
-
-            // gpu_kernel_call!(
-            //     gpu::xyzs_to_uvws,
-            //     d_xyzs.get(),
-            //     d_lmst.get(),
-            //     d_uvws_to.get_mut(),
-            //     gpu::RADec {
-            //         ra: obs_context.phase_centre.ra as GpuFloat,
-            //         dec: obs_context.phase_centre.dec as GpuFloat,
-            //     },
-            //     num_unflagged_tiles as i32,
-            //     num_unflagged_cross_baselines as i32,
-            //     1
-            // )?;
-
-            // gpu_kernel_call!(
-            //     gpu::rotate,
-            //     d_vis_fb.get_mut().cast(),
-            //     1,
-            //     num_unflagged_cross_baselines as i32,
-            //     all_fine_chan_lambdas_m.len() as i32,
-            //     d_uvws_from.get(),
-            //     d_uvws_to.get(),
-            //     d_lambdas.get()
-            // )?;
-
-            // d_vis_fb.copy_from_device(vis_data_fb.as_slice_mut().expect("is contiguous"))?;
-            // d_vis_fb.clear();
         }
 
         vis_data_fb.iter_mut().for_each(|j| *j *= -1.0);
