@@ -7,9 +7,6 @@ pub(crate) enum PeelArgsError {
     #[error("No calibration output was specified. There must be at least one calibration solution file.")]
     NoOutput,
 
-    #[error("The data either contains no frequency channels or all channels are flagged")]
-    NoChannels,
-
     #[error("The number of iono sub passes cannot be 0")]
     ZeroPasses,
 
