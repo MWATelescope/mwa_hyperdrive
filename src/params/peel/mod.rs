@@ -2632,6 +2632,9 @@ fn subtract_thread(
     Ok(())
 }
 
+// type for passing full residuals from joiner thread
+type FullResidual<'a> = (Array3<Jones<f32>>, Array3<f32>, &'a Timeblock);
+
 /// reshapes residuals for peel.
 /// receives a stream of 2D residuals and weights [chan, baseline]
 /// joins them into a 3D array [time, chan, baseline] whose time axis
@@ -2645,7 +2648,7 @@ fn joiner_thread<'a>(
     spw: &Spw,
     num_unflagged_cross_baselines: usize,
     rx_residual: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
-    tx_full_residual: Sender<(Array3<Jones<f32>>, Array3<f32>, &'a Timeblock)>,
+    tx_full_residual: Sender<FullResidual<'a>>,
     error: &AtomicCell<bool>,
 ) {
     for timeblock in iono_timeblocks {
@@ -2716,7 +2719,7 @@ fn peel_thread(
     low_res_lambdas_m: &[f64],
     apply_precession: bool,
     output_vis_params: Option<&OutputVisParams>,
-    rx_full_residual: Receiver<(Array3<Jones<f32>>, Array3<f32>, &Timeblock)>,
+    rx_full_residual: Receiver<FullResidual>,
     tx_write: Sender<VisTimestep>,
     tx_iono_consts: Sender<Vec<IonoConsts>>,
     error: &AtomicCell<bool>,

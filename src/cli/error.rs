@@ -173,7 +173,6 @@ impl From<PeelArgsError> for HyperdriveError {
     fn from(e: PeelArgsError) -> Self {
         match e {
             PeelArgsError::NoOutput
-            | PeelArgsError::NoChannels
             | PeelArgsError::ZeroPasses
             | PeelArgsError::ZeroLoops
             | PeelArgsError::ParseIonoTimeAverageFactor(_)
