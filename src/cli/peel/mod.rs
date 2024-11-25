@@ -31,6 +31,9 @@ use crate::{
     HyperdriveError,
 };
 
+#[cfg(test)]
+mod tests;
+
 const DEFAULT_OUTPUT_PEEL_FILENAME: &str = "hyperdrive_peeled.uvfits";
 const DEFAULT_OUTPUT_IONO_CONSTS: &str = "hyperdrive_iono_consts.json";
 #[cfg(not(any(feature = "cuda", feature = "hip")))]
@@ -38,11 +41,8 @@ const DEFAULT_NUM_PASSES: usize = 1;
 #[cfg(any(feature = "cuda", feature = "hip"))]
 const DEFAULT_NUM_PASSES: usize = 3;
 const DEFAULT_NUM_LOOPS: usize = 10;
-const DEFAULT_TIME_AVERAGE_FACTOR: &str = "8s";
-const DEFAULT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
-const DEFAULT_IONO_FREQ_AVERAGE_FACTOR: &str = "1.28MHz";
-const DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR: &str = "8s";
-const DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR: &str = "80kHz";
+const DEFAULT_IONO_TIME_AVERAGE: &str = "8s";
+const DEFAULT_IONO_FREQ_AVERAGE: &str = "1.28MHz";
 const DEFAULT_UVW_MIN: &str = "50λ";
 const DEFAULT_SHORT_BASELINE_SIGMA: f64 = 40.0;
 const DEFAULT_CONVERGENCE: f64 = 1.0;
@@ -54,15 +54,13 @@ lazy_static::lazy_static! {
 
     static ref NUM_LOOPS_HELP: String = format!("The number of times to loop over a single sources per pass. Default: {DEFAULT_NUM_LOOPS}");
 
-    static ref TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timesteps to use per timeblock *during* peeling. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then peeling is performed with 4 timesteps per timeblock. If the variable is instead 4s, then each timeblock contains up to 4s worth of data.");
+    static ref IONO_TIME_AVERAGE_FACTOR_HELP: String = format!("The time resolution of a peeling timeblock, or an averaging factor relative to the input resolution. If this is 0, then all data are averaged together. Default: {DEFAULT_IONO_TIME_AVERAGE}. e.g. If this variable is 4, then peeling is performed with 4 timesteps per timeblock. If the variable is instead 4s, then each timeblock contains up to 4s worth of data.");
 
-    static ref FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together *before* peeling. Also supports a target time resolution (e.g. 80kHz). If this is 0, then all data is averaged together. Default: {DEFAULT_FREQ_AVERAGE_FACTOR}. e.g. If the input data is in 20kHz resolution and this variable was 2, then we average 40kHz worth of data into a chanblock before peeling. If the variable is instead 40kHz, then each chanblock contains up to 40kHz worth of data.");
+    static ref IONO_FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together *during* peeling. Also supports a target frequency resolution (e.g. 1.28MHz). Cannot be 0. Default: {DEFAULT_IONO_FREQ_AVERAGE}. e.g. If the input data is in 40kHz resolution and this variable was 2, then we average 80kHz worth of data into a chanblock during peeling. If the variable is instead 1.28MHz, then each chanblock contains 32 fine channels.");
 
-    static ref IONO_FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together *during* peeling. Also supports a target time resolution (e.g. 1.28MHz). Cannot be 0. Default: {DEFAULT_IONO_FREQ_AVERAGE_FACTOR}. e.g. If the input data is in 40kHz resolution and this variable was 2, then we average 80kHz worth of data into a chanblock during peeling. If the variable is instead 1.28MHz, then each chanblock contains 32 fine channels.");
+    static ref OUTPUT_TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timeblocks to average together when writing out visibilities. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Defaults to input resolution. e.g. If this variable is 4, then 8 timesteps are averaged together as a timeblock in the output visibilities.");
 
-    static ref OUTPUT_TIME_AVERAGE_FACTOR_HELP: String = format!("The number of timeblocks to average together when writing out visibilities. Also supports a target time resolution (e.g. 8s). If this is 0, then all data are averaged together. Default: {DEFAULT_OUTPUT_TIME_AVERAGE_FACTOR}. e.g. If this variable is 4, then 8 timesteps are averaged together as a timeblock in the output visibilities.");
-
-    static ref OUTPUT_FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together when writing out visibilities. Also supports a target time resolution (e.g. 80kHz). If this is 0, then all data are averaged together. Default: {DEFAULT_OUTPUT_FREQ_AVERAGE_FACTOR}. This is multiplicative with the freq average factor; e.g. If this variable is 4, and the freq average factor is 2, then 8 fine-frequency channels are averaged together as a chanblock in the output visibilities.");
+    static ref OUTPUT_FREQ_AVERAGE_FACTOR_HELP: String = format!("The number of fine-frequency channels to average together when writing out visibilities. Also supports a target time resolution (e.g. 80kHz). If this is 0, then all data are averaged together. Defaults to input resolution. This is multiplicative with the freq average factor; e.g. If this variable is 4, and the freq average factor is 2, then 8 fine-frequency channels are averaged together as a chanblock in the output visibilities.");
 
     static ref UVW_MIN_HELP: String = format!("The minimum UVW length to use. This value must have a unit annotated. Allowed units: {}. Default: {DEFAULT_UVW_MIN}", *WAVELENGTH_FORMATS);
 
@@ -104,14 +102,11 @@ pub(crate) struct PeelCliArgs {
     #[clap(long, help = NUM_LOOPS_HELP.as_str(), help_heading = "PEELING")]
     pub(super) num_loops: Option<usize>,
 
-    #[clap(long, help = TIME_AVERAGE_FACTOR_HELP.as_str(), help_heading = "PEELING")]
-    pub(super) iono_time_average_factor: Option<String>,
+    #[clap(long, help = IONO_TIME_AVERAGE_FACTOR_HELP.as_str(), help_heading = "PEELING")]
+    pub(super) iono_time_average: Option<String>,
 
-    #[clap(long, help = FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "PEELING")]
-    pub(super) iono_freq_average_factor: Option<String>,
-
-    #[clap(short, long, help = IONO_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "PEELING")]
-    pub(super) low_res_iono_freq_average: Option<String>,
+    #[clap(long, help = IONO_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "PEELING")]
+    pub(super) iono_freq_average: Option<String>,
 
     #[clap(long, help = UVW_MIN_HELP.as_str(), help_heading = "PEELING")]
     pub(super) uvw_min: Option<String>,
@@ -223,9 +218,8 @@ impl PeelArgs {
                     num_sources_to_subtract,
                     num_passes,
                     num_loops,
-                    iono_time_average_factor,
-                    iono_freq_average_factor,
-                    low_res_iono_freq_average,
+                    iono_time_average,
+                    iono_freq_average,
                     uvw_min,
                     uvw_max,
                     short_baseline_sigma,
@@ -239,9 +233,11 @@ impl PeelArgs {
 
         // peel doesn't correctly average channels with flags
         // data_args.freq_average = Some("1".into());
-        let mut input_vis_params = data_args.parse("Peeling")?;
-        input_vis_params.spw = unflag_spw(input_vis_params.spw);
-        let input_vis_params = input_vis_params;
+        let input_vis_params = {
+            let mut input_vis_params = data_args.parse("Peeling")?;
+            input_vis_params.spw = unflag_spw(input_vis_params.spw);
+            input_vis_params
+        };
 
         let obs_context = input_vis_params.get_obs_context();
         let total_num_tiles = input_vis_params.get_total_num_tiles();
@@ -317,14 +313,14 @@ impl PeelArgs {
         let iono_time_average_factor = {
             let default_time_average_factor = parse_time_average_factor(
                 Some(input_vis_params.time_res),
-                Some(DEFAULT_TIME_AVERAGE_FACTOR),
+                Some(DEFAULT_IONO_TIME_AVERAGE),
                 NonZeroUsize::new(1).unwrap(),
             )
             .unwrap_or(NonZeroUsize::new(1).unwrap());
 
             let f = parse_time_average_factor(
                 Some(input_vis_params.time_res),
-                iono_time_average_factor.as_deref(),
+                iono_time_average.as_deref(),
                 default_time_average_factor,
             )
             .map_err(|e| match e {
@@ -360,14 +356,14 @@ impl PeelArgs {
         let iono_freq_average_factor = {
             let default_freq_average_factor = parse_freq_average_factor(
                 Some(input_vis_params.spw.freq_res),
-                Some(DEFAULT_FREQ_AVERAGE_FACTOR),
+                Some(DEFAULT_IONO_FREQ_AVERAGE),
                 NonZeroUsize::new(1).unwrap(),
             )
             .unwrap_or(NonZeroUsize::new(1).unwrap());
 
             parse_freq_average_factor(
                 Some(input_vis_params.spw.freq_res),
-                iono_freq_average_factor.as_deref(),
+                iono_freq_average.as_deref(),
                 default_freq_average_factor,
             )
             .map_err(|e| match e {
@@ -379,7 +375,7 @@ impl PeelArgs {
                 AverageFactorError::Parse(e) => PeelArgsError::ParseIonoFreqAverageFactor(e),
             })?
         };
-        // Check that the factor is not too big.
+        // limit iono freq average factor if it is too big.
         let iono_freq_average_factor =
             if iono_freq_average_factor.get() > input_vis_params.spw.chanblocks.len() {
                 format!(
@@ -394,21 +390,6 @@ impl PeelArgs {
                 iono_freq_average_factor
             };
 
-        let low_res_freq_average_factor = {
-            let default_iono_freq_average_factor = parse_freq_average_factor(
-                Some(input_vis_params.spw.freq_res),
-                Some(DEFAULT_IONO_FREQ_AVERAGE_FACTOR),
-                NonZeroUsize::new(1).unwrap(),
-            )
-            .unwrap_or(NonZeroUsize::new(1).unwrap());
-
-            parse_freq_average_factor(
-                Some(input_vis_params.spw.freq_res),
-                low_res_iono_freq_average.as_deref(),
-                default_iono_freq_average_factor,
-            )
-            .unwrap()
-        };
         let mut low_res_spws = {
             let spw = &input_vis_params.spw;
             let all_freqs = {
@@ -425,7 +406,7 @@ impl PeelArgs {
             channels_to_chanblocks(
                 &all_freqs,
                 spw.freq_res.round() as u64,
-                low_res_freq_average_factor,
+                iono_freq_average_factor,
                 &HashSet::new(),
             )
         };
@@ -439,12 +420,11 @@ impl PeelArgs {
         let n_input_freqs = input_vis_params.spw.get_all_freqs().len();
         assert_eq!(
             n_low_freqs,
-            div_ceil(n_input_freqs, low_res_freq_average_factor.get()),
-            "low chans (flagged+unflagged) {} * low_res_freq_average_factor {} != input chans (flagged+unflagged) {}. also iono_freq_average_factor {}",
+            div_ceil(n_input_freqs, iono_freq_average_factor.get()),
+            "low chans (flagged+unflagged) {} * iono_freq_average_factor {} != input chans (flagged+unflagged) {}.",
             n_low_freqs,
-            low_res_freq_average_factor.get(),
-            n_input_freqs,
             iono_freq_average_factor.get(),
+            n_input_freqs,
         );
 
         // Parse vis and iono const outputs.
@@ -601,21 +581,9 @@ impl PeelArgs {
             } else {
                 block.push(
                     format!(
-                        "- high: {} kHz (averaging {}x)",
+                        "- {} kHz (averaging {}x)",
                         input_vis_params.spw.freq_res / 1e3 * iono_freq_average_factor.get() as f64,
                         iono_freq_average_factor
-                    )
-                    .into(),
-                );
-            }
-            if low_res_freq_average_factor.get() == 1 {
-                block.push(format!("- low: {} kHz", low_res_spw.freq_res / 1e3).into());
-            } else {
-                block.push(
-                    format!(
-                        "- low: {} kHz (averaging {}x)",
-                        low_res_spw.freq_res / 1e3,
-                        low_res_freq_average_factor
                     )
                     .into(),
                 );
@@ -639,6 +607,7 @@ impl PeelArgs {
             beam,
             source_list,
             modelling_params,
+            // TODO: need both of these?
             iono_timeblocks,
             iono_time_average_factor,
             low_res_spw,
@@ -678,15 +647,8 @@ impl PeelCliArgs {
                 .or(other.num_sources_to_subtract),
             num_passes: self.num_passes.or(other.num_passes),
             num_loops: self.num_loops.or(other.num_loops),
-            iono_time_average_factor: self
-                .iono_time_average_factor
-                .or(other.iono_time_average_factor),
-            iono_freq_average_factor: self
-                .iono_freq_average_factor
-                .or(other.iono_freq_average_factor),
-            low_res_iono_freq_average: self
-                .low_res_iono_freq_average
-                .or(other.low_res_iono_freq_average),
+            iono_time_average: self.iono_time_average.or(other.iono_time_average),
+            iono_freq_average: self.iono_freq_average.or(other.iono_freq_average),
             uvw_min: self.uvw_min.or(other.uvw_min),
             uvw_max: self.uvw_max.or(other.uvw_max),
             short_baseline_sigma: self.short_baseline_sigma.or(other.short_baseline_sigma),

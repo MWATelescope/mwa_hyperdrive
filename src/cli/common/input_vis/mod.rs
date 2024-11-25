@@ -833,8 +833,14 @@ impl InputVisArgs {
             }
         };
         let first_obs_ts = obs_context.timestamps.first();
-        time_printer
-            .push_line(format!("First obs timestamp: {} | {:.2}", first_obs_ts, first_obs_ts.to_gpst_seconds()).into());
+        time_printer.push_line(
+            format!(
+                "First obs timestamp: {} | {:.2}",
+                first_obs_ts,
+                first_obs_ts.to_gpst_seconds()
+            )
+            .into(),
+        );
         time_printer.push_block(vec![
             format!(
                 "Available timesteps: {}",
@@ -863,8 +869,7 @@ impl InputVisArgs {
                     )
                     .into(),
                 )
-            },
-
+            }
             [f, .., l] => {
                 let first_use_ts = obs_context.timestamps[*f];
                 block.push(
@@ -885,7 +890,6 @@ impl InputVisArgs {
                     .into(),
                 );
             }
-
             [] => unreachable!("cannot be empty"),
         }
         {
