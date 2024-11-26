@@ -1432,7 +1432,7 @@ fn test_peel_single_source(peel_type: PeelType) {
     let num_tiles = obs_context.get_total_num_tiles();
     let num_times = obs_context.timestamps.len();
     let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-    let flagged_tiles = HashSet::new();
+    let flagged_tiles: HashSet<_> = obs_context.flagged_tiles.iter().cloned().collect();
 
     let num_chans = obs_context.fine_chan_freqs.len();
     let chanblocks = obs_context
@@ -1501,18 +1501,34 @@ fn test_peel_single_source(peel_type: PeelType) {
     let vis_shape = vis_residual_obs_tfb.dim();
     let vis_weights = Array3::<f32>::ones(vis_shape);
     let source_weighted_positions = [source_radec];
-    let baseline_weights = vec![1.0; vis_model_obs_tfb.len_of(Axis(2))];
 
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
 
+    let peel_weight_params = PeelWeightParams {
+        uvw_min_metres: 0.0,
+        uvw_max_metres: f64::MAX,
+        short_baseline_sigma: SHORT_BASELINE_SIGMA,
+    };
+
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, flagged_tiles);
+
     for apply_precession in [false, true] {
+        let vis_weights = peel_weight_params.apply_tfb(
+            vis_weights.clone(),
+            &obs_context,
+            &timeblock,
+            apply_precession,
+            &chanblocks,
+            &tile_baseline_flags,
+        );
+
         let mut high_res_modeller = new_sky_modeller(
             &beam,
             &source_list,
             Polarisations::default(),
             &obs_context.tile_xyzs,
             &fine_chan_freqs_hz,
-            &flagged_tiles,
+            &tile_baseline_flags.flagged_tiles,
             obs_context.phase_centre,
             array_pos.longitude_rad,
             array_pos.latitude_rad,
@@ -1585,16 +1601,12 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &source_weighted_positions,
                     NUM_PASSES,
                     NUM_LOOPS,
-                    SHORT_BASELINE_SIGMA,
                     CONVERGENCE,
-                    &fine_chan_freqs_hz,
-                    &lambdas_m,
+                    &chanblocks,
                     &low_res_lambdas_m,
                     &obs_context,
-                    obs_context.array_position,
-                    &obs_context.tile_xyzs,
+                    &tile_baseline_flags,
                     &mut *high_res_modeller,
-                    obs_context.dut1.unwrap_or_default(),
                     !apply_precession,
                     &multi_progress,
                 )
@@ -1608,7 +1620,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         Polarisations::default(),
                         &obs_context.tile_xyzs,
                         &fine_chan_freqs_hz,
-                        &flagged_tiles,
+                        &tile_baseline_flags.flagged_tiles,
                         obs_context.phase_centre,
                         array_pos.longitude_rad,
                         array_pos.latitude_rad,
@@ -1626,17 +1638,12 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &source_weighted_positions,
                         NUM_PASSES,
                         NUM_LOOPS,
-                        SHORT_BASELINE_SIGMA,
                         CONVERGENCE,
                         &chanblocks,
-                        &lambdas_m,
                         &low_res_lambdas_m,
                         &obs_context,
-                        obs_context.array_position,
-                        &obs_context.tile_xyzs,
-                        &baseline_weights,
+                        &tile_baseline_flags,
                         &mut high_res_modeller,
-                        obs_context.dut1.unwrap_or_default(),
                         !apply_precession,
                         &multi_progress,
                     )
@@ -1698,7 +1705,15 @@ fn test_peel_multi_source(peel_type: PeelType) {
     let num_tiles = obs_context.get_total_num_tiles();
     let num_times = obs_context.timestamps.len();
     let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
-    let flagged_tiles = HashSet::new();
+    let flagged_tiles: HashSet<_> = obs_context.flagged_tiles.iter().cloned().collect();
+
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, flagged_tiles);
+
+    let peel_weight_params = PeelWeightParams {
+        uvw_min_metres: 0.0,
+        uvw_max_metres: f64::MAX,
+        short_baseline_sigma: SHORT_BASELINE_SIGMA,
+    };
 
     let num_chans = obs_context.fine_chan_freqs.len();
     let chanblocks = obs_context
@@ -1739,19 +1754,6 @@ fn test_peel_multi_source(peel_type: PeelType) {
     );
     let source_midpoint =
         RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_0h_rad);
-
-    let baseline_weights = {
-        let uvw_lengths = xyzs_to_cross_uvws(
-            obs_context.tile_xyzs.as_slice(),
-            obs_context.phase_centre.to_hadec(lst_0h_rad),
-        )
-        .iter()
-        .map(|&UVW { u, v, .. }| (u.powi(2) + v.powi(2)).sqrt())
-        .collect_vec();
-        // let uvw_max = uvw_lengths.iter().copied().fold(f64::NAN, f64::max);
-        // println!("uvw_max: {}", uvw_max);
-        uvw_lengths.iter().map(|_| 1.).collect_vec()
-    };
 
     // observation: this test passes with sources 30 degrees apart, and failes with them 0.05 degrees apart
     let source_list = SourceList::from(indexmap! {
@@ -1818,6 +1820,15 @@ fn test_peel_multi_source(peel_type: PeelType) {
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
 
     for apply_precession in [true, false] {
+        let vis_weights = peel_weight_params.apply_tfb(
+            vis_weights.clone(),
+            &obs_context,
+            &timeblock,
+            apply_precession,
+            &chanblocks,
+            &tile_baseline_flags,
+        );
+
         let (average_lmst, _average_latitude) = if !apply_precession {
             let average_timestamp = timeblock.median;
             (
@@ -1849,7 +1860,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             Polarisations::default(),
             &obs_context.tile_xyzs,
             &fine_chan_freqs_hz,
-            &flagged_tiles,
+            &tile_baseline_flags.flagged_tiles,
             obs_context.phase_centre,
             array_pos.longitude_rad,
             array_pos.latitude_rad,
@@ -1929,16 +1940,12 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &source_weighted_positions,
                 NUM_PASSES,
                 NUM_LOOPS,
-                SHORT_BASELINE_SIGMA,
                 CONVERGENCE,
-                &fine_chan_freqs_hz,
-                &lambdas_m,
+                &chanblocks,
                 &low_res_lambdas_m,
                 &obs_context,
-                obs_context.array_position,
-                &obs_context.tile_xyzs,
+                &tile_baseline_flags,
                 &mut *high_res_modeller,
-                obs_context.dut1.unwrap_or_default(),
                 !apply_precession,
                 &multi_progress,
             )
@@ -1952,7 +1959,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     Polarisations::default(),
                     &obs_context.tile_xyzs,
                     &fine_chan_freqs_hz,
-                    &flagged_tiles,
+                    &tile_baseline_flags.flagged_tiles,
                     obs_context.phase_centre,
                     array_pos.longitude_rad,
                     array_pos.latitude_rad,
@@ -1970,17 +1977,12 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &source_weighted_positions,
                     NUM_PASSES,
                     NUM_LOOPS,
-                    SHORT_BASELINE_SIGMA,
                     CONVERGENCE,
                     &chanblocks,
-                    &lambdas_m,
                     &low_res_lambdas_m,
                     &obs_context,
-                    obs_context.array_position,
-                    &obs_context.tile_xyzs,
-                    baseline_weights.as_slice(),
+                    &tile_baseline_flags,
                     &mut high_res_modeller,
-                    obs_context.dut1.unwrap_or_default(),
                     !apply_precession,
                     &multi_progress,
                 )
@@ -2070,7 +2072,7 @@ mod gpu_tests {
 
     use super::*;
     use crate::{
-        gpu::{self, DevicePointer, GpuFloat},
+        gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat},
         model::SkyModellerGpu,
     };
 
