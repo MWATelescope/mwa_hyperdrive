@@ -2,6 +2,7 @@ use std::{fs::File, io::Write as _};
 
 use approx::assert_abs_diff_eq;
 use clap::Parser as _;
+use serial_test::serial;
 use tempfile::tempdir;
 
 use crate::{
@@ -58,6 +59,7 @@ fn get_merged_1090008640(extra_argv: Vec<String>) -> PeelParams {
 //   --output-vis-freq-average - output averaging settings
 
 #[test]
+#[serial]
 fn frequency_averaging_defaults() {
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
@@ -78,6 +80,7 @@ fn frequency_averaging_defaults() {
 }
 
 #[test]
+#[serial]
 fn frequency_averaging_explicit_output() {
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
@@ -98,6 +101,7 @@ fn frequency_averaging_explicit_output() {
 }
 
 #[test]
+#[serial]
 fn frequency_averaging_explicit_output_iono() {
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
@@ -121,6 +125,7 @@ fn frequency_averaging_explicit_output_iono() {
 }
 
 #[test]
+#[serial]
 fn frequency_averaging_explicit_in_out() {
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
@@ -145,6 +150,7 @@ fn frequency_averaging_explicit_in_out() {
 }
 
 #[test]
+#[serial]
 fn frequency_averaging_explicit() {
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
@@ -171,6 +177,7 @@ fn frequency_averaging_explicit() {
 // in this case the input data is 2s but there's only one timestep, so the
 // time res will be clipped to 2s
 #[test]
+#[serial]
 fn time_averaging_explicit_output_clip() {
     let PeelParams {
         input_vis_params: InputVisParams { time_res, .. },
