@@ -27,7 +27,7 @@ codegen-units = 1
 inherits = "production"
 
 [features]
-default = ["plotting"]
+default = ["plotting", "cuda"]
 
 # Use CUDA code with double-precision floats.
 cuda = ["mwa_hyperbeam/cuda", "cuda-runtime-sys", "cc"]
@@ -123,6 +123,8 @@ ndarray = { version = "0.15.4", features = ["approx-0_5"] }
 serial_test = "2.0.0"
 tar = "0.4.38"
 tempfile = "3.6.0"
+wcs = "0.2.8"
+mapproj = "0.3.0"
 
 [build-dependencies]
 built = { version = "~0.7", default-features = false, features = [

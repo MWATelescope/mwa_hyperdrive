@@ -4,7 +4,7 @@
 
 //! Tests against peeling
 
-use std::{collections::HashSet, f64::consts::TAU};
+use std::{collections::HashSet, f64::consts::TAU, str::FromStr};
 
 use approx::assert_abs_diff_eq;
 use hifitime::{Duration, Epoch};
@@ -24,7 +24,7 @@ use vec1::{vec1, Vec1};
 use super::*;
 use crate::{
     averaging::Timeblock,
-    beam::{Delays, FEEBeam},
+    beam::{Delays, FEEBeam, NoBeam},
     context::{ObsContext, Polarisations},
     io::read::VisInputType,
     model::{new_sky_modeller, SkyModellerCpu},
@@ -60,7 +60,7 @@ const NUM_LOOPS: usize = 10;
 const SHORT_BASELINE_SIGMA: f64 = 50.0;
 const CONVERGENCE: f64 = 0.5;
 
-fn get_beam(num_tiles: usize) -> FEEBeam {
+fn get_fee_beam(num_tiles: usize) -> FEEBeam {
     let delays = vec![0; 16];
     // https://github.com/MWATelescope/mwa_pb/blob/90d6fbfc11bf4fca35796e3d5bde3ab7c9833b66/mwa_pb/mwa_sweet_spots.py#L60
     // let delays = vec![0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12];
@@ -68,18 +68,38 @@ fn get_beam(num_tiles: usize) -> FEEBeam {
     FEEBeam::new_from_env(num_tiles, Delays::Partial(delays), None).unwrap()
 }
 
-// get a timestamp at lmst=0 around the year 2100
-// precessing to j2000 will introduce a noticable difference.
-fn get_j2100(array_position: &LatLngHeight, dut1: Duration) -> Epoch {
-    let mut epoch = Epoch::from_gregorian_utc_at_midnight(2100, 1, 1);
+fn get_no_beam(num_tiles: usize) -> NoBeam {
+    NoBeam { num_tiles }
+}
 
+// get a timestamp at lmst=0 near the provided epoch
+fn get_nearest_lmst0(array_position: &LatLngHeight, epoch: Epoch, dut1: Duration) -> Epoch {
     // shift zenith_time to the nearest time when the phase centre is at zenith
-    let sidereal2solar = 365.24 / 366.24;
+    let sidereal2solar = 365.256363004 / 366.242190402;
     let obs_lst_rad = get_lmst(array_position.longitude_rad, epoch, dut1);
-    if obs_lst_rad.abs() > 1e-6 {
-        epoch -= Duration::from_days(sidereal2solar * obs_lst_rad / TAU);
+    let epsilon = 1e-6;
+    if (obs_lst_rad % TAU > TAU - 1e-6) || (obs_lst_rad % TAU < 1e-6) {
+        eprintln!("lst rad = {obs_lst_rad:?} within epsilon = {epsilon:?}");
+        epoch
+    } else {
+        // subtract the time it takes for the earth to rotate from the epoch to the nearest lmst=0
+        let delta = Duration::from_days(sidereal2solar * obs_lst_rad / TAU);
+        eprintln!("lst rad = {obs_lst_rad:?} subtracting delta = {delta:?}");
+        epoch - delta
     }
-    epoch
+}
+
+// An epoch where precessing to j2000 will have no impact.
+fn get_j2000(array_position: &LatLngHeight, dut1: Duration) -> Epoch {
+    // https://en.wikipedia.org/wiki/Epoch_(astronomy)#Julian_dates_and_J2000
+    let j2000_epoch = Epoch::from_str("2000-01-01T11:58:55.816 UTC").unwrap();
+    get_nearest_lmst0(array_position, j2000_epoch, dut1)
+}
+
+// An epoch where precessing to j2000 will have a noticable impact.
+fn get_j2100(array_position: &LatLngHeight, dut1: Duration) -> Epoch {
+    let j2100_epoch = Epoch::from_gregorian_utc_at_midnight(2100, 1, 1);
+    get_nearest_lmst0(array_position, j2100_epoch, dut1)
 }
 
 /// get 3 simple tiles:
@@ -95,6 +115,32 @@ fn get_simple_tiles(s: f64) -> (Vec1<String>, Vec1<XyzGeodetic>) {
             XyzGeodetic { x: 0., y: s, z: 0., },
             XyzGeodetic { x: 0., y: 0., z: s, },
         ],
+    )
+}
+
+/// get simple tiles to create an NxN grid in uv space separated by s:
+/// - tile "o" is at origin
+/// - tile "u00N" has a u-component of N * s at lambda = s
+/// - tile "v00N" has a v-component of N * s at lambda = s
+#[rustfmt::skip]
+fn get_grid_tiles(n: NonZeroUsize, s: f64) -> (Vec1<String>, Vec1<XyzGeodetic>) {
+    let antpairs: Vec1<(usize, usize)> = (0..n.get())
+        .cartesian_product(0..n.get())
+        .filter(|&(i, j)| i == 0 || j == 0)
+        .collect_vec().try_into().unwrap();
+    let names = antpairs.iter()
+        .map(|(i, j)| match (i, j) {
+            (0, 0) => "o".into(),
+            (0, _) => format!("v{j:03}"),
+            _ => format!("u{i:03}"),
+        })
+        .collect_vec().try_into().unwrap();
+    let xyzs = antpairs.iter()
+        .map(|&(i, j)| XyzGeodetic { x: 0., y: j as f64 * s, z: i as f64 * s })
+        .collect_vec().try_into().unwrap();
+    (
+        names,
+        xyzs,
     )
 }
 
@@ -252,6 +298,102 @@ fn get_phase1_obs_context(tile_limit: usize) -> ObsContext {
         num_fine_chans_per_coarse_chan: None,
         freq_res: Some(freq_res),
         fine_chan_freqs: Vec1::try_from_vec(fine_chan_freqs).unwrap(),
+        flagged_fine_chans: vec![],
+        flagged_fine_chans_per_coarse_chan: None,
+        polarisations: Polarisations::default(),
+    }
+}
+
+/// get an observation context with:
+/// - array positioned at LatLngHeight = 0, 0, 100m
+/// - 1 timestamp: phase centre is at zenith on j2100
+/// - 1 frequency: lambda = 1m
+/// - tiles from [get_grid_tiles]
+fn get_grid_obs_context(n: NonZeroUsize, s: f64) -> ObsContext {
+    // above but with tiles from [get_grid_tiles]
+
+    let array_position = LatLngHeight {
+        longitude_rad: 0.,
+        latitude_rad: 0.,
+        height_metres: 100.,
+    };
+
+    let dut1 = Duration::from_seconds(0.0);
+    let obs_epoch = get_j2000(&array_position, dut1);
+
+    // at first timestep phase centre is at zenith
+    let lst_zenith_rad = get_lmst(array_position.longitude_rad, obs_epoch, dut1);
+    eprintln!("lst zenith rad: {lst_zenith_rad:?}");
+    let phase_centre = RADec::from_hadec(
+        HADec::from_radians(0., array_position.latitude_rad),
+        lst_zenith_rad,
+    );
+
+    eprintln!("phase centre: {phase_centre:?}");
+    let hadec = phase_centre.to_hadec(lst_zenith_rad);
+    eprintln!("ha % 𝜏 should be 0: {hadec:?}");
+    let azel = hadec.to_azel(array_position.latitude_rad);
+    eprintln!("(az, el) % 𝜏 should be 0, pi/2: {azel:?}");
+    let (tile_names, tile_xyzs) = get_grid_tiles(n, s);
+
+    // at first timestep phase centre is at zenith
+    let lst_zenith_rad = get_lmst(array_position.longitude_rad, obs_epoch, dut1);
+    let phase_centre = RADec::from_hadec(
+        HADec::from_radians(0., array_position.latitude_rad),
+        lst_zenith_rad,
+    );
+    let time_res = Duration::from_seconds(1.0);
+    let timestamps = vec1![obs_epoch];
+
+    // let lambdas_m = vec1![2., 1.];
+    let lambdas_m = vec1![1.];
+    let fine_chan_freqs: Vec1<u64> = lambdas_m.mapped(|l| (VEL_C / l) as u64);
+
+    let freq_res = match fine_chan_freqs.as_slice() {
+        [f0, f2, ..] => Some((f2 - f0) as f64),
+        // _ => None,
+        _ => Some(1.),
+    };
+
+    // sanity test: precessing to J2000 has no effect.
+    let prec_info = precess_time(
+        array_position.longitude_rad,
+        array_position.latitude_rad,
+        phase_centre,
+        obs_epoch,
+        dut1,
+    );
+    let prec_tile_xyzs = prec_info.precess_xyz(&tile_xyzs);
+    let prec_hadec_j2000 = prec_info.hadec_j2000;
+    eprintln!("precessed phase centre: {prec_hadec_j2000:?}");
+    eprintln!("unprecessed tile xyzs: {tile_xyzs:?}");
+    eprintln!("precessed tile xyzs:   {prec_tile_xyzs:?}");
+
+    ObsContext {
+        input_data_type: VisInputType::Raw,
+        obsid: None,
+        timestamps,
+        all_timesteps: vec1![0],
+        unflagged_timesteps: vec![0],
+        phase_centre,
+        pointing_centre: None,
+        array_position,
+        supplied_array_position: array_position,
+        dut1: Some(dut1),
+        tile_names,
+        tile_xyzs,
+        flagged_tiles: vec![],
+        unavailable_tiles: vec![],
+        autocorrelations_present: false,
+        dipole_delays: Some(Delays::Partial(vec![
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])),
+        dipole_gains: None,
+        time_res: Some(time_res),
+        mwa_coarse_chan_nums: None,
+        num_fine_chans_per_coarse_chan: None,
+        freq_res,
+        fine_chan_freqs,
         flagged_fine_chans: vec![],
         flagged_fine_chans_per_coarse_chan: None,
         polarisations: Polarisations::default(),
@@ -578,7 +720,7 @@ fn test_vis_rotation() {
         "One".into() => point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
     });
 
-    let beam = get_beam(num_tiles);
+    let beam = get_fee_beam(num_tiles);
 
     let mut vis_tfb = Array3::default((num_times, num_chans, num_baselines));
     let mut vis_rot_tfb = Array3::default((num_times, num_chans, num_baselines));
@@ -1024,7 +1166,7 @@ fn test_apply_iono2() {
     let mut tile_uvs_src = Array2::default((num_times, num_tiles));
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
-    let beam = get_beam(num_tiles);
+    let beam = get_fee_beam(num_tiles);
 
     for apply_precession in [false, true] {
         let modeller = SkyModellerCpu::new(
@@ -1112,6 +1254,424 @@ fn test_apply_iono2() {
     }
 }
 
+fn write_vis_tfb(path: PathBuf, vis_tfb: ArrayView3<Jones<f32>>, obs_context: &ObsContext) {
+    use crate::{
+        averaging::{channels_to_chanblocks, timesteps_to_timeblocks},
+        io::write::{VisOutputType, VisWriteError},
+    };
+    let num_tiles = obs_context.get_total_num_tiles();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let unflagged_baseline_tile_pairs = (0..num_baselines)
+        .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
+        .collect_vec();
+    let no_averaging = NonZeroUsize::new(1).unwrap();
+    let time_res = obs_context.time_res.unwrap();
+    let timesteps = (0..obs_context.timestamps.len()).collect_vec();
+    let output_timeblocks =
+        timesteps_to_timeblocks(&obs_context.timestamps, time_res, no_averaging, None);
+    let write_smallest_contiguous_band = false;
+    let dut1 = obs_context.dut1.unwrap_or_default();
+    let freq_res = obs_context.freq_res.unwrap() as u64;
+    let spw = &channels_to_chanblocks(
+        &obs_context.fine_chan_freqs,
+        freq_res,
+        no_averaging,
+        &HashSet::new(),
+    )[0];
+    let vis_weights = Array3::from_elem(vis_tfb.dim(), 1.0);
+
+    let error = AtomicCell::new(false);
+    let (tx_data, rx_data) = bounded(3);
+
+    assert_eq!(obs_context.tile_xyzs.len(), obs_context.tile_names.len());
+
+    let scoped_threads_result = thread::scope(|scope| {
+        let data_handle = scope.spawn(|| {
+            for (i_timestep, &timestep) in timesteps.iter().enumerate() {
+                let timestamp = obs_context.timestamps[timestep];
+                match tx_data.send(VisTimestep {
+                    cross_data_fb: vis_tfb.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    autos: None,
+                    timestamp,
+                }) {
+                    Ok(()) => (),
+                    // If we can't send the message, it's because the channel
+                    // has been closed on the other side. That should only
+                    // happen because the writer has exited due to error; in
+                    // that case, just exit this thread.
+                    Err(_) => return Ok(()),
+                }
+            }
+
+            Ok(())
+        });
+
+        let write_handle = thread::Builder::new()
+            .name("write".to_string())
+            .spawn_scoped(scope, || {
+                defer_on_unwind! { error.store(true); }
+
+                let result = write_vis(
+                    &vec1![(path, VisOutputType::MeasurementSet)],
+                    obs_context.array_position,
+                    obs_context.phase_centre,
+                    obs_context.pointing_centre,
+                    &obs_context.tile_xyzs,
+                    &obs_context.tile_names,
+                    obs_context.obsid,
+                    &output_timeblocks,
+                    time_res,
+                    dut1,
+                    spw,
+                    &unflagged_baseline_tile_pairs,
+                    no_averaging,
+                    no_averaging,
+                    None,
+                    write_smallest_contiguous_band,
+                    rx_data,
+                    &error,
+                    None,
+                );
+                if result.is_err() {
+                    error.store(true);
+                }
+                result
+            })
+            .expect("OS can create threads");
+
+        let result: Result<Result<(), VisWriteError>, _> = data_handle.join();
+        let result = match result {
+            Err(_) | Ok(Err(_)) => result.map(|_| Ok(String::new())),
+            Ok(Ok(())) => write_handle.join(),
+        };
+        result
+    });
+
+    match scoped_threads_result {
+        Ok(Ok(r)) => println!("{r}"),
+        Err(_) | Ok(Err(_)) => panic!("A panic occurred in the async threads"),
+    };
+}
+
+// use mapproj::{
+//     cylindrical::car::Car,
+//     img2celestial::{self, Img2Celestial},
+//     img2proj::BasicImgXY2ProjXY,
+//     CenteredProjection, ImgXY, LonLat,
+// };
+
+// use wcs::{WCSCelestialProj, WCSProj, WCS};
+
+// fn get_grid_wcs(n: NonZeroUsize, s: f64, obs_context: &ObsContext) -> WCS {
+//     // Define constants
+//     // let (crpix1, crpix2, crval1, crval2, cd11, cd22) =
+//     //     (0.5_f64, 0.5_f64, 90.0_f64, 90.0_f64, 1.0_f64, 1.0_f64);
+//     let img_size = n.get() as u16;
+//     let img_size = (img_size, img_size);
+
+//     // Set the projection
+//     // Plate Carree projection
+//     let mut proj = Car::new();
+//     let proj_bound = img_size.0 as f64 * s;
+//     let proj_center = LonLat::new(proj_bound / 2., proj_bound / 2.);
+//     // proj.set_proj_center_from_lonlat(&proj_center);
+//     let img2proj =
+//         BasicImgXY2ProjXY::from(img_size, (&(0_f64..=proj_bound), &(0_f64..=proj_bound)));
+//     let i2c = Img2Celestial::new(img2proj, proj);
+//     // We could have set the projection center here instead of previously:
+//     //   Img2Celestial.set_proj_center_from_lonlat(proj_center);
+
+//     // Use to project, unproject coordinates:
+//     // - we choose on purpose position in the image of the projection center
+//     let img_coo_input = ImgXY::new(382.00001513958, 389.500015437603);
+//     let lonlat = i2c.img2lonlat(&img_coo_input).unwrap();
+//     assert!((lonlat.lon() - proj_center.lon()).abs() < 1e-14);
+//     assert!((lonlat.lat() - proj_center.lat()).abs() < 1e-14);
+//     let img_coo_input = i2c.lonlat2img(&lonlat).unwrap();
+//     assert!((img_coo_input.x() - img_coo_input.x()).abs() < 1e-14);
+//     assert!((img_coo_input.y() - img_coo_input.y()).abs() < 1e-14);
+// }
+
+/// Same as [write_vis_tfb] but writes visibilities to a fits image, using tiles from [get_grid_tiles]
+/// and the same uv sampling as [get_grid_uvws]
+/// # Arguments
+/// * `path` - path to the output fits file
+/// * `vis_tfb` - visibilities in time-frequency-baseline order
+/// * `obs_context` - observation context
+fn write_grid_tfb(path: PathBuf, vis_tfb: ArrayView3<Jones<f32>>, obs_context: &ObsContext) {
+    use crate::{
+        averaging::{channels_to_chanblocks, timesteps_to_timeblocks},
+        io::write::{VisOutputType, VisWriteError},
+    };
+    let num_tiles = obs_context.get_total_num_tiles();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let unflagged_baseline_tile_pairs = (0..num_baselines)
+        .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
+        .collect_vec();
+    let no_averaging = NonZeroUsize::new(1).unwrap();
+    let time_res = obs_context.time_res.unwrap();
+    let timesteps = (0..obs_context.timestamps.len()).collect_vec();
+    let output_timeblocks =
+        timesteps_to_timeblocks(&obs_context.timestamps, time_res, no_averaging, None);
+    let write_smallest_contiguous_band = false;
+    let dut1 = obs_context.dut1.unwrap_or_default();
+    let freq_res = obs_context.freq_res.unwrap() as u64;
+    let spw = &channels_to_chanblocks(
+        &obs_context.fine_chan_freqs,
+        freq_res,
+        no_averaging,
+        &HashSet::new(),
+    )[0];
+    let vis_weights = Array3::from_elem(vis_tfb.dim(), 1.0);
+
+    let n: NonZeroUsize = (obs_context.get_total_num_tiles() / 2 + 1)
+        .try_into()
+        .unwrap();
+
+    // let wcs = get_grid_wcs(n, obs_context);
+
+    let error = AtomicCell::new(false);
+    let (tx_data, rx_data) = bounded(3);
+
+    assert_eq!(obs_context.tile_xyzs.len(), obs_context.tile_names.len());
+
+    let scoped_threads_result = thread::scope(|scope| {
+        let data_handle = scope.spawn(|| {
+            for (i_timestep, &timestep) in timesteps.iter().enumerate() {
+                let timestamp = obs_context.timestamps[timestep];
+                match tx_data.send(VisTimestep {
+                    cross_data_fb: vis_tfb.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    autos: None,
+                    timestamp,
+                }) {
+                    Ok(()) => (),
+                    // If we can't send the message, it's because the channel
+                    // has been closed on the other side. That should only
+                    // happen because the writer has exited due to error; in
+                    // that case, just exit this thread.
+                    Err(_) => return Ok(()),
+                }
+            }
+
+            Ok(())
+        });
+
+        let write_handle = thread::Builder::new()
+            .name("write".to_string())
+            .spawn_scoped(scope, || {
+                defer_on_unwind! { error.store(true); }
+
+                let result = write_vis(
+                    &vec1![(path, VisOutputType::MeasurementSet)],
+                    obs_context.array_position,
+                    obs_context.phase_centre,
+                    obs_context.pointing_centre,
+                    &obs_context.tile_xyzs,
+                    &obs_context.tile_names,
+                    obs_context.obsid,
+                    &output_timeblocks,
+                    time_res,
+                    dut1,
+                    spw,
+                    &unflagged_baseline_tile_pairs,
+                    no_averaging,
+                    no_averaging,
+                    None,
+                    write_smallest_contiguous_band,
+                    rx_data,
+                    &error,
+                    None,
+                );
+                if result.is_err() {
+                    error.store(true);
+                }
+                result
+            })
+            .expect("OS can create threads");
+
+        let result: Result<Result<(), VisWriteError>, _> = data_handle.join();
+        let result = match result {
+            Err(_) | Ok(Err(_)) => result.map(|_| Ok(String::new())),
+            Ok(Ok(())) => write_handle.join(),
+        };
+        result
+    });
+
+    match scoped_threads_result {
+        Ok(Ok(r)) => println!("{r}"),
+        Err(_) | Ok(Err(_)) => panic!("A panic occurred in the async threads"),
+    };
+}
+
+#[test]
+// TODO: test_apply_iono2 but it outputs the visibilities from a grid of uv
+// samplings as a fits image, using tiles from [get_grid_tiles]
+fn test_apply_iono_grid() {
+    let n: NonZeroUsize = 128.try_into().unwrap();
+    let s = 10.0;
+    let obs_context = get_grid_obs_context(n, s);
+
+    let array_pos = obs_context.array_position;
+
+    // second timestep is at 1h
+    let obs_epoch = obs_context.timestamps[0];
+    let num_tiles = obs_context.get_total_num_tiles();
+    let num_times = obs_context.timestamps.len();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let ant_pairs = (0..num_baselines)
+        .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
+        .collect_vec();
+    let flagged_tiles = HashSet::new();
+    let num_chans = obs_context.fine_chan_freqs.len();
+
+    let fine_chan_freqs_hz = obs_context
+        .fine_chan_freqs
+        .iter()
+        .map(|&f| f as f64)
+        .collect_vec();
+    let lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
+
+    // source is at zenith at 1h
+    let lst_0h_rad = get_lmst(
+        array_pos.longitude_rad,
+        obs_epoch,
+        obs_context.dut1.unwrap_or_default(),
+    );
+    let source_radec =
+        RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_0h_rad);
+    let source_fd = 1.;
+    let source_list = SourceList::from(indexmap! {
+        "One".into() => point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
+    });
+
+    let mut vis_tfb = Array3::default((num_times, num_chans, num_baselines));
+    let mut vis_iono_tfb = Array3::default((num_times, num_chans, num_baselines));
+    // residual visibilities
+    let mut vis_residual_tfb = Array3::zeros((num_times, num_chans, num_baselines));
+
+    // tile uvs and ws in the source phase centre
+    let mut tile_uvs_src = Array2::default((num_times, num_tiles));
+    let mut tile_ws_src = Array2::default((num_times, num_tiles));
+
+    // let beam = get_fee_beam(num_tiles);
+    let beam = get_no_beam(num_tiles);
+
+    let apply_precession = false;
+
+    // for a in 0..60 {
+    for a in vec![10] {
+        let iono_consts = IonoConsts {
+            alpha: a as f64 * 0.0001,
+            beta: 0.0,
+            gain: 1.0,
+        };
+        let modeller = SkyModellerCpu::new(
+            &beam,
+            &source_list,
+            Polarisations::default(),
+            &obs_context.tile_xyzs,
+            &fine_chan_freqs_hz,
+            &flagged_tiles,
+            obs_context.phase_centre,
+            array_pos.longitude_rad,
+            array_pos.latitude_rad,
+            obs_context.dut1.unwrap_or_default(),
+            apply_precession,
+        );
+
+        vis_tfb.fill(Jones::zero());
+        model_timesteps(&modeller, &obs_context.timestamps, vis_tfb.view_mut()).unwrap();
+
+        setup_tile_uv_w_arrays(
+            tile_uvs_src.view_mut(),
+            tile_ws_src.view_mut(),
+            &obs_context,
+            source_radec,
+            apply_precession,
+        );
+
+        // we want consts such that at lambda = 2m, the shift moves the source to the phase centre
+        // let iono_lmn = source_radec.to_lmn(obs_context.phase_centre);
+        // let iono_consts = IonoConsts {
+        //     alpha: iono_lmn.l / 4.,
+        //     beta: iono_lmn.m / 4.,
+        //     gain: 1.0,
+        // };
+        // let iono_consts = ((lst_1h_rad-lst_zenith_rad)/4., 0.);
+
+        apply_iono2(
+            vis_tfb.view(),
+            vis_iono_tfb.view_mut(),
+            tile_uvs_src.view(),
+            iono_consts,
+            &lambdas_m,
+        );
+
+        // subtract model from iono at observation phase centre
+        vis_residual_tfb.assign(&vis_iono_tfb);
+        vis_residual_tfb -= &vis_tfb;
+
+        display_vis_tfb(
+            &format!("vis_residual_tfb@obs prec={apply_precession}"),
+            vis_residual_tfb.view(),
+            &obs_context,
+            obs_context.phase_centre,
+            apply_precession,
+        );
+
+        // let mut tol_norm = 0_f32;
+        // let mut tol_sc = 0_f32;
+        // for (tile_uvs_src, vis_fb, vis_iono_fb) in izip!(
+        //     tile_uvs_src.outer_iter(),
+        //     vis_tfb.outer_iter(),
+        //     vis_iono_tfb.outer_iter(),
+        // ) {
+        //     for (&lambda_m, vis_b, vis_iono_b) in izip!(
+        //         lambdas_m.iter(),
+        //         vis_fb.outer_iter(),
+        //         vis_iono_fb.outer_iter(),
+        //     ) {
+        //         for (&(ant1, ant2), vis, vis_iono) in
+        //             izip!(ant_pairs.iter(), vis_b.iter(), vis_iono_b.iter(),)
+        //         {
+        //             let UV { u, v } = tile_uvs_src[ant1] - tile_uvs_src[ant2];
+        //             let arg = TAU * (u * iono_consts.alpha + v * iono_consts.beta) * lambda_m;
+        //             for (pol_model, pol_model_iono) in vis.iter().zip_eq(vis_iono.iter()) {
+        //                 // magnitudes shoud not be affected by iono rotation
+        //                 assert_abs_diff_eq!(
+        //                     pol_model.norm(),
+        //                     pol_model_iono.norm(),
+        //                     epsilon = 2e-7
+        //                 );
+        //                 tol_norm = tol_norm.max((pol_model.norm() - pol_model_iono.norm()).abs());
+        //                 let pol_model_iono_expected = Complex::<f64>::from_polar(
+        //                     pol_model.norm() as f64,
+        //                     pol_model.arg() as f64 - arg,
+        //                 );
+        //                 let (ex_s, ex_c) = pol_model_iono_expected.arg().sin_cos();
+        //                 let (rx_s, rx_c) = pol_model_iono.arg().sin_cos();
+        //                 assert_abs_diff_eq!(ex_s as f32, rx_s, epsilon = 1e-6);
+        //                 assert_abs_diff_eq!(ex_c as f32, rx_c, epsilon = 1e-6);
+        //                 tol_sc = tol_sc.max((ex_s as f32 - rx_s).abs());
+        //                 tol_sc = tol_sc.max((ex_c as f32 - rx_c).abs());
+        //             }
+        //         }
+        //     }
+        // }
+        // println!("tol norm: {tol_norm:7.2e} sc {tol_sc:7.2e}");
+
+        let path = format!("test_{a:02}.ms");
+        write_grid_tfb(
+            PathBuf::from(path.clone()),
+            vis_residual_tfb.view(),
+            &obs_context,
+        );
+        println!("wrote to {path:?}");
+    }
+}
+
 #[test]
 fn test_get_weights_rts() {
     let obs_context = get_phase1_obs_context(128);
@@ -1190,7 +1750,7 @@ fn test_iono_fit() {
     let mut tile_uvs_src = Array2::default((num_times, num_tiles));
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
-    let beam = get_beam(num_tiles);
+    let beam = get_fee_beam(num_tiles);
 
     for apply_precession in [false, true] {
         // unlike the other tests, this is in the SOURCE phase centre
@@ -1320,7 +1880,7 @@ fn test_apply_iono3() {
         "One".into() => point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
     });
 
-    let beam = get_beam(num_tiles);
+    let beam = get_fee_beam(num_tiles);
 
     // residual visibilities in the observation phase centre
     let mut vis_resid_obs_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
@@ -1477,7 +2037,7 @@ fn test_peel_single_source(peel_type: PeelType) {
         point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
     )]);
 
-    let beam = get_beam(num_tiles);
+    let beam = get_fee_beam(num_tiles);
 
     // model visibilities in the observation phase centre
     let mut vis_model_obs_tfb = Array3::zeros((num_times, num_chans, num_baselines));
@@ -1790,7 +2350,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
         },
     ];
 
-    let beam = get_beam(num_tiles);
+    let beam = get_fee_beam(num_tiles);
 
     // model visibilities of each source
     let mut vis_model_tmp_tfb = Array3::<Jones<f32>>::zeros((num_times, num_chans, num_baselines));
@@ -2505,7 +3065,7 @@ mod gpu_tests {
             "One".into() => point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
         });
 
-        let beam = get_beam(num_tiles);
+        let beam = get_fee_beam(num_tiles);
 
         // residual visibilities in the observation phase centre
         let mut vis_residual_obs_tfb =
