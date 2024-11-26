@@ -35,9 +35,8 @@ fn get_reduced_1090008640() -> PeelArgs {
     }
 }
 
-#[track_caller]
 // should be 40kHz, 2s raw
-fn get_merged_1090008640(extra_argv: Vec<String>) -> PeelArgs {
+fn get_merged_1090008640(extra_argv: Vec<String>) -> PeelParams {
     let args = get_reduced_1090008640();
     let temp_dir = tempdir().expect("Couldn't make tempdir");
     let arg_file = temp_dir.path().join("peel.toml");
@@ -47,7 +46,10 @@ fn get_merged_1090008640(extra_argv: Vec<String>) -> PeelArgs {
     write!(&mut f, "{ser}").unwrap();
     let mut argv = vec!["peel".to_string(), arg_file.display().to_string()];
     argv.extend(extra_argv);
-    PeelArgs::parse_from(argv).merge().unwrap()
+    let params = PeelArgs::parse_from(argv).merge().unwrap().parse().unwrap();
+    drop(f);
+    drop(temp_dir);
+    params
 }
 
 // testing the frequency averaging args all works together:
@@ -57,13 +59,12 @@ fn get_merged_1090008640(extra_argv: Vec<String>) -> PeelArgs {
 
 #[test]
 fn frequency_averaging_defaults() {
-    let args = get_merged_1090008640(vec![]);
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
         output_vis_params,
         low_res_spw,
         ..
-    } = args.parse().unwrap();
+    } = get_merged_1090008640(vec![]);
     let output_freq_average_factor = match output_vis_params {
         Some(OutputVisParams {
             output_freq_average_factor,
@@ -78,13 +79,12 @@ fn frequency_averaging_defaults() {
 
 #[test]
 fn frequency_averaging_explicit_output() {
-    let args = get_merged_1090008640(vec!["--output-vis-freq-average=80kHz".to_string()]);
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
         output_vis_params,
         low_res_spw,
         ..
-    } = args.parse().unwrap();
+    } = get_merged_1090008640(vec!["--output-vis-freq-average=80kHz".to_string()]);
     let output_freq_average_factor = match output_vis_params {
         Some(OutputVisParams {
             output_freq_average_factor,
@@ -99,16 +99,15 @@ fn frequency_averaging_explicit_output() {
 
 #[test]
 fn frequency_averaging_explicit_output_iono() {
-    let args = get_merged_1090008640(vec![
-        "--output-vis-freq-average=80kHz".to_string(),
-        "--iono-freq-average=320kHz".to_string(),
-    ]);
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
         output_vis_params,
         low_res_spw,
         ..
-    } = args.parse().unwrap();
+    } = get_merged_1090008640(vec![
+        "--output-vis-freq-average=80kHz".to_string(),
+        "--iono-freq-average=320kHz".to_string(),
+    ]);
     let output_freq_average_factor = match output_vis_params {
         Some(OutputVisParams {
             output_freq_average_factor,
@@ -123,17 +122,16 @@ fn frequency_averaging_explicit_output_iono() {
 
 #[test]
 fn frequency_averaging_explicit_in_out() {
-    let args = get_merged_1090008640(vec![
-        "--freq-average=80kHz".to_string(),
-        "--output-vis-freq-average=160kHz".to_string(),
-        "--iono-freq-average=320kHz".to_string(),
-    ]);
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
         output_vis_params,
         low_res_spw,
         ..
-    } = args.parse().unwrap();
+    } = get_merged_1090008640(vec![
+        "--freq-average=80kHz".to_string(),
+        "--output-vis-freq-average=160kHz".to_string(),
+        "--iono-freq-average=320kHz".to_string(),
+    ]);
     let output_freq_average_factor = match output_vis_params {
         Some(OutputVisParams {
             output_freq_average_factor,
@@ -148,17 +146,16 @@ fn frequency_averaging_explicit_in_out() {
 
 #[test]
 fn frequency_averaging_explicit() {
-    let args = get_merged_1090008640(vec![
-        "--freq-average=80kHz".to_string(),
-        "--output-vis-freq-average=160kHz".to_string(),
-        "--iono-freq-average=320kHz".to_string(),
-    ]);
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },
         output_vis_params,
         low_res_spw,
         ..
-    } = args.parse().unwrap();
+    } = get_merged_1090008640(vec![
+        "--freq-average=80kHz".to_string(),
+        "--output-vis-freq-average=160kHz".to_string(),
+        "--iono-freq-average=320kHz".to_string(),
+    ]);
     let output_freq_average_factor = match output_vis_params {
         Some(OutputVisParams {
             output_freq_average_factor,
@@ -175,13 +172,12 @@ fn frequency_averaging_explicit() {
 // time res will be clipped to 2s
 #[test]
 fn time_averaging_explicit_output_clip() {
-    let args = get_merged_1090008640(vec!["--output-vis-time-average=4s".to_string()]);
     let PeelParams {
         input_vis_params: InputVisParams { time_res, .. },
         output_vis_params,
         iono_time_average_factor,
         ..
-    } = args.parse().unwrap();
+    } = get_merged_1090008640(vec!["--output-vis-time-average=4s".to_string()]);
     let output_time_average_factor = match output_vis_params {
         Some(OutputVisParams {
             output_time_average_factor,
@@ -200,121 +196,3 @@ fn time_averaging_explicit_output_clip() {
 //   --output-vis-time-average - output averaging settings
 //
 // this requires test data with more than one timestep
-//
-// #[test]
-// fn time_averaging_defaults() {
-//     let args = get_merged_1090008640(vec![]);
-//     let PeelParams {
-//         input_vis_params: InputVisParams { time_res, .. },
-//         output_vis_params,
-//         iono_time_average_factor,
-//         ..
-//     } = args.parse().unwrap();
-//     let output_time_average_factor = match output_vis_params {
-//         Some(OutputVisParams {
-//             output_time_average_factor,
-//             ..
-//         }) => output_time_average_factor,
-//         _ => panic!("Expected OutputVisParams::Single"),
-//     };
-//     assert_abs_diff_eq!(time_res.to_seconds(), 2.0);
-//     assert_eq!(iono_time_average_factor.get(), 4);
-//     assert_eq!(output_time_average_factor.get(), 1);
-// }
-
-// #[test]
-// fn time_averaging_explicit_output() {
-//     let args = get_merged_1090008640(vec!["--output-vis-time-average=4s".to_string()]);
-//     let PeelParams {
-//         input_vis_params: InputVisParams { time_res, .. },
-//         output_vis_params,
-//         iono_time_average_factor,
-//         ..
-//     } = args.parse().unwrap();
-//     let output_time_average_factor = match output_vis_params {
-//         Some(OutputVisParams {
-//             output_time_average_factor,
-//             ..
-//         }) => output_time_average_factor,
-//         _ => panic!("Expected OutputVisParams::Single"),
-//     };
-//     assert_abs_diff_eq!(time_res.to_seconds(), 2.0);
-//     assert_eq!(iono_time_average_factor.get(), 4);
-//     assert_eq!(output_time_average_factor.get(), 2);
-// }
-
-// #[test]
-// fn time_averaging_explicit_output_iono() {
-//     let args = get_merged_1090008640(vec![
-//         "--output-vis-time-average=4s".to_string(),
-//         "--iono-time-average=16s".to_string(),
-//     ]);
-//     let PeelParams {
-//         input_vis_params: InputVisParams { time_res, .. },
-//         output_vis_params,
-//         iono_time_average_factor,
-//         ..
-//     } = args.parse().unwrap();
-//     let output_time_average_factor = match output_vis_params {
-//         Some(OutputVisParams {
-//             output_time_average_factor,
-//             ..
-//         }) => output_time_average_factor,
-//         _ => panic!("Expected OutputVisParams::Single"),
-//     };
-//     assert_abs_diff_eq!(time_res.to_seconds(), 2.0);
-//     assert_eq!(iono_time_average_factor.get(), 8);
-//     assert_eq!(output_time_average_factor.get(), 2);
-// }
-
-// #[test]
-// fn time_averaging_explicit_in_out() {
-//     // enable logging
-//     use env_logger::Env;
-//     env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
-//     let args = get_merged_1090008640(vec![
-//         "--time-average=4s".to_string(),
-//         "--output-vis-time-average=16s".to_string(),
-//     ]);
-//     let PeelParams {
-//         input_vis_params: InputVisParams { time_res, .. },
-//         output_vis_params,
-//         iono_time_average_factor,
-//         ..
-//     } = args.parse().unwrap();
-//     let output_time_average_factor = match output_vis_params {
-//         Some(OutputVisParams {
-//             output_time_average_factor,
-//             ..
-//         }) => output_time_average_factor,
-//         _ => panic!("Expected OutputVisParams::Single"),
-//     };
-//     assert_abs_diff_eq!(time_res.to_seconds(), 4.0);
-//     assert_eq!(iono_time_average_factor.get(), 2);
-//     assert_eq!(output_time_average_factor.get(), 8);
-// }
-
-// #[test]
-// fn time_averaging_explicit() {
-//     let args = get_merged_1090008640(vec![
-//         "--time-average=4s".to_string(),
-//         "--output-vis-time-average=16s".to_string(),
-//         "--iono-time-average=32s".to_string(),
-//     ]);
-//     let PeelParams {
-//         input_vis_params: InputVisParams { time_res, .. },
-//         output_vis_params,
-//         iono_time_average_factor,
-//         ..
-//     } = args.parse().unwrap();
-//     let output_time_average_factor = match output_vis_params {
-//         Some(OutputVisParams {
-//             output_time_average_factor,
-//             ..
-//         }) => output_time_average_factor,
-//         _ => panic!("Expected OutputVisParams::Single"),
-//     };
-//     assert_abs_diff_eq!(time_res.to_seconds(), 4.0);
-//     assert_eq!(iono_time_average_factor.get(), 4);
-//     assert_eq!(output_time_average_factor.get(), 8);
-// }
