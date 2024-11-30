@@ -594,6 +594,7 @@ fn test_vis_average_non_uniform_weights() {
         &HashSet::new(),
     );
 
+    // (1 * 2) + (11 * 5) = 57
     assert_abs_diff_eq!(jones_to_fb[(0, 0)], Jones::identity() * 57.0 / 13.0);
     assert_abs_diff_eq!(weight_to_fb[(0, 0)], 13.0);
 
@@ -619,7 +620,8 @@ fn test_vis_average_non_uniform_weights() {
     );
 
     // The first channel's weight accumulates only negatives.
-    assert_abs_diff_eq!(jones_to_fb[(0, 0)], Jones::identity() * 57.0 / 13.0);
+    // (1 + 5) / 2 = 3
+    assert_abs_diff_eq!(jones_to_fb[(0, 0)], Jones::identity() * 3.0);
     assert_abs_diff_eq!(weight_to_fb[(0, 0)], -13.0);
 
     assert_abs_diff_eq!(jones_to_fb[(1, 0)], Jones::identity() * 84.0 / 16.0);
@@ -725,4 +727,137 @@ fn test_vis_average_non_uniform_weights_non_integral_array_shapes() {
 
     assert_abs_diff_eq!(jones_to_fb[(1, 0)], Jones::identity() * 93.0 / 18.0);
     assert_abs_diff_eq!(weight_to_fb[(1, 0)], 18.0);
+}
+
+#[test]
+fn test_vis_average_half_flagged() {
+    // 2 timesteps, 4 channels, 1 baseline.
+    let jones_from_tfb = array![
+        [
+            [Jones::identity()],
+            [Jones::identity() * 2.0],
+            [Jones::identity() * 3.0],
+            [Jones::identity() * 4.0]
+        ],
+        [
+            [Jones::identity() * 5.0],
+            [Jones::identity() * 6.0],
+            [Jones::identity() * 7.0],
+            [Jones::identity() * 8.0]
+        ]
+    ];
+    let weight_from_tfb = array![[[1.], [1.], [0.], [0.]], [[1.], [1.], [0.], [0.]]];
+    let mut jones_to_fb = Array2::default((2, 1));
+    let mut weight_to_fb = Array2::default(jones_to_fb.dim());
+
+    vis_average(
+        jones_from_tfb.view(),
+        jones_to_fb.view_mut(),
+        weight_from_tfb.view(),
+        weight_to_fb.view_mut(),
+        &HashSet::new(),
+    );
+
+    assert_abs_diff_eq!(jones_to_fb[(0, 0)], Jones::identity() * 14. / 4.);
+    assert_abs_diff_eq!(weight_to_fb[(0, 0)], 4.0);
+
+    assert_abs_diff_eq!(jones_to_fb[(1, 0)], Jones::identity() * 22. / 4.);
+    assert_abs_diff_eq!(weight_to_fb[(1, 0)], 0.0);
+}
+
+#[test]
+fn test_vis_average_weights_non_zero_half_flagged() {
+    // 2 timesteps, 2 channels
+    #[rustfmt::skip]
+    let jones_from_tf = array![
+        [
+            Jones::<f32>::identity(),
+            Jones::identity() * 2.0,
+        ],
+        [
+            Jones::identity() * 3.0,
+            Jones::identity() * 4.0,
+        ],
+    ];
+    #[rustfmt::skip]
+    let weight_from_tf = array![
+        [1., 1.],
+        [1., 1.]
+    ];
+    let mut jones_to = Jones::<f32>::default();
+    let mut weight_to = 0.0;
+
+    vis_average_weights_non_zero(
+        jones_from_tf.view(),
+        weight_from_tf.view(),
+        &mut jones_to,
+        &mut weight_to,
+    );
+
+    assert_abs_diff_eq!(jones_to, Jones::identity() * 10. / 4.);
+    assert_abs_diff_eq!(weight_to, 4.0);
+
+    #[rustfmt::skip]
+    let weight_from_tf = array![
+        [1., -1.],
+        [-1., 1.]
+    ];
+
+    vis_average_weights_non_zero(
+        jones_from_tf.view(),
+        weight_from_tf.view(),
+        &mut jones_to,
+        &mut weight_to,
+    );
+
+    assert_abs_diff_eq!(jones_to, Jones::identity() * 5. / 2.);
+    assert_abs_diff_eq!(weight_to, 2.0);
+
+    #[rustfmt::skip]
+    let weight_from_tf = array![
+        [1., 0.],
+        [0., 1.]
+    ];
+
+    vis_average_weights_non_zero(
+        jones_from_tf.view(),
+        weight_from_tf.view(),
+        &mut jones_to,
+        &mut weight_to,
+    );
+
+    assert_abs_diff_eq!(jones_to, Jones::identity() * 5. / 2.);
+    assert_abs_diff_eq!(weight_to, 2.0);
+
+    #[rustfmt::skip]
+    let weight_from_tf = array![
+        [0., 0.],
+        [0., 0.]
+    ];
+
+    vis_average_weights_non_zero(
+        jones_from_tf.view(),
+        weight_from_tf.view(),
+        &mut jones_to,
+        &mut weight_to,
+    );
+
+    assert_abs_diff_eq!(jones_to, Jones::identity() * 10. / 4.);
+    assert_abs_diff_eq!(weight_to, 0.0);
+
+    #[rustfmt::skip]
+    let weight_from_tf = array![
+        [-1., -1.],
+        [-1., -1.]
+    ];
+
+    vis_average_weights_non_zero(
+        jones_from_tf.view(),
+        weight_from_tf.view(),
+        &mut jones_to,
+        &mut weight_to,
+    );
+
+    assert_abs_diff_eq!(jones_to, Jones::identity() * 10. / 4.);
+    assert_abs_diff_eq!(weight_to, -4.0);
 }

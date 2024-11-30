@@ -23,7 +23,9 @@ pub(crate) fn deflate_gz_into_tempfile<T: AsRef<Path>>(file: T) -> TempPath {
 }
 
 const DATA_DIR_1090008640: &str = "test_files/1090008640";
+const DATA_DIR_1061316544: &str = "test_files/1061316544";
 
+#[derive(Default)]
 pub(crate) struct DataAsStrings {
     pub(crate) metafits: String,
     pub(crate) vis: Vec<String>,
@@ -61,6 +63,13 @@ pub(crate) fn get_reduced_1090008640_uvfits() -> DataAsStrings {
     let mut data = get_reduced_1090008640_raw();
     data.vis[0] = format!("{DATA_DIR_1090008640}/1090008640.uvfits");
     data
+}
+
+pub(crate) fn get_reduced_1061316544_uvfits() -> DataAsStrings {
+    DataAsStrings {
+        vis: vec![format!("{DATA_DIR_1061316544}/1061316544.uvfits")],
+        ..DataAsStrings::default()
+    }
 }
 
 pub(crate) fn get_reduced_1090008640_raw_pbs() -> DataAsPathBufs {
