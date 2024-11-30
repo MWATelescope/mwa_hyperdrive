@@ -10,11 +10,7 @@ use marlu::RADec;
 use super::*;
 use crate::srclist::{FluxDensity, FluxDensityType};
 
-#[test]
-// Test that the (Az, El) coordinates retrieved from the
-// `.get_azel_mwa_parallel()` method of `SourceList` are correct and always
-// in the same order.
-fn test_get_azel_mwa() {
+fn get_test_sl() -> SourceList {
     let mut sl = SourceList::new();
     // Use a common component. Only the `radec` part needs to be modified.
     let comp = SourceComponent {
@@ -83,6 +79,15 @@ fn test_get_azel_mwa() {
             components: comps.into_boxed_slice(),
         },
     );
+    sl
+}
+
+#[test]
+// Test that the (Az, El) coordinates retrieved from the
+// `.get_azel_mwa_parallel()` method of `SourceList` are correct and always
+// in the same order.
+fn test_get_azel_mwa() {
+    let sl = get_test_sl();
 
     let lst = 3.0 * FRAC_PI_4;
     let (azs, zas): (Vec<_>, Vec<_>) = sl
@@ -115,4 +120,28 @@ fn test_get_azel_mwa() {
     ];
     assert_abs_diff_eq!(azs.as_slice(), az_expected.as_slice(), epsilon = 1e-10);
     assert_abs_diff_eq!(zas.as_slice(), za_expected.as_slice(), epsilon = 1e-10);
+}
+
+#[test]
+// Test that search finds the correct components
+fn test_search_asec() {
+    let sl = get_test_sl();
+
+    let comps = sl.search_asec(RADec::from_radians(FRAC_PI_2, PI), 12.80 * 3600.0);
+
+    assert!(comps.len() == 2);
+    assert_abs_diff_eq!(comps[0].0, 0.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(comps[1].0, 46060.469865239116, epsilon = 1e-10);
+    assert_eq!(comps[0].1, "source_3");
+    assert_eq!(comps[1].1, "source_3");
+    assert_eq!(comps[0].2, 0);
+    assert_eq!(comps[1].2, 1);
+    assert_eq!(comps[0].3, sl["source_3"].components[0]);
+    assert_eq!(comps[1].3, sl["source_3"].components[1]);
+
+    // slightly smaller range
+    let comps = sl.search_asec(RADec::from_radians(FRAC_PI_2, PI), 12.00 * 3600.0);
+    assert!(comps.len() == 1);
+    assert_abs_diff_eq!(comps[0].0, 0.0, epsilon = 1e-10);
+    assert_eq!(comps[0].1, "source_3");
 }

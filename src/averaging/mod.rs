@@ -376,6 +376,18 @@ pub(super) fn channels_to_chanblocks(
     spws
 }
 
+/// nasty hack because peel doesn't work with flagged channels
+pub(super) fn unflag_spw(spw: Spw) -> Spw {
+    let all_freqs: Vec<u64> = spw.get_all_freqs().iter().map(|&f| f as u64).collect_vec();
+    channels_to_chanblocks(
+        &all_freqs,
+        spw.freq_res as u64,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    )
+    .swap_remove(0)
+}
+
 /// Determine a time average factor given a time resolution and user input. Use
 /// the default if the logic here is insufficient.
 ///
@@ -489,7 +501,8 @@ pub(super) fn parse_freq_average_factor(
             // Scale the quantity by the unit, if required.
             let quantity = match time_format {
                 FreqFormat::Hz => quantity,
-                FreqFormat::kHz => 1000.0 * quantity,
+                FreqFormat::kHz => 1e3 * quantity,
+                FreqFormat::MHz => 1e6 * quantity,
             };
             let factor = quantity / freq_res;
             // Reject non-integer floats.

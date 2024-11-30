@@ -430,52 +430,17 @@ impl DiCalParams {
             Ok(())
         })?;
 
-        debug!("Multiplying visibilities by weights");
-
-        // Multiply the visibilities by the weights (and baseline weights based on
-        // UVW cuts). If a weight is negative, it means the corresponding visibility
-        // should be flagged, so that visibility is set to 0; this means it does not
-        // affect calibration. Not iterating over weights during calibration makes
-        // makes calibration run significantly faster.
-        vis_data
-            .outer_iter_mut()
-            .into_par_iter()
-            .zip(vis_model.outer_iter_mut())
-            .zip(vis_weights.outer_iter())
-            .for_each(|((mut vis_data, mut vis_model), vis_weights)| {
-                vis_data
-                    .outer_iter_mut()
-                    .zip(vis_model.outer_iter_mut())
-                    .zip(vis_weights.outer_iter())
-                    .for_each(|((mut vis_data, mut vis_model), vis_weights)| {
-                        vis_data
-                            .iter_mut()
-                            .zip(vis_model.iter_mut())
-                            .zip(vis_weights.iter())
-                            .zip(self.baseline_weights.iter())
-                            .for_each(|(((vis_data, vis_model), &vis_weight), baseline_weight)| {
-                                let weight = f64::from(vis_weight) * *baseline_weight;
-                                if weight <= 0.0 {
-                                    *vis_data = Jones::default();
-                                    *vis_model = Jones::default();
-                                } else {
-                                    *vis_data =
-                                        Jones::<f32>::from(Jones::<f64>::from(*vis_data) * weight);
-                                    *vis_model =
-                                        Jones::<f32>::from(Jones::<f64>::from(*vis_model) * weight);
-                                }
-                            });
-                    });
-            });
-
-        info!("Finished reading input data and sky modelling");
-
-        Ok(CalVis {
+        let mut cal_vis = CalVis {
             vis_data,
             vis_weights,
             vis_model,
             pols: obs_context.polarisations,
-        })
+        };
+        cal_vis.scale_by_weights(Some(&self.baseline_weights));
+
+        info!("Finished reading input data and sky modelling");
+
+        Ok(cal_vis)
     }
 }
 
@@ -575,6 +540,63 @@ pub(crate) struct CalVis {
 
     /// The available polarisations within the data.
     pub(crate) pols: Polarisations,
+}
+
+impl CalVis {
+    // Multiply the data and model visibilities by the weights (and baseline
+    // weights that could be e.g. based on UVW cuts). If a weight is negative,
+    // it means the corresponding visibility should be flagged, so that
+    // visibility is set to 0; this means it does not affect calibration. Not
+    // iterating over weights during calibration makes makes calibration run
+    // significantly faster.
+    pub(crate) fn scale_by_weights(&mut self, baseline_weights: Option<&[f64]>) {
+        debug!("Multiplying visibilities by weights");
+
+        // Ensure that the number of baseline weights is the same as the number
+        // of baselines.
+        if let Some(w) = baseline_weights {
+            assert_eq!(w.len(), self.vis_data.len_of(Axis(2)));
+        }
+
+        self.vis_data
+            .outer_iter_mut()
+            .into_par_iter()
+            .zip(self.vis_model.outer_iter_mut())
+            .zip(self.vis_weights.outer_iter())
+            .for_each(|((mut vis_data, mut vis_model), vis_weights)| {
+                vis_data
+                    .outer_iter_mut()
+                    .zip(vis_model.outer_iter_mut())
+                    .zip(vis_weights.outer_iter())
+                    .for_each(|((mut vis_data, mut vis_model), vis_weights)| {
+                        vis_data
+                            .iter_mut()
+                            .zip(vis_model.iter_mut())
+                            .zip(vis_weights.iter())
+                            .zip(
+                                baseline_weights
+                                    .map(|w| w.iter().cycle())
+                                    .unwrap_or_else(|| [1.0].iter().cycle()),
+                            )
+                            .for_each(
+                                |(((vis_data, vis_model), &vis_weight), &baseline_weight)| {
+                                    let weight = f64::from(vis_weight) * baseline_weight;
+                                    if weight <= 0.0 {
+                                        *vis_data = Jones::default();
+                                        *vis_model = Jones::default();
+                                    } else {
+                                        *vis_data = Jones::<f32>::from(
+                                            Jones::<f64>::from(*vis_data) * weight,
+                                        );
+                                        *vis_model = Jones::<f32>::from(
+                                            Jones::<f64>::from(*vis_model) * weight,
+                                        );
+                                    }
+                                },
+                            );
+                    });
+            });
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

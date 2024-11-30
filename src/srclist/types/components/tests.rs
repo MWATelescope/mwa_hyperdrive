@@ -59,7 +59,11 @@ fn test_split_components() {
             .count()
     });
 
-    let split_components = ComponentList::new(&srclist, &freqs, phase_centre);
+    let split_components = ComponentList::new(
+        srclist.values().rev().flat_map(|src| src.components.iter()),
+        &freqs,
+        phase_centre,
+    );
     let points = split_components.points;
     let gaussians = split_components.gaussians;
     let shapelets = split_components.shapelets;

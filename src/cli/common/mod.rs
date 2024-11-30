@@ -193,6 +193,20 @@ impl OutputVisArgs {
                 AverageFactorError::NotIntegerMultiple { out, inp } => HyperdriveError::Generic(format!("The output visibility time resolution isn't a multiple of input data's: {out} seconds vs {inp} seconds")),
                 AverageFactorError::Parse(e) => HyperdriveError::Generic(format!("Error when parsing the output visibility time average factor: {e}")),
             })?;
+
+            // clip time factor if not enough timestamps
+            let time_factor = if time_factor.get() > timestamps.len() {
+                format!(
+                    "Cannot average {} timeblocks; only {} are being used. Capping.",
+                    time_factor.get(),
+                    timestamps.len(),
+                )
+                .warn();
+                NonZeroUsize::new(timestamps.len()).unwrap()
+            } else {
+                time_factor
+            };
+
             let freq_factor =
                 parse_freq_average_factor(Some(input_vis_freq_res_hz), output_vis_freq_average.as_deref(), NonZeroUsize::new(1).unwrap())
                     .map_err(|e| match e {
@@ -269,6 +283,15 @@ impl OutputVisArgs {
                     "Freq. averaging {}x ({}kHz)",
                     freq_average_factor,
                     input_vis_freq_res_hz * freq_average_factor.get() as f64 / 1000.0
+                )
+                .into(),
+            );
+        } else {
+            block.push(
+                format!(
+                    "No writer averaging. {}s {}kHz",
+                    input_vis_time_res.to_seconds(),
+                    input_vis_freq_res_hz / 1000.0,
                 )
                 .into(),
             );

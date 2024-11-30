@@ -14,7 +14,7 @@ use ndarray::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::{FluxDensity, FluxDensityType, SourceList};
+use super::{FluxDensity, FluxDensityType};
 
 /// Information on a source's component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -173,15 +173,19 @@ pub(crate) struct ComponentList {
 }
 
 impl ComponentList {
-    /// Given a source list, split the components into each [ComponentType].
+    /// Given sky-model source components, split them into each
+    /// [`ComponentType`].
     ///
     /// These parameters don't change over time, so it's ideal to run this
     /// function once.
-    pub(crate) fn new(
-        source_list: &SourceList,
+    pub(crate) fn new<'a, I>(
+        components: I,
         unflagged_fine_chan_freqs: &[f64],
         phase_centre: RADec,
-    ) -> ComponentList {
+    ) -> ComponentList
+    where
+        I: IntoIterator<Item = &'a SourceComponent>,
+    {
         // Unpack each of the component parameters into vectors.
         let mut point_radecs = vec![];
         let mut point_lmns = vec![];
@@ -198,6 +202,7 @@ impl ComponentList {
         let mut shapelet_gaussian_params = vec![];
         let mut shapelet_coeffs: Vec<Vec<ShapeletCoeff>> = vec![];
 
+        // TODO: Reverse elsewhere
         // Reverse the source list; if the source list has been sorted
         // (brightest sources first), reversing makes the dimmest sources get
         // used first. This is good because floating-point precision errors are
@@ -205,11 +210,7 @@ impl ComponentList {
         // float starting from the brightest component means that the
         // floating-point precision errors are greater as we work through the
         // source list.
-        for comp in source_list
-            .iter()
-            .rev()
-            .flat_map(|(_, src)| src.components.iter())
-        {
+        for comp in components.into_iter() {
             let comp_lmn = comp.radec.to_lmn(phase_centre).prepare_for_rime();
             match &comp.comp_type {
                 ComponentType::Point => {

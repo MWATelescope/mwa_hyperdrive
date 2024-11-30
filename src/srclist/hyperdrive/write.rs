@@ -23,6 +23,8 @@ pub(crate) fn source_list_to_yaml<T: std::io::Write>(
         let mut map = HashMap::with_capacity(1);
         for (name, src) in sl.iter().take(num_sources) {
             map.insert(name.as_str(), serde_yaml::to_value(src)?);
+            // TODO: linter bug
+            #[allow(clippy::needless_borrows_for_generic_args)]
             serde_yaml::to_writer(&mut buf, &map)?;
             map.clear();
         }
