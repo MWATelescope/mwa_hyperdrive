@@ -8,12 +8,14 @@ use std::{
 };
 
 use clap::Parser;
+use ndarray::prelude::*;
 use tempfile::TempDir;
 
 use super::VisConvertArgs;
 use crate::{
     io::read::VisRead,
-    tests::{get_reduced_1090008640_raw, DataAsStrings},
+    params::VisConvertParams,
+    tests::{get_reduced_1061316544_uvfits, get_reduced_1090008640_raw, DataAsStrings},
     MsReader, UvfitsReader,
 };
 
@@ -149,4 +151,68 @@ fn test_per_coarse_chan_flags_and_smallest_contiguous_band_writing() {
             }
         }
     }
+}
+
+#[test]
+fn test_averaging_flags() {
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let uvfits_converted = temp_dir.path().join("converted.uvfits");
+    let DataAsStrings { vis, .. } = get_reduced_1061316544_uvfits();
+    // let vis = PathBuf::from(&vis[0]);
+    let uvfits_converted_string = uvfits_converted.display().to_string();
+    #[rustfmt::skip]
+    let args = vec![
+        "vis-convert",
+        "--data", &vis[0],
+        "--outputs", &uvfits_converted_string,
+        "--freq-average", "80kHz",
+        "--ignore-input-data-fine-channel-flags",
+    ];
+
+    let vis_convert_args = VisConvertArgs::parse_from(args);
+
+    let vis_convert_params = vis_convert_args.parse().unwrap();
+    vis_convert_params.run().unwrap();
+    let VisConvertParams {
+        input_vis_params, ..
+    } = vis_convert_params;
+
+    let uvreader = UvfitsReader::new(uvfits_converted, None, None).unwrap();
+    // let obs_context = uvreader.get_obs_context();
+    let num_unflagged_tiles = input_vis_params.get_num_unflagged_tiles();
+    let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
+    let num_fine_channels = input_vis_params.spw.chanblocks.len();
+    let flagged_channels = input_vis_params.spw.flagged_chan_indices;
+    let cross_vis_shape = (num_fine_channels, num_unflagged_cross_baselines);
+    let auto_vis_shape = (num_fine_channels, num_unflagged_tiles);
+
+    let mut cross_data_fb = Array2::zeros(cross_vis_shape);
+    let mut cross_weights_fb = Array2::zeros(cross_vis_shape);
+    let mut auto_data_fb = Array2::zeros(auto_vis_shape);
+    let mut auto_weights_fb = Array2::zeros(auto_vis_shape);
+    let timestep = 0;
+    uvreader
+        .read_crosses_and_autos(
+            cross_data_fb.view_mut(),
+            cross_weights_fb.view_mut(),
+            auto_data_fb.view_mut(),
+            auto_weights_fb.view_mut(),
+            timestep,
+            &input_vis_params.tile_baseline_flags,
+            &flagged_channels,
+        )
+        .unwrap();
+    auto_data_fb.indexed_iter().for_each(|((chan, tile), val)| {
+        let j = val;
+        if tile == 76 {
+            return;
+        }
+        assert!(
+            j[0].re > 0.0,
+            "auto_data_fb[{}, {}][0].re = {}",
+            chan,
+            tile,
+            j[0].re
+        );
+    });
 }

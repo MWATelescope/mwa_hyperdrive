@@ -574,15 +574,17 @@ pub(crate) fn vis_average(
 /// to be negative; if all of the weights in the chunk are negative or 0, the
 /// averaged visibility is considered "flagged".
 #[inline]
-fn vis_average_weights_non_zero(
+pub(super) fn vis_average_weights_non_zero(
     jones_chunk_tf: ArrayView2<Jones<f32>>,
     weight_chunk_tf: ArrayView2<f32>,
     jones_to: &mut Jones<f32>,
     weight_to: &mut f32,
 ) {
     let mut jones_weighted_sum = Jones::default();
-    let mut weight_sum = 0.0;
-    let mut flagged = true;
+    let mut jones_sum = Jones::default();
+    let mut unflagged_weight_sum = 0.0;
+    let mut flagged_weight_sum = 0.0;
+    let mut all_flagged = true;
 
     // iterate through time chunks
     jones_chunk_tf
@@ -590,39 +592,23 @@ fn vis_average_weights_non_zero(
         .zip_eq(weight_chunk_tf.iter())
         .for_each(|(jones, weight)| {
             let jones = Jones::<f64>::from(*jones);
-            let weight = *weight as f64;
+            jones_sum += jones;
 
-            if weight > 0.0 {
-                // This visibility is not flagged.
-                if flagged {
-                    // If previous visibilities were flagged, we need to discard
-                    // that information.
-                    jones_weighted_sum = jones * weight;
-                    weight_sum = weight;
-                    flagged = false;
-                } else {
-                    // Otherwise, we're accumulating this unflagged vis.
-                    jones_weighted_sum += jones * weight;
-                    weight_sum += weight;
-                }
+            let weight_abs_f64 = (*weight as f64).abs();
+            if *weight > 0.0 {
+                all_flagged = false;
+                jones_weighted_sum += jones * weight_abs_f64;
+                unflagged_weight_sum += weight_abs_f64;
             } else {
-                // This visibility is flagged.
-                if flagged {
-                    // If all prior vis were also flagged, we accumulate here.
-                    jones_weighted_sum += jones * weight;
-                    weight_sum += weight;
-                }
-                // Nothing needs to be done if there were preceding unflagged
-                // vis.
+                flagged_weight_sum += weight_abs_f64;
             }
         });
 
-    if weight_sum == 0.0 {
-        // If the weight is 0, we can't divide the accumulated vis by the
-        // accumulated weight. So, divide by the chunk size instead.
-        *jones_to = Jones::from(jones_weighted_sum / jones_chunk_tf.len() as f64);
+    if all_flagged || unflagged_weight_sum <= 0.0 {
+        *jones_to = Jones::from(jones_sum / jones_chunk_tf.len() as f64);
+        *weight_to = -flagged_weight_sum as f32;
     } else {
-        *jones_to = Jones::from(jones_weighted_sum / weight_sum);
+        *jones_to = Jones::from(jones_weighted_sum / unflagged_weight_sum);
+        *weight_to = unflagged_weight_sum as f32;
     }
-    *weight_to = weight_sum as f32;
 }
