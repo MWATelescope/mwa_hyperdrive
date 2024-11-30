@@ -84,7 +84,7 @@ jobs:
           # Build with our recently-built static cfitsio
           export CFITSIO_STATIC=1
           # Don't build against the host CPU
-          rm .cargo/config.toml
+          [ -f .cargo/config.toml ] && rm .cargo/config.toml
           # Don't make it look like the git tree is dirty because we aren't
           # building against the host CPU
           perl -0777 -pe 's/let dirty = .*\n.*\n.*\n.*/let dirty = "";/' src/cli/mod.rs
