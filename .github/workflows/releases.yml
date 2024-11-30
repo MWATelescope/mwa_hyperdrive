@@ -118,7 +118,7 @@ jobs:
           done
 
       - name: Upload tarball
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: linux.tar.gz
           path: "*.tar.gz"
@@ -130,7 +130,7 @@ jobs:
     needs: build-linux-release
     steps:
       - name: Download Linux artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: linux.tar.gz
 
