@@ -15,8 +15,9 @@ jobs:
           toolchain: stable
           profile: minimal
       - name: Install mdBook
+        # relative links are broken after v0.4.40, potentially because of https://github.com/rust-lang/mdBook/pull/2414
         run: |
-          (test -x $HOME/.cargo/bin/mdbook || cargo install --vers "^0.4" mdbook)
+          (test -x $HOME/.cargo/bin/mdbook || cargo install --vers "0.4.40" mdbook)
           cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
       - name: Build and Test
         run: |
