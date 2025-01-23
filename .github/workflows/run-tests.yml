@@ -51,7 +51,7 @@ jobs:
       - name: Install CUDA
         uses: Jimver/cuda-toolkit@v0.2.11
         with:
-          cuda: '12.2.0'
+          cuda: '12.4.1'
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1

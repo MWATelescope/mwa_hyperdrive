@@ -46,7 +46,7 @@ GitHub release page, you will need to compile `hyperdrive` from source.
 # CUDA?
 
 The releases with "CUDA" in the name are CUDA enabled. The `hyperdrive` binaries
-have been dynamically linked against CUDA 12.2.0; to run them, a CUDA
+have been dynamically linked against CUDA 12.4.1; to run them, a CUDA
 installation on version 12 is required.
 
 There is also a double- or single-precision version of `hyperdrive` provided. If
