@@ -64,7 +64,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.11
+        uses: Jimver/cuda-toolkit@v0.2.19
         with:
           cuda: '12.4.1'
 
