@@ -7,6 +7,11 @@ pub(crate) enum PeelArgsError {
     #[error("No calibration output was specified. There must be at least one calibration solution file.")]
     NoOutput,
 
+    #[error(
+        "The number of sources to subtract ({total}) is less than the number of sources to iono subtract ({iono})"
+    )]
+    TooManyIonoSub { total: usize, iono: usize },
+
     #[error("The number of iono sub passes cannot be 0")]
     ZeroPasses,
 

@@ -41,7 +41,7 @@ pub enum HyperdriveError {
     DiCalibrate(String),
 
     /// An error related to peeling.
-    #[error("{0}\n\nSee for more info: {URL}/*****.html")]
+    #[error("{0}\n\nSee for more info: {URL}/user/peel/intro.html")]
     Peel(String),
 
     /// An error related to solutions-apply.
@@ -173,6 +173,7 @@ impl From<PeelArgsError> for HyperdriveError {
     fn from(e: PeelArgsError) -> Self {
         match e {
             PeelArgsError::NoOutput
+            | PeelArgsError::TooManyIonoSub { .. }
             | PeelArgsError::ZeroPasses
             | PeelArgsError::ZeroLoops
             | PeelArgsError::ParseIonoTimeAverageFactor(_)

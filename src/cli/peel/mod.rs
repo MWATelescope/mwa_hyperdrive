@@ -265,25 +265,22 @@ impl PeelArgs {
                 input_vis_params.timeblocks.first().median,
                 input_vis_params.dut1,
             );
-            if apply_precession {
-                let srclist = srclist_args.parse(
-                    obs_context.phase_centre,
+            let (lst_rad, lat_rad) = if apply_precession {
+                (
                     precession_info.lmst_j2000,
                     precession_info.array_latitude_j2000,
-                    &obs_context.get_veto_freqs(),
-                    &*beam,
-                )?;
-                (srclist, precession_info.lmst_j2000)
+                )
             } else {
-                let srclist = srclist_args.parse(
-                    obs_context.phase_centre,
-                    precession_info.lmst,
-                    latitude_rad,
-                    &obs_context.get_veto_freqs(),
-                    &*beam,
-                )?;
-                (srclist, precession_info.lmst)
-            }
+                (precession_info.lmst, latitude_rad)
+            };
+            let srclist = srclist_args.parse(
+                obs_context.phase_centre,
+                lst_rad,
+                lat_rad,
+                &obs_context.get_veto_freqs(),
+                &*beam,
+            )?;
+            (srclist, lst_rad)
         };
 
         // Check that the number of sources to peel, iono subtract and subtract
@@ -292,7 +289,7 @@ impl PeelArgs {
         let _max_num_sources = match (num_sources_to_iono_subtract, num_sources_to_subtract) {
             (Some(is), Some(s)) => {
                 if s < is {
-                    panic!("The number of sources to subtract ({s}) must be at least equal to the number of sources to iono subtract ({is})");
+                    return Err(PeelArgsError::TooManyIonoSub { total: s, iono: is }.into());
                 }
                 Some(s)
             }

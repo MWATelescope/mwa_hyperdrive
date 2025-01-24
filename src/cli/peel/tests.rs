@@ -9,9 +9,10 @@ use crate::{
     cli::common::{InputVisArgs, SkyModelWithVetoArgs},
     params::{InputVisParams, OutputVisParams, PeelParams},
     tests::{get_reduced_1090008640_raw, DataAsStrings},
+    HyperdriveError,
 };
 
-use super::PeelArgs;
+use super::{PeelArgs, PeelCliArgs};
 
 #[track_caller]
 fn get_reduced_1090008640() -> PeelArgs {
@@ -203,3 +204,18 @@ fn time_averaging_explicit_output_clip() {
 //   --output-vis-time-average - output averaging settings
 //
 // this requires test data with more than one timestep
+
+// testing that parse() catches invalid number of iono sources
+#[test]
+fn handle_iono_greater_than_total() {
+    let mut args = get_reduced_1090008640();
+    args.peel_args = PeelCliArgs {
+        num_sources_to_iono_subtract: Some(2),
+        num_sources_to_subtract: Some(1),
+        ..Default::default()
+    };
+    match args.parse() {
+        Err(HyperdriveError::Generic(_)) => {} // expected
+        _ => panic!("Expected TooManyIonoSub"),
+    };
+}
