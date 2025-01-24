@@ -1,5 +1,5 @@
 <!DOCTYPE HTML>
-<html lang="en" class="sidebar-visible no-js ayu">
+<html lang="en" class="ayu sidebar-visible" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
@@ -7,13 +7,13 @@
 
 
         <!-- Custom HTML head -->
-        
-        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#ffffff">
 
         <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
         <link rel="stylesheet" href="../css/variables.css">
         <link rel="stylesheet" href="../css/general.css">
         <link rel="stylesheet" href="../css/chrome.css">
@@ -33,17 +33,20 @@
         <link rel="stylesheet" href=".././mdbook-admonish.css">
 
         <!-- MathJax -->
-        <script async type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
-    </head>
-    <body>
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
         <!-- Provide site root to javascript -->
-        <script type="text/javascript">
+        <script>
             var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "ayu";
         </script>
-
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
-        <script type="text/javascript">
+        <script>
             try {
                 var theme = localStorage.getItem('mdbook-theme');
                 var sidebar = localStorage.getItem('mdbook-sidebar');
@@ -59,45 +62,53 @@
         </script>
 
         <!-- Set the theme before any content is loaded, prevents flash -->
-        <script type="text/javascript">
+        <script>
             var theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
-            var html = document.querySelector('html');
-            html.classList.remove('no-js')
+            const html = document.documentElement;
             html.classList.remove('ayu')
             html.classList.add(theme);
-            html.classList.add('js');
+            html.classList.add("js");
         </script>
 
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
         <!-- Hide / unhide sidebar before it is displayed -->
-        <script type="text/javascript">
-            var html = document.querySelector('html');
-            var sidebar = 'hidden';
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
             }
+            sidebar_toggle.checked = sidebar === 'visible';
             html.classList.remove('sidebar-visible');
             html.classList.add("sidebar-" + sidebar);
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
-            <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../index.html">Introduction</a></li><li class="chapter-item expanded affix "><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Installation</li><li class="chapter-item expanded "><a href="../installation/intro.html"><strong aria-hidden="true">1.</strong> How do I install hyperdrive?</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../installation/pre_compiled.html" class="active"><strong aria-hidden="true">1.1.</strong> Pre-compiled</a></li><li class="chapter-item "><a href="../installation/from_source.html"><strong aria-hidden="true">1.2.</strong> From source</a></li><li class="chapter-item "><a href="../installation/post.html"><strong aria-hidden="true">1.3.</strong> Post installation</a></li></ol></li><li class="chapter-item expanded "><li class="part-title">User Guide</li><li class="chapter-item expanded "><a href="../user/intro.html"><strong aria-hidden="true">2.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../user/help.html"><strong aria-hidden="true">3.</strong> Getting started</a></li><li class="chapter-item expanded "><a href="../user/di_cal/intro.html"><strong aria-hidden="true">4.</strong> DI calibration</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../user/di_cal/tutorial.html"><strong aria-hidden="true">4.1.</strong> Tutorial</a></li><li class="chapter-item "><a href="../user/di_cal/simple.html"><strong aria-hidden="true">4.2.</strong> Simple usage</a></li><li class="chapter-item "><a href="../user/di_cal/out_calibrated.html"><strong aria-hidden="true">4.3.</strong> Getting calibrated data</a></li><li class="chapter-item "><div><strong aria-hidden="true">4.4.</strong> Advanced usage</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../user/di_cal/advanced/time_varying.html"><strong aria-hidden="true">4.4.1.</strong> Varying solutions over time</a></li></ol></li><li class="chapter-item "><a href="../user/di_cal/garrawarla.html"><strong aria-hidden="true">4.5.</strong> Usage on garrawarla</a></li><li class="chapter-item "><a href="../user/di_cal/how_does_it_work.html"><strong aria-hidden="true">4.6.</strong> How does it work?</a></li></ol></li><li class="chapter-item expanded "><a href="../user/solutions_apply/intro.html"><strong aria-hidden="true">5.</strong> Apply solutions</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../user/solutions_apply/simple.html"><strong aria-hidden="true">5.1.</strong> Simple usage</a></li></ol></li><li class="chapter-item expanded "><a href="../user/plotting.html"><strong aria-hidden="true">6.</strong> Plot solutions</a></li><li class="chapter-item expanded "><a href="../user/vis_convert/intro.html"><strong aria-hidden="true">7.</strong> Convert visibilities</a></li><li class="chapter-item expanded "><a href="../user/vis_simulate/intro.html"><strong aria-hidden="true">8.</strong> Simulate visibilities</a></li><li class="chapter-item expanded "><a href="../user/vis_subtract/intro.html"><strong aria-hidden="true">9.</strong> Subtract visibilities</a></li><li class="chapter-item expanded "><a href="../user/beam.html"><strong aria-hidden="true">10.</strong> Get beam responses</a></li><li class="chapter-item expanded affix "><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Definitions and Concepts</li><li class="chapter-item expanded "><a href="../defs/pols.html"><strong aria-hidden="true">11.</strong> Polarisations</a></li><li class="chapter-item expanded "><div><strong aria-hidden="true">12.</strong> Supported visibility formats</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../defs/vis_formats_read.html"><strong aria-hidden="true">12.1.</strong> Read</a></li><li class="chapter-item "><a href="../defs/vis_formats_write.html"><strong aria-hidden="true">12.2.</strong> Write</a></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">13.</strong> MWA-specific details</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../defs/mwa/metafits.html"><strong aria-hidden="true">13.1.</strong> Metafits files</a></li><li class="chapter-item "><a href="../defs/mwa/delays.html"><strong aria-hidden="true">13.2.</strong> Dipole delays</a></li><li class="chapter-item "><a href="../defs/mwa/dead_dipoles.html"><strong aria-hidden="true">13.3.</strong> Dead dipoles</a></li><li class="chapter-item "><a href="../defs/mwa/mwaf.html"><strong aria-hidden="true">13.4.</strong> mwaf flag files</a></li><li class="chapter-item "><a href="../defs/mwa/corrections.html"><strong aria-hidden="true">13.5.</strong> Raw data corrections</a></li><li class="chapter-item "><a href="../defs/mwa/picket_fence.html"><strong aria-hidden="true">13.6.</strong> Picket fence obs</a></li><li class="chapter-item "><a href="../defs/mwa/mwalib.html"><strong aria-hidden="true">13.7.</strong> mwalib</a></li></ol></li><li class="chapter-item expanded "><a href="../defs/source_lists.html"><strong aria-hidden="true">14.</strong> Sky-model source lists</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../defs/fd_types.html"><strong aria-hidden="true">14.1.</strong> Flux-density types</a></li><li class="chapter-item "><a href="../defs/source_list_hyperdrive.html"><strong aria-hidden="true">14.2.</strong> hyperdrive format</a></li><li class="chapter-item "><a href="../defs/source_list_ao.html"><strong aria-hidden="true">14.3.</strong> André Offringa (ao) format</a></li><li class="chapter-item "><a href="../defs/source_list_rts.html"><strong aria-hidden="true">14.4.</strong> RTS format</a></li><li class="chapter-item "><a href="../defs/source_list_fits.html"><strong aria-hidden="true">14.5.</strong> FITS format</a></li></ol></li><li class="chapter-item expanded "><a href="../defs/cal_sols.html"><strong aria-hidden="true">15.</strong> Calibration solutions file formats</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../defs/cal_sols_hyp.html"><strong aria-hidden="true">15.1.</strong> hyperdrive format</a></li><li class="chapter-item "><a href="../defs/cal_sols_ao.html"><strong aria-hidden="true">15.2.</strong> André Offringa (ao) format</a></li><li class="chapter-item "><a href="../defs/cal_sols_rts.html"><strong aria-hidden="true">15.3.</strong> RTS format</a></li></ol></li><li class="chapter-item expanded "><a href="../defs/beam.html"><strong aria-hidden="true">16.</strong> Beam responses</a></li><li class="chapter-item expanded "><a href="../defs/modelling/intro.html"><strong aria-hidden="true">17.</strong> Modelling visibilities</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../defs/modelling/rime.html"><strong aria-hidden="true">17.1.</strong> Measurement equation</a></li><li class="chapter-item "><a href="../defs/modelling/estimating.html"><strong aria-hidden="true">17.2.</strong> Estimating flux densities</a></li></ol></li><li class="chapter-item expanded "><a href="../defs/coords.html"><strong aria-hidden="true">18.</strong> Coordinate systems</a></li><li class="chapter-item expanded "><a href="../defs/dut1.html"><strong aria-hidden="true">19.</strong> DUT1</a></li><li class="chapter-item expanded "><div><strong aria-hidden="true">20.</strong> Terminology</div><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="../defs/blocks.html"><strong aria-hidden="true">20.1.</strong> Timeblocks and chanblocks</a></li></ol></li><li class="chapter-item expanded "><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Developer Guide</li><li class="chapter-item expanded "><a href="../dev/ndarray.html"><strong aria-hidden="true">21.</strong> Multiple-dimension arrays (ndarray)</a></li><li class="chapter-item expanded "><a href="../dev/vec1.html"><strong aria-hidden="true">22.</strong> Non-empty vectors (vec1)</a></li></ol>
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
             </div>
-            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                                <div id="menu-bar-hover-placeholder"></div>
-                <div id="menu-bar" class="menu-bar sticky bordered">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
-                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
                             <i class="fa fa-bars"></i>
-                        </button>
+                        </label>
                         <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
                             <i class="fa fa-paint-brush"></i>
                         </button>
@@ -106,7 +117,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
-                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu (default)</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
                         <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
@@ -138,7 +149,7 @@
                 </div>
 
                 <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
-                <script type="text/javascript">
+                <script>
                     document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
                     document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
                     Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
@@ -191,7 +202,7 @@ so a local installation of CUDA is required.</p>
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next" href="../installation/from_source.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../installation/from_source.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -205,7 +216,7 @@ so a local installation of CUDA is required.</p>
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next" href="../installation/from_source.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../installation/from_source.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -215,23 +226,24 @@ so a local installation of CUDA is required.</p>
 
 
 
-        <script type="text/javascript">
+        <script>
             window.playground_copyable = true;
         </script>
 
 
-        <script src="../elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../mark.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../searcher.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
 
-        <script src="../clipboard.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../highlight.js" type="text/javascript" charset="utf-8"></script>
-        <script src="../book.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
-        <script type="text/javascript" src="../mermaid.min.js"></script>
-        <script type="text/javascript" src="../mermaid-init.js"></script>
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
 
 
+    </div>
     </body>
 </html>
