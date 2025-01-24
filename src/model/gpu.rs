@@ -668,10 +668,14 @@ impl<'a> SkyModellerGpu<'a> {
 
                     // A new SI is needed when changing the reference freq.
                     // Thanks Jack.
-                    let si = if fd.freq == gpu::POWER_LAW_FD_REF_FREQ {
+                    #[cfg(feature = "gpu-single")]
+                    let power_law_fd_ref_freq: f64 = gpu::POWER_LAW_FD_REF_FREQ.into();
+                    #[cfg(not(feature = "gpu-single"))]
+                    let power_law_fd_ref_freq: f64 = gpu::POWER_LAW_FD_REF_FREQ;
+                    let si = if fd.freq == power_law_fd_ref_freq {
                         *si
                     } else {
-                        let logratio = (fd.freq / gpu::POWER_LAW_FD_REF_FREQ).ln();
+                        let logratio = (fd.freq / power_law_fd_ref_freq).ln();
                         ((fd.i / fd_at_150mhz.i).ln() - q * logratio.powi(2)) / logratio
                     };
 

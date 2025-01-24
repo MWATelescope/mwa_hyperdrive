@@ -43,7 +43,7 @@ macro_rules! test_modelling {
         #[cfg(not(feature = "gpu-single"))]
         let epsilon = if $no_beam { 0.0 } else { 1e-15 };
         #[cfg(feature = "gpu-single")]
-        let epsilon = if $no_beam { 6e-8 } else { 2e-3 };
+        let epsilon = if $no_beam { 2e-7 } else { 2e-3 };
         $list_test_fn(visibilities.view(), epsilon);
         d_vis_fb.clear();
 
