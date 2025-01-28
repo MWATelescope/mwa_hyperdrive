@@ -26,7 +26,7 @@ use crate::{
     },
     io::write::{VisOutputType, VIS_OUTPUT_EXTENSIONS},
     math::div_ceil,
-    params::{ModellingParams, PeelParams},
+    params::{ModellingParams, PeelLoopParams, PeelParams, PeelWeightParams},
     unit_parsing::{parse_wavelength, WavelengthUnit, WAVELENGTH_FORMATS},
     HyperdriveError,
 };
@@ -73,13 +73,13 @@ lazy_static::lazy_static! {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct PeelCliArgs {
-    /// The number of sources to peel. Peel sources are treated the same as
-    /// "ionospherically subtracted" sources, except before subtracting, a "DI
-    /// calibration" is done between the iono-rotated model and the data. This
-    /// allows for scintillation and any other phase shift to be corrected.
+    // TODO: peel
+    // The number of sources to peel. Peel sources are treated the same as
+    // "ionospherically subtracted" sources, except before subtracting, a "DI
+    // calibration" is done between the iono-rotated model and the data. This
+    // allows for scintillation and any other phase shift to be corrected.
     // #[clap(long = "peel", help_heading = "PEELING")]
     // pub(super) num_sources_to_peel: Option<usize>,
-
     /// The number of sources to "ionospherically subtract". That is, a λ²
     /// dependence is found for each of these sources and removed. The number of
     /// iono subtract sources cannot be more than the number of sources to
@@ -231,7 +231,7 @@ impl PeelArgs {
                 },
         } = self;
 
-        // peel doesn't correctly average channels with flags
+        // TODO: peel doesn't correctly average channels with flags?
         // data_args.freq_average = Some("1".into());
         let input_vis_params = {
             let mut input_vis_params = data_args.parse("Peeling")?;
@@ -597,6 +597,18 @@ impl PeelArgs {
         peel_printer.display();
         display_warnings();
 
+        let peel_loop_params = PeelLoopParams {
+            num_passes,
+            num_loops,
+            convergence,
+        };
+
+        let peel_weight_params = PeelWeightParams {
+            uvw_min_metres,
+            uvw_max_metres,
+            short_baseline_sigma,
+        };
+
         Ok(PeelParams {
             input_vis_params,
             output_vis_params,
@@ -608,13 +620,9 @@ impl PeelArgs {
             iono_timeblocks,
             iono_time_average_factor,
             low_res_spw,
-            uvw_min_metres,
-            uvw_max_metres,
-            short_baseline_sigma,
-            convergence,
+            peel_weight_params,
+            peel_loop_params,
             num_sources_to_iono_subtract,
-            num_passes,
-            num_loops,
         })
     }
 

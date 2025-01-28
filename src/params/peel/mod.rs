@@ -78,10 +78,14 @@ pub(crate) struct SourceIonoConsts {
     // pub(crate) centroid_timestamps: Vec<Epoch>,
 }
 
+/// parameters releating to weighting of visibilities
 pub(crate) struct PeelWeightParams {
-    uvw_min_metres: f64,
-    uvw_max_metres: f64,
-    short_baseline_sigma: f64,
+    /// minimum uvw cutoff in metres
+    pub(crate) uvw_min_metres: f64,
+    /// maximum uvw cutoff in metres
+    pub(crate) uvw_max_metres: f64,
+    /// sigma for RTS baseline taper, 1-exp(-(u²+v²)/(2*σ²));
+    pub(crate) short_baseline_sigma: f64,
 }
 
 impl PeelWeightParams {
@@ -184,7 +188,7 @@ impl PeelWeightParams {
             }
         }
 
-        // // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
+        // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
         let vis_weights_tfb = {
             let mut iono_taper = get_weights_rts(
                 tile_uvs_high_res.view(),
@@ -206,6 +210,26 @@ impl PeelWeightParams {
     }
 }
 
+/// parameters relating to peel loop control
+pub(crate) struct PeelLoopParams {
+    /// number of outer loops over all sources
+    pub(crate) num_passes: NonZeroUsize,
+    /// number of loops per source
+    pub(crate) num_loops: NonZeroUsize,
+    /// convergence factor, determines how fast the loop converges
+    pub(crate) convergence: f64,
+}
+
+impl PeelLoopParams {
+    pub(crate) fn get(&self) -> (usize, usize, f64) {
+        (
+            self.num_passes.get(),
+            self.num_loops.get(),
+            self.convergence,
+        )
+    }
+}
+
 #[cfg(any(feature = "cuda", feature = "hip"))]
 mod gpu;
 #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -221,13 +245,9 @@ pub(crate) struct PeelParams {
     pub(crate) iono_timeblocks: Vec1<Timeblock>,
     pub(crate) iono_time_average_factor: NonZeroUsize,
     pub(crate) low_res_spw: Spw,
-    pub(crate) uvw_min_metres: f64,
-    pub(crate) uvw_max_metres: f64,
-    pub(crate) short_baseline_sigma: f64,
-    pub(crate) convergence: f64,
+    pub(crate) peel_weight_params: PeelWeightParams,
+    pub(crate) peel_loop_params: PeelLoopParams,
     pub(crate) num_sources_to_iono_subtract: usize,
-    pub(crate) num_passes: NonZeroUsize,
-    pub(crate) num_loops: NonZeroUsize,
 }
 
 impl PeelParams {
@@ -243,13 +263,9 @@ impl PeelParams {
             iono_timeblocks,
             iono_time_average_factor,
             low_res_spw,
-            uvw_min_metres,
-            uvw_max_metres,
-            short_baseline_sigma,
-            convergence,
+            peel_weight_params,
+            peel_loop_params,
             num_sources_to_iono_subtract,
-            num_passes,
-            num_loops,
         } = self;
 
         let obs_context = input_vis_params.get_obs_context();
@@ -258,12 +274,6 @@ impl PeelParams {
         let array_position = obs_context.array_position;
         let tile_baseline_flags = &input_vis_params.tile_baseline_flags;
         let flagged_tiles = &tile_baseline_flags.flagged_tiles;
-
-        let peel_weight_params = PeelWeightParams {
-            uvw_min_metres: *uvw_min_metres,
-            uvw_max_metres: *uvw_max_metres,
-            short_baseline_sigma: *short_baseline_sigma,
-        };
 
         let unflagged_tile_xyzs: Vec<XyzGeodetic> = obs_context
             .tile_xyzs
@@ -466,12 +476,10 @@ impl PeelParams {
                         source_list,
                         &source_weighted_positions,
                         *num_sources_to_iono_subtract,
-                        *num_passes,
-                        *num_loops,
+                        peel_loop_params,
                         obs_context,
                         &unflagged_tile_xyzs,
-                        &peel_weight_params,
-                        *convergence,
+                        peel_weight_params,
                         tile_baseline_flags,
                         &spw.chanblocks,
                         &low_res_lambdas_m,
@@ -1130,9 +1138,7 @@ fn peel_cpu(
     source_list: &SourceList,
     iono_consts: &mut [IonoConsts],
     source_weighted_positions: &[RADec],
-    num_passes: usize,
-    num_loops: usize,
-    convergence: f64,
+    peel_loop_params: &PeelLoopParams,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
     obs_context: &ObsContext,
@@ -1142,6 +1148,7 @@ fn peel_cpu(
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     // TODO: Do we allow multiple timesteps in the low-res data?
+    let (num_loops, num_passes, convergence) = peel_loop_params.get();
 
     let all_fine_chan_lambdas_m = chanblocks
         .iter()
@@ -1851,12 +1858,10 @@ fn peel_thread(
     source_list: &SourceList,
     source_weighted_positions: &[RADec],
     num_sources_to_iono_subtract: usize,
-    num_passes: NonZeroUsize,
-    num_loops: NonZeroUsize,
+    peel_loop_params: &PeelLoopParams,
     obs_context: &ObsContext,
     unflagged_tile_xyzs: &[XyzGeodetic],
     peel_weight_params: &PeelWeightParams,
-    convergence: f64,
     tile_baseline_flags: &TileBaselineFlags,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
@@ -1918,9 +1923,7 @@ fn peel_thread(
                     source_list,
                     &mut iono_consts,
                     source_weighted_positions,
-                    num_passes.get(),
-                    num_loops.get(),
-                    convergence,
+                    peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
                     obs_context,
@@ -1953,9 +1956,7 @@ fn peel_thread(
                     source_list,
                     &mut iono_consts,
                     source_weighted_positions,
-                    num_passes.get(),
-                    num_loops.get(),
-                    convergence,
+                    peel_loop_params,
                     chanblocks,
                     low_res_lambdas_m,
                     obs_context,

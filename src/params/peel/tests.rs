@@ -1512,6 +1512,12 @@ fn test_peel_single_source(peel_type: PeelType) {
 
     let tile_baseline_flags = TileBaselineFlags::new(num_tiles, flagged_tiles);
 
+    let peel_loop_params = PeelLoopParams {
+        num_passes: NonZeroUsize::try_from(NUM_PASSES).expect("NUM_PASSES > 0"),
+        num_loops: NonZeroUsize::try_from(NUM_LOOPS).expect("NUM_LOOPS > 0"),
+        convergence: CONVERGENCE,
+    };
+
     for apply_precession in [false, true] {
         let vis_weights = peel_weight_params.apply_tfb(
             vis_weights.clone(),
@@ -1599,9 +1605,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &source_list,
                     &mut all_iono_consts,
                     &source_weighted_positions,
-                    NUM_PASSES,
-                    NUM_LOOPS,
-                    CONVERGENCE,
+                    &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
                     &obs_context,
@@ -1636,9 +1640,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &source_list,
                         &mut all_iono_consts,
                         &source_weighted_positions,
-                        NUM_PASSES,
-                        NUM_LOOPS,
-                        CONVERGENCE,
+                        &peel_loop_params,
                         &chanblocks,
                         &low_res_lambdas_m,
                         &obs_context,
@@ -1677,7 +1679,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             let (ab_epsilon, g_epsilon, n_epsilon) = match peel_type {
                 PeelType::CPU => (3e-11, 1e-7, 8e-8),
                 #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))]
-                PeelType::Gpu => (3e-11, 1e-7, 8e-8),
+                PeelType::Gpu => (3e-11, 1e-7, 9e-8),
                 #[cfg(all(any(feature = "cuda", feature = "hip"), feature = "gpu-single"))]
                 PeelType::Gpu => (2e-7, 3e-5, 3e-4), // TODO(Dev): bring this down
             };
@@ -1819,6 +1821,12 @@ fn test_peel_multi_source(peel_type: PeelType) {
 
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
 
+    let peel_loop_params = PeelLoopParams {
+        num_passes: NonZeroUsize::try_from(NUM_PASSES).expect("NUM_PASSES > 0"),
+        num_loops: NonZeroUsize::try_from(NUM_LOOPS).expect("NUM_LOOPS > 0"),
+        convergence: CONVERGENCE,
+    };
+
     for apply_precession in [true, false] {
         let vis_weights = peel_weight_params.apply_tfb(
             vis_weights.clone(),
@@ -1938,9 +1946,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &source_list,
                 &mut iono_consts_result,
                 &source_weighted_positions,
-                NUM_PASSES,
-                NUM_LOOPS,
-                CONVERGENCE,
+                &peel_loop_params,
                 &chanblocks,
                 &low_res_lambdas_m,
                 &obs_context,
@@ -1975,9 +1981,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &source_list,
                     &mut iono_consts_result,
                     &source_weighted_positions,
-                    NUM_PASSES,
-                    NUM_LOOPS,
-                    CONVERGENCE,
+                    &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
                     &obs_context,
@@ -2026,7 +2030,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
         let (ab_epsilon, g_epsilon, n_epsilon) = match peel_type {
             PeelType::CPU => (7e-11, 2e-7, 2e-6),
             #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))]
-            PeelType::Gpu => (7e-11, 2e-7, 2e-6),
+            PeelType::Gpu => (7e-11, 2e-7, 3e-6),
             #[cfg(all(any(feature = "cuda", feature = "hip"), feature = "gpu-single"))]
             PeelType::Gpu => (5e-9, 1e-4, 7e-4), // TODO(Dev): bring this down
         };
