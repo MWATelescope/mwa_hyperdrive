@@ -369,12 +369,12 @@ pub(crate) fn peel_gpu(
 
         let mut d_high_res_vis_tfb =
             DevicePointer::copy_to_device(vis_residual_tfb.as_slice().unwrap())?;
-        let mut d_high_res_vis2_tfb =
+        let mut d_high_res_resid_tfb =
             DevicePointer::copy_to_device(vis_residual_tfb.as_slice().unwrap())?;
         let d_high_res_weights_tfb =
             DevicePointer::copy_to_device(vis_weights_tfb.as_slice().unwrap())?;
 
-        let mut d_low_res_vis_fb =
+        let mut d_low_res_resid_fb =
             DevicePointer::copy_to_device(vis_residual_low_res_fb.as_slice().unwrap())?;
         let d_low_res_weights_fb =
             DevicePointer::copy_to_device(vis_weights_low_res_fb.as_slice().unwrap())?;
@@ -514,12 +514,12 @@ pub(crate) fn peel_gpu(
                 }
                 pb_trace!("{:?}: high res model", start.elapsed());
 
-                // d_high_res_vis2_tfb = residuals@src.
-                d_high_res_vis_tfb.copy_to(&mut d_high_res_vis2_tfb)?;
+                // d_high_res_resid_tfb = residuals@src.
+                d_high_res_vis_tfb.copy_to(&mut d_high_res_resid_tfb)?;
                 // add iono@src to residuals@src
                 gpu_kernel_call!(
                     gpu::add_model,
-                    d_high_res_vis2_tfb.get_mut().cast(),
+                    d_high_res_resid_tfb.get_mut().cast(),
                     d_high_res_model_tfb.get().cast(),
                     gpu_old_iono_consts,
                     d_lambdas.get(),
@@ -550,9 +550,9 @@ pub(crate) fn peel_gpu(
 
                 gpu_kernel_call!(
                     gpu::average,
-                    d_high_res_vis2_tfb.get().cast(),
+                    d_high_res_resid_tfb.get().cast(),
                     d_high_res_weights_tfb.get(),
-                    d_low_res_vis_fb.get_mut().cast(),
+                    d_low_res_resid_fb.get_mut().cast(),
                     num_timesteps_i32,
                     num_cross_baselines_i32,
                     num_high_res_chans_i32,
@@ -658,14 +658,14 @@ pub(crate) fn peel_gpu(
                     num_cross_baselines_i32,
                     num_low_res_chans_i32,
                     lrblch,
-                    d_low_res_vis_fb.get_size() as f64 / lrblch,
+                    d_low_res_resid_fb.get_size() as f64 / lrblch,
                     d_low_res_weights_fb.get_size() as f64 / lrblch,
                     d_low_res_model_fb.get_size() as f64 / lrblch,
                     d_low_res_model_rotated.get_size() as f64 / lrblch,
                 );
                 gpu_kernel_call!(
                     gpu::iono_loop,
-                    d_low_res_vis_fb.get().cast(),
+                    d_low_res_resid_fb.get().cast(),
                     d_low_res_weights_fb.get(),
                     d_low_res_model_fb.get().cast(),
                     d_low_res_model_rotated.get_mut().cast(),
