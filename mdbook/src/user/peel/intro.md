@@ -26,11 +26,7 @@ Looping over each source, the residuals are phased to the source's catalogue pos
 
 First, all other sources in the sky-model are subtracted from the calibrated data, and the data is phased to the catalogue position of the source. The data can then be averaged to a lower resolution to improve performance. Finally, the ionospheric parameters are measured using the least-squares fit described in the paper.
 
-## Source Counts
-
-Similar to `vis-subtract`, the total number of sources subtracted is limited by `--sub`, but only the top `--iono-sub` brightest sources are modeled ionospherically.
-
-### Guard rails
+## Loop parameters
 
 In reality, the ionosphere is a complex, turbulent medium, and not all tiles see the same ionosphere so the algorithm includes several safeguards to prevent divergent solutions. Each source's offsets are calculated in a loop, with a convergence factor to reduce the step size as the solution approaches the correct value.
 
@@ -38,7 +34,7 @@ In the first pass of the algorithm, the ionospheric offsets are not known, and s
 
 `--num-loops` sets the maximum number of loops for each source, while `--num-passes` is the number of passes over all sources. Decreasing `--convergence` is one way to improve the quality of the solutions, but it will also increase the runtime.
 
-### Averaging
+## Averaging
 
 hyperdrive reasons about visibilities at multiple resolutions:
 - The input data's original resolution
@@ -48,7 +44,19 @@ hyperdrive reasons about visibilities at multiple resolutions:
 
 All of these resolutions are specified in seconds or Hz, and are multiples of the input data's resolution. If the resolution is 0, then all data are averaged together.
 
-### High level overview
+## Weighting
+
+It is important to downweight short baselines if your point-source sky model is missing diffuse information. The minimum uv-distance to include in the fit can be set with `--uvw-min`, and the maximum with `--uvw-max`. The default is to include all baselines > 50λ.
+
+hyperdrive also borrows from RTS, which used a gaussian weighting scheme to taper short baselines, `1-exp(-(u²+v²)/(2*σ²))`, where `σ` is the tapering parameter. This can be set with `--short-baseline-sigma`, and defaults to 40λ.
+
+## Source Counts
+
+Similar to [`vis-subtract`](../vis_subtract/intro.md), the total number of sources in the sky model to be subtracted is limited by `--num-sources`, but only the top `--iono-sub` brightest have their ionospheric constants measured and modeled during subtraction. By default, hyperdrive will include sources in the sky model after [vetoing](../vis_simulate/intro.md#vetoing) if `--num-sources` is not specified, and will ionospherically subtract all of these sources if `--iono-sub` is not specified. An error will occur if `--num-sources` is greater than the number of sources in the sky model.
+
+Future versions of peel will include a `--peel` argument to specify the number of sources to peel.
+
+## High level overview
 
 ```mermaid
 %%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%

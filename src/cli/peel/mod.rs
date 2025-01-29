@@ -73,6 +73,15 @@ lazy_static::lazy_static! {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct PeelCliArgs {
+    /// The number of sources to "ionospherically subtract". In contrast to the
+    /// rest of the sky model, which is directly subtracted without finding a λ²
+    /// dependence source. The default is to ionospherically subtract all
+    /// sources in the sky model after vetoing, and restricting to --num-sources
+    /// (-n). The number of iono subtract sources cannot be greater than this
+    /// default value.
+    #[clap(long = "iono-sub", help_heading = "PEELING")]
+    pub(super) num_sources_to_iono_subtract: Option<usize>,
+
     // TODO: peel
     // The number of sources to peel. Peel sources are treated the same as
     // "ionospherically subtracted" sources, except before subtracting, a "DI
@@ -80,22 +89,6 @@ pub(crate) struct PeelCliArgs {
     // allows for scintillation and any other phase shift to be corrected.
     // #[clap(long = "peel", help_heading = "PEELING")]
     // pub(super) num_sources_to_peel: Option<usize>,
-    /// The number of sources to "ionospherically subtract". That is, a λ²
-    /// dependence is found for each of these sources and removed. The number of
-    /// iono subtract sources cannot be more than the number of sources to
-    /// subtract. The default is the number of sources in the source list, after
-    /// vetoing.
-    #[clap(long = "iono-sub", help_heading = "PEELING")]
-    pub(super) num_sources_to_iono_subtract: Option<usize>,
-
-    /// The number of sources to subtract. This subtraction just uses the sky
-    /// model directly; no peeling or ionospheric λ² is found. There must be at
-    /// least as many sources subtracted as there are ionospherically
-    /// subtracted. The default is the number of sources in the source list,
-    /// after vetoing.
-    #[clap(long = "sub", help_heading = "PEELING")]
-    pub(super) num_sources_to_subtract: Option<usize>,
-
     #[clap(long, help = NUM_PASSES_HELP.as_str(), help_heading = "PEELING")]
     pub(super) num_passes: Option<usize>,
 
@@ -209,13 +202,12 @@ impl PeelArgs {
         let Self {
             args_file: _,
             data_args,
-            mut srclist_args,
+            srclist_args,
             model_args,
             beam_args,
             peel_args:
                 PeelCliArgs {
                     num_sources_to_iono_subtract,
-                    num_sources_to_subtract,
                     num_passes,
                     num_loops,
                     iono_time_average,
@@ -256,8 +248,6 @@ impl PeelArgs {
             height_metres: _,
         } = obs_context.array_position;
         let (source_list, lmst_rad) = {
-            srclist_args.num_sources = num_sources_to_subtract;
-
             let precession_info = precess_time(
                 longitude_rad,
                 latitude_rad,
@@ -283,20 +273,19 @@ impl PeelArgs {
             (srclist, lst_rad)
         };
 
+        let sky_model_source_count = source_list.len();
+
         // Check that the number of sources to peel, iono subtract and subtract
-        // are sensible. When that's done, veto up to the maximum number of
-        // sources to subtract.
-        let _max_num_sources = match (num_sources_to_iono_subtract, num_sources_to_subtract) {
-            (Some(is), Some(s)) => {
-                if s < is {
-                    return Err(PeelArgsError::TooManyIonoSub { total: s, iono: is }.into());
+        // are sensible.
+        if let Some(is) = num_sources_to_iono_subtract {
+            if is > sky_model_source_count {
+                return Err(PeelArgsError::TooManyIonoSub {
+                    total: sky_model_source_count,
+                    iono: is,
                 }
-                Some(s)
+                .into());
             }
-            (None, Some(s)) => Some(s),
-            (Some(_), None) => None,
-            (None, None) => None,
-        };
+        }
 
         let num_passes = NonZeroUsize::try_from(num_passes.unwrap_or(DEFAULT_NUM_PASSES))
             .map_err(|_| PeelArgsError::ZeroPasses)?;
@@ -647,9 +636,6 @@ impl PeelCliArgs {
             num_sources_to_iono_subtract: self
                 .num_sources_to_iono_subtract
                 .or(other.num_sources_to_iono_subtract),
-            num_sources_to_subtract: self
-                .num_sources_to_subtract
-                .or(other.num_sources_to_subtract),
             num_passes: self.num_passes.or(other.num_passes),
             num_loops: self.num_loops.or(other.num_loops),
             iono_time_average: self.iono_time_average.or(other.iono_time_average),

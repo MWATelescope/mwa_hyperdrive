@@ -48,7 +48,7 @@ fn test_peel_no_stderr() {
             "peel",
             "--data", &data[0], &data[1],
             "--source-list", &srclist,
-            "--sub", "1",
+            "--num-sources", "1",
             "--iono-sub", "1",
             "--outputs", &format!("{}", output.display()),
         ])

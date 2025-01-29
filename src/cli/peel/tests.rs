@@ -210,12 +210,13 @@ fn time_averaging_explicit_output_clip() {
 fn handle_iono_greater_than_total() {
     let mut args = get_reduced_1090008640();
     args.peel_args = PeelCliArgs {
-        num_sources_to_iono_subtract: Some(2),
-        num_sources_to_subtract: Some(1),
+        num_sources_to_iono_subtract: Some(2), // --iono-sub=2
         ..Default::default()
     };
+    args.srclist_args.num_sources = Some(1); // --num-sources=1
     match args.parse() {
-        Err(HyperdriveError::Generic(_)) => {} // expected
-        _ => panic!("Expected TooManyIonoSub"),
+        Err(HyperdriveError::Peel(s)) if s.contains("The number of sources to subtract (1) is less than the number of sources to iono subtract (2)") => {} // expected
+        Err(e) => panic!("Expected TooManyIonoSub, got {e}"),
+        _ => panic!("Expected an error, got Ok"),
     };
 }

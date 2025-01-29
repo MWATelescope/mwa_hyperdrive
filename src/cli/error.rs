@@ -185,7 +185,7 @@ impl From<PeelArgsError> for HyperdriveError {
             | PeelArgsError::IonoTimeFactorZero
             | PeelArgsError::IonoFreqFactorZero
             | PeelArgsError::ParseUvwMin(_)
-            | PeelArgsError::ParseUvwMax(_) => Self::Generic(e.to_string()),
+            | PeelArgsError::ParseUvwMax(_) => Self::Peel(e.to_string()),
             PeelArgsError::Glob(e) => Self::from(e),
             PeelArgsError::VisRead(e) => Self::from(e),
             PeelArgsError::FileWrite(e) => Self::from(e),
