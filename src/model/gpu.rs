@@ -137,7 +137,7 @@ pub struct SkyModellerGpu<'a> {
 
 // You're not re-using pointers after they've been sent to another thread,
 // right?
-unsafe impl<'a> Send for SkyModellerGpu<'a> {}
+unsafe impl Send for SkyModellerGpu<'_> {}
 
 impl<'a> SkyModellerGpu<'a> {
     /// Given a source list, split the components into each component type (e.g.
