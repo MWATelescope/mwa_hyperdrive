@@ -442,7 +442,7 @@ pub(crate) fn peel_gpu(
                 .iter()
                 .take(num_sources_to_iono_subtract)
                 .zip_eq(iono_consts.iter_mut())
-                .zip(source_weighted_positions.iter().copied())
+                .zip_eq(source_weighted_positions.iter().copied())
                 .enumerate()
             {
                 let start = std::time::Instant::now();

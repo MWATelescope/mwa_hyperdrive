@@ -298,12 +298,12 @@ impl PeelParams {
 
         assert!(all_fine_chan_lambdas_m.len() % low_res_lambdas_m.len() == 0);
 
-        // Finding the Stokes-I-weighted `RADec` of each source.
+        // Finding the Stokes-I-weighted `RADec` of each ionosub source.
         let source_weighted_positions = {
             let mut component_radecs = vec![];
             let mut component_stokes_is = vec![];
-            let mut source_weighted_positions = Vec::with_capacity(source_list.len());
-            for source in source_list.values() {
+            let mut source_weighted_positions = Vec::with_capacity(*num_sources_to_iono_subtract);
+            for source in source_list.values().take(*num_sources_to_iono_subtract) {
                 component_radecs.clear();
                 component_stokes_is.clear();
                 for comp in source.components.iter() {

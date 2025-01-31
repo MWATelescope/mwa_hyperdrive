@@ -7,7 +7,7 @@ use tempfile::tempdir;
 
 use crate::{
     cli::common::{InputVisArgs, SkyModelWithVetoArgs},
-    params::{InputVisParams, OutputVisParams, PeelParams},
+    params::{InputVisParams, OutputVisParams, PeelLoopParams, PeelParams, PeelWeightParams},
     tests::{get_reduced_1090008640_raw, DataAsStrings},
     HyperdriveError,
 };
@@ -219,4 +219,60 @@ fn handle_iono_greater_than_total() {
         Err(e) => panic!("Expected TooManyIonoSub, got {e}"),
         _ => panic!("Expected an error, got Ok"),
     };
+}
+
+// integration test for the peel command
+#[test]
+fn test_peel_writes_files() {
+    let temp_dir = tempdir().expect("Couldn't make tempdir");
+    let json_file = temp_dir.path().join("peel.json");
+    let uvfits_file = temp_dir.path().join("peel.uvfits");
+
+    let params = get_merged_1090008640(vec![
+        "--iono-sub=1".to_string(),
+        "--num-passes=2".to_string(),
+        "--num-loops=1".to_string(),
+        "--iono-time-average=8s".to_string(),
+        "--iono-freq-average=1280kHz".to_string(),
+        "--uvw-min=50m".to_string(),
+        "--uvw-max=300m".to_string(),
+        "--short-baseline-sigma=40".to_string(),
+        "--convergence=0.9".to_string(),
+        "--outputs".to_string(),
+        uvfits_file.display().to_string(),
+        json_file.display().to_string(),
+    ]);
+    let PeelParams {
+        input_vis_params: InputVisParams { spw: input_spw, .. },
+        // output_vis_params,
+        // iono_timeblocks,
+        // iono_time_average_factor,
+        low_res_spw,
+        peel_weight_params:
+            PeelWeightParams {
+                uvw_min_metres,
+                uvw_max_metres,
+                short_baseline_sigma,
+            },
+        peel_loop_params:
+            PeelLoopParams {
+                num_passes,
+                num_loops,
+                convergence,
+            },
+        num_sources_to_iono_subtract,
+        ..
+    } = &params;
+    assert_abs_diff_eq!(*num_sources_to_iono_subtract, 1);
+    assert_abs_diff_eq!(*uvw_min_metres, 50.0);
+    assert_abs_diff_eq!(*uvw_max_metres, 300.0);
+    assert_abs_diff_eq!(*short_baseline_sigma, 40.0);
+    assert_abs_diff_eq!(*convergence, 0.9);
+    assert_eq!(num_passes.get(), 2);
+    assert_eq!(num_loops.get(), 1);
+    assert_eq!(input_spw.freq_res, 40e3);
+    assert_eq!(low_res_spw.freq_res, 1280e3);
+    params.run().unwrap();
+    assert!(uvfits_file.exists());
+    assert!(json_file.exists());
 }
