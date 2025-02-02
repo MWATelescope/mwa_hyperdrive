@@ -78,7 +78,7 @@ pub(crate) struct SourceIonoConsts {
     // pub(crate) centroid_timestamps: Vec<Epoch>,
 }
 
-/// parameters releating to weighting of visibilities
+/// parameters relating to weighting of visibilities
 pub(crate) struct PeelWeightParams {
     /// minimum uvw cutoff in metres
     pub(crate) uvw_min_metres: f64,
@@ -89,17 +89,17 @@ pub(crate) struct PeelWeightParams {
 }
 
 impl PeelWeightParams {
+    // TODO: test this properly
+    /// Applies the baseline weights to the visibilities.
     pub(crate) fn apply_tfb(
         &self,
-        // TODO: take an arrayview
-        // mut vis_weights_tfb: ArrayMutView3<f32>,
-        vis_weights_tfb: ArrayBase<ndarray::OwnedRepr<f32>, Dim<[usize; 3]>>,
+        mut vis_weights_tfb: ArrayViewMut3<f32>,
         obs_context: &ObsContext,
         timeblock: &Timeblock,
         apply_precession: bool,
         chanblocks: &[Chanblock],
         tile_baseline_flags: &TileBaselineFlags,
-    ) -> ArrayBase<ndarray::OwnedRepr<f32>, Dim<[usize; 3]>> {
+    ) {
         let array_position = obs_context.array_position;
         let dut1 = obs_context.dut1.unwrap_or_default();
 
@@ -189,24 +189,19 @@ impl PeelWeightParams {
         }
 
         // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
-        let vis_weights_tfb = {
-            let mut iono_taper = get_weights_rts(
-                tile_uvs_high_res.view(),
-                &all_fine_chan_lambdas_m,
-                self.short_baseline_sigma,
-            );
-            iono_taper *= &vis_weights_tfb;
-            iono_taper
-        };
+        let iono_taper = get_weights_rts(
+            tile_uvs_high_res.view(),
+            &all_fine_chan_lambdas_m,
+            self.short_baseline_sigma,
+        );
+        vis_weights_tfb *= &iono_taper;
         assert_eq!(baseline_weights.len(), vis_weights_tfb.len_of(Axis(2)));
-        let mut vis_weights_tfb = vis_weights_tfb.to_owned();
         for (vis_weight, bl_weight) in vis_weights_tfb
             .iter_mut()
             .zip(baseline_weights.iter().cycle())
         {
             *vis_weight = (*vis_weight as f64 * *bl_weight) as f32;
         }
-        vis_weights_tfb
     }
 }
 
@@ -651,8 +646,7 @@ fn get_weights_rts(tile_uvs: ArrayView2<UV>, lambdas_m: &[f64], short_sigma: f64
 /// Average "high-res" vis and weights to "low-res" vis (no low-res weights)
 /// arguments are all 3D arrays with axes (time, freq, baseline).
 /// assumes weights are capped to 0
-// TODO (Dev): rename to vis_average_tfb
-fn vis_average2(
+fn vis_average_tfb(
     jones_from_tfb: ArrayView3<Jones<f32>>,
     mut jones_to_tfb: ArrayViewMut3<Jones<f32>>,
     weight_tfb: ArrayView3<f32>,
@@ -762,8 +756,7 @@ fn weights_average(weight_tfb: ArrayView3<f32>, mut weight_avg_tfb: ArrayViewMut
 }
 
 #[allow(clippy::too_many_arguments)]
-// TODO: rename vis_rotate_tfb
-fn vis_rotate2(
+fn vis_rotate_tfb(
     vis_tfb: ArrayView3<Jones<f32>>,
     mut vis_rot_tfb: ArrayViewMut3<Jones<f32>>,
     tile_ws_from: ArrayView2<W>,
@@ -793,8 +786,7 @@ fn vis_rotate_fb(
     mut vis_rot_fb: ArrayViewMut2<Jones<f32>>,
     tile_ws_from: &[W],
     tile_ws_to: &[W],
-    // TODO(Dev): rename lambdas_m
-    fine_chan_lambdas_m: &[f64],
+    lambdas_m: &[f64],
 ) {
     let num_tiles = tile_ws_from.len();
     assert_eq!(num_tiles, tile_ws_to.len());
@@ -825,7 +817,7 @@ fn vis_rotate_fb(
             vis_f
                 .iter()
                 .zip_eq(vis_rot_f.iter_mut())
-                .zip_eq(fine_chan_lambdas_m.iter())
+                .zip_eq(lambdas_m.iter())
                 .for_each(|((jones, jones_rot), lambda_m)| {
                     let rotation = Complex::cis(arg / *lambda_m);
                     *jones_rot = Jones::<f32>::from(Jones::<f64>::from(*jones) * rotation);
@@ -835,8 +827,7 @@ fn vis_rotate_fb(
 
 /// Rotate the supplied visibilities (3D: time, freq, bl) according to the `λ²` constants of
 /// proportionality with `exp(-2πi(αu+βv)λ²)`.
-/// TODO(Dev): rename apply_iono_tfb
-fn apply_iono2(
+fn apply_iono_tfb(
     vis_tfb: ArrayView3<Jones<f32>>,
     mut vis_iono_tfb: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
@@ -903,9 +894,8 @@ fn apply_iono_fb(
 }
 
 /// unpeel model, peel iono model
-/// this is useful when vis_model has already been subtraced from vis_residual
-/// TODO (Dev): rename to unpeel_model
-fn apply_iono3(
+/// this is useful when vis_model has already been subtracted from vis_residual
+fn unpeel_model(
     vis_model: ArrayView3<Jones<f32>>,
     mut vis_residual: ArrayViewMut3<Jones<f32>>,
     tile_uvs: ArrayView2<UV>,
@@ -1130,10 +1120,8 @@ fn model_timesteps(
 // TODO (Dev): make this take a single timeblock
 #[allow(clippy::too_many_arguments)]
 fn peel_cpu(
-    // TODO (Dev): I would name this resid_hi_obs_tfb
-    mut vis_residual: ArrayViewMut3<Jones<f32>>,
-    // TODO (Dev): I would name this vis_weights_tfb
-    vis_weights: ArrayView3<f32>,
+    mut resid_hi_obs_tfb: ArrayViewMut3<Jones<f32>>,
+    vis_weights_tfb: ArrayView3<f32>,
     timeblock: &Timeblock,
     source_list: &SourceList,
     iono_consts: &mut [IonoConsts],
@@ -1182,15 +1170,12 @@ fn peel_cpu(
 
     // TODO: these assertions should be actual errors.
     let (time_axis, freq_axis, baseline_axis) = (Axis(0), Axis(1), Axis(2));
-
-    assert_eq!(vis_residual.len_of(time_axis), num_timestamps_high_res);
-    assert_eq!(vis_weights.len_of(time_axis), num_timestamps_high_res);
-
-    assert_eq!(vis_residual.len_of(baseline_axis), num_cross_baselines);
-    assert_eq!(vis_weights.len_of(baseline_axis), num_cross_baselines);
-
-    assert_eq!(vis_residual.len_of(freq_axis), num_freqs_high_res);
-    assert_eq!(vis_weights.len_of(freq_axis), num_freqs_high_res);
+    assert_eq!(resid_hi_obs_tfb.len_of(time_axis), num_timestamps_high_res);
+    assert_eq!(vis_weights_tfb.len_of(time_axis), num_timestamps_high_res);
+    assert_eq!(resid_hi_obs_tfb.len_of(baseline_axis), num_cross_baselines);
+    assert_eq!(vis_weights_tfb.len_of(baseline_axis), num_cross_baselines);
+    assert_eq!(resid_hi_obs_tfb.len_of(freq_axis), num_freqs_high_res);
+    assert_eq!(vis_weights_tfb.len_of(freq_axis), num_freqs_high_res);
 
     assert_eq!(iono_consts.len(), num_sources_to_iono_subtract);
     assert!(num_sources_to_iono_subtract <= num_sources);
@@ -1208,23 +1193,18 @@ fn peel_cpu(
     peel_progress.tick();
 
     // observation phase center
-    // TODO(Dev): rename tile_uvs_hi_obs
-    let mut tile_uvs_high_res = Array2::<UV>::default((timestamps.len(), num_tiles));
-    // TODO(Dev): rename tile_ws_hi_obs
-    let mut tile_ws_from = Array2::<W>::default((timestamps.len(), num_tiles));
+    let mut tile_uvs_hi_obs = Array2::<UV>::default((timestamps.len(), num_tiles));
+    let mut tile_ws_hi_obs = Array2::<W>::default((timestamps.len(), num_tiles));
     // source phase center
-    // TODO (Dev): rename tile_uvs_hi_src
-    let mut tile_uvs_high_res_rot = tile_uvs_high_res.clone();
-    // TODO (Dev): rename tile_ws_hi_src
-    let mut tile_ws_to = tile_ws_from.clone();
-    // TODO (Dev): rename tile_uvs_lo_src
-    let mut tile_uvs_low_res = Array2::<UV>::default((num_timestamps_low_res, num_tiles));
+    let mut tile_uvs_hi_src = tile_uvs_hi_obs.clone();
+    let mut tile_ws_hi_src = tile_ws_hi_obs.clone();
+    let mut tile_uvs_lo_src = Array2::<UV>::default((num_timestamps_low_res, num_tiles));
 
     // Pre-compute high-res tile UVs and Ws at observation phase centre.
     for (&time, mut tile_uvs, mut tile_ws) in izip!(
         timestamps.iter(),
-        tile_uvs_high_res.outer_iter_mut(),
-        tile_ws_from.outer_iter_mut(),
+        tile_uvs_hi_obs.outer_iter_mut(),
+        tile_ws_hi_obs.outer_iter_mut(),
     ) {
         let (lmst, precessed_xyzs) = if !no_precession {
             let precession_info = precess_time(
@@ -1286,31 +1266,23 @@ fn peel_cpu(
     };
 
     // Temporary visibility array, re-used for each timestep
-    // TODO (Dev): rename resid_hi_src_tfb
-    let mut vis_residual_tmp = vis_residual.to_owned();
-    let high_res_vis_dims = vis_residual.dim();
-    // TODO (Dev): rename model_hi_obs_tfb
-    let mut vis_model_high_res = Array3::default(high_res_vis_dims);
+    let mut resid_hi_src_tfb = resid_hi_obs_tfb.to_owned();
+    let high_res_vis_dims = resid_hi_obs_tfb.dim();
+    let mut model_hi_obs_tfb = Array3::default(high_res_vis_dims);
     let mut model_hi_src_tfb = Array3::default(high_res_vis_dims);
     let mut model_hi_src_iono_tfb = Array3::default(high_res_vis_dims);
 
     // temporary arrays for accumulation
-    // TODO: Do a stocktake of arrays that are lying around!
-    // TODO (Dev): rename resid_lo_src_tfb
-    let mut vis_residual_low_res: Array3<Jones<f32>> = Array3::zeros((
+    let mut resid_lo_src_tfb: Array3<Jones<f32>> = Array3::zeros((
         num_timestamps_low_res,
         num_freqs_low_res,
         num_cross_baselines,
     ));
-    // let mut model_lo_obs_tfb = resid_lo_src_tfb.clone();
-    // let mut model_lo_src_tfb = resid_lo_src_tfb.clone();
-    // TODO(Dev): rename model_lo_src_iono_tfb
-    let mut vis_model_low_res_tmp = vis_residual_low_res.clone();
-    // TODO(Dev): rename weights_lo
-    let mut vis_weights_low_res: Array3<f32> = Array3::zeros(vis_residual_low_res.dim());
+    let mut model_lo_src_iono_tfb = resid_lo_src_tfb.clone();
+    let mut weights_lo: Array3<f32> = Array3::zeros(resid_lo_src_tfb.dim());
 
     // The low-res weights only need to be populated once.
-    weights_average(vis_weights.view(), vis_weights_low_res.view_mut());
+    weights_average(vis_weights_tfb.view(), weights_lo.view_mut());
 
     for pass in 0..num_passes {
         for (((source_name, source), iono_consts), source_pos) in source_list
@@ -1328,7 +1300,7 @@ fn peel_cpu(
             high_res_modeller.update_with_a_source(source, obs_context.phase_centre)?;
             // high_res_modeller.update_with_a_source(source, source_pos)?;
             // this is only necessary for cpu modeller.
-            vis_model_high_res.fill(Jones::zero());
+            model_hi_obs_tfb.fill(Jones::zero());
 
             multi_progress_bar.suspend(|| trace!("{:?}: initialise modellers", start.elapsed()));
             // iterate along high res times:
@@ -1338,9 +1310,9 @@ fn peel_cpu(
             // iterate along high res times
             for (&time, mut model_hi_obs_fb, mut tile_uvs_src, mut tile_ws_src) in izip!(
                 timestamps,
-                vis_model_high_res.outer_iter_mut(),
-                tile_uvs_high_res_rot.outer_iter_mut(),
-                tile_ws_to.outer_iter_mut(),
+                model_hi_obs_tfb.outer_iter_mut(),
+                tile_uvs_hi_src.outer_iter_mut(),
+                tile_ws_hi_src.outer_iter_mut(),
             ) {
                 let (lmst, precessed_xyzs) = if !no_precession {
                     let precession_info = precess_time(
@@ -1377,7 +1349,7 @@ fn peel_cpu(
 
             let hadec_source = source_pos.to_hadec(average_lmst);
             setup_uvs(
-                tile_uvs_low_res.as_slice_mut().unwrap(),
+                tile_uvs_lo_src.as_slice_mut().unwrap(),
                 average_tile_xyzs.as_slice().unwrap(),
                 hadec_source,
             );
@@ -1386,46 +1358,46 @@ fn peel_cpu(
 
             multi_progress_bar
                 .suspend(|| trace!("{:?}: high-res residual rotate", start.elapsed()));
-            vis_rotate2(
-                vis_residual.view(),
-                vis_residual_tmp.view_mut(),
-                tile_ws_from.view(),
-                tile_ws_to.view(),
+            vis_rotate_tfb(
+                resid_hi_obs_tfb.view(),
+                resid_hi_src_tfb.view_mut(),
+                tile_ws_hi_obs.view(),
+                tile_ws_hi_src.view(),
                 &all_fine_chan_lambdas_m,
             );
 
             multi_progress_bar.suspend(|| trace!("{:?}: high-res model rotate", start.elapsed()));
             // TODO: just model in src pc
-            vis_rotate2(
-                vis_model_high_res.view(),
+            vis_rotate_tfb(
+                model_hi_obs_tfb.view(),
                 model_hi_src_tfb.view_mut(),
-                tile_ws_from.view(),
-                tile_ws_to.view(),
+                tile_ws_hi_obs.view(),
+                tile_ws_hi_src.view(),
                 &all_fine_chan_lambdas_m,
             );
 
             multi_progress_bar.suspend(|| trace!("{:?}: high-res model iono", start.elapsed()));
-            apply_iono2(
+            apply_iono_tfb(
                 model_hi_src_tfb.view(),
                 model_hi_src_iono_tfb.view_mut(),
-                tile_uvs_high_res_rot.view(),
+                tile_uvs_hi_src.view(),
                 *iono_consts,
                 &all_fine_chan_lambdas_m,
             );
 
             // Add the high-res model to the residuals.
             multi_progress_bar.suspend(|| trace!("{:?}: add low-res model", start.elapsed()));
-            Zip::from(&mut vis_residual_tmp)
+            Zip::from(&mut resid_hi_src_tfb)
                 .and(&model_hi_src_iono_tfb)
                 .for_each(|r, m| {
                     *r += *m;
                 });
 
             multi_progress_bar.suspend(|| trace!("{:?}: vis_average", start.elapsed()));
-            vis_average2(
-                vis_residual_tmp.view(),
-                vis_residual_low_res.view_mut(),
-                vis_weights.view(),
+            vis_average_tfb(
+                resid_hi_src_tfb.view(),
+                resid_lo_src_tfb.view_mut(),
+                vis_weights_tfb.view(),
             );
 
             multi_progress_bar.suspend(|| trace!("{:?}: alpha/beta loop", start.elapsed()));
@@ -1436,26 +1408,26 @@ fn peel_cpu(
                 multi_progress_bar.suspend(|| debug!("iter {iteration}, consts: {iono_consts:?}"));
 
                 // iono rotate model using existing iono consts
-                apply_iono2(
+                apply_iono_tfb(
                     model_hi_src_tfb.view(),
                     model_hi_src_iono_tfb.view_mut(),
-                    tile_uvs_high_res_rot.view(),
+                    tile_uvs_hi_src.view(),
                     *iono_consts,
                     &all_fine_chan_lambdas_m,
                 );
 
-                vis_average2(
+                vis_average_tfb(
                     model_hi_src_iono_tfb.view(),
-                    vis_model_low_res_tmp.view_mut(),
-                    vis_weights.view(),
+                    model_lo_src_iono_tfb.view_mut(),
+                    vis_weights_tfb.view(),
                 );
 
                 let iono_fits = iono_fit(
-                    vis_residual_low_res.view(),
-                    vis_weights_low_res.view(),
-                    vis_model_low_res_tmp.view(),
+                    resid_lo_src_tfb.view(),
+                    weights_lo.view(),
+                    model_lo_src_iono_tfb.view(),
                     low_res_lambdas_m,
-                    tile_uvs_low_res.view(),
+                    tile_uvs_lo_src.view(),
                 );
                 multi_progress_bar.suspend(|| trace!("iono_fits: {iono_fits:?}"));
                 let da = iono_fits[0];
@@ -1479,13 +1451,13 @@ fn peel_cpu(
             //     model_hi_obs_tfb.view_mut(),
             // )?;
 
-            multi_progress_bar.suspend(|| trace!("{:?}: apply_iono3", start.elapsed()));
+            multi_progress_bar.suspend(|| trace!("{:?}: unpeel_model", start.elapsed()));
             // add the model to residual, and subtract the iono rotated model
-            apply_iono3(
-                vis_model_high_res.view(),
-                vis_residual.view_mut(),
+            unpeel_model(
+                model_hi_obs_tfb.view(),
+                resid_hi_obs_tfb.view_mut(),
                 // tile_uvs_high_res.view(),
-                tile_uvs_high_res_rot.view(),
+                tile_uvs_hi_src.view(),
                 *iono_consts,
                 old_iono_consts,
                 &all_fine_chan_lambdas_m,
@@ -1623,14 +1595,6 @@ fn read_thread(
         if error.load() {
             return Ok(());
         }
-
-        debug!(
-            "[read] vdfb shp={:?} sum={:?} vwfb shp={:?} sum={:?}",
-            vis_data_fb.shape(),
-            vis_data_fb.sum(),
-            vis_weights_fb.shape(),
-            vis_weights_fb.sum(),
-        );
 
         match tx_data.send((vis_data_fb, vis_weights_fb, timeblock.median)) {
             Ok(()) => (),
@@ -1877,7 +1841,7 @@ fn peel_thread(
     let array_position = obs_context.array_position;
     let dut1 = obs_context.dut1.unwrap_or_default();
 
-    for (i, (mut vis_residual_tfb, vis_weights_tfb, timeblock)) in
+    for (i, (mut vis_residual_tfb, mut vis_weights_tfb, timeblock)) in
         rx_full_residual.iter().enumerate()
     {
         // Should we continue?
@@ -1889,8 +1853,8 @@ fn peel_thread(
         // WEIGHTS //
         // /////// //
 
-        let vis_weights_tfb = peel_weight_params.apply_tfb(
-            vis_weights_tfb,
+        peel_weight_params.apply_tfb(
+            vis_weights_tfb.view_mut(),
             obs_context,
             timeblock,
             apply_precession,

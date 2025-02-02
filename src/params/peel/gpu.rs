@@ -420,7 +420,7 @@ pub(crate) fn peel_gpu(
 
             let mut pass_issues = 0;
             let mut pass_alpha_mag = 0.;
-            let mut pass_bega_mag = 0.;
+            let mut pass_beta_mag = 0.;
             let mut pass_gain_mag = 0.;
 
             // this needs to be inside the pass loop, because d_uvws_from gets swapped with d_uvws_to
@@ -587,65 +587,6 @@ pub(crate) fn peel_gpu(
                 )?;
                 pb_trace!("{:?}: low res xyzs_to_uvws", start.elapsed());
 
-                // !!!!
-                // comment me out
-                // !!!!
-                // we have low res residual and model, now print what iono fit will see.
-                // {
-                //     use marlu::math::cross_correlation_baseline_to_tiles;
-                //     let vis_residual_low_res_fb = d_low_res_vis_fb.copy_from_device_new()?;
-                //     dbg!(vis_residual_low_res_fb.len(), num_low_res_chans, num_cross_baselines);
-                //     let vis_residual_low_res_fb = Array2::from_shape_vec(
-                //         (num_low_res_chans, num_cross_baselines),
-                //         vis_residual_low_res_fb,
-                //     )
-                //     .unwrap();
-                //     let vis_model_low_res_fb = d_low_res_model_fb.copy_from_device_new()?;
-                //     let vis_model_low_res_fb = Array2::<Jones<f32>>::from_shape_vec(
-                //         (num_low_res_chans, num_cross_baselines),
-                //         vis_model_low_res_fb,
-                //     )
-                //     .unwrap();
-                //     let vis_weights_low_res_fb = d_low_res_weights_fb.copy_from_device_new()?;
-                //     let vis_weights_low_res_fb = Array2::<f32>::from_shape_vec(
-                //         (num_low_res_chans, num_cross_baselines),
-                //         vis_weights_low_res_fb,
-                //     )
-                //     .unwrap();
-                //     let ant_pairs = (0..num_cross_baselines)
-                //         .map(|bl_idx| cross_correlation_baseline_to_tiles(num_tiles, bl_idx))
-                //         .collect_vec();
-                //     let uvws_low_res = d_low_res_uvws.copy_from_device_new()?;
-                //     for (ch_idx, (vis_residual_low_res_b, vis_model_low_res_b, vis_weights_low_res_b, &lambda)) in izip!(
-                //         vis_residual_low_res_fb.outer_iter(),
-                //         vis_model_low_res_fb.outer_iter(),
-                //         vis_weights_low_res_fb.outer_iter(),
-                //         low_res_lambdas_m,
-                //     ).enumerate() {
-                //         // dbg!(&ch_idx);
-                //         if ch_idx > 1 {
-                //             continue;
-                //         }
-                //         for (residual, model, weight, &gpu::UVW { u, v, w: _ }, &(ant1, ant2)) in izip!(
-                //             vis_residual_low_res_b.iter(),
-                //             vis_model_low_res_b.iter(),
-                //             vis_weights_low_res_b.iter(),
-                //             &uvws_low_res,
-                //             ant_pairs.iter(),
-                //         ) {
-                //             // dbg!(&ant1, &ant2);
-                //             if ant1 != 0 || (ant2 >= 16 && ant2 < num_tiles_i32 as usize - 16) {
-                //                 continue;
-                //             }
-                //             let residual_i = residual[0] + residual[3];
-                //             let model_i = model[0] + model[3];
-                //             let u = u as GpuFloat;
-                //             let v = v as GpuFloat;
-                //             println!("uv {ant1:3} {ant2:3} ({u:+9.3}, {v:+9.3}) l{lambda:+7.5} wt{weight:+3.1} | RI {:+11.7} @{:+5.3}pi | MI {:+11.7} @{:+5.3}pi", residual_i.norm(), residual_i.arg(), model_i.norm(), model_i.arg());
-                //         }
-                //     }
-                // }
-
                 let mut gpu_iono_consts = gpu::IonoConsts {
                     alpha: 0.0,
                     beta: 0.0,
@@ -653,7 +594,7 @@ pub(crate) fn peel_gpu(
                 };
                 // get size of device ptr
                 let lrblch = (num_cross_baselines_i32 * num_low_res_chans_i32) as f64;
-                pb_trace!("before iono_loop nt{:?} nxbl{:?} nlrch{:?} = lrxblch{:?}; lrvfb{:?} lrwfb{:?} lrmfb{:?} lrmrfb{:?}",
+                pb_trace!("before iono_loop nt{:?} nxbl{:?} nlrch{:?} = lrblch{:?}; lrvfb{:?} lrwfb{:?} lrmfb{:?} lrmrfb{:?}",
                     num_tiles_i32,
                     num_cross_baselines_i32,
                     num_low_res_chans_i32,
@@ -706,7 +647,6 @@ pub(crate) fn peel_gpu(
                     },
                 );
                 let message = format!(
-                    // "t{:03} p{pass} s{i_source:6}|{source_name:16} @ ra {:+7.2} d {:+7.2} | a {:+7.2e} b {:+7.2e} g {:+3.2} | da {:+8.2e} db {:+8.2e} dg {:+3.2} | {}",
                     "t{:3} pass {:2} s{i_source:6}|{source_name:16} @ ra {:+7.2} d {:+7.2} | a {:+8.6} b {:+8.6} g {:+3.2} | da {:+8.6} db {:+8.6} dg {:+3.2} | {}",
                     timeblock.index,
                     pass+1,
@@ -723,7 +663,7 @@ pub(crate) fn peel_gpu(
                 if issues.is_empty() {
                     pb_debug!("[peel_gpu] {}", message);
                     pass_alpha_mag += (iono_consts.alpha - old_iono_consts.alpha).abs();
-                    pass_bega_mag += (iono_consts.beta - old_iono_consts.beta).abs();
+                    pass_beta_mag += (iono_consts.beta - old_iono_consts.beta).abs();
                     pass_gain_mag += iono_consts.gain - old_iono_consts.gain;
                 } else {
                     pb_debug!(
@@ -837,7 +777,7 @@ pub(crate) fn peel_gpu(
                     timeblock.index,
                     pass + 1,
                     pass_alpha_mag / num_good_sources,
-                    pass_bega_mag / num_good_sources,
+                    pass_beta_mag / num_good_sources,
                     pass_gain_mag / num_good_sources
                 );
                 if pass_issues > 0 {

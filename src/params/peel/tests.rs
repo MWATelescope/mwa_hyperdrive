@@ -69,7 +69,7 @@ fn get_beam(num_tiles: usize) -> FEEBeam {
 }
 
 // get a timestamp at lmst=0 around the year 2100
-// precessing to j2000 will introduce a noticable difference.
+// precessing to j2000 will introduce a noticeable difference.
 fn get_j2100(array_position: &LatLngHeight, dut1: Duration) -> Epoch {
     let mut epoch = Epoch::from_gregorian_utc_at_midnight(2100, 1, 1);
 
@@ -498,12 +498,12 @@ fn test_setup_uv() {
 
         if !apply_precession {
             for a in 0..num_tiles {
-                // uvws for the phase centre at first timestpe should be the same as
+                // uvws for the phase centre at first timestep should be the same as
                 // uvws for the source at the second timestep
                 assert_abs_diff_eq!(tile_uvs_obs[[0, a]], tile_uvs_src[[1, a]], epsilon = 1e-6);
                 assert_abs_diff_eq!(tile_ws_obs[[0, a]], tile_ws_src[[1, a]], epsilon = 1e-6);
                 // uvws for the phase centre at the second timestep should be the same as
-                // uvws for the source at the first timestep, rotated in the opposite direciton.
+                // uvws for the source at the first timestep, rotated in the opposite direction.
                 // since all the baselines sit flat on the uv plane, only the w component is negative.
                 assert_abs_diff_eq!(tile_uvs_obs[[1, a]], tile_uvs_src[[0, a]], epsilon = 1e-6);
                 assert_abs_diff_eq!(tile_ws_obs[[1, a]], -tile_ws_src[[0, a]], epsilon = 1e-6);
@@ -863,7 +863,7 @@ fn test_vis_rotation() {
                     let w_src = tile_ws_src[ant1] - tile_ws_src[ant2];
                     let arg = TAU * (w_src - w_obs) / lambda_m;
                     for (pol_model, pol_model_rot) in vis.iter().zip_eq(vis_rot.iter()) {
-                        // magnitudes shoud not be affected by rotation
+                        // magnitudes should not be affected by rotation
                         assert_abs_diff_eq!(pol_model.norm(), pol_model_rot.norm(), epsilon = 1e-6);
                         let pol_model_rot_expected = Complex::<f64>::from_polar(
                             pol_model.norm() as f64,
@@ -946,7 +946,7 @@ fn test_vis_average() {
 
     let mut vis_avg_tfb = Array3::zeros(avg_shape);
 
-    vis_average2(vis_tfb.view(), vis_avg_tfb.view_mut(), weights_tfb.view());
+    vis_average_tfb(vis_tfb.view(), vis_avg_tfb.view_mut(), weights_tfb.view());
 
     assert_eq!(
         vis_avg_tfb.slice(s![.., .., 0]),
@@ -981,7 +981,7 @@ fn test_vis_average() {
 
 #[test]
 //
-fn test_apply_iono2() {
+fn test_apply_iono_tfb() {
     let obs_context = get_phase1_obs_context(128);
 
     let array_pos = obs_context.array_position;
@@ -1061,7 +1061,7 @@ fn test_apply_iono2() {
         };
         // let iono_consts = ((lst_1h_rad-lst_zenith_rad)/4., 0.);
 
-        apply_iono2(
+        apply_iono_tfb(
             vis_tfb.view(),
             vis_iono_tfb.view_mut(),
             tile_uvs_src.view(),
@@ -1087,7 +1087,7 @@ fn test_apply_iono2() {
                     let UV { u, v } = tile_uvs_src[ant1] - tile_uvs_src[ant2];
                     let arg = TAU * (u * iono_consts.alpha + v * iono_consts.beta) * lambda_m;
                     for (pol_model, pol_model_iono) in vis.iter().zip_eq(vis_iono.iter()) {
-                        // magnitudes shoud not be affected by iono rotation
+                        // magnitudes should not be affected by iono rotation
                         assert_abs_diff_eq!(
                             pol_model.norm(),
                             pol_model_iono.norm(),
@@ -1249,7 +1249,7 @@ fn test_iono_fit() {
                 // gain: 1.0005,
             },
         ] {
-            apply_iono2(
+            apply_iono_tfb(
                 vis_tfb.view(),
                 vis_iono_tfb.view_mut(),
                 tile_uvs_src.view(),
@@ -1285,11 +1285,15 @@ fn test_iono_fit() {
 }
 
 #[test]
-/// - synthesize model visibilities
-/// - apply ionospheric rotation
+/// Ensures that the ionospheric correction process is reversible and accurate
+///
+/// - synthesize model visibilities at observation phase centre
+/// - apply ionospheric rotation at observation phase centre using source phase centre uvws
 /// - create residual: ionospheric - model
-/// - ap ply_iono3 should result in empty visibilitiesiono rotated model
-fn test_apply_iono3() {
+/// - unpeel_model should result in empty visibilities
+/// - tests with 3 different ionospheric conditions
+/// - tests with and without precession correction
+fn test_unpeel_model() {
     let obs_context = get_simple_obs_context(TILE_SPACING);
     let array_pos = obs_context.array_position;
 
@@ -1383,7 +1387,7 @@ fn test_apply_iono3() {
             },
         ] {
             // apply iono rotation at source phase to model at observation phase
-            apply_iono2(
+            apply_iono_tfb(
                 vis_model_obs_tfb.view(),
                 vis_iono_obs_tfb.view_mut(),
                 tile_uvs_src.view(),
@@ -1395,7 +1399,7 @@ fn test_apply_iono3() {
             vis_resid_obs_tfb.assign(&vis_iono_obs_tfb);
             vis_resid_obs_tfb -= &vis_model_obs_tfb;
 
-            apply_iono3(
+            unpeel_model(
                 vis_model_obs_tfb.view(),
                 vis_resid_obs_tfb.view_mut(),
                 tile_uvs_src.view(),
@@ -1499,7 +1503,7 @@ fn test_peel_single_source(peel_type: PeelType) {
     };
 
     let vis_shape = vis_residual_obs_tfb.dim();
-    let vis_weights = Array3::<f32>::ones(vis_shape);
+    let mut vis_weights = Array3::<f32>::ones(vis_shape);
     let source_weighted_positions = [source_radec];
 
     let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
@@ -1519,8 +1523,8 @@ fn test_peel_single_source(peel_type: PeelType) {
     };
 
     for apply_precession in [false, true] {
-        let vis_weights = peel_weight_params.apply_tfb(
-            vis_weights.clone(),
+        peel_weight_params.apply_tfb(
+            vis_weights.view_mut(),
             &obs_context,
             &timeblock,
             apply_precession,
@@ -1583,7 +1587,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             },
         ] {
             log::info!("Testing with iono consts {iono_consts:?}");
-            apply_iono2(
+            apply_iono_tfb(
                 vis_model_obs_tfb.view(),
                 vis_iono_obs_tfb.view_mut(),
                 tile_uvs_src.view(),
@@ -1757,7 +1761,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
     let source_midpoint =
         RADec::from_hadec(HADec::from_radians(0., array_pos.latitude_rad), lst_0h_rad);
 
-    // observation: this test passes with sources 30 degrees apart, and failes with them 0.05 degrees apart
+    // observation: this test passes with sources 30 degrees apart, and fails with them 0.05 degrees apart
     let source_list = SourceList::from(indexmap! {
         // remember, radec is in radians
         "Four".into() => point_src_i!(RADec {ra: source_midpoint.ra + 0.05, dec: source_midpoint.dec + 0.05}, 0., fine_chan_freqs_hz[0], 4.),
@@ -1807,7 +1811,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
     let mut tile_uvs_src = Array2::default((num_times, num_tiles));
     let mut tile_ws_src = Array2::default((num_times, num_tiles));
 
-    let vis_weights = Array3::<f32>::ones(vis_residual_obs_tfb.dim());
+    let mut vis_weights = Array3::<f32>::ones(vis_residual_obs_tfb.dim());
 
     let timeblock = Timeblock {
         index: 0,
@@ -1828,8 +1832,8 @@ fn test_peel_multi_source(peel_type: PeelType) {
     };
 
     for apply_precession in [true, false] {
-        let vis_weights = peel_weight_params.apply_tfb(
-            vis_weights.clone(),
+        peel_weight_params.apply_tfb(
+            vis_weights.view_mut(),
             &obs_context,
             &timeblock,
             apply_precession,
@@ -1879,7 +1883,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
 
         vis_residual_obs_tfb.fill(Jones::zero());
 
-        // model each source in source_list and rotate by iono_consts with apply_iono2
+        // model each source in source_list and rotate by iono_consts with apply_iono_tfb
         for (&iono_consts, (name, source)) in izip!(iono_consts.iter(), source_list.iter(),) {
             let source_radec = &source.components[0].radec;
             let ra = (source_radec.ra.to_degrees() + 180.) % 360. - 180.;
@@ -1921,7 +1925,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 apply_precession,
             );
 
-            apply_iono2(
+            apply_iono_tfb(
                 vis_model_tmp_tfb.view(),
                 vis_iono_tmp_tfb.view_mut(),
                 tile_uvs_src.view(),
@@ -2479,7 +2483,7 @@ mod gpu_tests {
     /// - synthesize model visibilities
     /// - apply ionospheric rotation
     /// - create residual: ionospheric - model
-    /// - apply_iono3 should result in empty visibilities
+    /// - unpeel_model should result in empty visibilities
     fn test_gpu_subtract_iono() {
         let obs_context = get_simple_obs_context(TILE_SPACING);
         let array_pos = obs_context.array_position;
@@ -2606,7 +2610,7 @@ mod gpu_tests {
                 },
             ] {
                 // apply iono rotation at source phase to model at observation phase
-                apply_iono2(
+                apply_iono_tfb(
                     vis_model_obs_tfb.view(),
                     vis_iono_obs_tfb.view_mut(),
                     tile_uvs_src.view(),

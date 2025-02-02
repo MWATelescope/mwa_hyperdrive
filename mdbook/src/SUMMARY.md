@@ -4,14 +4,14 @@
 
 ---
 
-# Installation
+## Installation
 
 - [How do I install hyperdrive?](installation/intro.md)
   - [Pre-compiled](installation/pre_compiled.md)
   - [From source](installation/from_source.md)
   - [Post installation](installation/post.md)
 
-# User Guide
+## User Guide
 
 - [Introduction](user/intro.md)
 - [Getting started](user/help.md)
@@ -19,7 +19,7 @@
   - [Tutorial](user/di_cal/tutorial.md)
   - [Simple usage](user/di_cal/simple.md)
   - [Getting calibrated data](user/di_cal/out_calibrated.md)
-  - [Advanced usage]()
+  - Advanced usage
     - [Varying solutions over time](user/di_cal/advanced/time_varying.md)
   - [Usage on garrawarla](user/di_cal/garrawarla.md)
   - [How does it work?](user/di_cal/how_does_it_work.md)
@@ -34,13 +34,13 @@
 
 ---
 
-# Definitions and Concepts
+## Definitions and Concepts
 
 - [Polarisations](defs/pols.md)
-- [Supported visibility formats]()
+- Supported visibility formats
   - [Read](defs/vis_formats_read.md)
   - [Write](defs/vis_formats_write.md)
-- [MWA-specific details]()
+- MWA-specific details
   - [Metafits files](defs/mwa/metafits.md)
   - [Dipole delays](defs/mwa/delays.md)
   - [Dead dipoles](defs/mwa/dead_dipoles.md)
@@ -64,12 +64,12 @@
   - [Estimating flux densities](defs/modelling/estimating.md)
 - [Coordinate systems](defs/coords.md)
 - [DUT1](defs/dut1.md)
-- [Terminology]()
+- [Terminology]
   - [Timeblocks and chanblocks](defs/blocks.md)
 
 ---
 
-# Developer Guide
+## Developer Guide
 
 - [Multiple-dimension arrays (ndarray)](dev/ndarray.md)
 - [Non-empty vectors (vec1)](dev/vec1.md)
