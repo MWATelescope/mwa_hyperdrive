@@ -1,0 +1,42 @@
+---
+name: Benchmarks
+
+on:
+  push:
+    pull_request:
+    branches:
+      - "**"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  MWA_BEAM_FILE: /usr/local/mwa_full_embedded_element_pattern.h5
+
+jobs:
+  test:
+    name: Benchmarks
+    runs-on: self-hosted
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Cargo Bench
+        run: |
+          cargo bench
+        env:
+          HYPERDRIVE_TEST_DIR: /home/runner/data
+
+      - name: Zip benchmark results
+        run: zip -r criterion.zip target/criterion/*
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: criterion.zip
+          path: criterion.zip
