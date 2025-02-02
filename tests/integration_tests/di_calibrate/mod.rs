@@ -29,7 +29,7 @@ fn test_1090008640_woden() {
         .arg("--source-list")
         .arg("test_files/1090008640_WODEN/srclist_3x3_grid.txt")
         .arg("--outputs")
-        .arg(&format!("{}", solutions_path.display()))
+        .arg(format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
         .ok();
     assert!(cmd.is_err());
@@ -47,7 +47,7 @@ fn test_1090008640_woden() {
         .arg("--source-list")
         .arg("test_files/1090008640_WODEN/srclist_3x3_grid.txt")
         .arg("--outputs")
-        .arg(&format!("{}", solutions_path.display()))
+        .arg(format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
         .ok();
     assert!(cmd.is_ok(), "{:?}", get_cmd_output(cmd));
@@ -107,7 +107,7 @@ fn test_1090008640_woden() {
         .arg("--source-list")
         .arg("test_files/1090008640_WODEN/srclist_3x3_grid.txt")
         .arg("--outputs")
-        .arg(&format!("{}", solutions_path.display()))
+        .arg(format!("{}", solutions_path.display()))
         .arg("--no-progress-bars")
         .ok();
 

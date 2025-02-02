@@ -61,7 +61,7 @@ pub struct IncompleteSolutions<'a> {
     min_threshold: f64,
 }
 
-impl<'a> IncompleteSolutions<'a> {
+impl IncompleteSolutions<'_> {
     /// Convert these [`IncompleteSolutions`] into "padded"
     /// [`CalibrationSolutions`].
     ///

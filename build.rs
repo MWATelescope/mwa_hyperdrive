@@ -118,7 +118,7 @@ mod gpu {
                     }
 
                     cuda_target.flag("-gencode");
-                    cuda_target.flag(&format!("arch=compute_{arch},code=sm_{sm}"));
+                    cuda_target.flag(format!("arch=compute_{arch},code=sm_{sm}"));
                 }
             }
 

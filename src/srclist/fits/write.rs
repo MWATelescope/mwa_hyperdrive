@@ -246,7 +246,7 @@ pub(crate) fn write_source_list_jack(
     ];
     for freq in flux_freqs.iter() {
         table_description.push(
-            ColumnDescription::new(&format!("INT_FLX{freq}"))
+            ColumnDescription::new(format!("INT_FLX{freq}"))
                 .with_type(ColumnDataType::Double)
                 .create()?,
         );
@@ -291,7 +291,7 @@ pub(crate) fn write_source_list_jack(
     hdu.write_col(&mut fptr, "RA", &ra_degrees)?;
     hdu.write_col(&mut fptr, "DEC", &dec_degrees)?;
     for (idx, freq) in flux_freqs.iter().enumerate() {
-        hdu.write_col(&mut fptr, &format!("INT_FLX{freq}"), &flux_lists[idx])?;
+        hdu.write_col(&mut fptr, format!("INT_FLX{freq}"), &flux_lists[idx])?;
     }
     hdu.write_col(&mut fptr, "MAJOR_DC", &majors)?;
     hdu.write_col(&mut fptr, "MINOR_DC", &minors)?;
