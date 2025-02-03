@@ -2703,4 +2703,98 @@ mod gpu_tests {
     fn test_peel_gpu_multi_source() {
         test_peel_multi_source(PeelType::Gpu)
     }
+
+    #[test]
+    fn test_gpu_rotate_kernel() {
+        let obs_context = get_simple_obs_context(TILE_SPACING);
+        let num_times = obs_context.timestamps.len();
+        let num_chans = obs_context.fine_chan_freqs.len();
+        let num_baselines =
+            (obs_context.get_total_num_tiles() * (obs_context.get_total_num_tiles() - 1)) / 2;
+
+        // Create test visibilities with known values
+        let vis_tfb = Array3::<Jones<f32>>::from_shape_fn(
+            (num_times, num_chans, num_baselines),
+            |(t, f, b)| {
+                Jones::from([
+                    Complex::new(t as f32, f as f32),
+                    Complex::zero(),
+                    Complex::zero(),
+                    Complex::new(b as f32, 1.0),
+                ])
+            },
+        );
+
+        // Create test UVWs
+        let mut uvws_from = Array2::<UVW>::default((num_times, num_baselines));
+        let mut uvws_to = Array2::<UVW>::default((num_times, num_baselines));
+        setup_uvw_array(
+            uvws_from.view_mut(),
+            &obs_context,
+            obs_context.phase_centre,
+            false,
+        );
+        setup_uvw_array(
+            uvws_to.view_mut(),
+            &obs_context,
+            obs_context.phase_centre,
+            false,
+        );
+        let uvws_from_gpu: Vec<gpu::UVW> = uvws_from
+            .iter()
+            .map(|&uvw| gpu::UVW {
+                u: uvw.u,
+                v: uvw.v,
+                w: uvw.w,
+            })
+            .collect();
+        let uvws_to_gpu: Vec<gpu::UVW> = uvws_to
+            .iter()
+            .map(|&uvw| gpu::UVW {
+                u: uvw.u,
+                v: uvw.v,
+                w: uvw.w,
+            })
+            .collect();
+
+        let lambdas: Vec<f64> = obs_context
+            .fine_chan_freqs
+            .iter()
+            .map(|&f| VEL_C / (f as f64))
+            .collect();
+
+        // Copy data to GPU
+        let mut d_vis = DevicePointer::copy_to_device(vis_tfb.as_slice().unwrap()).unwrap();
+        let d_uvws_from = DevicePointer::copy_to_device(uvws_from_gpu.as_slice()).unwrap();
+        let d_uvws_to = DevicePointer::copy_to_device(uvws_to_gpu.as_slice()).unwrap();
+        let d_lambdas = DevicePointer::copy_to_device(&lambdas).unwrap();
+
+        // Call rotate kernel
+        gpu_kernel_call!(
+            gpu::rotate,
+            d_vis.get_mut().cast(),
+            num_times as i32,
+            num_baselines as i32,
+            num_chans as i32,
+            d_uvws_from.get(),
+            d_uvws_to.get(),
+            d_lambdas.get()
+        )
+        .unwrap();
+
+        // Copy results back
+        let mut vis_rotated = vis_tfb.clone();
+        d_vis
+            .copy_from_device(vis_rotated.as_slice_mut().unwrap())
+            .unwrap();
+
+        // Verify results
+        for ((t, f, b), &vis) in vis_rotated.indexed_iter() {
+            let w_diff = uvws_to[[t, b]].w - uvws_from[[t, b]].w;
+            let phase = -TAU * w_diff / lambdas[f];
+            let expected =
+                vis_tfb[[t, f, b]] * Complex::new(phase.cos() as f32, phase.sin() as f32);
+            assert_abs_diff_eq!(vis, expected, epsilon = 1e-5);
+        }
+    }
 }
