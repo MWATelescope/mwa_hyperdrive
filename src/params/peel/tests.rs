@@ -1417,6 +1417,120 @@ fn test_unpeel_model() {
     }
 }
 
+#[test]
+fn test_peel_weight_params() {
+    // Get a simple observation context for testing
+    let obs_context = get_phase1_obs_context(128);
+    let timeblock = Timeblock {
+        index: 0,
+        range: 0..2,
+        timestamps: Vec1::try_from_vec(obs_context.timestamps[0..2].to_vec()).unwrap(),
+        timesteps: vec1![0, 1],
+        median: obs_context.timestamps[0],
+    };
+
+    // Create chanblocks for testing
+    let chanblocks = vec![
+        Chanblock {
+            chanblock_index: 0,
+            unflagged_index: 0,
+            freq: 150e6, // 150 MHz -> λ ≈ 2m
+        },
+        Chanblock {
+            chanblock_index: 1,
+            unflagged_index: 1,
+            freq: 170e6, // 170 MHz -> λ ≈ 1.76m
+        },
+    ];
+
+    let num_tiles = obs_context.get_total_num_tiles();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let num_timesteps = timeblock.timestamps.len();
+    let num_freqs = chanblocks.len();
+
+    // Initialize weights array
+    let vis_weights = Array3::<f32>::ones((num_timesteps, num_freqs, num_baselines));
+
+    // Create TileBaselineFlags with no flagged tiles
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, HashSet::new());
+
+    // Test cases with different weight parameters
+    let test_cases = vec![
+        // Test case 1: Include all baselines
+        (
+            PeelWeightParams {
+                uvw_min_metres: 0.0,
+                uvw_max_metres: f64::MAX,
+                short_baseline_sigma: 40.0,
+            },
+            "all baselines",
+        ),
+        // Test case 2: Exclude short baselines
+        (
+            PeelWeightParams {
+                uvw_min_metres: 100.0, // 100m minimum
+                uvw_max_metres: f64::MAX,
+                short_baseline_sigma: 40.0,
+            },
+            "exclude short baselines",
+        ),
+        // Test case 3: Exclude long baselines
+        (
+            PeelWeightParams {
+                uvw_min_metres: 0.0,
+                uvw_max_metres: 1000.0, // 1km maximum
+                short_baseline_sigma: 40.0,
+            },
+            "exclude long baselines",
+        ),
+    ];
+
+    for (params, case_name) in test_cases {
+        let mut weights = vis_weights.clone();
+        params.apply_tfb(
+            weights.view_mut(),
+            &obs_context,
+            &timeblock,
+            false, // no precession
+            &chanblocks,
+            &tile_baseline_flags,
+        );
+
+        // Verify weights are between 0 and 1
+        for &weight in weights.iter() {
+            assert!(
+                (0.0..=1.0).contains(&weight),
+                "Weight {weight} outside [0,1] range for {case_name}"
+            );
+        }
+
+        // For short baseline exclusion, verify some weights are 0
+        if params.uvw_min_metres > 0.0 {
+            assert!(
+                weights.iter().any(|&w| w == 0.0),
+                "No zero weights found when excluding short baselines for {case_name}"
+            );
+        }
+
+        // For long baseline exclusion, verify some weights are 0
+        if params.uvw_max_metres < f64::MAX {
+            assert!(
+                weights.iter().any(|&w| w == 0.0),
+                "No zero weights found when excluding long baselines for {case_name}"
+            );
+        }
+
+        // Verify RTS-style tapering is applied - weights should follow 1-exp(-(u²+v²)/(2σ²))
+        // Get a baseline that should be affected by tapering
+        let mid_baseline_weight = weights[[0, 0, num_baselines / 2]];
+        assert!(
+            mid_baseline_weight > 0.0 && mid_baseline_weight < 1.0,
+            "Mid-length baseline weight {mid_baseline_weight} not tapered for {case_name}"
+        );
+    }
+}
+
+
 #[derive(Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
 enum PeelType {

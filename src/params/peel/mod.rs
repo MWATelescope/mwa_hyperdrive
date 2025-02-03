@@ -89,7 +89,6 @@ pub(crate) struct PeelWeightParams {
 }
 
 impl PeelWeightParams {
-    // TODO: test this properly
     /// Applies the baseline weights to the visibilities.
     pub(crate) fn apply_tfb(
         &self,
