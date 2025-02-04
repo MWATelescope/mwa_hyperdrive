@@ -1530,7 +1530,6 @@ fn test_peel_weight_params() {
     }
 }
 
-
 #[derive(Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
 enum PeelType {
@@ -2857,24 +2856,31 @@ mod gpu_tests {
         let uvws_from_gpu: Vec<gpu::UVW> = uvws_from
             .iter()
             .map(|&uvw| gpu::UVW {
-                u: uvw.u,
-                v: uvw.v,
-                w: uvw.w,
+                u: uvw.u as _,
+                v: uvw.v as _,
+                w: uvw.w as _,
             })
             .collect();
         let uvws_to_gpu: Vec<gpu::UVW> = uvws_to
             .iter()
             .map(|&uvw| gpu::UVW {
-                u: uvw.u,
-                v: uvw.v,
-                w: uvw.w,
+                u: uvw.u as _,
+                v: uvw.v as _,
+                w: uvw.w as _,
             })
             .collect();
 
+        #[cfg(not(feature = "gpu-single"))]
         let lambdas: Vec<f64> = obs_context
             .fine_chan_freqs
             .iter()
             .map(|&f| VEL_C / (f as f64))
+            .collect();
+        #[cfg(feature = "gpu-single")]
+        let lambdas: Vec<f32> = obs_context
+            .fine_chan_freqs
+            .iter()
+            .map(|&f| (VEL_C as f32) / (f as f32))
             .collect();
 
         // Copy data to GPU
@@ -2905,7 +2911,10 @@ mod gpu_tests {
         // Verify results
         for ((t, f, b), &vis) in vis_rotated.indexed_iter() {
             let w_diff = uvws_to[[t, b]].w - uvws_from[[t, b]].w;
+            #[cfg(not(feature = "gpu-single"))]
             let phase = -TAU * w_diff / lambdas[f];
+            #[cfg(feature = "gpu-single")]
+            let phase = -TAU * w_diff / (lambdas[f] as f64);
             let expected =
                 vis_tfb[[t, f, b]] * Complex::new(phase.cos() as f32, phase.sin() as f32);
             assert_abs_diff_eq!(vis, expected, epsilon = 1e-5);
