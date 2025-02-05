@@ -1,10 +1,70 @@
 # Peel visibilities
 
-`peel` can subtract the sky-model visibilities from calibrated data visibilities, and write them out like [vis-subtract](../vis_subtract/intro.md), but taking into account the direction dependent effects of the ionosphere.
+`peel` can subtract the sky-model visibilities from calibrated data visibilities, and write them out like [vis-subtract](../vis_subtract/intro.md), but it additionally solves for and applies the direction dependent effects of the ionosphere.
 
 ~~~admonish warning title="Work in progress"
 Hyperdrive's `peel` implementation technically only performs ionospheric subtraction. For more on the distinction between the two, read on. Familiarity with the `vis-subtract` command is recommended.
 ~~~
+
+## Example
+
+From the images below, it's clear that peeling 100 sources, rather than directly subtracting them
+results in a much cleaner image.
+
+![unsubtracted visibilities](unsubtracted.png)
+![subtracted visibilities](subtracted.png)
+![peeled visibilities](peeled.png)
+
+<details>
+<summary>Steps to reproduce the images above.</summary>
+
+The images above were generated using mwa-demo with the following `demo/00_env.sh`
+
+```bash
+export obsid=1321103688
+
+# preprocessing
+export freqres_khz=40
+export timeres_s=2
+# calibration: only use the 11th timestep from the raw files
+export apply_args="--timesteps 10"
+export dical_name="_t10"
+
+# peeling
+export num_sources=100
+export iono_sources=100
+export num_passes=1
+export num_loops=1
+export freq_average=80kHz
+export time_average=8s
+export iono_freq_average=1280kHz
+export iono_time_average=8s
+export uvw_min=50lambda
+export uvw_max=300lambda
+export short_baseline_sigma=40
+export convergence=0.9
+
+# imaging
+export briggs=0.5
+export size=8000
+export scale=0.0035502
+export niter=10000000
+export nmiter=5
+export wsclean_args="-multiscale-gain 0.15 -join-channels -channels-out 4 -save-source-list -fit-spectral-pol 2"
+
+# generate the peeled visibilities
+demo/09_peel.sh
+
+# generate the subtracted visibilities
+export iono_sources=0
+export peel_prefix="sub_"
+demo/09_peel.sh
+
+# image everything
+demo/07_img.sh
+```
+
+</details>
 
 ## Ionospheric subtraction
 
