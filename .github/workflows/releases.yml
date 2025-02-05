@@ -105,7 +105,7 @@ jobs:
           path: "*.tar.gz"
           if-no-files-found: error
 
-  create-release:
+  create-github-release:
     name: Create a new release
     runs-on: ubuntu-latest
     needs: build-linux-release
@@ -122,3 +122,53 @@ jobs:
           prerelease: false
           files: |
             *.tar.gz
+
+  rust_release:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [create-github-release]
+    environment: CI
+    steps:
+        - name: Checkout sources
+          uses: actions/checkout@v4
+
+        - name: Install stable, minimal toolchain
+          uses: dtolnay/rust-toolchain@v1
+          with:
+            toolchain: stable
+
+        # We install cfitsio because when releasing to crates.io, it runs
+        # the rust docs generation which fails if our code does any
+        # writing. With feature cfitsio-static, it has to build cfitsio which
+        # involves writing so have to build without that feature when pushing
+        # to crates.io
+        - name: Install cfitsio 3.49
+          run: |
+            curl "https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-3.49.tar.gz" -o cfitsio.tar.gz
+            tar -xf cfitsio.tar.gz
+            rm cfitsio.tar.gz
+            cd cfitsio-3.49
+            # Enabling SSE2/SSSE3 could cause portability problems, but it's unlikely that anyone
+            # is using such a CPU...
+            # https://stackoverflow.com/questions/52858556/most-recent-processor-without-support-of-ssse3-instructions
+            # Disabling curl just means you cannot fits_open() using a URL.
+            CFLAGS="-O3" ./configure --prefix=/usr/local --enable-reentrant --enable-sse2 --enable-ssse3 --disable-curl
+
+            make -j
+            sudo make install
+            sudo ldconfig
+
+            cd ..
+            rm -rf cfitsio-3.49
+
+        - name: Build on latest stable rust
+          run: cargo build --release --features examples
+
+        - name: Run tests on latest stable rust
+          run: cargo test --release --features examples
+
+        - uses: katyo/publish-crates@v2
+          with:
+              registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+              args: --no-verify
