@@ -49,7 +49,6 @@ pub(crate) fn div_ceil(a: usize, b: usize) -> usize {
 }
 
 /// Information on flagged tiles, baselines and maps to and from array indices.
-#[derive(Debug)]
 pub struct TileBaselineFlags {
     /// Map between a pair of tile numbers and its unflagged *cross-correlation*
     /// baseline index. e.g. If tiles 0 and 2 are flagged, (1, 3) maps to 0

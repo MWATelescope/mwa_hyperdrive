@@ -431,7 +431,6 @@ pub(crate) fn write_vis(
                 ..vis_ctx.clone()
             };
 
-            trace!("this_timeblock.range: {:?}", this_timeblock.range);
             for vis_writer in writers.iter_mut() {
                 vis_writer.write_vis(
                     out_data_tfb.slice(s![0..this_timeblock.range.len(), .., ..]),

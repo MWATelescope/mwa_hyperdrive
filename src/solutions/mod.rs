@@ -47,7 +47,7 @@ pub(crate) enum CalSolutionType {
     Bin,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct CalibrationSolutions {
     /// The direction-independent calibration solutions. This has dimensions of
     /// (num_timeblocks, total_num_tiles, total_num_chanblocks). Note that this

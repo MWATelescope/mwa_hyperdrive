@@ -65,39 +65,6 @@ pub(crate) struct InputVisParams {
     pub(crate) dut1: Duration,
 }
 
-// derive debug for InputVisParams
-impl std::fmt::Debug for InputVisParams {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InputVisParams")
-            .field(
-                "vis_reader.get_input_data_type()",
-                &self.vis_reader.get_input_data_type(),
-            )
-            .field("solutions.is_some()", &self.solutions.is_some())
-            .field(
-                "timeblocks.timestamps",
-                &self
-                    .timeblocks
-                    .iter()
-                    .map(|t| t.timestamps.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .field("time_res.to_seconds()", &self.time_res.to_seconds())
-            .field("spw.chanblocks.len()", &self.spw.chanblocks.len())
-            .field("spw.chans_per_chanblock", &self.spw.chans_per_chanblock)
-            .field("spw.first_freq", &self.spw.first_freq)
-            .field("spw.flagged_chan_indices", &self.spw.flagged_chan_indices)
-            .field(
-                "tile_baseline_flags.flagged_tiles",
-                &self.tile_baseline_flags.flagged_tiles,
-            )
-            .field("using_autos", &self.using_autos)
-            .field("ignore_weights", &self.ignore_weights)
-            .field("dut1.to_seconds()", &self.dut1.to_seconds())
-            .finish()
-    }
-}
-
 impl InputVisParams {
     pub(crate) fn get_obs_context(&self) -> &ObsContext {
         self.vis_reader.get_obs_context()
@@ -135,8 +102,6 @@ impl InputVisParams {
             assert_eq!(auto_data_fb.dim(), avg_auto_vis_shape);
             assert_eq!(auto_weights_fb.dim(), avg_auto_vis_shape);
         }
-
-        debug!("[read_timeblock] {:?}", self);
 
         let averaging = timeblock.timestamps.len() > 1 || self.spw.chans_per_chanblock.get() > 1;
 

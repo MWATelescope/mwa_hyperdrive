@@ -1096,11 +1096,6 @@ impl VisRead for UvfitsReader {
             weights_fb,
             tile_baseline_flags,
         });
-        debug!(
-            "[uvfits read_crosses] npols {:?} fppol {:?}",
-            self.metadata.pols.num_pols(),
-            self.metadata.num_floats_per_pol
-        );
         match (
             self.metadata.pols.num_pols(),
             self.metadata.num_floats_per_pol,
