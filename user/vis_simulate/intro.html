@@ -183,6 +183,15 @@
 <a href="../../defs/mwa/metafits.html">metafits</a> are used. These will affect the generated
 visibilities. You can disable them with <code>--unity-dipole-gains</code>.</p>
 <h3 id="vetoing"><a class="header" href="#vetoing">Vetoing</a></h3>
+<p>Vetoing removes sources that have components below the elevation limit,
+components that are too far from the phase centre,
+components with beam-attenuated flux densities less than the threshold,
+and/or remove sources that aren't in the top N sources specified by <code>num_sources</code>.</p>
+<p>This is important for calibration, because it is expensive to generate a sky
+model, and using only dim sources would result in poor calibration.</p>
+<p>Sources are vetoed if any of their components are further away from the
+phase centre than <code>source_dist_cutoff_deg</code> or their beam attenuated flux
+densities are less than <code>veto_threshold</code>.</p>
 <p>Source-list vetoing can do unexpected things. You can effectively disable it by
 supplying <code>--veto-threshold 0</code>, although the veto routine will still:</p>
 <ol>
@@ -190,6 +199,10 @@ supplying <code>--veto-threshold 0</code>, although the veto routine will still:
 <li>Sort the remaining sources by brightness based off of the centre frequencies
 MWA coarse channels.</li>
 </ol>
+<p>If there are fewer sources than that of <code>num_sources</code>, an error is returned;
+it's up to the caller to handle this if they want to.</p>
+<p>The frequencies to use for beam calculations are the coarse channel centers,
+1.28 MHz apart on MWA.</p>
 
                     </main>
 

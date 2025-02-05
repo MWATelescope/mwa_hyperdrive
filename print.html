@@ -1240,6 +1240,15 @@ particular time resolution, flag some tiles, etc.).</p>
 <a href="user/vis_simulate/../../defs/mwa/metafits.html">metafits</a> are used. These will affect the generated
 visibilities. You can disable them with <code>--unity-dipole-gains</code>.</p>
 <h3 id="vetoing"><a class="header" href="#vetoing">Vetoing</a></h3>
+<p>Vetoing removes sources that have components below the elevation limit,
+components that are too far from the phase centre,
+components with beam-attenuated flux densities less than the threshold,
+and/or remove sources that aren't in the top N sources specified by <code>num_sources</code>.</p>
+<p>This is important for calibration, because it is expensive to generate a sky
+model, and using only dim sources would result in poor calibration.</p>
+<p>Sources are vetoed if any of their components are further away from the
+phase centre than <code>source_dist_cutoff_deg</code> or their beam attenuated flux
+densities are less than <code>veto_threshold</code>.</p>
 <p>Source-list vetoing can do unexpected things. You can effectively disable it by
 supplying <code>--veto-threshold 0</code>, although the veto routine will still:</p>
 <ol>
@@ -1247,14 +1256,134 @@ supplying <code>--veto-threshold 0</code>, although the veto routine will still:
 <li>Sort the remaining sources by brightness based off of the centre frequencies
 MWA coarse channels.</li>
 </ol>
+<p>If there are fewer sources than that of <code>num_sources</code>, an error is returned;
+it's up to the caller to handle this if they want to.</p>
+<p>The frequencies to use for beam calculations are the coarse channel centers,
+1.28 MHz apart on MWA.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="subtract-visibilities"><a class="header" href="#subtract-visibilities">Subtract visibilities</a></h1>
 <p><code>vis-subtract</code> can subtract the sky-model visibilities from calibrated data
 visibilities and write them out. This can be useful to see how well the sky
 model agrees with the input data, although direction-dependent effects (e.g. the
 ionosphere) may be present and produce "holes" in the visibilities, e.g.:</p>
-<p><img src="user/vis_subtract/subtracted.jpg" alt="" /></p>
+<p><img src="user/vis_subtract/subtracted.jpg" alt="subtracted visibilities" /></p>
 <p>A high-level overview of the steps in <code>vis-subtract</code> are below. Solid lines
 indicate actions that always happen, dashed lines are optional:</p>
+<pre class="mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
+flowchart TD
+    InputData[/fa:fa-file Calibrated input data/]--&gt;Args
+    CalSols[/fa:fa-file Sky-model source-list file/]--&gt;Args
+    Settings[/fa:fa-cog Other settings/]-.-&gt;Args
+
+    Args[fa:fa-cog User arguments]--&gt;Valid{fa:fa-code Valid?}
+    Valid --&gt; subtract
+
+    subgraph subtract[For all timesteps]
+        Read[&quot;fa:fa-code Read a timestep
+        of input data&quot;]
+        Simulate[&quot;fa:fa-code Generate model vis&quot;]
+        Read &amp; Simulate--&gt;Subtract[&quot;fa:fa-minus Subtract model vis from data&quot;]
+        Subtract--&gt;Write[fa:fa-save Write timeblock
+        visibilities]
+    end
+</pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="peel-visibilities"><a class="header" href="#peel-visibilities">Peel visibilities</a></h1>
+<p><code>peel</code> can subtract the sky-model visibilities from calibrated data visibilities, and write them out like <a href="user/peel/../vis_subtract/intro.html">vis-subtract</a>, but it additionally solves for and applies the direction dependent effects of the ionosphere.</p>
+<div id="admonition-work-in-progress" class="admonition admonish-warning" role="note" aria-labelledby="admonition-work-in-progress-title">
+<div class="admonition-title">
+<div id="admonition-work-in-progress-title">
+<p>Work in progress</p>
+</div>
+<a class="admonition-anchor-link" href="user/peel/intro.html#admonition-work-in-progress"></a>
+</div>
+<div>
+<p>Hyperdrive's <code>peel</code> implementation technically only performs ionospheric subtraction. For more on the distinction between the two, read on. Familiarity with the <code>vis-subtract</code> command is recommended.</p>
+</div>
+</div>
+<h2 id="example"><a class="header" href="#example">Example</a></h2>
+<p>From the images below, it's clear that peeling 100 sources, rather than directly subtracting them
+results in a much cleaner image.</p>
+<p><img src="user/peel/unsubtracted.png" alt="unsubtracted visibilities" />
+<img src="user/peel/subtracted.png" alt="subtracted visibilities" />
+<img src="user/peel/peeled.png" alt="peeled visibilities" /></p>
+<details>
+<summary>Steps to reproduce the images above.</summary>
+<p>The images above were generated using mwa-demo with the following <code>demo/00_env.sh</code></p>
+<pre><code class="language-bash">export obsid=1321103688
+
+# preprocessing
+export freqres_khz=40
+export timeres_s=2
+# calibration: only use the 11th timestep from the raw files
+export apply_args="--timesteps 10"
+export dical_name="_t10"
+
+# peeling
+export num_sources=100
+export iono_sources=100
+export num_passes=1
+export num_loops=1
+export freq_average=80kHz
+export time_average=8s
+export iono_freq_average=1280kHz
+export iono_time_average=8s
+export uvw_min=50lambda
+export uvw_max=300lambda
+export short_baseline_sigma=40
+export convergence=0.9
+
+# imaging
+export briggs=0.5
+export size=8000
+export scale=0.0035502
+export niter=10000000
+export nmiter=5
+export wsclean_args="-multiscale-gain 0.15 -join-channels -channels-out 4 -save-source-list -fit-spectral-pol 2"
+
+# generate the peeled visibilities
+demo/09_peel.sh
+
+# generate the subtracted visibilities
+export iono_sources=0
+export peel_prefix="sub_"
+demo/09_peel.sh
+
+# image everything
+demo/07_img.sh
+</code></pre>
+</details>
+<h2 id="ionospheric-subtraction"><a class="header" href="#ionospheric-subtraction">Ionospheric subtraction</a></h2>
+<p>Light travels slower through regions of higher electron density, especially at lower frequencies. When light from a source passes through the ionosphere, it is refracted, causing a shift in the apparent position and brightness of the source. This shift varies with the direction of the source and can change over time.</p>
+<p>Assuming the ionosphere is a thin screen with a slowly varying electron density, the direction and magnitude of the shift depend on the gradient of the electron density along the line of sight and scale with the square of the light's wavelength.</p>
+<p>Ionospheric subtraction models the effect of the ionosphere on a given source using three parameters:</p>
+<ul>
+<li>The ionospheric offset vector (α, β), which is a constant of proportionality in front of λ², representing the shift in the source's apparent position in image space (l, m), such that l = αλ², m = βλ².</li>
+<li>A gain (g), which captures any changes in the apparent brightness of the source.</li>
+</ul>
+<p>Hyperdrive solves for these ionospheric parameters for each source using the algorithm described in <a href="https://ieeexplore.ieee.org/document/4703504">Mitchell 2008</a> one timeblock at a time.</p>
+<h3 id="algorithm"><a class="header" href="#algorithm">Algorithm</a></h3>
+<p>The starting point (and end point) for ionospheric subtraction is the residual visibilities, which is the calibrated data with the ionospheric sky model subtracted. Initially, the ionospheric parameters of each source are not known, and so the sources are subtracted without any ionospheric corrections, but the solutions are usually improved in subsequent passes.</p>
+<p>Looping over each source, the residuals are phased to the source's catalogue position, and the model for the source that was subtracted is added back in to the data. Let's call these visibilities the</p>
+<p>First, all other sources in the sky-model are subtracted from the calibrated data, and the data is phased to the catalogue position of the source. The data can then be averaged to a lower resolution to improve performance. Finally, the ionospheric parameters are measured using the least-squares fit described in the paper.</p>
+<h2 id="loop-parameters"><a class="header" href="#loop-parameters">Loop parameters</a></h2>
+<p>In reality, the ionosphere is a complex, turbulent medium, and not all tiles see the same ionosphere so the algorithm includes several safeguards to prevent divergent solutions. Each source's offsets are calculated in a loop, with a convergence factor to reduce the step size as the solution approaches the correct value.</p>
+<p>In the first pass of the algorithm, the ionospheric offsets are not known, and so the sources are not necessarily subtracted from their correct positions, but the solutions are usually improved in subsequent passes.</p>
+<p><code>--num-loops</code> sets the maximum number of loops for each source, while <code>--num-passes</code> is the number of passes over all sources. Decreasing <code>--convergence</code> is one way to improve the quality of the solutions, but it will also increase the runtime.</p>
+<h2 id="averaging"><a class="header" href="#averaging">Averaging</a></h2>
+<p>hyperdrive reasons about visibilities at multiple resolutions:</p>
+<ul>
+<li>The input data's original resolution</li>
+<li>The input data's resolution during reading ( <code>--time-average</code>, <code>--freq-average</code> )</li>
+<li>The resolution of the ionospheric subtraction ( <code>--iono-time-average</code>, <code>--iono-freq-average</code> )</li>
+<li>The resolution of the output visibilities ( <code>--output-vis-time-average</code>, <code>--output-vis-freq-average</code> )</li>
+</ul>
+<p>All of these resolutions are specified in seconds or Hz, and are multiples of the input data's resolution. If the resolution is 0, then all data are averaged together.</p>
+<h2 id="weighting"><a class="header" href="#weighting">Weighting</a></h2>
+<p>It is important to down-weight short baselines if your point-source sky model is missing diffuse information. The minimum uv-distance to include in the fit can be set with <code>--uvw-min</code>, and the maximum with <code>--uvw-max</code>. The default is to include all baselines &gt; 50λ.</p>
+<p>hyperdrive also borrows from RTS, which used a gaussian weighting scheme to taper short baselines, <code>1-exp(-(u²+v²)/(2*σ²))</code>, where <code>σ</code> is the tapering parameter. This can be set with <code>--short-baseline-sigma</code>, and defaults to 40λ.</p>
+<h2 id="source-counts"><a class="header" href="#source-counts">Source Counts</a></h2>
+<p>Similar to <a href="user/peel/../vis_subtract/intro.html"><code>vis-subtract</code></a>, the total number of sources in the sky model to be subtracted is limited by <code>--num-sources</code>, but only the top <code>--iono-sub</code> brightest have their ionospheric constants measured and modeled during subtraction. By default, hyperdrive will include sources in the sky model after <a href="user/peel/../vis_simulate/intro.html#vetoing">vetoing</a> if <code>--num-sources</code> is not specified, and will ionospherically subtract all of these sources if <code>--iono-sub</code> is not specified. An error will occur if <code>--num-sources</code> is greater than the number of sources in the sky model.</p>
+<p>Future versions of peel will include a <code>--peel</code> argument to specify the number of sources to peel.</p>
+<h2 id="high-level-overview"><a class="header" href="#high-level-overview">High level overview</a></h2>
 <pre class="mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
 flowchart TD
     InputData[fa:fa-file Calibrated input data]--&gt;Args
@@ -1262,14 +1391,36 @@ flowchart TD
     Settings[fa:fa-cog Other settings]-.-&gt;Args
 
     Args[fa:fa-cog User arguments]--&gt;Valid{fa:fa-code Valid?}
-    Valid --&gt; subtract
+    Valid --&gt; peel
 
-    subgraph subtract[For all timesteps]
-        Read[fa:fa-code Read a timestep\nof input data]
-        Read--&gt;Apply[&quot;fa:fa-code Generate model vis\nand subtract it from input data&quot;]
-        Apply--&gt;Write[fa:fa-save Write timeblock\nvisibilities]
+    subgraph peel[For all timesteps]
+        Read[&quot;fa:fa-code Read a timestep
+        of input data&quot;]
+        IonoConsts[&quot;fa:fa-cog Ionospheric consts
+        α, β, g
+        per-source, initially unknown&quot;]
+        Residual[&quot;fa:fa-code Subtract for Residual&quot;]
+        Model[&quot;fa:fa-code Generate
+        ionospheric model vis&quot;]
+        IonoConsts --&gt; Model
+        Read -------&gt; Residual
+        Model --&gt; Residual
+        Residual --&gt; Loop
+        IonoConsts --&gt; Loop
+        subgraph Loop[For each source]
+            Phased[&quot;fa:fa-code Phase residual to source&quot;]
+            SourceModel[&quot;fa:fa-code model source&quot;]
+            SourceModel &amp; Phased --&gt; Average[&quot;fa:fa-code Add source and average data&quot;]
+            SourceModel &amp; Average --&gt; Fit[&quot;fa:fa-code Fit ionospheric
+            model&quot;]
+        end
+        Fit --&gt; IonoConsts
+        Residual --&gt; Write[&quot;fa:fa-save Write timeblock
+        visibilities&quot;]
     end
 </pre>
+<h2 id="peeling"><a class="header" href="#peeling">Peeling</a></h2>
+<p>A full peel involves performing direction-independent calibration towards each source, this is currently a work in progress and not yet implemented.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="get-beam-responses"><a class="header" href="#get-beam-responses">Get beam responses</a></h1>
 <p>The <code>beam</code> subcommand can be used to obtain beam responses from any of the
 supported beam types. The output format is

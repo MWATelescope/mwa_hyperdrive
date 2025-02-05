@@ -164,22 +164,25 @@
 visibilities and write them out. This can be useful to see how well the sky
 model agrees with the input data, although direction-dependent effects (e.g. the
 ionosphere) may be present and produce "holes" in the visibilities, e.g.:</p>
-<p><img src="subtracted.jpg" alt="" /></p>
+<p><img src="subtracted.jpg" alt="subtracted visibilities" /></p>
 <p>A high-level overview of the steps in <code>vis-subtract</code> are below. Solid lines
 indicate actions that always happen, dashed lines are optional:</p>
 <pre class="mermaid">%%{init: {'theme':'dark', 'themeVariables': {'fontsize': 20}}}%%
 flowchart TD
-    InputData[fa:fa-file Calibrated input data]--&gt;Args
-    CalSols[fa:fa-file Sky-model source-list file]--&gt;Args
-    Settings[fa:fa-cog Other settings]-.-&gt;Args
+    InputData[/fa:fa-file Calibrated input data/]--&gt;Args
+    CalSols[/fa:fa-file Sky-model source-list file/]--&gt;Args
+    Settings[/fa:fa-cog Other settings/]-.-&gt;Args
 
     Args[fa:fa-cog User arguments]--&gt;Valid{fa:fa-code Valid?}
     Valid --&gt; subtract
 
     subgraph subtract[For all timesteps]
-        Read[fa:fa-code Read a timestep\nof input data]
-        Read--&gt;Apply[&quot;fa:fa-code Generate model vis\nand subtract it from input data&quot;]
-        Apply--&gt;Write[fa:fa-save Write timeblock\nvisibilities]
+        Read[&quot;fa:fa-code Read a timestep
+        of input data&quot;]
+        Simulate[&quot;fa:fa-code Generate model vis&quot;]
+        Read &amp; Simulate--&gt;Subtract[&quot;fa:fa-minus Subtract model vis from data&quot;]
+        Subtract--&gt;Write[fa:fa-save Write timeblock
+        visibilities]
     end
 </pre>
 
@@ -191,7 +194,7 @@ flowchart TD
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../../user/beam.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../user/peel/intro.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -205,7 +208,7 @@ flowchart TD
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../../user/beam.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../user/peel/intro.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
