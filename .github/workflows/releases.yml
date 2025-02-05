@@ -33,33 +33,13 @@ jobs:
             cmake \
             curl \
             git \
-            libz-dev \
+            lcov \
+            libcfitsio-dev \
+            libhdf5-dev \
+            libfreetype-dev \
+            libexpat1-dev \
             libfontconfig-dev \
-            software-properties-common \
             ;
-
-          # This comes from software-properties-common, and is only necessary
-          # to install gcc-12. Remove this when we use a newer ubuntu image.
-          # https://stackoverflow.com/a/67453352
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt update -y
-          sudo apt install -y gcc-11 g++-11
-          sudo update-alternatives \
-            --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 \
-            --slave /usr/bin/g++ g++ /usr/bin/g++-11 \
-            --slave /usr/bin/gcov gcov /usr/bin/gcov-11 \
-            --slave /usr/bin/gcc-ar gcc-ar /usr/bin/gcc-ar-11 \
-            --slave /usr/bin/gcc-ranlib gcc-ranlib /usr/bin/gcc-ranlib-11
-          gcc --version
-          g++ --version
-          gcov --version
-
-          # Compile cfitsio from source to get its static library.
-          curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-4.3.0.tar.gz -O
-          tar -xvf cfitsio-4.3.0.tar.gz && rm cfitsio-4.3.0.tar.gz && cd cfitsio-4.3.0
-          CFLAGS="-fPIE -O3 -march=x86-64-v2" ./configure --enable-reentrant --disable-curl --enable-sse2 --enable-ssse3 --libdir=/usr/lib/x86_64-linux-gnu/
-          sudo make -j install
-
         env:
           DEBIAN_FRONTEND: noninteractive
 
