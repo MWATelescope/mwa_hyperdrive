@@ -6,32 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-02-05
+
+### Added
+
+- `peel` subcommand, see: <https://mwatelescope.github.io/mwa_hyperdrive/user/peel/intro.html>
+- `SkyModeller::update_with_a_source`
+- `CalVis::scale_by_weights`
+- `DevicePointer::copy_to`
+- `SourceList::search` and `search_asec`
+
+### Changed
+
+- `srclist::types::components::ComponentList::new` now takes an iterator over `SourceComponent` references
+
 ## [0.4.2] - 2024-11-30
+
 ### Fixed
+
 - fixed averaging issue #41
 
 ## [0.4.1] - 2024-07-31
+
 ### Added
+
 - hyperbeam@0.9.3
 
 ### Fixed
+
 - fix a compile error when specifying env `HIP_FLAGS` with `--features=hip`
 - fix #34 , a compile error for non-x86 CPUs (thanks @cjordan )
 
 ## [0.4.0] - 2024-06-19
+
 ### Added
+
 - fits sourcelist support (including shapelets for Jack-style fits)
 - hyperbeam@0.9.2 built@0.7 marlu@0.11.0 mwalib@1.3.3 birli@0.11.0
 
 ### Fixed
+
 - rocm6 support
 - a bunch of really nasty segfaults that took a big toll on my sanity
-- Huge thanks to @robotopia for fixing https://github.com/MWATelescope/mwa_hyperbeam/issues/9
+- Huge thanks to @robotopia for fixing <https://github.com/MWATelescope/mwa_hyperbeam/issues/9>
   via hyperbeam 0.9.0
 - performance optimizations in hyperbeam 0.9.2
 
 ## [0.3.0] - 2023-09-27
+
 ### Added
+
 - Support for HIP, which allows AMD GPUs to be used instead of only NVIDIA GPUs
   via CUDA.
 - Support for the "DipAmps" column in a metafits file. This allows users to
@@ -56,6 +80,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   "big" subcommands.
 
 ### Fixed
+
 - When raw MWA data is missing gpubox files in what is otherwise a contiguous
   spectral window, it is no longer treated as a "picket fence" situation.
 - Flux densities were not being correctly estimated for curved-power-law
@@ -74,6 +99,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   for validity.
 
 ### Changed
+
 - The performance of CPU visibility modelling has been dramatically improved.
 - The command-line interface has been overhauled. Some things may be different,
   but generally the options and flags are much more consistent between
@@ -91,13 +117,16 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - More error checks have been added to RTS, AO and WODEN source list reading.
 
 ## [0.2.1] - 2022-10-20
+
 ### Added
+
 - `hyperdrive` can now be installed from crates.io
 - A --ignore-input-solutions-tile-flag argument for `solutions-apply`.
 - Debug-level messages stating which tiles are being flagged and why in
   `solutions-apply`.
 
 ### Fixed
+
 - Until now, `hyperdrive` only supported raw MWA data with a frequency
   resolution of 10, 20 or 40 kHz. It now supports any resolution.
 - When reading from uvfits/measurement set, a metafits' dipole information was
@@ -119,6 +148,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Bugs were fixed surrounding the reading of RTS solutions.
 
 ### Changed
+
 - The library used for logging has changed. The user experience should only be
   superficial, but piping `hyperdrive` output to a file (e.g. a job output on a
   supercomputer) should display a little better.
