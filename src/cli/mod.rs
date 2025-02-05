@@ -95,7 +95,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/di_cal/intro.html"#
     )]
     DiCalibrate(di_calibrate::DiCalArgs),
 
-    #[clap(about = r#"Peeling!"#)]
+    #[clap(about = r#"Solve for and subtract ionospheric sky-model."#)]
     Peel(peel::PeelArgs),
 
     #[clap(alias = "convert-vis")]
