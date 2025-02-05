@@ -1,0 +1,186 @@
+# this tests that the latest docker image works, and does linter checks
+# linter checks happen here because docker images are faster than waiting for
+# dependencies to install on GitHub Actions VMs
+on: [push, pull_request]
+
+name: Docker Multiplatform
+
+env:
+  REGISTRY_IMAGE: mwatelescope/hyperdrive
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    environment: CI
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux/amd64
+# TODO:
+# - os: ubuntu-22.04-arm
+#   platform: linux/arm64
+# error[E0308]: mismatched types
+#   --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/marlu-0.11.0/src/io/uvfits.rs:53:8
+#    |
+# 51 |         c_strings.push(c_str.into_raw());
+#    |         ---------      ---------------- this argument has type `*mut u8`...
+#    |         |
+#    |         ... which causes `c_strings` to have type `Vec<*mut u8>`
+# 52 |     }
+# 53 |     Ok(c_strings)
+#    |     -- ^^^^^^^^^ expected `Vec<*mut i8>`, found `Vec<*mut u8>`
+#    |     |
+#    |     arguments to this enum variant are incorrect
+#    |
+#    = note: expected struct `Vec<*mut i8>`
+#               found struct `Vec<*mut u8>`
+# help: the type constructed contains `Vec<*mut u8>` due to the type of the argument passed
+#   --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/marlu-0.11.0/src/io/uvfits.rs:53:5
+#    |
+# 53 |     Ok(c_strings)
+#    |     ^^^---------^
+#    |        |
+#    |        this argument influences the type of `Ok`
+# note: tuple variant defined here
+#   --> /rustc/e71f9a9a98b0faf423844bf0ba7438f29dc27d58/library/core/src/result.rs:532:5
+#
+# error[E0308]: mismatched types
+#   --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/marlu-0.11.0/src/io/uvfits.rs:59:36
+#    |
+# 59 |             drop(CString::from_raw(ptr));
+#    |                  ----------------- ^^^ expected `*mut u8`, found `*mut i8`
+#    |                  |
+#    |                  arguments to this function are incorrect
+#    |
+#    = note: expected raw pointer `*mut u8`
+#               found raw pointer `*mut i8`
+# note: associated function defined here
+#   --> /rustc/e71f9a9a98b0faf423844bf0ba7438f29dc27d58/library/alloc/src/ffi/c_str.rs:396:19
+#
+# error[E0308]: arguments to this function are incorrect
+#     --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/marlu-0.11.0/src/io/uvfits.rs:473:13
+#      |
+# 473  |             fitsio_sys::ffcrtb(
+#      |             ^^^^^^^^^^^^^^^^^^
+#      |
+# note: expected `*mut *mut u8`, found `*mut *mut i8`
+#     --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/marlu-0.11.0/src/io/uvfits.rs:478:17
+#      |
+# 478  |                 c_col_names.as_mut_ptr(),   /* I - name of each column                      */
+#      |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+#      = note: expected raw pointer `*mut *mut u8`
+#                 found raw pointer `*mut *mut i8`
+# note: expected `*mut *mut u8`, found `*mut *mut i8`
+#     --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/marlu-0.11.0/src/io/uvfits.rs:479:17
+#      |
+# 479  |                 c_col_formats.as_mut_ptr(), /* I - value of TFORMn keyword for each column  */
+#      |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+#      = note: expected raw pointer `*mut *mut u8`
+#                 found raw pointer `*mut *mut i8`
+# note: expected `*mut *mut u8`, found `*mut *mut i8`
+#     --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/marlu-0.11.0/src/io/uvfits.rs:480:17
+#      |
+# 480  |                 c_col_units.as_mut_ptr(),   /* I - value of TUNITn keyword for each column  */
+#      |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+#      = note: expected raw pointer `*mut *mut u8`
+#                 found raw pointer `*mut *mut i8`
+# note: function defined here
+#     --> /opt/cargo/registry/src/index.crates.io-6f17d22bba15001f/fitsio-sys-0.4.0/src/bindings.rs:6299:12
+#      |
+# 6299 |     pub fn ffcrtb(
+#      |            ^^^^^^
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+      # - name: test docker image
+      #   run: |
+      #     docker run --rm ${{ env.REGISTRY_IMAGE }}@${{ steps.build.outputs.digest }} /bin/bash -c "\
+      #       curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o mwa_full_embedded_element_pattern.h5 && \
+      #       cargo test --release"
+
+  merge:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    outputs:
+      container: ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
