@@ -19,6 +19,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - `srclist::types::components::ComponentList::new` now takes an iterator over `SourceComponent` references
+- `di_calibrate::calibrate_timeblock` is now public to the crate
 
 ## [0.4.2] - 2024-11-30
 

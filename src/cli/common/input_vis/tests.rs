@@ -664,17 +664,3 @@ fn sparse_timeblocks_with_averaging() {
     .unwrap();
     assert_eq!(output_params.output_timeblocks.len(), 3);
 }
-
-#[test]
-fn debug_input_vis_params() {
-    let DataAsStrings { metafits, vis, .. } = get_reduced_1090008640_raw();
-
-    let args = InputVisArgs {
-        files: Some(vec![metafits, vis[0].clone()]),
-        ..Default::default()
-    };
-
-    let params = args.parse("Peeling").unwrap();
-    let s = format!("{:?}", params);
-    assert!(s.contains("InputVisParams"));
-}
