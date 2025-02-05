@@ -416,8 +416,6 @@ impl<'a> SkyModellerGpu<'a> {
         let d_freqs = DevicePointer::copy_to_device(&unflagged_fine_chan_freqs_floats)?;
         let d_shapelet_basis_values = DevicePointer::copy_to_device(&shapelet_basis_values)?;
 
-        let gpu_beam = beam.prepare_gpu_beam(&unflagged_fine_chan_freqs_ints)?;
-
         let mut tile_index_to_unflagged_tile_index_map: Vec<i32> =
             Vec::with_capacity(unflagged_tile_xyzs.len());
         let mut i_unflagged_tile = 0;
