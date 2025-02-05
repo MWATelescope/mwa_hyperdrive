@@ -28,7 +28,7 @@ use crate::{
     constants::*,
     context::Polarisations,
     model::mask_pols,
-    srclist::{ComponentList, GaussianParams, PerComponentParams, SourceList},
+    srclist::{ComponentList, GaussianParams, PerComponentParams, Source, SourceList},
 };
 
 const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
@@ -81,7 +81,14 @@ impl<'a> SkyModellerCpu<'a> {
         dut1: Duration,
         apply_precession: bool,
     ) -> SkyModellerCpu<'a> {
-        let components = ComponentList::new(source_list, unflagged_fine_chan_freqs, phase_centre);
+        let components = ComponentList::new(
+            source_list
+                .values()
+                .rev()
+                .flat_map(|src| src.components.iter()),
+            unflagged_fine_chan_freqs,
+            phase_centre,
+        );
         let maps = crate::math::TileBaselineFlags::new(
             unflagged_tile_xyzs.len() + flagged_tiles.len(),
             flagged_tiles.clone(),
@@ -700,7 +707,7 @@ impl<'a> SkyModellerCpu<'a> {
         Ok(())
     }
 
-    /// For a timestamp, get the LST, [`UVW`]s and array latitude. These things
+    /// For a timestamp, get the LST, tile [`UVW`]s and array latitude. These things
     /// depend on whether we're precessing, so rather than copy+pasting this
     /// code around the place, put it in one spot.
     fn get_lst_uvws_latitude(&self, timestamp: Epoch) -> (f64, Vec<UVW>, f64) {
@@ -794,6 +801,20 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         mask_pols(vis_fb, self.pols);
 
         Ok(uvws)
+    }
+
+    fn update_with_a_source(
+        &mut self,
+        source: &Source,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError> {
+        self.phase_centre = phase_centre;
+        self.components = ComponentList::new(
+            source.components.iter(),
+            self.unflagged_fine_chan_freqs,
+            phase_centre,
+        );
+        Ok(())
     }
 }
 

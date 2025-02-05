@@ -23,7 +23,12 @@ use hifitime::{Duration, Epoch};
 use marlu::{c32, Jones, RADec, XyzGeodetic, UVW};
 use ndarray::{Array2, ArrayViewMut2};
 
-use crate::{beam::Beam, context::Polarisations, srclist::SourceList, MODEL_DEVICE};
+use crate::{
+    beam::Beam,
+    context::Polarisations,
+    srclist::{Source, SourceList},
+    MODEL_DEVICE,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ModelDevice {
@@ -115,7 +120,7 @@ pub(crate) fn get_cpu_info() -> String {
 }
 
 /// An object that simulates sky-model visibilities.
-pub trait SkyModeller<'a> {
+pub trait SkyModeller<'a>: Send {
     /// Generate sky-model visibilities for a single timestep. The visibilities
     /// as well as the [`UVW`] coordinates used in generating the visibilities
     /// are returned. The visibilities are ordered by frequency and then
@@ -163,6 +168,14 @@ pub trait SkyModeller<'a> {
         timestamp: Epoch,
         vis_fb: ArrayViewMut2<Jones<f32>>,
     ) -> Result<Vec<UVW>, ModelError>;
+
+    /// Replace the sky model with a single source. This is mostly useful for
+    /// peeling.
+    fn update_with_a_source(
+        &mut self,
+        source: &Source,
+        phase_centre: RADec,
+    ) -> Result<(), ModelError>;
 }
 
 /// Create a [`SkyModeller`] trait object that generates sky-model visibilities

@@ -118,8 +118,15 @@ impl BeamArgs {
                 trace!("Attempting to use delays:");
                 match &dipole_delays {
                     Delays::Full(d) => {
-                        for row in d.outer_iter() {
-                            trace!("{row}");
+                        let mut last_row = None;
+                        for (i, row) in d.outer_iter().enumerate() {
+                            if let Some(last_row) = last_row {
+                                if row == last_row {
+                                    continue
+                                }
+                            }
+                            trace!("{i:03} {row}");
+                            last_row = Some(row);
                         }
                     }
                     Delays::Partial(d) => trace!("{d:?}"),
@@ -178,8 +185,15 @@ impl BeamArgs {
                 };
                 if let Some(dipole_gains) = dipole_gains.as_ref() {
                     trace!("Attempting to use dipole gains:");
-                    for row in dipole_gains.outer_iter() {
-                        trace!("{row}");
+                    let mut last_row = None;
+                    for (i, row) in dipole_gains.outer_iter().enumerate() {
+                        if let Some(last_row) = last_row {
+                            if row == last_row {
+                                continue
+                            }
+                        }
+                        trace!("{i:03} {row}");
+                        last_row = Some(row);
                     }
 
                     // Currently, the only way to have dipole gains other than

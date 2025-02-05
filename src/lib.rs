@@ -7,6 +7,8 @@
 //!
 //! <https://mwatelescope.github.io/mwa_hyperdrive/index.html>
 
+// TODO: #![warn(clippy::too_many_lines)]
+
 mod averaging;
 mod beam;
 mod cli;

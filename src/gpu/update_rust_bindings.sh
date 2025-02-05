@@ -4,7 +4,9 @@
 # headers for GPU code change.
 
 # This script requires bindgen. This can be provided by a package manager or
-# installed with "cargo install bindgen".
+# installed with "cargo install bindgen-cli".
+
+# don't forget `sudo apt install libclang-dev` https://rust-lang.github.io/rust-bindgen/requirements.html
 
 # https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
 SCRIPTPATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
@@ -20,6 +22,8 @@ for PRECISION in SINGLE DOUBLE; do
     bindgen "${SCRIPTPATH}"/types.h \
             --ignore-functions \
             --blocklist-type "__int8_t" \
+            --allowlist-type "RADec" \
+            --allowlist-type "XYZ" \
             --allowlist-type "UVW" \
             --allowlist-type "LmnRime" \
             --allowlist-type "ShapeletCoeff" \
@@ -29,6 +33,7 @@ for PRECISION in SINGLE DOUBLE; do
             --allowlist-type "Points" \
             --allowlist-type "Gaussians" \
             --allowlist-type "Shapelets" \
+            --allowlist-type "IonoConsts" \
             --allowlist-var "SBF_.*" \
             --with-derive-default \
             --with-derive-partialeq \
@@ -42,4 +47,15 @@ for PRECISION in SINGLE DOUBLE; do
             --blocklist-type ".*" \
             -- -D "${PRECISION}" \
             > "${SCRIPTPATH}/model_${LOWER_CASE}.rs"
+
+    bindgen "${SCRIPTPATH}"/peel.h \
+            --allowlist-function "rotate" \
+            --allowlist-function "average" \
+            --allowlist-function "xyzs_to_uvws" \
+            --allowlist-function "iono_loop" \
+            --allowlist-function "subtract_iono" \
+            --allowlist-function "add_model" \
+            --blocklist-type ".*" \
+            -- -D "${PRECISION}" \
+            > "${SCRIPTPATH}/peel_${LOWER_CASE}.rs"
 done

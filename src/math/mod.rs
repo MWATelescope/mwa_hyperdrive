@@ -42,6 +42,12 @@ pub(crate) fn average_epoch<I: IntoIterator<Item = Epoch>>(es: I) -> Epoch {
     Epoch::from_gpst_seconds(average).round(10.milliseconds())
 }
 
+// TODO (dev): a.div_ceil(b) would be better, but it's nightly:
+// https://doc.rust-lang.org/std/primitive.i32.html#method.div_ceil
+pub(crate) fn div_ceil(a: usize, b: usize) -> usize {
+    (a + b - 1) / b
+}
+
 /// Information on flagged tiles, baselines and maps to and from array indices.
 pub struct TileBaselineFlags {
     /// Map between a pair of tile numbers and its unflagged *cross-correlation*

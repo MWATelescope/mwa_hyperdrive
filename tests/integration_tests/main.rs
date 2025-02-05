@@ -9,6 +9,7 @@
 
 mod di_calibrate;
 mod no_stderr;
+mod peel;
 mod solutions_apply;
 
 use std::{
