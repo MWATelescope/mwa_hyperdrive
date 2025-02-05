@@ -65,7 +65,7 @@ fn get_beam(num_tiles: usize) -> FEEBeam {
     // https://github.com/MWATelescope/mwa_pb/blob/90d6fbfc11bf4fca35796e3d5bde3ab7c9833b66/mwa_pb/mwa_sweet_spots.py#L60
     // let delays = vec![0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12];
 
-    FEEBeam::new_from_env(num_tiles, Delays::Partial(delays), None).unwrap()
+    FEEBeam::new_from_env(num_tiles, Delays::Partial(delays), None, None).unwrap()
 }
 
 // get a timestamp at lmst=0 around the year 2100
