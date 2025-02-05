@@ -1,3 +1,12 @@
+use crate::{
+    averaging::Timeblock,
+    context::ObsContext,
+    di_calibrate::calibrate_timeblock,
+    gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat},
+    model::{SkyModeller, SkyModellerGpu},
+    srclist::SourceList,
+    Chanblock, TileBaselineFlags,
+};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info, trace, warn};
@@ -8,65 +17,9 @@ use marlu::{
     Jones, RADec, XyzGeodetic, UVW,
 };
 use ndarray::prelude::*;
-use num_complex::Complex;
 use rayon::prelude::*;
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-};
-
-use crate::{
-    averaging::Timeblock,
-    context::ObsContext,
-    di_calibrate::calibrate_timeblock,
-    gpu::{self, gpu_kernel_call, DevicePointer, GpuError, GpuFloat},
-    model::{SkyModeller, SkyModellerGpu},
-    srclist::{ComponentType, FluxDensity, FluxDensityType, SourceList},
-    Chanblock, TileBaselineFlags,
-};
 
 use super::{weights_average, IonoConsts, PeelError, PeelLoopParams, UV, W};
-
-// custom sorting implementations
-impl PartialOrd for BadSource {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.source_name.partial_cmp(&other.source_name) {
-            // Some(Ordering::Equal) => match self.gpstime.partial_cmp(&other.gpstime) {
-            Some(Ordering::Equal) => match self.pass.partial_cmp(&other.pass) {
-                Some(Ordering::Less) => Some(Ordering::Greater),
-                Some(Ordering::Greater) => Some(Ordering::Less),
-                other => other,
-            },
-            //     other => other,
-            // },
-            other => other,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)] //, Serialize, Deserialize)]
-pub(crate) struct BadSource {
-    // timeblock: Timeblock,
-    pub(crate) gpstime: f64,
-    pub(crate) pass: usize,
-    // pub(crate) gsttime: Epoch,
-    // pub(crate) times: Vec<Epoch>,
-    // source: Source,
-    pub(crate) i_source: usize,
-    pub(crate) source_name: String,
-    // pub(crate) weighted_catalogue_pos_j2000: RADec,
-    // iono_consts: IonoConsts,
-    pub(crate) alpha: f64,
-    pub(crate) beta: f64,
-    pub(crate) gain: f64,
-    // pub(crate) alphas: Vec<f64>,
-    // pub(crate) betas: Vec<f64>,
-    // pub(crate) gains: Vec<f64>,
-    pub(crate) residuals_i: Vec<Complex<f64>>,
-    pub(crate) residuals_q: Vec<Complex<f64>>,
-    pub(crate) residuals_u: Vec<Complex<f64>>,
-    pub(crate) residuals_v: Vec<Complex<f64>>,
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn peel_gpu(
@@ -303,8 +256,6 @@ pub(crate) fn peel_gpu(
         .try_into()
         .expect("smaller than i32::MAX");
 
-    let mut bad_sources = Vec::<BadSource>::new();
-
     unsafe {
         let mut gpu_uvws: ArrayBase<ndarray::OwnedRepr<gpu::UVW>, Dim<[usize; 2]>> =
             Array2::default((num_timesteps, num_cross_baselines));
@@ -446,11 +397,7 @@ pub(crate) fn peel_gpu(
                 .enumerate()
             {
                 let start = std::time::Instant::now();
-                // pb_debug!(
-                //     "peel loop {pass}: {source_name} at {source_pos} (has iono {iono_consts:?})"
-                // );
 
-                // let old_iono_consts = *iono_consts;
                 let old_iono_consts = IonoConsts {
                     alpha: iono_consts.alpha,
                     beta: iono_consts.beta,
@@ -673,21 +620,6 @@ pub(crate) fn peel_gpu(
                         old_iono_consts.beta,
                         old_iono_consts.gain,
                     );
-                    bad_sources.push(BadSource {
-                        gpstime: timeblock.median.to_gpst_seconds(),
-                        pass,
-                        i_source,
-                        source_name: source_name.to_string(),
-                        // weighted_catalogue_pos_j2000: source_pos,
-                        alpha: iono_consts.alpha,
-                        beta: iono_consts.beta,
-                        gain: iono_consts.gain,
-                        residuals_i: Vec::default(), // todo!(),
-                        residuals_q: Vec::default(), // todo!(),
-                        residuals_u: Vec::default(), // todo!(),
-                        residuals_v: Vec::default(), // todo!(),
-                    });
-
                     iono_consts.alpha = old_iono_consts.alpha;
                     iono_consts.beta = old_iono_consts.beta;
                     iono_consts.gain = old_iono_consts.gain;
@@ -731,8 +663,6 @@ pub(crate) fn peel_gpu(
                         gpu::add_model,
                         d_high_res_model_rotated.get_mut().cast(),
                         d_high_res_model_tfb.get().cast(),
-                        //iono_consts.0 as GpuFloat,
-                        //iono_consts.1 as GpuFloat,
                         gpu_iono_consts,
                         d_lambdas.get(),
                         d_uvws_to.get(),
@@ -823,89 +753,5 @@ pub(crate) fn peel_gpu(
         // copy results back to host
         d_high_res_vis_tfb.copy_from_device(vis_residual_tfb.as_slice_mut().unwrap())?;
     }
-
-    let mut pass_counts = HashMap::<String, usize>::new();
-    for bad_source in bad_sources.iter() {
-        *pass_counts
-            .entry(bad_source.source_name.clone())
-            .or_default() += 1;
-    }
-    let mut printed = HashSet::<String>::new();
-    bad_sources.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    for bad_source in bad_sources.into_iter() {
-        let BadSource {
-            gpstime,
-            // pass,
-            i_source,
-            source_name,
-            alpha,
-            beta,
-            gain,
-            ..
-        } = bad_source;
-        // if source_name is in printed
-        if printed.contains(&source_name) {
-            continue;
-        } else {
-            printed.insert(source_name.clone());
-        }
-        let passes = pass_counts[&source_name];
-
-        let pos = source_weighted_positions[i_source];
-        let RADec { ra, dec } = pos;
-        pb_warn!(
-            "[peel_gpu] Bad source: {:.2} p{:2} {} at radec({:+7.2}, {:+7.2}) iono({:+8.6},{:+8.6},{:+3.2})",
-            gpstime,
-            passes,
-            source_name,
-            (ra + 180.) % 360. - 180.,
-            dec,
-            alpha,
-            beta,
-            gain
-        );
-        let matches = source_list.search_asec(pos, 300.);
-        for (sep, src_name, idx, comp) in matches {
-            let compstr = match comp.comp_type {
-                ComponentType::Gaussian { maj, min, pa } => format!(
-                    "G {:6.1}as {:6.1}as {:+6.1}d",
-                    maj.to_degrees() * 3600.,
-                    min.to_degrees() * 3600.,
-                    pa.to_degrees()
-                ),
-                ComponentType::Point => format!("P {:8} {:8} {:7}", "", "", ""),
-                _ => format!("? {:8} {:8} {:7}", "", "", ""),
-            };
-            let fluxstr = match comp.flux_type {
-                FluxDensityType::CurvedPowerLaw {
-                    si,
-                    fd: FluxDensity { freq, i, .. },
-                    q,
-                } => format!(
-                    "cpl S={:+6.2}(νn)^{:+5.2} exp[{:+5.2}ln(νn)]; @{:.1}MHz",
-                    i,
-                    si,
-                    q,
-                    freq / 1e6
-                ),
-                FluxDensityType::PowerLaw {
-                    si,
-                    fd: FluxDensity { freq, i, .. },
-                } => format!("pl  S={:+6.2}(νn)^{:+5.2}; @{:.1}MHz", i, si, freq / 1e6),
-                FluxDensityType::List(fds) => {
-                    let FluxDensity { i, freq, .. } = fds[0];
-                    format!("lst S={:+6.2} @{:.1}MHz", i, freq / 1e6)
-                }
-            };
-            pb_warn!(
-                "[peel_gpu]  {sep:5.1} {src_name:16} c{idx:2} at radec({:+7.2},{:+7.2}) comp({}) flx ({})",
-                (comp.radec.ra + 180.) % 360. - 180.,
-                comp.radec.dec,
-                compstr,
-                fluxstr,
-            );
-        }
-    }
-
     Ok(())
 }
