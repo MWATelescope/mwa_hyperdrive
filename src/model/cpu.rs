@@ -35,35 +35,35 @@ const GAUSSIAN_EXP_CONST: f64 = -(FRAC_PI_2 * FRAC_PI_2) / LN_2;
 const SHAPELET_CONST: f64 = SQRT_FRAC_PI_SQ_2_LN_2 / shapelets::SBF_DX;
 
 pub struct SkyModellerCpu<'a> {
-    pub(crate) beam: &'a dyn Beam,
+    pub(super) beam: &'a dyn Beam,
 
     /// The phase centre used for all modelling.
-    pub(crate) phase_centre: RADec,
+    pub(super) phase_centre: RADec,
     /// The longitude of the array we're using \[radians\].
-    pub(crate) array_longitude: f64,
+    pub(super) array_longitude: f64,
     /// The latitude of the array we're using \[radians\].
-    pub(crate) array_latitude: f64,
+    pub(super) array_latitude: f64,
     /// The UT1 - UTC offset. If this is 0, effectively UT1 == UTC, which is a
     /// wrong assumption by up to 0.9s. We assume the this value does not change
     /// over the timestamps given to this `SkyModellerCpu`.
-    pub(crate) dut1: Duration,
+    pub(super) dut1: Duration,
     /// Shift baselines and LSTs back to J2000.
-    pub(crate) precess: bool,
+    pub(super) precess: bool,
 
-    pub(crate) unflagged_fine_chan_freqs: &'a [f64],
+    pub(super) unflagged_fine_chan_freqs: &'a [f64],
 
     /// The [`XyzGeodetic`] positions of each of the unflagged tiles.
-    pub(crate) unflagged_tile_xyzs: &'a [XyzGeodetic],
-    pub(crate) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
+    pub(super) unflagged_tile_xyzs: &'a [XyzGeodetic],
+    pub(super) unflagged_baseline_to_tile_map: HashMap<usize, (usize, usize)>,
 
-    pub(crate) components: ComponentList,
+    pub(super) components: ComponentList,
 
     tile_index_to_array_index_map: Vec<usize>,
     freq_map: Vec<usize>,
     unique_tiles: Vec<usize>,
     unique_freqs: Vec<f64>,
 
-    pub(crate) pols: Polarisations,
+    pub(super) pols: Polarisations,
 }
 
 impl<'a> SkyModellerCpu<'a> {

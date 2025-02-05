@@ -428,7 +428,7 @@ fn make_calibration_progress_bar(num_chanblocks: usize, message: String) -> Prog
 
 /// Worker function to do calibration.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn calibrate_timeblock(
+fn calibrate_timeblock(
     vis_data_tfb: ArrayView3<Jones<f32>>,
     vis_model_tfb: ArrayView3<Jones<f32>>,
     mut di_jones: ArrayViewMut3<Jones<f64>>,
