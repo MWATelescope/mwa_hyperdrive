@@ -465,6 +465,7 @@ impl PeelArgs {
                 outputs: Some(vis_outputs),
                 output_vis_time_average,
                 output_vis_freq_average,
+                output_autos: false, // todo: not yet implemented.
             }
             .parse(
                 input_vis_params.time_res,
