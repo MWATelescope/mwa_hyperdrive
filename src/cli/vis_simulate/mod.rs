@@ -162,7 +162,7 @@ pub(super) struct VisSimulateCliArgs {
 
     /// Don't write auto-correlations to the output visibilities.
     #[clap(long, help_heading = "OUTPUT FILES")]
-    output_no_autos: bool,
+    pub(super) output_no_autos: bool,
 
     /// Remove any "point" components from the input sky model.
     #[clap(long, help_heading = "SKY MODEL")]

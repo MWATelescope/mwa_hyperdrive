@@ -639,6 +639,7 @@ fn sparse_timeblocks_with_averaging() {
     args.simulate_args.num_fine_channels = Some(1);
     let output = tmp_dir.path().join("20ts.uvfits");
     args.simulate_args.output_model_files = Some(vec![output.clone()]);
+    args.simulate_args.output_no_autos = true;
     args.run(false).unwrap();
 
     // Now try to read it with sparse timesteps and averaging.
@@ -646,6 +647,7 @@ fn sparse_timeblocks_with_averaging() {
         files: Some(vec![metafits, output.display().to_string()]),
         timesteps: Some(vec![6, 12, 18]),
         time_average: Some("8s".to_string()),
+        no_autos: true,
         ..Default::default()
     };
     let params = args.parse("").unwrap();
@@ -655,7 +657,7 @@ fn sparse_timeblocks_with_averaging() {
         outputs: Some(vec![tmp_dir.path().join("output.uvfits")]),
         output_vis_time_average: None,
         output_vis_freq_average: None,
-        output_autos: true,
+        output_autos: false,
     }
     .parse(
         params.time_res,
