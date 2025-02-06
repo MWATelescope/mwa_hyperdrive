@@ -365,11 +365,11 @@ impl UvfitsReader {
         let unflagged_timesteps = all_timesteps.clone();
         let all_timesteps =
             Vec1::try_from_vec(all_timesteps).map_err(|_| UvfitsReadError::NoTimesteps {
-                file: uvfits_fptr.filename.clone(),
+                file: uvfits_fptr.file_path().to_path_buf(),
             })?;
         let timestamps =
             Vec1::try_from_vec(timestamps).map_err(|_| UvfitsReadError::NoTimesteps {
-                file: uvfits_fptr.filename.clone(),
+                file: uvfits_fptr.file_path().to_path_buf(),
             })?;
 
         // Get the data's time resolution. There is a possibility that the file

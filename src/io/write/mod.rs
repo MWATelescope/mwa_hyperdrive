@@ -154,7 +154,9 @@ pub(crate) fn write_vis(
             [c1, .., cn] => {
                 let first_freq = c1.freq;
                 let last_freq = cn.freq;
-                let mut v = Array1::range(first_freq, last_freq, spw.freq_res).into_raw_vec();
+                let (mut v, v_offset) =
+                    Array1::range(first_freq, last_freq, spw.freq_res).into_raw_vec_and_offset();
+                assert!(v_offset.is_none() || v_offset.unwrap() == 0);
                 v.push(last_freq); // `Array1::range` is an exclusive range.
                 Vec1::try_from_vec(v).expect("v is never empty")
             }
