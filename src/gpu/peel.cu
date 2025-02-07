@@ -179,89 +179,6 @@ __global__ void average_kernel(const JonesF32 *high_res_vis, const float *high_r
 }
 
 /**
- * Kernel for rotating visibilities and averaging them into "low-resolution"
- * visibilities.
- *
- * The visibilities should be ordered in time, frequency and baseline (slowest
- * to fastest). The weights should never be negative; this allows us to avoid
- * special logic when averaging.
- */
-__global__ void rotate_average_kernel(const JonesF32 *high_res_vis, const float *high_res_weights,
-                                      JonesF32 *low_res_vis, RADec pointing_centre, const int num_timesteps,
-                                      const int num_tiles, const int num_baselines, const int num_freqs,
-                                      const int freq_average_factor, const FLOAT *lmsts, const XYZ *xyzs,
-                                      const UVW *uvws_from, UVW *uvws_to, const FLOAT *lambdas)
-{
-    const int i_bl = threadIdx.x + (blockDim.x * blockIdx.x);
-    if (i_bl >= num_baselines)
-        return;
-
-    for (int i_freq = 0; i_freq < num_freqs; i_freq += freq_average_factor)
-    {
-        JonesF64 vis_weighted_sum = JonesF64{
-            .j00_re = 0.0,
-            .j00_im = 0.0,
-            .j01_re = 0.0,
-            .j01_im = 0.0,
-            .j10_re = 0.0,
-            .j10_im = 0.0,
-            .j11_re = 0.0,
-            .j11_im = 0.0,
-        };
-        double weight_sum = 0.0;
-
-        for (int i_time = 0; i_time < num_timesteps; i_time++)
-        {
-            // Prepare an "argument" for later.
-            const double arg = -TAU * ((double)uvws_to[i_time * num_baselines + i_bl].w -
-                                       (double)uvws_from[i_time * num_baselines + i_bl].w);
-            for (int i_freq_chunk = i_freq; i_freq_chunk < i_freq + freq_average_factor; i_freq_chunk++)
-            {
-                C64 complex;
-                sincos(arg / lambdas[i_freq_chunk], &complex.y, &complex.x);
-
-                const int step = (i_time * num_freqs + i_freq_chunk) * num_baselines + i_bl;
-                const double weight = high_res_weights[step];
-                const JonesF32 vis_single = high_res_vis[step];
-                const JonesF64 vis_double = JonesF64{
-                    .j00_re = vis_single.j00_re,
-                    .j00_im = vis_single.j00_im,
-                    .j01_re = vis_single.j01_re,
-                    .j01_im = vis_single.j01_im,
-                    .j10_re = vis_single.j10_re,
-                    .j10_im = vis_single.j10_im,
-                    .j11_re = vis_single.j11_re,
-                    .j11_im = vis_single.j11_im,
-                };
-                const JonesF64 rotated_weighted_vis = vis_double * weight * complex;
-
-                vis_weighted_sum += rotated_weighted_vis;
-                weight_sum += weight;
-            }
-        }
-
-        // If `weight_sum` is bigger than 0, use it in division, otherwise just
-        // divide by 1. We do this so we don't get NaN values, and we don't use
-        // if statements in case the compiler optimises this better to avoid
-        // warp divergence.
-        vis_weighted_sum /= (weight_sum > 0.0) ? weight_sum : 1.0;
-
-        const int low_res_step = (i_freq / freq_average_factor) * num_baselines + i_bl;
-        low_res_vis[low_res_step] = JonesF32{
-            .j00_re = (float)vis_weighted_sum.j00_re,
-            .j00_im = (float)vis_weighted_sum.j00_im,
-            .j01_re = (float)vis_weighted_sum.j01_re,
-            .j01_im = (float)vis_weighted_sum.j01_im,
-            .j10_re = (float)vis_weighted_sum.j10_re,
-            .j10_im = (float)vis_weighted_sum.j10_im,
-            .j11_re = (float)vis_weighted_sum.j11_re,
-            .j11_im = (float)vis_weighted_sum.j11_im,
-        };
-        // low_res_weights[low_res_step] = weight_sum;
-    }
-}
-
-/**
  *
  */
 __device__ void apply_iono(const JonesF32 *vis, JonesF32 *vis_out, const IonoConsts *iono_consts,
@@ -790,8 +707,21 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
     gridDimAdd2.x = 1;
 
     IonoConsts *d_iono_consts;
-    gpuMalloc(&d_iono_consts, sizeof(IonoConsts));
-    gpuMemcpy(d_iono_consts, iono_consts, sizeof(IonoConsts), gpuMemcpyHostToDevice);
+    gpuError_t error_id;
+
+    error_id = gpuMalloc(&d_iono_consts, sizeof(IonoConsts));
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
+    }
+
+    error_id = gpuMemcpy(d_iono_consts, iono_consts, sizeof(IonoConsts), gpuMemcpyHostToDevice);
+    if (error_id != gpuSuccess) {
+        gpuError_t free_error = gpuFree(d_iono_consts);
+        if (free_error != gpuSuccess) {
+            return gpuGetErrorString(free_error);
+        }
+        return gpuGetErrorString(error_id);
+    }
 
     for (int iteration = 0; iteration < num_iterations; iteration++)
     {
@@ -805,12 +735,20 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         error_id = gpuDeviceSynchronize();
         if (error_id != gpuSuccess)
         {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
             return gpuGetErrorString(error_id);
         }
 #endif
         error_id = gpuGetLastError();
         if (error_id != gpuSuccess)
         {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
             return gpuGetErrorString(error_id);
         }
 
@@ -820,12 +758,20 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         error_id = gpuDeviceSynchronize();
         if (error_id != gpuSuccess)
         {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
             return gpuGetErrorString(error_id);
         }
 #endif
         error_id = gpuGetLastError();
         if (error_id != gpuSuccess)
         {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
             return gpuGetErrorString(error_id);
         }
 
@@ -835,24 +781,55 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
         error_id = gpuDeviceSynchronize();
         if (error_id != gpuSuccess)
         {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
             return gpuGetErrorString(error_id);
         }
 #endif
         error_id = gpuGetLastError();
         if (error_id != gpuSuccess)
         {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
             return gpuGetErrorString(error_id);
         }
 
-        gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
+        error_id = gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
+        if (error_id != gpuSuccess) {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
+            return gpuGetErrorString(error_id);
+        }
+
         if (iono_consts->gain < 0.0)
         {
+            gpuError_t free_error = gpuFree(d_iono_consts);
+            if (free_error != gpuSuccess) {
+                return gpuGetErrorString(free_error);
+            }
             break;
         }
     }
 
-    gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
-    gpuFree(d_iono_consts);
+    error_id = gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
+    if (error_id != gpuSuccess) {
+        gpuError_t free_error = gpuFree(d_iono_consts);
+        if (free_error != gpuSuccess) {
+            return gpuGetErrorString(free_error);
+        }
+        return gpuGetErrorString(error_id);
+    }
+
+    error_id = gpuFree(d_iono_consts);
+    if (error_id != gpuSuccess) {
+        return gpuGetErrorString(error_id);
+    }
 
     return NULL;
 }
