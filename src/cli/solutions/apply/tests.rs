@@ -441,7 +441,7 @@ pub(crate) fn get_1090008640_identity_solutions_file(tmp_dir: &Path) -> PathBuf 
     let sols = CalibrationSolutions {
         di_jones: Array3::from_elem((1, 128, 32), Jones::identity()),
         chanblock_freqs: Some(
-            Vec1::try_from(Array1::linspace(196495000.0, 197735000.0, 32).into_raw_vec()).unwrap(),
+            Vec1::try_from(Array1::linspace(196495000.0, 197735000.0, 32).to_vec()).unwrap(),
         ),
         ..Default::default()
     };

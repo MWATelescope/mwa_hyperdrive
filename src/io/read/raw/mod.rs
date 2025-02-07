@@ -718,7 +718,8 @@ impl RawDataReader {
         // `outer_iter` on an `ndarray`. Ignore the time dimension; there's only
         // ever one timestep.
         let (_, num_chans, num_baselines) = jones_array_tfb.dim();
-        let data_vis_fb = jones_array_tfb.into_raw_vec();
+        let (data_vis_fb, data_vis_offset) = jones_array_tfb.into_raw_vec_and_offset();
+        assert!(data_vis_offset.unwrap_or(0) == 0);
 
         // bake flags into weights
         for (weight, flag) in weight_array_tfb.iter_mut().zip_eq(flag_array_tfb) {
@@ -731,7 +732,8 @@ impl RawDataReader {
 
         let mut data_weights_fb = weight_array_tfb.remove_axis(Axis(0));
         self.apply_mwaf_flags(mwaf_timestep, gpubox_channels, data_weights_fb.view_mut());
-        let data_weights_fb = data_weights_fb.into_raw_vec();
+        let (data_weights_fb, data_weights_offset) = data_weights_fb.into_raw_vec_and_offset();
+        assert!(data_weights_offset.unwrap_or(0) == 0);
 
         let chan_flags = (0..num_chans)
             .map(|i_chan| flagged_fine_chans.contains(&(i_chan as u16)))
