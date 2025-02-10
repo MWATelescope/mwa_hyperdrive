@@ -561,7 +561,6 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_avg_freq() {
         exp_timesteps * exp_baselines
     );
     let num_fine_freq_chans: String = fits_get_required_key(&mut out_vis, &hdu0, "NAXIS4").unwrap();
-    std::fs::copy(out_vis_path, PathBuf::from("/tmp/hyp_test.uvfits")).unwrap();
     assert_eq!(num_fine_freq_chans.parse::<usize>().unwrap(), exp_channels);
 }
 
