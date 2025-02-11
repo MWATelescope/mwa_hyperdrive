@@ -611,19 +611,10 @@ extern "C" const char *xyzs_to_uvws(const XYZ *d_xyzs, const FLOAT *d_lmsts, UVW
     xyzs_to_uvws_kernel<<<gridDim, blockDim>>>(d_xyzs, d_lmsts, d_uvws, pointing_centre, num_tiles, num_baselines,
                                                num_timesteps);
 
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -639,19 +630,10 @@ extern "C" const char *rotate(JonesF32 *d_vis_fb, const int num_timesteps, const
     rotate_kernel<<<gridDim, blockDim>>>(d_vis_fb, num_timesteps, num_baselines, num_freqs, d_uvws_from, d_uvws_to,
                                          d_lambdas);
 
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -667,19 +649,10 @@ extern "C" const char *average(const JonesF32 *d_high_res_vis, const float *d_hi
 
     average_kernel<<<gridDim, blockDim>>>(d_high_res_vis, d_high_res_weights, d_low_res_vis, num_timesteps,
                                           num_baselines, num_freqs, freq_average_factor);
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -707,22 +680,9 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
     gridDimAdd2.x = 1;
 
     IonoConsts *d_iono_consts;
-    gpuError_t error_id;
 
-    error_id = gpuMalloc(&d_iono_consts, sizeof(IonoConsts));
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
-
-    error_id = gpuMemcpy(d_iono_consts, iono_consts, sizeof(IonoConsts), gpuMemcpyHostToDevice);
-    if (error_id != gpuSuccess) {
-        gpuError_t free_error = gpuFree(d_iono_consts);
-        if (free_error != gpuSuccess) {
-            return gpuGetErrorString(free_error);
-        }
-        return gpuGetErrorString(error_id);
-    }
-
+    CHECK_GPU_ERROR(gpuMalloc(&d_iono_consts, sizeof(IonoConsts)));
+    CHECK_GPU_ERROR(gpuMemcpy(d_iono_consts, iono_consts, sizeof(IonoConsts), gpuMemcpyHostToDevice));
     for (int iteration = 0; iteration < num_iterations; iteration++)
     {
         // Do the work for one loop of the iteration.
@@ -730,107 +690,32 @@ extern "C" const char *iono_loop(const JonesF32 *d_vis_residual, const float *d_
                                                 d_iono_consts, d_iono_fits, num_baselines, num_freqs, d_uvws,
                                                 d_lambdas_m);
 
-        gpuError_t error_id;
 #ifdef DEBUG
-        error_id = gpuDeviceSynchronize();
-        if (error_id != gpuSuccess)
-        {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
-            return gpuGetErrorString(error_id);
-        }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-        error_id = gpuGetLastError();
-        if (error_id != gpuSuccess)
-        {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
-            return gpuGetErrorString(error_id);
-        }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
         // Sum the iono fits.
         reduce_baselines<NUM_ADD_THREADS><<<gridDimAdd, blockDimAdd>>>(d_iono_fits, num_baselines);
 #ifdef DEBUG
-        error_id = gpuDeviceSynchronize();
-        if (error_id != gpuSuccess)
-        {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
-            return gpuGetErrorString(error_id);
-        }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-        error_id = gpuGetLastError();
-        if (error_id != gpuSuccess)
-        {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
-            return gpuGetErrorString(error_id);
-        }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
         reduce_freqs<NUM_ADD_THREADS2>
             <<<gridDimAdd2, blockDimAdd2>>>(d_iono_fits, d_lambdas_m, num_freqs, d_iono_consts, convergence);
 #ifdef DEBUG
-        error_id = gpuDeviceSynchronize();
-        if (error_id != gpuSuccess)
-        {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
-            return gpuGetErrorString(error_id);
-        }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-        error_id = gpuGetLastError();
-        if (error_id != gpuSuccess)
-        {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
-            return gpuGetErrorString(error_id);
-        }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
-        error_id = gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
-        if (error_id != gpuSuccess) {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
-            return gpuGetErrorString(error_id);
-        }
+        CHECK_GPU_ERROR(gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost));
 
         if (iono_consts->gain < 0.0)
-        {
-            gpuError_t free_error = gpuFree(d_iono_consts);
-            if (free_error != gpuSuccess) {
-                return gpuGetErrorString(free_error);
-            }
             break;
-        }
     }
 
-    error_id = gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost);
-    if (error_id != gpuSuccess) {
-        gpuError_t free_error = gpuFree(d_iono_consts);
-        if (free_error != gpuSuccess) {
-            return gpuGetErrorString(free_error);
-        }
-        return gpuGetErrorString(error_id);
-    }
-
-    error_id = gpuFree(d_iono_consts);
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
-
+    CHECK_GPU_ERROR(gpuMemcpy(iono_consts, d_iono_consts, sizeof(IonoConsts), gpuMemcpyDeviceToHost));
     return NULL;
 }
 
@@ -847,19 +732,10 @@ extern "C" const char *subtract_iono(JonesF32 *d_vis_residual, const JonesF32 *d
     subtract_iono_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_consts, old_iono_consts, d_uvws,
                                                 d_lambdas_m, num_timesteps, num_baselines, num_freqs);
 
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -876,19 +752,10 @@ extern "C" const char *add_model(JonesF32 *d_vis_residual, const JonesF32 *d_vis
     add_model_kernel<<<gridDim, blockDim>>>(d_vis_residual, d_vis_model, iono_consts, d_lambdas_m,
                                             d_uvws, num_timesteps, num_freqs, num_baselines);
 
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess)
-    {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }

@@ -387,17 +387,10 @@ extern "C" const char *model_points(const Points *comps, const Addresses *a, con
                                                a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
                                                a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -413,17 +406,10 @@ extern "C" const char *model_gaussians(const Gaussians *comps, const Addresses *
                                                   d_beam_jones, a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs,
                                                   a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -439,17 +425,10 @@ extern "C" const char *model_shapelets(const Shapelets *comps, const Addresses *
         a->num_freqs, a->num_baselines, a->d_freqs, d_uvws, *comps, a->d_shapelet_basis_values, d_beam_jones,
         a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
-    gpuError_t error_id;
 #ifdef DEBUG
-    error_id = gpuDeviceSynchronize();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-    error_id = gpuGetLastError();
-    if (error_id != gpuSuccess) {
-        return gpuGetErrorString(error_id);
-    }
+        CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }

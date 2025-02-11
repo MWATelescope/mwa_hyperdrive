@@ -478,3 +478,12 @@ inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
     jc->j10 = temp.j10 * j2h.j00 + temp.j11 * j2h.j10;
     jc->j11 = temp.j10 * j2h.j01 + temp.j11 * j2h.j11;
 }
+
+
+#define CHECK_GPU_ERROR(call) do { \
+    gpuError_t error_id = call; \
+    if (error_id != gpuSuccess) { \
+        fprintf(stderr, "GPU Error: %s:%d, in function %s: %s\n", __FILE__, __LINE__, __func__, gpuGetErrorString(error_id)); \
+        return gpuGetErrorString(error_id); \
+    } \
+} while (0)
