@@ -165,7 +165,17 @@ jobs:
           run: |
             sudo apt update -y
             sudo apt install -y \
+              tzdata \
+              build-essential \
+              pkg-config \
+              cmake \
+              curl \
+              git \
+              lcov \
               libhdf5-dev \
+              libfreetype-dev \
+              libexpat1-dev \
+              libfontconfig-dev \
               ;
           env:
             DEBIAN_FRONTEND: noninteractive
