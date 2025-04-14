@@ -186,10 +186,10 @@ jobs:
             rm -rf cfitsio-3.49
 
         - name: Build on latest stable rust
-          run: cargo build --release --features examples
+          run: cargo build --release
 
         - name: Run tests on latest stable rust
-          run: cargo test --release --features examples
+          run: cargo test --release
 
         - uses: katyo/publish-crates@v2
           with:
