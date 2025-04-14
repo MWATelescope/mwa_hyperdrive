@@ -161,6 +161,15 @@ jobs:
           with:
             toolchain: stable
 
+        - name: Install dependencies
+          run: |
+            sudo apt update -y
+            sudo apt install -y \
+              libhdf5-dev \
+              ;
+          env:
+            DEBIAN_FRONTEND: noninteractive
+
         # We install cfitsio because when releasing to crates.io, it runs
         # the rust docs generation which fails if our code does any
         # writing. With feature cfitsio-static, it has to build cfitsio which
