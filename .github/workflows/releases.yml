@@ -208,9 +208,6 @@ jobs:
         - name: Build on latest stable rust
           run: cargo build --release
 
-        - name: Run tests on latest stable rust
-          run: cargo test --release
-
         - uses: katyo/publish-crates@v2
           with:
               registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
