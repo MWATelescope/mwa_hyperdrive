@@ -3,14 +3,19 @@
 # -> cpu-only, multiplatform with aoflagger
 # docker buildx build --platform=arm64,amd64 . \
 #   --build-arg=BASE_IMAGE=mwatelescope/birli:main \
-#   --build-arg=FEATURES=aoflagger
+#   --tag=mwatelescope/hyperdrive:cpu \
+#   --push
+# not implemented: --build-arg=FEATURES=aoflagger
 
 # -> cuda, V100 or A100
-# export CUDA_VER=11.4.3
+# export CUDA_VER=12.5.1
 # docker build . \
-#   --build-arg=BASE_IMAGE=nvidia/cuda:${CUDA_VER}-devel-ubuntu20.04 \
+#   --build-arg=BASE_IMAGE=nvidia/cuda:${CUDA_VER}-devel-ubuntu24.04 \
 #   --build-arg=FEATURES=cuda \
-#   --build-arg=CUDA_COMPUTE=70,80
+#   --build-arg=CUDA_COMPUTE=70,80 \
+#   --tag=mwatelescope/hyperdrive:cuda${CUDA_VER}-ubuntu24.04 --push
+# note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu20.04, python3.8 is too old for pyuvdata>6
+# note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu22.04, python3.10 is too old for mwax_mover
 
 # -> rocm, setonix MI250
 # export ROCM_VER=6.3.1
