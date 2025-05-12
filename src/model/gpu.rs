@@ -1315,8 +1315,8 @@ impl<'a> SkyModeller<'a> for SkyModellerGpu<'a> {
 
     fn model_timestep_autos_with(
         &self,
-        timestamp: Epoch,
-        vis_fb: ArrayViewMut2<Jones<f32>>,
+        _timestamp: Epoch,
+        _vis_fb: ArrayViewMut2<Jones<f32>>,
     ) -> Result<(), ModelError> {
         todo!()
     }

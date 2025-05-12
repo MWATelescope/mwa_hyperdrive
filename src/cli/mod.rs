@@ -251,10 +251,12 @@ impl Hyperdrive {
             Command::DipoleGains(args) => args.run()?,
             Command::Beam(args) => args.run()?,
 
+            // TODO:
             Command::SolutionsEnhance {
-                sols,
-                output_sols,
-                mut data_args,
+                // sols,
+                // output_sols,
+                // mut data_args,
+                ..
             } => {
                 // use marlu::Jones;
                 // use ndarray::prelude::*;

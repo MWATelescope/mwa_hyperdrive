@@ -487,3 +487,5 @@ inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
         return gpuGetErrorString(error_id); \
     } \
 } while (0)
+
+// I guess the last line can't be a macro?
