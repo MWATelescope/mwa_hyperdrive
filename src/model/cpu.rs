@@ -934,7 +934,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                             .zip($fds.outer_iter())
                             .zip(self.unflagged_fine_chan_freqs)
                             .enumerate()
-                            .for_each(|(i_freq, ((vis_model, comp_fds), freq))| {
+                            .for_each(|(i_freq, ((vis_model, comp_fds), _freq))| {
                                 // Access the beam-deduplicated-freq index.
                                 let i_freq = self.freq_map[i_freq];
                                 let tile_beam = $beam_responses.slice(s![i_tile, i_freq, ..]);
