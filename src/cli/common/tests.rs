@@ -90,7 +90,7 @@ fn skymodel_veto_parse_num() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -123,7 +123,7 @@ fn skymodel_veto_parse_named() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -160,7 +160,7 @@ fn skymodel_veto_parse_named_invert() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -197,7 +197,7 @@ fn skymodel_veto_parse_named_invert_missing_source() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -232,7 +232,7 @@ fn skymodel_veto_parse_named_and_num_sources() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -270,7 +270,7 @@ fn skymodel_veto_parse_named_and_num_sources_invert() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(
@@ -307,7 +307,7 @@ fn skymodel_veto_parse_named_and_num_sources_invert_all_sources() {
         no_beam: true,
         ..Default::default()
     }
-    .parse(128, None, None, None)
+    .parse(128, None, None, None, None)
     .expect("no problems setting up a NoBeam");
 
     let source_list = Some(

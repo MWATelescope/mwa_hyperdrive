@@ -479,7 +479,6 @@ inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
     jc->j11 = temp.j10 * j2h.j01 + temp.j11 * j2h.j11;
 }
 
-
 #define CHECK_GPU_ERROR(call) do { \
     gpuError_t error_id = call; \
     if (error_id != gpuSuccess) { \
