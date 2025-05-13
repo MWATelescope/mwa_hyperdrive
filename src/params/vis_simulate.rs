@@ -14,11 +14,10 @@ use crossbeam_channel::{bounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Itertools;
 use log::info;
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
-    Jones, LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
+    LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
 };
 use mwalib::MetafitsContext;
 use ndarray::ArcArray2;
@@ -95,6 +94,7 @@ impl VisSimulateParams {
                     output_files,
                     output_time_average_factor,
                     output_freq_average_factor,
+                    output_autos,
                     output_timeblocks,
                     write_smallest_contiguous_band,
                 },
@@ -152,12 +152,6 @@ impl VisSimulateParams {
                     defer_on_unwind! { error.store(true); }
                     model_progress.tick();
 
-                    let cross_vis_shape = (
-                        fine_chan_freqs.len(),
-                        tile_baseline_flags
-                            .unflagged_cross_baseline_to_tile_map
-                            .len(),
-                    );
                     let weight_factor = (freq_res_hz / FREQ_WEIGHT_FACTOR)
                         * (time_res.to_seconds() / TIME_WEIGHT_FACTOR);
                     let result = model_thread(
@@ -171,7 +165,7 @@ impl VisSimulateParams {
                         *array_position,
                         *dut1,
                         *apply_precession,
-                        cross_vis_shape,
+                        *output_autos,
                         weight_factor,
                         tx_model,
                         &error,
@@ -191,15 +185,17 @@ impl VisSimulateParams {
                     .spawn_scoped(scope, || {
                         defer_on_unwind! { error.store(true); }
                         write_progress.tick();
-
-                        // Form (sorted) unflagged baselines from our cross- and
-                        // auto-correlation baselines.
-                        let unflagged_baseline_tile_pairs = tile_baseline_flags
-                            .unflagged_cross_baseline_to_tile_map
-                            .values()
-                            .copied()
-                            .sorted()
-                            .collect::<Vec<_>>();
+                        // Form sorted unflagged tile pairs from our
+                        // cross-correlation baselines (and maybe autos too).
+                        let unflagged_baseline_tile_pairs: Vec<_> = if *output_autos {
+                            tile_baseline_flags
+                                .get_unflagged_baseline_tile_pairs()
+                                .collect()
+                        } else {
+                            tile_baseline_flags
+                                .get_unflagged_cross_baseline_tile_pairs()
+                                .collect()
+                        };
 
                         let spw = &channels_to_chanblocks(
                             &fine_chan_freqs.mapped_ref(|f| *f as u64),
@@ -264,7 +260,7 @@ fn model_thread(
     array_position: LatLngHeight,
     dut1: Duration,
     apply_precession: bool,
-    vis_shape: (usize, usize),
+    model_autos: bool,
     weight_factor: f64,
     tx: Sender<VisTimestep>,
     error: &AtomicCell<bool>,
@@ -284,10 +280,21 @@ fn model_thread(
         apply_precession,
     )?;
 
-    for &timestamp in timestamps {
-        let mut cross_data_fb: ArcArray2<Jones<f32>> = ArcArray2::zeros(vis_shape);
+    let num_tiles = unflagged_tile_xyzs.len();
+    let num_cross_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let cross_vis_shape = (fine_chan_freqs.len(), num_cross_baselines);
+    let auto_vis_shape = (fine_chan_freqs.len(), num_tiles);
 
+    for &timestamp in timestamps {
+        let mut cross_data_fb = ArcArray2::zeros(cross_vis_shape);
         modeller.model_timestep_with(timestamp, cross_data_fb.view_mut())?;
+        let auto_data_fb = if model_autos {
+            let mut auto_data_fb = ArcArray2::zeros(auto_vis_shape);
+            modeller.model_timestep_autos_with(timestamp, auto_data_fb.view_mut())?;
+            Some(auto_data_fb)
+        } else {
+            None
+        };
 
         // Should we continue?
         if error.load() {
@@ -296,15 +303,20 @@ fn model_thread(
 
         match tx.send(VisTimestep {
             cross_data_fb,
-            cross_weights_fb: ArcArray2::from_elem(vis_shape, weight_factor as f32),
-            autos: None,
+            cross_weights_fb: ArcArray2::from_elem(cross_vis_shape, weight_factor as f32),
+            autos: auto_data_fb.map(|d| {
+                (
+                    d,
+                    ArcArray2::from_elem(auto_vis_shape, weight_factor as f32),
+                )
+            }),
             timestamp,
         }) {
             Ok(()) => (),
-            // If we can't send the message, it's because the channel
-            // has been closed on the other side. That should only
-            // happen because the writer has exited due to error; in
-            // that case, just exit this thread.
+            // If we can't send the message, it's because the channel has been
+            // closed on the other side. That should only happen because the
+            // writer has exited due to error; in that case, just exit this
+            // thread.
             Err(_) => return Ok(()),
         }
 

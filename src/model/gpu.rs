@@ -1317,6 +1317,14 @@ impl<'a> SkyModeller<'a> for SkyModellerGpu<'a> {
     ) -> Result<(), ModelError> {
         self.update_source_list(source.components.iter(), phase_centre)
     }
+
+    fn model_timestep_autos_with(
+        &self,
+        _timestamp: Epoch,
+        _vis_fb: ArrayViewMut2<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        todo!()
+    }
 }
 
 /// The return type of [SkyModellerGpu::get_shapelet_uvs]. These arrays have
