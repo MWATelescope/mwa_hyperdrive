@@ -334,6 +334,7 @@ fn test_1090008640_di_calibrate_writes_solutions() {
         "--source-list", &srclist,
         "--outputs", &format!("{}", sols.display()),
         "--model-filenames", &format!("{}", cal_model.display()),
+        "--no-autos"
     ]);
 
     // Run di-cal and check that it succeeds
@@ -445,6 +446,7 @@ fn test_1090008640_calibrate_model_uvfits() {
         // The array position is needed because, if not specified, it's read
         // slightly different out of the uvfits.
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
+        "--output-no-autos"
     ]);
 
     // Run vis-simulate and check that it succeeds
@@ -463,6 +465,7 @@ fn test_1090008640_calibrate_model_uvfits() {
         "--model-filenames", &format!("{}", cal_model.display()),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
+        "--no-autos"
     ]);
 
     // Run di-cal and check that it succeeds
@@ -613,6 +616,7 @@ fn test_1090008640_calibrate_model_ms() {
             &format!("{long_deg}"),
             &format!("{lat_deg}"),
             &format!("{height_m}"),
+        "--output-no-autos"
     ]);
 
     // Run vis-simulate and check that it succeeds
@@ -632,6 +636,7 @@ fn test_1090008640_calibrate_model_ms() {
             &format!("{long_deg}"),
             &format!("{lat_deg}"),
             &format!("{height_m}"),
+        "--no-autos"
     ]);
 
     // Run di-cal and check that it succeeds
@@ -752,6 +757,7 @@ fn test_cal_timeblocks() {
         // The array position is needed because, if not specified, it's read
         // slightly different out of the uvfits.
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
+        "--output-no-autos"
     ]);
     sim_args.run(false).unwrap();
 
@@ -765,6 +771,7 @@ fn test_cal_timeblocks() {
         "--outputs", &format!("{}", sols_file.display()),
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
+        "--no-autos"
     ]);
     let sols = cal_args.run(false).unwrap().unwrap();
     let num_cal_timeblocks = sols.di_jones.len_of(Axis(0));
@@ -790,6 +797,7 @@ fn test_cal_timeblocks() {
         "--timesteps-per-timeblock", "2",
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
         "--array-position", "116.67081523611111", "-26.703319405555554", "377.827",
+        "--no-autos"
     ]);
     let sols = cal_args.run(false).unwrap().unwrap();
     let num_cal_timeblocks = sols.di_jones.len_of(Axis(0));
