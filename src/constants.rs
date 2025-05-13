@@ -19,10 +19,6 @@ pub(crate) const DEFAULT_VETO_THRESHOLD: f64 = 0.01;
 /// source lists \[degrees\].
 pub(crate) const ELEVATION_LIMIT: f64 = 0.0;
 
-/// Sources that are separated by more than this value from the phase centre are
-/// discarded from sky-model source lists \[degrees\].
-pub(crate) const DEFAULT_CUTOFF_DISTANCE: f64 = 50.0;
-
 // sqrt(pi^2 / (2 ln(2)))
 pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.6682231283184983;
 
