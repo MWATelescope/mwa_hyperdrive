@@ -336,6 +336,20 @@ pub(super) struct SkyModelWithVetoArgs {
 
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY MODEL")]
     pub(super) veto_threshold: Option<f64>,
+    /// Optional source names to include (or exclude if --invert).
+    /// Skips vetoing if provided, unless --invert is enabled.
+    #[clap(long, multiple_values(true), help_heading = "SKY MODEL SOURCES")]
+    pub(super) named_sources: Option<Vec<String>>,
+
+    /// Exclude the named sources from the source list.
+    /// Only used if named-sources is specified.
+    #[clap(
+        short,
+        long,
+        help_heading = "SKY MODEL SOURCES",
+        requires = "named-sources"
+    )]
+    pub(super) invert: Option<bool>,
 }
 
 impl SkyModelWithVetoArgs {
@@ -346,9 +360,15 @@ impl SkyModelWithVetoArgs {
             num_sources: self.num_sources.or(other.num_sources),
             source_dist_cutoff: self.source_dist_cutoff.or(other.source_dist_cutoff),
             veto_threshold: self.veto_threshold.or(other.veto_threshold),
+            named_sources: self.named_sources.or(other.named_sources),
+            invert: self.invert.or(other.invert),
         }
     }
 
+    /// Parse the source list with optional list of named sources to include,
+    /// and optional inversion before vetoing.
+    /// invert is ignored when named_sources is empty.
+    /// veto is skipped if named_sources is not empty and invert is false.
     pub(super) fn parse(
         self,
         phase_centre: RADec,
@@ -363,6 +383,8 @@ impl SkyModelWithVetoArgs {
             num_sources,
             source_dist_cutoff,
             veto_threshold,
+            named_sources,
+            invert,
         } = self;
 
         let mut printer = InfoPrinter::new("Sky model info".into());
@@ -387,7 +409,7 @@ impl SkyModelWithVetoArgs {
         // kinds.
         let sl_type_not_specified = source_list_type.is_none();
         let sl_type = source_list_type.and_then(|t| SourceListType::from_str(t.as_ref()).ok());
-        let (mut sl, sl_type) = read_source_list_file(sl_pb, sl_type)?;
+        let (sl, sl_type) = read_source_list_file(sl_pb, sl_type)?;
 
         let ComponentCounts {
             num_points,
@@ -413,19 +435,79 @@ impl SkyModelWithVetoArgs {
         if num_sources == Some(0) || sl.is_empty() {
             return Err(ReadSourceListError::NoSources);
         }
-        veto_sources(
-            &mut sl,
-            phase_centre,
-            lst_rad,
-            array_latitude_rad,
-            veto_freqs_hz,
-            beam,
-            num_sources,
-            source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
-            veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
-        )?;
+
+        let num_sources_full = sl.len();
+
+        // validate named_sources
+        let named_sources = named_sources.unwrap_or_default();
+        for name in &named_sources {
+            if !sl.contains_key(name) {
+                return Err(ReadSourceListError::MissingNamedSource {
+                    name: name.to_string().into(),
+                });
+            }
+        }
+
+        let invert = invert.unwrap_or(false);
+        // filter with named_sources and invert
+        let (mut sl, veto) = match (named_sources, invert) {
+            (names, _) if names.is_empty() => (sl, true),
+            (names, true) => {
+                // Keep only the sources that are not in the list and then veto.
+                let sl = sl
+                    .into_iter()
+                    .filter(|(name, _)| !names.contains(name))
+                    .collect();
+                (sl, true)
+            }
+            (names, false) => {
+                // Do not veto the named sources.
+                let sl: SourceList = sl
+                    .into_iter()
+                    .filter(|(name, _)| names.contains(name))
+                    .collect();
+                if let Some(num_sources) = num_sources {
+                    if num_sources != sl.len() {
+                        return Err(ReadSourceListError::NamedSourcesAndNumSources {
+                            num_sources,
+                            named_sources: names.len(),
+                        });
+                    }
+                }
+                (sl, false)
+            }
+        };
         if sl.is_empty() {
-            return Err(ReadSourceListError::NoSourcesAfterVeto);
+            return Err(ReadSourceListError::AllSourcesFiltered { invert });
+        }
+        if num_sources_full != sl.len() {
+            printer.push_line(
+                format!(
+                    "Filtered {} named sources, invert={}",
+                    num_sources_full - sl.len(),
+                    invert
+                )
+                .into(),
+            );
+        }
+
+        if veto {
+            veto_sources(
+                &mut sl,
+                phase_centre,
+                lst_rad,
+                array_latitude_rad,
+                veto_freqs_hz,
+                beam,
+                num_sources,
+                source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
+                veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
+            )?;
+            if sl.is_empty() {
+                return Err(ReadSourceListError::NoSourcesAfterVeto);
+            }
+        } else {
+            printer.push_line("Skipping veto after named source filter".into());
         }
 
         {

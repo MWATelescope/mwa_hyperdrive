@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::{borrow::Cow, path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use clap::Parser;
 use log::{debug, info, trace};
@@ -14,14 +14,9 @@ use super::common::{
     ARG_FILE_HELP,
 };
 use crate::{
-    cli::common::InfoPrinter,
-    constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
-    io::{get_single_match_from_glob, write::VIS_OUTPUT_EXTENSIONS},
+    io::write::VIS_OUTPUT_EXTENSIONS,
     params::{ModellingParams, VisSubtractParams},
-    srclist::{
-        read::read_source_list_file, veto_sources, ComponentCounts, ReadSourceListError,
-        SourceList, SourceListType,
-    },
+    srclist::SourceList,
     HyperdriveError,
 };
 
@@ -34,17 +29,6 @@ lazy_static::lazy_static! {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 struct VisSubtractCliArgs {
-    /// Invert the subtraction; sources *not* specified in sources-to-subtract
-    /// will be subtracted from the input data.
-    #[clap(short, long, help_heading = "SKY-MODEL SOURCES")]
-    #[serde(default)]
-    invert: bool,
-
-    /// The names of the sources in the sky-model source list that will be
-    /// subtracted from the input data.
-    #[clap(long, multiple_values(true), help_heading = "SKY-MODEL SOURCES")]
-    sources_to_subtract: Option<Vec<String>>,
-
     #[clap(
         short = 'o',
         long,
@@ -169,8 +153,6 @@ impl VisSubtractArgs {
             beam_args,
             vis_subtract_args:
                 VisSubtractCliArgs {
-                    invert,
-                    sources_to_subtract,
                     outputs,
                     output_vis_time_average,
                     output_vis_freq_average,
@@ -213,126 +195,14 @@ impl VisSubtractArgs {
             (precession_info.lmst, latitude_rad)
         };
 
-        // If we're not inverted but `sources_to_subtract` is empty, then there's
-        // nothing to do.
-        let sources_to_subtract = sources_to_subtract.unwrap_or_default();
-        if !invert && sources_to_subtract.is_empty() {
-            return Err(VisSubtractArgsError::NoSources.into());
-        }
-
-        // Read in the source list and remove all but the specified sources. We
-        // have to parse the arguments manually as we're doing custom stuff here
-        // in vis-subtract.
-        let SkyModelWithVetoArgs {
-            source_list,
-            source_list_type,
-            num_sources,
-            source_dist_cutoff,
-            veto_threshold,
-        } = srclist_args;
-
-        let source_list: SourceList = {
-            let source_list = source_list.ok_or(ReadSourceListError::NoSourceList)?;
-            // If the specified source list file can't be found, treat it as a glob
-            // and expand it to find a match.
-            let pb = PathBuf::from(&source_list);
-            let pb = if pb.exists() {
-                pb
-            } else {
-                get_single_match_from_glob(&source_list)
-                    .map_err(|e| HyperdriveError::Generic(e.to_string()))?
-            };
-
-            // Read the source list file. If the type was manually specified,
-            // use that, otherwise the reading code will try all available
-            // kinds.
-            let sl_type_not_specified = source_list_type.is_none();
-            let sl_type = source_list_type
-                .as_ref()
-                .and_then(|t| SourceListType::from_str(t.as_ref()).ok());
-            let (sl, sl_type) = read_source_list_file(pb, sl_type)?;
-
-            // If the user didn't specify the source list type, then print out
-            // what we found.
-            if sl_type_not_specified {
-                trace!("Successfully parsed {}-style source list", sl_type);
-            }
-            if num_sources == Some(0) || sl.is_empty() {
-                return Err(ReadSourceListError::NoSources.into());
-            }
-            sl
-        };
-        debug!("Found {} sources in the source list", source_list.len());
-        let ComponentCounts {
-            num_points,
-            num_gaussians,
-            num_shapelets,
-            ..
-        } = source_list.get_counts();
-        let mut sl_printer = InfoPrinter::new("Sky model info".into());
-        sl_printer.push_block(vec![
-            format!("Source list contains {} sources", source_list.len()).into(),
-            format!("({} components, {num_points} points, {num_gaussians} Gaussians, {num_shapelets} shapelets)", num_points + num_gaussians + num_shapelets).into()
-        ]);
-
-        // Ensure that all specified sources are actually in the source list.
-        for name in &sources_to_subtract {
-            if !source_list.contains_key(name) {
-                return Err(HyperdriveError::from(VisSubtractArgsError::MissingSource {
-                    name: name.to_string().into(),
-                }));
-            }
-        }
-        // Handle the invert option.
-        let source_list: SourceList = if invert {
-            let mut sl: SourceList = source_list
-                .into_iter()
-                .filter(|(name, _)| !sources_to_subtract.contains(name))
-                .collect();
-            if sl.is_empty() {
-                // Nothing to do.
-                return Err(VisSubtractArgsError::AllSourcesFiltered.into());
-            }
-            veto_sources(
-                &mut sl,
-                obs_context.phase_centre,
-                lmst,
-                latitude,
-                &obs_context.get_veto_freqs(),
-                &*beam,
-                num_sources,
-                source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
-                veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
-            )?;
-            if sl.is_empty() {
-                return Err(ReadSourceListError::NoSourcesAfterVeto.into());
-            }
-            sl
-        } else {
-            source_list
-                .into_iter()
-                .filter(|(name, _)| sources_to_subtract.contains(name))
-                .collect()
-        };
-        let ComponentCounts {
-            num_points,
-            num_gaussians,
-            num_shapelets,
-            num_power_laws: _,
-            num_curved_power_laws: _,
-            num_lists: _,
-        } = source_list.get_counts();
-        sl_printer.push_block(vec![
-            format!(
-                "Subtracting {} sources with a total of {} components",
-                source_list.len(),
-                num_points + num_gaussians + num_shapelets
-            )
-            .into(),
-            format!("{num_points} points, {num_gaussians} Gaussians, {num_shapelets} shapelets")
-                .into(),
-        ]);
-        sl_printer.display();
+        // Read in the source list and remove all but the specified sources.
+        let source_list: SourceList = srclist_args.parse(
+            obs_context.phase_centre,
+            lmst,
+            latitude,
+            &obs_context.get_veto_freqs(),
+            &*beam,
+        )?;
 
         let output_vis_params = OutputVisArgs {
             outputs,
@@ -374,23 +244,9 @@ impl VisSubtractArgs {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub(super) enum VisSubtractArgsError {
-    #[error("Specified source {name} is not in the input source list; can't subtract it")]
-    MissingSource { name: Cow<'static, str> },
-
-    #[error("No sources were specified for subtraction. Did you want to subtract all sources? See the \"invert\" option.")]
-    NoSources,
-
-    #[error("No sources were left after removing specified sources from the source list.")]
-    AllSourcesFiltered,
-}
-
 impl VisSubtractCliArgs {
     fn merge(self, other: Self) -> Self {
         Self {
-            invert: self.invert || other.invert,
-            sources_to_subtract: self.sources_to_subtract.or(other.sources_to_subtract),
             outputs: self.outputs.or(other.outputs),
             output_vis_time_average: self
                 .output_vis_time_average

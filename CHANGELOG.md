@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-05-13
+
+### Changed
+
+- cli args `--sources-to-subtract` and `--invert` from vis-subtract are now
+  included in all source list reading commands, behaviour is slighly different:
+    - `--sources-to-subtract` renamed to `--named-sources`
+    - `--invert` now requires `--named-sources` to be present
+
+### Fixed
+
+- [#29](https://github.com/MWATelescope/mwa_hyperdrive/issues/29) confusing syntax
+  around named source filtering and inversion.
+
 ## [0.5.1] - 2025-04-11
 
 ### Changed

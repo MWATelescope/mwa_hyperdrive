@@ -15,7 +15,6 @@ use super::{
     srclist::SrclistByBeamError,
     vis_convert::VisConvertArgsError,
     vis_simulate::VisSimulateArgsError,
-    vis_subtract::VisSubtractArgsError,
 };
 use crate::{
     beam::BeamError,
@@ -284,17 +283,6 @@ impl From<VisSimulateError> for HyperdriveError {
             VisSimulateError::VisWrite(e) => Self::from(e),
             VisSimulateError::Model(e) => Self::from(e),
             VisSimulateError::IO(e) => Self::from(e),
-        }
-    }
-}
-
-impl From<VisSubtractArgsError> for HyperdriveError {
-    fn from(e: VisSubtractArgsError) -> Self {
-        let s = e.to_string();
-        match e {
-            VisSubtractArgsError::MissingSource { .. }
-            | VisSubtractArgsError::NoSources
-            | VisSubtractArgsError::AllSourcesFiltered => Self::VisSubtract(s),
         }
     }
 }
