@@ -1538,11 +1538,14 @@ enum PeelType {
     Gpu,
 }
 
+// some cpu-only tests are very expensive, this halves the test time
+const CPU_TILE_LIMIT: usize = 80;
+
 /// Test a peel function with and without precession on a single source
 #[track_caller]
 fn test_peel_single_source(peel_type: PeelType) {
     // modify obs_context so that timesteps are closer together
-    let obs_context = get_phase1_obs_context(128);
+    let obs_context = get_phase1_obs_context(CPU_TILE_LIMIT);
     // let obs_context = get_simple_obs_context(TILE_SPACING);
 
     let array_pos = obs_context.array_position;
@@ -1818,7 +1821,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
     // builder.filter_level(log::LevelFilter::Debug);
     // builder.init();
 
-    let obs_context = get_phase1_obs_context(128);
+    let obs_context = get_phase1_obs_context(CPU_TILE_LIMIT);
 
     let array_pos = obs_context.array_position;
     let num_tiles = obs_context.get_total_num_tiles();
