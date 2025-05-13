@@ -37,9 +37,7 @@ use crate::{
         AverageFactorError,
     },
     beam::Beam,
-    constants::{
-        DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG,
-    },
+    constants::{DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     io::{
         get_single_match_from_glob,
         write::{can_write_to_file, VisOutputType, VIS_OUTPUT_EXTENSIONS},
@@ -64,9 +62,6 @@ lazy_static::lazy_static! {
 
     pub(super) static ref SOURCE_LIST_TYPE_HELP: String =
         format!("The type of sky-model source list. Valid types are: {}. If not specified, all types are attempted", *SOURCE_LIST_TYPES_COMMA_SEPARATED);
-
-    pub(super) static ref SOURCE_DIST_CUTOFF_HELP: String =
-        format!("Specifies the maximum distance from the phase centre a source can be [degrees]. Default: {DEFAULT_CUTOFF_DISTANCE}");
 
     pub(super) static ref VETO_THRESHOLD_HELP: String =
         format!("Specifies the minimum Stokes XX+YY a source must have before it gets vetoed [Jy]. Default: {DEFAULT_VETO_THRESHOLD}");
@@ -331,7 +326,8 @@ pub(super) struct SkyModelWithVetoArgs {
     #[clap(short, long, help_heading = "SKY MODEL")]
     pub(super) num_sources: Option<usize>,
 
-    #[clap(long, help = SOURCE_DIST_CUTOFF_HELP.as_str(), help_heading = "SKY MODEL")]
+    /// Specifies the maximum distance from the phase centre a source can be [degrees].
+    #[clap(long, help_heading = "SKY MODEL")]
     pub(super) source_dist_cutoff: Option<f64>,
 
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY MODEL")]
@@ -500,7 +496,7 @@ impl SkyModelWithVetoArgs {
                 veto_freqs_hz,
                 beam,
                 num_sources,
-                source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
+                source_dist_cutoff.unwrap_or(f64::MAX),
                 veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
             )?;
             if sl.is_empty() {

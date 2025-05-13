@@ -21,10 +21,10 @@ use marlu::{LatLngHeight, RADec};
 use crate::{
     beam::Delays,
     cli::common::{
-        display_warnings, BeamArgs, Warn, ARRAY_POSITION_HELP, SOURCE_DIST_CUTOFF_HELP,
-        SOURCE_LIST_INPUT_TYPE_HELP, SOURCE_LIST_OUTPUT_TYPE_HELP, VETO_THRESHOLD_HELP,
+        display_warnings, BeamArgs, Warn, ARRAY_POSITION_HELP, SOURCE_LIST_INPUT_TYPE_HELP,
+        SOURCE_LIST_OUTPUT_TYPE_HELP, VETO_THRESHOLD_HELP,
     },
-    constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
+    constants::DEFAULT_VETO_THRESHOLD,
     metafits::get_dipole_delays,
     srclist::{
         read::read_source_list_file, veto_sources, write_source_list, ReadSourceListError,
@@ -114,7 +114,8 @@ pub struct SrclistByBeamArgs {
     #[clap(short = 'n', long, help_heading = "SOURCE FILTERING")]
     number: usize,
 
-    #[clap(long, help = SOURCE_DIST_CUTOFF_HELP.as_str(), help_heading = "SOURCE FILTERING")]
+    /// The maximum distance from the phase centre a source can be [degrees].
+    #[clap(long, help_heading = "SOURCE FILTERING")]
     source_dist_cutoff: Option<f64>,
 
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SOURCE FILTERING")]
@@ -356,7 +357,7 @@ fn by_beam(
         &metadata.freqs_hz,
         &*beam,
         None,
-        source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
+        source_dist_cutoff.unwrap_or(f64::MAX),
         veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
     )?;
     // Were any sources left after vetoing?

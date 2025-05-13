@@ -14,11 +14,14 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   included in all source list reading commands, behaviour is slighly different:
     - `--sources-to-subtract` renamed to `--named-sources`
     - `--invert` now requires `--named-sources` to be present
+- remove default `--source-dist-cutoff`.
 
 ### Fixed
 
 - [#29](https://github.com/MWATelescope/mwa_hyperdrive/issues/29) confusing syntax
   around named source filtering and inversion.
+- [#47](https://github.com/MWATelescope/mwa_hyperdrive/issues/47) `--source-dist-cutoff`
+  was too small, default removed.
 
 ## [0.5.1] - 2025-04-11
 
