@@ -7,6 +7,9 @@
 // TODO: Utilise tile flags.
 // TODO: Allow the user to specify the mwa_version for the metafits file.
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
