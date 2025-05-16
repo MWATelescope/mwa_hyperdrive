@@ -536,12 +536,7 @@ fn model_thread(
         match tx.send(VisTimestep {
             cross_data_fb: vis_model_fb.to_shared(),
             cross_weights_fb: ArcArray::from_elem(vis_model_fb.dim(), weight_factor),
-            autos: auto_data_fb.map(|d| {
-                (
-                    d,
-                    ArcArray2::from_elem(auto_vis_shape, weight_factor as f32),
-                )
-            }),
+            autos: auto_data_fb.map(|d| (d, ArcArray2::from_elem(auto_vis_shape, weight_factor))),
             timestamp,
         }) {
             Ok(()) => (),
