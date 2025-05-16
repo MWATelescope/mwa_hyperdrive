@@ -16,6 +16,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - deleted unused `io::read::uvfits::error::FitsError` type
 
+### Changed
+
+- vis-simulate now supports auto-correlations by default, use `--output-no-autos`
+  to disable
+- VisRead trait generalizes `read_{crosses,autos,crosses_and_autos}` with `read_inner_dispatch`
+
 ## [0.6.1] - 2025-07-29
 
 ### Fixed

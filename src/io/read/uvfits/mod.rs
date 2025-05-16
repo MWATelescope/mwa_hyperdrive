@@ -1044,103 +1044,30 @@ impl VisRead for UvfitsReader {
 
     fn set_raw_data_corrections(&mut self, _: RawDataCorrections) {}
 
-    fn read_crosses_and_autos(
+    fn read_inner_dispatch(
         &self,
-        cross_vis_fb: ArrayViewMut2<Jones<f32>>,
-        cross_weights_fb: ArrayViewMut2<f32>,
-        auto_vis_fb: ArrayViewMut2<Jones<f32>>,
-        auto_weights_fb: ArrayViewMut2<f32>,
+        cross_data: Option<CrossData>,
+        auto_data: Option<AutoData>,
         timestep: usize,
-        tile_baseline_flags: &TileBaselineFlags,
         flagged_fine_chans: &HashSet<u16>,
     ) -> Result<(), VisReadError> {
-        let cross_data = Some(CrossData {
-            vis_fb: cross_vis_fb,
-            weights_fb: cross_weights_fb,
-            tile_baseline_flags,
-        });
-        let auto_data = Some(AutoData {
-            vis_fb: auto_vis_fb,
-            weights_fb: auto_weights_fb,
-            tile_baseline_flags,
-        });
-
-        match (
-            self.metadata.pols.num_pols(),
-            self.metadata.num_floats_per_pol,
-        ) {
-            (4, 3) => self.read_inner::<4, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
-            (3, 3) => self.read_inner::<3, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
-            (2, 3) => self.read_inner::<2, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
-            (1, 3) => self.read_inner::<1, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
-            (4, 2) => self.read_inner::<4, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
-            (3, 2) => self.read_inner::<3, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
-            (2, 2) => self.read_inner::<2, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+        let num_pols = self.metadata.pols.num_pols();
+        let num_floats = self.metadata.num_floats_per_pol;
+        match (num_pols, num_floats) {
             (1, 2) => self.read_inner::<1, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (1, 3) => self.read_inner::<1, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (2, 2) => self.read_inner::<2, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (2, 3) => self.read_inner::<2, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (3, 2) => self.read_inner::<3, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (3, 3) => self.read_inner::<3, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (4, 2) => self.read_inner::<4, 2>(cross_data, auto_data, timestep, flagged_fine_chans),
+            (4, 3) => self.read_inner::<4, 3>(cross_data, auto_data, timestep, flagged_fine_chans),
             _ => {
-                unimplemented!("uvfits num pols must be 1-4 and num floats per pol must be 2 or 3")
-            }
-        }
-    }
-
-    fn read_crosses(
-        &self,
-        vis_fb: ArrayViewMut2<Jones<f32>>,
-        weights_fb: ArrayViewMut2<f32>,
-        timestep: usize,
-        tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<u16>,
-    ) -> Result<(), VisReadError> {
-        let cross_data = Some(CrossData {
-            vis_fb,
-            weights_fb,
-            tile_baseline_flags,
-        });
-        match (
-            self.metadata.pols.num_pols(),
-            self.metadata.num_floats_per_pol,
-        ) {
-            (4, 3) => self.read_inner::<4, 3>(cross_data, None, timestep, flagged_fine_chans),
-            (3, 3) => self.read_inner::<3, 3>(cross_data, None, timestep, flagged_fine_chans),
-            (2, 3) => self.read_inner::<2, 3>(cross_data, None, timestep, flagged_fine_chans),
-            (1, 3) => self.read_inner::<1, 3>(cross_data, None, timestep, flagged_fine_chans),
-            (4, 2) => self.read_inner::<4, 2>(cross_data, None, timestep, flagged_fine_chans),
-            (3, 2) => self.read_inner::<3, 2>(cross_data, None, timestep, flagged_fine_chans),
-            (2, 2) => self.read_inner::<2, 2>(cross_data, None, timestep, flagged_fine_chans),
-            (1, 2) => self.read_inner::<1, 2>(cross_data, None, timestep, flagged_fine_chans),
-            _ => {
-                unimplemented!("uvfits num pols must be 1-4 and num floats per pol must be 2 or 3")
-            }
-        }
-    }
-
-    fn read_autos(
-        &self,
-        vis_fb: ArrayViewMut2<Jones<f32>>,
-        weights_fb: ArrayViewMut2<f32>,
-        timestep: usize,
-        tile_baseline_flags: &TileBaselineFlags,
-        flagged_fine_chans: &HashSet<u16>,
-    ) -> Result<(), VisReadError> {
-        let auto_data = Some(AutoData {
-            vis_fb,
-            weights_fb,
-            tile_baseline_flags,
-        });
-        match (
-            self.metadata.pols.num_pols(),
-            self.metadata.num_floats_per_pol,
-        ) {
-            (4, 3) => self.read_inner::<4, 3>(None, auto_data, timestep, flagged_fine_chans),
-            (3, 3) => self.read_inner::<3, 3>(None, auto_data, timestep, flagged_fine_chans),
-            (2, 3) => self.read_inner::<2, 3>(None, auto_data, timestep, flagged_fine_chans),
-            (1, 3) => self.read_inner::<1, 3>(None, auto_data, timestep, flagged_fine_chans),
-            (4, 2) => self.read_inner::<4, 2>(None, auto_data, timestep, flagged_fine_chans),
-            (3, 2) => self.read_inner::<3, 2>(None, auto_data, timestep, flagged_fine_chans),
-            (2, 2) => self.read_inner::<2, 2>(None, auto_data, timestep, flagged_fine_chans),
-            (1, 2) => self.read_inner::<1, 2>(None, auto_data, timestep, flagged_fine_chans),
-            _ => {
-                unimplemented!("uvfits num pols must be 1-4 and num floats per pol must be 2 or 3")
+                unimplemented!(
+                    "uvfits num pols ({}) must be 1-4 and num floats per pol ({}) must be 2 or 3",
+                    num_pols,
+                    num_floats
+                )
             }
         }
     }
