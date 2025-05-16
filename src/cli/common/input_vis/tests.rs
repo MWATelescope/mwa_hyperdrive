@@ -657,7 +657,6 @@ fn sparse_timeblocks_with_averaging() {
         output_vis_time_average: None,
         output_vis_freq_average: None,
         output_autos: false,
-        ..Default::default()
     }
     .parse(
         params.time_res,

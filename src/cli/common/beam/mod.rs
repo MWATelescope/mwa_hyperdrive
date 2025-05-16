@@ -122,7 +122,7 @@ impl BeamArgs {
                         for (i, row) in d.outer_iter().enumerate() {
                             if let Some(last_row) = last_row {
                                 if row == last_row {
-                                    continue
+                                    continue;
                                 }
                             }
                             trace!("{i:03} {row}");
@@ -189,7 +189,7 @@ impl BeamArgs {
                     for (i, row) in dipole_gains.outer_iter().enumerate() {
                         if let Some(last_row) = last_row {
                             if row == last_row {
-                                continue
+                                continue;
                             }
                         }
                         trace!("{i:03} {row}");
