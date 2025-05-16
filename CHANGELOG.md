@@ -8,6 +8,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.6.0] - 2025-07-28
 
+### Added
+
+- auto-correlation visibility simulation and writing support
+
 ### Changed
 
 - add oversampled pfb gains from birli 0.18, these are not the default! For phase3 data, use `--pfb-flavour jake_oversampled`
