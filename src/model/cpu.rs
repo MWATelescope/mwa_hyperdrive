@@ -766,27 +766,17 @@ impl<'a> SkyModellerCpu<'a> {
 }
 
 impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
+    // TODO: this impl could be moved into the trait
     fn model_timestep(
         &self,
         timestamp: Epoch,
     ) -> Result<(Array2<Jones<f32>>, Vec<UVW>), ModelError> {
-        let (lst, uvws, latitude) = self.get_lst_uvws_latitude(timestamp);
-        let shapelet_uvws = self
-            .components
-            .shapelets
-            .get_shapelet_uvws(lst, self.unflagged_tile_xyzs);
-        let mut vis_fb = Array2::default((self.unflagged_fine_chan_freqs.len(), uvws.len()));
-
-        self.model_points(vis_fb.view_mut(), &uvws, lst, latitude)?;
-        self.model_gaussians(vis_fb.view_mut(), &uvws, lst, latitude)?;
-        self.model_shapelets(
-            vis_fb.view_mut(),
-            &uvws,
-            shapelet_uvws.view(),
-            lst,
-            latitude,
-        )?;
-
+        let num_cross_baselines = self
+            .tile_baseline_flags
+            .unflagged_cross_baseline_to_tile_map
+            .len();
+        let mut vis_fb = Array2::zeros((self.unflagged_fine_chan_freqs.len(), num_cross_baselines));
+        let uvws = self.model_timestep_with(timestamp, vis_fb.view_mut())?;
         Ok((vis_fb, uvws))
     }
 
@@ -916,12 +906,18 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         model!(fds, beam_responses);
         // Gaussians.
         let fds = &self.components.gaussians.flux_densities;
-        let azels = &self.components.points.get_azels_mwa_parallel(lst, latitude);
+        let azels = &self
+            .components
+            .gaussians
+            .get_azels_mwa_parallel(lst, latitude);
         let beam_responses = self.get_beam_responses(azels, latitude)?;
         model!(fds, beam_responses);
         // Shapelets sources.
         let fds = &self.components.shapelets.flux_densities;
-        let azels = &self.components.points.get_azels_mwa_parallel(lst, latitude);
+        let azels = &self
+            .components
+            .shapelets
+            .get_azels_mwa_parallel(lst, latitude);
         let beam_responses = self.get_beam_responses(azels, latitude)?;
         model!(fds, beam_responses);
 
