@@ -8,6 +8,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.6.0] - 2025-05-13
 
+### Added
+
+- auto-correlation visibility simulation and writing support
+
 ### Changed
 
 - cli args `--sources-to-subtract` and `--invert` from vis-subtract are now
