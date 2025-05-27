@@ -37,7 +37,6 @@ use crate::{
     cli::Warn,
     context::ObsContext,
     flagging::{MwafFlags, MwafProducer},
-    math::TileBaselineFlags,
     metafits,
 };
 
