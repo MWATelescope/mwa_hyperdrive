@@ -189,18 +189,23 @@ impl<'a> SkyModellerCpu<'a> {
         azels: &[AzEl],
         array_latitude_rad: f64,
     ) -> Result<Array3<Jones<f64>>, BeamError> {
-        if matches!(self.beam.get_beam_type(), BeamType::None) {
-            return Ok(Array3::from_elem(
-                (1, self.unflagged_fine_chan_freqs.len(), azels.len()),
-                Jones::identity(),
-            ));
-        }
-
-        let mut beam_responses = Array3::zeros((
+        let shape = (
             self.unique_tiles.len(),
             self.unique_freqs.len(),
             azels.len(),
-        ));
+        );
+
+        if matches!(self.beam.get_beam_type(), BeamType::None) {
+            return Ok(Array3::from_elem(shape, Jones::identity()));
+        }
+
+        let mut beam_responses = Array3::zeros(shape);
+
+        if azels.is_empty() || self.unique_tiles.is_empty() || self.unique_freqs.is_empty() {
+            // Return an empty array to avoid chunk size zero panics
+            return Ok(beam_responses);
+        }
+
         // The variables are a bit confusing here. `i_tile` is the outer-most
         // index into `beam_responses`, and `i_unique_tile` is the index to feed
         // into the beam calculations.
@@ -827,11 +832,11 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         mut vis_model_fb: ArrayViewMut2<Jones<f32>>,
     ) -> Result<(), ModelError> {
         assert_eq!(
-                        vis_model_fb.len_of(Axis(1)),
+            vis_model_fb.len_of(Axis(1)),
             self.tile_baseline_flags
-            .tile_to_unflagged_auto_index_map
+                .tile_to_unflagged_auto_index_map
                 .len(),
-                "vis_fb.len_of(Axis(1)) != self.tile_baseline_flags.tile_to_unflagged_auto_index_map.len()"
+            "vis_fb.len_of(Axis(1)) != self.tile_baseline_flags.tile_to_unflagged_auto_index_map.len()"
         );
 
         let (lst, latitude) = if self.precess {
@@ -843,7 +848,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
                 self.dut1,
             );
             debug!(
-                "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
+                "Modelling autos for GPS timestamp {}, LMST {}°, J2000 LMST {}°",
                 timestamp.to_gpst_seconds(),
                 precession_info.lmst.to_degrees(),
                 precession_info.lmst_j2000.to_degrees()
@@ -855,7 +860,7 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         } else {
             let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
             debug!(
-                "Modelling GPS timestamp {}, LMST {}°",
+                "Modelling autos for GPS timestamp {}, LMST {}°",
                 timestamp.to_gpst_seconds(),
                 lst.to_degrees()
             );
@@ -900,26 +905,32 @@ impl<'a> super::SkyModeller<'a> for SkyModellerCpu<'a> {
         }
 
         // Point sources.
-        let fds = &self.components.points.flux_densities;
-        let azels = &self.components.points.get_azels_mwa_parallel(lst, latitude);
-        let beam_responses = self.get_beam_responses(azels, latitude)?;
-        model!(fds, beam_responses);
+        if !self.components.points.radecs.is_empty() {
+            let fds = &self.components.points.flux_densities;
+            let azels = &self.components.points.get_azels_mwa_parallel(lst, latitude);
+            let beam_responses = self.get_beam_responses(azels, latitude)?;
+            model!(fds, beam_responses);
+        }
         // Gaussians.
-        let fds = &self.components.gaussians.flux_densities;
-        let azels = &self
-            .components
-            .gaussians
-            .get_azels_mwa_parallel(lst, latitude);
-        let beam_responses = self.get_beam_responses(azels, latitude)?;
-        model!(fds, beam_responses);
+        if !self.components.gaussians.flux_densities.is_empty() {
+            let fds = &self.components.gaussians.flux_densities;
+            let azels = &self
+                .components
+                .gaussians
+                .get_azels_mwa_parallel(lst, latitude);
+            let beam_responses = self.get_beam_responses(azels, latitude)?;
+            model!(fds, beam_responses);
+        }
         // Shapelets sources.
-        let fds = &self.components.shapelets.flux_densities;
-        let azels = &self
-            .components
-            .shapelets
-            .get_azels_mwa_parallel(lst, latitude);
-        let beam_responses = self.get_beam_responses(azels, latitude)?;
-        model!(fds, beam_responses);
+        if !self.components.shapelets.flux_densities.is_empty() {
+            let fds = &self.components.shapelets.flux_densities;
+            let azels = &self
+                .components
+                .shapelets
+                .get_azels_mwa_parallel(lst, latitude);
+            let beam_responses = self.get_beam_responses(azels, latitude)?;
+            model!(fds, beam_responses);
+        }
 
         Ok(())
     }
