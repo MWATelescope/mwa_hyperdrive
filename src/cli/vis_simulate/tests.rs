@@ -14,8 +14,6 @@ use mwalib::{MetafitsContext, Pol};
 use serial_test::serial;
 use tempfile::TempDir;
 
-#[cfg(all(feature = "cuda", not(feature = "gpu-single")))]
-use crate::cli::{common::BeamArgs, common::SkyModelWithVetoArgs, VisSimulateCliArgs};
 use crate::{
     cli::vis_simulate::VisSimulateArgs,
     io::read::fits::{fits_get_col, fits_get_required_key, fits_open, fits_open_hdu},
@@ -110,9 +108,9 @@ fn test_1090008640_vis_simulate_autos() {
     let num_timesteps = 2;
     let num_chans = 2;
 
-    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let output_path = temp_dir.path().join("model.uvfits");
     for use_autos in [true, false] {
+        let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+        let output_path = temp_dir.path().join("model.uvfits");
         let sim_args =
             get_reduced_1090008640(false, use_autos, num_chans, num_timesteps, &output_path);
         let metafits = sim_args.simulate_args.metafits.as_ref().unwrap().clone();
@@ -200,9 +198,10 @@ fn test_1090008640_vis_simulate_autos() {
             assert_abs_diff_eq!(tile_pos.y, metafits_tile_pos.y);
             assert_abs_diff_eq!(tile_pos.z, metafits_tile_pos.z);
         }
+        drop(hdu1);
 
         // Test visibility values.
-        fits_open_hdu(&mut uvfits, 0).unwrap();
+        let hdu0 = fits_open_hdu(&mut uvfits, 0).unwrap();
         let mut group_params = vec![0.0; pcount];
         let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
         let mut status = 0;
@@ -284,6 +283,8 @@ fn test_1090008640_vis_simulate_autos() {
             );
             assert_eq!(status, 0, "Status wasn't 0");
         };
+        drop(hdu0);
+        drop(uvfits);
 
         let (a1, a2) = decode_uvfits_baseline(group_params[3] as usize);
         if use_autos {
@@ -316,7 +317,7 @@ fn test_1090008640_vis_simulate_autos() {
 // exactly the same.
 #[test]
 #[serial]
-#[cfg(all(feature = "cuda", not(feature = "gpu-single")))]
+#[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))]
 fn test_1090008640_vis_simulate_cpu_gpu_match() {
     use ndarray::prelude::*;
 
@@ -326,13 +327,13 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let output_path = temp_dir.path().join("model.uvfits");
     let args = get_reduced_1090008640(false, false, num_chans, num_timesteps, &output_path);
-    let metafits = args.data_args.files.as_ref().unwrap()[0].clone();
+    let metafits = args.simulate_args.metafits.as_ref().unwrap().clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
-        "--metafits", &metafits,
+        "--metafits", &metafits.display().to_string(),
         "--source-list", &args.srclist_args.source_list.unwrap(),
-        "--output-model-files", &format!("{}", output_path.display()),
+        "--output-model-files", &output_path.display().to_string(),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
         "--cpu",
@@ -374,13 +375,13 @@ fn test_1090008640_vis_simulate_cpu_gpu_match() {
     drop(uvfits);
 
     let args = get_reduced_1090008640(false, false, num_chans, num_timesteps, &output_path);
-    let metafits = args.data_args.files.as_ref().unwrap()[0].clone();
+    let metafits = args.simulate_args.metafits.as_ref().unwrap().clone();
     #[rustfmt::skip]
     let sim_args = VisSimulateArgs::parse_from([
         "vis-simulate",
-        "--metafits", &metafits,
+        "--metafits", &metafits.display().to_string(),
         "--source-list", &args.srclist_args.source_list.unwrap(),
-        "--output-model-files", &format!("{}", output_path.display()),
+        "--output-model-files", &output_path.display().to_string(),
         "--num-timesteps", &format!("{num_timesteps}"),
         "--num-fine-channels", &format!("{num_chans}"),
     ]);
