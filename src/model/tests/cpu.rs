@@ -433,3 +433,59 @@ fn model_timestep_autos_with_shapelet() {
 
     test_model_timestep_autos_with_shapelet(visibilities.view(), 0.0);
 }
+
+#[test]
+fn get_beam_responses_empty_azels() {
+    use crate::beam::NoBeam;
+    use crate::context::Polarisations;
+    use crate::model::cpu::SkyModellerCpu;
+    use crate::srclist::SourceList;
+    use std::collections::HashSet;
+
+    // Minimal setup for SkyModellerCpu
+    let beam = NoBeam { num_tiles: 1 };
+    // must have one point source
+    let source_list = SourceList::from([(
+        "point".to_string(),
+        Source {
+            components: vec![get_point(RADec::from_degrees(0.0, -27.0), FluxType::List)]
+                .into_boxed_slice(),
+        },
+    )]);
+
+    let pols = Polarisations::default();
+    // must have at least one tile
+    let unflagged_tile_xyzs = vec![XyzGeodetic {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    }];
+    // must have at least one frequency
+    let unflagged_fine_chan_freqs = vec![170000000.0];
+    let flagged_tiles = HashSet::new();
+    let phase_centre = marlu::RADec::from_degrees(0.0, -27.0);
+    let array_longitude_rad = 0.0;
+    let array_latitude_rad = 0.0;
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let dut1 = hifitime::Duration::from_seconds(0.0);
+    let apply_precession = false;
+
+    let modeller = SkyModellerCpu::new(
+        &beam,
+        &source_list,
+        pols,
+        &unflagged_tile_xyzs,
+        &unflagged_fine_chan_freqs,
+        &flagged_tiles,
+        phase_centre,
+        array_longitude_rad,
+        array_latitude_rad,
+        dut1,
+        apply_precession,
+    );
+
+    let mut vis_model_fb = Array2::zeros((1, 1));
+    let result = modeller.model_timestep_autos_with(timestamp, vis_model_fb.view_mut());
+
+    assert!(result.is_ok());
+}
