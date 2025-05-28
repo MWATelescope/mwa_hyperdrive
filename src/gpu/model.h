@@ -49,6 +49,12 @@ const char *model_gaussians(const Gaussians *comps, const Addresses *a, const UV
 const char *model_shapelets(const Shapelets *comps, const Addresses *a, const UVW *d_uvws, const JONES *d_beam_jones,
                             JonesF32 *d_vis_fb);
 
+/**
+ * Generate sky-model auto-correlation visibilities for a single timestep given multiple
+ * sky-model components. This is used for auto-correlations only.
+ */
+const char *model_autos(int num_tiles, int num_freqs, const FLOAT *freqs, const Points *points, const Gaussians *gaussians, const Shapelets *shapelets, const JONES *beam_jones, const int *tile_map, const int *freq_map, int num_fee_freqs, const int *tile_index_to_unflagged_tile_index_map, JonesF32 *vis_fb);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif // __cplusplus

@@ -31,3 +31,20 @@ extern "C" {
         d_vis_fb: *mut JonesF32,
     ) -> *const ::std::os::raw::c_char;
 }
+extern "C" {
+    #[doc = " Generate sky-model auto-correlation visibilities for a single timestep given multiple\n sky-model components. This is used for auto-correlations only."]
+    pub fn model_autos(
+        num_tiles: ::std::os::raw::c_int,
+        num_freqs: ::std::os::raw::c_int,
+        freqs: *const f32,
+        points: *const Points,
+        gaussians: *const Gaussians,
+        shapelets: *const Shapelets,
+        beam_jones: *const JonesF32,
+        tile_map: *const ::std::os::raw::c_int,
+        freq_map: *const ::std::os::raw::c_int,
+        num_fee_freqs: ::std::os::raw::c_int,
+        tile_index_to_unflagged_tile_index_map: *const ::std::os::raw::c_int,
+        vis_fb: *mut JonesF32,
+    ) -> *const ::std::os::raw::c_char;
+}
