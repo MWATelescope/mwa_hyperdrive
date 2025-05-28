@@ -14,7 +14,7 @@ use crossbeam_channel::{bounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use log::info;
+use log::{error, info, trace};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
@@ -144,7 +144,7 @@ impl VisSimulateParams {
 
         // Generate the visibilities and write them out asynchronously.
         let error = AtomicCell::new(false);
-        let scoped_threads_result: Result<String, VisSimulateError> = thread::scope(|scope| {
+        let write_message = thread::scope(|scope| {
             // Modelling thread.
             let model_handle: ScopedJoinHandle<Result<(), ModelError>> = thread::Builder::new()
                 .name("model".to_string())
@@ -154,7 +154,7 @@ impl VisSimulateParams {
 
                     let weight_factor = (freq_res_hz / FREQ_WEIGHT_FACTOR)
                         * (time_res.to_seconds() / TIME_WEIGHT_FACTOR);
-                    let result = model_thread(
+                    model_thread(
                         &**beam,
                         source_list,
                         tile_xyzs,
@@ -168,13 +168,12 @@ impl VisSimulateParams {
                         *output_autos,
                         weight_factor,
                         tx_model,
-                        &error,
                         model_progress,
-                    );
-                    if result.is_err() {
+                    )
+                    .map_err(|e| {
                         error.store(true);
-                    }
-                    result
+                        e
+                    })
                 })
                 .expect("OS can create threads");
 
@@ -236,14 +235,29 @@ impl VisSimulateParams {
             // the Cargo.toml. (It would be nice to capture the panic
             // information, if it's possible, but I don't know how, so panics
             // are currently aborting.)
-            model_handle.join().unwrap()?;
-            let write_message = write_handle.join().unwrap()?;
-            Ok(write_message)
-        });
+            model_handle.join().map_err(|e| {
+                error!("[vis_simulate] Model thread panicked: {:?}", e);
+                VisSimulateError::IO(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Model thread panicked",
+                ))
+            })??;
 
-        // Propagate errors and print out the write message.
-        info!("{}", scoped_threads_result?);
-
+            write_handle
+                .join()
+                .map_err(|e| {
+                    error!("[vis_simulate] Write thread panicked: {:?}", e);
+                    VisSimulateError::IO(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Write thread panicked",
+                    ))
+                })?
+                .map_err(|e| {
+                    error!("[vis_simulate] Write thread returned error: {:?}", e);
+                    VisSimulateError::VisWrite(e)
+                })
+        })?;
+        info!("{}", write_message);
         Ok(())
     }
 }
@@ -263,7 +277,6 @@ fn model_thread(
     model_autos: bool,
     weight_factor: f64,
     tx: Sender<VisTimestep>,
-    error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
 ) -> Result<(), ModelError> {
     let modeller = model::new_sky_modeller(
@@ -296,12 +309,7 @@ fn model_thread(
             None
         };
 
-        // Should we continue?
-        if error.load() {
-            return Ok(());
-        }
-
-        match tx.send(VisTimestep {
+        if let Err(_) = tx.send(VisTimestep {
             cross_data_fb,
             cross_weights_fb: ArcArray2::from_elem(cross_vis_shape, weight_factor as f32),
             autos: auto_data_fb.map(|d| {
@@ -312,12 +320,8 @@ fn model_thread(
             }),
             timestamp,
         }) {
-            Ok(()) => (),
-            // If we can't send the message, it's because the channel has been
-            // closed on the other side. That should only happen because the
-            // writer has exited due to error; in that case, just exit this
-            // thread.
-            Err(_) => return Ok(()),
+            trace!("[model_thread] vis_simulate channel is closed");
+            return Ok(());
         }
 
         progress_bar.inc(1);
