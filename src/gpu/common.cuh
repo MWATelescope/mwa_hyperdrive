@@ -479,6 +479,40 @@ inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
     jc->j11 = temp.j10 * j2h.j01 + temp.j11 * j2h.j11;
 }
 
+/**
+ * Compute auto-correlation: beam * fd * beam^H (for a single tile).
+ */
+inline __device__ JONES apply_beam_auto(const JONES beam_response, const JONES fd) {
+    // Cast to complex forms for convenience.
+    JONES_C *bc = (JONES_C *)&beam_response;
+    JONES_C *fdc = (JONES_C *)&fd;
+
+    // beam . fd
+    JONES_C temp{
+        .j00 = bc->j00 * fdc->j00 + bc->j01 * fdc->j10,
+        .j01 = bc->j00 * fdc->j01 + bc->j01 * fdc->j11,
+        .j10 = bc->j10 * fdc->j00 + bc->j11 * fdc->j10,
+        .j11 = bc->j10 * fdc->j01 + bc->j11 * fdc->j11,
+    };
+
+    // beam^H
+    JONES_C bh = JONES_C{
+        .j00 = CUCONJ(bc->j00),
+        .j01 = CUCONJ(bc->j10),
+        .j10 = CUCONJ(bc->j01),
+        .j11 = CUCONJ(bc->j11),
+    };
+
+    // (beam . fd) . beam^H
+    JONES result;
+    JONES_C *rc = (JONES_C *)&result;
+    rc->j00 = temp.j00 * bh.j00 + temp.j01 * bh.j10;
+    rc->j01 = temp.j00 * bh.j01 + temp.j01 * bh.j11;
+    rc->j10 = temp.j10 * bh.j00 + temp.j11 * bh.j10;
+    rc->j11 = temp.j10 * bh.j01 + temp.j11 * bh.j11;
+
+    return result;
+}
 
 #define CHECK_GPU_ERROR(call) do { \
     gpuError_t error_id = call; \
