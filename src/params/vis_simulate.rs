@@ -142,9 +142,9 @@ impl VisSimulateParams {
                     .with_message("Model writing"),
         );
 
-        // Generate the visibilities and write them out asynchronously.
         let error = AtomicCell::new(false);
-        let write_message = thread::scope(|scope| {
+        // Run threads and get the write_message; print it only if all threads succeed.
+        let write_message = thread::scope(|scope| -> Result<String, VisSimulateError> {
             // Modelling thread.
             let model_handle: ScopedJoinHandle<Result<(), ModelError>> = thread::Builder::new()
                 .name("model".to_string())
@@ -175,7 +175,7 @@ impl VisSimulateParams {
                         e
                     })
                 })
-                .expect("OS can create threads");
+                .expect("can't create threads");
 
             // Writing thread.
             let write_handle: ScopedJoinHandle<Result<String, VisWriteError>> =
@@ -184,8 +184,6 @@ impl VisSimulateParams {
                     .spawn_scoped(scope, || {
                         defer_on_unwind! { error.store(true); }
                         write_progress.tick();
-                        // Form sorted unflagged tile pairs from our
-                        // cross-correlation baselines (and maybe autos too).
                         let unflagged_baseline_tile_pairs: Vec<_> = if *output_autos {
                             tile_baseline_flags
                                 .get_unflagged_baseline_tile_pairs()
@@ -228,35 +226,13 @@ impl VisSimulateParams {
                         }
                         result
                     })
-                    .expect("OS can create threads");
+                    .expect("can't create threads");
 
-            // Join all thread handles. This propagates any errors and lets us
-            // know if any threads panicked, if panics aren't aborting as per
-            // the Cargo.toml. (It would be nice to capture the panic
-            // information, if it's possible, but I don't know how, so panics
-            // are currently aborting.)
-            model_handle.join().map_err(|e| {
-                error!("[vis_simulate] Model thread panicked: {:?}", e);
-                VisSimulateError::IO(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Model thread panicked",
-                ))
-            })??;
-
-            write_handle
-                .join()
-                .map_err(|e| {
-                    error!("[vis_simulate] Write thread panicked: {:?}", e);
-                    VisSimulateError::IO(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Write thread panicked",
-                    ))
-                })?
-                .map_err(|e| {
-                    error!("[vis_simulate] Write thread returned error: {:?}", e);
-                    VisSimulateError::VisWrite(e)
-                })
+            // Join all thread handles, propagating errors and panics.
+            model_handle.join().expect("model thread can't join")?;
+            Ok(write_handle.join().expect("write thread can't join")?)
         })?;
+        multi_progress.clear().expect("can't clear progress bars");
         info!("{}", write_message);
         Ok(())
     }
