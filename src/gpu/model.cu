@@ -10,7 +10,8 @@
 
 const int NUM_THREADS_PER_BLOCK_POINTS = 256;
 const int NUM_THREADS_PER_BLOCK_GAUSSIANS = 256;
-const int NUM_THREADS_PER_BLOCK_SHAPELETS = 32;
+const int NUM_THREADS_PER_BLOCK_SHAPELETS = 256;
+const int NUM_THREADS_PER_BLOCK_AUTOS = 512;
 
 inline __device__ JONES extrap_power_law_fd(const FLOAT freq, const JONES ref_flux_density,
                                             const FLOAT spectral_index) {
@@ -376,6 +377,125 @@ __global__ void model_shapelets_kernel(const int num_freqs, const int num_baseli
     }
 }
 
+__global__ void model_autos_kernel(
+    int num_tiles, int num_freqs, const FLOAT *__restrict__ freqs,
+    const Points points, const Gaussians gaussians, const Shapelets shapelets,
+    const JONES *__restrict__ beam_jones, const int *__restrict__ tile_map,
+    const int *__restrict__ freq_map, const int num_fee_freqs,
+    const int *__restrict__ tile_index_to_unflagged_tile_index_map,
+    JonesF32 *__restrict__ vis_fb
+) {
+    const int num_directions = points.num_power_laws + points.num_curved_power_laws + points.num_lists +
+                              gaussians.num_power_laws + gaussians.num_curved_power_laws + gaussians.num_lists +
+                              shapelets.num_power_laws + shapelets.num_curved_power_laws + shapelets.num_lists;
+
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < num_tiles * num_freqs; i += gridDim.x * blockDim.x) {
+        const int i_freq = i % num_freqs;
+        const int i_tile = i / num_freqs;
+
+        const FLOAT freq = freqs[i_freq];
+
+        // Get beam response indices for this tile and frequency
+        const int i_j_row = tile_map[tile_index_to_unflagged_tile_index_map[i_tile]];
+        const int i_col = freq_map[i_freq];
+        const JONES *beam_ptr = beam_jones + num_directions * (num_fee_freqs * i_j_row + i_col);
+
+        JONES delta_vis = JONES{
+            .j00_re = 0.0,
+            .j00_im = 0.0,
+            .j01_re = 0.0,
+            .j01_im = 0.0,
+            .j10_re = 0.0,
+            .j10_im = 0.0,
+            .j11_re = 0.0,
+            .j11_im = 0.0,
+        };
+
+        // Process point sources - power law
+        for (int i_comp = 0; i_comp < points.num_power_laws; i_comp++) {
+            JONES fd = extrap_power_law_fd(freq, points.power_law_fds[i_comp], points.power_law_sis[i_comp]);
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += points.num_power_laws;
+
+        // Process point sources - curved power law
+        for (int i_comp = 0; i_comp < points.num_curved_power_laws; i_comp++) {
+            JONES fd = extrap_curved_power_law_fd(freq, points.curved_power_law_fds[i_comp],
+                                                  points.curved_power_law_sis[i_comp], points.curved_power_law_qs[i_comp]);
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += points.num_curved_power_laws;
+
+        // Process point sources - list
+        for (int i_comp = 0; i_comp < points.num_lists; i_comp++) {
+            JONES fd = points.list_fds[i_freq * points.num_lists + i_comp];
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += points.num_lists;
+
+        // For gaussians and shapelets, we just need the same computation as points
+        // since the envelope is 1.0 for auto-correlations
+
+        // Process gaussian sources - power law
+        for (int i_comp = 0; i_comp < gaussians.num_power_laws; i_comp++) {
+            JONES fd = extrap_power_law_fd(freq, gaussians.power_law_fds[i_comp], gaussians.power_law_sis[i_comp]);
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += gaussians.num_power_laws;
+
+        // Process gaussian sources - curved power law
+        for (int i_comp = 0; i_comp < gaussians.num_curved_power_laws; i_comp++) {
+            JONES fd = extrap_curved_power_law_fd(freq, gaussians.curved_power_law_fds[i_comp],
+                                                  gaussians.curved_power_law_sis[i_comp],
+                                                  gaussians.curved_power_law_qs[i_comp]);
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += gaussians.num_curved_power_laws;
+
+        // Process gaussian sources - list
+        for (int i_comp = 0; i_comp < gaussians.num_lists; i_comp++) {
+            JONES fd = gaussians.list_fds[i_freq * gaussians.num_lists + i_comp];
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += gaussians.num_lists;
+
+        // Process shapelet sources - power law
+        for (int i_comp = 0; i_comp < shapelets.num_power_laws; i_comp++) {
+            JONES fd = extrap_power_law_fd(freq, shapelets.power_law_fds[i_comp], shapelets.power_law_sis[i_comp]);
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += shapelets.num_power_laws;
+
+        // Process shapelet sources - curved power law
+        for (int i_comp = 0; i_comp < shapelets.num_curved_power_laws; i_comp++) {
+            JONES fd = extrap_curved_power_law_fd(freq, shapelets.curved_power_law_fds[i_comp],
+                                                  shapelets.curved_power_law_sis[i_comp],
+                                                  shapelets.curved_power_law_qs[i_comp]);
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += shapelets.num_curved_power_laws;
+
+        // Process shapelet sources - list
+        for (int i_comp = 0; i_comp < shapelets.num_lists; i_comp++) {
+            JONES fd = shapelets.list_fds[i_freq * shapelets.num_lists + i_comp];
+            JONES beam_response = beam_ptr[i_comp];
+            delta_vis += apply_beam_auto(beam_response, fd);
+        }
+        beam_ptr += shapelets.num_lists;
+
+        // Store result - auto-correlations are indexed as [freq, tile]
+        vis_fb[i_freq * num_tiles + i_tile] += delta_vis;
+    }
+}
+
 extern "C" const char *model_points(const Points *comps, const Addresses *a, const UVW *d_uvws,
                                     const JONES *d_beam_jones, JonesF32 *d_vis_fb) {
     dim3 gridDim, blockDim;
@@ -388,9 +508,9 @@ extern "C" const char *model_points(const Points *comps, const Addresses *a, con
                                                a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
 #ifdef DEBUG
-        CHECK_GPU_ERROR(gpuDeviceSynchronize());
+    CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-        CHECK_GPU_ERROR(gpuGetLastError());
+    CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -407,9 +527,9 @@ extern "C" const char *model_gaussians(const Gaussians *comps, const Addresses *
                                                   a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
 #ifdef DEBUG
-        CHECK_GPU_ERROR(gpuDeviceSynchronize());
+    CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-        CHECK_GPU_ERROR(gpuGetLastError());
+    CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
@@ -426,9 +546,24 @@ extern "C" const char *model_shapelets(const Shapelets *comps, const Addresses *
         a->d_tile_map, a->d_freq_map, a->num_unique_beam_freqs, a->d_tile_index_to_unflagged_tile_index_map, d_vis_fb);
 
 #ifdef DEBUG
-        CHECK_GPU_ERROR(gpuDeviceSynchronize());
+    CHECK_GPU_ERROR(gpuDeviceSynchronize());
 #endif
-        CHECK_GPU_ERROR(gpuGetLastError());
+    CHECK_GPU_ERROR(gpuGetLastError());
+
+    return NULL;
+}
+
+extern "C" const char *model_autos(int num_tiles, int num_freqs, const FLOAT *freqs, const Points *points, const Gaussians *gaussians, const Shapelets *shapelets, const JONES *beam_jones, const int *tile_map, const int *freq_map, int num_fee_freqs, const int *tile_index_to_unflagged_tile_index_map, JonesF32 *vis_fb) {
+    dim3 blockDim(NUM_THREADS_PER_BLOCK_AUTOS);
+    dim3 gridDim((num_tiles * num_freqs + blockDim.x - 1) / blockDim.x);
+
+    model_autos_kernel<<<gridDim, blockDim>>>(num_tiles, num_freqs, freqs, *points, *gaussians, *shapelets, beam_jones,
+                                               tile_map, freq_map, num_fee_freqs, tile_index_to_unflagged_tile_index_map, vis_fb);
+
+#ifdef DEBUG
+    CHECK_GPU_ERROR(gpuDeviceSynchronize());
+#endif
+    CHECK_GPU_ERROR(gpuGetLastError());
 
     return NULL;
 }
