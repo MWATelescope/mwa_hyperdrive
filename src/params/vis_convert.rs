@@ -7,7 +7,6 @@ use std::thread::{self, ScopedJoinHandle};
 use crossbeam_channel::bounded;
 use crossbeam_utils::atomic::AtomicCell;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use itertools::Itertools;
 use log::{debug, info};
 use ndarray::prelude::*;
 use scopeguard::defer_on_unwind;
@@ -44,6 +43,10 @@ impl VisConvertParams {
         input_vis_params: &InputVisParams,
         output_vis_params: &OutputVisParams,
     ) -> Result<(), VisConvertError> {
+        // Are we going to write out auto-correlations? Use this variable so the
+        // rest of the code is clearer.
+        let using_autos = input_vis_params.using_autos && output_vis_params.output_autos;
+
         let obs_context = input_vis_params.get_obs_context();
 
         // Channel for transferring visibilities from the reader to the writer.
@@ -100,7 +103,7 @@ impl VisConvertParams {
                     for timeblock in &input_vis_params.timeblocks {
                         let mut cross_data_fb = Array2::zeros(cross_vis_shape);
                         let mut cross_weights_fb = Array2::zeros(cross_vis_shape);
-                        let mut autos_fb = if input_vis_params.using_autos {
+                        let mut autos_fb = if using_autos {
                             Some((Array2::zeros(auto_vis_shape), Array2::zeros(auto_vis_shape)))
                         } else {
                             None
@@ -153,33 +156,19 @@ impl VisConvertParams {
                     defer_on_unwind! { error.store(true); }
                     write_progress.tick();
 
-                    // If we're not using autos, "disable" the
-                    // `unflagged_tiles_iter` by making it not iterate over
-                    // anything.
-                    let total_num_tiles = if input_vis_params.using_autos {
-                        obs_context.get_total_num_tiles()
+                    // Form sorted unflagged tile pairs from our
+                    // cross-correlation baselines (and maybe autos too).
+                    let unflagged_baseline_tile_pairs: Vec<_> = if using_autos {
+                        input_vis_params
+                            .tile_baseline_flags
+                            .get_unflagged_baseline_tile_pairs()
+                            .collect()
                     } else {
-                        0
+                        input_vis_params
+                            .tile_baseline_flags
+                            .get_unflagged_cross_baseline_tile_pairs()
+                            .collect()
                     };
-                    let unflagged_tiles_iter = (0..total_num_tiles)
-                        .filter(|i_tile| {
-                            !input_vis_params
-                                .tile_baseline_flags
-                                .flagged_tiles
-                                .contains(i_tile)
-                        })
-                        .map(|i_tile| (i_tile, i_tile));
-                    // Form (sorted) unflagged baselines from our cross- and
-                    // auto-correlation baselines.
-                    let unflagged_cross_and_auto_baseline_tile_pairs = input_vis_params
-                        .tile_baseline_flags
-                        .tile_to_unflagged_cross_baseline_map
-                        .keys()
-                        .copied()
-                        .chain(unflagged_tiles_iter)
-                        .sorted()
-                        .collect::<Vec<_>>();
-
                     let result = write_vis(
                         &output_vis_params.output_files,
                         obs_context.array_position,
@@ -192,7 +181,7 @@ impl VisConvertParams {
                         input_vis_params.time_res,
                         input_vis_params.dut1,
                         &input_vis_params.spw,
-                        &unflagged_cross_and_auto_baseline_tile_pairs,
+                        &unflagged_baseline_tile_pairs,
                         output_vis_params.output_time_average_factor,
                         output_vis_params.output_freq_average_factor,
                         input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),

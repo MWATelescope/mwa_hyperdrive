@@ -367,3 +367,125 @@ fn shapelet_multiple_components() {
 
     test_multiple_shapelet_components(visibilities.view(), shapelet_uvws.view(), 0.0, 0.0);
 }
+
+#[test]
+fn model_timestep_autos_with_point() {
+    let obs = ObsParams::new(true);
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "point".to_string(),
+        Source {
+            components: vec![get_point(RADec::from_degrees(1.0, -27.0), FluxType::List)]
+                .into_boxed_slice(),
+        },
+    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let result = modeller.model_timestep_autos_with(timestamp, visibilities.view_mut());
+    assert!(result.is_ok());
+
+    test_model_timestep_autos_with_point(visibilities.view(), 0.0);
+}
+
+#[test]
+fn model_timestep_autos_with_gaussian() {
+    let obs = ObsParams::new(true);
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "gaussian".to_string(),
+        Source {
+            components: vec![get_gaussian(
+                RADec::from_degrees(1.0, -27.0),
+                FluxType::List,
+            )]
+            .into_boxed_slice(),
+        },
+    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let result = modeller.model_timestep_autos_with(timestamp, visibilities.view_mut());
+    assert!(result.is_ok());
+
+    test_model_timestep_autos_with_gaussian(visibilities.view(), 0.0);
+}
+
+#[test]
+fn model_timestep_autos_with_shapelet() {
+    let obs = ObsParams::new(true);
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "shapelet".to_string(),
+        Source {
+            components: vec![get_shapelet(
+                RADec::from_degrees(1.0, -27.0),
+                FluxType::List,
+            )]
+            .into_boxed_slice(),
+        },
+    );
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let result = modeller.model_timestep_autos_with(timestamp, visibilities.view_mut());
+    assert!(result.is_ok());
+
+    test_model_timestep_autos_with_shapelet(visibilities.view(), 0.0);
+}
+
+#[test]
+fn get_beam_responses_empty_azels() {
+    use crate::beam::NoBeam;
+    use crate::context::Polarisations;
+    use crate::model::cpu::SkyModellerCpu;
+    use crate::srclist::SourceList;
+    use std::collections::HashSet;
+
+    // Minimal setup for SkyModellerCpu
+    let beam = NoBeam { num_tiles: 1 };
+    // must have one point source
+    let source_list = SourceList::from([(
+        "point".to_string(),
+        Source {
+            components: vec![get_point(RADec::from_degrees(0.0, -27.0), FluxType::List)]
+                .into_boxed_slice(),
+        },
+    )]);
+
+    let pols = Polarisations::default();
+    // must have at least one tile
+    let unflagged_tile_xyzs = vec![XyzGeodetic {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    }];
+    // must have at least one frequency
+    let unflagged_fine_chan_freqs = vec![170000000.0];
+    let flagged_tiles = HashSet::new();
+    let phase_centre = marlu::RADec::from_degrees(0.0, -27.0);
+    let array_longitude_rad = 0.0;
+    let array_latitude_rad = 0.0;
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let dut1 = hifitime::Duration::from_seconds(0.0);
+    let apply_precession = false;
+
+    let modeller = SkyModellerCpu::new(
+        &beam,
+        &source_list,
+        pols,
+        &unflagged_tile_xyzs,
+        &unflagged_fine_chan_freqs,
+        &flagged_tiles,
+        phase_centre,
+        array_longitude_rad,
+        array_latitude_rad,
+        dut1,
+        apply_precession,
+    );
+
+    let mut vis_model_fb = Array2::zeros((1, 1));
+    let result = modeller.model_timestep_autos_with(timestamp, vis_model_fb.view_mut());
+
+    assert!(result.is_ok());
+}
