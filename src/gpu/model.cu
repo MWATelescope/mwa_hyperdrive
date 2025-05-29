@@ -101,8 +101,8 @@ __global__ void model_points_kernel(const int num_freqs, const int num_baselines
                                     const int *__restrict__ freq_map, int num_fee_freqs,
                                     const int *__restrict__ tile_index_to_unflagged_tile_index_map,
                                     JonesF32 *__restrict__ vis_fb) {
-    // The 0-indexed number of tiles as a float.
-    const float num_tiles = (sqrtf(1.0f + 8.0f * (float)num_baselines) - 1.0f) / 2.0f;
+    // The 0-indexed number of tiles as a float (n-1).
+    const float ntiles_sub1f = NTILES_SUB1F_FROM_BASELINES(num_baselines);
     const int num_directions = comps.num_power_laws + comps.num_curved_power_laws + comps.num_lists;
 
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < num_baselines * num_freqs; i += gridDim.x * blockDim.x) {
@@ -112,11 +112,7 @@ __global__ void model_points_kernel(const int num_freqs, const int num_baselines
         const FLOAT freq = freqs[i_freq];
         const UVW uvw = uvws[i_bl] * freq / VEL_C;
 
-        // Get tile indices for this baseline to get the correct beam responses.
-        const float tile1f =
-            floorf(-0.5f * sqrtf(4.0f * num_tiles * (num_tiles + 1.0f) - 8.0f * i_bl + 1.0f) + num_tiles + 0.5f);
-        const int i_tile2 = i_bl - (int)(tile1f * (num_tiles - (tile1f + 1.0f) / 2.0f)) + 1;
-        const int i_tile1 = (int)tile1f;
+        BASELINE_TO_TILES(i_bl, ntiles_sub1f, i_tile1, i_tile2);
 
         // `i_j1_row` and `i_j2_row` are indices into beam responses.
         const int i_j1_row = tile_map[tile_index_to_unflagged_tile_index_map[i_tile1]];
@@ -184,8 +180,8 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_baseli
                                        const int *tile_map, const int *__restrict__ freq_map, const int num_fee_freqs,
                                        const int *__restrict__ tile_index_to_unflagged_tile_index_map,
                                        JonesF32 *__restrict__ vis_fb) {
-    // The 0-indexed number of tiles as a float.
-    const float num_tiles = (sqrtf(1.0f + 8.0f * (float)num_baselines) - 1.0f) / 2.0f;
+    // The 0-indexed number of tiles as a float (n-1).
+    const float ntiles_sub1f = NTILES_SUB1F_FROM_BASELINES(num_baselines);
     const int num_directions = comps.num_power_laws + comps.num_curved_power_laws + comps.num_lists;
 
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < num_baselines * num_freqs; i += gridDim.x * blockDim.x) {
@@ -195,11 +191,7 @@ __global__ void model_gaussians_kernel(const int num_freqs, const int num_baseli
         const FLOAT freq = freqs[i_freq];
         const UVW uvw = uvws[i_bl] * freq / VEL_C;
 
-        // Get tile indices for this baseline to get the correct beam responses.
-        const float tile1f =
-            floorf(-0.5f * sqrtf(4.0f * num_tiles * (num_tiles + 1.0f) - 8.0f * i_bl + 1.0f) + num_tiles + 0.5f);
-        const int i_tile2 = i_bl - (int)(tile1f * (num_tiles - (tile1f + 1.0f) / 2.0f)) + 1;
-        const int i_tile1 = (int)tile1f;
+        BASELINE_TO_TILES(i_bl, ntiles_sub1f, i_tile1, i_tile2);
 
         // `i_j1_row` and `i_j2_row` are indices into beam responses.
         const int i_j1_row = tile_map[tile_index_to_unflagged_tile_index_map[i_tile1]];
@@ -280,8 +272,8 @@ __global__ void model_shapelets_kernel(const int num_freqs, const int num_baseli
                                        const int *__restrict__ freq_map, const int num_fee_freqs,
                                        const int *__restrict__ tile_index_to_unflagged_tile_index_map,
                                        JonesF32 *__restrict__ vis_fb) {
-    // The 0-indexed number of tiles as a float.
-    const float num_tiles = (sqrtf(1.0f + 8.0f * (float)num_baselines) - 1.0f) / 2.0f;
+    // The 0-indexed number of tiles as a float (n-1).
+    const float ntiles_sub1f = NTILES_SUB1F_FROM_BASELINES(num_baselines);
     const int num_directions = comps.num_power_laws + comps.num_curved_power_laws + comps.num_lists;
 
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < num_baselines * num_freqs; i += gridDim.x * blockDim.x) {
@@ -292,11 +284,7 @@ __global__ void model_shapelets_kernel(const int num_freqs, const int num_baseli
         const FLOAT one_on_lambda = freq / VEL_C;
         const UVW uvw = uvws[i_bl] * one_on_lambda;
 
-        // Get tile indices for this baseline to get the correct beam responses.
-        const float tile1f =
-            floorf(-0.5f * sqrtf(4.0f * num_tiles * (num_tiles + 1.0f) - 8.0f * i_bl + 1.0f) + num_tiles + 0.5f);
-        const int i_tile2 = i_bl - (int)(tile1f * (num_tiles - (tile1f + 1.0f) / 2.0f)) + 1;
-        const int i_tile1 = (int)tile1f;
+        BASELINE_TO_TILES(i_bl, ntiles_sub1f, i_tile1, i_tile2);
 
         // `i_j1_row` and `i_j2_row` are indices into beam responses.
         const int i_j1_row = tile_map[tile_index_to_unflagged_tile_index_map[i_tile1]];
