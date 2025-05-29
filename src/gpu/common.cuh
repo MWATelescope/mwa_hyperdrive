@@ -11,89 +11,89 @@
 
 // HIP-specific defines.
 #if __HIPCC__
-#define gpuMalloc             hipMalloc
-#define gpuFree               hipFree
-#define gpuMemcpy             hipMemcpy
+#define gpuMalloc hipMalloc
+#define gpuFree hipFree
+#define gpuMemcpy hipMemcpy
 #define gpuMemcpyHostToDevice hipMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost hipMemcpyDeviceToHost
-#define gpuGetErrorString     hipGetErrorString
-#define gpuGetLastError       hipGetLastError
-#define gpuDeviceSynchronize  hipDeviceSynchronize
-#define gpuError_t            hipError_t
-#define gpuSuccess            hipSuccess
-#define C32                   hipFloatComplex
-#define C64                   hipDoubleComplex
-#define MAKE_C32              make_hipFloatComplex
-#define MAKE_C64              make_hipDoubleComplex
-#define __syncwarp            __syncthreads
+#define gpuGetErrorString hipGetErrorString
+#define gpuGetLastError hipGetLastError
+#define gpuDeviceSynchronize hipDeviceSynchronize
+#define gpuError_t hipError_t
+#define gpuSuccess hipSuccess
+#define C32 hipFloatComplex
+#define C64 hipDoubleComplex
+#define MAKE_C32 make_hipFloatComplex
+#define MAKE_C64 make_hipDoubleComplex
+#define __syncwarp __syncthreads
 
 // If SINGLE is enabled, use single-precision floats everywhere. Otherwise
 // default to double-precision.
 #ifdef SINGLE
-#define FLOAT4       float4
-#define SINCOS       sincosf
-#define EXP          expf
-#define POW          powf
-#define FLOOR        floorf
-#define COMPLEX      hipFloatComplex
+#define FLOAT4 float4
+#define SINCOS sincosf
+#define EXP expf
+#define POW powf
+#define FLOOR floorf
+#define COMPLEX hipFloatComplex
 #define MAKE_COMPLEX make_hipFloatComplex
-#define CUCONJ       hipConjf
-#define LOG          logf
-#define EXP          expf
+#define CUCONJ hipConjf
+#define LOG logf
+#define EXP expf
 #else
-#define FLOAT4       double4
-#define SINCOS       sincos
-#define EXP          exp
-#define POW          pow
-#define FLOOR        floor
-#define COMPLEX      hipDoubleComplex
+#define FLOAT4 double4
+#define SINCOS sincos
+#define EXP exp
+#define POW pow
+#define FLOOR floor
+#define COMPLEX hipDoubleComplex
 #define MAKE_COMPLEX make_hipDoubleComplex
-#define CUCONJ       hipConj
-#define LOG          log
-#define EXP          exp
+#define CUCONJ hipConj
+#define LOG log
+#define EXP exp
 #endif // SINGLE
 
 // CUDA-specific defines.
 #elif __CUDACC__
 
-#define gpuMalloc             cudaMalloc
-#define gpuFree               cudaFree
-#define gpuMemcpy             cudaMemcpy
+#define gpuMalloc cudaMalloc
+#define gpuFree cudaFree
+#define gpuMemcpy cudaMemcpy
 #define gpuMemcpyHostToDevice cudaMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost cudaMemcpyDeviceToHost
-#define gpuGetErrorString     cudaGetErrorString
-#define gpuGetLastError       cudaGetLastError
-#define gpuDeviceSynchronize  cudaDeviceSynchronize
-#define gpuError_t            cudaError_t
-#define gpuSuccess            cudaSuccess
-#define warpSize              32
-#define C32                   cuFloatComplex
-#define C64                   cuDoubleComplex
-#define MAKE_C32              make_cuFloatComplex
-#define MAKE_C64              make_cuDoubleComplex
+#define gpuGetErrorString cudaGetErrorString
+#define gpuGetLastError cudaGetLastError
+#define gpuDeviceSynchronize cudaDeviceSynchronize
+#define gpuError_t cudaError_t
+#define gpuSuccess cudaSuccess
+#define warpSize 32
+#define C32 cuFloatComplex
+#define C64 cuDoubleComplex
+#define MAKE_C32 make_cuFloatComplex
+#define MAKE_C64 make_cuDoubleComplex
 
 #ifdef SINGLE
-#define FLOAT4       float4
-#define SINCOS       sincosf
-#define EXP          expf
-#define POW          powf
-#define FLOOR        floorf
-#define COMPLEX      cuFloatComplex
+#define FLOAT4 float4
+#define SINCOS sincosf
+#define EXP expf
+#define POW powf
+#define FLOOR floorf
+#define COMPLEX cuFloatComplex
 #define MAKE_COMPLEX make_cuFloatComplex
-#define CUCONJ       cuConjf
-#define LOG          logf
-#define EXP          expf
+#define CUCONJ cuConjf
+#define LOG logf
+#define EXP expf
 #else
-#define FLOAT4       double4
-#define SINCOS       sincos
-#define EXP          exp
-#define POW          pow
-#define FLOOR        floor
-#define COMPLEX      cuDoubleComplex
+#define FLOAT4 double4
+#define SINCOS sincos
+#define EXP exp
+#define POW pow
+#define FLOOR floor
+#define COMPLEX cuDoubleComplex
 #define MAKE_COMPLEX make_cuDoubleComplex
-#define CUCONJ       cuConj
-#define LOG          log
-#define EXP          exp
+#define CUCONJ cuConj
+#define LOG log
+#define EXP exp
 #endif // SINGLE
 #endif // __HIPCC__
 
@@ -112,7 +112,8 @@ const FLOAT SQRT_FRAC_PI_SQ_2_LN_2 = 2.6682231283184983;   // sqrt( PI^2 / (2 ln
 const FLOAT EXP_CONST = -((FRAC_PI_2 * FRAC_PI_2) / LN_2); // -( (PI/2)^2 / ln(2) )
 const FLOAT SHAPELET_CONST = SQRT_FRAC_PI_SQ_2_LN_2 / SBF_DX;
 
-typedef struct JONES_C {
+typedef struct JONES_C
+{
     // The (0,0) component
     COMPLEX j00;
     // The (0,1) component
@@ -123,7 +124,8 @@ typedef struct JONES_C {
     COMPLEX j11;
 } JONES_C;
 
-typedef struct JonesF32_C {
+typedef struct JonesF32_C
+{
     // The (0,0) component
     C32 j00;
     // The (0,1) component
@@ -134,7 +136,8 @@ typedef struct JonesF32_C {
     C32 j11;
 } JonesF32_C;
 
-typedef struct JonesF64_C {
+typedef struct JonesF64_C
+{
     // The (0,0) component
     C64 j00;
     // The (0,1) component
@@ -147,30 +150,36 @@ typedef struct JonesF64_C {
 
 inline __device__ COMPLEX operator+(const COMPLEX a, const COMPLEX b) { return MAKE_COMPLEX(a.x + b.x, a.y + b.y); }
 
-inline __device__ COMPLEX operator*(const COMPLEX a, const COMPLEX b) {
+inline __device__ COMPLEX operator*(const COMPLEX a, const COMPLEX b)
+{
     return MAKE_COMPLEX(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-inline __device__ void operator*=(C32 &a, const C32 b) {
+inline __device__ void operator*=(C32 &a, const C32 b)
+{
     a = MAKE_C32(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-inline __device__ void operator*=(C64 &a, const C64 b) {
+inline __device__ void operator*=(C64 &a, const C64 b)
+{
     a = MAKE_C64(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }
 
-inline __device__ C32 operator*(const C32 a, const C64 b) {
+inline __device__ C32 operator*(const C32 a, const C64 b)
+{
     return MAKE_C32(a.x * (float)b.x - a.y * (float)b.y, a.x * (float)b.y + a.y * (float)b.x);
 }
 
 inline __device__ COMPLEX operator*(const COMPLEX a, const FLOAT b) { return MAKE_COMPLEX(a.x * b, a.y * b); }
 
-inline __device__ void operator+=(COMPLEX &a, const COMPLEX b) {
+inline __device__ void operator+=(COMPLEX &a, const COMPLEX b)
+{
     a.x += b.x;
     a.y += b.y;
 }
 
-inline __device__ JonesF32 operator*(const JonesF32 a, const float b) {
+inline __device__ JonesF32 operator*(const JonesF32 a, const float b)
+{
     return JonesF32{
         .j00_re = a.j00_re * b,
         .j00_im = a.j00_im * b,
@@ -183,7 +192,8 @@ inline __device__ JonesF32 operator*(const JonesF32 a, const float b) {
     };
 }
 
-inline __device__ JonesF64 operator*(const JonesF64 a, const double b) {
+inline __device__ JonesF64 operator*(const JonesF64 a, const double b)
+{
     return JonesF64{
         .j00_re = a.j00_re * b,
         .j00_im = a.j00_im * b,
@@ -196,7 +206,8 @@ inline __device__ JonesF64 operator*(const JonesF64 a, const double b) {
     };
 }
 
-inline __device__ JonesF32 operator*(const JonesF32 a, const C32 b) {
+inline __device__ JonesF32 operator*(const JonesF32 a, const C32 b)
+{
     return JonesF32{
         .j00_re = a.j00_re * b.x - a.j00_im * b.y,
         .j00_im = a.j00_re * b.y + a.j00_im * b.x,
@@ -209,7 +220,8 @@ inline __device__ JonesF32 operator*(const JonesF32 a, const C32 b) {
     };
 }
 
-inline __device__ JonesF32 operator*(const JonesF32 a, const C64 b) {
+inline __device__ JonesF32 operator*(const JonesF32 a, const C64 b)
+{
     return JonesF32{
         .j00_re = a.j00_re * (float)b.x - a.j00_im * (float)b.y,
         .j00_im = a.j00_re * (float)b.y + a.j00_im * (float)b.x,
@@ -222,7 +234,8 @@ inline __device__ JonesF32 operator*(const JonesF32 a, const C64 b) {
     };
 }
 
-inline __device__ JonesF64 operator*(const JonesF64 a, const C32 b) {
+inline __device__ JonesF64 operator*(const JonesF64 a, const C32 b)
+{
     return JonesF64{
         .j00_re = a.j00_re * b.x - a.j00_im * b.y,
         .j00_im = a.j00_re * b.y + a.j00_im * b.x,
@@ -235,7 +248,8 @@ inline __device__ JonesF64 operator*(const JonesF64 a, const C32 b) {
     };
 }
 
-inline __device__ JonesF64 operator*(const JonesF64 a, const C64 b) {
+inline __device__ JonesF64 operator*(const JonesF64 a, const C64 b)
+{
     return JonesF64{
         .j00_re = a.j00_re * b.x - a.j00_im * b.y,
         .j00_im = a.j00_re * b.y + a.j00_im * b.x,
@@ -248,23 +262,26 @@ inline __device__ JonesF64 operator*(const JonesF64 a, const C64 b) {
     };
 }
 
-inline __device__ void operator*=(JonesF32 &a, const C32 b) {
-    JonesF32_C *c = (JonesF32_C*)&a;
+inline __device__ void operator*=(JonesF32 &a, const C32 b)
+{
+    JonesF32_C *c = (JonesF32_C *)&a;
     c->j00 *= b;
     c->j01 *= b;
     c->j10 *= b;
     c->j11 *= b;
 }
 
-inline __device__ void operator*=(JonesF64 &a, const C64 b) {
-    JonesF64_C *c = (JonesF64_C*)&a;
+inline __device__ void operator*=(JonesF64 &a, const C64 b)
+{
+    JonesF64_C *c = (JonesF64_C *)&a;
     c->j00 *= b;
     c->j01 *= b;
     c->j10 *= b;
     c->j11 *= b;
 }
 
-inline __device__ JonesF32 operator+(JonesF32 a, JonesF32 b) {
+inline __device__ JonesF32 operator+(JonesF32 a, JonesF32 b)
+{
     return JonesF32{
         .j00_re = a.j00_re + b.j00_re,
         .j00_im = a.j00_im + b.j00_im,
@@ -277,7 +294,8 @@ inline __device__ JonesF32 operator+(JonesF32 a, JonesF32 b) {
     };
 }
 
-inline __device__ JonesF64 operator+(JonesF64 a, JonesF64 b) {
+inline __device__ JonesF64 operator+(JonesF64 a, JonesF64 b)
+{
     return JonesF64{
         .j00_re = a.j00_re + b.j00_re,
         .j00_im = a.j00_im + b.j00_im,
@@ -290,7 +308,8 @@ inline __device__ JonesF64 operator+(JonesF64 a, JonesF64 b) {
     };
 }
 
-inline __device__ void operator+=(JonesF32 &a, const JonesF64 &b) {
+inline __device__ void operator+=(JonesF32 &a, const JonesF64 &b)
+{
     a.j00_re += (float)b.j00_re;
     a.j00_im += (float)b.j00_im;
     a.j01_re += (float)b.j01_re;
@@ -301,7 +320,8 @@ inline __device__ void operator+=(JonesF32 &a, const JonesF64 &b) {
     a.j11_im += (float)b.j11_im;
 }
 
-inline __device__ void operator+=(JonesF32 &a, JonesF32 b) {
+inline __device__ void operator+=(JonesF32 &a, JonesF32 b)
+{
     a.j00_re += b.j00_re;
     a.j00_im += b.j00_im;
     a.j01_re += b.j01_re;
@@ -312,7 +332,8 @@ inline __device__ void operator+=(JonesF32 &a, JonesF32 b) {
     a.j11_im += b.j11_im;
 }
 
-inline __device__ void operator+=(JonesF64 &a, JonesF64 b) {
+inline __device__ void operator+=(JonesF64 &a, JonesF64 b)
+{
     a.j00_re += b.j00_re;
     a.j00_im += b.j00_im;
     a.j01_re += b.j01_re;
@@ -323,7 +344,8 @@ inline __device__ void operator+=(JonesF64 &a, JonesF64 b) {
     a.j11_im += b.j11_im;
 }
 
-inline __device__ void operator+=(volatile JonesF32 &a, volatile JonesF32 &b) {
+inline __device__ void operator+=(volatile JonesF32 &a, volatile JonesF32 &b)
+{
     a.j00_re += b.j00_re;
     a.j00_im += b.j00_im;
     a.j01_re += b.j01_re;
@@ -334,7 +356,8 @@ inline __device__ void operator+=(volatile JonesF32 &a, volatile JonesF32 &b) {
     a.j11_im += b.j11_im;
 }
 
-inline __device__ void operator+=(volatile JonesF64 &a, volatile JonesF64 &b) {
+inline __device__ void operator+=(volatile JonesF64 &a, volatile JonesF64 &b)
+{
     a.j00_re += b.j00_re;
     a.j00_im += b.j00_im;
     a.j01_re += b.j01_re;
@@ -345,7 +368,8 @@ inline __device__ void operator+=(volatile JonesF64 &a, volatile JonesF64 &b) {
     a.j11_im += b.j11_im;
 }
 
-inline __device__ void operator+=(JonesF64 &a, JonesF32 &b) {
+inline __device__ void operator+=(JonesF64 &a, JonesF32 &b)
+{
     a.j00_re += (double)b.j00_re;
     a.j00_im += (double)b.j00_im;
     a.j01_re += (double)b.j01_re;
@@ -356,7 +380,8 @@ inline __device__ void operator+=(JonesF64 &a, JonesF32 &b) {
     a.j11_im += (double)b.j11_im;
 }
 
-inline __device__ JONES operator/(JONES a, FLOAT b) {
+inline __device__ JONES operator/(JONES a, FLOAT b)
+{
     return JONES{
         .j00_re = a.j00_re / b,
         .j00_im = a.j00_im / b,
@@ -369,7 +394,8 @@ inline __device__ JONES operator/(JONES a, FLOAT b) {
     };
 }
 
-inline __device__ void operator/=(JonesF64 &a, double b) {
+inline __device__ void operator/=(JonesF64 &a, double b)
+{
     a.j00_re /= b;
     a.j00_im /= b;
     a.j01_re /= b;
@@ -380,7 +406,8 @@ inline __device__ void operator/=(JonesF64 &a, double b) {
     a.j11_im /= b;
 }
 
-inline __device__ void operator-=(JonesF32 &a, JonesF32 b) {
+inline __device__ void operator-=(JonesF32 &a, JonesF32 b)
+{
     a.j00_re -= b.j00_re;
     a.j00_im -= b.j00_im;
     a.j01_re -= b.j01_re;
@@ -391,7 +418,8 @@ inline __device__ void operator-=(JonesF32 &a, JonesF32 b) {
     a.j11_im -= b.j11_im;
 }
 
-inline __device__ void operator-=(JonesF64 &a, JonesF64 b) {
+inline __device__ void operator-=(JonesF64 &a, JonesF64 b)
+{
     a.j00_re -= b.j00_re;
     a.j00_im -= b.j00_im;
     a.j01_re -= b.j01_re;
@@ -402,7 +430,8 @@ inline __device__ void operator-=(JonesF64 &a, JonesF64 b) {
     a.j11_im -= b.j11_im;
 }
 
-inline __device__ void operator-=(JonesF32 &a, JonesF64 b) {
+inline __device__ void operator-=(JonesF32 &a, JonesF64 b)
+{
     a.j00_re -= (float)b.j00_re;
     a.j00_im -= (float)b.j00_im;
     a.j01_re -= (float)b.j01_re;
@@ -413,7 +442,8 @@ inline __device__ void operator-=(JonesF32 &a, JonesF64 b) {
     a.j11_im -= (float)b.j11_im;
 }
 
-inline __device__ void operator-=(JonesF64 &a, JonesF32 b) {
+inline __device__ void operator-=(JonesF64 &a, JonesF32 b)
+{
     a.j00_re -= (double)b.j00_re;
     a.j00_im -= (double)b.j00_im;
     a.j01_re -= (double)b.j01_re;
@@ -424,7 +454,8 @@ inline __device__ void operator-=(JonesF64 &a, JonesF32 b) {
     a.j11_im -= (double)b.j11_im;
 }
 
-inline __device__ UVW operator*(const UVW a, const FLOAT b) {
+inline __device__ UVW operator*(const UVW a, const FLOAT b)
+{
     return UVW{
         .u = a.u * b,
         .v = a.v * b,
@@ -432,7 +463,8 @@ inline __device__ UVW operator*(const UVW a, const FLOAT b) {
     };
 }
 
-inline __device__ UVW operator/(const UVW a, const FLOAT b) {
+inline __device__ UVW operator/(const UVW a, const FLOAT b)
+{
     return UVW{
         .u = a.u / b,
         .v = a.v / b,
@@ -440,7 +472,8 @@ inline __device__ UVW operator/(const UVW a, const FLOAT b) {
     };
 }
 
-inline __device__ ShapeletUV operator*(const ShapeletUV a, const FLOAT b) {
+inline __device__ ShapeletUV operator*(const ShapeletUV a, const FLOAT b)
+{
     return ShapeletUV{
         .u = a.u * b,
         .v = a.v * b,
@@ -450,7 +483,8 @@ inline __device__ ShapeletUV operator*(const ShapeletUV a, const FLOAT b) {
 /**
  * Multiply a Jones matrix by two beam Jones matrices (i.e. J1 . J . J2^H).
  */
-inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
+inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2)
+{
     // Cast the input Jones matrices to complex forms for convenience.
     JONES_C *j1c = (JONES_C *)j1;
     JONES_C *jc = (JONES_C *)j;
@@ -482,7 +516,8 @@ inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
 /**
  * Compute auto-correlation: beam * fd * beam^H (for a single tile).
  */
-inline __device__ JONES apply_beam_auto(const JONES beam_response, const JONES fd) {
+inline __device__ JONES apply_beam_auto(const JONES beam_response, const JONES fd)
+{
     // Cast to complex forms for convenience.
     JONES_C *bc = (JONES_C *)&beam_response;
     JONES_C *fdc = (JONES_C *)&fd;
@@ -514,10 +549,46 @@ inline __device__ JONES apply_beam_auto(const JONES beam_response, const JONES f
     return result;
 }
 
-#define CHECK_GPU_ERROR(call) do { \
-    gpuError_t error_id = call; \
-    if (error_id != gpuSuccess) { \
-        fprintf(stderr, "GPU Error: %s:%d, in function %s: %s\n", __FILE__, __LINE__, __func__, gpuGetErrorString(error_id)); \
-        return gpuGetErrorString(error_id); \
-    } \
-} while (0)
+#define CHECK_GPU_ERROR(call)                                                                                                     \
+    do                                                                                                                            \
+    {                                                                                                                             \
+        gpuError_t error_id = call;                                                                                               \
+        if (error_id != gpuSuccess)                                                                                               \
+        {                                                                                                                         \
+            fprintf(stderr, "GPU Error: %s:%d, in function %s: %s\n", __FILE__, __LINE__, __func__, gpuGetErrorString(error_id)); \
+            return gpuGetErrorString(error_id);                                                                                   \
+        }                                                                                                                         \
+    } while (0)
+
+/**
+ * Macro to compute the number of tiles minus one (n-1) as a float from the number of baselines.
+ * Assumes num_baselines = n * (n - 1) / 2, solves for n.
+ *
+ * Returns n-1 as a float, which is used in baseline-to-tile calculations.
+ */
+#define NTILES_SUB1F_FROM_BASELINES(num_baselines) \
+    ((sqrtf(1.0f + 8.0f * (float)(num_baselines)) - 1.0f) / 2.0f)
+
+/**
+ * Convert a baseline index to tile indices.
+ *
+ * The ntiles_sub1f parameter is actually n-1 (number of tiles minus one) as a float, matching the above macro.
+ *
+ * Cross-correlation baselines are indexed using the upper triangle of a matrix,
+ * where tile pairs (i,j) with i < j are assigned consecutive indices:
+ * (0,1)→0, (0,2)→1, (0,3)→2, ..., (1,2)→n, (1,3)→n+1, etc.
+ *
+ * This uses the inverse triangular number formula to convert from a baseline
+ * index back to the tile pair. The math involves solving:
+ * i_bl = i_tile1 * (2*n - i_tile1 - 1) / 2 + (i_tile2 - i_tile1 - 1)
+ * where n = ntiles_sub1f + 1.
+ *
+ * Performance notes:
+ * - The definition of i_tile1 and i_tile2 happens in the macro for optimization reasons.
+ * - Despite the use of expensive and hard to debug sqrt/floor instructions,
+ *   the current approach is faster than precomputing tile pairs on the CPU.
+ */
+#define BASELINE_TO_TILES(i_bl, ntiles_sub1f, i_tile1, i_tile2)                                                                                 \
+    const float tile1f = floorf(-0.5f * sqrtf(4.0f * (ntiles_sub1f) * ((ntiles_sub1f) + 1.0f) - 8.0f * (i_bl) + 1.0f) + (ntiles_sub1f) + 0.5f); \
+    const int i_tile1 = (int)tile1f;                                                                                                            \
+    const int i_tile2 = (i_bl) - (int)(tile1f * ((ntiles_sub1f) - (tile1f + 1.0f) / 2.0f)) + 1;
