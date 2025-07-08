@@ -22,7 +22,8 @@
 # docker build . \
 #   --build-arg=BASE_IMAGE=quay.io/pawsey/rocm-mpich-base:rocm${ROCM_VER}-mpich3.4.3-ubuntu22 \
 #   --build-arg=FEATURES=hip \
-#   --build-arg=HIP_ARCH=gfx90a
+#   --build-arg=HIP_ARCH=gfx90a \
+#   --tag=mwatelescope/hyperdrive:rocm${ROCM_VER}-ubuntu22 --push
 
 # -> dug MI50
 # export ROCM_VER=6.0.2
@@ -59,9 +60,18 @@ RUN apt-get update -y && \
 
 # Get Rust
 ARG RUST_VERSION=stable
-RUN mkdir -pm755 /opt/rust /opt/cargo
-ENV RUSTUP_HOME=/opt/rust CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain=$RUST_VERSION
+ENV RUSTUP_HOME=/opt/rust CARGO_HOME=/opt/cargo
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+# 2025-07-08: rustup is broken in gh actions ci if it's already installed
+RUN if [ ! -f $RUSTUP_HOME/settings.toml ]; then \
+        mkdir -pm755 $RUSTUP_HOME $CARGO_HOME && ( \
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | env RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=$CARGO_HOME TMPDIR=$RUSTUP_HOME/tmp \
+        sh -s -- -y \
+        --profile=minimal \
+        --default-toolchain=${RUST_VERSION} \
+        ) \
+    fi
 
 # optional, example: "70,80" for V100 and A100
 ARG CUDA_COMPUTE=""
