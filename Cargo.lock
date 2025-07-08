@@ -103,9 +103,9 @@ dependencies = [
 
 [[package]]
 name = "birli"
-version = "0.17.1"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67d4455bbf9fd33fbea0230bf36f6841cd34c8df35eb284ab5eff2bd6692d2e3"
+checksum = "462dff39a9b78723976468e0e7ec078e9d68c2df00b2bb32372065e355044d65"
 dependencies = [
  "built",
  "byteorder",
