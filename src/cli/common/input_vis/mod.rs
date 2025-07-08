@@ -356,6 +356,8 @@ impl InputVisArgs {
                     }
                     PfbFlavour::Jake => raw_data_corrections_block
                         .push("Correcting PFB gains with 'Jake Jones' gains".into()),
+                    PfbFlavour::JakeOversampled => raw_data_corrections_block
+                        .push("Correcting PFB gains with 'Jake Jones' oversampled gains".into()),
                     PfbFlavour::Cotter2014 => raw_data_corrections_block
                         .push("Correcting PFB gains with 'Cotter 2014' gains".into()),
                     PfbFlavour::Empirical => raw_data_corrections_block
