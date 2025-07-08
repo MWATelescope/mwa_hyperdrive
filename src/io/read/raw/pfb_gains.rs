@@ -30,6 +30,10 @@ pub(crate) enum PfbFlavour {
     #[strum(serialize = "jake")]
     Jake,
 
+    /// Use the "Jake Jones" oversampled gains (200 Hz).
+    #[strum(serialize = "jake_oversampled")]
+    JakeOversampled,
+
     /// Use the "Cotter 2014" gains (10 kHz).
     #[strum(serialize = "cotter2014")]
     Cotter2014,
@@ -60,6 +64,8 @@ impl PfbFlavour {
             PfbFlavour::None => None,
 
             PfbFlavour::Jake => Some(birli::passband_gains::PFB_JAKE_2022_200HZ),
+
+            PfbFlavour::JakeOversampled => Some(birli::passband_gains::OSPFB_JAKE_2025_200HZ),
 
             PfbFlavour::Cotter2014 => Some(birli::passband_gains::PFB_COTTER_2014_10KHZ),
 
