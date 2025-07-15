@@ -62,6 +62,11 @@ pub(super) struct VisConvertArgs {
     #[clap(long, help_heading = "OUTPUT FILES")]
     pub(super) output_vis_freq_average: Option<String>,
 
+    /// Don't write auto-correlations to the output visibilities.
+    /// Default: output if present
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    pub(super) output_no_autos: bool,
+
     /// Rather than writing out the entire input bandwidth, write out only the
     /// smallest contiguous band. e.g. Typical 40 kHz MWA data has 768 channels,
     /// but the first 2 and last 2 channels are usually flagged. Turning this
@@ -97,6 +102,7 @@ impl VisConvertArgs {
                 outputs,
                 output_vis_time_average,
                 output_vis_freq_average,
+                output_no_autos,
                 output_smallest_contiguous_band,
             } = unpack_arg_file!(arg_file);
 
@@ -111,6 +117,7 @@ impl VisConvertArgs {
                 output_vis_freq_average: cli_args
                     .output_vis_freq_average
                     .or(output_vis_freq_average),
+                output_no_autos: cli_args.output_no_autos || output_no_autos,
                 output_smallest_contiguous_band: cli_args.output_smallest_contiguous_band
                     || output_smallest_contiguous_band,
             })
@@ -128,6 +135,7 @@ impl VisConvertArgs {
             outputs,
             output_vis_time_average,
             output_vis_freq_average,
+            output_no_autos,
             output_smallest_contiguous_band,
         } = self;
 
@@ -140,6 +148,7 @@ impl VisConvertArgs {
             outputs,
             output_vis_time_average,
             output_vis_freq_average,
+            output_autos: input_vis_params.using_autos && !output_no_autos,
         }
         .parse(
             input_vis_params.time_res,

@@ -479,6 +479,40 @@ inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
     jc->j11 = temp.j10 * j2h.j01 + temp.j11 * j2h.j11;
 }
 
+/**
+ * Compute auto-correlation: beam * fd * beam^H (for a single tile).
+ */
+inline __device__ JONES apply_beam_auto(const JONES beam_response, const JONES fd) {
+    // Cast to complex forms for convenience.
+    JONES_C *bc = (JONES_C *)&beam_response;
+    JONES_C *fdc = (JONES_C *)&fd;
+
+    // beam . fd
+    JONES_C temp{
+        .j00 = bc->j00 * fdc->j00 + bc->j01 * fdc->j10,
+        .j01 = bc->j00 * fdc->j01 + bc->j01 * fdc->j11,
+        .j10 = bc->j10 * fdc->j00 + bc->j11 * fdc->j10,
+        .j11 = bc->j10 * fdc->j01 + bc->j11 * fdc->j11,
+    };
+
+    // beam^H
+    JONES_C bh = JONES_C{
+        .j00 = CUCONJ(bc->j00),
+        .j01 = CUCONJ(bc->j10),
+        .j10 = CUCONJ(bc->j01),
+        .j11 = CUCONJ(bc->j11),
+    };
+
+    // (beam . fd) . beam^H
+    JONES result;
+    JONES_C *rc = (JONES_C *)&result;
+    rc->j00 = temp.j00 * bh.j00 + temp.j01 * bh.j10;
+    rc->j01 = temp.j00 * bh.j01 + temp.j01 * bh.j11;
+    rc->j10 = temp.j10 * bh.j00 + temp.j11 * bh.j10;
+    rc->j11 = temp.j10 * bh.j01 + temp.j11 * bh.j11;
+
+    return result;
+}
 
 #define CHECK_GPU_ERROR(call) do { \
     gpuError_t error_id = call; \
@@ -487,3 +521,36 @@ inline __device__ void apply_beam(const JONES *j1, JONES *j, const JONES *j2) {
         return gpuGetErrorString(error_id); \
     } \
 } while (0)
+
+/**
+ * Macro to compute the number of tiles minus one (n-1) as a float from the number of baselines.
+ * Assumes num_baselines = n * (n - 1) / 2, solves for n.
+ *
+ * Returns n-1 as a float, which is used in baseline-to-tile calculations.
+ */
+#define NTILES_SUB1F_FROM_BASELINES(num_baselines) \
+    ((sqrtf(1.0f + 8.0f * (float)(num_baselines)) - 1.0f) / 2.0f)
+
+/**
+ * Convert a baseline index to tile indices.
+ *
+ * The ntiles_sub1f parameter is actually n-1 (number of tiles minus one) as a float, matching the above macro.
+ *
+ * Cross-correlation baselines are indexed using the upper triangle of a matrix,
+ * where tile pairs (i,j) with i < j are assigned consecutive indices:
+ * (0,1)→0, (0,2)→1, (0,3)→2, ..., (1,2)→n, (1,3)→n+1, etc.
+ *
+ * This uses the inverse triangular number formula to convert from a baseline
+ * index back to the tile pair. The math involves solving:
+ * i_bl = i_tile1 * (2*n - i_tile1 - 1) / 2 + (i_tile2 - i_tile1 - 1)
+ * where n = ntiles_sub1f + 1.
+ *
+ * Performance notes:
+ * - The definition of i_tile1 and i_tile2 happens in the macro for optimization reasons.
+ * - Despite the use of expensive and hard to debug sqrt/floor instructions,
+ *   the current approach is faster than precomputing tile pairs on the CPU.
+ */
+#define BASELINE_TO_TILES(i_bl, ntiles_sub1f, i_tile1, i_tile2) \
+    const float tile1f = floorf(-0.5f * sqrtf(4.0f * (ntiles_sub1f) * ((ntiles_sub1f) + 1.0f) - 8.0f * (i_bl) + 1.0f) + (ntiles_sub1f) + 0.5f); \
+    const int i_tile1 = (int)tile1f; \
+    const int i_tile2 = (i_bl) - (int)(tile1f * ((ntiles_sub1f) - (tile1f + 1.0f) / 2.0f)) + 1;

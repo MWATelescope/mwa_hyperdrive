@@ -8,8 +8,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.6.0] - 2025-05-13
 
+### Added
+
+- auto-correlation visibility simulation and writing support
+
 ### Changed
 
+- vis-simulate now supports auto-correlations by default, use `--output-no-autos`
+  to disable
+- VisRead trait generalizes `read_{crosses,autos,crosses_and_autos}` with `read_inner_dispatch`
 - cli args `--sources-to-subtract` and `--invert` from vis-subtract are now
   included in all source list reading commands, behaviour is slighly different:
     - `--sources-to-subtract` renamed to `--named-sources`

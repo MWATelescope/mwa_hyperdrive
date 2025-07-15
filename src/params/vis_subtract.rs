@@ -13,7 +13,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::Itertools;
 use log::{debug, info};
 use marlu::Jones;
-use ndarray::prelude::*;
+use ndarray::{prelude::*, ArcArray2};
 use scopeguard::defer_on_unwind;
 
 use super::{InputVisParams, ModellingParams, OutputVisParams};
@@ -47,13 +47,18 @@ impl VisSubtractParams {
             modelling_params: ModellingParams { apply_precession },
         } = self;
 
+        // Are we going to write out simulated auto-correlations? Use this
+        // variable so the rest of the code is clearer.
+        let using_autos = input_vis_params.using_autos && output_vis_params.output_autos;
+
         let obs_context = input_vis_params.get_obs_context();
         let num_unflagged_tiles = input_vis_params.get_num_unflagged_tiles();
         let num_unflagged_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
-        let vis_shape = (
+        let cross_vis_shape = (
             input_vis_params.spw.chanblocks.len(),
             num_unflagged_cross_baselines,
         );
+        let auto_vis_shape = (input_vis_params.spw.chanblocks.len(), num_unflagged_tiles);
 
         // Channel for modelling and subtracting.
         let (tx_model, rx_model) = bounded(5);
@@ -111,14 +116,24 @@ impl VisSubtractParams {
                         for timeblock in &input_vis_params.timeblocks {
                             // Read data to fill the buffer, pausing when the buffer is
                             // full to write it all out.
-                            let mut cross_data_fb = Array2::zeros(vis_shape);
-                            let mut cross_weights_fb = Array2::zeros(vis_shape);
+                            let mut cross_data_fb = Array2::zeros(cross_vis_shape);
+                            let mut cross_weights_fb = Array2::zeros(cross_vis_shape);
+                            let mut autos_fb = if using_autos {
+                                Some((
+                                    ArcArray2::zeros(auto_vis_shape),
+                                    ArcArray2::zeros(auto_vis_shape),
+                                ))
+                            } else {
+                                None
+                            };
 
                             let result = self.input_vis_params.read_timeblock(
                                 timeblock,
                                 cross_data_fb.view_mut(),
                                 cross_weights_fb.view_mut(),
-                                None,
+                                autos_fb
+                                    .as_mut()
+                                    .map(|(data, weights)| (data.view_mut(), weights.view_mut())),
                                 &error,
                             );
 
@@ -137,7 +152,7 @@ impl VisSubtractParams {
                             match tx_model.send(VisTimestep {
                                 cross_data_fb: cross_data_fb.into_shared(),
                                 cross_weights_fb: cross_weights_fb.into_shared(),
-                                autos: None,
+                                autos: autos_fb,
                                 timestamp: timeblock.median,
                             }) {
                                 Ok(()) => (),
@@ -170,7 +185,8 @@ impl VisSubtractParams {
                         source_list,
                         input_vis_params,
                         *apply_precession,
-                        vis_shape,
+                        cross_vis_shape,
+                        auto_vis_shape,
                         rx_model,
                         tx_write,
                         &error,
@@ -190,6 +206,19 @@ impl VisSubtractParams {
                     defer_on_unwind! { error.store(true); }
                     write_progress.tick();
 
+                    // Form sorted unflagged tile pairs from our
+                    // cross-correlation baselines (and maybe autos too).
+                    let unflagged_baseline_tile_pairs: Vec<_> = if using_autos {
+                        input_vis_params
+                            .tile_baseline_flags
+                            .get_unflagged_baseline_tile_pairs()
+                            .collect()
+                    } else {
+                        input_vis_params
+                            .tile_baseline_flags
+                            .get_unflagged_cross_baseline_tile_pairs()
+                            .collect()
+                    };
                     let result = write_vis(
                         &output_vis_params.output_files,
                         obs_context.array_position,
@@ -202,13 +231,7 @@ impl VisSubtractParams {
                         input_vis_params.time_res,
                         input_vis_params.dut1,
                         &input_vis_params.spw,
-                        &input_vis_params
-                            .tile_baseline_flags
-                            .unflagged_cross_baseline_to_tile_map
-                            .values()
-                            .copied()
-                            .sorted()
-                            .collect::<Vec<_>>(),
+                        &unflagged_baseline_tile_pairs,
                         output_vis_params.output_time_average_factor,
                         output_vis_params.output_freq_average_factor,
                         input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
@@ -248,7 +271,8 @@ fn model_thread(
     source_list: &SourceList,
     input_vis_params: &InputVisParams,
     apply_precession: bool,
-    vis_shape: (usize, usize),
+    cross_vis_shape: (usize, usize),
+    auto_vis_shape: (usize, usize),
     rx: Receiver<VisTimestep>,
     tx: Sender<VisTimestep>,
     error: &AtomicCell<bool>,
@@ -287,27 +311,40 @@ fn model_thread(
         apply_precession,
     )?;
 
-    // Recycle an array for model visibilities.
-    let mut vis_model_fb = Array2::zeros(vis_shape);
+    // Recycle arrays for model visibilities.
+    let mut cross_vis_model_fb = Array2::zeros(cross_vis_shape);
+    let mut auto_vis_model_fb = Array2::zeros(auto_vis_shape);
 
     // Iterate over the incoming data.
     for VisTimestep {
         mut cross_data_fb,
         cross_weights_fb,
-        autos,
+        mut autos,
         timestamp,
     } in rx.iter()
     {
         debug!("Modelling timestamp {}", timestamp.to_gpst_seconds());
-        modeller.model_timestep_with(timestamp, vis_model_fb.view_mut())?;
+        modeller.model_timestep_with(timestamp, cross_vis_model_fb.view_mut())?;
         cross_data_fb
             .iter_mut()
-            .zip_eq(vis_model_fb.iter())
+            .zip_eq(cross_vis_model_fb.iter())
             .for_each(|(vis_data, vis_model)| {
                 *vis_data =
                     Jones::from(Jones::<f64>::from(*vis_data) - Jones::<f64>::from(*vis_model));
             });
-        vis_model_fb.fill(Jones::default());
+        cross_vis_model_fb.fill(Jones::default());
+
+        if let Some((auto_data_fb, _auto_weights_fb)) = autos.as_mut() {
+            modeller.model_timestep_autos_with(timestamp, auto_vis_model_fb.view_mut())?;
+            auto_data_fb
+                .iter_mut()
+                .zip_eq(auto_vis_model_fb.iter())
+                .for_each(|(vis_data, vis_model)| {
+                    *vis_data =
+                        Jones::from(Jones::<f64>::from(*vis_data) - Jones::<f64>::from(*vis_model));
+                });
+            auto_vis_model_fb.fill(Jones::default());
+        }
 
         // Should we continue?
         if error.load() {
