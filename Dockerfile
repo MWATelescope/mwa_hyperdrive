@@ -64,7 +64,7 @@ ENV RUSTUP_HOME=/opt/rust CARGO_HOME=/opt/cargo
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
 # 2025-07-08: rustup is broken in gh actions ci if it's already installed
 RUN if [ ! -f $RUSTUP_HOME/settings.toml ]; then \
-        mkdir -pm755 $RUSTUP_HOME $CARGO_HOME && ( \
+        mkdir -pm755 $RUSTUP_HOME/tmp $CARGO_HOME && ( \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
         | env RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=$CARGO_HOME TMPDIR=$RUSTUP_HOME/tmp \
         sh -s -- -y \
