@@ -6,10 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2025-05-13
+## [0.6.0] - 2025-07-28
 
 ### Changed
 
+- add oversampled pfb gains from birli 0.18, these are not the default! For phase3 data, use `--pfb-flavour jake_oversampled`
 - cli args `--sources-to-subtract` and `--invert` from vis-subtract are now
   included in all source list reading commands, behaviour is slighly different:
     - `--sources-to-subtract` renamed to `--named-sources`
