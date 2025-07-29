@@ -3071,6 +3071,7 @@ fn test_peel_weight_preservation() {
         output_freq_average_factor: NonZeroUsize::new(1).unwrap(),
         output_timeblocks: vec1![timeblock.clone()],
         write_smallest_contiguous_band: false,
+        output_autos: false,
     };
     // no-op redefinition removed
     let peel_handle = std::thread::spawn(move || {
