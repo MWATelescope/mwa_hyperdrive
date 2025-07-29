@@ -1,6 +1,6 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.6.0"
+version = "0.6.1"
 authors = [
     "Christopher H. Jordan <christopherjordan87@gmail.com>",
     "Dev Null <dev.null@curtin.edu.au>",

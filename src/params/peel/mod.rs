@@ -1840,7 +1840,7 @@ fn peel_thread(
     let array_position = obs_context.array_position;
     let dut1 = obs_context.dut1.unwrap_or_default();
 
-    for (i, (mut vis_residual_tfb, mut vis_weights_tfb, timeblock)) in
+    for (i, (mut vis_residual_tfb, vis_weights_tfb, timeblock)) in
         rx_full_residual.iter().enumerate()
     {
         // Should we continue?
@@ -1852,8 +1852,10 @@ fn peel_thread(
         // WEIGHTS //
         // /////// //
 
+        // copy weights to a new array for tapering, but keep originals for writing
+        let mut tapered_weights_tfb = vis_weights_tfb.clone();
         peel_weight_params.apply_tfb(
-            vis_weights_tfb.view_mut(),
+            tapered_weights_tfb.view_mut(),
             obs_context,
             timeblock,
             apply_precession,
@@ -1881,7 +1883,7 @@ fn peel_thread(
 
                 peel_cpu(
                     vis_residual_tfb.view_mut(),
-                    vis_weights_tfb.view(),
+                    tapered_weights_tfb.view(),
                     timeblock,
                     source_list,
                     &mut iono_consts,
@@ -1914,7 +1916,7 @@ fn peel_thread(
                 )?;
                 peel_gpu(
                     vis_residual_tfb.view_mut(),
-                    vis_weights_tfb.view(),
+                    tapered_weights_tfb.view(),
                     timeblock,
                     source_list,
                     &mut iono_consts,
