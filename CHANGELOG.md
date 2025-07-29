@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## unreleased
+
+### Changed
+
+- vis-simulate now supports auto-correlations by default, use `--output-no-autos`
+  to disable
+- VisRead trait generalizes `read_{crosses,autos,crosses_and_autos}` with `read_inner_dispatch`
+
 ## [0.6.1] - 2025-07-29
 
 ### Fixed
@@ -13,6 +21,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - tapered weights were accidentally written out in peeling, flagging short baselines since v0.5.0
 
 ## [0.6.0] - 2025-07-28
+
+### Added
+
+- auto-correlation visibility simulation and writing support
 
 ### Changed
 

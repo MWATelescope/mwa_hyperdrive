@@ -351,6 +351,6 @@ fn skymodel_veto_parse_named_and_num_sources_invert_all_sources() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        ReadSourceListError::AllSourcesFiltered { invert } if invert == true
+        ReadSourceListError::AllSourcesFiltered { invert } if invert
     ));
 }
