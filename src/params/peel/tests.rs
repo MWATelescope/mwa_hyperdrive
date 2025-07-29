@@ -4,12 +4,13 @@
 
 //! Tests against peeling
 
-use std::{collections::HashSet, f64::consts::TAU};
+use std::{collections::HashSet, f64::consts::TAU, num::NonZeroUsize, path::PathBuf};
 
 use approx::assert_abs_diff_eq;
+use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indexmap::indexmap;
-use indicatif::{MultiProgress, ProgressDrawTarget};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
 use itertools::{izip, Itertools};
 use marlu::{
     constants::VEL_C,
@@ -27,6 +28,7 @@ use crate::{
     beam::{Delays, FEEBeam},
     context::{ObsContext, Polarisations},
     io::read::VisInputType,
+    io::write::VisOutputType,
     model::{new_sky_modeller, SkyModellerCpu},
     srclist::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList},
 };
@@ -2922,5 +2924,214 @@ mod gpu_tests {
                 vis_tfb[[t, f, b]] * Complex::new(phase.cos() as f32, phase.sin() as f32);
             assert_abs_diff_eq!(vis, expected, epsilon = 1e-5);
         }
+    }
+}
+
+#[test]
+fn test_peel_weight_preservation() {
+    // Test that the original weights are preserved and not modified by tapering
+    let apply_precession = true;
+
+    let obs_context = get_phase1_obs_context(CPU_TILE_LIMIT);
+
+    let array_pos = obs_context.array_position;
+    let num_tiles = obs_context.get_total_num_tiles();
+    let num_times = obs_context.timestamps.len();
+    let num_baselines = (num_tiles * (num_tiles - 1)) / 2;
+    let num_chans = obs_context.fine_chan_freqs.len();
+
+    let chanblocks = obs_context
+        .fine_chan_freqs
+        .iter()
+        .enumerate()
+        .map(|(i, f)| Chanblock {
+            chanblock_index: i as u16,
+            unflagged_index: i as u16,
+            freq: *f as f64,
+        })
+        .collect_vec();
+
+    let fine_chan_freqs_hz = obs_context
+        .fine_chan_freqs
+        .iter()
+        .map(|&f| f as f64)
+        .collect_vec();
+    let _lambdas_m = fine_chan_freqs_hz.iter().map(|&f| VEL_C / f).collect_vec();
+    let avg_freq = 4;
+    let low_res_lambdas_m = obs_context
+        .fine_chan_freqs
+        .as_slice()
+        .chunks(avg_freq)
+        .map(|chunk| {
+            let f = chunk.iter().sum::<u64>() as f64 / chunk.len() as f64;
+            VEL_C / f
+        })
+        .collect_vec();
+
+    let lst_0h_rad = get_lmst(
+        array_pos.longitude_rad,
+        obs_context.timestamps[0],
+        obs_context.dut1.unwrap_or_default(),
+    );
+    let source_radec =
+        RADec::from_hadec(HADec::from_radians(0.2, array_pos.latitude_rad), lst_0h_rad);
+    let source_fd = 1.;
+    let source_list = SourceList::from([(
+        "One".into(),
+        point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd),
+    )]);
+
+    let beam = get_beam(num_tiles);
+
+    // Create original weights with some non-uniform values to make changes detectable
+    let original_weights = {
+        let mut weights = Array3::<f32>::ones((num_times, num_chans, num_baselines));
+        // Set some weights to different values to make changes detectable
+        for i in 0..num_times {
+            for j in 0..num_chans {
+                for k in 0..num_baselines {
+                    weights[[i, j, k]] = 1.0 + (i + j + k) as f32 * 0.1;
+                }
+            }
+        }
+        weights
+    };
+
+    let timeblock = Timeblock {
+        index: 0,
+        range: 0..2,
+        timestamps: obs_context.timestamps.clone(),
+        timesteps: vec1![0, 1],
+        median: obs_context.timestamps[0],
+    };
+
+    let source_weighted_positions = [source_radec];
+
+    let multi_progress = MultiProgress::with_draw_target(ProgressDrawTarget::hidden());
+
+    let peel_weight_params = PeelWeightParams {
+        uvw_min_metres: 0.0,
+        uvw_max_metres: f64::MAX,
+        short_baseline_sigma: SHORT_BASELINE_SIGMA,
+    };
+
+    let flagged_tiles: HashSet<_> = obs_context.flagged_tiles.iter().cloned().collect();
+    let tile_baseline_flags = TileBaselineFlags::new(num_tiles, flagged_tiles);
+
+    let peel_loop_params = PeelLoopParams {
+        num_passes: NonZeroUsize::try_from(NUM_PASSES).expect("NUM_PASSES > 0"),
+        num_loops: NonZeroUsize::try_from(NUM_LOOPS).expect("NUM_LOOPS > 0"),
+        convergence: CONVERGENCE,
+    };
+
+    // Create a copy of weights for testing
+    let mut test_weights = original_weights.clone();
+
+    // Apply tapering to the test weights
+    peel_weight_params.apply_tfb(
+        test_weights.view_mut(),
+        &obs_context,
+        &timeblock,
+        apply_precession,
+        &chanblocks,
+        &tile_baseline_flags,
+    );
+
+    // Verify that the original weights are different from the tapered weights
+    // (this proves that apply_tfb actually modifies the weights)
+    assert!(!original_weights.abs_diff_eq(&test_weights, 1e-6));
+
+    // Now test the actual peel_thread function
+    // We need to set up the channels for peel_thread
+    let (tx_full_residual, rx_full_residual) = crossbeam_channel::bounded(1);
+    let (tx_write, rx_write) = crossbeam_channel::bounded(10); // Buffer for written data
+    let (tx_iono_consts, _rx_iono_consts) = crossbeam_channel::bounded(1);
+    let error = AtomicCell::new(false);
+
+    // Clone original_weights before moving into thread
+    let original_weights_clone = original_weights.clone();
+
+    // Send test data to the channel
+    let test_vis_residual: Array3<Jones<f32>> =
+        Array3::zeros((num_times, num_chans, num_baselines));
+    let test_weights_for_thread = original_weights.clone();
+    let timeblock_owned = timeblock.clone();
+    tx_full_residual
+        .send((test_vis_residual, test_weights_for_thread, timeblock_owned))
+        .unwrap();
+    drop(tx_full_residual); // Close the sender
+
+    // Spawn peel_thread in a separate thread so we can read from rx_write
+    let output_vis_params = OutputVisParams {
+        output_files: vec1![(
+            PathBuf::from("/tmp/test_output.uvfits"),
+            VisOutputType::Uvfits
+        )],
+        output_time_average_factor: NonZeroUsize::new(1).unwrap(),
+        output_freq_average_factor: NonZeroUsize::new(1).unwrap(),
+        output_timeblocks: vec1![timeblock.clone()],
+        write_smallest_contiguous_band: false,
+    };
+    let output_vis_params = output_vis_params;
+    let peel_handle = std::thread::spawn(move || {
+        // Wrap the receiver to convert owned Timeblock to reference
+        let rx_full_residual_ref = rx_full_residual
+            .into_iter()
+            .map(|(a, b, c)| (a, b, Box::new(c)))
+            .map(|(a, b, c)| (a, b, Box::leak(c) as &Timeblock));
+        // Create a new channel to pass the reference tuple to peel_thread
+        let (tx_ref, rx_ref) = crossbeam_channel::bounded(1);
+        for (a, b, c_ref) in rx_full_residual_ref {
+            tx_ref.send((a, b, c_ref)).unwrap();
+        }
+        drop(tx_ref);
+        peel_thread(
+            &beam,
+            &source_list,
+            &source_weighted_positions,
+            1, // num_sources_to_iono_subtract
+            &peel_loop_params,
+            &obs_context,
+            &obs_context.tile_xyzs,
+            &peel_weight_params,
+            &tile_baseline_flags,
+            &chanblocks,
+            &low_res_lambdas_m,
+            apply_precession,
+            Some(&output_vis_params), // pass output_vis_params
+            rx_ref,
+            tx_write,
+            tx_iono_consts,
+            &error,
+            &multi_progress,
+            &multi_progress.add(ProgressBar::new(1)),
+        )
+    });
+
+    // Collect all written weights
+    let mut written_weights = Vec::new();
+    while let Ok(vis_timestep) = rx_write.recv() {
+        written_weights.push(vis_timestep.cross_weights_fb);
+    }
+
+    // Wait for peel_thread to complete
+    let result = peel_handle.join().unwrap();
+
+    // Verify peel_thread completed successfully
+    assert!(result.is_ok(), "peel_thread should complete successfully");
+
+    // Verify that we received written weights
+    assert!(
+        !written_weights.is_empty(),
+        "Should have received written weights"
+    );
+
+    // Verify that the written weights match the original weights
+    // The written weights should be the original weights, not the tapered ones
+    for (i, written_weight_fb) in written_weights.iter().enumerate() {
+        let original_weight_fb = original_weights_clone.slice(ndarray::s![i, .., ..]);
+        let written_slice = written_weight_fb.as_slice().unwrap();
+        let original_slice = original_weight_fb.as_slice().unwrap();
+        assert_abs_diff_eq!(written_slice, original_slice, epsilon = 1e-6);
     }
 }
