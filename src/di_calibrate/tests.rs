@@ -703,6 +703,71 @@ fn test_multiple_timeblocks_behave() {
     assert_abs_diff_eq!(incomplete_sols.di_jones, expected, epsilon = 1e-14);
 }
 
+/// Test that multi-timeblock calibration works correctly with identity initial guesses
+/// instead of copying all-timesteps initial guesses.
+#[test]
+fn test_multiple_timeblocks_with_identity_initial_guesses() {
+    let timestamps = vec1![
+        Epoch::from_gpst_seconds(1090008640.0),
+        Epoch::from_gpst_seconds(1090008642.0),
+        Epoch::from_gpst_seconds(1090008644.0),
+        Epoch::from_gpst_seconds(1090008646.0),
+        Epoch::from_gpst_seconds(1090008648.0),
+        Epoch::from_gpst_seconds(1090008650.0),
+    ];
+    let num_timesteps = timestamps.len();
+    let num_tiles = 5;
+    let num_baselines = num_tiles * (num_tiles - 1) / 2;
+    let num_chanblocks = 1;
+
+    let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
+    let vis_data: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity() * 4.0);
+    let vis_model: Array3<Jones<f32>> = Array3::from_elem(vis_shape, Jones::identity());
+
+    // Create timeblocks with 2 timesteps each (3 timeblocks total)
+    let timeblocks = timesteps_to_timeblocks(
+        &timestamps,
+        Duration::from_seconds(2.0),
+        NonZeroUsize::new(2).unwrap(),
+        None,
+    );
+    let spws = channels_to_chanblocks(
+        &[150000000],
+        40e3 as u64,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    );
+
+    let (incomplete_sols, results) = calibrate_timeblocks(
+        vis_data.view(),
+        vis_model.view(),
+        &timeblocks,
+        &spws.first().unwrap().chanblocks,
+        10,
+        1e-8,
+        1e-4,
+        Polarisations::default(),
+        false,
+    );
+
+    // All timeblocks should converge
+    let num_timeblocks = timeblocks.len();
+    let num_chanblocks = spws.first().unwrap().chanblocks.len();
+    let expected_converged = num_timeblocks * num_chanblocks;
+    let actual_converged = results.iter().filter(|r| r.converged).count();
+    assert_eq!(
+        actual_converged, expected_converged,
+        "All timeblocks should converge"
+    );
+
+    // The solutions for all timeblocks should be the same (2 * identity)
+    let expected = Array3::from_elem(
+        (num_timeblocks, num_tiles, num_chanblocks),
+        Jones::identity() * 2.0,
+    );
+    assert_abs_diff_eq!(incomplete_sols.di_jones, expected, epsilon = 1e-14);
+}
+
 #[test]
 fn test_chanblocks_without_data_have_nan_solutions() {
     let timestamps = vec1![

@@ -452,17 +452,16 @@ pub(crate) fn calibrate_timeblock(
         .zip(di_jones_rev.outer_iter_mut())
         .map(|(chanblock, di_jones)| {
             let i_chanblock = chanblock.unflagged_index as usize;
-            let range = s![
-                timeblock.range.clone(),
-                // We use a range because `calibrate` and `calibration_loop`
-                // expect visibility arrays with potentially multiple
-                // chanblocks. It may be worth enforcing only single chanblocks.
-                i_chanblock..i_chanblock + 1,
-                ..
-            ];
+            // Select timesteps for this timeblock, then slice the chanblock
+            let timestep_indices: Vec<usize> = timeblock.timesteps.iter().copied().collect();
+            let data_selected = vis_data_tfb.select(Axis(0), &timestep_indices);
+            let model_selected = vis_model_tfb.select(Axis(0), &timestep_indices);
+            let data_slice = data_selected.slice(s![.., i_chanblock..i_chanblock + 1, ..]);
+            let model_slice = model_selected.slice(s![.., i_chanblock..i_chanblock + 1, ..]);
+
             let mut cal_result = calibrate(
-                vis_data_tfb.slice(range),
-                vis_model_tfb.slice(range),
+                data_slice,
+                model_slice,
                 di_jones,
                 max_iterations,
                 stop_threshold,
@@ -591,6 +590,7 @@ pub(crate) fn calibrate_timeblock(
                         let chanblock = old_cal_result.chanblock.unwrap();
                         let i_chanblock = old_cal_result.i_chanblock.unwrap();
                         let range = s![timeblock.range.clone(), i_chanblock..i_chanblock + 1, ..];
+
                         let mut new_cal_result = calibrate(
                             vis_data_tfb.slice(range),
                             vis_model_tfb.slice(range),
@@ -731,6 +731,7 @@ pub(super) fn calibrate(
         top.fill(Jones::default());
         bot.fill(Jones::default());
 
+        // Process all timesteps (original behavior)
         calibration_loop(
             data_tfb,
             model_tfb,
