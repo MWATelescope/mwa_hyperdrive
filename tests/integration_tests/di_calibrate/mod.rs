@@ -6,6 +6,7 @@
 
 mod cli_args;
 mod missing_files;
+mod multi_timeblock;
 
 use std::path::PathBuf;
 
