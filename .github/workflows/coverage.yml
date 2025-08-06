@@ -56,7 +56,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Get the beam HDF5 file
-        run: curl http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 -o mwa_full_embedded_element_pattern.h5
+        run: wget -Omwa_full_embedded_element_pattern.h5 http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5
 
       - name: Generate test lcov coverage into coverage/ dir
         run: |
