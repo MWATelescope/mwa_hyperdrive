@@ -268,10 +268,6 @@ impl IncompleteSolutions<'_> {
 ///
 /// This function basically wraps `calibrate_timeblock`, which does work in
 /// parallel. For this reason, `calibrate_timeblocks` does nothing in parallel.
-///
-/// The way this code is currently structured mandates that all timesteps are
-/// calibrated together (as if they all belonged to a single timeblock) before
-/// any timeblocks are individually calibrated. This decision can be revisited.
 #[allow(clippy::too_many_arguments)]
 pub fn calibrate_timeblocks<'a>(
     vis_data_tfb: ArrayView3<Jones<f32>>,
@@ -315,46 +311,6 @@ pub fn calibrate_timeblocks<'a>(
         );
         Array2::from_shape_vec((num_timeblocks, num_chanblocks), cal_results).unwrap()
     } else {
-        // Calibrate all timesteps together to get a good initial guess at what
-        // the solutions for each timeblock should be.
-        let pb = make_calibration_progress_bar(
-            num_chanblocks,
-            "Calibrating all timeblocks together".to_string(),
-        );
-        // This timeblock represents all timeblocks.
-        let timeblock = {
-            let mut timeblock = timeblocks.first().clone();
-            for tb in timeblocks.iter().skip(1) {
-                timeblock.range = timeblock.range.start..tb.range.end;
-                timeblock.timestamps.extend(tb.timestamps.iter());
-            }
-            timeblock
-        };
-        let cal_results = calibrate_timeblock(
-            vis_data_tfb.view(),
-            vis_model_tfb.view(),
-            di_jones.view_mut(),
-            &timeblock,
-            chanblocks,
-            max_iterations,
-            stop_threshold,
-            min_threshold,
-            pols,
-            pb,
-            print_convergence_messages,
-        );
-        let total_converged_count = cal_results.into_iter().filter(|r| r.converged).count();
-        info!(
-            "All timesteps for initial guesses: {}/{} ({}%) chanblocks converged",
-            total_converged_count,
-            num_chanblocks,
-            ((total_converged_count as f64 / num_chanblocks as f64) * 100.0).round()
-        );
-
-        // Calibrate each timeblock individually. Set all solutions to be that
-        // of the averaged solutions so that the individual timeblocks have less
-        // work to do.
-        di_jones.accumulate_axis_inplace(Axis(0), |&prev, curr| *curr = prev);
         let mut all_cal_results = Vec::with_capacity(timeblocks.len());
         for (i_timeblock, timeblock) in timeblocks.iter().enumerate() {
             let pb = make_calibration_progress_bar(
