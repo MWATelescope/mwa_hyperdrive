@@ -36,6 +36,7 @@ pub(crate) fn peel_gpu(
     tile_baseline_flags: &TileBaselineFlags,
     high_res_modeller: &mut SkyModellerGpu,
     no_precession: bool,
+    num_sources_to_peel: usize,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     let (num_loops, num_passes, convergence) = peel_loop_params.get();
@@ -650,7 +651,6 @@ pub(crate) fn peel_gpu(
                 pb_trace!("{:?}: subtract_iono", start.elapsed());
 
                 // Peel?
-                let num_sources_to_peel = 0;
                 if pass == num_passes - 1 && i_source < num_sources_to_peel {
                     // We currently can only do DI calibration on the CPU. Copy the visibilities back to the host.
                     let vis = d_high_res_vis_tfb.copy_from_device_new()?;
@@ -676,11 +676,19 @@ pub(crate) fn peel_gpu(
                         Array3::from_elem((1, num_tiles, num_high_res_chans), Jones::identity());
                     let shape = (num_timesteps, num_high_res_chans, num_cross_baselines);
                     let pb = ProgressBar::hidden();
+                    // Build a local timeblock for DI cal
+                    let cal_tb = Timeblock {
+                        index: 0,
+                        range: 0..num_timesteps,
+                        timestamps: timeblock.timestamps.clone(),
+                        timesteps: timeblock.timesteps.clone(),
+                        median: timeblock.median,
+                    };
                     let di_cal_results = calibrate_timeblock(
                         ArrayView3::from_shape(shape, &vis).expect("correct shape"),
                         ArrayView3::from_shape(shape, &model).expect("correct shape"),
                         di_jones.view_mut(),
-                        timeblock,
+                        &cal_tb,
                         chanblocks,
                         50,
                         1e-8,
@@ -690,7 +698,39 @@ pub(crate) fn peel_gpu(
                         true,
                     );
                     if di_cal_results.into_iter().all(|r| r.converged) {
-                        // Apply.
+                        // Subtract DI-calibrated model from visibilities on host, then copy back
+                        let mut vis_host = vis;
+                        let model_host = model;
+                        // di_jones shape: (1, tiles, chans)
+                        let j_tiles = di_jones.index_axis(Axis(0), 0);
+                        // Iterate per time then per baseline, update per channel
+                        for t in 0..num_timesteps {
+                            // reset baseline tile indices per timestep
+                            let mut i_tile1 = 0usize;
+                            let mut i_tile2 = 1usize;
+                            for b in 0..num_cross_baselines {
+                                let j1 = j_tiles.index_axis(Axis(0), i_tile1);
+                                let j2 = j_tiles.index_axis(Axis(0), i_tile2);
+                                for f in 0..num_high_res_chans {
+                                    let idx = t * num_high_res_chans * num_cross_baselines
+                                        + f * num_cross_baselines
+                                        + b;
+                                    let m = Jones::<f64>::from(model_host[idx]);
+                                    let sub = (j1[f] * m) * j2[f].h();
+                                    let mut v = Jones::<f64>::from(vis_host[idx]);
+                                    v -= sub;
+                                    vis_host[idx] = Jones::from(v);
+                                }
+                                // advance baseline tile indices
+                                i_tile2 += 1;
+                                if i_tile2 == num_tiles {
+                                    i_tile1 += 1;
+                                    i_tile2 = i_tile1 + 1;
+                                }
+                            }
+                        }
+                        // Copy back to device buffer by recreating device memory from host slice
+                        d_high_res_vis_tfb = DevicePointer::copy_to_device(&vis_host)?;
                     }
                 }
 

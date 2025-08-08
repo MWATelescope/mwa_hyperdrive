@@ -81,6 +81,21 @@ fn frequency_averaging_defaults() {
 }
 
 #[test]
+fn peel_cannot_exceed_iono() {
+    let mut args = get_reduced_1090008640();
+    args.peel_args = PeelCliArgs {
+        num_sources_to_iono_subtract: Some(1),
+        num_sources_to_peel: Some(2),
+        ..Default::default()
+    };
+    match args.parse() {
+        Err(HyperdriveError::Peel(s)) if s.contains("cannot exceed the number of sources to iono subtract") => {}
+        Err(e) => panic!("Expected TooManyPeel error, got {e}"),
+        Ok(_) => panic!("Expected an error, got Ok"),
+    }
+}
+
+#[test]
 #[serial]
 fn frequency_averaging_explicit_output() {
     let PeelParams {

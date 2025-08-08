@@ -242,6 +242,7 @@ pub(crate) struct PeelParams {
     pub(crate) peel_weight_params: PeelWeightParams,
     pub(crate) peel_loop_params: PeelLoopParams,
     pub(crate) num_sources_to_iono_subtract: usize,
+    pub(crate) num_sources_to_peel: usize,
 }
 
 impl PeelParams {
@@ -260,6 +261,7 @@ impl PeelParams {
             peel_weight_params,
             peel_loop_params,
             num_sources_to_iono_subtract,
+            ..
         } = self;
 
         let obs_context = input_vis_params.get_obs_context();
@@ -470,6 +472,7 @@ impl PeelParams {
                         source_list,
                         &source_weighted_positions,
                         *num_sources_to_iono_subtract,
+                        self.num_sources_to_peel,
                         peel_loop_params,
                         obs_context,
                         &unflagged_tile_xyzs,
@@ -1132,6 +1135,7 @@ fn peel_cpu(
     tile_baseline_flags: &TileBaselineFlags,
     high_res_modeller: &mut dyn SkyModeller,
     no_precession: bool,
+    num_sources_to_peel: usize,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     // TODO: Do we allow multiple timesteps in the low-res data?
@@ -1284,11 +1288,12 @@ fn peel_cpu(
     weights_average(vis_weights_tfb.view(), weights_lo.view_mut());
 
     for pass in 0..num_passes {
-        for (((source_name, source), iono_consts), source_pos) in source_list
+        for (i_source, (((source_name, source), iono_consts), source_pos)) in source_list
             .iter()
             .take(num_sources_to_iono_subtract)
             .zip_eq(iono_consts.iter_mut())
             .zip_eq(source_weighted_positions.iter().copied())
+            .enumerate()
         {
             multi_progress_bar.suspend(|| {
                 debug!("peel loop {pass}: {source_name} at {source_pos} (has iono {iono_consts:?})")
@@ -1455,12 +1460,103 @@ fn peel_cpu(
             unpeel_model(
                 model_hi_obs_tfb.view(),
                 resid_hi_obs_tfb.view_mut(),
-                // tile_uvs_high_res.view(),
                 tile_uvs_hi_src.view(),
                 *iono_consts,
                 old_iono_consts,
                 &all_fine_chan_lambdas_m,
             );
+
+            // If peeling requested for this source (last pass), do DI cal and subtract
+            if pass == num_passes - 1 && num_sources_to_peel > 0 {
+                if i_source < num_sources_to_peel {
+                    // Re-rotate updated residuals to source phase centre
+                    vis_rotate_tfb(
+                        resid_hi_obs_tfb.view(),
+                        resid_hi_src_tfb.view_mut(),
+                        tile_ws_hi_obs.view(),
+                        tile_ws_hi_src.view(),
+                        &all_fine_chan_lambdas_m,
+                    );
+                    // Build model at source phase centre with iono applied (already in model_hi_src_iono_tfb)
+                    // Run DI calibration comparing resid_hi_src_tfb vs model_hi_src_iono_tfb in source phase centre
+                    let mut di_jones = Array3::from_elem(
+                        (1, num_tiles, num_freqs_high_res),
+                        Jones::identity(),
+                    );
+                    let shape = (num_timestamps_high_res, num_freqs_high_res, num_cross_baselines);
+                    let pb = ProgressBar::hidden();
+                    // Build a local timeblock with index 0 and full range
+                    let cal_tb = Timeblock {
+                        index: 0,
+                        range: 0..num_timestamps_high_res,
+                        timestamps: timeblock.timestamps.clone(),
+                        timesteps: timeblock.timesteps.clone(),
+                        median: timeblock.median,
+                    };
+                    let results = crate::di_calibrate::calibrate_timeblock(
+                        ArrayView3::from_shape(shape, resid_hi_src_tfb.as_slice().unwrap())
+                            .expect("correct shape"),
+                        ArrayView3::from_shape(shape, model_hi_src_iono_tfb.as_slice().unwrap())
+                            .expect("correct shape"),
+                        di_jones.view_mut(),
+                        &cal_tb,
+                        chanblocks,
+                        50,
+                        1e-8,
+                        1e-4,
+                        obs_context.polarisations,
+                        pb,
+                        true,
+                    );
+                    if results.into_iter().all(|r| r.converged) {
+                        // Subtract DI-calibrated model from residuals at source phase centre
+                        // resid_hi_src_tfb -= J_i * model_hi_src_tfb * J_j^H (per baseline)
+                        resid_hi_src_tfb
+                            .outer_iter_mut()
+                            .zip(model_hi_src_tfb.outer_iter())
+                            .for_each(|(mut res_fb, model_fb)| {
+                                // di_jones shape: (1, tiles, chans) -> take [0, .., ..]
+                                let j_tiles = di_jones.index_axis(Axis(0), 0);
+                                let mut i_tile1 = 0usize;
+                                let mut i_tile2 = 1usize;
+                                res_fb
+                                    .axis_iter_mut(Axis(1))
+                                    .zip(model_fb.axis_iter(Axis(1)))
+                                    .for_each(|(mut res_f, model_f)| {
+                                        let j1 = j_tiles.index_axis(Axis(0), i_tile1);
+                                        let j2 = j_tiles.index_axis(Axis(0), i_tile2);
+                                        res_f
+                                            .iter_mut()
+                                            .zip(model_f.iter())
+                                            .enumerate()
+                                            .for_each(|(i_chan, (res, m))| {
+                                                let g1 = j1[i_chan];
+                                                let g2 = j2[i_chan];
+                                                let m64: Jones<f64> = Jones::from(*m);
+                                                let sub: Jones<f64> = (g1 * m64) * g2.h();
+                                                let mut r64: Jones<f64> = Jones::from(*res);
+                                                r64 -= sub;
+                                                *res = Jones::from(r64);
+                                            });
+                                        // advance baseline tile indices
+                                        i_tile2 += 1;
+                                        if i_tile2 == num_tiles {
+                                            i_tile1 += 1;
+                                            i_tile2 = i_tile1 + 1;
+                                        }
+                                    });
+                            });
+                        // Rotate residuals back to observation phase centre for subsequent sources
+                        vis_rotate_tfb(
+                            resid_hi_src_tfb.view(),
+                            resid_hi_obs_tfb.view_mut(),
+                            tile_ws_hi_src.view(),
+                            tile_ws_hi_obs.view(),
+                            &all_fine_chan_lambdas_m,
+                        );
+                    }
+                }
+            }
 
             multi_progress_bar.suspend(|| {
                 debug!(
@@ -1821,6 +1917,7 @@ fn peel_thread(
     source_list: &SourceList,
     source_weighted_positions: &[RADec],
     num_sources_to_iono_subtract: usize,
+    num_sources_to_peel: usize,
     peel_loop_params: &PeelLoopParams,
     obs_context: &ObsContext,
     unflagged_tile_xyzs: &[XyzGeodetic],
@@ -1895,6 +1992,7 @@ fn peel_thread(
                     tile_baseline_flags,
                     &mut high_res_modeller,
                     !apply_precession,
+                    num_sources_to_peel,
                     multi_progress,
                 )?;
             }
@@ -1928,6 +2026,7 @@ fn peel_thread(
                     tile_baseline_flags,
                     &mut high_res_modeller,
                     !apply_precession,
+                    num_sources_to_peel,
                     multi_progress,
                 )?;
             }
