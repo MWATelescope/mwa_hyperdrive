@@ -75,3 +75,7 @@ hyperdrive solutions-apply \
     --freq-average 2
 ```
 ~~~
+
+~~~admonish tip title="Auto-correlations"
+All writers include auto-correlations by default if they are present in memory. To always write crosses-only, add `--output-no-autos` to the command (available in `solutions-apply`, `vis-convert`, `vis-subtract`, and for model outputs in `di-calibrate`).
+~~~

@@ -29,3 +29,7 @@ flowchart TD
         visibilities]
     end
 ```
+
+~~~admonish tip title="Autos"
+Use `--no-autos` to skip reading and subtracting autos.
+~~~
