@@ -207,7 +207,7 @@ impl CalibrationSolutions {
         &self,
         timestamp: Epoch,
         timestamp_fraction: f64,
-    ) -> ArrayView2<'_, Jones<f64>> {
+    ) -> ArrayView2<Jones<f64>> {
         let num_timeblocks = self.di_jones.len_of(Axis(0));
         // If there's only timeblock, well...
         if num_timeblocks == 1 {
