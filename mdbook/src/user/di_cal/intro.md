@@ -35,3 +35,9 @@ flowchart TD
 
     cal-->WriteSols[fa:fa-save Write calibration solutions]
 ```
+
+~~~admonish info title="Model visibility outputs"
+If `--model-filenames` is supplied, model visibilities are written for inspection.
+These include auto-correlations by default; use `--no-autos` to skip reading,
+simulating and writing them.
+~~~

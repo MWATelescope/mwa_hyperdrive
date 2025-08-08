@@ -26,3 +26,7 @@ flowchart TD
         Apply-->Write[fa:fa-save Write timeblock\nvisibilities]
     end
 ```
+
+~~~admonish tip title="Autos"
+Outputs include auto-correlations by default when present. Add `--output-no-autos` to write crosses-only.
+~~~
