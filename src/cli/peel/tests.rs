@@ -118,6 +118,41 @@ fn frequency_averaging_explicit_output() {
 
 #[test]
 #[serial]
+fn test_peel_writes_di_per_source() {
+    use crate::CalibrationSolutions;
+    use ndarray::Axis;
+
+    let temp_dir = tempdir().expect("Couldn't make tempdir");
+    let di_dir = temp_dir.path().join("di_solutions");
+
+    // Request DI solutions per source for 2 sources
+    let params = get_merged_1090008640(vec![
+        "--iono-sub=2".to_string(),
+        format!("--di-per-source-dir={}", di_dir.display()),
+    ]);
+
+    // Run peel
+    params.run().unwrap();
+
+    // Verify directory and files exist
+    assert!(di_dir.exists(), "DI per-source directory not created");
+    let mut fits_files: Vec<_> = std::fs::read_dir(&di_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("fits"))
+        .collect();
+    fits_files.sort();
+    assert_eq!(fits_files.len(), 2, "Expected 2 per-source DI files");
+
+    // Quick sanity check: can read one and it has one timeblock
+    let sols = CalibrationSolutions::read_solutions_from_ext(&fits_files[0], Option::<&std::path::Path>::None)
+        .expect("able to read per-source DI solutions");
+    assert_eq!(sols.di_jones.len_of(Axis(0)), 1, "Per-source DI should have 1 timeblock");
+}
+
+#[test]
+#[serial]
 fn frequency_averaging_explicit_output_iono() {
     let PeelParams {
         input_vis_params: InputVisParams { spw: input_spw, .. },

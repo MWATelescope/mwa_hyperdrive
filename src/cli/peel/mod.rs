@@ -131,6 +131,10 @@ pub(crate) struct PeelCliArgs {
     #[clap(long, help_heading = "OUTPUT FILES")]
     #[serde(default)]
     output_smallest_contiguous_band: bool,
+
+    /// Write per-source DI calibration solutions (hyperdrive .fits), one file per peeled source.
+    #[clap(long, help_heading = "OUTPUT FILES")]
+    pub(super) di_per_source_dir: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -217,6 +221,7 @@ impl PeelArgs {
                     uvw_max,
                     short_baseline_sigma,
                     convergence,
+                    di_per_source_dir,
                     outputs,
                     output_vis_time_average,
                     output_vis_freq_average,
@@ -617,6 +622,7 @@ impl PeelArgs {
             input_vis_params,
             output_vis_params,
             iono_outputs,
+            di_per_source_dir,
             beam,
             source_list,
             modelling_params,
@@ -661,6 +667,7 @@ impl PeelCliArgs {
             uvw_max: self.uvw_max.or(other.uvw_max),
             short_baseline_sigma: self.short_baseline_sigma.or(other.short_baseline_sigma),
             convergence: self.convergence.or(other.convergence),
+            di_per_source_dir: self.di_per_source_dir.or(other.di_per_source_dir),
             outputs: self.outputs.or(other.outputs),
             output_vis_time_average: self
                 .output_vis_time_average
