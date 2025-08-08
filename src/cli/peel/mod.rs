@@ -82,13 +82,13 @@ pub(crate) struct PeelCliArgs {
     #[clap(long = "iono-sub", help_heading = "PEELING")]
     pub(super) num_sources_to_iono_subtract: Option<usize>,
 
-    // TODO: peel
-    // The number of sources to peel. Peel sources are treated the same as
-    // "ionospherically subtracted" sources, except before subtracting, a "DI
-    // calibration" is done between the iono-rotated model and the data. This
-    // allows for scintillation and any other phase shift to be corrected.
-    // #[clap(long = "peel", help_heading = "PEELING")]
-    // pub(super) num_sources_to_peel: Option<usize>,
+    /// The number of sources to peel. Peel sources are treated the same as
+    /// "ionospherically subtracted" sources, except before subtracting, a "DI
+    /// calibration" is done between the iono-rotated model and the data. This
+    /// allows for scintillation and any other phase shift to be corrected.
+    #[clap(long = "peel", help_heading = "PEELING")]
+    pub(super) num_sources_to_peel: Option<usize>,
+
     #[clap(long, help = NUM_PASSES_HELP.as_str(), help_heading = "PEELING")]
     pub(super) num_passes: Option<usize>,
 
@@ -208,6 +208,7 @@ impl PeelArgs {
             peel_args:
                 PeelCliArgs {
                     num_sources_to_iono_subtract,
+                    num_sources_to_peel,
                     num_passes,
                     num_loops,
                     iono_time_average,
@@ -282,6 +283,19 @@ impl PeelArgs {
                 return Err(PeelArgsError::TooManyIonoSub {
                     total: sky_model_source_count,
                     iono: is,
+                }
+                .into());
+            }
+        }
+
+        // number of peel sources cannot exceed the number of iono-sub sources
+        let num_sources_to_iono_subtract_value =
+            num_sources_to_iono_subtract.unwrap_or(sky_model_source_count);
+        if let Some(p) = num_sources_to_peel {
+            if p > num_sources_to_iono_subtract_value {
+                return Err(PeelArgsError::TooManyPeel {
+                    total: num_sources_to_iono_subtract_value,
+                    peel: p,
                 }
                 .into());
             }
@@ -537,6 +551,7 @@ impl PeelArgs {
 
         let num_sources_to_iono_subtract =
             num_sources_to_iono_subtract.unwrap_or(source_list.len());
+        let num_sources_to_peel = num_sources_to_peel.unwrap_or(0);
 
         let mut peel_printer = InfoPrinter::new("Peeling set up".into());
         peel_printer.push_block(vec![
@@ -612,6 +627,7 @@ impl PeelArgs {
             peel_weight_params,
             peel_loop_params,
             num_sources_to_iono_subtract,
+            num_sources_to_peel,
         })
     }
 
@@ -636,6 +652,7 @@ impl PeelCliArgs {
             num_sources_to_iono_subtract: self
                 .num_sources_to_iono_subtract
                 .or(other.num_sources_to_iono_subtract),
+            num_sources_to_peel: self.num_sources_to_peel.or(other.num_sources_to_peel),
             num_passes: self.num_passes.or(other.num_passes),
             num_loops: self.num_loops.or(other.num_loops),
             iono_time_average: self.iono_time_average.or(other.iono_time_average),

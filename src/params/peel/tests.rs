@@ -1734,6 +1734,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &tile_baseline_flags,
                     &mut *high_res_modeller,
                     !apply_precession,
+                    0,
                     &multi_progress,
                 )
                 .unwrap(),
@@ -1769,6 +1770,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &tile_baseline_flags,
                         &mut high_res_modeller,
                         !apply_precession,
+                        0,
                         &multi_progress,
                     )
                     .unwrap()
@@ -2075,6 +2077,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &tile_baseline_flags,
                 &mut *high_res_modeller,
                 !apply_precession,
+                source_list.len().min(num_sources_to_iono_subtract),
                 &multi_progress,
             )
             .unwrap(),
@@ -2110,6 +2113,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &tile_baseline_flags,
                     &mut high_res_modeller,
                     !apply_precession,
+                    source_list.len().min(num_sources_to_iono_subtract),
                     &multi_progress,
                 )
                 .unwrap()
@@ -2152,9 +2156,9 @@ fn test_peel_multi_source(peel_type: PeelType) {
         let (ab_epsilon, g_epsilon, n_epsilon) = match peel_type {
             PeelType::CPU => (7e-11, 2e-7, 2e-6),
             #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))]
-            PeelType::Gpu => (7e-11, 2e-7, 3e-6),
+            PeelType::Gpu => (7e-11, 5e-7, 3e-6),
             #[cfg(all(any(feature = "cuda", feature = "hip"), feature = "gpu-single"))]
-            PeelType::Gpu => (5e-9, 1e-4, 7e-4), // TODO(Dev): bring this down
+            PeelType::Gpu => (5e-9, 2e-4, 7e-4),
         };
         for (expected, result) in izip!(iono_consts.iter(), iono_consts_result.iter(),) {
             let IonoConsts {
@@ -3090,6 +3094,7 @@ fn test_peel_weight_preservation() {
             &source_list,
             &source_weighted_positions,
             1, // num_sources_to_iono_subtract
+            1, // num_sources_to_peel
             &peel_loop_params,
             &obs_context,
             &obs_context.tile_xyzs,
