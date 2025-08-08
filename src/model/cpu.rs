@@ -199,13 +199,12 @@ impl<'a> SkyModellerCpu<'a> {
             return Ok(Array3::from_elem(shape, Jones::identity()));
         }
 
-        let mut beam_responses = Array3::zeros(shape);
-
         if azels.is_empty() || self.unique_tiles.is_empty() || self.unique_freqs.is_empty() {
             // Return an empty array to avoid chunk size zero panics
-            return Ok(beam_responses);
+            return Ok(Array3::zeros(shape));
         }
 
+        let mut beam_responses = Array3::zeros(shape);
         // The variables are a bit confusing here. `i_tile` is the outer-most
         // index into `beam_responses`, and `i_unique_tile` is the index to feed
         // into the beam calculations.
