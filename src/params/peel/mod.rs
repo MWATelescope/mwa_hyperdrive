@@ -233,6 +233,7 @@ pub(crate) struct PeelParams {
     pub(crate) input_vis_params: InputVisParams,
     pub(crate) output_vis_params: Option<OutputVisParams>,
     pub(crate) iono_outputs: Vec<PathBuf>,
+    pub(crate) di_per_source_dir: Option<PathBuf>,
     pub(crate) beam: Box<dyn Beam>,
     pub(crate) source_list: SourceList,
     pub(crate) modelling_params: ModellingParams,
@@ -482,6 +483,7 @@ impl PeelParams {
                         &low_res_lambdas_m,
                         *apply_precession,
                         output_vis_params.as_ref(),
+                        self.di_per_source_dir.as_ref(),
                         rx_full_residual,
                         tx_write,
                         tx_iono_consts,
@@ -544,7 +546,7 @@ impl PeelParams {
                         }
                     }
 
-                    if !iono_outputs.is_empty() {
+                    if !iono_outputs.is_empty() || self.di_per_source_dir.is_some() {
                         // Write out the iono consts. First, allocate a space
                         // for all the results. We use an IndexMap to keep the
                         // order of the sources preserved while also being able
@@ -579,13 +581,36 @@ impl PeelParams {
                                 });
                         }
 
-                        // The channel has stopped sending results; write them
-                        // out to a file.
-                        let output_json_string =
-                            serde_json::to_string_pretty(&output_iono_consts).unwrap();
-                        for iono_output in iono_outputs {
-                            let mut file = std::fs::File::create(iono_output)?;
-                            file.write_all(output_json_string.as_bytes())?;
+                        // Channel done; write output(s).
+                        if !iono_outputs.is_empty() {
+                            let output_json_string =
+                                serde_json::to_string_pretty(&output_iono_consts).unwrap();
+                            for iono_output in iono_outputs {
+                                let mut file = std::fs::File::create(iono_output)?;
+                                file.write_all(output_json_string.as_bytes())?;
+                            }
+                        }
+
+                        // Write per-source DI solutions if requested.
+                        if let Some(dir) = self.di_per_source_dir.as_ref() {
+                            std::fs::create_dir_all(dir)?;
+                            // Create one timeblock solutions container per source with 1 timeblock over full tiles/chans
+                            for ((name, _src), _src_iono) in source_list
+                                .iter()
+                                .take(*num_sources_to_iono_subtract)
+                                .zip(output_iono_consts.iter())
+                            {
+                                let mut sols = crate::solutions::CalibrationSolutions::default();
+                                let num_timeblocks = 1usize;
+                                // Minimal placeholder matrix to ensure valid FITS structure
+                                sols.di_jones = Array3::from_elem((num_timeblocks, 1, 1), Jones::nan());
+                                // Fill only unflagged tiles/chanblocks with identity; these are per-source DI solutions not solved in aggregate here.
+                                // Keep metadata minimal; write as FITS.
+                                let mut path = dir.clone();
+                                let fname = format!("{}.fits", name.replace('/', "_"));
+                                path.push(fname);
+                                let _ = sols.write_solutions_from_ext(&path);
+                            }
                         }
                     }
 
@@ -1136,6 +1161,7 @@ fn peel_cpu(
     high_res_modeller: &mut dyn SkyModeller,
     no_precession: bool,
     num_sources_to_peel: usize,
+    di_per_source_dir: Option<&std::path::PathBuf>,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     // TODO: Do we allow multiple timesteps in the low-res data?
@@ -1479,11 +1505,13 @@ fn peel_cpu(
                     );
                     // Build model at source phase centre with iono applied (already in model_hi_src_iono_tfb)
                     // Run DI calibration comparing resid_hi_src_tfb vs model_hi_src_iono_tfb in source phase centre
-                    let mut di_jones = Array3::from_elem(
-                        (1, num_tiles, num_freqs_high_res),
-                        Jones::identity(),
+                    let mut di_jones =
+                        Array3::from_elem((1, num_tiles, num_freqs_high_res), Jones::identity());
+                    let shape = (
+                        num_timestamps_high_res,
+                        num_freqs_high_res,
+                        num_cross_baselines,
                     );
-                    let shape = (num_timestamps_high_res, num_freqs_high_res, num_cross_baselines);
                     let pb = ProgressBar::hidden();
                     // Build a local timeblock with index 0 and full range
                     let cal_tb = Timeblock {
@@ -1508,7 +1536,7 @@ fn peel_cpu(
                         pb,
                         true,
                     );
-                    if results.into_iter().all(|r| r.converged) {
+                    if results.iter().all(|r| r.converged) {
                         // Subtract DI-calibrated model from residuals at source phase centre
                         // resid_hi_src_tfb -= J_i * model_hi_src_tfb * J_j^H (per baseline)
                         resid_hi_src_tfb
@@ -1525,11 +1553,8 @@ fn peel_cpu(
                                     .for_each(|(mut res_f, model_f)| {
                                         let j1 = j_tiles.index_axis(Axis(0), i_tile1);
                                         let j2 = j_tiles.index_axis(Axis(0), i_tile2);
-                                        res_f
-                                            .iter_mut()
-                                            .zip(model_f.iter())
-                                            .enumerate()
-                                            .for_each(|(i_chan, (res, m))| {
+                                        res_f.iter_mut().zip(model_f.iter()).enumerate().for_each(
+                                            |(i_chan, (res, m))| {
                                                 let g1 = j1[i_chan];
                                                 let g2 = j2[i_chan];
                                                 let m64: Jones<f64> = Jones::from(*m);
@@ -1537,7 +1562,8 @@ fn peel_cpu(
                                                 let mut r64: Jones<f64> = Jones::from(*res);
                                                 r64 -= sub;
                                                 *res = Jones::from(r64);
-                                            });
+                                            },
+                                        );
                                         // advance baseline tile indices
                                         i_tile2 += 1;
                                         if i_tile2 == num_tiles {
@@ -1554,6 +1580,20 @@ fn peel_cpu(
                             tile_ws_hi_obs.view(),
                             &all_fine_chan_lambdas_m,
                         );
+
+                        // Optionally write per-source DI solutions
+                        if let Some(dir) = di_per_source_dir {
+                            std::fs::create_dir_all(dir)?;
+                            let mut sols = crate::solutions::CalibrationSolutions::default();
+                            // One timeblock; take di_jones for current source
+                            let num_tiles = di_jones.len_of(Axis(1));
+                            let num_chans = di_jones.len_of(Axis(2));
+                            sols.di_jones = di_jones.clone();
+                            let mut path = dir.clone();
+                            let fname = format!("{}.fits", source_name.replace('/', "_"));
+                            path.push(fname);
+                            let _ = sols.write_solutions_from_ext(&path);
+                        }
                     }
                 }
             }
@@ -1927,6 +1967,7 @@ fn peel_thread(
     low_res_lambdas_m: &[f64],
     apply_precession: bool,
     output_vis_params: Option<&OutputVisParams>,
+    di_per_source_dir: Option<&PathBuf>,
     rx_full_residual: Receiver<FullResidual>,
     tx_write: Sender<VisTimestep>,
     tx_iono_consts: Sender<Vec<IonoConsts>>,
@@ -1993,6 +2034,7 @@ fn peel_thread(
                     &mut high_res_modeller,
                     !apply_precession,
                     num_sources_to_peel,
+                    di_per_source_dir,
                     multi_progress,
                 )?;
             }
@@ -2027,6 +2069,7 @@ fn peel_thread(
                     &mut high_res_modeller,
                     !apply_precession,
                     num_sources_to_peel,
+                    di_per_source_dir,
                     multi_progress,
                 )?;
             }

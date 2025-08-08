@@ -1735,6 +1735,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &mut *high_res_modeller,
                     !apply_precession,
                     0,
+                    None,
                     &multi_progress,
                 )
                 .unwrap(),
@@ -1771,6 +1772,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &mut high_res_modeller,
                         !apply_precession,
                         0,
+                        None,
                         &multi_progress,
                     )
                     .unwrap()
@@ -2078,6 +2080,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &mut *high_res_modeller,
                 !apply_precession,
                 source_list.len().min(num_sources_to_iono_subtract),
+                None,
                 &multi_progress,
             )
             .unwrap(),
@@ -2114,6 +2117,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &mut high_res_modeller,
                     !apply_precession,
                     source_list.len().min(num_sources_to_iono_subtract),
+                    None,
                     &multi_progress,
                 )
                 .unwrap()
@@ -3104,6 +3108,7 @@ fn test_peel_weight_preservation() {
             &low_res_lambdas_m,
             apply_precession,
             Some(&output_vis_params), // pass output_vis_params
+            None,
             rx_ref,
             tx_write,
             tx_iono_consts,

@@ -37,6 +37,7 @@ pub(crate) fn peel_gpu(
     high_res_modeller: &mut SkyModellerGpu,
     no_precession: bool,
     num_sources_to_peel: usize,
+    di_per_source_dir: Option<&std::path::PathBuf>,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     let (num_loops, num_passes, convergence) = peel_loop_params.get();
@@ -697,7 +698,7 @@ pub(crate) fn peel_gpu(
                         pb,
                         true,
                     );
-                    if di_cal_results.into_iter().all(|r| r.converged) {
+                    if di_cal_results.iter().all(|r| r.converged) {
                         // Subtract DI-calibrated model from visibilities on host, then copy back
                         let mut vis_host = vis;
                         let model_host = model;
@@ -731,6 +732,21 @@ pub(crate) fn peel_gpu(
                         }
                         // Copy back to device buffer by recreating device memory from host slice
                         d_high_res_vis_tfb = DevicePointer::copy_to_device(&vis_host)?;
+
+                        // Optionally write per-source DI solutions
+                        if let Some(dir) = di_per_source_dir {
+                            std::fs::create_dir_all(dir)?;
+                            let mut sols = crate::solutions::CalibrationSolutions::default();
+                            // One timeblock, unflagged tiles only, unflagged chans only
+                            let num_tiles = j_tiles.len_of(Axis(0));
+                            let num_chans = num_high_res_chans;
+                            // We don't have flagged/full maps here, write unpadded
+                            sols.di_jones = Array3::from_shape_fn((1, num_tiles, num_chans), |(_, i_tile, i_chan)| j_tiles[(i_tile, i_chan)]);
+                            let mut path = dir.clone();
+                            let fname = format!("{}.fits", source_name.replace('/', "_"));
+                            path.push(fname);
+                            let _ = sols.write_solutions_from_ext(&path);
+                        }
                     }
                 }
 
