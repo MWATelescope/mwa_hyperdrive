@@ -285,7 +285,7 @@ fn model_thread(
             None
         };
 
-        if let Err(_) = tx.send(VisTimestep {
+        if tx.send(VisTimestep {
             cross_data_fb,
             cross_weights_fb: ArcArray2::from_elem(cross_vis_shape, weight_factor as f32),
             autos: auto_data_fb.map(|d| {
