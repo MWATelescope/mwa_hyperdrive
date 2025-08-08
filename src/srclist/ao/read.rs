@@ -31,12 +31,14 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
     let mut measurement_got_freq = false;
     let mut measurement_got_fd = false;
     let mut source_name = String::new();
+    let mut cluster_name = String::new();
     let mut components: Vec<SourceComponent> = vec![];
     let mut source_list = SourceList::new();
     let mut one_point_oh = false;
 
     let parse_float = |string: &str, line_num: u32| -> Result<f64, ReadSourceListCommonError> {
-        string
+        let trimmed = string.trim_end_matches(',');
+        trimmed
             .parse()
             .map_err(|_| ReadSourceListCommonError::ParseFloatError {
                 line_num,
@@ -84,6 +86,9 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     return Err(ReadSourceListCommonError::NestedSources(line_num).into());
                 } else {
                     in_source = true;
+                    // Prepare new source context
+                    source_name.clear();
+                    cluster_name.clear();
                 }
             }
 
@@ -100,6 +105,24 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     match name_with_quotes.split('\"').nth(1) {
                         None => return Err(ReadSourceListAOError::NameNotQuoted(line_num).into()),
                         Some(name) => source_name.push_str(name),
+                    }
+                }
+            }
+
+            // Optional cluster keyword to group sources
+            Some("cluster") => {
+                if !in_source {
+                    return Err(ReadSourceListCommonError::OutsideSource {
+                        line_num,
+                        keyword: "cluster",
+                    }
+                    .into());
+                } else {
+                    let cluster_with_quotes: String = items.collect::<Vec<_>>().join(" ");
+                    match cluster_with_quotes.split('\"').nth(1) {
+                        // Reuse NameNotQuoted error for simplicity
+                        None => return Err(ReadSourceListAOError::NameNotQuoted(line_num).into()),
+                        Some(name) => cluster_name.push_str(name),
                     }
                 }
             }
@@ -649,10 +672,24 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         });
                     }
 
-                    source_list.insert(source_name.clone(), source);
+                    // Insert by cluster if present; otherwise by source name. If the key exists, append components.
+                    let key = if !cluster_name.is_empty() {
+                        cluster_name.clone()
+                    } else {
+                        source_name.clone()
+                    };
+                    if let Some(existing) = source_list.get_mut(&key) {
+                        let mut merged: Vec<SourceComponent> =
+                            existing.components.to_vec();
+                        merged.extend_from_slice(&source.components);
+                        existing.components = merged.into_boxed_slice();
+                    } else {
+                        source_list.insert(key, source);
+                    }
 
                     in_source = false;
                     source_name.clear();
+                    cluster_name.clear();
                 }
             }
 
@@ -697,6 +734,8 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
 mod tests {
     use super::*;
     use approx::*;
+    use std::fs::File;
+    use std::io::BufReader;
     use std::io::Cursor;
 
     #[test]
@@ -1071,5 +1110,46 @@ source {
         // Stokes V is actually 0
         assert_abs_diff_eq!(fd.v, 0.0, epsilon = 1e-10);
         assert_abs_diff_eq!(*si, -0.81, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn parse_with_clusters_file() {
+        let f = File::open("test_files/ao_cluster_srclist.txt").expect("open test file");
+        let mut reader = BufReader::new(f);
+        let sl = parse_source_list(&mut reader).expect("parse cluster srclist");
+
+        // Should be grouped by cluster names
+        assert!(sl.contains_key("cluster1"));
+        assert!(sl.contains_key("cluster2"));
+        assert!(sl.contains_key("cluster3"));
+
+        // cluster1: one gaussian component
+        let s1 = sl.get("cluster1").unwrap();
+        assert_eq!(s1.components.len(), 1);
+        assert!(matches!(
+            s1.components[0].comp_type,
+            ComponentType::Gaussian { .. }
+        ));
+
+        // cluster2: one gaussian component
+        let s2 = sl.get("cluster2").unwrap();
+        assert_eq!(s2.components.len(), 1);
+        assert!(matches!(
+            s2.components[0].comp_type,
+            ComponentType::Gaussian { .. }
+        ));
+
+        // cluster3: three point components
+        let s3 = sl.get("cluster3").unwrap();
+        assert_eq!(s3.components.len(), 3);
+        assert!(s3
+            .components
+            .iter()
+            .all(|c| matches!(c.comp_type, ComponentType::Point)));
+
+        // Original source names should not exist as keys when cluster is present
+        assert!(!sl.contains_key("G111.7-02.1"));
+        assert!(!sl.contains_key("G184.6-05.8"));
+        assert!(!sl.contains_key("MLT000557-5628"));
     }
 }
