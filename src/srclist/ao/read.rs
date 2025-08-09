@@ -680,8 +680,10 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         source_name.clone()
                     };
                     if let Some(existing) = source_list.get_mut(&key) {
-                        let mut merged: Vec<SourceComponent> =
-                            existing.components.to_vec();
+                        let mut merged: Vec<SourceComponent> = Vec::with_capacity(
+                            existing.components.len() + source.components.len()
+                        );
+                        merged.extend_from_slice(&existing.components);
                         merged.extend_from_slice(&source.components);
                         existing.components = merged.into_boxed_slice();
                     } else {
