@@ -10,17 +10,6 @@ use hifitime::{Duration, Epoch};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum FitsError {
-    /// An error associated the fitsio crate.
-    #[error(transparent)]
-    Fitsio(#[from] fitsio::errors::Error),
-
-    /// An IO error.
-    #[error(transparent)]
-    IO(#[from] std::io::Error),
-}
-
-#[derive(Error, Debug)]
 pub enum UvfitsReadError {
     #[error("Supplied file path {0} does not exist or is not readable!")]
     BadFile(PathBuf),

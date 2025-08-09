@@ -297,7 +297,7 @@ impl ObsParams {
         }
     }
 
-    fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu {
+    fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu<'_> {
         SkyModellerCpu::new(
             &*self.beam,
             srclist,
