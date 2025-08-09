@@ -259,7 +259,7 @@ fn test_read_bad_bp_cal() {
     assert!(
         // Even though there's a bad float, the number of lines is checked
         // first.
-        matches!(err, ReadBpCalFileError::NoTiles { .. }),
+        matches!(err, ReadBpCalFileError::NoTiles),
         "{}",
         err
     );
@@ -271,7 +271,7 @@ fn test_read_bad_bp_cal() {
     let result = BpCal::read(&mut contents);
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(matches!(err, ReadBpCalFileError::NoTiles { .. }), "{}", err);
+    assert!(matches!(err, ReadBpCalFileError::NoTiles), "{}", err);
 
     let mut contents = Cursor::new(indoc! {"
     0.080000, 0.120000, 0.160000, 0.200000, 0.240000, 0.280000, 0.320000, 0.360000, 0.400000, 0.440000, 0.480000, 0.520000, 0.560000, 0.600000, 0.680000, 0.720000, 0.760000, 0.800000, 0.840000, 0.880000, 0.920000, 0.960000, 1.000000, 1.040000, 1.080000, 1.120000,

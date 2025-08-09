@@ -206,13 +206,11 @@ fn convert<P: AsRef<Path>, S: AsRef<str>>(
             let brightest = sl.remove_entry(&brightest_name).unwrap();
             collapsed.insert(brightest_name, brightest.1);
             let base_src = collapsed.get_mut(&brightest.0).unwrap();
-            let mut base_comps = vec![].into_boxed_slice();
-            std::mem::swap(&mut base_src.components, &mut base_comps);
-            let mut base_comps = base_comps.into_vec();
+            let mut base_comps = std::mem::take(&mut base_src.components).into_vec();
             sl.into_iter()
                 .flat_map(|(_, src)| src.components.to_vec())
                 .for_each(|comp| base_comps.push(comp));
-            std::mem::swap(&mut base_src.components, &mut base_comps.into_boxed_slice());
+            base_src.components = base_comps.into_boxed_slice();
             collapsed
         } else {
             sl

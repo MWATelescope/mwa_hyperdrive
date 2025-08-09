@@ -318,7 +318,7 @@ pub(crate) fn write_vis(
             this_average_timestamp = Some(
                 timeblocks
                     .iter()
-                    .find(|tb| tb.timestamps.iter().any(|e| *e == timestamp))
+                    .find(|tb| tb.timestamps.contains(&timestamp))
                     .unwrap()
                     .median,
             );

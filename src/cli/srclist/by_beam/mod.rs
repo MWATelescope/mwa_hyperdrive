@@ -375,9 +375,7 @@ fn by_beam(
         let mut num_collapsed_components = base.1.components.len() - 1;
         collapsed.insert(base.0, base.1);
         let base_src = collapsed.get_index_mut(0).unwrap().1;
-        let mut base_comps = vec![].into_boxed_slice();
-        std::mem::swap(&mut base_src.components, &mut base_comps);
-        let mut base_comps = base_comps.to_vec();
+        let mut base_comps = std::mem::take(&mut base_src.components).to_vec();
         sl.into_iter()
             .take(num_sources)
             .flat_map(|(_, src)| src.components.to_vec())
@@ -385,7 +383,7 @@ fn by_beam(
                 num_collapsed_components += 1;
                 base_comps.push(comp);
             });
-        std::mem::swap(&mut base_src.components, &mut base_comps.into_boxed_slice());
+        base_src.components = base_comps.into_boxed_slice();
         info!(
             "Collapsed {num_sources} into 1 base source with {num_collapsed_components} components"
         );

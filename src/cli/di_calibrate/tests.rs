@@ -259,7 +259,7 @@ fn test_args_with_arg_file(args: &DiCalArgs) {
     for filename in ["calibrate.toml", "calibrate.json"] {
         let arg_file = temp_dir.path().join(filename);
         let mut f = File::create(&arg_file).expect("couldn't make file");
-        let ser = match filename.split('.').last() {
+        let ser = match filename.rsplit('.').next() {
             Some("toml") => {
                 toml::to_string_pretty(&args).expect("couldn't serialise DiCalArgs as toml")
             }

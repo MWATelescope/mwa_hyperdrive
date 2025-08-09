@@ -838,7 +838,7 @@ source {
             _ => unreachable!(),
         };
 
-        assert!(matches!(comp.comp_type, ComponentType::Point { .. }));
+        assert!(matches!(comp.comp_type, ComponentType::Point));
     }
 
     #[test]
@@ -896,7 +896,7 @@ source {
             _ => unreachable!(),
         };
 
-        assert!(matches!(comp.comp_type, ComponentType::Point { .. }));
+        assert!(matches!(comp.comp_type, ComponentType::Point));
 
         let comp = &s.components[1];
         assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);
@@ -982,7 +982,7 @@ source {
             _ => unreachable!(),
         };
 
-        assert!(matches!(comp.comp_type, ComponentType::Point { .. }));
+        assert!(matches!(comp.comp_type, ComponentType::Point));
 
         let comp = &s.components[1];
         assert_abs_diff_eq!(comp.radec.ra, 3.09367332997935, epsilon = 1e-10);

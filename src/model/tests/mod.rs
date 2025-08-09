@@ -318,7 +318,7 @@ impl ObsParams {
     fn get_gpu_modeller(
         &self,
         srclist: &SourceList,
-    ) -> (SkyModellerGpu, DevicePointer<crate::gpu::UVW>) {
+    ) -> (SkyModellerGpu<'_>, DevicePointer<crate::gpu::UVW>) {
         let m = SkyModellerGpu::new(
             &*self.beam,
             srclist,

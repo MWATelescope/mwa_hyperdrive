@@ -3072,7 +3072,7 @@ fn test_peel_weight_preservation() {
         output_timeblocks: vec1![timeblock.clone()],
         write_smallest_contiguous_band: false,
     };
-    let output_vis_params = output_vis_params;
+    // no-op redefinition removed
     let peel_handle = std::thread::spawn(move || {
         // Wrap the receiver to convert owned Timeblock to reference
         let rx_full_residual_ref = rx_full_residual
