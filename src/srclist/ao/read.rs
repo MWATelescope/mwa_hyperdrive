@@ -672,7 +672,8 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         });
                     }
 
-                    // Insert by cluster if present; otherwise by source name. If the key exists, append components.
+                    // Insert by cluster name if present; otherwise by source name.
+                    // If multiple sources share the same cluster name, their components are merged into a single source entry in the source list.
                     let key = if !cluster_name.is_empty() {
                         cluster_name.clone()
                     } else {
