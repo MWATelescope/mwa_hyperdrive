@@ -519,7 +519,7 @@ impl VisSimParams {
 
                 // Warn the user if they wanted unity dipole gains but the ideal
                 // dipole delays contain 32.
-                if *unity_dipole_gains && ideal_delays.iter().any(|&v| v == 32) {
+                if *unity_dipole_gains && ideal_delays.contains(&32) {
                     warn!(
                         "Some ideal dipole delays are 32; these dipoles will not have unity gains"
                     );

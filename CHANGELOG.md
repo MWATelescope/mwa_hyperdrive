@@ -12,6 +12,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - [#59](https://github.com/MWATelescope/mwa_hyperdrive/issues/59) multi-timeblock calibration.
 
+### Removed
+
+- deleted unused `io::read::uvfits::error::FitsError` type
+
 ## [0.6.1] - 2025-07-29
 
 ### Fixed

@@ -228,16 +228,14 @@ fn shift(
             let base = sl.remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
-            let mut base_comps = vec![].into_boxed_slice();
-            std::mem::swap(&mut base_src.components, &mut base_comps);
-            let mut base_comps = base_comps.to_vec();
+            let mut base_comps = std::mem::take(&mut base_src.components).to_vec();
 
             for name in &ordered[1..] {
                 for comp in sl[name].components.iter() {
                     base_comps.push(comp.clone());
                 }
             }
-            std::mem::swap(&mut base_src.components, &mut base_comps.into_boxed_slice());
+            base_src.components = base_comps.into_boxed_slice();
         } else {
             // Use the apparently brightest source as the base.
             let brightest = sl
@@ -256,13 +254,11 @@ fn shift(
             let base = sl.remove_entry(&base_name).unwrap();
             collapsed.insert(base_name, base.1);
             let base_src = collapsed.get_mut(&base.0).unwrap();
-            let mut base_comps = vec![].into_boxed_slice();
-            std::mem::swap(&mut base_src.components, &mut base_comps);
-            let mut base_comps = base_comps.to_vec();
+            let mut base_comps = std::mem::take(&mut base_src.components).to_vec();
             sl.into_iter()
                 .flat_map(|(_, src)| src.components.to_vec())
                 .for_each(|comp| base_comps.push(comp));
-            std::mem::swap(&mut base_src.components, &mut base_comps.into_boxed_slice());
+            base_src.components = base_comps.into_boxed_slice();
         }
 
         collapsed
