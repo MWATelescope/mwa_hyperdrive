@@ -285,17 +285,20 @@ fn model_thread(
             None
         };
 
-        if tx.send(VisTimestep {
-            cross_data_fb,
-            cross_weights_fb: ArcArray2::from_elem(cross_vis_shape, weight_factor as f32),
-            autos: auto_data_fb.map(|d| {
-                (
-                    d,
-                    ArcArray2::from_elem(auto_vis_shape, weight_factor as f32),
-                )
-            }),
-            timestamp,
-        }) {
+        if tx
+            .send(VisTimestep {
+                cross_data_fb,
+                cross_weights_fb: ArcArray2::from_elem(cross_vis_shape, weight_factor as f32),
+                autos: auto_data_fb.map(|d| {
+                    (
+                        d,
+                        ArcArray2::from_elem(auto_vis_shape, weight_factor as f32),
+                    )
+                }),
+                timestamp,
+            })
+            .is_err()
+        {
             trace!("[model_thread] vis_simulate channel is closed");
             return Ok(());
         }
