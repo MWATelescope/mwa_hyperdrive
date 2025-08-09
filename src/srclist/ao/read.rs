@@ -1222,7 +1222,7 @@ source {
 
         let err = parse_source_list(&mut sl).unwrap_err();
         match err {
-            ReadSourceListError::AO(ReadSourceListAOError::NameNotQuoted(_)) => {}
+            ReadSourceListError::AO(ReadSourceListAOError::ClusterNotQuoted(_)) => {}
             other => panic!("unexpected error: {other:?}"),
         }
     }
