@@ -4,6 +4,8 @@
 transformations were requested on the way (e.g. ignore autos, average to a
 particular time resolution, flag some tiles, etc.).
 
+Autos control: **--no-autos** ignores auto-correlations
+
 ~~~admonish info title="Simple examples"
 ```shell
 hyperdrive vis-convert \
