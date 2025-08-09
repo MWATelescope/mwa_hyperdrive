@@ -120,8 +120,8 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                 } else {
                     let cluster_with_quotes: String = items.collect::<Vec<_>>().join(" ");
                     match cluster_with_quotes.split('\"').nth(1) {
-                        // Reuse NameNotQuoted error for simplicity
-                        None => return Err(ReadSourceListAOError::NameNotQuoted(line_num).into()),
+                        // Use a specific error for cluster not quoted
+                        None => return Err(ReadSourceListAOError::ClusterNotQuoted(line_num).into()),
                         Some(name) => cluster_name.push_str(name),
                     }
                 }
