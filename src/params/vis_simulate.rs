@@ -170,9 +170,8 @@ impl VisSimulateParams {
                         tx_model,
                         model_progress,
                     )
-                    .map_err(|e| {
+                    .inspect_err(|_| {
                         error.store(true);
-                        e
                     })
                 })
                 .expect("can't create threads");
