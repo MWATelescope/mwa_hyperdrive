@@ -1,0 +1,60 @@
+skymodel fileformat 1.1
+source {
+  name "G111.7-02.1"
+  cluster "cluster1"
+  component {
+    type gaussian
+    shape 300 300 270
+    position 23h23m25.992s 58d48m00s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 7942.0888671875 0 0 0
+      spectral-index { -0.769999980926514, 0 }
+    }
+  }
+}
+source {
+  name "G184.6-05.8"
+  cluster "cluster2"
+  component {
+    type gaussian
+    shape 420 300 270
+    position 05h34m31.008s 22d01m00.12s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1458.59094238281 0 0 0
+      spectral-index { -0.300000011920929, 0 }
+    }
+  }
+}
+source {
+  name "MLT000557-5628"
+  cluster "cluster3"
+  component {
+    type point
+    position 00h05m55.835s -56d28m30.088s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 4.85676050186157 0 0 0
+      spectral-index { -0.808530986309052, 0 }
+    }
+  }
+  component {
+    type point
+    position 00h05m58.413s -56d28m34.708s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.87265837192535 0 0 0
+      spectral-index { -0.808530986309052, 0 }
+    }
+  }
+  component {
+    type point
+    position 00h06m00.879s -56d28m23.784s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1.08756852149963 0 0 0
+      spectral-index { -0.808530986309052, 0 }
+    }
+  }
+}

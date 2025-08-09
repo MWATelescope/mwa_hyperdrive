@@ -256,6 +256,9 @@ pub(crate) enum ReadSourceListAOError {
     #[error("Source list line {0}: Source name not in quotes")]
     NameNotQuoted(u32),
 
+    #[error("Source list line {0}: Cluster name not in quotes")]
+    ClusterNotQuoted(u32),
+
     #[error("Source list line {line_num}: Unrecognised component type: {comp_type}")]
     UnrecognisedComponentType { line_num: u32, comp_type: String },
 
