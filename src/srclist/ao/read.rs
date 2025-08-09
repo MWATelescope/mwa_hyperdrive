@@ -1152,4 +1152,130 @@ source {
         assert!(!sl.contains_key("G184.6-05.8"));
         assert!(!sl.contains_key("MLT000557-5628"));
     }
+
+    #[test]
+    fn parse_with_clusters_merge_components() {
+        // Two separate source blocks with the same cluster name should merge
+        // their components under the cluster key.
+        let mut sl = Cursor::new(
+            r#"skymodel fileformat 1.1
+source {
+  name "S1"
+  cluster "C"
+  component {
+    type point
+    position 00h00m00s 00d00m00s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1 0 0 0
+      spectral-index { -1.0 0 }
+    }
+  }
+}
+source {
+  name "S2"
+  cluster "C"
+  component {
+    type gaussian
+    position 00h00m10s 00d00m00s
+    shape 120 60 45
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 2 0 0 0
+      spectral-index { -0.5 0 }
+    }
+  }
+}
+"#,
+        );
+
+        let sl = parse_source_list(&mut sl).expect("parse merged cluster srclist");
+        assert_eq!(sl.len(), 1);
+        let s = sl.get("C").expect("cluster key exists");
+        assert_eq!(s.components.len(), 2);
+        assert!(matches!(s.components[0].comp_type, ComponentType::Point));
+        assert!(matches!(s.components[1].comp_type, ComponentType::Gaussian { .. }));
+    }
+
+    #[test]
+    fn parse_cluster_missing_quotes_errors() {
+        use crate::srclist::error::{ReadSourceListAOError, ReadSourceListError};
+        let mut sl = Cursor::new(
+            r#"source {
+  name "S"
+  cluster C
+  component {
+    type point
+    position 00h00m00s 00d00m00s
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 1 0 0 0
+      spectral-index { -1.0 0 }
+    }
+  }
+}
+"#,
+        );
+
+        let err = parse_source_list(&mut sl).unwrap_err();
+        match err {
+            ReadSourceListError::AO(ReadSourceListAOError::NameNotQuoted(_)) => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cluster_outside_source_errors() {
+        use crate::srclist::error::{ReadSourceListCommonError, ReadSourceListError};
+        let mut sl = Cursor::new("cluster \"C\"\n");
+        let err = parse_source_list(&mut sl).unwrap_err();
+        match err {
+            ReadSourceListError::Common(ReadSourceListCommonError::OutsideSource { keyword, .. }) => {
+                assert_eq!(keyword, "cluster");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_shape_and_flux_with_trailing_commas() {
+        let mut sl = Cursor::new(
+            r#"source {
+  name "G"
+  component {
+    type gaussian
+    position 11h49m01.062s -12d04m12.1809s
+    shape 155.7, 148.7, 87.9,
+    sed {
+      frequency 200 MHz
+      fluxdensity Jy 4.3064720, 0, 0, 0,
+      spectral-index { -0.88, 0.00 }
+    }
+  }
+}
+"#,
+        );
+
+        let sl = parse_source_list(&mut sl).expect("parse srclist with commas");
+        let s = sl.get("G").unwrap();
+        assert_eq!(s.components.len(), 1);
+        let comp = &s.components[0];
+        // Validate gaussian parsed and numbers handled despite commas
+        assert!(matches!(comp.comp_type, ComponentType::Gaussian { .. }));
+        if let ComponentType::Gaussian { maj, min, pa } = comp.comp_type {
+            assert_abs_diff_eq!(maj, 0.0007548549014875475, epsilon = 1e-10);
+            assert_abs_diff_eq!(min, 0.0007209179438098799, epsilon = 1e-10);
+            assert_abs_diff_eq!(pa, 1.5341444125030157, epsilon = 1e-10);
+        } else {
+            unreachable!();
+        }
+        if let FluxDensityType::PowerLaw { fd, si } = &comp.flux_type {
+            assert_abs_diff_eq!(fd.freq, 200e6, epsilon = 1e-10);
+            assert_abs_diff_eq!(fd.i, 4.306472, epsilon = 1e-10);
+            assert_abs_diff_eq!(fd.q, 0.0, epsilon = 1e-10);
+            assert_abs_diff_eq!(*si, -0.88, epsilon = 1e-10);
+        } else {
+            unreachable!();
+        }
+    }
 }
