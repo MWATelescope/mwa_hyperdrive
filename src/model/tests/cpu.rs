@@ -329,6 +329,62 @@ fn gaussian_multiple_components() {
 }
 
 #[test]
+fn precession_off_paths_and_autos() {
+    use hifitime::Epoch;
+    use crate::context::Polarisations;
+
+    // Build a modeller with precession disabled
+    let obs = ObsParams::new(true);
+    let modeller = SkyModellerCpu::new(
+        &*obs.beam,
+        &POINT_ZENITH_LIST,
+        Polarisations::default(),
+        &obs.xyzs,
+        &obs.freqs,
+        &obs.flagged_tiles,
+        obs.phase_centre,
+        obs.array_longitude_rad,
+        obs.array_latitude_rad,
+        hifitime::Duration::default(),
+        false, // apply_precession off
+    );
+
+    // model_timestep should succeed and return UVWs
+    let (vis, uvws) = modeller
+        .model_timestep(Epoch::from_gpst_seconds(1090008640.0))
+        .expect("model timestep");
+    assert_eq!(vis.dim().0, obs.freqs.len());
+    assert_eq!(uvws.len(), obs.uvws.len());
+
+    // model_timestep_autos_with should also work
+    let mut autos = ndarray::Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    modeller
+        .model_timestep_autos_with(Epoch::from_gpst_seconds(1090008640.0), autos.view_mut())
+        .expect("model autos");
+}
+
+#[test]
+fn update_with_a_source_reconfigures_components() {
+    use crate::srclist::{Source, SourceList};
+    use marlu::RADec;
+
+    let obs = ObsParams::new(true);
+    let mut modeller = obs.get_cpu_modeller(&POINT_ZENITH_LIST);
+
+    // Update with a different single-source list at a new phase centre
+    let new_phase = RADec::from_degrees(1.0, -27.0);
+    let mut sl = SourceList::new();
+    sl.insert(
+        "p".to_string(),
+        Source { components: vec![get_point(new_phase, FluxType::List)].into_boxed_slice() },
+    );
+    let src = sl.values().next().unwrap();
+    modeller
+        .update_with_a_source(src, new_phase)
+        .expect("update with source");
+}
+
+#[test]
 fn shapelet_multiple_components() {
     let obs = ObsParams::new(true);
     let mut srclist = SourceList::new();
