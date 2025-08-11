@@ -16,6 +16,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - deleted unused `io::read::uvfits::error::FitsError` type
 
+### Added
+
+- auto-correlation visibility simulation and writing support
+
 ### Changed
 
 - vis-simulate now supports auto-correlations by default, use `--output-no-autos`
@@ -29,10 +33,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - tapered weights were accidentally written out in peeling, flagging short baselines since v0.5.0
 
 ## [0.6.0] - 2025-07-28
-
-### Added
-
-- auto-correlation visibility simulation and writing support
 
 ### Changed
 
