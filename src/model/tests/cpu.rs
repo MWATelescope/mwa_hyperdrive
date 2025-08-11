@@ -330,8 +330,8 @@ fn gaussian_multiple_components() {
 
 #[test]
 fn precession_off_paths_and_autos() {
-    use hifitime::Epoch;
     use crate::context::Polarisations;
+    use hifitime::Epoch;
 
     // Build a modeller with precession disabled
     let obs = ObsParams::new(true);
@@ -355,12 +355,15 @@ fn precession_off_paths_and_autos() {
         .expect("model timestep");
     assert_eq!(vis.dim().0, obs.freqs.len());
     assert_eq!(uvws.len(), obs.uvws.len());
+    // With NoBeam and zenith point source, vis should exactly match list FD
+    test_list_zenith_visibilities(vis.view(), 0.0);
 
     // model_timestep_autos_with should also work
     let mut autos = ndarray::Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
     modeller
         .model_timestep_autos_with(Epoch::from_gpst_seconds(1090008640.0), autos.view_mut())
         .expect("model autos");
+    test_model_timestep_autos_with_point(autos.view(), 0.0);
 }
 
 #[test]
@@ -371,17 +374,26 @@ fn update_with_a_source_reconfigures_components() {
     let obs = ObsParams::new(true);
     let mut modeller = obs.get_cpu_modeller(&POINT_ZENITH_LIST);
 
-    // Update with a different single-source list at a new phase centre
+    // Update with a different single-source list, keeping original phase centre
     let new_phase = RADec::from_degrees(1.0, -27.0);
     let mut sl = SourceList::new();
     sl.insert(
         "p".to_string(),
-        Source { components: vec![get_point(new_phase, FluxType::List)].into_boxed_slice() },
+        Source {
+            components: vec![get_point(new_phase, FluxType::List)].into_boxed_slice(),
+        },
     );
     let src = sl.values().next().unwrap();
     modeller
-        .update_with_a_source(src, new_phase)
+        .update_with_a_source(src, obs.phase_centre)
         .expect("update with source");
+
+    // After update, assert visibilities match first-principles expectations for an off-zenith point
+    let mut vis = Array2::zeros((obs.freqs.len(), obs.uvws.len()));
+    modeller
+        .model_points(vis.view_mut(), &obs.uvws, obs.lst, obs.array_latitude_rad)
+        .expect("model off-zenith via model_points");
+    test_list_off_zenith_visibilities(vis.view(), 0.0);
 }
 
 #[test]
@@ -488,6 +500,55 @@ fn model_timestep_autos_with_shapelet() {
     assert!(result.is_ok());
 
     test_model_timestep_autos_with_shapelet(visibilities.view(), 0.0);
+}
+
+#[test]
+fn model_timestep_autos_sum_of_flux_densities_no_beam() {
+    use crate::srclist::{ComponentType, FluxDensity, FluxDensityType, SourceComponent};
+
+    // With NoBeam, each tile's autocorrelation equals the integral of sky flux density,
+    // i.e. the sum of component flux densities per frequency, independent of position.
+    let obs = ObsParams::new(true);
+
+    // Build a source list with two point sources having known list fluxes per frequency
+    let make_point_with_list = |pos: RADec, vals: [f64; 3]| -> SourceComponent {
+        SourceComponent {
+            radec: pos,
+            comp_type: ComponentType::Point,
+            flux_type: FluxDensityType::List(vec1::vec1![
+                FluxDensity { freq: 150e6, i: vals[0], ..Default::default() },
+                FluxDensity { freq: 175e6, i: vals[1], ..Default::default() },
+                FluxDensity { freq: 200e6, i: vals[2], ..Default::default() },
+            ]),
+        }
+    };
+
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "s1".to_string(),
+        Source { components: vec![make_point_with_list(RADec::from_degrees(1.0, -27.0), [1.0, 3.0, 2.0])].into_boxed_slice() },
+    );
+    srclist.insert(
+        "s2".to_string(),
+        Source { components: vec![make_point_with_list(RADec::from_degrees(1.1, -27.0), [0.5, 0.25, 1.5])].into_boxed_slice() },
+    );
+
+    let modeller = obs.get_cpu_modeller(&srclist);
+    let timestamp = Epoch::from_gpst_seconds(1090008640.0);
+    let mut autos = Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    modeller
+        .model_timestep_autos_with(timestamp, autos.view_mut())
+        .expect("model autos");
+
+    // Expected per-frequency sums replicated across all tiles
+    let expected_sums = [1.0 + 0.5, 3.0 + 0.25, 2.0 + 1.5];
+    let mut expected = Array2::from_elem((obs.freqs.len(), obs.xyzs.len()), Jones::identity());
+    for (fi, sum) in expected_sums.iter().enumerate() {
+        let mut row = expected.slice_mut(s![fi, ..]);
+        row.fill(Jones::identity() * *sum as f32);
+    }
+
+    approx::assert_abs_diff_eq!(autos, expected, epsilon = 0.0);
 }
 
 #[test]
