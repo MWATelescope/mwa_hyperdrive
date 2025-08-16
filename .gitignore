@@ -2,3 +2,11 @@
 /mdbook/book/
 *.DS_Store
 mwa_full_embedded_element_pattern.h5
+_*.ipynb
+MWA_embedded_element_pattern_rev2_interp_167_197MHz.h5
+srclist_pumav3_EoR0LoBES_EoR1pietro_CenA-GP_2023-11-07.fits
+GGSM_updated.fits
+*gpubox*.fits
+*.metafits
+*.uvfits
+*.profraw

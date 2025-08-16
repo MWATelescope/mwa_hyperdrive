@@ -51,9 +51,7 @@ pub struct TileBaselineFlags {
     /// Map between a pair of tile numbers and its unflagged *cross-correlation*
     /// baseline index. e.g. If tiles 0 and 2 are flagged, (1, 3) maps to 0
     /// (i.e. the first unflagged cross-correlation baseline is between tiles 1
-    /// and 3). (1, 1) maps to 0 (i.e. the first unflagged auto-correlation
-    /// corresponds to tile 1). The first tile index is always smaller or equal
-    /// to the second.
+    /// and 3).
     pub(crate) tile_to_unflagged_cross_baseline_map: HashMap<(usize, usize), usize>,
 
     /// Map between a tile index and its unflagged auto-correlation index. e.g.
@@ -117,5 +115,36 @@ impl TileBaselineFlags {
             unflagged_auto_index_to_tile_map,
             flagged_tiles,
         }
+    }
+
+    /// Return the unflagged tile pairs for all baselines (i.e. *cross*- and
+    /// *auto*-correlations).
+    pub(crate) fn get_unflagged_baseline_tile_pairs(
+        &self,
+    ) -> impl Iterator<Item = (usize, usize)> + '_ {
+        let total_num_tiles =
+            self.tile_to_unflagged_auto_index_map.len() + self.flagged_tiles.len();
+        (0..total_num_tiles)
+            .filter(|tile1| !self.flagged_tiles.contains(tile1))
+            .flat_map(move |tile1| {
+                (tile1..total_num_tiles)
+                    .filter(|tile2| !self.flagged_tiles.contains(tile2))
+                    .map(move |tile2| (tile1, tile2))
+            })
+    }
+
+    /// Return the unflagged tile pairs for all *cross-correlation* baselines.
+    pub(crate) fn get_unflagged_cross_baseline_tile_pairs(
+        &self,
+    ) -> impl Iterator<Item = (usize, usize)> + '_ {
+        let total_num_tiles =
+            self.tile_to_unflagged_auto_index_map.len() + self.flagged_tiles.len();
+        (0..total_num_tiles)
+            .filter(|tile1| !self.flagged_tiles.contains(tile1))
+            .flat_map(move |tile1| {
+                (tile1 + 1..total_num_tiles)
+                    .filter(|tile2| !self.flagged_tiles.contains(tile2))
+                    .map(move |tile2| (tile1, tile2))
+            })
     }
 }

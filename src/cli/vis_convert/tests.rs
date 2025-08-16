@@ -20,6 +20,76 @@ use crate::{
 };
 
 #[test]
+fn test_dry_run_returns_early() {
+    use crate::io::read::UvfitsReader;
+    // Verify dry-run doesn't write, and real run produces data matching direct read
+    let temp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let uvfits_converted = temp_dir.path().join("converted.uvfits");
+    let DataAsStrings { vis, .. } = get_reduced_1061316544_uvfits();
+
+    let uvfits_converted_string = uvfits_converted.display().to_string();
+    #[rustfmt::skip]
+    let args = vec![
+        "vis-convert",
+        "--data", &vis[0],
+        "--outputs", &uvfits_converted_string,
+    ];
+    let vis_convert_args = VisConvertArgs::parse_from(args);
+    // Dry-run should not create the file
+    assert!(vis_convert_args.clone().run(true).is_ok());
+    assert!(!uvfits_converted.exists());
+
+    // Run for real and ensure output equals a direct read of input
+    assert!(vis_convert_args.run(false).is_ok());
+    assert!(uvfits_converted.exists());
+
+    let input_reader = UvfitsReader::new(PathBuf::from(&vis[0]), None, None).unwrap();
+    let output_reader = UvfitsReader::new(uvfits_converted.clone(), None, None).unwrap();
+
+    // Compare a single timestep crosses/autos and weights exactly
+    let obs_in = input_reader.get_obs_context();
+    let ntiles = obs_in.get_total_num_tiles();
+    let nbl = (ntiles * (ntiles - 1)) / 2;
+    let nch = obs_in.fine_chan_freqs.len();
+    let mut in_cross = Array2::zeros((nch, nbl));
+    let mut in_cross_w = Array2::zeros((nch, nbl));
+    let mut in_auto = Array2::zeros((nch, ntiles));
+    let mut in_auto_w = Array2::zeros((nch, ntiles));
+    input_reader
+        .read_crosses_and_autos(
+            in_cross.view_mut(),
+            in_cross_w.view_mut(),
+            in_auto.view_mut(),
+            in_auto_w.view_mut(),
+            0,
+            &crate::math::TileBaselineFlags::new(ntiles, std::collections::HashSet::new()),
+            &std::collections::HashSet::new(),
+        )
+        .unwrap();
+
+    let mut out_cross = Array2::zeros((nch, nbl));
+    let mut out_cross_w = Array2::zeros((nch, nbl));
+    let mut out_auto = Array2::zeros((nch, ntiles));
+    let mut out_auto_w = Array2::zeros((nch, ntiles));
+    output_reader
+        .read_crosses_and_autos(
+            out_cross.view_mut(),
+            out_cross_w.view_mut(),
+            out_auto.view_mut(),
+            out_auto_w.view_mut(),
+            0,
+            &crate::math::TileBaselineFlags::new(ntiles, std::collections::HashSet::new()),
+            &std::collections::HashSet::new(),
+        )
+        .unwrap();
+
+    approx::assert_abs_diff_eq!(in_cross, out_cross);
+    approx::assert_abs_diff_eq!(in_cross_w, out_cross_w);
+    approx::assert_abs_diff_eq!(in_auto, out_auto);
+    approx::assert_abs_diff_eq!(in_auto_w, out_auto_w);
+}
+
+#[test]
 fn test_per_coarse_chan_flags_and_smallest_contiguous_band_writing() {
     let temp_dir = TempDir::new().expect("couldn't make tmp dir");
     let uvfits_converted = temp_dir.path().join("converted.uvfits");
