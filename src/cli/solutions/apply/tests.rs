@@ -437,6 +437,97 @@ fn test_solutions_apply_trivial_uvfits() {
     test_solutions_apply_trivial(args)
 }
 
+#[test]
+fn test_solutions_apply_dry_run() {
+    let DataAsStrings {
+        metafits,
+        vis: mut files,
+        mwafs: _,
+        srclist: _,
+    } = get_reduced_1090008640_uvfits();
+    files.push(metafits.clone());
+
+    let tmp_dir = TempDir::new().unwrap();
+    let sols_file = get_1090008640_identity_solutions_file(tmp_dir.path());
+
+    let args = SolutionsApplyArgs {
+        data_args: InputVisArgs {
+            files: Some(files),
+            ignore_input_data_fine_channel_flags: true,
+            ..Default::default()
+        },
+        solutions: Some(sols_file.display().to_string()),
+        ..Default::default()
+    };
+
+    // Dry run should not attempt to write outputs and should succeed
+    let result = args.clone().run(true);
+    assert!(result.is_ok(), "dry run failed: {:?}", result.err());
+
+    // Also assert that a real run with identity solutions preserves visibilities exactly
+    let tmp_dir2 = TempDir::new().unwrap();
+    let out = tmp_dir2.path().join("out.uvfits");
+    let mut args_real = args.clone();
+    args_real.outputs = Some(vec![out.clone()]);
+    // We will need original files later; keep a clone before moving into args
+    let files_clone = args_real
+        .data_args
+        .files
+        .as_ref()
+        .unwrap()
+        .clone();
+    let result = args_real.run(false);
+    assert!(result.is_ok(), "real run failed: {:?}", result.err());
+    assert!(out.exists());
+
+    let metafits_pb = PathBuf::from(metafits);
+    let input_files = files_clone;
+    // The first entry is the uvfits path; last is metafits
+    let in_reader = UvfitsReader::new(PathBuf::from(&input_files[0]), Some(&metafits_pb), None).unwrap();
+    let out_reader = UvfitsReader::new(out, Some(&metafits_pb), None).unwrap();
+
+    let ctx = out_reader.get_obs_context();
+    let ntiles = ctx.get_total_num_tiles();
+    let nbl = (ntiles * (ntiles - 1)) / 2;
+    let nch = ctx.fine_chan_freqs.len();
+    let mut in_cross = Array2::zeros((nch, nbl));
+    let mut in_cross_w = Array2::zeros((nch, nbl));
+    let mut in_auto = Array2::zeros((nch, ntiles));
+    let mut in_auto_w = Array2::zeros((nch, ntiles));
+    in_reader
+        .read_crosses_and_autos(
+            in_cross.view_mut(),
+            in_cross_w.view_mut(),
+            in_auto.view_mut(),
+            in_auto_w.view_mut(),
+            0,
+            &crate::math::TileBaselineFlags::new(ntiles, std::collections::HashSet::new()),
+            &std::collections::HashSet::new(),
+        )
+        .unwrap();
+
+    let mut out_cross = Array2::zeros((nch, nbl));
+    let mut out_cross_w = Array2::zeros((nch, nbl));
+    let mut out_auto = Array2::zeros((nch, ntiles));
+    let mut out_auto_w = Array2::zeros((nch, ntiles));
+    out_reader
+        .read_crosses_and_autos(
+            out_cross.view_mut(),
+            out_cross_w.view_mut(),
+            out_auto.view_mut(),
+            out_auto_w.view_mut(),
+            0,
+            &crate::math::TileBaselineFlags::new(ntiles, std::collections::HashSet::new()),
+            &std::collections::HashSet::new(),
+        )
+        .unwrap();
+
+    assert_abs_diff_eq!(out_cross, in_cross);
+    assert_abs_diff_eq!(out_cross_w, in_cross_w);
+    assert_abs_diff_eq!(out_auto, in_auto);
+    assert_abs_diff_eq!(out_auto_w, in_auto_w);
+}
+
 pub(crate) fn get_1090008640_identity_solutions_file(tmp_dir: &Path) -> PathBuf {
     let sols = CalibrationSolutions {
         di_jones: Array3::from_elem((1, 128, 32), Jones::identity()),
