@@ -1,0 +1,263 @@
+% Template for URSI Summary Papers
+%
+% Use pdflatex or latex + dvips + ps2pdf to produce a PDF.
+%
+% 
+
+\documentclass[summary]{ursi}
+
+\usepackage{hyperref} 
+\usepackage{enumitem}
+\setitemize{noitemsep,topsep=0pt,parsep=0pt,partopsep=0pt}
+%% Add packages and define personal macros here, but ensure that they do not
+%% interfere with the fonts and page layout. Do not add hyperlinks.
+
+\title{\textsc{mwa\_hyperdrive}: Next generation calibration software for the Murchison Widefield Array radio telescope}
+
+%% Use \affref{nn} and matching \aff{nn}{...} below for several authors
+%% Mark the presenting author with an asterisk
+
+\author{Christopher H. Jordan\affref{ref1}\affref{ref2}, Dev Null*\affref{ref1}\affref{ref2}\affref{ref3}, Cathryn M. Trott\affref{ref1}\affref{ref2}, Jack LB Line\affref{ref1}\affref{ref2}, J. Kariuki Chege\affref{ref1}\affref{ref2}\affref{ref5}, Christene R. Lynch\affref{ref1}\affref{ref2}\affref{ref6}, Chuneeta D. Nunhokee\affref{ref1}\affref{ref2}, Greg Sleap\affref{ref1} and Randall B. Wayth\affref{ref1}\affref{ref2}\affref{ref4}}
+
+%% define affiliations and addresses
+\affiliation{%
+  % use explicit line-breaks \\ if needed
+  \aff{ref1}{International Centre for Radio Astronomy Research, Curtin University, Bentley, WA 6102, Australia}
+  \aff{ref2}{ARC Centre of Excellence for All Sky Astrophysics in 3 Dimensions (ASTRO 3D), Bentley, Australia}
+  \aff{ref3}{Australian SKA Regional Centre (AusSRC), Curtin University, Bentley, WA, Australia}
+  \aff{ref4}{SKA Observatory, Kensington WA, Australia}
+  \aff{ref5}{Kapteyn Institute, University of Groningen, Netherlands}
+  \aff{ref6}{Department of Physics and Astronomy, University of North Carolina Asheville, Asheville, NC 28804, USA}
+}
+
+\newcommand{\hyperdrive}{\textsc{hyperdrive}}\newcommand{\mwalib}{\textsc{mwalib}}
+\newcommand{\birli}{\textsc{Birli}}
+\newcommand{\hyperbeam}{\textsc{hyperbeam}}
+\newcommand{\rts}{\textsc{RTS}}
+\newcommand{\mwareduce}{\textsc{mwa-reduce}}
+\newcommand{\wsclean}{\textsc{wsclean}}
+\newcommand{\cotter}{\textsc{cotter}}
+\newcommand{\calibrate}{\textsc{calibrate}}
+\newcommand{\everybeam}{\textsc{EveryBeam}}
+\newcommand{\casacore}{\textsc{casacore}}
+\newcommand{\fhd}{\textsc{FHD}}
+
+\newcommand{\clang}{\textsc{C}}
+\newcommand{\cpp}{\textsc{C++}}
+\newcommand{\cuda}{\textsc{CUDA}}
+\newcommand{\hip}{\textsc{HIP}}
+\newcommand{\python}{\textsc{Python}}
+\newcommand{\rust}{\textsc{Rust}}
+
+\newcommand{\fits}{\textsc{FITS}}
+\newcommand{\uvfits}{\textsc{UVFITS}}
+\newcommand{\aips}{\textsc{AIPS}}
+
+\newcommand{\docker}{\textsc{Docker}}
+
+\newcommand{\coo}{CO$_2$}
+
+% (Omit \affref and \aff and the asterisk if there is only one author.)
+
+\begin{document}
+
+\maketitle
+
+% Dev's todo:
+% - [x] cut most of the software development stuff to make room
+% applications of hyperdrive:
+% - [x] EoR: Cite Ridhima's papers for RTS-hyperdrive comparison, and world-leading MWAEoR limits
+% - [x] comparison images with ionospheric, vanilla subtraction, showing offsets on a night with an interesting ionosphere
+% - [ ] currently being used by MWA operations to calibrate observations in near-real time, much better than the old calibration pipeline, compare solutions
+% - [ ] demixing (is that the right word?) bright sources in sidelobe, could do an imaging noise comparison
+% - [ ] study of ionospheric events, like Shintaro plasma bubble
+% - [ ] works on nvidia and amd gpus, x86 and arm64
+% limitations:
+% - [x] ionospheric subtraction isn't peeling, only missing dical towards source
+% - [x] assumes that all antenna elements see the same ionosphere
+% - [x] assumes a thin phase screen not true for particularly turbulent nights
+% - [ ] ^ needs workarounds for SKA-low
+
+\begin{abstract}
+
+Exploration of the redshifted 21cm signal from the Epoch of Reionisation (EoR)  requires precisely and accurately calibrated data from low-frequency radio telescopes. 
+We present \href{https://github.com/MWATelescope/mwa_hyperdrive}{\textsc{mwa\_hyperdrive}} (hereafter \hyperdrive{}), a calibration software package designed for the Murchison Widefield Array (MWA), with an emphasis on correctness for EoR science. 
+\hyperdrive{} provides improved and faster results than its predecessors, and is easy to use on a wider variety of compute platforms.
+In this paper, we briefly introduce \hyperdrive{}, and direct the reader to the extensive online documentation\footnote{\url{https://mwatelescope.github.io/mwa_hyperdrive}}.
+\end{abstract}
+
+\section{Introduction}
+The MWA is a low-frequency radio telescope situated on Inyarrimanha Ilgari Bundara, CSIRO's Murchison Radio Observatory in Western Australia \cite{tingay2013}. 
+A key MWA science goal is the detection of the H\textsc{i} signature in the EoR \cite{beardsley2019}. 
+This experiment is particularly difficult, because it requires understanding and precisely correcting instrumental and propagation effects to 1 part in 10$^5$ \cite{barry2016}. 
+
+As a sky signal propagates through the Earth's atmosphere and the signal chain of each receiving element, it is subject to a variety of effects that can distort the signal before being correlated and accumulated into complex interferometric visibilities. 
+It is convenient to model these effects as having a direction-independent (DI) and direction-dependent (DD) component that can be corrected separately.
+
+The combination of all DI effects, such as the frequency-dependent response of electronic components, introduce global variations that can be corrected with a complex gain correction as a function of frequency for each antenna element. These are typically derived by minimizing the difference between the measured signal and a simulation of the expected visibilities from a detailed sky model.
+
+DD effects such as variations in the electron density of the the ionosphere require more advanced techniques.
+This work uses an approximation of a DD calibration technique called peeling, where deviations in the position of compact sources relative to a catalogue are used to fit for a model of the ionosphere, allowing the sources to be subtracted more accurately. 
+
+\section{Motivation}
+For many years, the Australia-based MWA EoR team used the Real-Time System (RTS; \cite{mitchell2008}), an \textsc{MPI}- and \cuda{}-enabled code written in \clang{} for its DI calibration and peeling functionality (c.f. \cite{jordan2017,Trott2020,chege2021}). However it suffered from significant technical debt that made it difficult to modify and maintain, with limited testing and documentation. 
+
+In 2020 the MWA began to produce visibilities in a new format as part of the ``MWAX'' correlator upgrade \cite{morrison2023}. 
+This format change necessitated a significant departure in raw correlator visibility reading code. 
+Modifying \rts{} to support both the old and new format of the raw data files would was deemed impractical due to the aforementioned issues, and so work began on its successor, \textsc{mwa\_hyperdrive}\footnote{\url{https://github.com/MWATelescope/mwa_hyperdrive}} (hereafter \hyperdrive{}).
+
+The decision to re-write software should normally be made as a last resort.
+\fhd{} \cite{Barry2019} is an attractive alternative, but requires an IDL software license and is currently unable to use GPUs to accelerate its work. 
+\calibrate{} as part of \mwareduce{} \cite{offringa2016} is another alternative, but it is also not able to use GPUs. 
+Being able to use the GPUs that are readily available on supercomputers is important for researcher efficiency and environmental impact.
+
+\section{Development}
+\hyperdrive{} was split into several re-usable library projects, each providing functionality that can be used independently, while reducing repeated code.
+\subsection{\mwalib{}}
+\hyperdrive{} was required to ingest visibilities in both ``legacy'' and ``MWAX'' correlator formats. 
+Although a \python{} package\footnote{\url{https://github.com/RadioAstronomySoftwareGroup/pyuvdata}} that provided this functionality was under development at the time, more cross-language functionality and reduced memory footprint were determined to be a priority. 
+A new purpose-built library \mwalib{}\footnote{\url{https://github.com/MWATelescope/mwalib}} created to provide a fast, format-agnostic and observatory-maintained library for interfacing with all raw MWA data and metadata, providing interfaces for \clang{}, \rust{} and \python{}
+
+\subsection{\birli{}}
+A series of preprocessing steps are typically applied when reading raw MWA data, including geometric delays, digital gains and RFI flagging. 
+Historically, \cotter{} was used to perform these corrections on raw data in the ``legacy'' correlator format \cite{Offringa2015}.
+\cotter{} was not designed to be used as a library, and would have required significant adaptations to the ``MWAX'' correlator format.
+\birli{}\footnote{\url{https://github.com/MWATelescope/Birli}} is a replacement for \cotter{} which provides a library interface for performing raw-data corrections on data that it reads using \mwalib{}. 
+
+\subsection{\textsc{mwa\_hyperbeam}}
+Another requirement of \hyperdrive{} was being able to simulate the MWA beam response. 
+Two types of beam response are of interest: the ``analytic'' and ``fully-embedded element'' (FEE) beam models, with the latter being the newer, more accurate beam model \cite{sokolowski2017}. 
+In particular, the FEE beam model reduces polarisation errors and allows dead dipoles in an MWA tile to be considered. 
+Similar to the raw-data-reading situation, existing software packages implementing the MWA beam response were investigated. 
+The \rts{} had implemented its own version of the FEE beam model, but only for its GPU code, and this was tightly tied to existing \rts{} code, making the task of abstracting the code into its own library more challenging than re-writing the algorithm for both CPUs and GPUs.
+
+\section{Design}
+
+\subsection{Key calibration functionality}
+The DI calibration algorithm used is ``antsol''\footnote{\url{https://www.aoc.nrao.edu/~sbhatnag/misc/stefcal.pdf}} (equivalent to ``MitchCal'' and ``StEFCal''), which uses an iterative approach to solve,
+\begin{equation*}
+  G_{p,i} = \frac{ \sum_{q,q \neq p} D_{pq} G_{q,i-1} M_{pq}^H }{ \sum_{q,q \neq p} \left( M_{pq} G_{q,i-1}^H \right) \left( M_{pq} G_{q,i-1}^H \right) }
+\end{equation*}
+where $p$ and $q$ are antenna/tile indices, $G_p$ is the 2x2 complex-valued gain solution for
+an antenna $p$, $D_{pq}$ is a 2x2 complex-valued ``data'' visibility from baseline $pq$, $M_{pq}$
+is a 2x2 complex-valued ``model'' visibility from baseline $pq$, $i$ is the current iteration
+index, and the superscript $H$ denotes a Hermitian transpose (that is, a complex
+conjugate transpose). 
+Using more iterations should improve the resulting gains, at the expense of increased computational cost. 
+This this procedure is performed independently for blocks of channels or timesteps selected by the user.
+In order to keep the calibration quality high while also reducing the amount of compute required, a stop convergence threshold is used.
+
+\subsection{Ionospheric Subtraction}
+DD calibration in \hyperdrive{} follows a similar approach to the \textit{Calibrator Measurement Loop} in \cite{mitchell2008}, which models the ionospheric refraction experienced by each source as a wavelength-dependent shift in apparent position given by the angles $l=\alpha\lambda^2$ and $m=\beta\lambda^2$.
+The starting point (and end point) for ionospheric subtraction is the residual visibilities, which is the calibrated data minus the sky model with ionospheric corrections applied. 
+These corrections are initially unknown, and are improved upon in subsequent passes.
+
+Looping over each source in descending order of beam-attenuated brightness, the residuals are phased to the source's catalogue position.
+The current estimate of the ionospheric corrections are applied to model visibilities of the source, which are added back into to the residuals and averaged. % to reduce contributions from sources away from the phase centre. 
+
+At this point, \cite{mitchell2008} describes a least-squares method in \textit{III-B, Ionospheric Refraction Measurement} which is used to update the source's ionospheric parameters to further reduce the subtraction residual. This method is used in \hyperdrive{}, along with several refinements were later added to the \rts{} source code.
+
+Visibilities from short baselines are down-weighted with an exponential taper $1-\exp\left(-\frac{u^2+v^2}{2\sigma^2}\right)$, where the wavenumber $\sigma$ corresponds to the maximum angular scale captured in the compact sky model, approximately $40\lambda$. 
+Additionally, ionospheric corrections use a third parameter $g$ in addition to $\alpha$ and $\beta$, that captures a scalar gain due to ionospheric scintillation. 
+
+\hyperdrive{} introduces additional ``goodness-of-fit'' tests, and converges slowly on ionospheric solutions to prevent divergent solutions of bright sources from triggering cascading failures in other sources. 
+These modifications were found to be sufficient to omit step \textit{III-C, Instrument Gain Measurement} for future work, which would peel sources by fitting each with a per-frequency complex gain solution. Despite this, ionospheric subtraction shows a clear reduction in residuals when compared to a direct subtraction of the model in Figure~\ref{fig:cal_sub_peel}.
+
+\subsection{Additional Functionality}
+\hyperdrive{} is designed to be modular and flexible. 
+In addition to the \textsc{di-calibrate} and \textsc{peel} (ionospheric subtraction) functionality already discussed, \hyperdrive{} comes with many other useful subcommands.
+
+\begin{itemize}
+  \item \textsc{vis-simulate} and \textsc{vis-subtract} allow an arbitrary sky model to be simulated with the MWA or subtracted from existing data.
+  \item \textsc{srclist-verify} and \textsc{srclist-convert} support validating and converting between multiple sky model formats, including \rts{}, \calibrate{}, and \hyperdrive{}.
+  \item Given a ``global sky model'' \textsc{srclist-by-beam} is able to generate a smaller sky model for a particular field using a desired source count and beam attenuation,
+  \item \textsc{solutions-plot} and \textsc{solutions-convert} support plotting and converting between multiple calibration solution file formats.
+  \item \textsc{vis-convert} can convert between visibility file formats.
+\end{itemize}
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=1\linewidth]{cal_sub_peel_1099487728_4s_40kHz_edg80_t4-5-MFS-image.png}
+    \caption{An image extracted from eight seconds of an MWA observation, centred on RA: 0:18:50, Dec: $-$31:51:39 with different subtraction methods applied. On the left is the unsubtracted image. In the middle, the model visibilities are directly subtracted without corrections, and on the right, the sky model has had ionospheric corrections applied to the brightest sources. Without these corrections, the sources are subtracted from the wrong position, resulting in ``holes''.}
+    \label{fig:cal_sub_peel}
+\end{figure*}
+
+\section{Performance}
+% \subsection{Calibration Runtime Performance}
+The runtime performance of each software package's DI calibration is shown
+in Table~\ref{tab:perf}. With these benchmark results, we can see that overall
+CPU performance is significantly worse than GPU performance, especially for
+\calibrate{}. On the supercomputer nodes, a \hyperdrive{} user could use
+roughly 20,000 sources in a sky model with a GPU before the \hyperdrive{} CPU
+performance with 100 sources takes a similar amount of time. In addition, the
+GPU performance seems to scale significantly better, with the absolute time
+taken to model 1,000 sources being not much more than 100 sources. 
+\begin{table*}[ht]
+  \begin{center}
+  \caption{DI calibration wall times for various codes on various machines for a single
+2\,minute MWA observation at 2\,second, 40\,kHz resolution (MWA obsid
+1090008640). The minimum and stop convergence thresholds were 1e-4 and 1e-12,
+respectively. A minimum UVW cutoff of 97.187m was used as well as the FEE beam.}
+  \label{tab:perf}
+  \begin{tabular}{ |l|rrr| }
+    \hline
+                                                           & \multicolumn{3}{c}{Time taken on} \\
+    Software                                               & sirius$^1$ & garrawarla$^2$ & setonix$^3$ \\
+    \hline
+    \calibrate{} with 50 sources, 50 iterations, CPU       & 17m54s     & 27m01s         & 29m32s \\
+    \calibrate{} with 100 sources, 50 iterations, CPU      & 27m56s     & 42m37s         & 41m34s \\
+    \calibrate{} with 100 sources, 100 iterations, CPU     & 31m39s     & 47m25s         & 54m41s \\
+    \hline
+    \rts{} with 100 sources, 25 GPUs                       &            & 1m17s          & \\
+    \rts{} with 1,000 sources, 25 GPUs                     &            & 2m04s          & \\
+    \hline
+    \hyperdrive{} with 50 sources, 50 iterations, CPU      & 4m24s      & 6m47s          & 7m47s \\
+    \hyperdrive{} with 100 sources, 50 iterations, CPU     & 6m15s      & 11m08s         & 12m10s \\
+    \hyperdrive{} with 100 sources, 50 iterations, GPU     & 1m00s      & 0m48s          & 1m12s \\
+    \hyperdrive{} with 1,000 sources, 50 iterations, GPU   & 1m41s      & 1m27s          & 1m33s \\
+    \hyperdrive{} with 1,000 sources, 100 iterations, GPU  & 2m10s      & 1m44s          & 2m28s \\
+    \hyperdrive{} with 10,000 sources, 100 iterations, GPU & 7m58s      & 6m40s          & 5m58s \\
+    \hline
+  \end{tabular}
+ \flushleft $^1$sirius is a desktop computer with a Ryzen 9 3900X CPU, an
+  NVIDIA GeForce RTX 2070 GPU and 128 GB of RAM, running up-to-date Arch
+  linux as of 2023-09-26. \calibrate{} was compiled from the \textsc{git}
+  commit \textsc{3cb3db0} (the current latest version) of \mwareduce{} with
+  \textsc{GCC} 12.3.0. \hyperdrive{} v0.3.0 was compiled with \textsc{rustc}
+  1.72.1 and \textsc{CUDA} 12.2.0, using the \textsc{cuda}, \textsc{gpu-single},
+  \textsc{hdf5-static} and \textsc{cfitsio-static} compile features.
+
+  \flushleft $^2$garrawarla is a Pawsey supercomputer; each node
+  has 2 Intel Xeon Gold 6230 CPUs, each with 20 cores, an NVIDIA Tesla V100
+  Tensor Core 32GB CPU and 384 GB of RAM. \calibrate{} was compiled from
+  the \textsc{git} commit \textsc{ff64a55} of \mwareduce{} with \textsc{GCC}
+  8.3.0. \rts{} was compiled on from the \textsc{git} commit \textsc{99d97a5}
+  with \textsc{GCC} 8.3.0 and \textsc{CUDA} 10.2.0. \hyperdrive{} v0.3.0
+  was compiled with \textsc{rustc} 1.72.1 and \textsc{CUDA} 10.2.0, using
+  the \textsc{cuda}, \textsc{hdf5-static} and \textsc{cfitsio-static} compile
+  features.
+
+  \flushleft $^3$setonix is a Pawsey supercomputer; each node
+  has 8 AMD EPYC 7763 CPUs, each with 64 cores, 8 AMD Instinct MI250X GPUs
+  and and 256 GB of RAM. \calibrate{} was compiled from the \textsc{git}
+  commit \textsc{3cb3db0} (the current latest version) of \mwareduce{} with
+  \textsc{GCC} 11.4.0 inside a \docker{} image; it could not installed natively
+  due to difficulties with the setonix software stack. \hyperdrive{} v0.3.0
+  was compiled with \textsc{rustc} 1.72.1 and \textsc{ROCm} 5.4.3, using
+  the \textsc{hip}, \textsc{hdf5-static} and \textsc{cfitsio-static} compile
+  features.
+  \end{center}
+\end{table*}
+
+In EoR experiments, calibrated and foreground-subtracted visibilities are used to generate power spectra of the 21 cm hydrogen line, which measures fluctuations in the intergalactic medium. 
+Previous studies, such as \cite{Trott2020}, derived upper limits on the 21 cm power spectra using \rts{} software with the MWA. 
+More recently, \cite{nunhokee2024} demonstrated that \hyperdrive{} calibration and subtraction yield slightly improved results. Additionally, ongoing work with \hyperdrive{} shows promising results, achieving the most stringent upper limits on the 21 cm power spectra to date with the MWA \cite{nunhokee2025}.
+
+\section{Acknowledgements}
+This research was supported by the ARC ASTRO 3D Centre of Excellence through project number CE170100013. ICRAR is a Joint Venture of Curtin University and The University of Western Australia, funded by the Western Australian government. This scientific work uses data from \textit{Inyarrimanha Ilgari Bundara} / CSIRO's Murchison Radio-astronomy Observatory. We acknowledge the Wajarri Yamaji People as the Traditional Owners and native title holders of the Observatory site. Support for the operation of the MWA is provided by the Australian Government (NCRIS), under a contract to Curtin University administered by Astronomy Australia Limited. This work was supported by resources provided by the Pawsey Supercomputing Research Centre with funding from the Australian Government and the Government of Western Australia. This research received technical support from the Australian SKA Regional Centre (AusSRC). The authors thank Anshu Gupta, Sammy McSweeney, Bradley Meyers and Nichole Barry for their help.
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs3}
+
+
+\end{document}

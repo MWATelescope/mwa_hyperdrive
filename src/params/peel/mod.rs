@@ -570,7 +570,17 @@ impl PeelParams {
 
                         // Store the results as they are received on the
                         // channel.
-                        while let Ok(incoming_iono_consts) = rx_iono_consts.recv() {
+                        // Also buffer optional per-source DI solutions (single timeblock)
+                        let mut per_source_di: Option<Vec<Array3<Jones<f64>>>> = self
+                            .di_per_source_dir
+                            .as_ref()
+                            .map(|_| {
+                                (0..*num_sources_to_iono_subtract)
+                                    .map(|_| Array3::from_elem((1, 0, 0), Jones::identity()))
+                                    .collect::<Vec<_>>()
+                            });
+
+                        while let Ok((incoming_iono_consts, incoming_di)) = rx_iono_consts.recv() {
                             incoming_iono_consts
                                 .into_iter()
                                 .zip_eq(output_iono_consts.iter_mut())
@@ -579,6 +589,17 @@ impl PeelParams {
                                     src_iono_consts.betas.push(iono_consts.beta);
                                     src_iono_consts.gains.push(iono_consts.gain);
                                 });
+                            if let (Some(buf), Some(di_vec)) = (per_source_di.as_mut(), incoming_di)
+                            {
+                                for (i, di) in di_vec.into_iter().enumerate() {
+                                    // replace storage with incoming di if non-empty
+                                    if di.len() > 0 {
+                                        if i < buf.len() {
+                                            buf[i] = di;
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         // Channel done; write output(s).
@@ -591,25 +612,26 @@ impl PeelParams {
                             }
                         }
 
-                        // Write per-source DI solutions if requested.
-                        if let Some(dir) = self.di_per_source_dir.as_ref() {
+                        // Write per-source DI solutions if requested and available.
+                        if let (Some(dir), Some(per_src)) =
+                            (self.di_per_source_dir.as_ref(), per_source_di.as_ref())
+                        {
                             std::fs::create_dir_all(dir)?;
-                            // Create one timeblock solutions container per source with 1 timeblock over full tiles/chans
-                            for ((name, _src), _src_iono) in source_list
+                            for (((name, _src), _src_iono), di) in source_list
                                 .iter()
                                 .take(*num_sources_to_iono_subtract)
                                 .zip(output_iono_consts.iter())
+                                .zip(per_src.iter())
                             {
-                                let mut sols = crate::solutions::CalibrationSolutions::default();
-                                let num_timeblocks = 1usize;
-                                // Minimal placeholder matrix to ensure valid FITS structure
-                                sols.di_jones = Array3::from_elem((num_timeblocks, 1, 1), Jones::nan());
-                                // Fill only unflagged tiles/chanblocks with identity; these are per-source DI solutions not solved in aggregate here.
-                                // Keep metadata minimal; write as FITS.
-                                let mut path = dir.clone();
-                                let fname = format!("{}.fits", name.replace('/', "_"));
-                                path.push(fname);
-                                let _ = sols.write_solutions_from_ext(&path);
+                                // Only write if di has correct shape
+                                if di.len_of(Axis(0)) == 1 && di.len_of(Axis(1)) > 0 && di.len_of(Axis(2)) > 0 {
+                                    let mut sols = crate::solutions::CalibrationSolutions::default();
+                                    sols.di_jones = di.clone();
+                                    let mut path = dir.clone();
+                                    let fname = format!("{}.fits", name.replace('/', "_"));
+                                    path.push(fname);
+                                    let _ = sols.write_solutions_from_ext(&path);
+                                }
                             }
                         }
                     }
@@ -1970,7 +1992,8 @@ fn peel_thread(
     di_per_source_dir: Option<&PathBuf>,
     rx_full_residual: Receiver<FullResidual>,
     tx_write: Sender<VisTimestep>,
-    tx_iono_consts: Sender<Vec<IonoConsts>>,
+    // Send iono constants and optional per-source DI solutions (shape 1xTilesxChans)
+    tx_iono_consts: Sender<(Vec<IonoConsts>, Option<Vec<Array3<Jones<f64>>>>)>,
     error: &AtomicCell<bool>,
     multi_progress: &MultiProgress,
     overall_peel_progress: &ProgressBar,
@@ -2039,39 +2062,67 @@ fn peel_thread(
                 )?;
             }
 
+            let mut sent_iono = false;
             #[cfg(any(feature = "cuda", feature = "hip"))]
-            if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
-                let mut high_res_modeller = SkyModellerGpu::new(
-                    beam,
-                    &SourceList::new(),
-                    obs_context.polarisations,
-                    unflagged_tile_xyzs,
-                    &all_fine_chan_freqs_hz,
-                    &tile_baseline_flags.flagged_tiles,
-                    RADec::default(),
-                    array_position.longitude_rad,
-                    array_position.latitude_rad,
-                    dut1,
-                    apply_precession,
-                )?;
-                peel_gpu(
-                    vis_residual_tfb.view_mut(),
-                    tapered_weights_tfb.view(),
-                    timeblock,
-                    source_list,
-                    &mut iono_consts,
-                    source_weighted_positions,
-                    peel_loop_params,
-                    chanblocks,
-                    low_res_lambdas_m,
-                    obs_context,
-                    tile_baseline_flags,
-                    &mut high_res_modeller,
-                    !apply_precession,
-                    num_sources_to_peel,
-                    di_per_source_dir,
-                    multi_progress,
-                )?;
+            {
+                if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
+                    let mut high_res_modeller = SkyModellerGpu::new(
+                        beam,
+                        &SourceList::new(),
+                        obs_context.polarisations,
+                        unflagged_tile_xyzs,
+                        &all_fine_chan_freqs_hz,
+                        &tile_baseline_flags.flagged_tiles,
+                        RADec::default(),
+                        array_position.longitude_rad,
+                        array_position.latitude_rad,
+                        dut1,
+                        apply_precession,
+                    )?;
+
+                    // Prepare optional DI storage when requested, one timeblock per source
+                    let mut di_storage_opt: Option<Vec<Array3<Jones<f64>>>> = if di_per_source_dir
+                        .is_some()
+                        && num_sources_to_peel > 0
+                    {
+                        Some(
+                            (0..num_sources_to_iono_subtract)
+                                .map(|_| {
+                                    Array3::from_elem((1, unflagged_tile_xyzs.len(), chanblocks.len()), Jones::identity())
+                                })
+                                .collect(),
+                        )
+                    } else {
+                        None
+                    };
+
+                    peel_gpu(
+                        vis_residual_tfb.view_mut(),
+                        tapered_weights_tfb.view(),
+                        timeblock,
+                        source_list,
+                        &mut iono_consts,
+                        source_weighted_positions,
+                        peel_loop_params,
+                        chanblocks,
+                        low_res_lambdas_m,
+                        obs_context,
+                        tile_baseline_flags,
+                        &mut high_res_modeller,
+                        !apply_precession,
+                        num_sources_to_peel,
+                        multi_progress,
+                        di_storage_opt.as_mut().map(|v| v.as_mut_slice()),
+                    )?;
+
+                    // Send iono consts and optional DI solutions
+                    let di_payload = di_storage_opt.take();
+                    match tx_iono_consts.send((iono_consts.clone(), di_payload)) {
+                        Ok(()) => (),
+                        Err(_) => return Ok(()),
+                    }
+                    sent_iono = true;
+                }
             }
 
             // dev: what's with this?
@@ -2095,9 +2146,17 @@ fn peel_thread(
             }
         }
 
-        match tx_iono_consts.send(iono_consts) {
-            Ok(()) => (),
-            Err(_) => return Ok(()),
+        #[allow(unused_variables)]
+        if !{
+            #[cfg(any(feature = "cuda", feature = "hip"))]
+            { sent_iono }
+            #[cfg(not(any(feature = "cuda", feature = "hip")))]
+            { false }
+        } {
+            match tx_iono_consts.send((iono_consts, None)) {
+                Ok(()) => (),
+                Err(_) => return Ok(()),
+            }
         }
 
         for ((cross_data_fb, cross_weights_fb), timestamp) in vis_residual_tfb

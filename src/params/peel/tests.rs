@@ -1757,7 +1757,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     )
                     .unwrap();
 
-                    peel_gpu(
+                    let _ = peel_gpu(
                         vis_residual_obs_tfb.view_mut(),
                         vis_weights.view(),
                         &timeblock,
@@ -1772,8 +1772,8 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &mut high_res_modeller,
                         !apply_precession,
                         0,
-                        None,
                         &multi_progress,
+                        None,
                     )
                     .unwrap()
                 }
@@ -2102,7 +2102,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 )
                 .unwrap();
 
-                peel_gpu(
+                let _ = peel_gpu(
                     vis_residual_obs_tfb.view_mut(),
                     vis_weights.view(),
                     &timeblock,
@@ -2117,8 +2117,8 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &mut high_res_modeller,
                     !apply_precession,
                     source_list.len().min(num_sources_to_iono_subtract),
-                    None,
                     &multi_progress,
+                    None,
                 )
                 .unwrap()
             }
