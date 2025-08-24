@@ -1608,8 +1608,8 @@ fn peel_cpu(
                             std::fs::create_dir_all(dir)?;
                             let mut sols = crate::solutions::CalibrationSolutions::default();
                             // One timeblock; take di_jones for current source
-                            let num_tiles = di_jones.len_of(Axis(1));
-                            let num_chans = di_jones.len_of(Axis(2));
+                            let _num_tiles = di_jones.len_of(Axis(1));
+                            let _num_chans = di_jones.len_of(Axis(2));
                             sols.di_jones = di_jones.clone();
                             let mut path = dir.clone();
                             let fname = format!("{}.fits", source_name.replace('/', "_"));
@@ -2062,7 +2062,7 @@ fn peel_thread(
                 )?;
             }
 
-            let mut sent_iono = false;
+            let _sent_iono = false;
             #[cfg(any(feature = "cuda", feature = "hip"))]
             {
                 if matches!(MODEL_DEVICE.load(), ModelDevice::Gpu) {
