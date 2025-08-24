@@ -29,6 +29,10 @@ pub(crate) fn peel_gpu(
     source_list: &SourceList,
     iono_consts: &mut [IonoConsts],
     source_weighted_positions: &[RADec],
+    num_sources_to_peel: usize,
+    di_max_iterations: u32,
+    di_stop_threshold: f64,
+    di_min_threshold: f64,
     peel_loop_params: &PeelLoopParams,
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
@@ -650,8 +654,11 @@ pub(crate) fn peel_gpu(
                 pb_trace!("{:?}: subtract_iono", start.elapsed());
 
                 // Peel?
-                let num_sources_to_peel = 0;
                 if pass == num_passes - 1 && i_source < num_sources_to_peel {
+                    multi_progress_bar.suspend(|| {
+                        debug!("Performing DI calibration for source {i_source}: {source_name}")
+                    });
+
                     // We currently can only do DI calibration on the CPU. Copy the visibilities back to the host.
                     let vis = d_high_res_vis_tfb.copy_from_device_new()?;
 
@@ -682,15 +689,37 @@ pub(crate) fn peel_gpu(
                         di_jones.view_mut(),
                         timeblock,
                         chanblocks,
-                        50,
-                        1e-8,
-                        1e-4,
+                        di_max_iterations,
+                        di_stop_threshold,
+                        di_min_threshold,
                         obs_context.polarisations,
                         pb,
                         true,
                     );
-                    if di_cal_results.into_iter().all(|r| r.converged) {
-                        // Apply.
+
+                    // Check if calibration converged for all channels
+                    let converged_count = di_cal_results.iter().filter(|r| r.converged).count();
+                    let total_channels = di_cal_results.len();
+                    
+                    multi_progress_bar.suspend(|| {
+                        info!(
+                            "DI calibration for {}: {}/{} channels converged", 
+                            source_name, converged_count, total_channels
+                        )
+                    });
+
+                    if converged_count > total_channels / 2 {
+                        multi_progress_bar.suspend(|| {
+                            debug!("DI calibration solutions computed for {} - application not yet implemented", source_name)
+                        });
+                        // TODO: Apply the DI Jones corrections
+                    } else {
+                        multi_progress_bar.suspend(|| {
+                            warn!(
+                                "DI calibration for {} failed to converge on enough channels ({}/{}) - not applying",
+                                source_name, converged_count, total_channels
+                            )
+                        });
                     }
                 }
 
