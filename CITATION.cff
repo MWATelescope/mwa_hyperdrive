@@ -1,0 +1,48 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: MWA Hyperdrive
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Christopher H.
+    family-names: Jordan
+    email: christopherjordan87@gmail.com
+    affiliation: Curtin University
+    orcid: 'https://orcid.org/0000-0002-1220-2940'
+  - given-names: Dev
+    family-names: 'Null'
+    email: dev.null@curtin.edu.au
+    affiliation: 'Australian SKA Regional Centre, Curtin University'
+    orcid: 'https://orcid.org/0000-0003-2159-0911'
+identifiers:
+  - type: doi
+    value: 10.46620/URSIAPRASC25/LSCN1310
+    description: >-
+      URSI AP-RASC Summary Paper, MWA_HYPERDRIVE: Next
+      generation calibration software for the Murchison
+      Widefield Array radio telescope
+repository-code: 'https://github.com/MWATelescope/mwa_hyperdrive'
+url: 'https://mwatelescope.github.io/mwa_hyperdrive'
+abstract: >-
+  Exploration of the redshifted 21cm signal from the Epoch
+  of Reionisation (EoR) requires precisely and accurately
+  calibrated data from low-frequency radio telescopes. We
+  present MWA_HYPERDRIVE, a calibration and ionospheric
+  subtraction software package designed for the Murchison
+  Widefield Array (MWA), with an emphasis on correctness
+  for EoR science. HYPERDRIVE provides improved and
+  faster results than its predecessors, and is easy to
+  use on a wider variety of compute platforms.
+keywords:
+  - radio astronomy
+  - calibration
+  - ionosphere
+  - continuum subtraction
+license: MPL-2.0
+commit: e85820227005bfcce77d41fb616713e433c487fe
+version: v0.6.1
+date-released: '2025-07-29'
