@@ -46,3 +46,44 @@ license: MPL-2.0
 commit: e85820227005bfcce77d41fb616713e433c487fe
 version: v0.6.1
 date-released: '2025-07-29'
+preferred-citation:
+  type: conference-paper
+  title: 'MWA_HYPERDRIVE: Next generation calibration software for the Murchison Widefield
+    Array radio telescope'
+  year: 2025
+  authors:
+  - family-names: Jordan
+    given-names: C.
+    orcid: 'https://orcid.org/0000-0002-1220-2940'
+  - family-names: 'Null'
+    given-names: D.
+    orcid: 'https://orcid.org/0000-0003-2159-0911'
+  - family-names: Trott
+    given-names: C.
+    orcid: 'https://orcid.org/0000-0001-6324-1766'
+  - family-names: Line
+    given-names: J.
+    orcid: 'https://orcid.org/0000-0002-9130-5920'
+  - family-names: Chege
+    given-names: K.
+    orcid: 'https://orcid.org/0000-0002-1292-5268'
+  - family-names: Lynch
+    given-names: C.
+    orcid: 'https://orcid.org/0000-0002-0494-192X'
+  - family-names: Nunhokee
+    given-names: C.
+    orcid: 'https://orcid.org/0000-0002-5445-6586'
+  - family-names: Sleap
+    given-names: G.
+    orcid: 'https://orcid.org/0000-0003-0134-3884'
+  - family-names: Wayth
+    given-names: R.
+    orcid: 'https://orcid.org/0000-0002-6995-4131'
+  collection-title: Proceedings of the 7th URSI Asia-Pacific RadioScience Conference
+    - AP-RASC 2025
+  conference:
+    name: 7th URSI Asia-Pacific RadioScience Conference - AP-RASC 2025
+    organization: URSI - International Union of Radio Science
+  publisher: URSI - International Union of Radio Science
+  doi: 10.46620/ursiaprasc25/lscn1310
+  url: https://doi.org/10.46620/ursiaprasc25/lscn1310
