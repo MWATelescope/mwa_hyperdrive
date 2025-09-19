@@ -12,6 +12,11 @@ pub(crate) enum PeelArgsError {
     )]
     TooManyIonoSub { total: usize, iono: usize },
 
+    #[error(
+        "The number of sources to subtract ({total}) is less than the number of sources to peel ({peel})"
+    )]
+    TooManyPeel { total: usize, peel: usize },
+
     #[error("The number of iono sub passes cannot be 0")]
     ZeroPasses,
 
