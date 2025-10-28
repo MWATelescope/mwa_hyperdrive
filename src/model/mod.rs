@@ -121,10 +121,10 @@ pub(crate) fn get_cpu_info() -> String {
 
 /// An object that simulates sky-model visibilities.
 pub trait SkyModeller<'a>: Send {
-    /// Generate sky-model visibilities for a single timestep. The visibilities
-    /// as well as the [`UVW`] coordinates used in generating the visibilities
-    /// are returned. The visibilities are ordered by frequency and then
-    /// baseline.
+    /// Generate *cross-correlation* sky-model visibilities for a single
+    /// timestep. The visibilities as well as the [`UVW`] coordinates used in
+    /// generating the visibilities are returned. The visibilities are ordered
+    /// by frequency and then baseline.
     ///
     /// This function is not as efficient as
     /// [`SkyModeller::model_timestep_with`], because that function does not
@@ -143,10 +143,10 @@ pub trait SkyModeller<'a>: Send {
         timestamp: Epoch,
     ) -> Result<(Array2<Jones<f32>>, Vec<UVW>), ModelError>;
 
-    /// Generate sky-model visibilities for a single timestep. The [`UVW`]
-    /// coordinates used in generating the visibilities are returned, but the
-    /// new visibilities are added to `vis_fb`. The visibilities are ordered by
-    /// frequency and then baseline.
+    /// Generate *cross-correlation* sky-model visibilities for a single
+    /// timestep. The [`UVW`] coordinates used in generating the visibilities
+    /// are returned, but the new visibilities are added to `vis_fb`. The
+    /// visibilities are ordered by frequency and then baseline.
     ///
     /// `timestamp`: The [`hifitime::Epoch`] struct used to determine what this
     /// timestep corresponds to.
@@ -175,6 +175,31 @@ pub trait SkyModeller<'a>: Send {
         &mut self,
         source: &Source,
         phase_centre: RADec,
+    ) -> Result<(), ModelError>;
+
+    /// Generate *auto-correlation* sky-model visibilities for a single
+    /// timestep. The new visibilities are added to `vis_fb`. The visibilities
+    /// are ordered by frequency and then baseline.
+    ///
+    /// `timestamp`: The [`hifitime::Epoch`] struct used to determine what this
+    /// timestep corresponds to.
+    ///
+    /// `vis_fb`: A mutable view into an `ndarray`. The view *must* be
+    /// contiguous in memory. Rather than returning an array from this function,
+    /// modelled visibilities are added to this array. *The view is not cleared
+    /// as part of this function.* This view *must* have dimensions `[n1][n2]`,
+    /// where `n1` is number of unflagged frequencies and `n2` is the number of
+    /// unflagged tiles.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if there was a problem with
+    /// beam-response calculation or a CUDA/HIP error (if using CUDA/HIP
+    /// functionality).
+    fn model_timestep_autos_with(
+        &self,
+        timestamp: Epoch,
+        vis_fb: ArrayViewMut2<Jones<f32>>,
     ) -> Result<(), ModelError>;
 }
 
