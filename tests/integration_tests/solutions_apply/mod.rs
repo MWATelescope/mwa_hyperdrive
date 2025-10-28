@@ -4,4 +4,5 @@
 
 //! Integration tests for solutions-apply.
 
+mod autos;
 mod cli_args;
