@@ -175,6 +175,21 @@ pub(super) fn timesteps_to_timeblocks(
     // [(3, 2..=4), (6, 5..=7), (9, 8..=10)]
 
     let mut timeblocks = vec![];
+
+    // Safety check: if time resolution is zero, we can't create proper timeblocks
+    // This prevents infinite loops in the following iteration
+    if time_resolution.total_nanoseconds() == 0 {
+        // For zero time resolution, create a single timeblock with all timestamps
+        let timeblock = Timeblock {
+            index: 0,
+            range: 0..timestamps_to_use.len(),
+            timestamps: timestamps_to_use.clone(),
+            timesteps: timesteps_to_use.clone(),
+            median: *timestamps_to_use.first(),
+        };
+        return Vec1::try_from_vec(vec![timeblock]).expect("cannot be empty");
+    }
+
     let timeblock_length = Duration::from_total_nanoseconds(
         (time_average_factor.get() - 1) as i128 * time_resolution.total_nanoseconds(),
     );
