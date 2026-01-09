@@ -21,20 +21,15 @@ use vec1::Vec1;
 use crate::{beam::Delays, io::read::VisInputType};
 
 /// Currently supported polarisations.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 #[allow(non_camel_case_types)]
 pub enum Polarisations {
+    #[default]
     XX_XY_YX_YY,
     XX,
     YY,
     XX_YY,
     XX_YY_XY,
-}
-
-impl Default for Polarisations {
-    fn default() -> Self {
-        Self::XX_XY_YX_YY
-    }
 }
 
 impl Display for Polarisations {

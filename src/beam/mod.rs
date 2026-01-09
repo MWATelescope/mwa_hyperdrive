@@ -38,6 +38,7 @@ use crate::gpu::{DevicePointer, GpuFloat};
     Copy,
     PartialEq,
     Eq,
+    Default,
     strum_macros::Display,
     strum_macros::EnumIter,
     strum_macros::EnumString,
@@ -46,17 +47,12 @@ use crate::gpu::{DevicePointer, GpuFloat};
 pub enum BeamType {
     /// Fully-embedded element beam.
     #[strum(serialize = "fee")]
+    #[default]
     FEE,
 
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
     #[strum(serialize = "none")]
     None,
-}
-
-impl Default for BeamType {
-    fn default() -> Self {
-        Self::FEE
-    }
 }
 
 lazy_static::lazy_static! {
