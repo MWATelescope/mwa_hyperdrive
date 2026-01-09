@@ -59,13 +59,23 @@ pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, TableE
 // timesteps. This function assumes that the `main_table` and `timestamps` are
 // not empty.
 fn get_time_resolution(main_table: &mut Table, timestamps: &[Epoch]) -> Option<Duration> {
-    if let Ok(s) = main_table.get_cell("INTERVAL", 0) {
+    if let Ok(s) = main_table.get_cell::<f64>("INTERVAL", 0) {
         debug!("Using the INTERVAL column for the time resolution ({s} seconds)");
-        return Some(Duration::from_seconds(s));
+        // Check if the interval is zero or invalid, which would cause infinite loops
+        if s > 0.0 && s.is_finite() {
+            return Some(Duration::from_seconds(s));
+        } else {
+            debug!("INTERVAL column contains invalid value ({s}), falling back to other methods");
+        }
     }
-    if let Ok(s) = main_table.get_cell("EXPOSURE", 0) {
+    if let Ok(s) = main_table.get_cell::<f64>("EXPOSURE", 0) {
         debug!("Using the EXPOSURE column for the time resolution ({s} seconds)");
-        return Some(Duration::from_seconds(s));
+        // Check if the exposure is zero or invalid, which would cause infinite loops
+        if s > 0.0 && s.is_finite() {
+            return Some(Duration::from_seconds(s));
+        } else {
+            debug!("EXPOSURE column contains invalid value ({s}), falling back to other methods");
+        }
     }
     if timestamps.len() == 1 {
         debug!(
@@ -307,10 +317,21 @@ impl MsReader {
                         y: v[1],
                         z: v[2],
                     };
-                    Some(xyz.to_earth_wgs84())
+                    debug!("Found ARRAY_CENTER: [{}, {}, {}]", v[0], v[1], v[2]);
+                    let geodetic = xyz.to_earth_wgs84();
+                    debug!(
+                        "Converted to geodetic: lon={:.6}°, lat={:.6}°, height={:.3}m",
+                        geodetic.longitude_rad.to_degrees(),
+                        geodetic.latitude_rad.to_degrees(),
+                        geodetic.height_metres
+                    );
+                    Some(geodetic)
                 }
 
-                Err(_) => None,
+                Err(e) => {
+                    debug!("Could not read ARRAY_CENTER: {}", e);
+                    None
+                }
             };
 
             if let Some(pos) = maybe_pos {
