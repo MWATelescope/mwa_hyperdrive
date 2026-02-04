@@ -14,7 +14,7 @@ use crossbeam_channel::{bounded, Sender};
 use crossbeam_utils::atomic::AtomicCell;
 use hifitime::{Duration, Epoch};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use log::{error, info, trace};
+use log::{info, trace};
 use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
