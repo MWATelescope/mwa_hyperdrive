@@ -19,11 +19,22 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - auto-correlation visibility simulation and writing support
+- Fix for reading a timestep with zero length #67
+- Fix multi-timeblock solution slicing #59
+- implement cluster reading for ao style srclist #63
+- Fixes for CPU model behavior with empty component types
 
 ### Changed
 
-- vis-simulate now supports auto-correlations by default, use `--output-no-autos`
-  to disable
+- All commands that read or write visibilities, now do so with auto-correlations by default.
+  - This results in a 1% increase in the number of baselines written out. use `--no-autos` or `--output-no-autos` to disable.
+  - `vis-simulate` now simulates auto-correlations by default,
+    use `--output-no-autos` to disable.
+  - `di-calibrate` will simulate auto-correlations by default,
+    and write them to `--model-filenames` if provided.
+    use `--no-autos` to disable.
+  - `solutions-apply`, `vis-convert`, `vis-subtract`, `peel` will read and write auto-correlations
+    by default (but not modify them), use `--no-autos` to disable.
 - VisRead trait generalizes `read_{crosses,autos,crosses_and_autos}` with `read_inner_dispatch`
 
 ## [0.6.1] - 2025-07-29
