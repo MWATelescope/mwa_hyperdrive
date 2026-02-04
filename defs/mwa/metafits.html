@@ -7,7 +7,7 @@
 
 
         <!-- Custom HTML head -->
-
+        
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -103,7 +103,7 @@
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
+                                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -165,24 +165,20 @@ the raw visibilities in a download, but these could be old (such as the "PPD
 metafits" files). <strong><code>hyperdrive</code> does not support PPD metafits files; only new
 metafits files should be used.</strong></p>
 <p>This command downloads a new metafits file for the specified observation ID:</p>
-<div id="admonition-download-mwa-metafits-file" class="admonition admonish-example" role="note" aria-labelledby="admonition-download-mwa-metafits-file-title">
+<div id="admonition-download-mwa-metafits-file" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-download-mwa-metafits-file-title">
 <p>Download MWA metafits file</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-download-mwa-metafits-file"></a>
+<p><a class="admonition-anchor-link" href="#admonition-download-mwa-metafits-file"></a></p>
 </div>
 <div>
 <pre><code>OBSID=1090008640; wget "http://ws.mwatelescope.org/metadata/fits?obs_id=${OBSID}" -O "${OBSID}".metafits
 </code></pre>
 </div>
 </div>
-<div id="admonition-why-should-i-use-a-metafits-file" class="admonition admonish-info" role="note" aria-labelledby="admonition-why-should-i-use-a-metafits-file-title">
+<div id="admonition-why-should-i-use-a-metafits-file" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-why-should-i-use-a-metafits-file-title">
 <p>Why should I use a metafits file?</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-why-should-i-use-a-metafits-file"></a>
+<p><a class="admonition-anchor-link" href="#admonition-why-should-i-use-a-metafits-file"></a></p>
 </div>
 <div>
 <p>Measurement sets and uvfits files do not contain MWA-specific information,
@@ -191,12 +187,10 @@ particularly dead dipole information. Calibration should perform better when
 uvfits file may also lack <a href="delays.html">dipole delay</a> information.</p>
 </div>
 </div>
-<div id="admonition-why-are-new-metafits-files-better" class="admonition admonish-info" role="note" aria-labelledby="admonition-why-are-new-metafits-files-better-title">
+<div id="admonition-why-are-new-metafits-files-better" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-why-are-new-metafits-files-better-title">
 <p>Why are new metafits files better?</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-why-are-new-metafits-files-better"></a>
+<p><a class="admonition-anchor-link" href="#admonition-why-are-new-metafits-files-better"></a></p>
 </div>
 <div>
 <p>The database of MWA metadata can change over time for observations conducted

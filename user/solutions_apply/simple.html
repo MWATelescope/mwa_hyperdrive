@@ -7,7 +7,7 @@
 
 
         <!-- Custom HTML head -->
-
+        
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -103,7 +103,7 @@
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
+                                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -160,12 +160,10 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="simple-usage-of-solutions-apply"><a class="header" href="#simple-usage-of-solutions-apply">Simple usage of solutions apply</a></h1>
-<div id="admonition-info" class="admonition admonish-info" role="note" aria-labelledby="admonition-info-title">
+<div id="admonition-info" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-info-title">
 <p>Info</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-info"></a>
+<p><a class="admonition-anchor-link" href="#admonition-info"></a></p>
 </div>
 <div>
 <p>Use the <code>solutions-apply</code> subcommand, i.e.</p>
@@ -187,36 +185,30 @@
 </div>
 </div>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
-<div id="admonition-from-raw-mwa-data" class="admonition admonish-example" role="note" aria-labelledby="admonition-from-raw-mwa-data-title">
+<div id="admonition-from-raw-mwa-data" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-from-raw-mwa-data-title">
 <p>From raw MWA data</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-from-raw-mwa-data"></a>
+<p><a class="admonition-anchor-link" href="#admonition-from-raw-mwa-data"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply -d *gpubox*.fits *.metafits *.mwaf -s hyp_sols.fits -o hyp_cal.ms
 </code></pre>
 </div>
 </div>
-<div id="admonition-from-an-uncalibrated-measurement-set" class="admonition admonish-example" role="note" aria-labelledby="admonition-from-an-uncalibrated-measurement-set-title">
+<div id="admonition-from-an-uncalibrated-measurement-set" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-from-an-uncalibrated-measurement-set-title">
 <p>From an uncalibrated measurement set</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-from-an-uncalibrated-measurement-set"></a>
+<p><a class="admonition-anchor-link" href="#admonition-from-an-uncalibrated-measurement-set"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply -d *.ms -s hyp_sols.fits -o hyp_cal.ms
 </code></pre>
 </div>
 </div>
-<div id="admonition-from-an-uncalibrated-uvfits" class="admonition admonish-example" role="note" aria-labelledby="admonition-from-an-uncalibrated-uvfits-title">
+<div id="admonition-from-an-uncalibrated-uvfits" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-from-an-uncalibrated-uvfits-title">
 <p>From an uncalibrated uvfits</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-from-an-uncalibrated-uvfits"></a>
+<p><a class="admonition-anchor-link" href="#admonition-from-an-uncalibrated-uvfits"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply -d *.uvfits -s hyp_sols.fits -o hyp_cal.ms

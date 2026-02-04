@@ -7,7 +7,7 @@
 
 
         <!-- Custom HTML head -->
-
+        
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -103,7 +103,7 @@
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
+                                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -165,12 +165,10 @@
 However, it is possible to convert <code>RTS</code> solutions to one of the other supported
 formats; a metafits file is required, and the <em>directory</em> containing the
 solutions (i.e. <code>DI_JonesMatrices</code> and <code>BandpassCalibration</code> files) is supplied:</p>
-<div id="admonition-converting-rts-solutions-to-another-format" class="admonition admonish-example" role="note" aria-labelledby="admonition-converting-rts-solutions-to-another-format-title">
+<div id="admonition-converting-rts-solutions-to-another-format" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-converting-rts-solutions-to-another-format-title">
 <p>Converting <code>RTS</code> solutions to another format</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-converting-rts-solutions-to-another-format"></a>
+<p><a class="admonition-anchor-link" href="#admonition-converting-rts-solutions-to-another-format"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-convert /path/to/rts/solutions/ rts-as-hyp-solutions.fits -m /path/to/obs.metafits
@@ -181,12 +179,10 @@ solutions (i.e. <code>DI_JonesMatrices</code> and <code>BandpassCalibration</cod
 <p>An example of RTS solutions can be found in the <code>test_files</code> directory (as a
 <code>.tar.gz</code> file). The code to read the solutions attempts to unpack and clarify
 the format, but it is messy.</p>
-<div id="admonition-writing-rts-solutions" class="admonition admonish-warning" role="note" aria-labelledby="admonition-writing-rts-solutions-title">
+<div id="admonition-writing-rts-solutions" class="admonition admonish-warning">
 <div class="admonition-title">
-<div id="admonition-writing-rts-solutions-title">
 <p>Writing <code>RTS</code> solutions</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-writing-rts-solutions"></a>
+<p><a class="admonition-anchor-link" href="#admonition-writing-rts-solutions"></a></p>
 </div>
 <div>
 <p>I (CHJ) spent a very long time trying to make the writing of <code>RTS</code> solutions

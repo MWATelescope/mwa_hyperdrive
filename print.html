@@ -8,7 +8,7 @@
 
 
         <!-- Custom HTML head -->
-
+        
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -104,7 +104,7 @@
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
+                                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -214,12 +214,10 @@ install CUDA are on <a href="installation/from_source.html#cuda">the next page</
 NVIDIA's CUDA), but HIP does not appear to offer static libraries, so no static
 feature is provided, and users will need to compile hyperdrive themselves with
 instructions on <a href="installation/from_source.html#gpu">the next page</a>.</p>
-<div id="admonition-note" class="admonition admonish-note" role="note" aria-labelledby="admonition-note-title">
+<div id="admonition-note" class="admonition admonish-note">
 <div class="admonition-title">
-<div id="admonition-note-title">
 <p>Note</p>
-</div>
-<a class="admonition-anchor-link" href="installation/pre_compiled.html#admonition-note"></a>
+<p><a class="admonition-anchor-link" href="installation/pre_compiled.html#admonition-note"></a></p>
 </div>
 <div>
 <p>The pre-compiled binaries are made by GitHub actions using:</p>
@@ -234,12 +232,10 @@ so a local installation of CUDA is required.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="installing-hyperdrive-from-source-code"><a class="header" href="#installing-hyperdrive-from-source-code">Installing <code>hyperdrive</code> from source code</a></h1>
 <h2 id="dependencies"><a class="header" href="#dependencies">Dependencies</a></h2>
 <p><code>hyperdrive</code> depends on these C libraries:</p>
-<div id="admonition-cfitsiohttpsheasarcgsfcnasagovdocssoftwarefitsio" class="admonition admonish-example" role="note" aria-labelledby="admonition-cfitsiohttpsheasarcgsfcnasagovdocssoftwarefitsio-title">
+<div id="admonition-cfitsiohttpsheasarcgsfcnasagovdocssoftwarefitsio" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-cfitsiohttpsheasarcgsfcnasagovdocssoftwarefitsio-title">
 <p><a href="https://heasarc.gsfc.nasa.gov/docs/software/fitsio/">cfitsio</a></p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-cfitsiohttpsheasarcgsfcnasagovdocssoftwarefitsio"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-cfitsiohttpsheasarcgsfcnasagovdocssoftwarefitsio"></a></p>
 </div>
 <div>
 <ul>
@@ -259,12 +255,10 @@ so a local installation of CUDA is required.</p>
 </ul>
 </div>
 </div>
-<div id="admonition-hdf5httpswwwhdfgrouporghdf5" class="admonition admonish-example" role="note" aria-labelledby="admonition-hdf5httpswwwhdfgrouporghdf5-title">
+<div id="admonition-hdf5httpswwwhdfgrouporghdf5" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-hdf5httpswwwhdfgrouporghdf5-title">
 <p><a href="https://www.hdfgroup.org/hdf5">hdf5</a></p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-hdf5httpswwwhdfgrouporghdf5"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-hdf5httpswwwhdfgrouporghdf5"></a></p>
 </div>
 <div>
 <ul>
@@ -284,12 +278,10 @@ so a local installation of CUDA is required.</p>
 </div>
 </div>
 <h3 id="optional-dependencies"><a class="header" href="#optional-dependencies">Optional dependencies</a></h3>
-<div id="admonition-freetype2-for-calibration-solutions-plotting" class="admonition admonish-tip" role="note" aria-labelledby="admonition-freetype2-for-calibration-solutions-plotting-title">
+<div id="admonition-freetype2-for-calibration-solutions-plotting" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-freetype2-for-calibration-solutions-plotting-title">
 <p>freetype2 (for calibration solutions plotting)</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-freetype2-for-calibration-solutions-plotting"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-freetype2-for-calibration-solutions-plotting"></a></p>
 </div>
 <div>
 <ul>
@@ -303,12 +295,10 @@ time.</li>
 </ul>
 </div>
 </div>
-<div id="admonition-cuda-for-accelerated-sky-modelling-with-nvidia-gpus" class="admonition admonish-tip" role="note" aria-labelledby="admonition-cuda-for-accelerated-sky-modelling-with-nvidia-gpus-title">
+<div id="admonition-cuda-for-accelerated-sky-modelling-with-nvidia-gpus" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-cuda-for-accelerated-sky-modelling-with-nvidia-gpus-title">
 <p>CUDA (for accelerated sky modelling with NVIDIA GPUs)</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-cuda-for-accelerated-sky-modelling-with-nvidia-gpus"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-cuda-for-accelerated-sky-modelling-with-nvidia-gpus"></a></p>
 </div>
 <div>
 <ul>
@@ -325,12 +315,10 @@ time.</li>
 </ul>
 </div>
 </div>
-<div id="admonition-hip-for-accelerated-sky-modelling-with-amd-gpus" class="admonition admonish-tip" role="note" aria-labelledby="admonition-hip-for-accelerated-sky-modelling-with-amd-gpus-title">
+<div id="admonition-hip-for-accelerated-sky-modelling-with-amd-gpus" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-hip-for-accelerated-sky-modelling-with-amd-gpus-title">
 <p>HIP (for accelerated sky modelling with AMD GPUs)</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-hip-for-accelerated-sky-modelling-with-amd-gpus"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-hip-for-accelerated-sky-modelling-with-amd-gpus"></a></p>
 </div>
 <div>
 <ul>
@@ -355,12 +343,10 @@ instructions above.</li>
 </div>
 </div>
 <h2 id="installing-rust"><a class="header" href="#installing-rust">Installing Rust</a></h2>
-<div id="admonition-tldr" class="admonition admonish-tip" role="note" aria-labelledby="admonition-tldr-title">
+<div id="admonition-tldr" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-tldr-title">
 <p>TL;DR</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-tldr"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-tldr"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -378,12 +364,10 @@ information to do this. Similar, perhaps more direct information is
 </code></pre>
 <p>If you want to download the source code and install it yourself, read on.</p>
 <h2 id="manually-installing-from-the-hyperdrive-repo"><a class="header" href="#manually-installing-from-the-hyperdrive-repo">Manually installing from the <code>hyperdrive</code> repo</a></h2>
-<div id="admonition-optimal-performance" class="admonition admonish-tip" role="note" aria-labelledby="admonition-optimal-performance-title">
+<div id="admonition-optimal-performance" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-optimal-performance-title">
 <p>Optimal Performance</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-optimal-performance"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-optimal-performance"></a></p>
 </div>
 <div>
 <p>(optional) Use native CPU features (not portable!)</p>
@@ -398,24 +382,20 @@ cargo install --path mwa_hyperdrive --locked
 <p>This will install <code>hyperdrive</code> to <code>~/.cargo/bin/hyperdrive</code>. This binary can be
 moved anywhere and it will still work. The installation destination can be
 changed by setting <code>CARGO_HOME</code>.</p>
-<div id="admonition-further-optimisation" class="admonition admonish-danger" role="note" aria-labelledby="admonition-further-optimisation-title">
+<div id="admonition-further-optimisation" class="admonition admonish-danger">
 <div class="admonition-title">
-<div id="admonition-further-optimisation-title">
 <p>Further optimisation</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-further-optimisation"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-further-optimisation"></a></p>
 </div>
 <div>
 <p>It is possible to compile with more optimisations if you give <code>--profile production</code> to the <code>cargo install</code> command. This may make things a few percent
 faster, but compilation will take much longer.</p>
 </div>
 </div>
-<div id="admonition-cuda" class="admonition admonish-danger" role="note" aria-labelledby="admonition-cuda-title">
+<div id="admonition-cuda" class="admonition admonish-danger">
 <div class="admonition-title">
-<div id="admonition-cuda-title">
 <p>CUDA</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-cuda"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-cuda"></a></p>
 </div>
 <div>
 <p>Do you have a CUDA-capable NVIDIA GPU? Ensure you have installed
@@ -442,12 +422,10 @@ compiler happy. You can select a custom C++ compiler with the <code>CXX</code> v
 e.g. <code>CXX=/opt/cuda/bin/g++</code>.</p>
 </div>
 </div>
-<div id="admonition-hip" class="admonition admonish-danger" role="note" aria-labelledby="admonition-hip-title">
+<div id="admonition-hip" class="admonition admonish-danger">
 <div class="admonition-title">
-<div id="admonition-hip-title">
 <p>HIP</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-hip"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-hip"></a></p>
 </div>
 <div>
 <p>Do you have a HIP-capable AMD GPU? Ensure you have installed HIP (instructions
@@ -463,12 +441,10 @@ much slower than single-precision.</p>
 <p>If you are encountering problems, you may need to set your <code>HIP_PATH</code> variable.</p>
 </div>
 </div>
-<div id="admonition-static-dependencies" class="admonition admonish-tip" role="note" aria-labelledby="admonition-static-dependencies-title">
+<div id="admonition-static-dependencies" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-static-dependencies-title">
 <p>Static dependencies</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-static-dependencies"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-static-dependencies"></a></p>
 </div>
 <div>
 <p>The aforementioned C libraries can each be compiled by <code>cargo</code>. <code>all-static</code>
@@ -478,12 +454,10 @@ Individual dependencies can be statically compiled and linked, e.g.
 <code>cfitsio-static</code>. See the dependencies list above for more information.</p>
 </div>
 </div>
-<div id="admonition-multiple-features" class="admonition admonish-info" role="note" aria-labelledby="admonition-multiple-features-title">
+<div id="admonition-multiple-features" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-multiple-features-title">
 <p>Multiple features</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-multiple-features"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-multiple-features"></a></p>
 </div>
 <div>
 <p><code>cargo</code> features can be chained in a comma-separated list:</p>
@@ -491,12 +465,10 @@ Individual dependencies can be statically compiled and linked, e.g.
 </code></pre>
 </div>
 </div>
-<div id="admonition-troubleshooting" class="admonition admonish-question" role="note" aria-labelledby="admonition-troubleshooting-title">
+<div id="admonition-troubleshooting" class="admonition admonish-question">
 <div class="admonition-title">
-<div id="admonition-troubleshooting-title">
 <p>Troubleshooting</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-troubleshooting"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-troubleshooting"></a></p>
 </div>
 <div>
 <p>If you're having problems compiling, it's possible you have an older Rust
@@ -511,12 +483,10 @@ issue</a> describing your
 system and what you've tried.</p>
 </div>
 </div>
-<div id="admonition-changes-from-older-versions" class="admonition admonish-info" role="note" aria-labelledby="admonition-changes-from-older-versions-title">
+<div id="admonition-changes-from-older-versions" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-changes-from-older-versions-title">
 <p>Changes from older versions</p>
-</div>
-<a class="admonition-anchor-link" href="installation/from_source.html#admonition-changes-from-older-versions"></a>
+<p><a class="admonition-anchor-link" href="installation/from_source.html#admonition-changes-from-older-versions"></a></p>
 </div>
 <div>
 <p><code>hyperdrive</code> used to depend on the <a href="https://github.com/liberfa/erfa">ERFA</a> C
@@ -524,12 +494,10 @@ library. It now uses a pure-Rust equivalent.</p>
 </div>
 </div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="post-installation-instructions"><a class="header" href="#post-installation-instructions">Post installation instructions</a></h1>
-<div id="admonition-setting-up-the-beam" class="admonition admonish-info" role="note" aria-labelledby="admonition-setting-up-the-beam-title">
+<div id="admonition-setting-up-the-beam" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-setting-up-the-beam-title">
 <p>Setting up the beam</p>
-</div>
-<a class="admonition-anchor-link" href="installation/post.html#admonition-setting-up-the-beam"></a>
+<p><a class="admonition-anchor-link" href="installation/post.html#admonition-setting-up-the-beam"></a></p>
 </div>
 <div>
 <p>Many <code>hyperdrive</code> functions require the beam code to function. The MWA FEE beam
@@ -567,12 +535,10 @@ hyperdrive di-calibrate --help
 them after <code>hyperdrive</code>. Each subcommand accepts <code>--help</code> (as well as <code>-h</code>).
 Detailed usage information on each subcommand can be seen in the table of
 contents of this book. More information on subcommands as a concept is below.</p>
-<div id="admonition-subcommands" class="admonition admonish-info" role="note" aria-labelledby="admonition-subcommands-title">
+<div id="admonition-subcommands" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-subcommands-title">
 <p>Subcommands</p>
-</div>
-<a class="admonition-anchor-link" href="user/help.html#admonition-subcommands"></a>
+<p><a class="admonition-anchor-link" href="user/help.html#admonition-subcommands"></a></p>
 </div>
 <div>
 <p><code>hyperdrive</code> itself is split into many subcommands. These are simple to list:</p>
@@ -615,12 +581,10 @@ OPTIONS:
 </code></pre>
 </div>
 </div>
-<div id="admonition-shortcuts" class="admonition admonish-tip" role="note" aria-labelledby="admonition-shortcuts-title">
+<div id="admonition-shortcuts" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-shortcuts-title">
 <p>Shortcuts</p>
-</div>
-<a class="admonition-anchor-link" href="user/help.html#admonition-shortcuts"></a>
+<p><a class="admonition-anchor-link" href="user/help.html#admonition-shortcuts"></a></p>
 </div>
 <div>
 <p>It's possible to save keystrokes when subcommands aren't ambiguous, e.g. use
@@ -674,12 +638,10 @@ flowchart TD
 calibrated with <code>hyperdrive</code>. We also plot calibration solutions and image
 calibrated data with <code>wsclean</code>.</p>
 <p><a href="user/di_cal/../../installation/intro.html">Install</a> <code>hyperdrive</code> if you haven't already.</p>
-<div id="admonition-step-1-obtain-data" class="admonition admonish-example" role="note" aria-labelledby="admonition-step-1-obtain-data-title">
+<div id="admonition-step-1-obtain-data" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-step-1-obtain-data-title">
 <p>Step 1: Obtain data</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-1-obtain-data"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-1-obtain-data"></a></p>
 </div>
 <div>
 <p>Feel free to try your own data, but test data is available in the <code>hyperdrive</code>
@@ -694,12 +656,10 @@ observation</a> used
 in <code>hyperdrive</code> tests.</p>
 </div>
 </div>
-<div id="admonition-step-2-obtain-a-suitable-sky-model-source-list" class="admonition admonish-example" role="note" aria-labelledby="admonition-step-2-obtain-a-suitable-sky-model-source-list-title">
+<div id="admonition-step-2-obtain-a-suitable-sky-model-source-list" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-step-2-obtain-a-suitable-sky-model-source-list-title">
 <p>Step 2: Obtain a suitable sky-model source list</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-2-obtain-a-suitable-sky-model-source-list"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-2-obtain-a-suitable-sky-model-source-list"></a></p>
 </div>
 <div>
 <p>It's very important to use a sky model that corresponds to the data you're
@@ -709,12 +669,10 @@ many suitable source lists.</p>
 <code>test_files/1090008640/srclist_pumav3_EoR0aegean_EoR1pietro+ForA_1090008640_100.yaml</code>.</p>
 </div>
 </div>
-<div id="admonition-step-3-run" class="admonition admonish-example" role="note" aria-labelledby="admonition-step-3-run-title">
+<div id="admonition-step-3-run" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-step-3-run-title">
 <p>Step 3: Run</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-3-run"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-3-run"></a></p>
 </div>
 <div>
 <p>We're going to run the <code>di-calibrate</code> subcommand of <code>hyperdrive</code>. If you look at
@@ -724,12 +682,10 @@ the help (with <code>hyperdrive di-calibrate --help</code>), you should see the 
 </code></pre>
 </div>
 </div>
-<div id="admonition-tip" class="admonition admonish-tip" role="note" aria-labelledby="admonition-tip-title">
+<div id="admonition-tip" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-tip-title">
 <p>Tip</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-tip"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-tip"></a></p>
 </div>
 <div>
 <p>The above command can be more neatly expressed as:</p>
@@ -742,12 +698,10 @@ the help (with <code>hyperdrive di-calibrate --help</code>), you should see the 
 multiple lines separated by <code>\</code>.</p>
 </div>
 </div>
-<div id="admonition-step-4-understanding-the-output" class="admonition admonish-example" role="note" aria-labelledby="admonition-step-4-understanding-the-output-title">
+<div id="admonition-step-4-understanding-the-output" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-step-4-understanding-the-output-title">
 <p>Step 4: Understanding the output</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-4-understanding-the-output"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-4-understanding-the-output"></a></p>
 </div>
 <div>
 <p>The command we ran in step 3 should give us information on the input data, the
@@ -769,12 +723,10 @@ progress bars related to these two tasks.</p>
 </ul>
 </div>
 </div>
-<div id="admonition-what-do-these-things-mean" class="admonition admonish-info" role="note" aria-labelledby="admonition-what-do-these-things-mean-title">
+<div id="admonition-what-do-these-things-mean" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-what-do-these-things-mean-title">
 <p>What do these things mean?</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-what-do-these-things-mean"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-what-do-these-things-mean"></a></p>
 </div>
 <div>
 <p>A <a href="user/di_cal/../../defs/blocks.html">"chanblock"</a> is a frequency unit of calibration;
@@ -804,12 +756,10 @@ by default) thresholds.
 minimum threshold) are allowed to be adjusted.</p>
 </div>
 </div>
-<div id="admonition-step-5-analyse" class="admonition admonish-example" role="note" aria-labelledby="admonition-step-5-analyse-title">
+<div id="admonition-step-5-analyse" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-step-5-analyse-title">
 <p>Step 5: Analyse</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-5-analyse"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-step-5-analyse"></a></p>
 </div>
 <div>
 <p>Don't assume that things will always work! A good indicator of how calibration
@@ -821,12 +771,10 @@ OK. But there are other things we can do to inspect calibration quality; good
 examples are plotting the solutions, and imaging the calibrated data.</p>
 </div>
 </div>
-<div id="admonition-plotting-solutions" class="admonition admonish-example" role="note" aria-labelledby="admonition-plotting-solutions-title">
+<div id="admonition-plotting-solutions" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-plotting-solutions-title">
 <p>Plotting solutions</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-plotting-solutions"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-plotting-solutions"></a></p>
 </div>
 <div>
 <p>First, we need to know where the solutions were written; this is also reported
@@ -850,12 +798,10 @@ amps), or the dot values change steadily with frequency (particularly for the
 phases). This also hints that the calibration solutions are good.</p>
 </div>
 </div>
-<div id="admonition-info" class="admonition admonish-info" role="note" aria-labelledby="admonition-info-title">
+<div id="admonition-info" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-info-title">
 <p>Info</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-info"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-info"></a></p>
 </div>
 <div>
 <p>The solutions plots for the full 1090008640 observation look like this:</p>
@@ -867,12 +813,10 @@ with frequency are small or smooth.</p>
 <a href="user/di_cal/../../defs/cal_sols.html">here</a>.</p>
 </div>
 </div>
-<div id="admonition-imaging-calibrated-data" class="admonition admonish-example" role="note" aria-labelledby="admonition-imaging-calibrated-data-title">
+<div id="admonition-imaging-calibrated-data" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-imaging-calibrated-data-title">
 <p>Imaging calibrated data</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-imaging-calibrated-data"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-imaging-calibrated-data"></a></p>
 </div>
 <div>
 <p>We have calibration solutions, but not calibrated data. We need to "apply" the
@@ -895,12 +839,10 @@ viewers to inspect the image, but here's what it looks like with
 because there was very little input data.</p>
 </div>
 </div>
-<div id="admonition-info-1" class="admonition admonish-info" role="note" aria-labelledby="admonition-info-1-title">
+<div id="admonition-info-1" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-info-1-title">
 <p>Info</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-info-1"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/tutorial.html#admonition-info-1"></a></p>
 </div>
 <div>
 <p>When using the <a href="http://ws.mwatelescope.org/observation/obs/?obs_id=1090008640">full 1090008640
@@ -913,12 +855,10 @@ science case, these visibilities might be "science ready".</p>
 </div>
 </div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="simple-usage-of-di-calibrate"><a class="header" href="#simple-usage-of-di-calibrate">Simple usage of DI calibrate</a></h1>
-<div id="admonition-info" class="admonition admonish-info" role="note" aria-labelledby="admonition-info-title">
+<div id="admonition-info" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-info-title">
 <p>Info</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-info"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-info"></a></p>
 </div>
 <div>
 <p>DI calibration is done with the <code>di-calibrate</code> subcommand, i.e.</p>
@@ -942,12 +882,10 @@ sky) can be obtained <a href="https://github.com/JLBLine/srclists">here</a> (at 
 </div>
 </div>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
-<div id="admonition-raw-mwa-data" class="admonition admonish-example" role="note" aria-labelledby="admonition-raw-mwa-data-title">
+<div id="admonition-raw-mwa-data" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-raw-mwa-data-title">
 <p>Raw MWA data</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-raw-mwa-data"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-raw-mwa-data"></a></p>
 </div>
 <div>
 <p>A <a href="user/di_cal/../../defs/mwa/metafits.html">metafits</a> file is always required when reading
@@ -960,12 +898,10 @@ raw MWA data. <a href="user/di_cal/../../defs/mwa/mwaf.html"><code>mwaf</code></
 </code></pre>
 </div>
 </div>
-<div id="admonition-measurement-sets" class="admonition admonish-example" role="note" aria-labelledby="admonition-measurement-sets-title">
+<div id="admonition-measurement-sets" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-measurement-sets-title">
 <p>Measurement sets</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-measurement-sets"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-measurement-sets"></a></p>
 </div>
 <div>
 <p>Note that a metafits may not be required, but is generally a good idea.</p>
@@ -973,12 +909,10 @@ raw MWA data. <a href="user/di_cal/../../defs/mwa/mwaf.html"><code>mwaf</code></
 </code></pre>
 </div>
 </div>
-<div id="admonition-uvfits" class="admonition admonish-example" role="note" aria-labelledby="admonition-uvfits-title">
+<div id="admonition-uvfits" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-uvfits-title">
 <p>uvfits</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-uvfits"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/simple.html#admonition-uvfits"></a></p>
 </div>
 <div>
 <p>Note that a metafits may not be required, but is generally a good idea.</p>
@@ -990,12 +924,10 @@ raw MWA data. <a href="user/di_cal/../../defs/mwa/mwaf.html"><code>mwaf</code></
 <p><code>di-calibrate</code> does not write out calibrated data (visibilities); see
 <a href="user/di_cal/../solutions_apply/intro.html"><code>solutions-apply</code></a>. You will need calibration
 solutions, so refer to the previous pages on DI calibration to get those.</p>
-<div id="admonition-tip" class="admonition admonish-tip" role="note" aria-labelledby="admonition-tip-title">
+<div id="admonition-tip" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-tip-title">
 <p>Tip</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/out_calibrated.html#admonition-tip"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/out_calibrated.html#admonition-tip"></a></p>
 </div>
 <div>
 <p>Calibrated visibilities are written out in one of the <a href="user/di_cal/../../defs/vis_formats_write.html">supported
@@ -1003,12 +935,10 @@ formats</a> and can be
 <a href="user/di_cal/../../defs/vis_formats_write.html#visibility-averaging">averaged</a>.</p>
 </div>
 </div><div style="break-before: page; page-break-before: always;"></div><h1 id="varying-solutions-over-time"><a class="header" href="#varying-solutions-over-time">Varying solutions over time</a></h1>
-<div id="admonition-tip" class="admonition admonish-tip" role="note" aria-labelledby="admonition-tip-title">
+<div id="admonition-tip" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-tip-title">
 <p>Tip</p>
-</div>
-<a class="admonition-anchor-link" href="user/di_cal/advanced/time_varying.html#admonition-tip"></a>
+<p><a class="admonition-anchor-link" href="user/di_cal/advanced/time_varying.html#admonition-tip"></a></p>
 </div>
 <div>
 <p>See <a href="user/di_cal/advanced/../../../defs/blocks.html">this page</a> for information on timeblocks.</p>
@@ -1088,12 +1018,10 @@ flowchart TD
     end
 </pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="simple-usage-of-solutions-apply"><a class="header" href="#simple-usage-of-solutions-apply">Simple usage of solutions apply</a></h1>
-<div id="admonition-info" class="admonition admonish-info" role="note" aria-labelledby="admonition-info-title">
+<div id="admonition-info" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-info-title">
 <p>Info</p>
-</div>
-<a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-info"></a>
+<p><a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-info"></a></p>
 </div>
 <div>
 <p>Use the <code>solutions-apply</code> subcommand, i.e.</p>
@@ -1115,36 +1043,30 @@ flowchart TD
 </div>
 </div>
 <h2 id="examples-1"><a class="header" href="#examples-1">Examples</a></h2>
-<div id="admonition-from-raw-mwa-data" class="admonition admonish-example" role="note" aria-labelledby="admonition-from-raw-mwa-data-title">
+<div id="admonition-from-raw-mwa-data" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-from-raw-mwa-data-title">
 <p>From raw MWA data</p>
-</div>
-<a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-from-raw-mwa-data"></a>
+<p><a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-from-raw-mwa-data"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply -d *gpubox*.fits *.metafits *.mwaf -s hyp_sols.fits -o hyp_cal.ms
 </code></pre>
 </div>
 </div>
-<div id="admonition-from-an-uncalibrated-measurement-set" class="admonition admonish-example" role="note" aria-labelledby="admonition-from-an-uncalibrated-measurement-set-title">
+<div id="admonition-from-an-uncalibrated-measurement-set" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-from-an-uncalibrated-measurement-set-title">
 <p>From an uncalibrated measurement set</p>
-</div>
-<a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-from-an-uncalibrated-measurement-set"></a>
+<p><a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-from-an-uncalibrated-measurement-set"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply -d *.ms -s hyp_sols.fits -o hyp_cal.ms
 </code></pre>
 </div>
 </div>
-<div id="admonition-from-an-uncalibrated-uvfits" class="admonition admonish-example" role="note" aria-labelledby="admonition-from-an-uncalibrated-uvfits-title">
+<div id="admonition-from-an-uncalibrated-uvfits" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-from-an-uncalibrated-uvfits-title">
 <p>From an uncalibrated uvfits</p>
-</div>
-<a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-from-an-uncalibrated-uvfits"></a>
+<p><a class="admonition-anchor-link" href="user/solutions_apply/simple.html#admonition-from-an-uncalibrated-uvfits"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply -d *.uvfits -s hyp_sols.fits -o hyp_cal.ms
@@ -1153,12 +1075,10 @@ flowchart TD
 </div>
 <p>Generally the syntax is the same as <a href="user/solutions_apply/../di_cal/simple.html"><code>di-calibrate</code></a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="plot-solutions"><a class="header" href="#plot-solutions">Plot solutions</a></h1>
-<div id="admonition-availability" class="admonition admonish-danger" role="note" aria-labelledby="admonition-availability-title">
+<div id="admonition-availability" class="admonition admonish-danger">
 <div class="admonition-title">
-<div id="admonition-availability-title">
 <p>Availability</p>
-</div>
-<a class="admonition-anchor-link" href="user/plotting.html#admonition-availability"></a>
+<p><a class="admonition-anchor-link" href="user/plotting.html#admonition-availability"></a></p>
 </div>
 <div>
 <p>Plotting calibration solutions is <em>not</em> available for GitHub-built releases of
@@ -1196,12 +1116,10 @@ available.</p>
 <p><code>vis-convert</code> reads in visibilities and writes them out, performing whatever
 transformations were requested on the way (e.g. ignore autos, average to a
 particular time resolution, flag some tiles, etc.).</p>
-<div id="admonition-simple-examples" class="admonition admonish-info" role="note" aria-labelledby="admonition-simple-examples-title">
+<div id="admonition-simple-examples" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-simple-examples-title">
 <p>Simple examples</p>
-</div>
-<a class="admonition-anchor-link" href="user/vis_convert/intro.html#admonition-simple-examples"></a>
+<p><a class="admonition-anchor-link" href="user/vis_convert/intro.html#admonition-simple-examples"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive vis-convert \
@@ -1218,12 +1136,10 @@ particular time resolution, flag some tiles, etc.).</p>
 </div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="simulate-visibilities"><a class="header" href="#simulate-visibilities">Simulate visibilities</a></h1>
 <p><code>vis-simulate</code> effectively turns a sky-model source list into visibilities.</p>
-<div id="admonition-simple-example" class="admonition admonish-info" role="note" aria-labelledby="admonition-simple-example-title">
+<div id="admonition-simple-example" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-simple-example-title">
 <p>Simple example</p>
-</div>
-<a class="admonition-anchor-link" href="user/vis_simulate/intro.html#admonition-simple-example"></a>
+<p><a class="admonition-anchor-link" href="user/vis_simulate/intro.html#admonition-simple-example"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive vis-simulate \
@@ -1288,12 +1204,10 @@ flowchart TD
 </pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="peel-visibilities"><a class="header" href="#peel-visibilities">Peel visibilities</a></h1>
 <p><code>peel</code> can subtract the sky-model visibilities from calibrated data visibilities, and write them out like <a href="user/peel/../vis_subtract/intro.html">vis-subtract</a>, but it additionally solves for and applies the direction dependent effects of the ionosphere.</p>
-<div id="admonition-work-in-progress" class="admonition admonish-warning" role="note" aria-labelledby="admonition-work-in-progress-title">
+<div id="admonition-work-in-progress" class="admonition admonish-warning">
 <div class="admonition-title">
-<div id="admonition-work-in-progress-title">
 <p>Work in progress</p>
-</div>
-<a class="admonition-anchor-link" href="user/peel/intro.html#admonition-work-in-progress"></a>
+<p><a class="admonition-anchor-link" href="user/peel/intro.html#admonition-work-in-progress"></a></p>
 </div>
 <div>
 <p>Hyperdrive's <code>peel</code> implementation technically only performs ionospheric subtraction. For more on the distinction between the two, read on. Familiarity with the <code>vis-subtract</code> command is recommended.</p>
@@ -1429,24 +1343,20 @@ supported beam types. The output format is
 in steps of <code>--step</code>, then for each of these zenith angles, moving from 0 to
 \( 2 \pi \) in steps of <code>--step</code> for the azimuth. Using a smaller <code>--step</code>
 will generate many more responses, so be aware that it might take a while.</p>
-<div id="admonition-cudahip" class="admonition admonish-danger" role="note" aria-labelledby="admonition-cudahip-title">
+<div id="admonition-cudahip" class="admonition admonish-danger">
 <div class="admonition-title">
-<div id="admonition-cudahip-title">
 <p>CUDA/HIP</p>
-</div>
-<a class="admonition-anchor-link" href="user/beam.html#admonition-cudahip"></a>
+<p><a class="admonition-anchor-link" href="user/beam.html#admonition-cudahip"></a></p>
 </div>
 <div>
 <p>If CUDA or HIP is available to you, the <code>--gpu</code> flag will generate the beam
 responses on the GPU, vastly decreasing the time taken.</p>
 </div>
 </div>
-<div id="admonition-python-example-to-plot-beam-responses" class="admonition admonish-example" role="note" aria-labelledby="admonition-python-example-to-plot-beam-responses-title">
+<div id="admonition-python-example-to-plot-beam-responses" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-python-example-to-plot-beam-responses-title">
 <p><code>Python</code> example to plot beam responses</p>
-</div>
-<a class="admonition-anchor-link" href="user/beam.html#admonition-python-example-to-plot-beam-responses"></a>
+<p><a class="admonition-anchor-link" href="user/beam.html#admonition-python-example-to-plot-beam-responses"></a></p>
 </div>
 <div>
 <pre><code class="language-python">#!/usr/bin/env python3
@@ -1500,12 +1410,10 @@ polarisation.</p>
 <p>where \( \text{I} \), \( \text{Q} \), \( \text{U} \), \( \text{V} \) are
 Stokes polarisations and \( i \) is the imaginary unit.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="supported-visibility-formats-for-reading"><a class="header" href="#supported-visibility-formats-for-reading">Supported visibility formats for reading</a></h1>
-<div id="admonition-raw-mwa-data" class="admonition admonish-info" role="note" aria-labelledby="admonition-raw-mwa-data-title">
+<div id="admonition-raw-mwa-data" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-raw-mwa-data-title">
 <p>Raw MWA data</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-raw-mwa-data"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-raw-mwa-data"></a></p>
 </div>
 <div>
 <p>Raw "legacy" MWA data comes in "gpubox" files. "MWAX" data comes in a similar
@@ -1521,12 +1429,10 @@ file. See <a href="defs/mwa/metafits.html">this page</a> for more info.</p>
 page</a> for more info.</p>
 </div>
 </div>
-<div id="admonition-measurement-sets" class="admonition admonish-info" role="note" aria-labelledby="admonition-measurement-sets-title">
+<div id="admonition-measurement-sets" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-measurement-sets-title">
 <p>Measurement sets</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-measurement-sets"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-measurement-sets"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive di-calibrate -d *.ms *.metafits -s a_good_sky_model.yaml
@@ -1542,12 +1448,10 @@ to improve calibration. See
 <a href="defs/./vis_formats_read.html#admonition-when-using-a-metafits">below</a> for more info.</p>
 </div>
 </div>
-<div id="admonition-uvfits" class="admonition admonish-info" role="note" aria-labelledby="admonition-uvfits-title">
+<div id="admonition-uvfits" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-uvfits-title">
 <p>uvfits</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-uvfits"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-uvfits"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive di-calibrate -d *.uvfits *.metafits -s a_good_sky_model.yaml
@@ -1561,12 +1465,10 @@ file when calibrating may mean it is not as accurate as it could be. See
 <a href="https://library.nrao.edu/public/memos/aips/memos/AIPSM_117.pdf">here</a>.</p>
 </div>
 </div>
-<div id="admonition-when-using-a-metafits" class="admonition admonish-warning" role="note" aria-labelledby="admonition-when-using-a-metafits-title">
+<div id="admonition-when-using-a-metafits" class="admonition admonish-warning">
 <div class="admonition-title">
-<div id="admonition-when-using-a-metafits-title">
 <p>When using a metafits</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-when-using-a-metafits"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_read.html#admonition-when-using-a-metafits"></a></p>
 </div>
 <div>
 <p>When using a metafits file with a uvfits/MS, the tile names in the metafits and
@@ -1583,12 +1485,10 @@ created elsewhere.</p>
 visibility file formats with <code>solutions-apply</code>, but other aspects of
 <code>hyperdrive</code> are also able to produce these file formats, and all aspects are
 able to perform averaging and write to multiple outputs.</p>
-<div id="admonition-measurement-sets" class="admonition admonish-info" role="note" aria-labelledby="admonition-measurement-sets-title">
+<div id="admonition-measurement-sets" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-measurement-sets-title">
 <p>Measurement sets</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-measurement-sets"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-measurement-sets"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply \
@@ -1598,12 +1498,10 @@ able to perform averaging and write to multiple outputs.</p>
 </code></pre>
 </div>
 </div>
-<div id="admonition-uvfits" class="admonition admonish-info" role="note" aria-labelledby="admonition-uvfits-title">
+<div id="admonition-uvfits" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-uvfits-title">
 <p>uvfits</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-uvfits"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-uvfits"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-apply \
@@ -1615,12 +1513,10 @@ able to perform averaging and write to multiple outputs.</p>
 <a href="https://library.nrao.edu/public/memos/aips/memos/AIPSM_117.pdf">here</a>.</p>
 </div>
 </div>
-<div id="admonition-visibility-averaging" class="admonition admonish-tip" role="note" aria-labelledby="admonition-visibility-averaging-title">
+<div id="admonition-visibility-averaging" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-visibility-averaging-title">
 <p>Visibility averaging</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-visibility-averaging"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-visibility-averaging"></a></p>
 </div>
 <div>
 <p>When writing out visibilities, they can be averaged in time and frequency. Units
@@ -1647,12 +1543,10 @@ and a freq. resolution of 40kHz, then both commands will yield the same result.<
 time and frequency.</p>
 </div>
 </div>
-<div id="admonition-writing-to-multiple-visibility-outputs" class="admonition admonish-tip" role="note" aria-labelledby="admonition-writing-to-multiple-visibility-outputs-title">
+<div id="admonition-writing-to-multiple-visibility-outputs" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-writing-to-multiple-visibility-outputs-title">
 <p>Writing to multiple visibility outputs</p>
-</div>
-<a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-writing-to-multiple-visibility-outputs"></a>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-writing-to-multiple-visibility-outputs"></a></p>
 </div>
 <div>
 <p>All aspects of <code>hyperdrive</code> that can write visibilities can write to multiple
@@ -1676,24 +1570,20 @@ the raw visibilities in a download, but these could be old (such as the "PPD
 metafits" files). <strong><code>hyperdrive</code> does not support PPD metafits files; only new
 metafits files should be used.</strong></p>
 <p>This command downloads a new metafits file for the specified observation ID:</p>
-<div id="admonition-download-mwa-metafits-file" class="admonition admonish-example" role="note" aria-labelledby="admonition-download-mwa-metafits-file-title">
+<div id="admonition-download-mwa-metafits-file" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-download-mwa-metafits-file-title">
 <p>Download MWA metafits file</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/metafits.html#admonition-download-mwa-metafits-file"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/metafits.html#admonition-download-mwa-metafits-file"></a></p>
 </div>
 <div>
 <pre><code>OBSID=1090008640; wget "http://ws.mwatelescope.org/metadata/fits?obs_id=${OBSID}" -O "${OBSID}".metafits
 </code></pre>
 </div>
 </div>
-<div id="admonition-why-should-i-use-a-metafits-file" class="admonition admonish-info" role="note" aria-labelledby="admonition-why-should-i-use-a-metafits-file-title">
+<div id="admonition-why-should-i-use-a-metafits-file" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-why-should-i-use-a-metafits-file-title">
 <p>Why should I use a metafits file?</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/metafits.html#admonition-why-should-i-use-a-metafits-file"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/metafits.html#admonition-why-should-i-use-a-metafits-file"></a></p>
 </div>
 <div>
 <p>Measurement sets and uvfits files do not contain MWA-specific information,
@@ -1702,12 +1592,10 @@ particularly dead dipole information. Calibration should perform better when
 uvfits file may also lack <a href="defs/mwa/delays.html">dipole delay</a> information.</p>
 </div>
 </div>
-<div id="admonition-why-are-new-metafits-files-better" class="admonition admonish-info" role="note" aria-labelledby="admonition-why-are-new-metafits-files-better-title">
+<div id="admonition-why-are-new-metafits-files-better" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-why-are-new-metafits-files-better-title">
 <p>Why are new metafits files better?</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/metafits.html#admonition-why-are-new-metafits-files-better"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/metafits.html#admonition-why-are-new-metafits-files-better"></a></p>
 </div>
 <div>
 <p>The database of MWA metadata can change over time for observations conducted
@@ -1796,12 +1684,10 @@ producing them is:</p>
 </code></pre>
 <p>At the time of writing, <code>hyperdrive</code> only utilises <code>mwaf</code> files when reading
 visibilities from raw data.</p>
-<div id="admonition-cotter-produced-mwaf-files" class="admonition admonish-danger" role="note" aria-labelledby="admonition-cotter-produced-mwaf-files-title">
+<div id="admonition-cotter-produced-mwaf-files" class="admonition admonish-danger">
 <div class="admonition-title">
-<div id="admonition-cotter-produced-mwaf-files-title">
 <p>cotter-produced mwaf files</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/mwaf.html#admonition-cotter-produced-mwaf-files"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/mwaf.html#admonition-cotter-produced-mwaf-files"></a></p>
 </div>
 <div>
 <p><code>cotter</code>-produced <code>mwaf</code> files are unreliable because</p>
@@ -1821,12 +1707,10 @@ it is ready for calibration (or other analysis). These tasks are handled by
 executable itself, or internally in <code>hyperdrive</code>.
 <a href="https://github.com/MWATelescope/cotter"><code>cotter</code></a> used to perform these tasks
 but it has been superseded by <code>Birli</code>.</p>
-<div id="admonition-geometric-correction-aka-phase-tracking" class="admonition admonish-info" role="note" aria-labelledby="admonition-geometric-correction-aka-phase-tracking-title">
+<div id="admonition-geometric-correction-aka-phase-tracking" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-geometric-correction-aka-phase-tracking-title">
 <p>Geometric correction (a.k.a. phase tracking)</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-geometric-correction-aka-phase-tracking"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-geometric-correction-aka-phase-tracking"></a></p>
 </div>
 <div>
 <p>Many MWA observations do not apply a geometric correction despite having a
@@ -1837,23 +1721,23 @@ desired phase centre. This correction applies</p>
 on calibration!</p>
 </div>
 </div>
-<div id="admonition-pfb-gains" class="admonition admonish-info" role="note" aria-labelledby="admonition-pfb-gains-title">
+<div id="admonition-pfb-gains" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-pfb-gains-title">
 <p>PFB gains</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-pfb-gains"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-pfb-gains"></a></p>
 </div>
 <div>
 <p>The poly-phase filter bank used by the MWA affects visibilities before they get
 saved to disk. Over time, a number of "flavours" of these gains have been used:</p>
 <ul>
 <li>"Jake Jones" (<code>jake</code>; 200 Hz)</li>
+<li>"Jake Jones (oversampled)" (<code>jake_oversampled</code>; 200 Hz, oversampled; Birli ≥ 0.18)</li>
 <li>"cotter 2014" (<code>cotter2014</code>; 10 kHz)</li>
 <li>"RTS empirical" (<code>empirical</code>; 40 kHz)</li>
 <li>"Alan Levine" (<code>levine</code>; 40 kHz)</li>
 </ul>
-<p>When correcting raw data, the "Jake Jones" gains are used by default. For each
+<p>When correcting raw data, the "Jake Jones" gains are used by default.
+For Phase 3 data oversampled data, use <code>--pfb-flavour jake_oversampled</code>. For each
 flavour, the first item in the parentheses (e.g. <code>cotter2014</code>) indicates what
 should be supplied to <code>hyperdrive</code> if you want to use those gains instead. There
 is also a <code>none</code> "flavour" if you want to disable PFB gain correction.</p>
@@ -1863,24 +1747,20 @@ calibration quality.</p>
 <a href="https://wiki.mwatelescope.org/display/MP/RRI+Receiver+PFB+Filter">here</a>.</p>
 </div>
 </div>
-<div id="admonition-cable-lengths" class="admonition admonish-info" role="note" aria-labelledby="admonition-cable-lengths-title">
+<div id="admonition-cable-lengths" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-cable-lengths-title">
 <p>Cable lengths</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-cable-lengths"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-cable-lengths"></a></p>
 </div>
 <div>
 <p>Each tile is connected by a cable, and that cable might have a different length
 to others. This correction aims to better align the signals of each tile.</p>
 </div>
 </div>
-<div id="admonition-digital-gains" class="admonition admonish-info" role="note" aria-labelledby="admonition-digital-gains-title">
+<div id="admonition-digital-gains" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-digital-gains-title">
 <p>Digital gains</p>
-</div>
-<a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-digital-gains"></a>
+<p><a class="admonition-anchor-link" href="defs/mwa/corrections.html#admonition-digital-gains"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">todo!()
@@ -1940,12 +1820,10 @@ pages.</p>
 <p><code>hyperdrive</code> can also convert between formats, although in a "lossy" way;
 non-<code>hyperdrive</code> formats cannot represent all component and/or flux-density
 types.</p>
-<div id="admonition-supported-formats" class="admonition admonish-info" role="note" aria-labelledby="admonition-supported-formats-title">
+<div id="admonition-supported-formats" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-supported-formats-title">
 <p>Supported formats</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_lists.html#admonition-supported-formats"></a>
+<p><a class="admonition-anchor-link" href="defs/source_lists.html#admonition-supported-formats"></a></p>
 </div>
 <div>
 <ul>
@@ -1956,12 +1834,10 @@ types.</p>
 </ul>
 </div>
 </div>
-<div id="admonition-conversion" class="admonition admonish-info" role="note" aria-labelledby="admonition-conversion-title">
+<div id="admonition-conversion" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-conversion-title">
 <p>Conversion</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_lists.html#admonition-conversion"></a>
+<p><a class="admonition-anchor-link" href="defs/source_lists.html#admonition-conversion"></a></p>
 </div>
 <div>
 <p><code>hyperdrive</code> can convert (as best it can) between different source list formats.
@@ -1971,12 +1847,10 @@ will be guessed. Depending on the output file name, the output source list type
 may need to be specified.</p>
 </div>
 </div>
-<div id="admonition-verification" class="admonition admonish-info" role="note" aria-labelledby="admonition-verification-title">
+<div id="admonition-verification" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-verification-title">
 <p>Verification</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_lists.html#admonition-verification"></a>
+<p><a class="admonition-anchor-link" href="defs/source_lists.html#admonition-verification"></a></p>
 </div>
 <div>
 <p><code>hyperdrive</code> can be given many source lists in order to test that they are
@@ -1985,12 +1859,10 @@ what kind of source list the file represents (i.e. <code>hyperdrive</code>, <cod
 ...) as well as how many sources and components are within the file.</p>
 </div>
 </div>
-<div id="admonition-component-types" class="admonition admonish-info" role="note" aria-labelledby="admonition-component-types-title">
+<div id="admonition-component-types" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-component-types-title">
 <p>Component types</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_lists.html#admonition-component-types"></a>
+<p><a class="admonition-anchor-link" href="defs/source_lists.html#admonition-component-types"></a></p>
 </div>
 <div>
 <p>Each component in a sky model is represented in one of three ways:</p>
@@ -2011,12 +1883,10 @@ directory</a>.</p>
 <p>This page describes supported flux-density types within <code>hyperdrive</code>. The
 following pages detail their usage within sky-model source lists. <a href="defs/modelling/estimating.html">This
 page</a> details how each type is estimated in modelling.</p>
-<div id="admonition-power-laws-and-curved-power-laws" class="admonition admonish-info" role="note" aria-labelledby="admonition-power-laws-and-curved-power-laws-title">
+<div id="admonition-power-laws-and-curved-power-laws" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-power-laws-and-curved-power-laws-title">
 <p>Power laws and Curved power laws</p>
-</div>
-<a class="admonition-anchor-link" href="defs/fd_types.html#admonition-power-laws-and-curved-power-laws"></a>
+<p><a class="admonition-anchor-link" href="defs/fd_types.html#admonition-power-laws-and-curved-power-laws"></a></p>
 </div>
 <div>
 <p>Most astrophysical sources are modelled as power laws. These are simply
@@ -2031,12 +1901,10 @@ q \).</p>
 <code>hyperdrive</code>.</p>
 </div>
 </div>
-<div id="admonition-flux-density-lists" class="admonition admonish-info" role="note" aria-labelledby="admonition-flux-density-lists-title">
+<div id="admonition-flux-density-lists" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-flux-density-lists-title">
 <p>Flux density lists</p>
-</div>
-<a class="admonition-anchor-link" href="defs/fd_types.html#admonition-flux-density-lists"></a>
+<p><a class="admonition-anchor-link" href="defs/fd_types.html#admonition-flux-density-lists"></a></p>
 </div>
 <div>
 <p>The list type is simply many instances of a Stokes \( \text{I} \), \(
@@ -2071,12 +1939,10 @@ in the <a href="https://github.com/MWATelescope/mwa_hyperdrive/tree/main/example
 directory</a>.</p>
 <p>As most sky-models only include Stokes I, Stokes Q, U and V are not required to
 be specified. If they are not specified, they are assumed to have values of 0.</p>
-<div id="admonition-yaml-example" class="admonition admonish-example" role="note" aria-labelledby="admonition-yaml-example-title">
+<div id="admonition-yaml-example" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-yaml-example-title">
 <p>YAML example</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_list_hyperdrive.html#admonition-yaml-example"></a>
+<p><a class="admonition-anchor-link" href="defs/source_list_hyperdrive.html#admonition-yaml-example"></a></p>
 </div>
 <div>
 <p>The following are the contents of a valid YAML file. <code>super_sweet_source1</code> is a
@@ -2136,12 +2002,10 @@ super_sweet_source2:
 </code></pre>
 </div>
 </div>
-<div id="admonition-json-example" class="admonition admonish-example" role="note" aria-labelledby="admonition-json-example-title">
+<div id="admonition-json-example" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-json-example-title">
 <p>JSON example</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_list_hyperdrive.html#admonition-json-example"></a>
+<p><a class="admonition-anchor-link" href="defs/source_list_hyperdrive.html#admonition-json-example"></a></p>
 </div>
 <div>
 <p>The following are the contents of a valid JSON file. <code>super_sweet_source1</code> is a
@@ -2245,12 +2109,10 @@ power laws are not supported).</p>
 <p>Source names are allowed to have spaces inside them, because the names are
 surrounded by quotes. This is fine for reading, but when converting one of these
 sources to another format, the spaces need to be translated to underscores.</p>
-<div id="admonition-example" class="admonition admonish-example" role="note" aria-labelledby="admonition-example-title">
+<div id="admonition-example" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-example-title">
 <p>Example</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_list_ao.html#admonition-example"></a>
+<p><a class="admonition-anchor-link" href="defs/source_list_ao.html#admonition-example"></a></p>
 </div>
 <div>
 <pre><code class="language-plaintext">skymodel fileformat 1.1
@@ -2299,12 +2161,10 @@ power laws are not supported).</p>
 (i.e. no preceding space).</p>
 <p>RTS sources always have a "base source", which can be thought of as a
 non-optional component or the first component in a collection of components.</p>
-<div id="admonition-example" class="admonition admonish-example" role="note" aria-labelledby="admonition-example-title">
+<div id="admonition-example" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-example-title">
 <p>Example</p>
-</div>
-<a class="admonition-anchor-link" href="defs/source_list_rts.html#admonition-example"></a>
+<p><a class="admonition-anchor-link" href="defs/source_list_rts.html#admonition-example"></a></p>
 </div>
 <div>
 <p>Taken from <a href="https://github.com/JLBLine/srclists">srclists</a>, file
@@ -2697,12 +2557,10 @@ is between antennas 0 and 2 so it has a value other than NaN.</p>
 <p>These baseline weights must have a non-NaN value for all tiles in the
 observation (e.g. if there are 128 tiles in the calibration solutions, then
 there must be 8128 baseline weights).</p>
-<div id="admonition-python-code-for-reading" class="admonition admonish-example" role="note" aria-labelledby="admonition-python-code-for-reading-title">
+<div id="admonition-python-code-for-reading" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-python-code-for-reading-title">
 <p>Python code for reading</p>
-</div>
-<a class="admonition-anchor-link" href="defs/cal_sols_hyp.html#admonition-python-code-for-reading"></a>
+<p><a class="admonition-anchor-link" href="defs/cal_sols_hyp.html#admonition-python-code-for-reading"></a></p>
 </div>
 <div>
 <p>A full example of reading and plotting solutions is
@@ -2770,12 +2628,10 @@ or because the calibration diverged, a "NaN" will be stored in the doubles belon
 However, it is possible to convert <code>RTS</code> solutions to one of the other supported
 formats; a metafits file is required, and the <em>directory</em> containing the
 solutions (i.e. <code>DI_JonesMatrices</code> and <code>BandpassCalibration</code> files) is supplied:</p>
-<div id="admonition-converting-rts-solutions-to-another-format" class="admonition admonish-example" role="note" aria-labelledby="admonition-converting-rts-solutions-to-another-format-title">
+<div id="admonition-converting-rts-solutions-to-another-format" class="admonition admonish-example">
 <div class="admonition-title">
-<div id="admonition-converting-rts-solutions-to-another-format-title">
 <p>Converting <code>RTS</code> solutions to another format</p>
-</div>
-<a class="admonition-anchor-link" href="defs/cal_sols_rts.html#admonition-converting-rts-solutions-to-another-format"></a>
+<p><a class="admonition-anchor-link" href="defs/cal_sols_rts.html#admonition-converting-rts-solutions-to-another-format"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">hyperdrive solutions-convert /path/to/rts/solutions/ rts-as-hyp-solutions.fits -m /path/to/obs.metafits
@@ -2786,12 +2642,10 @@ solutions (i.e. <code>DI_JonesMatrices</code> and <code>BandpassCalibration</cod
 <p>An example of RTS solutions can be found in the <code>test_files</code> directory (as a
 <code>.tar.gz</code> file). The code to read the solutions attempts to unpack and clarify
 the format, but it is messy.</p>
-<div id="admonition-writing-rts-solutions" class="admonition admonish-warning" role="note" aria-labelledby="admonition-writing-rts-solutions-title">
+<div id="admonition-writing-rts-solutions" class="admonition admonish-warning">
 <div class="admonition-title">
-<div id="admonition-writing-rts-solutions-title">
 <p>Writing <code>RTS</code> solutions</p>
-</div>
-<a class="admonition-anchor-link" href="defs/cal_sols_rts.html#admonition-writing-rts-solutions"></a>
+<p><a class="admonition-anchor-link" href="defs/cal_sols_rts.html#admonition-writing-rts-solutions"></a></p>
 </div>
 <div>
 <p>I (CHJ) spent a very long time trying to make the writing of <code>RTS</code> solutions
@@ -2841,12 +2695,10 @@ on the beam <a href="defs/modelling/../beam.html">here</a>.</p>
 <p>The following pages go into further detail of how visibilities are modelled in
 <code>hyperdrive</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="measurement-equation"><a class="header" href="#measurement-equation">Measurement equation</a></h1>
-<div id="admonition-note" class="admonition admonish-note" role="note" aria-labelledby="admonition-note-title">
+<div id="admonition-note" class="admonition admonish-note">
 <div class="admonition-title">
-<div id="admonition-note-title">
 <p>Note</p>
-</div>
-<a class="admonition-anchor-link" href="defs/modelling/rime.html#admonition-note"></a>
+<p><a class="admonition-anchor-link" href="defs/modelling/rime.html#admonition-note"></a></p>
 </div>
 <div>
 <p>A lot of this content was taken from <a href="https://github.com/JLBLine/WODEN">Jack Line's
@@ -2882,12 +2734,10 @@ It is expected, however, that a sky-model component with a negative flux density
 belongs to a source with multiple components, and that the overall flux density
 of that source at any frequency is positive. A source with a negative flux
 density is not physical.</p>
-<div id="admonition-power-laws-and-curved-power-laws" class="admonition admonish-info" role="note" aria-labelledby="admonition-power-laws-and-curved-power-laws-title">
+<div id="admonition-power-laws-and-curved-power-laws" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-power-laws-and-curved-power-laws-title">
 <p>Power laws and Curved power laws</p>
-</div>
-<a class="admonition-anchor-link" href="defs/modelling/estimating.html#admonition-power-laws-and-curved-power-laws"></a>
+<p><a class="admonition-anchor-link" href="defs/modelling/estimating.html#admonition-power-laws-and-curved-power-laws"></a></p>
 </div>
 <div>
 <p>Both power-law and curved-power-law sources have a spectral index (\( \alpha
@@ -2928,12 +2778,10 @@ and use the straight line to estimate \( S \).</p>
 <p>No estimation is required when \( \nu \) is equal to any of the list
 frequencies \( \nu_i \).</p>
 <!-- ~~~ -->
-<div id="admonition-concerns-on-list-types" class="admonition admonish-danger" role="note" aria-labelledby="admonition-concerns-on-list-types-title">
+<div id="admonition-concerns-on-list-types" class="admonition admonish-danger">
 <div class="admonition-title">
-<div id="admonition-concerns-on-list-types-title">
 <p>Concerns on list types</p>
-</div>
-<a class="admonition-anchor-link" href="defs/modelling/estimating.html#admonition-concerns-on-list-types"></a>
+<p><a class="admonition-anchor-link" href="defs/modelling/estimating.html#admonition-concerns-on-list-types"></a></p>
 </div>
 <div>
 <p>When estimating flux densities from a list, it is feared that the "jagged" shape
@@ -2955,7 +2803,7 @@ frame (internally we refer to this as "geocentric XYZ"). There's also a
 everywhere when converting, as it's the current best ellipsoid). Finally,
 there's also an "East North Height" coordinate system.</p>
 <p>To calculate UVW baseline coordinates, geodetic XYZ coordinates are
-required<sup class="footnote-reference" id="fr-1-1"><a href="#footnote-1">1</a></sup>. Therefore, various coordinate conversions are required to obtain
+required<sup class="footnote-reference"><a href="#1">1</a></sup>. Therefore, various coordinate conversions are required to obtain
 UVWs. The conversion between all of these systems is briefly described below.
 The relevant code lives within <a href="https://github.com/MWATelescope/Marlu"><code>Marlu</code></a>.</p>
 <h2 id="itrf-and-geocentric-xyz"><a class="header" href="#itrf-and-geocentric-xyz">ITRF and "geocentric XYZ"</a></h2>
@@ -3041,11 +2889,10 @@ standard</a></li>
 <li><a href="https://casa.nrao.edu/Memos/CoordConvention.pdf">https://casa.nrao.edu/Memos/CoordConvention.pdf</a></li>
 <li><a href="https://casa.nrao.edu/Memos/229.html#SECTION00042000000000000000">https://casa.nrao.edu/Memos/229.html#SECTION00042000000000000000</a></li>
 </ul>
-<hr>
-<ol class="footnote-definition"><li id="footnote-1">
-<p>If this isn't true, <em>please</em> file a <code>hyperdrive</code> issue. <a href="#fr-1-1">↩</a></p>
-</li>
-</ol><div style="break-before: page; page-break-before: always;"></div><h1 id="dut1"><a class="header" href="#dut1">DUT1</a></h1>
+<div class="footnote-definition" id="1"><sup class="footnote-definition-label">1</sup>
+<p>If this isn't true, <em>please</em> file a <code>hyperdrive</code> issue.</p>
+</div>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="dut1"><a class="header" href="#dut1">DUT1</a></h1>
 <p><a href="https://en.wikipedia.org/wiki/DUT1">DUT1</a> is the difference between the UT1 and
 UTC time frames. In short, using the DUT1 allows a better representation of the
 local sidereal time within <code>hyperdrive</code>.</p>

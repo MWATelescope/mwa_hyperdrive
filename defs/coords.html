@@ -7,7 +7,7 @@
 
 
         <!-- Custom HTML head -->
-
+        
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -103,7 +103,7 @@
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
+                                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -170,7 +170,7 @@ frame (internally we refer to this as "geocentric XYZ"). There's also a
 everywhere when converting, as it's the current best ellipsoid). Finally,
 there's also an "East North Height" coordinate system.</p>
 <p>To calculate UVW baseline coordinates, geodetic XYZ coordinates are
-required<sup class="footnote-reference" id="fr-1-1"><a href="#footnote-1">1</a></sup>. Therefore, various coordinate conversions are required to obtain
+required<sup class="footnote-reference"><a href="#1">1</a></sup>. Therefore, various coordinate conversions are required to obtain
 UVWs. The conversion between all of these systems is briefly described below.
 The relevant code lives within <a href="https://github.com/MWATelescope/Marlu"><code>Marlu</code></a>.</p>
 <h2 id="itrf-and-geocentric-xyz"><a class="header" href="#itrf-and-geocentric-xyz">ITRF and "geocentric XYZ"</a></h2>
@@ -256,11 +256,10 @@ standard</a></li>
 <li><a href="https://casa.nrao.edu/Memos/CoordConvention.pdf">https://casa.nrao.edu/Memos/CoordConvention.pdf</a></li>
 <li><a href="https://casa.nrao.edu/Memos/229.html#SECTION00042000000000000000">https://casa.nrao.edu/Memos/229.html#SECTION00042000000000000000</a></li>
 </ul>
-<hr>
-<ol class="footnote-definition"><li id="footnote-1">
-<p>If this isn't true, <em>please</em> file a <code>hyperdrive</code> issue. <a href="#fr-1-1">↩</a></p>
-</li>
-</ol>
+<div class="footnote-definition" id="1"><sup class="footnote-definition-label">1</sup>
+<p>If this isn't true, <em>please</em> file a <code>hyperdrive</code> issue.</p>
+</div>
+
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">

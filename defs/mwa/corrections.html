@@ -7,7 +7,7 @@
 
 
         <!-- Custom HTML head -->
-
+        
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -103,7 +103,7 @@
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
+                                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -166,12 +166,10 @@ it is ready for calibration (or other analysis). These tasks are handled by
 executable itself, or internally in <code>hyperdrive</code>.
 <a href="https://github.com/MWATelescope/cotter"><code>cotter</code></a> used to perform these tasks
 but it has been superseded by <code>Birli</code>.</p>
-<div id="admonition-geometric-correction-aka-phase-tracking" class="admonition admonish-info" role="note" aria-labelledby="admonition-geometric-correction-aka-phase-tracking-title">
+<div id="admonition-geometric-correction-aka-phase-tracking" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-geometric-correction-aka-phase-tracking-title">
 <p>Geometric correction (a.k.a. phase tracking)</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-geometric-correction-aka-phase-tracking"></a>
+<p><a class="admonition-anchor-link" href="#admonition-geometric-correction-aka-phase-tracking"></a></p>
 </div>
 <div>
 <p>Many MWA observations do not apply a geometric correction despite having a
@@ -182,23 +180,23 @@ desired phase centre. This correction applies</p>
 on calibration!</p>
 </div>
 </div>
-<div id="admonition-pfb-gains" class="admonition admonish-info" role="note" aria-labelledby="admonition-pfb-gains-title">
+<div id="admonition-pfb-gains" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-pfb-gains-title">
 <p>PFB gains</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-pfb-gains"></a>
+<p><a class="admonition-anchor-link" href="#admonition-pfb-gains"></a></p>
 </div>
 <div>
 <p>The poly-phase filter bank used by the MWA affects visibilities before they get
 saved to disk. Over time, a number of "flavours" of these gains have been used:</p>
 <ul>
 <li>"Jake Jones" (<code>jake</code>; 200 Hz)</li>
+<li>"Jake Jones (oversampled)" (<code>jake_oversampled</code>; 200 Hz, oversampled; Birli ≥ 0.18)</li>
 <li>"cotter 2014" (<code>cotter2014</code>; 10 kHz)</li>
 <li>"RTS empirical" (<code>empirical</code>; 40 kHz)</li>
 <li>"Alan Levine" (<code>levine</code>; 40 kHz)</li>
 </ul>
-<p>When correcting raw data, the "Jake Jones" gains are used by default. For each
+<p>When correcting raw data, the "Jake Jones" gains are used by default.
+For Phase 3 data oversampled data, use <code>--pfb-flavour jake_oversampled</code>. For each
 flavour, the first item in the parentheses (e.g. <code>cotter2014</code>) indicates what
 should be supplied to <code>hyperdrive</code> if you want to use those gains instead. There
 is also a <code>none</code> "flavour" if you want to disable PFB gain correction.</p>
@@ -208,24 +206,20 @@ calibration quality.</p>
 <a href="https://wiki.mwatelescope.org/display/MP/RRI+Receiver+PFB+Filter">here</a>.</p>
 </div>
 </div>
-<div id="admonition-cable-lengths" class="admonition admonish-info" role="note" aria-labelledby="admonition-cable-lengths-title">
+<div id="admonition-cable-lengths" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-cable-lengths-title">
 <p>Cable lengths</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-cable-lengths"></a>
+<p><a class="admonition-anchor-link" href="#admonition-cable-lengths"></a></p>
 </div>
 <div>
 <p>Each tile is connected by a cable, and that cable might have a different length
 to others. This correction aims to better align the signals of each tile.</p>
 </div>
 </div>
-<div id="admonition-digital-gains" class="admonition admonish-info" role="note" aria-labelledby="admonition-digital-gains-title">
+<div id="admonition-digital-gains" class="admonition admonish-info">
 <div class="admonition-title">
-<div id="admonition-digital-gains-title">
 <p>Digital gains</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-digital-gains"></a>
+<p><a class="admonition-anchor-link" href="#admonition-digital-gains"></a></p>
 </div>
 <div>
 <pre><code class="language-shell">todo!()
