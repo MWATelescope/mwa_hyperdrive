@@ -10,7 +10,7 @@
 
 const int NUM_THREADS_PER_BLOCK_POINTS = 256;
 const int NUM_THREADS_PER_BLOCK_GAUSSIANS = 256;
-const int NUM_THREADS_PER_BLOCK_SHAPELETS = 256;
+const int NUM_THREADS_PER_BLOCK_SHAPELETS = 32;
 const int NUM_THREADS_PER_BLOCK_AUTOS = 512;
 
 inline __device__ JONES extrap_power_law_fd(const FLOAT freq, const JONES ref_flux_density,
