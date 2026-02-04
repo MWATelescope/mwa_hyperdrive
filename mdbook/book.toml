@@ -3,8 +3,6 @@ title = "mwa_hyperdrive documentation"
 authors = ["Christopher H. Jordan", "Dev Null"]
 description = "mwa_hyperdrive documentation"
 language = "en"
-multilingual = false
-
 [output.html]
 mathjax-support = true
 git-repository-url = "https://github.com/MWATelescope/mwa_hyperdrive"
