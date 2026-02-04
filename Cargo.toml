@@ -140,10 +140,10 @@ harness = false
 url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
 half = { git = "https://github.com/VoidStarKat/half-rs", tag="v2.2.1" }
 # birli = { path = "../Birli" }
-birli = { git = "https://github.com/MWATelescope/Birli", branch = "msrv1.85" }
+# birli = { git = "https://github.com/MWATelescope/Birli" }
 # marlu = { path = "../Marlu" }
-marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "msrv1.85" }
+# marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }
-mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "msrv1.85" }
+# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "DUT1" }

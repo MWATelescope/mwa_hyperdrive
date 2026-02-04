@@ -1424,7 +1424,8 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "marlu"
 version = "0.16.1"
-source = "git+https://github.com/MWATelescope/Marlu?branch=msrv1.85#dc0707da1e0aaa8cbf1326ee0b48e413026c1de0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a22b2a223e3d76259ae1f7b6c8621a1fece7dd6b01a7583e1bf1b24a6bda0385"
 dependencies = [
  "approx",
  "built",
@@ -2947,13 +2948,3 @@ dependencies = [
  "once_cell",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "birli"
-version = "0.18.2"
-source = "git+https://github.com/MWATelescope/Birli?branch=msrv1.85#f2b52cc519f8be21ebc44451df536e36484b12c9"
-
-[[patch.unused]]
-name = "mwa_hyperbeam"
-version = "0.10.4"
-source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=msrv1.85#0257d946a4fe87e9d8762b329b4f7ca431eb8d92"
