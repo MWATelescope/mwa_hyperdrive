@@ -1,5 +1,3 @@
-# There are many ways you can build this Dockerfile
-
 # -> cpu-only, multiplatform with aoflagger
 # docker buildx build --platform=arm64,amd64 . \
 #   --build-arg=BASE_IMAGE=mwatelescope/birli:main \
@@ -13,17 +11,20 @@
 #   --build-arg=BASE_IMAGE=nvidia/cuda:${CUDA_VER}-devel-ubuntu24.04 \
 #   --build-arg=FEATURES=cuda \
 #   --build-arg=CUDA_COMPUTE=70,80 \
-#   --tag=mwatelescope/hyperdrive:cuda${CUDA_VER}-ubuntu24.04 --push
+#   --tag=mwatelescope/hyperdrive:${HYP_VER}-cuda${CUDA_VER}-ubuntu24.04 --push
+# module load singularity/default; singularity pull -F /data/curtin_mwaeor/singularity/hyperdrive_autos-dev_cuda12.5.1-ubuntu24.04.sif docker://mwatelescope/hyperdrive:cuda12.5.1-ubuntu24.04
 # note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu20.04, python3.8 is too old for pyuvdata>6
 # note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu22.04, python3.10 is too old for mwax_mover
 
 # -> rocm, setonix MI250
-# export ROCM_VER=6.3.1
+# export ROCM_VER=6.3.3
+# export HYP_VER=0.6.1-autos
 # docker build . \
-#   --build-arg=BASE_IMAGE=quay.io/pawsey/rocm-mpich-base:rocm${ROCM_VER}-mpich3.4.3-ubuntu22 \
+#   --build-arg=BASE_IMAGE=quay.io/pawsey/rocm-mpich-base:rocm${ROCM_VER}-mpich3.4.3-ubuntu24.04 \
 #   --build-arg=FEATURES=hip \
 #   --build-arg=HIP_ARCH=gfx90a \
-#   --tag=mwatelescope/hyperdrive:rocm${ROCM_VER}-ubuntu22 --push
+#   --tag=mwatelescope/hyperdrive:${HYP_VER}-rocm${ROCM_VER}-ubuntu24.04 --push
+# module load singularity/default; singularity pull -F /software/projects/mwaeor/singularity/hyperdrive_rocm6.3.1-ubuntu22.sif docker://mwatelescope/hyperdrive:0.6.1-autos-rocm6.3.1-ubuntu22
 
 # -> dug MI50
 # export ROCM_VER=6.0.2
