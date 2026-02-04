@@ -7,7 +7,7 @@ on:
 jobs:
   build:
     name: Build, Test and Deploy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
@@ -16,7 +16,7 @@ jobs:
           profile: minimal
       - name: Install mdBook
         run: |
-          (test -x $HOME/.cargo/bin/mdbook || cargo install --vers "^0.4" mdbook)
+          (test -x $HOME/.cargo/bin/mdbook || cargo install mdbook)
           cargo install mdbook-linkcheck mdbook-mermaid mdbook-admonish
       - name: Build and Test
         run: |
