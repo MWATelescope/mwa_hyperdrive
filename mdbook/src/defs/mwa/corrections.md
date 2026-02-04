@@ -24,11 +24,13 @@ The poly-phase filter bank used by the MWA affects visibilities before they get
 saved to disk. Over time, a number of "flavours" of these gains have been used:
 
 - "Jake Jones" (`jake`; 200 Hz)
+- "Jake Jones (oversampled)" (`jake_oversampled`; 200 Hz, oversampled; Birli ≥ 0.18)
 - "cotter 2014" (`cotter2014`; 10 kHz)
 - "RTS empirical" (`empirical`; 40 kHz)
 - "Alan Levine" (`levine`; 40 kHz)
 
-When correcting raw data, the "Jake Jones" gains are used by default. For each
+When correcting raw data, the "Jake Jones" gains are used by default.
+For Phase 3 data oversampled data, use `--pfb-flavour jake_oversampled`. For each
 flavour, the first item in the parentheses (e.g. `cotter2014`) indicates what
 should be supplied to `hyperdrive` if you want to use those gains instead. There
 is also a `none` "flavour" if you want to disable PFB gain correction.
