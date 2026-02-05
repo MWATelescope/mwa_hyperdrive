@@ -114,9 +114,14 @@ hyperdrive also borrows from RTS, which used a gaussian weighting scheme to tape
 
 ## Source Counts
 
-Similar to [`vis-subtract`](../vis_subtract/intro.md), the total number of sources in the sky model to be subtracted is limited by `--num-sources`, but only the top `--iono-sub` brightest have their ionospheric constants measured and modeled during subtraction. By default, hyperdrive will include sources in the sky model after [vetoing](../vis_simulate/intro.md#vetoing) if `--num-sources` is not specified, and will ionospherically subtract all of these sources if `--iono-sub` is not specified. An error will occur if `--num-sources` is greater than the number of sources in the sky model.
+Similar to [`vis-subtract`](../vis_subtract/intro.md), the total number of sources in the sky model to be subtracted is limited by `--num-sources`, but only the top `--iono-sub` brightest have their ionospheric constants measured and modeled during subtraction. Additionally, the top `--peel` brightest sources will undergo full DI calibration peeling.
 
-Future versions of peel will include a `--peel` argument to specify the number of sources to peel.
+The relationship between these parameters is:
+- `--num-sources`: Total sources in sky model to subtract (default: all after vetoing)
+- `--iono-sub`: Number of sources for ionospheric subtraction (default: all sources, ≤ num-sources)  
+- `--peel`: Number of sources for full DI calibration peeling (default: 0, ≤ iono-sub)
+
+An error will occur if `--num-sources` is greater than the number of sources in the sky model, or if `--peel` > `--iono-sub` > `--num-sources`.
 
 ## High level overview
 
@@ -159,4 +164,39 @@ flowchart TD
 
 ## Peeling
 
-A full peel involves performing direction-independent calibration towards each source, this is currently a work in progress and not yet implemented.
+A full peel involves performing direction-independent calibration towards each source after ionospheric subtraction. This functionality has been implemented and can be controlled with the `--peel` argument.
+
+### Usage
+
+To perform full peeling on a subset of sources, use the `--peel` argument to specify how many of the brightest sources should be fully peeled:
+
+```shell
+hyperdrive peel --peel 3 --iono-sub 10 [other arguments...]
+```
+
+This example will:
+- Ionospherically subtract the 10 brightest sources
+- Perform full DI calibration peeling on the 3 brightest sources
+
+### DI Calibration Parameters
+
+The DI calibration step during peeling can be controlled with these additional parameters:
+
+- `--di-max-iterations`: Maximum number of DI calibration iterations (default: 50)
+- `--di-stop-threshold`: Stop threshold for convergence (default: 1e-8)  
+- `--di-min-threshold`: Minimum threshold for convergence (default: 1e-4)
+
+### Difference between Ionospheric Subtraction and Full Peeling
+
+**Ionospheric Subtraction** (`--iono-sub`):
+- Solves for ionospheric refraction parameters α and β (proportional to λ²)
+- Applies scalar gain correction
+- Subtracts the ionosphere-corrected model from visibilities
+
+**Full Peeling** (`--peel`):
+- Performs ionospheric subtraction (as above)
+- **Additionally** performs direction-independent calibration toward the source
+- Solves for complex gain corrections per antenna and channel
+- Corrects for scintillation and other phase/amplitude effects
+
+Full peeling provides more complete correction but is computationally more expensive and should typically be applied only to the brightest sources.
