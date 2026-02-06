@@ -7,7 +7,9 @@ Hyperdrive's `peel` implementation technically only performs ionospheric subtrac
 ~~~
 
 ~~~admonish tip title="Autos"
-Outputs include auto-correlations by default when present. Add `--output-no-autos` to write crosses-only.
+Auto-correlations are not read by default. Use `--autos` when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.
+
+Auto-correlations are not modified by `peel`.
 ~~~
 
 ## Example

@@ -94,10 +94,11 @@ pub(crate) struct InputVisArgs {
     )]
     pub(crate) array_position: Option<Vec<f64>>,
 
-    /// Don't read autocorrelations from the input data.
+    /// Read autocorrelations from the input data.
+    /// Default: don't read autos
     #[clap(long, help_heading = "INPUT DATA")]
     #[serde(default)]
-    pub(crate) no_autos: bool,
+    pub(crate) autos: bool,
 
     /// Use this value as the DUT1 [seconds].
     #[clap(long, help_heading = "INPUT DATA")]
@@ -206,7 +207,7 @@ impl InputVisArgs {
             timesteps: self.timesteps.or(other.timesteps),
             use_all_timesteps: self.use_all_timesteps || other.use_all_timesteps,
             array_position: self.array_position.or(other.array_position),
-            no_autos: self.no_autos || other.no_autos,
+            autos: self.autos || other.autos,
             dut1: self.dut1.or(other.dut1),
             ignore_weights: self.ignore_weights || other.ignore_weights,
             ignore_dut1: self.ignore_dut1 || other.ignore_dut1,
@@ -236,7 +237,7 @@ impl InputVisArgs {
             timesteps,
             use_all_timesteps,
             array_position,
-            no_autos,
+            autos,
             dut1,
             ignore_weights,
             ignore_dut1,
@@ -1135,7 +1136,7 @@ impl InputVisArgs {
             time_res: time_res * time_average_factor.get() as i64,
             spw,
             tile_baseline_flags,
-            using_autos: !no_autos,
+            using_autos: autos,
             ignore_weights,
             dut1,
         })

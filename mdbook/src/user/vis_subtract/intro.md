@@ -31,5 +31,7 @@ flowchart TD
 ```
 
 ~~~admonish tip title="Autos"
-Use `--no-autos` to skip reading and subtracting autos.
+Auto-correlations are not read by default. Use `--autos` when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.
+
+Auto-correlations are not modified by `vis-subtract`.
 ~~~

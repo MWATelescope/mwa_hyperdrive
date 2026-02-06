@@ -53,8 +53,8 @@ fn get_reduced_1090008640(
         "--num-fine-channels", &num_chans_str,
         "--veto-threshold", "0.0", // Don't complicate things with vetoing
     ];
-    if !use_autos {
-        argv.push("--output-no-autos");
+    if use_autos {
+        argv.push("--output-autos");
     }
     VisSimulateArgs::parse_from(argv)
 }

@@ -635,7 +635,7 @@ fn sparse_timeblocks_with_averaging() {
             time_res: Some(2.0),
             num_fine_channels: Some(1),
             output_model_files: Some(vec![output.clone()]),
-            output_no_autos: true,
+            output_autos: false,
             ..Default::default()
         },
     };
@@ -646,7 +646,6 @@ fn sparse_timeblocks_with_averaging() {
         files: Some(vec![metafits, output.display().to_string()]),
         timesteps: Some(vec![6, 12, 18]),
         time_average: Some("8s".to_string()),
-        no_autos: true,
         ..Default::default()
     };
     let params = args.parse("").unwrap();

@@ -28,16 +28,14 @@ fn read_num_tiles(path: &std::path::Path) -> usize {
 /// Calibrate and apply on a uvfits that contains autos; verify output autos behavior.
 ///
 /// - We first run `di-calibrate` on 1061316544 uvfits to produce solutions.
-/// - Then run three `solutions-apply` variants:
-///   1) default (should include autos)
-///   2) `--output-no-autos` (should exclude autos)
-///   3) `--no-autos` (input ignores autos; output should also not contain autos)
+/// - Then run two `solutions-apply` variants:
+///   1) `--autos` (should include autos if present in input)
+///   2) default (input doesn't read autos; output should also not contain autos)
 #[test]
 fn test_apply_autos_and_flags_on_1061316544() {
     let tmp = TempDir::new().expect("couldn't make tmp dir");
     let sols_path = tmp.path().join("dical.fits");
     let out_default = tmp.path().join("apply_default.uvfits");
-    let out_output_no_autos = tmp.path().join("apply_output_no_autos.uvfits");
     let out_no_autos = tmp.path().join("apply_no_autos.uvfits");
 
     // 1) Calibrate to get solutions
@@ -59,8 +57,8 @@ fn test_apply_autos_and_flags_on_1061316544() {
     );
     assert!(sols_path.exists(), "solutions not written");
 
-    // 2a) Apply (default): should include autos
-    let apply_default = hyperdrive()
+    // 2a) Apply with --autos: should include autos if present in input
+    let apply_with_autos = hyperdrive()
         .arg("solutions-apply")
         .arg("--data")
         .arg("test_files/1061316544/1061316544.metafits")
@@ -69,39 +67,17 @@ fn test_apply_autos_and_flags_on_1061316544() {
         .arg(format!("{}", sols_path.display()))
         .arg("--outputs")
         .arg(format!("{}", out_default.display()))
+        .arg("--autos")
         .arg("--no-progress-bars")
         .ok();
     assert!(
-        apply_default.is_ok(),
-        "apply (default) failed: {:?}",
-        get_cmd_output(apply_default)
+        apply_with_autos.is_ok(),
+        "apply (--autos) failed: {:?}",
+        get_cmd_output(apply_with_autos)
     );
-    assert!(out_default.exists(), "apply default output not written");
+    assert!(out_default.exists(), "apply --autos output not written");
 
-    // 2b) Apply with --output-no-autos: should exclude autos
-    let apply_output_no_autos = hyperdrive()
-        .arg("solutions-apply")
-        .arg("--data")
-        .arg("test_files/1061316544/1061316544.metafits")
-        .arg("test_files/1061316544/1061316544.uvfits")
-        .arg("--solutions")
-        .arg(format!("{}", sols_path.display()))
-        .arg("--outputs")
-        .arg(format!("{}", out_output_no_autos.display()))
-        .arg("--output-no-autos")
-        .arg("--no-progress-bars")
-        .ok();
-    assert!(
-        apply_output_no_autos.is_ok(),
-        "apply (--output-no-autos) failed: {:?}",
-        get_cmd_output(apply_output_no_autos)
-    );
-    assert!(
-        out_output_no_autos.exists(),
-        "apply --output-no-autos output not written"
-    );
-
-    // 2c) Apply with --no-autos (input ignores autos): should also not contain autos
+    // 2b) Apply (default): input doesn't read autos; output should also not contain autos
     let apply_no_autos = hyperdrive()
         .arg("solutions-apply")
         .arg("--data")
@@ -111,15 +87,14 @@ fn test_apply_autos_and_flags_on_1061316544() {
         .arg(format!("{}", sols_path.display()))
         .arg("--outputs")
         .arg(format!("{}", out_no_autos.display()))
-        .arg("--no-autos")
         .arg("--no-progress-bars")
         .ok();
     assert!(
         apply_no_autos.is_ok(),
-        "apply (--no-autos) failed: {:?}",
+        "apply (default) failed: {:?}",
         get_cmd_output(apply_no_autos)
     );
-    assert!(out_no_autos.exists(), "apply --no-autos output not written");
+    assert!(out_no_autos.exists(), "apply default output not written");
 
     // Determine geometry from the output itself
     let ntiles = read_num_tiles(&out_default);
@@ -127,25 +102,18 @@ fn test_apply_autos_and_flags_on_1061316544() {
     let crosses_plus_autos = crosses_only + ntiles;
 
     // Read GCOUNT for each output and compare with inferred timesteps
-    let gcount_default = read_gcount(&out_default);
+    let gcount_with_autos = read_gcount(&out_default);
     assert_eq!(
-        gcount_default % crosses_plus_autos,
+        gcount_with_autos % crosses_plus_autos,
         0,
         "GCOUNT divisible by baselines+autos"
     );
-    let timesteps = gcount_default / crosses_plus_autos;
-
-    let gcount_out_no_autos = read_gcount(&out_output_no_autos);
-    assert_eq!(
-        gcount_out_no_autos,
-        timesteps * crosses_only,
-        "--output-no-autos should exclude autos"
-    );
+    let timesteps = gcount_with_autos / crosses_plus_autos;
 
     let gcount_no_autos = read_gcount(&out_no_autos);
     assert_eq!(
         gcount_no_autos,
         timesteps * crosses_only,
-        "--no-autos input should yield crosses-only output"
+        "default (no --autos) should yield crosses-only output"
     );
 }

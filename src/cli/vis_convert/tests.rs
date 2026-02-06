@@ -33,6 +33,7 @@ fn test_dry_run_returns_early() {
         "vis-convert",
         "--data", &vis[0],
         "--outputs", &uvfits_converted_string,
+        "--autos",
     ];
     let vis_convert_args = VisConvertArgs::parse_from(args);
     // Dry-run should not create the file
@@ -237,6 +238,7 @@ fn test_averaging_flags() {
         "--outputs", &uvfits_converted_string,
         "--freq-average", "80kHz",
         "--ignore-input-data-fine-channel-flags",
+        "--autos",
     ];
 
     let vis_convert_args = VisConvertArgs::parse_from(args);

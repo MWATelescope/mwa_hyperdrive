@@ -131,7 +131,6 @@ fn test_vis_simulate_and_vis_subtract_no_stderr() {
             "--num-timesteps", &format!("{num_timesteps}"),
             "--num-fine-channels", &format!("{num_chans}"),
             "--no-progress-bars",
-            "--output-no-autos",
         ])
         .ok();
     assert!(
@@ -153,7 +152,6 @@ fn test_vis_simulate_and_vis_subtract_no_stderr() {
             "--source-list", &srclist,
             "--output", &format!("{}", sub_path.display()),
             "--no-progress-bars",
-            "--no-autos",
         ])
         .ok();
     assert!(

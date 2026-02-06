@@ -51,13 +51,13 @@ The frequencies to use for beam calculations are the coarse channel centers,
 
 ### Auto-correlations
 
-By default, visibilities include auto-correlations when simulated. To write only cross-correlations, use:
+By default, visibilities exclude auto-correlations when simulated. To include auto-correlations, use:
 
 ```shell
 hyperdrive vis-simulate \
   -s srclist.yaml \
   -m *.metafits \
-  --output-no-autos
+  --output-autos
 ```
 
-Including autos can increase file size; disable them if you only need cross-correlations.
+Including autos can increase file size; only enable them if needed.

@@ -381,6 +381,7 @@ fn test_solutions_apply_trivial_raw() {
             no_cable_length_correction: false,
             no_geometric_correction: false,
             ignore_input_data_fine_channel_flags: true,
+            autos: true,
             ..Default::default()
         },
         ..Default::default()
@@ -407,6 +408,7 @@ fn test_solutions_apply_trivial_ms() {
         data_args: InputVisArgs {
             files: Some(files),
             ignore_input_data_fine_channel_flags: true,
+            autos: true,
             ..Default::default()
         },
         ..Default::default()
@@ -429,6 +431,7 @@ fn test_solutions_apply_trivial_uvfits() {
         data_args: InputVisArgs {
             files: Some(files),
             ignore_input_data_fine_channel_flags: true,
+            autos: true,
             ..Default::default()
         },
         ..Default::default()
@@ -454,6 +457,7 @@ fn test_solutions_apply_dry_run() {
         data_args: InputVisArgs {
             files: Some(files),
             ignore_input_data_fine_channel_flags: true,
+            autos: true,
             ..Default::default()
         },
         solutions: Some(sols_file.display().to_string()),
@@ -470,12 +474,7 @@ fn test_solutions_apply_dry_run() {
     let mut args_real = args.clone();
     args_real.outputs = Some(vec![out.clone()]);
     // We will need original files later; keep a clone before moving into args
-    let files_clone = args_real
-        .data_args
-        .files
-        .as_ref()
-        .unwrap()
-        .clone();
+    let files_clone = args_real.data_args.files.as_ref().unwrap().clone();
     let result = args_real.run(false);
     assert!(result.is_ok(), "real run failed: {:?}", result.err());
     assert!(out.exists());
@@ -483,7 +482,8 @@ fn test_solutions_apply_dry_run() {
     let metafits_pb = PathBuf::from(metafits);
     let input_files = files_clone;
     // The first entry is the uvfits path; last is metafits
-    let in_reader = UvfitsReader::new(PathBuf::from(&input_files[0]), Some(&metafits_pb), None).unwrap();
+    let in_reader =
+        UvfitsReader::new(PathBuf::from(&input_files[0]), Some(&metafits_pb), None).unwrap();
     let out_reader = UvfitsReader::new(out, Some(&metafits_pb), None).unwrap();
 
     let ctx = out_reader.get_obs_context();
@@ -554,6 +554,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits() {
         "--data", &format!("{}", metafits.display()), &format!("{}", vis[0].display()),
         "--solutions", &format!("{}", solutions.display()),
         "--outputs", &format!("{}", out_vis_path.display()),
+        "--autos",
     ]);
 
     // Run solutions-apply and check that it succeeds
@@ -590,7 +591,6 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_no_autos() {
         "--data", &format!("{}", metafits.display()), &format!("{}", vis[0].display()),
         "--solutions", &format!("{}", solutions.display()),
         "--outputs", &format!("{}", out_vis_path.display()),
-        "--no-autos",
     ]);
 
     // Run solutions-apply and check that it succeeds
@@ -632,6 +632,7 @@ fn test_1090008640_solutions_apply_writes_vis_uvfits_avg_freq() {
         "--solutions", &format!("{}", solutions.display()),
         "--outputs", &format!("{}", out_vis_path.display()),
         "--freq-average", &format!("{freq_avg_factor}"),
+        "--autos",
     ]);
 
     // Run solutions-apply and check that it succeeds
@@ -736,6 +737,7 @@ fn test_1090008640_solutions_apply_correct_vis() {
         "--data", &metafits, &uvfits,
         "--solutions", &sols_file_string,
         "--outputs", &vis_out_string,
+        "--autos",
     ];
     let flag_strings = flagged_tiles
         .iter()
@@ -883,6 +885,7 @@ fn test_1090008640_solutions_apply_correct_vis() {
         "--data", &metafits, &uvfits,
         "--solutions", &sols_file_string,
         "--outputs", &vis_out_string,
+        "--autos",
     ];
     if !flag_strings.is_empty() {
         args.push("--tile-flags");

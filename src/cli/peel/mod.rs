@@ -122,10 +122,6 @@ pub(crate) struct PeelCliArgs {
     #[clap(long, help = OUTPUT_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub(super) output_vis_freq_average: Option<String>,
 
-    /// Don't write auto-correlations to the output visibilities.
-    /// Default: output if present
-    #[clap(long, help_heading = "OUTPUT FILES")]
-    output_no_autos: bool,
 
     /// When writing out visibilities, rather than writing out the entire input
     /// bandwidth, write out only the smallest contiguous band. e.g. Typical 40
@@ -224,7 +220,6 @@ impl PeelArgs {
                     outputs,
                     output_vis_time_average,
                     output_vis_freq_average,
-                    output_no_autos,
                     output_smallest_contiguous_band,
                 },
         } = self;
@@ -470,7 +465,7 @@ impl PeelArgs {
                 outputs: Some(vis_outputs),
                 output_vis_time_average,
                 output_vis_freq_average,
-                output_autos: input_vis_params.using_autos && !output_no_autos,
+                output_autos: input_vis_params.using_autos,
             }
             .parse(
                 input_vis_params.time_res,
@@ -658,7 +653,6 @@ impl PeelCliArgs {
             output_vis_freq_average: self
                 .output_vis_freq_average
                 .or(other.output_vis_freq_average),
-            output_no_autos: self.output_no_autos || other.output_no_autos,
             output_smallest_contiguous_band: self.output_smallest_contiguous_band
                 || other.output_smallest_contiguous_band,
         }

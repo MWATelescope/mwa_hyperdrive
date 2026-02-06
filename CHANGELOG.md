@@ -26,15 +26,12 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- All commands that read or write visibilities, now do so with auto-correlations by default.
-  - This results in a 1% increase in the number of baselines written out. use `--no-autos` or `--output-no-autos` to disable.
-  - `vis-simulate` now simulates auto-correlations by default,
-    use `--output-no-autos` to disable.
-  - `di-calibrate` will simulate auto-correlations by default,
-    and write them to `--model-filenames` if provided.
-    use `--no-autos` to disable.
-  - `solutions-apply`, `vis-convert`, `vis-subtract`, `peel` will read and write auto-correlations
-    by default (but not modify them), use `--no-autos` to disable.
+- auto-correlations support added to all commands, but disabled by default.
+  - Use `--autos` when reading input data to include auto-correlations.
+  - Commands that write visibilities match the input: if input data includes auto-correlations, they are written to the output;
+    if input data excludes them, they are not written.
+  - `vis-simulate` does not simulate auto-correlations by default; use `--output-autos` to include them.
+  - `di-calibrate`, `solutions-apply`, `vis-convert`, `vis-subtract`, and `peel` automatically match the input data's auto-correlation state.
 - VisRead trait generalizes `read_{crosses,autos,crosses_and_autos}` with `read_inner_dispatch`
 
 ## [0.6.1] - 2025-07-29

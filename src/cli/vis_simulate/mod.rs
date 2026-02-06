@@ -163,9 +163,10 @@ pub(super) struct VisSimulateCliArgs {
     #[clap(long, help_heading = "OUTPUT FILES")]
     pub(super) output_model_freq_average: Option<String>,
 
-    /// Don't simulate auto-correlations.
+    /// Include auto-correlations in the output.
+    /// Default: don't include autos
     #[clap(long, help_heading = "OUTPUT FILES")]
-    pub(super) output_no_autos: bool,
+    pub(super) output_autos: bool,
 
     /// Remove any "point" components from the input sky model.
     #[clap(long, help_heading = "SKY MODEL")]
@@ -271,7 +272,7 @@ impl VisSimulateArgs {
                     output_model_files,
                     output_model_time_average,
                     output_model_freq_average,
-                    output_no_autos,
+                    output_autos,
                     filter_points,
                     filter_gaussians,
                     filter_shapelets,
@@ -561,7 +562,7 @@ impl VisSimulateArgs {
             outputs: output_model_files,
             output_vis_time_average: output_model_time_average,
             output_vis_freq_average: output_model_freq_average,
-            output_autos: !output_no_autos,
+            output_autos,
         }
         .parse(
             time_res,
@@ -660,7 +661,7 @@ impl VisSimulateCliArgs {
             output_model_freq_average: self
                 .output_model_freq_average
                 .or(other.output_model_freq_average),
-            output_no_autos: self.output_no_autos || other.output_no_autos,
+            output_autos: self.output_autos || other.output_autos,
             filter_points: self.filter_points || other.filter_points,
             filter_gaussians: self.filter_gaussians || other.filter_gaussians,
             filter_shapelets: self.filter_shapelets || other.filter_shapelets,

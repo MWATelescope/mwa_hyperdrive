@@ -77,5 +77,5 @@ hyperdrive solutions-apply \
 ~~~
 
 ~~~admonish tip title="Auto-correlations"
-All writers include auto-correlations by default if they are present in memory. To always write crosses-only, add `--output-no-autos` to the command (available in `solutions-apply`, `vis-convert`, `vis-subtract`, and for model outputs in `di-calibrate`).
+Auto-correlations are not read by default. Use `--autos` when reading input data to include them. All writers match the input: if input data includes auto-correlations, they are written to the output; if input data excludes them (default), they are not written. `vis-simulate` does not simulate auto-correlations by default; use `--output-autos` to include them.
 ~~~
