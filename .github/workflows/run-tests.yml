@@ -5,10 +5,10 @@ name: Tests
 on:
   push:
     tags-ignore:
-      - '**'
+      - "**"
     pull_request:
     branches:
-    - '**'
+      - "**"
 
 # The CI jobs can use a lot of disk space; we take tips from this site to run
 # the jobs faster and use less space.
@@ -27,7 +27,21 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          [ -n "$AGENT_TOOLSDIRECTORY" ] && sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker system prune -af --volumes
+          sudo apt-get clean
+          df -h
       - name: Install dependencies
         run: |
           sudo apt update -y
@@ -51,7 +65,7 @@ jobs:
       - name: Install CUDA
         uses: Jimver/cuda-toolkit@v0.2.23
         with:
-          cuda: '12.4.1'
+          cuda: "12.4.1"
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1

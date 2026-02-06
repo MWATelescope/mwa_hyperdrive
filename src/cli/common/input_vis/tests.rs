@@ -611,7 +611,8 @@ fn sparse_timeblocks_with_averaging() {
         srclist,
     } = get_reduced_1090008640_raw();
 
-    let mut args = VisSimulateArgs {
+    let output = tmp_dir.path().join("20ts.uvfits");
+    let args = VisSimulateArgs {
         args_file: None,
         beam_args: BeamArgs {
             beam_type: None,
@@ -628,14 +629,16 @@ fn sparse_timeblocks_with_averaging() {
             num_sources: Some(1),
             ..Default::default()
         },
-        simulate_args: VisSimulateCliArgs::default(),
+        simulate_args: VisSimulateCliArgs {
+            metafits: Some(PathBuf::from(&metafits)),
+            num_timesteps: Some(20),
+            time_res: Some(2.0),
+            num_fine_channels: Some(1),
+            output_model_files: Some(vec![output.clone()]),
+            output_autos: false,
+            ..Default::default()
+        },
     };
-    args.simulate_args.metafits = Some(PathBuf::from(&metafits));
-    args.simulate_args.num_timesteps = Some(20);
-    args.simulate_args.time_res = Some(2.0);
-    args.simulate_args.num_fine_channels = Some(1);
-    let output = tmp_dir.path().join("20ts.uvfits");
-    args.simulate_args.output_model_files = Some(vec![output.clone()]);
     args.run(false).unwrap();
 
     // Now try to read it with sparse timesteps and averaging.
@@ -652,6 +655,7 @@ fn sparse_timeblocks_with_averaging() {
         outputs: Some(vec![tmp_dir.path().join("output.uvfits")]),
         output_vis_time_average: None,
         output_vis_freq_average: None,
+        output_autos: false,
     }
     .parse(
         params.time_res,
