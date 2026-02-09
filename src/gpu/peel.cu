@@ -21,12 +21,9 @@ __global__ void xyzs_to_uvws_kernel(const XYZ *xyzs, const FLOAT *lmsts, UVW *uv
     if (i_bl >= num_baselines)
         return;
 
-    // Find the tile indices from the baseline index. `num_tiles` has to be
-    // subtracted by 1 to make it "0 index".
-    const float n = (float)(num_tiles - 1);
-    const float tile1f = floorf(-0.5 * sqrtf(4.0 * n * (n + 1.0) - 8.0 * i_bl + 1.0) + n + 0.5);
-    const int tile2 = (int)(i_bl - tile1f * (n - (tile1f + 1.0) / 2.0) + 1.0);
-    const int tile1 = (int)tile1f;
+    // Find the tile indices from the baseline index using the macro. ntiles_sub1f is n-1 as float.
+    const float ntiles_sub1f = (float)(num_tiles - 1);
+    BASELINE_TO_TILES(i_bl, ntiles_sub1f, tile1, tile2);
 
     FLOAT s_ha, c_ha, s_dec, c_dec;
     SINCOS(pointing_centre.dec, &s_dec, &c_dec);

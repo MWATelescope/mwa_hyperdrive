@@ -6,6 +6,12 @@
 Hyperdrive's `peel` implementation technically only performs ionospheric subtraction. For more on the distinction between the two, read on. Familiarity with the `vis-subtract` command is recommended.
 ~~~
 
+~~~admonish tip title="Autos"
+Auto-correlations are not read by default. Use `--autos` when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.
+
+Auto-correlations are not modified by `peel`.
+~~~
+
 ## Example
 
 From the images below, it's clear that peeling 100 sources, rather than directly subtracting them

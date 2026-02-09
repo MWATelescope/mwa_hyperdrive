@@ -599,3 +599,69 @@ fn test_curved_power_law_changing_ref_freq() {
     // The SI has changed from -0.8, which was what we started with.
     assert_abs_diff_eq!(modeller_sis[0], -0.8172609243471072);
 }
+
+#[test]
+fn model_timestep_autos_with_point() {
+    let obs = ObsParams::new(true);
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "point".to_string(),
+        Source {
+            components: vec![get_point(RADec::from_degrees(1.0, -27.0), FluxType::List)]
+                .into_boxed_slice(),
+        },
+    );
+    let (modeller, _) = obs.get_gpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let result = modeller.model_timestep_autos_with(timestamp, visibilities.view_mut());
+    assert!(result.is_ok());
+
+    test_model_timestep_autos_with_point(visibilities.view(), 0.0);
+}
+
+#[test]
+fn model_timestep_autos_with_gaussian() {
+    let obs = ObsParams::new(true);
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "gaussian".to_string(),
+        Source {
+            components: vec![get_gaussian(
+                RADec::from_degrees(1.0, -27.0),
+                FluxType::List,
+            )]
+            .into_boxed_slice(),
+        },
+    );
+    let (modeller, _) = obs.get_gpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let result = modeller.model_timestep_autos_with(timestamp, visibilities.view_mut());
+    assert!(result.is_ok());
+
+    test_model_timestep_autos_with_gaussian(visibilities.view(), 0.0);
+}
+
+#[test]
+fn model_timestep_autos_with_shapelet() {
+    let obs = ObsParams::new(true);
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "shapelet".to_string(),
+        Source {
+            components: vec![get_shapelet(
+                RADec::from_degrees(1.0, -27.0),
+                FluxType::List,
+            )]
+            .into_boxed_slice(),
+        },
+    );
+    let (modeller, _) = obs.get_gpu_modeller(&srclist);
+    let mut visibilities = Array2::zeros((obs.freqs.len(), obs.xyzs.len()));
+    let timestamp = Epoch::from_gpst_seconds(1090008640.);
+    let result = modeller.model_timestep_autos_with(timestamp, visibilities.view_mut());
+    assert!(result.is_ok());
+
+    test_model_timestep_autos_with_shapelet(visibilities.view(), 0.0);
+}

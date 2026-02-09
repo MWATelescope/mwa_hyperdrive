@@ -16,6 +16,24 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - deleted unused `io::read::uvfits::error::FitsError` type
 
+### Added
+
+- auto-correlation visibility simulation and writing support
+- Fix for reading a timestep with zero length #67
+- Fix multi-timeblock solution slicing #59
+- implement cluster reading for ao style srclist #63
+- Fixes for CPU model behavior with empty component types
+
+### Changed
+
+- auto-correlations support added to all commands, but disabled by default.
+  - Use `--autos` when reading input data to include auto-correlations.
+  - Commands that write visibilities match the input: if input data includes auto-correlations, they are written to the output;
+    if input data excludes them, they are not written.
+  - `vis-simulate` does not simulate auto-correlations by default; use `--output-autos` to include them.
+  - `di-calibrate`, `solutions-apply`, `vis-convert`, `vis-subtract`, and `peel` automatically match the input data's auto-correlation state.
+- VisRead trait generalizes `read_{crosses,autos,crosses_and_autos}` with `read_inner_dispatch`
+
 ## [0.6.1] - 2025-07-29
 
 ### Fixed

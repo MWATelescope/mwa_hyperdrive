@@ -141,3 +141,49 @@ fn test_hifitime_works_as_expected() {
     let e = Epoch::from_gpst_seconds(1090008640.26);
     assert_abs_diff_eq!(e.round(10.milliseconds()).to_gpst_seconds(), 1090008640.26);
 }
+
+#[test]
+
+fn test_baseline_tile_pairs() {
+    let total_num_tiles = 4;
+    let tile_flags = HashSet::new();
+    let maps = TileBaselineFlags::new(total_num_tiles, tile_flags);
+    assert_eq!(
+        maps.get_unflagged_baseline_tile_pairs()
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [
+            (0, 0),
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (2, 2),
+            (2, 3),
+            (3, 3)
+        ]
+    );
+    assert_eq!(
+        maps.get_unflagged_cross_baseline_tile_pairs()
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+    );
+
+    let tile_flags = HashSet::from([1]);
+    let maps = TileBaselineFlags::new(total_num_tiles, tile_flags);
+    assert_eq!(
+        maps.get_unflagged_baseline_tile_pairs()
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [(0, 0), (0, 2), (0, 3), (2, 2), (2, 3), (3, 3)]
+    );
+    assert_eq!(
+        maps.get_unflagged_cross_baseline_tile_pairs()
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [(0, 2), (0, 3), (2, 3)]
+    );
+}

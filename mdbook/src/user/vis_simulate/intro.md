@@ -48,3 +48,16 @@ it's up to the caller to handle this if they want to.
 
 The frequencies to use for beam calculations are the coarse channel centers,
 1.28 MHz apart on MWA.
+
+### Auto-correlations
+
+By default, visibilities exclude auto-correlations when simulated. To include auto-correlations, use:
+
+```shell
+hyperdrive vis-simulate \
+  -s srclist.yaml \
+  -m *.metafits \
+  --output-autos
+```
+
+Including autos can increase file size; only enable them if needed.
