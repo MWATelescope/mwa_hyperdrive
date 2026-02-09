@@ -633,6 +633,16 @@ flowchart TD
 
     cal--&gt;WriteSols[fa:fa-save Write calibration solutions]
 </pre>
+<div id="admonition-model-visibility-outputs" class="admonition admonish-info">
+<div class="admonition-title">
+<p>Model visibility outputs</p>
+<p><a class="admonition-anchor-link" href="user/di_cal/intro.html#admonition-model-visibility-outputs"></a></p>
+</div>
+<div>
+<p>If <code>--model-filenames</code> is supplied, model visibilities are written for inspection.
+Auto-correlations are not read by default. Use <code>--autos</code> when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.</p>
+</div>
+</div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="di-calibration-tutorial"><a class="header" href="#di-calibration-tutorial">DI calibration tutorial</a></h1>
 <p>Here, a series of steps are laid out to demonstrate how raw MWA data is
 calibrated with <code>hyperdrive</code>. We also plot calibration solutions and image
@@ -1017,6 +1027,16 @@ flowchart TD
         Apply--&gt;Write[fa:fa-save Write timeblock\nvisibilities]
     end
 </pre>
+<div id="admonition-autos" class="admonition admonish-tip">
+<div class="admonition-title">
+<p>Autos</p>
+<p><a class="admonition-anchor-link" href="user/solutions_apply/intro.html#admonition-autos"></a></p>
+</div>
+<div>
+<p>Auto-correlations are not read by default. Use <code>--autos</code> when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.</p>
+<p>Auto-correlations are not modified by <code>solutions-apply</code>.</p>
+</div>
+</div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="simple-usage-of-solutions-apply"><a class="header" href="#simple-usage-of-solutions-apply">Simple usage of solutions apply</a></h1>
 <div id="admonition-info" class="admonition admonish-info">
 <div class="admonition-title">
@@ -1116,6 +1136,7 @@ available.</p>
 <p><code>vis-convert</code> reads in visibilities and writes them out, performing whatever
 transformations were requested on the way (e.g. ignore autos, average to a
 particular time resolution, flag some tiles, etc.).</p>
+<p>Autos control: Auto-correlations are not read by default. Use <strong>--autos</strong> to include them when reading, and they will be written to the output. If <code>--autos</code> is not used (default), autos are not read and not written.</p>
 <div id="admonition-simple-examples" class="admonition admonish-info">
 <div class="admonition-title">
 <p>Simple examples</p>
@@ -1129,7 +1150,7 @@ particular time resolution, flag some tiles, etc.).</p>
 </code></pre>
 <pre><code class="language-shell">hyperdrive vis-convert \
     -d *.uvfits \
-    --no-autos \
+    --autos \
     -o hyp_converted.ms
 </code></pre>
 </div>
@@ -1176,6 +1197,14 @@ MWA coarse channels.</li>
 it's up to the caller to handle this if they want to.</p>
 <p>The frequencies to use for beam calculations are the coarse channel centers,
 1.28 MHz apart on MWA.</p>
+<h3 id="auto-correlations"><a class="header" href="#auto-correlations">Auto-correlations</a></h3>
+<p>By default, visibilities exclude auto-correlations when simulated. To include auto-correlations, use:</p>
+<pre><code class="language-shell">hyperdrive vis-simulate \
+  -s srclist.yaml \
+  -m *.metafits \
+  --output-autos
+</code></pre>
+<p>Including autos can increase file size; only enable them if needed.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="subtract-visibilities"><a class="header" href="#subtract-visibilities">Subtract visibilities</a></h1>
 <p><code>vis-subtract</code> can subtract the sky-model visibilities from calibrated data
 visibilities and write them out. This can be useful to see how well the sky
@@ -1202,6 +1231,16 @@ flowchart TD
         visibilities]
     end
 </pre>
+<div id="admonition-autos" class="admonition admonish-tip">
+<div class="admonition-title">
+<p>Autos</p>
+<p><a class="admonition-anchor-link" href="user/vis_subtract/intro.html#admonition-autos"></a></p>
+</div>
+<div>
+<p>Auto-correlations are not read by default. Use <code>--autos</code> when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.</p>
+<p>Auto-correlations are not modified by <code>vis-subtract</code>.</p>
+</div>
+</div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="peel-visibilities"><a class="header" href="#peel-visibilities">Peel visibilities</a></h1>
 <p><code>peel</code> can subtract the sky-model visibilities from calibrated data visibilities, and write them out like <a href="user/peel/../vis_subtract/intro.html">vis-subtract</a>, but it additionally solves for and applies the direction dependent effects of the ionosphere.</p>
 <div id="admonition-work-in-progress" class="admonition admonish-warning">
@@ -1211,6 +1250,16 @@ flowchart TD
 </div>
 <div>
 <p>Hyperdrive's <code>peel</code> implementation technically only performs ionospheric subtraction. For more on the distinction between the two, read on. Familiarity with the <code>vis-subtract</code> command is recommended.</p>
+</div>
+</div>
+<div id="admonition-autos" class="admonition admonish-tip">
+<div class="admonition-title">
+<p>Autos</p>
+<p><a class="admonition-anchor-link" href="user/peel/intro.html#admonition-autos"></a></p>
+</div>
+<div>
+<p>Auto-correlations are not read by default. Use <code>--autos</code> when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.</p>
+<p>Auto-correlations are not modified by <code>peel</code>.</p>
 </div>
 </div>
 <h2 id="example"><a class="header" href="#example">Example</a></h2>
@@ -1562,6 +1611,15 @@ two files simultaneously from <code>hyperdrive</code>.</p>
     --time-average 4 \
     --freq-average 2
 </code></pre>
+</div>
+</div>
+<div id="admonition-auto-correlations" class="admonition admonish-tip">
+<div class="admonition-title">
+<p>Auto-correlations</p>
+<p><a class="admonition-anchor-link" href="defs/vis_formats_write.html#admonition-auto-correlations"></a></p>
+</div>
+<div>
+<p>Auto-correlations are not read by default. Use <code>--autos</code> when reading input data to include them. All writers match the input: if input data includes auto-correlations, they are written to the output; if input data excludes them (default), they are not written. <code>vis-simulate</code> does not simulate auto-correlations by default; use <code>--output-autos</code> to include them.</p>
 </div>
 </div>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="metafits-files"><a class="header" href="#metafits-files">Metafits files</a></h1>

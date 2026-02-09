@@ -163,6 +163,7 @@
 <p><code>vis-convert</code> reads in visibilities and writes them out, performing whatever
 transformations were requested on the way (e.g. ignore autos, average to a
 particular time resolution, flag some tiles, etc.).</p>
+<p>Autos control: Auto-correlations are not read by default. Use <strong>--autos</strong> to include them when reading, and they will be written to the output. If <code>--autos</code> is not used (default), autos are not read and not written.</p>
 <div id="admonition-simple-examples" class="admonition admonish-info">
 <div class="admonition-title">
 <p>Simple examples</p>
@@ -176,7 +177,7 @@ particular time resolution, flag some tiles, etc.).</p>
 </code></pre>
 <pre><code class="language-shell">hyperdrive vis-convert \
     -d *.uvfits \
-    --no-autos \
+    --autos \
     -o hyp_converted.ms
 </code></pre>
 </div>

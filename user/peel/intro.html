@@ -170,6 +170,16 @@
 <p>Hyperdrive's <code>peel</code> implementation technically only performs ionospheric subtraction. For more on the distinction between the two, read on. Familiarity with the <code>vis-subtract</code> command is recommended.</p>
 </div>
 </div>
+<div id="admonition-autos" class="admonition admonish-tip">
+<div class="admonition-title">
+<p>Autos</p>
+<p><a class="admonition-anchor-link" href="#admonition-autos"></a></p>
+</div>
+<div>
+<p>Auto-correlations are not read by default. Use <code>--autos</code> when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.</p>
+<p>Auto-correlations are not modified by <code>peel</code>.</p>
+</div>
+</div>
 <h2 id="example"><a class="header" href="#example">Example</a></h2>
 <p>From the images below, it's clear that peeling 100 sources, rather than directly subtracting them
 results in a much cleaner image.</p>
