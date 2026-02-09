@@ -16,14 +16,28 @@ env:
 jobs:
   build-linux-release:
     name: Build release for Linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          [ -n "$AGENT_TOOLSDIRECTORY" ] && sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker system prune -af --volumes
+          sudo apt-get clean
+          df -h
       - name: Install dependencies
         run: |
           sudo apt update -y
@@ -68,9 +82,9 @@ jobs:
           cd ..
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.19
+        uses: Jimver/cuda-toolkit@v0.2.23
         with:
-          cuda: '12.4.1'
+          cuda: "12.4.1"
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -154,61 +168,61 @@ jobs:
     needs: [create-github-release]
     environment: CI
     steps:
-        - name: Checkout sources
-          uses: actions/checkout@v4
+      - name: Checkout sources
+        uses: actions/checkout@v4
 
-        - name: Install stable, minimal toolchain
-          uses: dtolnay/rust-toolchain@v1
-          with:
-            toolchain: stable
+      - name: Install stable, minimal toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
 
-        - name: Install dependencies
-          run: |
-            sudo apt update -y
-            sudo apt install -y \
-              tzdata \
-              build-essential \
-              pkg-config \
-              cmake \
-              curl \
-              git \
-              lcov \
-              libhdf5-dev \
-              libfreetype-dev \
-              libexpat1-dev \
-              libfontconfig-dev \
-              ;
-          env:
-            DEBIAN_FRONTEND: noninteractive
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            tzdata \
+            build-essential \
+            pkg-config \
+            cmake \
+            curl \
+            git \
+            lcov \
+            libhdf5-dev \
+            libfreetype-dev \
+            libexpat1-dev \
+            libfontconfig-dev \
+            ;
+        env:
+          DEBIAN_FRONTEND: noninteractive
 
-        # We install cfitsio because when releasing to crates.io, it runs
-        # the rust docs generation which fails if our code does any
-        # writing. With feature cfitsio-static, it has to build cfitsio which
-        # involves writing so have to build without that feature when pushing
-        # to crates.io
-        - name: Install cfitsio 3.49
-          run: |
-            curl "https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-3.49.tar.gz" -o cfitsio.tar.gz
-            tar -xf cfitsio.tar.gz
-            rm cfitsio.tar.gz
-            cd cfitsio-3.49
-            # Enabling SSE2/SSSE3 could cause portability problems, but it's unlikely that anyone
-            # is using such a CPU...
-            # https://stackoverflow.com/questions/52858556/most-recent-processor-without-support-of-ssse3-instructions
-            # Disabling curl just means you cannot fits_open() using a URL.
-            CFLAGS="-O3" ./configure --prefix=/usr/local --enable-reentrant --enable-sse2 --enable-ssse3 --disable-curl
+      # We install cfitsio because when releasing to crates.io, it runs
+      # the rust docs generation which fails if our code does any
+      # writing. With feature cfitsio-static, it has to build cfitsio which
+      # involves writing so have to build without that feature when pushing
+      # to crates.io
+      - name: Install cfitsio 3.49
+        run: |
+          curl "https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-3.49.tar.gz" -o cfitsio.tar.gz
+          tar -xf cfitsio.tar.gz
+          rm cfitsio.tar.gz
+          cd cfitsio-3.49
+          # Enabling SSE2/SSSE3 could cause portability problems, but it's unlikely that anyone
+          # is using such a CPU...
+          # https://stackoverflow.com/questions/52858556/most-recent-processor-without-support-of-ssse3-instructions
+          # Disabling curl just means you cannot fits_open() using a URL.
+          CFLAGS="-O3" ./configure --prefix=/usr/local --enable-reentrant --enable-sse2 --enable-ssse3 --disable-curl
 
-            make -j
-            sudo make install
-            sudo ldconfig
+          make -j
+          sudo make install
+          sudo ldconfig
 
-            cd ..
-            rm -rf cfitsio-3.49
+          cd ..
+          rm -rf cfitsio-3.49
 
-        - name: Build on latest stable rust
-          run: cargo build --release
+      - name: Build on latest stable rust
+        run: cargo build --release
 
-        - uses: katyo/publish-crates@v2
-          with:
-              registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-              args: --no-verify
+      - uses: katyo/publish-crates@v2
+        with:
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          args: --no-verify
