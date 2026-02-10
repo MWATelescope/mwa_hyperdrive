@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+- Support for the "mwa_pb" and "RTS" analytic beams.
+
+### Changed
+- The beam subcommand now takes a beam type with the -b or --beam-type flag.
+
+### Fixed
+- Using the beam subcommand would fail to set up an FEE beam if MWA_BEAM_FILE
+  was not set.
+
 ## [0.7.0] - 2026-02-09
 
 ### Fixed

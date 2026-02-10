@@ -468,8 +468,9 @@ impl From<BeamError> for HyperdriveError {
             | BeamError::DelayGainsDimensionMismatch { .. } => Self::Delays(s),
             BeamError::Unrecognised(_)
             | BeamError::BadTileIndex { .. }
-            | BeamError::Hyperbeam(_)
-            | BeamError::HyperbeamInit(_) => Self::Beam(s),
+            | BeamError::HyperbeamFee(_)
+            | BeamError::HyperbeamInitFee(_)
+            | BeamError::HyperbeamAnalytic(_) => Self::Beam(s),
             #[cfg(any(feature = "cuda", feature = "hip"))]
             BeamError::Gpu(_) => Self::Beam(s),
         }
