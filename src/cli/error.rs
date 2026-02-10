@@ -173,6 +173,7 @@ impl From<PeelArgsError> for HyperdriveError {
         match e {
             PeelArgsError::NoOutput
             | PeelArgsError::TooManyIonoSub { .. }
+            | PeelArgsError::TooManyPeel { .. }
             | PeelArgsError::ZeroPasses
             | PeelArgsError::ZeroLoops
             | PeelArgsError::ParseIonoTimeAverageFactor(_)
