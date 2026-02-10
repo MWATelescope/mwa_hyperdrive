@@ -405,7 +405,7 @@ impl UvfitsReader {
                 }
                 let diff = window[1] - window[0];
                 let diff_mod = diff.total_nanoseconds() % time_res.total_nanoseconds();
-                println!(
+                debug!(
                     "nanoseconds: {}, time_res: {}, mod: {}",
                     diff.total_nanoseconds(),
                     time_res.total_nanoseconds(),
