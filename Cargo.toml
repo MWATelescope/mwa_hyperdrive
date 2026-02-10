@@ -58,7 +58,9 @@ cuda-static = ["mwa_hyperbeam/cuda-static"]
 all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.18.0", default-features = false }
+birli = { version = "0.18.1", default-features = false, features = [
+    "aoflagger",
+] }
 bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
@@ -138,9 +140,9 @@ harness = false
 
 [patch.crates-io]
 url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
-half = { git = "https://github.com/VoidStarKat/half-rs", tag="v2.2.1" }
+half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
 # birli = { path = "../Birli" }
-# birli = { git = "https://github.com/MWATelescope/Birli" }
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "bmetrics" }
 # marlu = { path = "../Marlu" }
 # marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
 # mwalib = { path = "../mwalib" }

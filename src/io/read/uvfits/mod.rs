@@ -400,7 +400,17 @@ impl UvfitsReader {
         // resolution.
         if let Some(time_res) = time_res {
             for (i_pair, window) in timestamps.windows(2).enumerate() {
+                if i_pair == 0 {
+                    continue;
+                }
                 let diff = window[1] - window[0];
+                let diff_mod = diff.total_nanoseconds() % time_res.total_nanoseconds();
+                println!(
+                    "nanoseconds: {}, time_res: {}, mod: {}",
+                    diff.total_nanoseconds(),
+                    time_res.total_nanoseconds(),
+                    diff_mod,
+                );
                 if diff.total_nanoseconds() % time_res.total_nanoseconds() != 0 {
                     return Err(UvfitsReadError::IrregularTimestamps {
                         what_we_think_is_the_time_res: time_res,
