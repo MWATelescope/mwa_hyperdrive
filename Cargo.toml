@@ -42,6 +42,9 @@ gpu-single = ["mwa_hyperbeam/gpu-single"]
 # Enable plotting.
 plotting = ["plotters"]
 
+# Bmetrics subcommand and birli aoflagger (FlagContext, metrics).
+bmetrics = ["birli/aoflagger"]
+
 # Use dlopen to find libfontconfig at runtime.
 fontconfig-dlopen = ["plotters/fontconfig-dlopen"]
 
@@ -58,9 +61,7 @@ cuda-static = ["mwa_hyperbeam/cuda-static"]
 all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.18.1", default-features = false, features = [
-    "aoflagger",
-] }
+birli = { version = "0.18.1", default-features = false }
 bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
