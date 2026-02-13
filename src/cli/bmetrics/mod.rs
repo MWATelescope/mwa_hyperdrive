@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::common::ARG_FILE_HELP;
 use crate::cli::HyperdriveError;
-use crate::io::read::{CrossData, UvfitsReader, VisRead};
+use crate::io::read::{CrossData, MsReader, UvfitsReader, VisRead};
 use crate::math::TileBaselineFlags;
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -28,8 +28,10 @@ pub(crate) struct BmetricsArgs {
     #[clap(name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str(), parse(from_os_str))]
     args_file: Option<PathBuf>,
 
-    /// Input data files: For raw MWA data, provide metafits file followed by gpubox files.
-    /// For UVFITS, provide a single UVFITS file (requires --metafits as well).
+    /// Input data files:
+    /// - Raw MWA data: provide metafits file followed by gpubox files.
+    /// - UVFITS: provide a single UVFITS file.
+    /// - Measurement Set: provide a single `.ms` directory.
     #[clap(short, long = "data", required = true, multiple_values = true)]
     data: Vec<PathBuf>,
 
@@ -90,16 +92,30 @@ impl BmetricsArgs {
             ));
         }
 
-        // Check if first file looks like UVFITS
-        let first_file_str = self.data[0].to_str().unwrap_or("");
+        // Detect input type from the first path.
+        let first_path = &self.data[0];
+        let first_file_str = first_path.to_str().unwrap_or("");
+
+        // UVFITS (single file)
         if first_file_str.ends_with(".uvfits") || first_file_str.contains(".uvfits.") {
             if self.data.len() > 1 {
                 return Err(HyperdriveError::Generic(
                     "UVFITS input should be a single file".to_string(),
                 ));
             }
-            info!("Reading UVFITS file: {:?}", &self.data[0]);
-            return self.run_from_uvfits(&self.data[0]);
+            info!("Reading UVFITS file: {:?}", first_path);
+            return self.run_from_uvfits(first_path);
+        }
+
+        // Measurement Set (directory ending in .ms)
+        if first_file_str.ends_with(".ms") {
+            if self.data.len() > 1 {
+                return Err(HyperdriveError::Generic(
+                    "Measurement set input should be a single .ms directory".to_string(),
+                ));
+            }
+            info!("Reading measurement set: {:?}", first_path);
+            return self.run_from_ms(first_path);
         }
 
         if self.data.len() < 2 {
@@ -160,6 +176,147 @@ impl BmetricsArgs {
             &corr_ctx,
             &vis_sel,
             &flag_ctx,
+        )
+    }
+
+    fn run_from_ms(&self, ms_path: &PathBuf) -> Result<(), HyperdriveError> {
+        warn!("========================================================================");
+        warn!("Reading measurement set for metrics calculation");
+        warn!("Note: Receiver metadata (type, slot, cable) may not be available from MS");
+        warn!("========================================================================");
+
+        let reader = MsReader::new(ms_path.clone(), None, self.metafits.as_deref(), None)
+            .map_err(|e| HyperdriveError::VisRead(e.to_string()))?;
+
+        let obs_context = reader.get_obs_context();
+        let num_timesteps = obs_context.all_timesteps.len();
+        let num_freqs = obs_context.fine_chan_freqs.len();
+        let num_tiles = obs_context.tile_names.len();
+        let num_cross_baselines = num_tiles * (num_tiles - 1) / 2;
+        let num_baselines = num_tiles * (num_tiles + 1) / 2;
+
+        info!(
+            "MS contains {} antennas, {} timesteps, {} channels",
+            num_tiles, num_timesteps, num_freqs
+        );
+
+        // Storage in (time, freq, baseline) with baseline axis in upper-triangular
+        // (including autos) order: (0,0),(0,1)...(0,n-1),(1,1),(1,2)...
+        let mut jones_array =
+            Array3::<Jones<f32>>::zeros((num_timesteps, num_freqs, num_baselines));
+
+        // Build a TileBaselineFlags with no tiles flagged. (The MS reader will still
+        // apply any per-row/per-channel flags when populating weights/flags.)
+        let tile_baseline_flags = TileBaselineFlags::new(num_tiles, HashSet::new());
+
+        // Temporary buffers for each timestep.
+        let mut cross_vis_fb = Array2::<Jones<f32>>::zeros((num_freqs, num_cross_baselines));
+        let mut cross_weights_fb = Array2::<f32>::zeros((num_freqs, num_cross_baselines));
+        let mut auto_vis_fb = Array2::<Jones<f32>>::zeros((num_freqs, num_tiles));
+        let mut auto_weights_fb = Array2::<f32>::zeros((num_freqs, num_tiles));
+
+        // Helper: baseline index for (i,j) with i<=j in the packed upper triangle.
+        #[inline]
+        fn bl_index(i: usize, j: usize, n: usize) -> usize {
+            debug_assert!(i <= j);
+            let tri = if i == 0 { 0 } else { (i * (i - 1)) / 2 };
+            i * n - tri + (j - i)
+        }
+
+        info!("Reading visibility data from measurement set...");
+        for t_idx in 0..num_timesteps {
+            // Clear buffers (reader adds into existing arrays in some paths).
+            cross_vis_fb.fill(Jones::default());
+            cross_weights_fb.fill(0.0);
+            auto_vis_fb.fill(Jones::default());
+            auto_weights_fb.fill(0.0);
+
+            reader.read_crosses_and_autos(
+                cross_vis_fb.view_mut(),
+                cross_weights_fb.view_mut(),
+                auto_vis_fb.view_mut(),
+                auto_weights_fb.view_mut(),
+                t_idx,
+                &tile_baseline_flags,
+                &HashSet::new(),
+            )?;
+
+            // Autos
+            for ant in 0..num_tiles {
+                let b = bl_index(ant, ant, num_tiles);
+                jones_array
+                    .slice_mut(s![t_idx, .., b])
+                    .assign(&auto_vis_fb.slice(s![.., ant]));
+            }
+
+            // Crosses
+            for bl in 0..num_cross_baselines {
+                let (i, j) = marlu::math::cross_correlation_baseline_to_tiles(num_tiles, bl);
+                let b = bl_index(i, j, num_tiles);
+                jones_array
+                    .slice_mut(s![t_idx, .., b])
+                    .assign(&cross_vis_fb.slice(s![.., bl]));
+            }
+        }
+
+        // Build MetricsContext from MS metadata.
+        let antennas: Vec<AntennaMetadata> = obs_context
+            .tile_xyzs
+            .iter()
+            .zip(obs_context.tile_names.iter())
+            .enumerate()
+            .map(|(idx, (xyz, name))| AntennaMetadata {
+                tile_name: name.clone(),
+                tile_id: idx as u32 + 1,
+                ant_id: idx as u32,
+                east_m: xyz.x as f64,
+                north_m: xyz.y as f64,
+                height_m: xyz.z as f64,
+                // Receiver info generally isn't stored in MS in a way we can rely on.
+                rec_number: 0,
+                rec_slot_number: 0,
+                rec_type: "Unknown".to_string(),
+                cable_flavour: "Unknown".to_string(),
+                has_whitening_filter: false,
+            })
+            .collect();
+
+        let fine_chan_freqs_hz: Vec<f64> = obs_context
+            .fine_chan_freqs
+            .iter()
+            .map(|&f| f as f64)
+            .collect();
+
+        let timestamps_s: Vec<f64> = obs_context
+            .timestamps
+            .iter()
+            .map(|epoch| epoch.to_gpst_seconds())
+            .collect();
+
+        let mut antenna_pairs = Vec::with_capacity(num_baselines);
+        for i in 0..num_tiles {
+            for j in i..num_tiles {
+                antenna_pairs.push((i, j));
+            }
+        }
+
+        let metrics_ctx = MetricsContext {
+            antennas,
+            fine_chan_freqs_hz,
+            timestamps_s,
+            antenna_pairs,
+        };
+
+        // For now, treat everything as unflagged (birli metrics uses these for bookkeeping).
+        let timestep_flags = vec![false; num_timesteps];
+        let chan_flags = vec![false; num_freqs];
+
+        info!("Calculating metrics from measurement set data...");
+        self.calculate_and_save_metrics_from_context(
+            jones_array.view(),
+            &metrics_ctx,
+            &timestep_flags,
+            &chan_flags,
         )
     }
 
