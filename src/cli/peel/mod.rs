@@ -122,7 +122,6 @@ pub(crate) struct PeelCliArgs {
     #[clap(long, help = OUTPUT_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub(super) output_vis_freq_average: Option<String>,
 
-
     /// When writing out visibilities, rather than writing out the entire input
     /// bandwidth, write out only the smallest contiguous band. e.g. Typical 40
     /// kHz MWA data has 768 channels, but the first 2 and last 2 channels are
