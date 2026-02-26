@@ -628,21 +628,16 @@ impl MsReader {
             }
         };
 
-        let num_fine_chans_per_coarse_chan = {
+        let num_fine_chans_per_coarse_chan = if mwa_coarse_chan_nums.is_some() {
             let n = (1.28e6 / freq_res).round() as u16;
-            Some(NonZeroU16::new(n).expect("is not 0"))
+            let v = Some(NonZeroU16::new(n).expect("is not 0"));
+            debug!("MWA coarse channel numbers: {:?}", mwa_coarse_chan_nums.as_ref().unwrap());
+            debug!("num_fine_chans_per_coarse_chan: {}", n);
+            v
+        } else {
+            debug!("This doesn't appear to be MWA data; no MWA coarse channels described");
+            None
         };
-
-        match (
-            mwa_coarse_chan_nums.as_ref(),
-            num_fine_chans_per_coarse_chan,
-        ) {
-            (Some(mwa_ccs), Some(n)) => {
-                debug!("MWA coarse channel numbers: {mwa_ccs:?}");
-                debug!("num_fine_chans_per_coarse_chan: {n}");
-            }
-            _ => debug!("This doesn't appear to be MWA data; no MWA coarse channels described"),
-        }
 
         // Get other metadata.
         let obsid: Option<u32> = {
@@ -814,7 +809,7 @@ impl MsReader {
                         let i_offset: u16 = ((offset_hz / freq_res).round() as i32
                             + i32::from(num_fine_chans_per_coarse_chan) / 2)
                             .try_into()
-                            .expect("smaller than u16::MAX");
+                            .unwrap_or(u16::MAX);
                         (i_chan, i_offset, cc_num as u32)
                     })
                     .collect::<Vec<_>>();
