@@ -7,7 +7,7 @@
 
 
         <!-- Custom HTML head -->
-
+        
         <meta name="description" content="mwa_hyperdrive documentation">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -30,6 +30,7 @@
 
         <!-- Custom theme stylesheets -->
         <link rel="stylesheet" href="../../././theme/css/mdbook-admonish.css">
+        <link rel="stylesheet" href="../.././mdbook-admonish.css">
 
         <!-- MathJax -->
         <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
@@ -102,7 +103,7 @@
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                <div id="menu-bar-hover-placeholder"></div>
+                                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -181,12 +182,10 @@ flowchart TD
         Apply--&gt;Write[fa:fa-save Write timeblock\nvisibilities]
     end
 </pre>
-<div id="admonition-autos" class="admonition admonish-tip" role="note" aria-labelledby="admonition-autos-title">
+<div id="admonition-autos" class="admonition admonish-tip">
 <div class="admonition-title">
-<div id="admonition-autos-title">
 <p>Autos</p>
-</div>
-<a class="admonition-anchor-link" href="#admonition-autos"></a>
+<p><a class="admonition-anchor-link" href="#admonition-autos"></a></p>
 </div>
 <div>
 <p>Auto-correlations are not read by default. Use <code>--autos</code> when reading input data to include them. Outputs match the input: if input data includes auto-correlations, they are written; if input data excludes them (default), they are not written.</p>
