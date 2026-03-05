@@ -26,7 +26,9 @@ jobs:
           mdbook-admonish install
           mdbook build
           mdbook test
-      - uses: JamesIves/github-pages-deploy-action@4.1.7
+      - uses: JamesIves/github-pages-deploy-action@4.6.1
         with:
           branch: gh-pages
           folder: ./mdbook/book/html
+          clean: false
+          single-commit: false
