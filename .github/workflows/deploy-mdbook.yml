@@ -16,7 +16,7 @@ jobs:
           profile: minimal
       - name: Install mdBook
         run: |
-          (test -x $HOME/.cargo/bin/mdbook || cargo install mdbook --version 0.4.40)
+          (test -x $HOME/.cargo/bin/mdbook || cargo install mdbook --version 0.4.43)
           cargo install mdbook-linkcheck --version 0.7.7
           cargo install mdbook-mermaid --version 0.13.0
           cargo install mdbook-admonish --version 1.16.0
