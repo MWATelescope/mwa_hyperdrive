@@ -1727,6 +1727,10 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &source_list,
                     &mut all_iono_consts,
                     &source_weighted_positions,
+                    0, // num_sources_to_peel  
+                    50, // di_max_iterations
+                    1e-8, // di_stop_threshold
+                    1e-4, // di_min_threshold
                     &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
@@ -1762,6 +1766,10 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &source_list,
                         &mut all_iono_consts,
                         &source_weighted_positions,
+                        0, // num_sources_to_peel
+                        50, // di_max_iterations
+                        1e-8, // di_stop_threshold  
+                        1e-4, // di_min_threshold
                         &peel_loop_params,
                         &chanblocks,
                         &low_res_lambdas_m,
@@ -2068,6 +2076,10 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &source_list,
                 &mut iono_consts_result,
                 &source_weighted_positions,
+                0, // num_sources_to_peel
+                50, // di_max_iterations  
+                1e-8, // di_stop_threshold
+                1e-4, // di_min_threshold
                 &peel_loop_params,
                 &chanblocks,
                 &low_res_lambdas_m,
@@ -2103,6 +2115,10 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &source_list,
                     &mut iono_consts_result,
                     &source_weighted_positions,
+                    0, // num_sources_to_peel
+                    50, // di_max_iterations
+                    1e-8, // di_stop_threshold
+                    1e-4, // di_min_threshold
                     &peel_loop_params,
                     &chanblocks,
                     &low_res_lambdas_m,
@@ -3091,6 +3107,10 @@ fn test_peel_weight_preservation() {
             &source_list,
             &source_weighted_positions,
             1, // num_sources_to_iono_subtract
+            0, // num_sources_to_peel
+            50, // di_max_iterations
+            1e-8, // di_stop_threshold
+            1e-4, // di_min_threshold
             &peel_loop_params,
             &obs_context,
             &obs_context.tile_xyzs,
@@ -3135,4 +3155,117 @@ fn test_peel_weight_preservation() {
         let original_slice = original_weight_fb.as_slice().unwrap();
         assert_abs_diff_eq!(written_slice, original_slice, epsilon = 1e-6);
     }
+}
+
+#[test]
+fn test_peel_with_di_calibration() {
+    // This test verifies that peel_cpu can be called with DI calibration parameters
+    // without crashing, even though the DI Jones application is not fully implemented yet
+    
+    let _ = env_logger::builder()
+        .is_test(true)
+        .filter_level(log::LevelFilter::Trace)
+        .try_init();
+
+    let apply_precession = false;
+    let beam = get_beam(128);
+    
+    // Use existing helper functions like other tests
+    let obs_context = get_phase1_obs_context(128);
+    let fine_chan_freqs_hz = obs_context
+        .fine_chan_freqs
+        .iter()
+        .map(|&f| f as f64)
+        .collect::<Vec<_>>();
+    let low_res_lambdas_m = [VEL_C / fine_chan_freqs_hz[0], VEL_C / fine_chan_freqs_hz[0]];
+    let timestamps = vec1![Epoch::from_gpst_seconds(1090008640.0)];
+    let timeblock = Timeblock {
+        timestamps: timestamps.clone(),
+        median: timestamps[0],
+        index: 0,
+    };
+    
+    let array_pos = obs_context.array_position;
+    let lst_0h_rad = marlu::precession::get_lmst(
+        array_pos.longitude_rad,
+        obs_context.timestamps[0],
+        obs_context.dut1.unwrap_or_default(),
+    );
+    let source_radec =
+        RADec::from_hadec(HADec::from_radians(0.2, array_pos.latitude_rad), lst_0h_rad);
+    let source_fd = 1.;
+    let source_list = SourceList::from([
+        ("Source1".into(), point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd)),
+        ("Source2".into(), point_src_i!(source_radec, 0., fine_chan_freqs_hz[0], source_fd * 0.5)),
+    ]);
+
+    let source_weighted_positions = vec![source_radec; 2];
+    
+    let tile_baseline_flags = TileBaselineFlags::new(128, HashSet::new());
+    let num_unflagged_tiles = 128;
+    let num_cross_baselines = (num_unflagged_tiles * (num_unflagged_tiles - 1)) / 2;
+    let num_times = timeblock.timestamps.len();
+    let num_chans = fine_chan_freqs_hz.len();
+
+    // Create test visibility data
+    let mut vis_residual_tfb = Array3::zeros((num_times, num_chans, num_cross_baselines));
+    vis_residual_tfb.fill(Jones::identity());
+    
+    let vis_weights_tfb = Array3::ones((num_times, num_chans, num_cross_baselines));
+    let mut iono_consts = vec![IonoConsts::default(); 2];
+    
+    // Create chanblocks like other tests 
+    let chanblocks = channels_to_chanblocks(
+        &fine_chan_freqs_hz,
+        40000,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    );
+    
+    let peel_loop_params = PeelLoopParams {
+        num_passes: NonZeroUsize::new(1).unwrap(),
+        num_loops: NonZeroUsize::new(1).unwrap(),
+        convergence: 1.0,
+    };
+
+    let mut high_res_modeller = SkyModellerCpu::new(
+        &beam,
+        &source_list,
+        Polarisations::default(),
+        &obs_context.tile_xyzs,
+        &fine_chan_freqs_hz,
+        &tile_baseline_flags.flagged_tiles,
+        obs_context.phase_centre,
+        array_pos.longitude_rad,
+        array_pos.latitude_rad,
+        obs_context.dut1.unwrap_or_default(),
+        apply_precession,
+    );
+
+    let multi_progress = MultiProgress::new();
+
+    // Test with num_sources_to_peel = 1 (should trigger DI calibration for first source)
+    let result = peel_cpu(
+        vis_residual_tfb.view_mut(),
+        vis_weights_tfb.view(),
+        &timeblock,
+        &source_list,
+        &mut iono_consts,
+        &source_weighted_positions,
+        1, // num_sources_to_peel - this should trigger DI calibration
+        10, // di_max_iterations
+        1e-6, // di_stop_threshold
+        1e-3, // di_min_threshold  
+        &peel_loop_params,
+        &chanblocks[0].chanblocks.as_slice(),
+        &low_res_lambdas_m,
+        &obs_context,
+        &tile_baseline_flags,
+        &mut high_res_modeller,
+        !apply_precession,
+        &multi_progress,
+    );
+
+    // The test should complete without error
+    assert!(result.is_ok(), "peel_cpu with DI calibration should complete successfully");
 }

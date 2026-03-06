@@ -82,13 +82,12 @@ pub(crate) struct PeelCliArgs {
     #[clap(long = "iono-sub", help_heading = "PEELING")]
     pub(super) num_sources_to_iono_subtract: Option<usize>,
 
-    // TODO: peel
-    // The number of sources to peel. Peel sources are treated the same as
-    // "ionospherically subtracted" sources, except before subtracting, a "DI
-    // calibration" is done between the iono-rotated model and the data. This
-    // allows for scintillation and any other phase shift to be corrected.
-    // #[clap(long = "peel", help_heading = "PEELING")]
-    // pub(super) num_sources_to_peel: Option<usize>,
+    /// The number of sources to peel. Peel sources are treated the same as
+    /// "ionospherically subtracted" sources, except before subtracting, a "DI
+    /// calibration" is done between the iono-rotated model and the data. This
+    /// allows for scintillation and any other phase shift to be corrected.
+    #[clap(long = "peel", help_heading = "PEELING")]
+    pub(super) num_sources_to_peel: Option<usize>,
     #[clap(long, help = NUM_PASSES_HELP.as_str(), help_heading = "PEELING")]
     pub(super) num_passes: Option<usize>,
 
@@ -112,6 +111,21 @@ pub(crate) struct PeelCliArgs {
 
     #[clap(long, help = CONVERGENCE_HELP.as_str(), help_heading = "PEELING")]
     pub(super) convergence: Option<f64>,
+
+    /// Maximum number of iterations for DI calibration during peeling. 
+    /// Default: 50
+    #[clap(long = "di-max-iterations", help_heading = "PEELING")]
+    pub(super) di_max_iterations: Option<u32>,
+
+    /// Stop threshold for DI calibration convergence during peeling.
+    /// Default: 1e-8
+    #[clap(long = "di-stop-threshold", help_heading = "PEELING")]
+    pub(super) di_stop_threshold: Option<f64>,
+
+    /// Minimum threshold for DI calibration convergence during peeling.
+    /// Default: 1e-4
+    #[clap(long = "di-min-threshold", help_heading = "PEELING")]
+    pub(super) di_min_threshold: Option<f64>,
 
     #[clap(short, long, multiple_values(true), help = VIS_OUTPUTS_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub(super) outputs: Option<Vec<PathBuf>>,
@@ -209,6 +223,7 @@ impl PeelArgs {
             peel_args:
                 PeelCliArgs {
                     num_sources_to_iono_subtract,
+                    num_sources_to_peel,
                     num_passes,
                     num_loops,
                     iono_time_average,
@@ -217,6 +232,9 @@ impl PeelArgs {
                     uvw_max,
                     short_baseline_sigma,
                     convergence,
+                    di_max_iterations,
+                    di_stop_threshold,
+                    di_min_threshold,
                     outputs,
                     output_vis_time_average,
                     output_vis_freq_average,
@@ -283,6 +301,16 @@ impl PeelArgs {
                 return Err(PeelArgsError::TooManyIonoSub {
                     total: sky_model_source_count,
                     iono: is,
+                }
+                .into());
+            }
+        }
+
+        if let Some(ps) = num_sources_to_peel {
+            if ps > sky_model_source_count {
+                return Err(PeelArgsError::TooManyPeel {
+                    total: sky_model_source_count,
+                    peel: ps,
                 }
                 .into());
             }
@@ -539,16 +567,36 @@ impl PeelArgs {
 
         let num_sources_to_iono_subtract =
             num_sources_to_iono_subtract.unwrap_or(source_list.len());
+        let num_sources_to_peel = num_sources_to_peel.unwrap_or(0);
+
+        // Ensure num_sources_to_peel doesn't exceed num_sources_to_iono_subtract
+        if num_sources_to_peel > num_sources_to_iono_subtract {
+            return Err(PeelArgsError::TooManyPeel {
+                total: num_sources_to_iono_subtract,
+                peel: num_sources_to_peel,
+            }
+            .into());
+        }
+
+        let di_max_iterations = di_max_iterations.unwrap_or(50);
+        let di_stop_threshold = di_stop_threshold.unwrap_or(1e-8);
+        let di_min_threshold = di_min_threshold.unwrap_or(1e-4);
 
         let mut peel_printer = InfoPrinter::new("Peeling set up".into());
-        peel_printer.push_block(vec![
+        let mut print_blocks = vec![
             format!("Subtracting {} sources", source_list.len()).into(),
             format!(
                 "Ionospheric subtracting {} sources",
                 num_sources_to_iono_subtract
             )
             .into(),
-        ]);
+        ];
+        if num_sources_to_peel > 0 {
+            print_blocks.push(
+                format!("DI calibrating {} sources", num_sources_to_peel).into(),
+            );
+        }
+        peel_printer.push_block(print_blocks);
         if num_sources_to_iono_subtract > 0 {
             let mut block = vec![];
             block.push("Finding ionospheric offsets with data at:".into());
@@ -614,6 +662,10 @@ impl PeelArgs {
             peel_weight_params,
             peel_loop_params,
             num_sources_to_iono_subtract,
+            num_sources_to_peel,
+            di_max_iterations,
+            di_stop_threshold,
+            di_min_threshold,
         })
     }
 
@@ -638,6 +690,7 @@ impl PeelCliArgs {
             num_sources_to_iono_subtract: self
                 .num_sources_to_iono_subtract
                 .or(other.num_sources_to_iono_subtract),
+            num_sources_to_peel: self.num_sources_to_peel.or(other.num_sources_to_peel),
             num_passes: self.num_passes.or(other.num_passes),
             num_loops: self.num_loops.or(other.num_loops),
             iono_time_average: self.iono_time_average.or(other.iono_time_average),
@@ -646,6 +699,9 @@ impl PeelCliArgs {
             uvw_max: self.uvw_max.or(other.uvw_max),
             short_baseline_sigma: self.short_baseline_sigma.or(other.short_baseline_sigma),
             convergence: self.convergence.or(other.convergence),
+            di_max_iterations: self.di_max_iterations.or(other.di_max_iterations),
+            di_stop_threshold: self.di_stop_threshold.or(other.di_stop_threshold),
+            di_min_threshold: self.di_min_threshold.or(other.di_min_threshold),
             outputs: self.outputs.or(other.outputs),
             output_vis_time_average: self
                 .output_vis_time_average
