@@ -20,6 +20,34 @@ use vec1::Vec1;
 
 use crate::{beam::Delays, io::read::VisInputType};
 
+/// Explicit telescope-specific processing routes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum Telescope {
+    /// Preserve the existing Hyperdrive behaviour.
+    #[default]
+    Standard,
+
+    /// Activate the 21CMA-specific processing route.
+    Cma21,
+}
+
+impl Telescope {
+    pub(crate) fn parse_cli(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "standard" | "default" | "mwa" => Some(Self::Standard),
+            "21cma" | "cma21" => Some(Self::Cma21),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Cma21 => "21cma",
+        }
+    }
+}
+
 /// Currently supported polarisations.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 #[allow(non_camel_case_types)]
@@ -190,9 +218,9 @@ pub(crate) struct ObsContext {
     /// All of the fine-channel frequencies within the data \[Hz\]. The values
     /// reflect the frequencies at the *centre* of each channel.
     ///
-    /// These are kept as ints to help some otherwise error-prone calculations
-    /// using floats. By using ints, we assume there is no sub-Hz structure.
-    pub(crate) fine_chan_freqs: Vec1<u64>,
+    /// These are kept as floats so the supplied channel centres are preserved,
+    /// even when they are not integer-Hz values.
+    pub(crate) fine_chan_freqs: Vec1<f64>,
 
     /// The flagged fine channels for each baseline in the supplied data. Zero
     /// indexed.
@@ -214,17 +242,13 @@ impl ObsContext {
         self.tile_xyzs.len()
     }
 
-    /// Return all frequencies within the fine frequency channel range that are
-    /// multiples of 1.28 MHz.
+    /// Return the MWA coarse-channel centre frequencies used for source-veto
+    /// calculations. Non-MWA observations intentionally return an empty list.
     pub(crate) fn get_veto_freqs(&self) -> Vec<f64> {
-        let mut veto_freqs = self.fine_chan_freqs.clone();
-        veto_freqs.sort_unstable();
-        let mut veto_freqs: Vec<f64> = veto_freqs
-            .into_iter()
-            .map(|f| (f as f64 / 1.28e6).round() * 1.28e6)
-            .collect();
-        veto_freqs.dedup();
-        veto_freqs
+        self.mwa_coarse_chan_nums
+            .as_ref()
+            .map(|ccs| ccs.iter().map(|&cc| f64::from(cc) * 1.28e6).collect())
+            .unwrap_or_default()
     }
 
     /// Print information on the indices, names and statuses of all of the tiles

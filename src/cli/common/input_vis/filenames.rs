@@ -128,6 +128,7 @@ fn exists_and_is_readable(file: &Path) -> Result<(), InputVisArgsError> {
 // on the glob results.
 fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), InputVisArgsError> {
     let file_pb = PathBuf::from(file);
+    let file_lower = file.to_ascii_lowercase();
     // Is this a file, and is it readable?
     match exists_and_is_readable(&file_pb) {
         Ok(_) => (),
@@ -158,16 +159,16 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         // Propagate all other errors.
         Err(e) => return Err(e),
     };
-    if file.contains("_metafits_ppds.fits") {
+    if file_lower.contains("_metafits_ppds.fits") {
         return Err(InputVisArgsError::PpdMetafitsUnsupported(file.to_string()));
     }
     match (
-        file.ends_with(".metafits") || file.ends_with("_metafits.fits"),
+        file_lower.ends_with(".metafits") || file_lower.ends_with("_metafits.fits"),
         RE_GPUBOX.is_match(file),
         RE_MWAX.is_match(file),
-        file.ends_with(".mwaf"),
-        file.ends_with(".ms"),
-        file.ends_with(".uvfits"),
+        file_lower.ends_with(".mwaf"),
+        file_lower.ends_with(".ms"),
+        file_lower.ends_with(".uvfits"),
     ) {
         (true, false, false, false, false, false) => file_types.metafits.push(file_pb),
         (false, true, false, false, false, false) => file_types.gpuboxes.push(file_pb),
@@ -178,7 +179,7 @@ fn file_checker(file_types: &mut InputDataTypesTemp, file: &str) -> Result<(), I
         _ => {
             // We don't recognise this file as a "vis input" type. Try to match
             // a calibration solutions type.
-            if file.ends_with(".fits") || file.ends_with(".bin") {
+            if file_lower.ends_with(".fits") || file_lower.ends_with(".bin") {
                 file_types.solutions.push(file_pb);
             } else {
                 // If that doesn't work, bail out.
@@ -217,12 +218,24 @@ mod tests {
         make_file(dir, "_metafits.fits")
     }
 
+    fn make_metafits_upper(dir: &Path) -> TempPath {
+        make_file(dir, ".METAFITS")
+    }
+
     fn make_ms(dir: &Path) -> TempPath {
         make_file(dir, ".ms")
     }
 
+    fn make_ms_upper(dir: &Path) -> TempPath {
+        make_file(dir, ".MS")
+    }
+
     fn make_uvfits(dir: &Path) -> TempPath {
         make_file(dir, ".uvfits")
+    }
+
+    fn make_uvfits_upper(dir: &Path) -> TempPath {
+        make_file(dir, ".UVFITS")
     }
 
     fn make_legacy_gpubox(dir: &Path) -> TempPath {
@@ -336,6 +349,13 @@ mod tests {
         let result = file_checker(&mut input, metafits.to_str().unwrap());
         assert!(result.is_ok());
         assert_eq!(input.metafits.len(), 1);
+
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let metafits = make_metafits_upper(dir.path());
+        let result = file_checker(&mut input, metafits.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.metafits.len(), 1);
     }
 
     #[test]
@@ -346,6 +366,13 @@ mod tests {
         let result = file_checker(&mut input, ms.to_str().unwrap());
         assert!(result.is_ok());
         assert_eq!(input.ms.len(), 1);
+
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let ms = make_ms_upper(dir.path());
+        let result = file_checker(&mut input, ms.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.ms.len(), 1);
     }
 
     #[test]
@@ -353,6 +380,13 @@ mod tests {
         let mut input = InputDataTypesTemp::default();
         let dir = make_new_dir();
         let uvfits = make_uvfits(dir.path());
+        let result = file_checker(&mut input, uvfits.to_str().unwrap());
+        assert!(result.is_ok());
+        assert_eq!(input.uvfits.len(), 1);
+
+        let mut input = InputDataTypesTemp::default();
+        let dir = make_new_dir();
+        let uvfits = make_uvfits_upper(dir.path());
         let result = file_checker(&mut input, uvfits.to_str().unwrap());
         assert!(result.is_ok());
         assert_eq!(input.uvfits.len(), 1);

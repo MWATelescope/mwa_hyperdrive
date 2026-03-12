@@ -32,6 +32,7 @@ use super::common::{
 use crate::{
     beam::Delays,
     cli::common::InfoPrinter,
+    context::Telescope,
     io::write::VIS_OUTPUT_EXTENSIONS,
     math::TileBaselineFlags,
     metafits::{get_dipole_delays, get_dipole_gains},
@@ -568,6 +569,7 @@ impl VisSimulateArgs {
             time_res,
             freq_res,
             &timestamps,
+            Telescope::Standard,
             false,
             DEFAULT_OUTPUT_VIS_FILENAME,
             Some("simulated"),

@@ -478,17 +478,14 @@ impl UvfitsReader {
             }
         };
 
-        let mut fine_chan_freqs_f64 = Vec::with_capacity(metadata.num_fine_freq_chans);
         let mut fine_chan_freqs = Vec::with_capacity(metadata.num_fine_freq_chans);
         for i in 0..metadata.num_fine_freq_chans {
-            let freq = (base_freq + (i as isize - base_index + 1) as f64 * freq_res).round();
-            fine_chan_freqs_f64.push(freq);
-            fine_chan_freqs.push(freq.round() as u64);
+            let freq = base_freq + (i as isize - base_index + 1) as f64 * freq_res;
+            fine_chan_freqs.push(freq);
         }
-        let fine_chan_freqs_f64 = Vec1::try_from_vec(fine_chan_freqs_f64).unwrap();
         let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs).unwrap();
 
-        let mwa_coarse_chan_nums = match mwalib_context.as_ref() {
+        let (mwa_coarse_chan_nums, num_fine_chans_per_coarse_chan) = match mwalib_context.as_ref() {
             Some(c) => {
                 // Get the coarse channel information out of the metafits
                 // file, but only the ones aligned with the frequencies in
@@ -501,7 +498,7 @@ impl UvfitsReader {
                         let cc_num =
                             u32::try_from(cc.rec_chan_number).expect("not bigger than u32::MAX");
                         let cc_centre = f64::from(cc.chan_centre_hz);
-                        for &f in &fine_chan_freqs_f64 {
+                        for &f in fine_chan_freqs.iter() {
                             if (f - cc_centre).abs() < cc_width / 2.0 {
                                 return Some(cc_num);
                             }
@@ -511,26 +508,24 @@ impl UvfitsReader {
                     .collect();
                 cc_nums.sort_unstable();
                 debug!("Found corresponding MWA coarse channel numbers from the metafits and uvfits frequencies");
-                Vec1::try_from_vec(cc_nums).ok()
+                (
+                    Vec1::try_from_vec(cc_nums).ok(),
+                    NonZeroU16::new((cc_width / freq_res).round() as u16),
+                )
             }
 
             None => {
-                debug!("Assuming MWA coarse channel numbers from uvfits frequencies");
-
-                // Find all multiples of 1.28 MHz within our bandwidth.
-                let mut cc_nums = fine_chan_freqs
-                    .iter()
-                    .map(|&f| (f as f64 / 1.28e6).round() as u32)
-                    .collect::<Vec<_>>();
-                cc_nums.sort_unstable();
-                cc_nums.dedup();
-                Vec1::try_from_vec(cc_nums).ok()
+                match super::infer_mwa_coarse_chan_info(fine_chan_freqs.as_slice(), freq_res) {
+                    Some((cc_nums, num_fine)) => {
+                        debug!("Inferred MWA coarse channel numbers from uvfits frequencies");
+                        (Some(cc_nums), Some(num_fine))
+                    }
+                    None => {
+                        debug!("Uvfits frequencies do not look MWA-like; not inferring coarse channels");
+                        (None, None)
+                    }
+                }
             }
-        };
-
-        let num_fine_chans_per_coarse_chan = {
-            let n = (1.28e6 / freq_res).round() as u16;
-            Some(NonZeroU16::new(n).expect("is not 0"))
         };
 
         match (

@@ -129,7 +129,6 @@ struct DiCalCliArgs {
     #[clap(long, help_heading = "OUTPUT FILES")]
     output_model_freq_average: Option<String>,
 
-
     /// When writing out model visibilities, rather than writing out the entire
     /// input bandwidth, write out only the smallest contiguous band. e.g.
     /// Typical 40 kHz MWA data has 768 channels, but the first 2 and last 2
@@ -262,8 +261,7 @@ impl DiCalArgs {
             longitude_rad,
             latitude_rad,
             obs_context.phase_centre,
-            // obs_context.timestamps[*timesteps_to_use.first()],
-            input_vis_params.timeblocks.first().median,
+            input_vis_params.get_primary_model_timestamp(),
             input_vis_params.dut1,
         );
         let (lst_rad, latitude_rad) = if apply_precession {
@@ -465,7 +463,7 @@ impl DiCalArgs {
         let flagged_fine_chans = &input_vis_params.spw.flagged_chan_indices;
         for (i_chan, &freq) in obs_context.fine_chan_freqs.iter().enumerate() {
             if !flagged_fine_chans.contains(&(i_chan as u16)) {
-                unflagged_fine_chan_freqs.push(freq as f64);
+                unflagged_fine_chan_freqs.push(freq);
             }
         }
         if log_enabled!(Debug) {
@@ -579,7 +577,8 @@ impl DiCalArgs {
                 .parse(
                     input_vis_params.time_res,
                     input_vis_params.spw.freq_res,
-                    &input_vis_params.timeblocks.mapped_ref(|tb| tb.median),
+                    &input_vis_params.get_output_timeblock_timestamps(),
+                    input_vis_params.processing_telescope,
                     output_smallest_contiguous_band,
                     "hyp_model.uvfits", // not actually used
                     Some("model"),

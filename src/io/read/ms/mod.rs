@@ -58,39 +58,112 @@ pub(super) fn read_table(ms: &Path, table: Option<&str>) -> Result<Table, TableE
 // they're available, in that order. Failing that we need to fall back on the
 // timesteps. This function assumes that the `main_table` and `timestamps` are
 // not empty.
+fn get_timestamp_diffs_us(timestamps: &[Epoch]) -> Vec<i64> {
+    timestamps
+        .windows(2)
+        .filter_map(|ts| {
+            let diff_us = ((ts[1] - ts[0]).to_seconds() * 1e6).round() as i64;
+            (diff_us > 0).then_some(diff_us)
+        })
+        .collect()
+}
+
+fn get_time_resolution_from_timestamps(timestamps: &[Epoch]) -> Option<Duration> {
+    let mut diff_counts: HashMap<i64, usize> = HashMap::new();
+    for diff_us in get_timestamp_diffs_us(timestamps) {
+        *diff_counts.entry(diff_us).or_default() += 1;
+    }
+
+    diff_counts
+        .into_iter()
+        .max_by(|(diff_a, count_a), (diff_b, count_b)| {
+            count_a.cmp(count_b).then_with(|| diff_b.cmp(diff_a))
+        })
+        .map(|(diff_us, _)| Duration::from_seconds(diff_us as f64 / 1e6))
+}
+
+fn timestamp_diffs_are_multiples_of_resolution(timestamps: &[Epoch], resolution: Duration) -> bool {
+    let diffs_us = get_timestamp_diffs_us(timestamps);
+    if diffs_us.is_empty() {
+        return false;
+    }
+
+    let base_us = (resolution.to_seconds() * 1e6).round() as i64;
+    if base_us <= 0 {
+        return false;
+    }
+    let tolerance_us = (base_us.abs() / 1000).max(1);
+
+    diffs_us.into_iter().all(|diff_us| {
+        let remainder = diff_us.rem_euclid(base_us);
+        remainder <= tolerance_us || base_us - remainder <= tolerance_us
+    })
+}
+
 fn get_time_resolution(main_table: &mut Table, timestamps: &[Epoch]) -> Option<Duration> {
+    let from_timestamps = get_time_resolution_from_timestamps(timestamps);
+
+    let mut from_columns = None;
     if let Ok(s) = main_table.get_cell::<f64>("INTERVAL", 0) {
         debug!("Using the INTERVAL column for the time resolution ({s} seconds)");
         // Check if the interval is zero or invalid, which would cause infinite loops
         if s > 0.0 && s.is_finite() {
-            return Some(Duration::from_seconds(s));
+            from_columns = Some(Duration::from_seconds(s));
         } else {
             debug!("INTERVAL column contains invalid value ({s}), falling back to other methods");
         }
     }
-    if let Ok(s) = main_table.get_cell::<f64>("EXPOSURE", 0) {
-        debug!("Using the EXPOSURE column for the time resolution ({s} seconds)");
-        // Check if the exposure is zero or invalid, which would cause infinite loops
-        if s > 0.0 && s.is_finite() {
-            return Some(Duration::from_seconds(s));
-        } else {
-            debug!("EXPOSURE column contains invalid value ({s}), falling back to other methods");
+    if from_columns.is_none() {
+        if let Ok(s) = main_table.get_cell::<f64>("EXPOSURE", 0) {
+            debug!("Using the EXPOSURE column for the time resolution ({s} seconds)");
+            // Check if the exposure is zero or invalid, which would cause infinite loops
+            if s > 0.0 && s.is_finite() {
+                from_columns = Some(Duration::from_seconds(s));
+            } else {
+                debug!(
+                    "EXPOSURE column contains invalid value ({s}), falling back to other methods"
+                );
+            }
         }
     }
-    if timestamps.len() == 1 {
-        debug!(
-            "Only one timestep is present in the data; can't determine the data's time resolution."
-        );
-        None
-    } else {
-        debug!("Using the timestamps to determine the time resolution");
-        // Find the minimum gap between two consecutive timestamps.
-        let time_res = timestamps
-            .windows(2)
-            .fold(Duration::from_seconds(f64::INFINITY), |acc, ts| {
-                acc.min(ts[1] - ts[0])
-            });
-        Some(time_res)
+
+    match (from_columns, from_timestamps) {
+        (Some(column_res), Some(timestamp_res)) => {
+            let delta = (column_res.to_seconds() - timestamp_res.to_seconds()).abs();
+            if timestamp_diffs_are_multiples_of_resolution(timestamps, column_res) {
+                if delta > 1e-3 {
+                    debug!(
+                        "Timestamp gaps are multiples of the time-resolution columns ({:.6} s); using columns instead of sparse cadence ({:.6} s)",
+                        column_res.to_seconds(),
+                        timestamp_res.to_seconds()
+                    );
+                }
+                Some(column_res)
+            } else if delta > 1e-3 {
+                debug!(
+                    "Time-resolution columns ({:.6} s) disagree with timestamp cadence ({:.6} s); using timestamps",
+                    column_res.to_seconds(),
+                    timestamp_res.to_seconds()
+                );
+                Some(timestamp_res)
+            } else {
+                Some(column_res)
+            }
+        }
+        (Some(column_res), None) => Some(column_res),
+        (None, Some(timestamp_res)) => {
+            debug!(
+                "Using the timestamps to determine the time resolution ({:.6} seconds)",
+                timestamp_res.to_seconds()
+            );
+            Some(timestamp_res)
+        }
+        (None, None) => {
+            debug!(
+                "Only one timestep is present in the data; can't determine the data's time resolution."
+            );
+            None
+        }
     }
 }
 
@@ -556,13 +629,8 @@ impl MsReader {
         let mut spectral_window_table = read_table(&ms, Some("SPECTRAL_WINDOW"))?;
         let fine_chan_freqs_f64: Vec<f64> =
             spectral_window_table.get_cell_as_vec("CHAN_FREQ", 0)?;
-        let fine_chan_freqs = {
-            let fine_chan_freqs = fine_chan_freqs_f64
-                .iter()
-                .map(|f| f.round() as u64)
-                .collect();
-            Vec1::try_from_vec(fine_chan_freqs).map_err(|_| MsReadError::NoChannelFreqs)?
-        };
+        let fine_chan_freqs = Vec1::try_from_vec(fine_chan_freqs_f64.clone())
+            .map_err(|_| MsReadError::NoChannelFreqs)?;
         // Assume that `total_bandwidth_hz` is the total bandwidth inside the
         // measurement set, which is not necessarily the whole observation.
         let total_bandwidth_hz: f64 = spectral_window_table.get_cell("TOTAL_BANDWIDTH", 0)?;
@@ -588,7 +656,7 @@ impl MsReader {
         // "coarse channel" instead). Instead, it contains nothing useful. So,
         // we determine what would be MWA coarse channel numbers from the
         // available frequencies.
-        let mwa_coarse_chan_nums = match mwalib_context.as_ref() {
+        let (mwa_coarse_chan_nums, num_fine_chans_per_coarse_chan) = match mwalib_context.as_ref() {
             Some(c) => {
                 // Get the coarse channel information out of the metafits file,
                 // but only the ones aligned with the frequencies in the uvfits
@@ -611,26 +679,22 @@ impl MsReader {
                     .collect();
                 cc_nums.sort_unstable();
                 debug!("Found corresponding MWA coarse channel numbers from the metafits and MS frequencies");
-                Vec1::try_from_vec(cc_nums).ok()
+                (
+                    Vec1::try_from_vec(cc_nums).ok(),
+                    NonZeroU16::new((cc_width / freq_res).round() as u16),
+                )
             }
 
-            None => {
-                debug!("Assuming MWA coarse channel numbers from MS frequencies");
-
-                // Find all multiples of 1.28 MHz within our bandwidth.
-                let mut cc_nums = fine_chan_freqs
-                    .iter()
-                    .map(|&f| (f as f64 / 1.28e6).round() as u32)
-                    .collect::<Vec<_>>();
-                cc_nums.sort_unstable();
-                cc_nums.dedup();
-                Vec1::try_from_vec(cc_nums).ok()
-            }
-        };
-
-        let num_fine_chans_per_coarse_chan = {
-            let n = (1.28e6 / freq_res).round() as u16;
-            Some(NonZeroU16::new(n).expect("is not 0"))
+            None => match super::infer_mwa_coarse_chan_info(fine_chan_freqs.as_slice(), freq_res) {
+                Some((cc_nums, num_fine)) => {
+                    debug!("Inferred MWA coarse channel numbers from MS frequencies");
+                    (Some(cc_nums), Some(num_fine))
+                }
+                None => {
+                    debug!("MS frequencies do not look MWA-like; not inferring coarse channels");
+                    (None, None)
+                }
+            },
         };
 
         match (
@@ -971,6 +1035,39 @@ impl MsReader {
         Ok(ms)
     }
 
+    fn expand_row_weights<const NUM_POLS: usize>(
+        ms_weights: Vec<f32>,
+        num_chans: usize,
+    ) -> Vec<f32> {
+        if ms_weights.len() == num_chans {
+            return ms_weights;
+        }
+
+        if ms_weights.len() == NUM_POLS {
+            let row_weight = ms_weights
+                .into_iter()
+                .reduce(f32::min)
+                .expect("NUM_POLS is never zero");
+            return vec![row_weight; num_chans];
+        }
+
+        if ms_weights.len() == num_chans * NUM_POLS {
+            return ms_weights
+                .chunks_exact(NUM_POLS)
+                .map(|weights| weights.iter().copied().reduce(f32::min).expect("not empty"))
+                .collect();
+        }
+
+        panic!(
+            "{}",
+            VisReadError::BadArraySize {
+                array_type: "weight_array",
+                expected_len: num_chans,
+                axis_num: 0,
+            }
+        );
+    }
+
     /// An internal method for reading visibilities. Cross- and/or
     /// auto-correlation visibilities and weights are written to the supplied
     /// arrays.
@@ -1037,8 +1134,12 @@ impl MsReader {
                                     })
                                     .collect()
                             } else {
-                                // One weight per frequency.
-                                row.get_cell(self.weight_col_name)?
+                                // 1D MS WEIGHT columns are usually one weight
+                                // per correlation, not one per fine channel.
+                                Self::expand_row_weights::<NUM_POLS>(
+                                    row.get_cell(self.weight_col_name)?,
+                                    ms_data.len_of(Axis(0)),
+                                )
                             }
                         };
                         // The flag array is arranged
@@ -1145,7 +1246,10 @@ impl MsReader {
                                         })
                                         .collect()
                                 } else {
-                                    row.get_cell(self.weight_col_name)?
+                                    Self::expand_row_weights::<NUM_POLS>(
+                                        row.get_cell(self.weight_col_name)?,
+                                        ms_data.len_of(Axis(0)),
+                                    )
                                 }
                             };
                             let flags: Array2<bool> = row.get_cell("FLAG")?;

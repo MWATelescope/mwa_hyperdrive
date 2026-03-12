@@ -6,7 +6,7 @@ use hifitime::Epoch;
 use marlu::{LatLngHeight, RADec, XyzGeodetic};
 use vec1::vec1;
 
-use super::Polarisations;
+use super::{Polarisations, Telescope};
 use crate::{beam::Delays, context::ObsContext, io::read::VisInputType};
 
 fn get_minimal_obs_context() -> ObsContext {
@@ -32,7 +32,7 @@ fn get_minimal_obs_context() -> ObsContext {
         mwa_coarse_chan_nums: None,
         num_fine_chans_per_coarse_chan: None,
         freq_res: None,
-        fine_chan_freqs: vec1![128_000_000],
+        fine_chan_freqs: vec1![128_000_000.0],
         flagged_fine_chans: vec![],
         flagged_fine_chans_per_coarse_chan: None,
         polarisations: Polarisations::default(),
@@ -40,9 +40,23 @@ fn get_minimal_obs_context() -> ObsContext {
 }
 
 #[test]
+fn test_veto_freqs_are_empty_without_mwa_coarse_info() {
+    assert!(get_minimal_obs_context().get_veto_freqs().is_empty());
+}
+
+#[test]
 fn test_veto_freqs() {
     let mut obs_ctx = get_minimal_obs_context();
-    obs_ctx.fine_chan_freqs = vec1![182335000, 182415000];
+    obs_ctx.mwa_coarse_chan_nums = Some(vec1![142, 143]);
 
-    assert_eq!(&obs_ctx.get_veto_freqs(), &[181760000.0, 183040000.0]);
+    assert_eq!(&obs_ctx.get_veto_freqs(), &[181_760_000.0, 183_040_000.0]);
+}
+
+#[test]
+fn test_telescope_parse_cli() {
+    assert_eq!(Telescope::parse_cli("standard"), Some(Telescope::Standard));
+    assert_eq!(Telescope::parse_cli("mwa"), Some(Telescope::Standard));
+    assert_eq!(Telescope::parse_cli("21cma"), Some(Telescope::Cma21));
+    assert_eq!(Telescope::parse_cli("cma21"), Some(Telescope::Cma21));
+    assert_eq!(Telescope::parse_cli("unknown"), None);
 }

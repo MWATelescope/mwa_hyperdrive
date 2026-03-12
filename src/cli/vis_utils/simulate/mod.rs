@@ -881,6 +881,7 @@ fn model_thread(
             cross_weights_fb: ArcArray2::from_elem(vis_shape, weight_factor as f32),
             autos: None,
             timestamp,
+            output_timestamp: timestamp,
         }) {
             Ok(()) => (),
             // If we can't send the message, it's because the channel

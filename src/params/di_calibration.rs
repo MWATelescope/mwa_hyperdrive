@@ -416,6 +416,7 @@ impl DiCalParams {
                             *output_freq_average_factor,
                             input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                             *write_smallest_contiguous_band,
+                            input_vis_params.processing_telescope,
                             rx_model,
                             &error,
                             model_write_progress,
@@ -512,12 +513,9 @@ fn model_thread(
         as f32;
 
     // Iterate over all calibration timesteps and write to the model slices.
-    for (timestamp, mut vis_model_fb) in input_vis_params
-        .timeblocks
-        .iter()
-        .map(|tb| tb.median)
-        .zip(vis_model_slices)
-    {
+    for (timeblock, mut vis_model_fb) in input_vis_params.timeblocks.iter().zip(vis_model_slices) {
+        let timestamp = input_vis_params.get_timeblock_model_timestamp(timeblock);
+        let output_timestamp = input_vis_params.get_timeblock_output_timestamp(timeblock);
         debug!("Modelling timestamp {}", timestamp.to_gpst_seconds());
         modeller.model_timestep_with(timestamp, vis_model_fb.view_mut())?;
         let auto_data_fb = if model_autos {
@@ -538,6 +536,7 @@ fn model_thread(
             cross_weights_fb: ArcArray::from_elem(vis_model_fb.dim(), weight_factor),
             autos: auto_data_fb.map(|d| (d, ArcArray2::from_elem(auto_vis_shape, weight_factor))),
             timestamp,
+            output_timestamp,
         }) {
             Ok(()) => (),
             // If we can't send the message, it's because the channel has
@@ -569,12 +568,13 @@ pub(crate) struct CalVis {
 }
 
 impl CalVis {
-    // Multiply the data and model visibilities by the weights (and baseline
-    // weights that could be e.g. based on UVW cuts). If a weight is negative,
-    // it means the corresponding visibility should be flagged, so that
-    // visibility is set to 0; this means it does not affect calibration. Not
-    // iterating over weights during calibration makes makes calibration run
-    // significantly faster.
+    // Multiply the data and model visibilities by the square root of the
+    // weights (and baseline weights that could be e.g. based on UVW cuts). This
+    // preserves weighted least-squares behaviour while keeping the solver in the
+    // original unweighted form. If a weight is negative, it means the
+    // corresponding visibility should be flagged, so that visibility is set to
+    // 0; this means it does not affect calibration. Not iterating over weights
+    // during calibration makes makes calibration run significantly faster.
     pub(crate) fn scale_by_weights(&mut self, baseline_weights: Option<&[f64]>) {
         debug!("Multiplying visibilities by weights");
 
@@ -611,17 +611,78 @@ impl CalVis {
                                         *vis_data = Jones::default();
                                         *vis_model = Jones::default();
                                     } else {
+                                        let scale = weight.sqrt();
                                         *vis_data = Jones::<f32>::from(
-                                            Jones::<f64>::from(*vis_data) * weight,
+                                            Jones::<f64>::from(*vis_data) * scale,
                                         );
                                         *vis_model = Jones::<f32>::from(
-                                            Jones::<f64>::from(*vis_model) * weight,
+                                            Jones::<f64>::from(*vis_model) * scale,
                                         );
                                     }
                                 },
                             );
                     });
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use approx::assert_abs_diff_eq;
+    use ndarray::Array3;
+
+    use super::CalVis;
+    use crate::context::Polarisations;
+    use marlu::Jones;
+
+    #[test]
+    fn scale_by_weights_uses_square_root_of_total_weight() {
+        let mut cal_vis = CalVis {
+            vis_data: Array3::from_shape_vec(
+                (1, 1, 3),
+                vec![
+                    Jones::identity() * 2.0,
+                    Jones::identity() * 3.0,
+                    Jones::identity() * 5.0,
+                ],
+            )
+            .unwrap(),
+            vis_weights: Array3::from_shape_vec((1, 1, 3), vec![4.0, 9.0, -2.0]).unwrap(),
+            vis_model: Array3::from_shape_vec(
+                (1, 1, 3),
+                vec![
+                    Jones::identity() * 7.0,
+                    Jones::identity() * 11.0,
+                    Jones::identity() * 13.0,
+                ],
+            )
+            .unwrap(),
+            pols: Polarisations::default(),
+        };
+
+        cal_vis.scale_by_weights(Some(&[9.0, 16.0, 1.0]));
+
+        let expected_vis_data = Array3::from_shape_vec(
+            (1, 1, 3),
+            vec![
+                Jones::identity() * 12.0,
+                Jones::identity() * 36.0,
+                Jones::default(),
+            ],
+        )
+        .unwrap();
+        let expected_vis_model = Array3::from_shape_vec(
+            (1, 1, 3),
+            vec![
+                Jones::identity() * 42.0,
+                Jones::identity() * 132.0,
+                Jones::default(),
+            ],
+        )
+        .unwrap();
+
+        assert_abs_diff_eq!(cal_vis.vis_data, expected_vis_data);
+        assert_abs_diff_eq!(cal_vis.vis_model, expected_vis_model);
     }
 }
 

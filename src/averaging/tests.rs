@@ -136,11 +136,73 @@ fn test_timesteps_to_timeblocks() {
 }
 
 #[test]
+fn test_timesteps_to_timeblocks_with_irregular_timestamps() {
+    let timestamps = vec![
+        0.0, 3.5, 7.0, 10.5, 13.6, 17.6, 21.0, 24.5, 47.5, 51.0, 54.5,
+    ]
+    .into_iter()
+    .map(Epoch::from_gpst_seconds)
+    .collect::<Vec<_>>();
+    let timestamps = Vec1::try_from_vec(timestamps).unwrap();
+    let time_res = Duration::from_seconds(3.5);
+
+    let no_average =
+        timesteps_to_timeblocks(&timestamps, time_res, NonZeroUsize::new(1).unwrap(), None);
+    assert_eq!(no_average.len(), timestamps.len());
+    for (i, timeblock) in no_average.iter().enumerate() {
+        assert_eq!(timeblock.range, i..i + 1);
+        assert_eq!(timeblock.timestamps.len(), 1);
+        assert_abs_diff_eq!(
+            timeblock.timestamps.first().to_gpst_seconds(),
+            timestamps[i].to_gpst_seconds()
+        );
+    }
+
+    let averaged =
+        timesteps_to_timeblocks(&timestamps, time_res, NonZeroUsize::new(2).unwrap(), None);
+    assert_eq!(averaged.len(), 6);
+    assert_eq!(averaged[0].range, 0..2);
+    assert_eq!(averaged[1].range, 2..4);
+    assert_eq!(averaged[2].range, 4..6);
+    assert_eq!(averaged[3].range, 6..8);
+    assert_eq!(averaged[4].range, 8..10);
+    assert_eq!(averaged[5].range, 10..11);
+}
+
+#[test]
+fn test_chunked_timestamps_to_timeblocks_preserves_irregular_centroids() {
+    let timestamps = vec![100.4, 103.5, 107.5, 110.5, 114.0]
+        .into_iter()
+        .map(Epoch::from_gpst_seconds)
+        .collect::<Vec<_>>();
+    let timestamps = Vec1::try_from_vec(timestamps).unwrap();
+
+    let no_average = chunked_timestamps_to_timeblocks(&timestamps, NonZeroUsize::new(1).unwrap());
+    assert_eq!(no_average.len(), 5);
+    for (timeblock, &timestamp) in no_average.iter().zip(timestamps.iter()) {
+        assert_eq!(timeblock.range.len(), 1);
+        assert_abs_diff_eq!(
+            timeblock.median.to_gpst_seconds(),
+            timestamp.to_gpst_seconds()
+        );
+    }
+
+    let averaged = chunked_timestamps_to_timeblocks(&timestamps, NonZeroUsize::new(2).unwrap());
+    assert_eq!(averaged.len(), 3);
+    assert_eq!(averaged[0].range, 0..2);
+    assert_eq!(averaged[1].range, 2..4);
+    assert_eq!(averaged[2].range, 4..5);
+    assert_abs_diff_eq!(averaged[0].median.to_gpst_seconds(), (100.4 + 103.5) / 2.0);
+    assert_abs_diff_eq!(averaged[1].median.to_gpst_seconds(), (107.5 + 110.5) / 2.0);
+    assert_abs_diff_eq!(averaged[2].median.to_gpst_seconds(), 114.0);
+}
+
+#[test]
 fn test_channels_to_chanblocks() {
-    let all_channel_freqs = [12000];
+    let all_channel_freqs = [12000.0];
     let freq_average_factor = NonZeroUsize::new(1).unwrap();
     let mut flagged_channels = HashSet::new();
-    let freq_res = 1000;
+    let freq_res = 1000.0;
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
         freq_res,
@@ -151,10 +213,10 @@ fn test_channels_to_chanblocks() {
     assert_eq!(spws[0].chanblocks.len(), 1);
     assert!(spws[0].flagged_chanblock_indices.is_empty());
     assert_abs_diff_eq!(spws[0].chanblocks[0].freq, 12000.0);
-    assert_abs_diff_eq!(spws[0].freq_res, freq_res as f64);
+    assert_abs_diff_eq!(spws[0].freq_res, freq_res);
     assert_abs_diff_eq!(spws[0].first_freq, 12000.0);
 
-    let all_channel_freqs = [10000, 11000, 12000, 13000, 14000];
+    let all_channel_freqs = [10000.0, 11000.0, 12000.0, 13000.0, 14000.0];
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
         freq_res,
@@ -172,7 +234,7 @@ fn test_channels_to_chanblocks() {
     assert_abs_diff_eq!(spws[0].freq_res, 1000.0);
     assert_abs_diff_eq!(spws[0].first_freq, 10000.0);
 
-    let all_channel_freqs = [10000, 11000, 12000, 13000, 14000, 20000];
+    let all_channel_freqs = [10000.0, 11000.0, 12000.0, 13000.0, 14000.0, 20000.0];
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
         freq_res,
@@ -269,16 +331,35 @@ fn test_channels_to_chanblocks() {
 // No frequencies, no spws.
 #[test]
 fn test_no_channels_to_chanblocks() {
-    let all_channel_freqs = [];
+    let all_channel_freqs: [f64; 0] = [];
     let freq_average_factor = NonZeroUsize::new(2).unwrap();
     let flagged_channels = HashSet::new();
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
-        10e3 as u64,
+        10e3,
         freq_average_factor,
         &flagged_channels,
     );
     assert!(spws.is_empty());
+}
+
+#[test]
+fn test_channels_to_chanblocks_with_fractional_hz_frequencies() {
+    let all_channel_freqs = [121_887_207.03125, 121_911_621.09375, 121_936_035.15625];
+    let spws = channels_to_chanblocks(
+        &all_channel_freqs,
+        24_414.0625,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    );
+
+    assert_eq!(spws.len(), 1);
+    assert_eq!(spws[0].chanblocks.len(), 3);
+    assert_abs_diff_eq!(spws[0].chanblocks[0].freq, all_channel_freqs[0]);
+    assert_abs_diff_eq!(spws[0].chanblocks[1].freq, all_channel_freqs[1]);
+    assert_abs_diff_eq!(spws[0].chanblocks[2].freq, all_channel_freqs[2]);
+    assert_abs_diff_eq!(spws[0].freq_res, 24_414.0625);
+    assert_abs_diff_eq!(spws[0].first_freq, all_channel_freqs[0]);
 }
 
 fn test_time(

@@ -35,6 +35,7 @@ use crate::{
     },
     cli::Warn,
     constants::DEFAULT_MS_DATA_COL_NAME,
+    context::Telescope,
     io::read::{
         pfb_gains::{PfbFlavour, DEFAULT_PFB_FLAVOUR, PFB_FLAVOURS},
         MsReader, RawDataCorrections, RawDataReader, UvfitsReader, VisInputType, VisRead,
@@ -50,6 +51,9 @@ lazy_static::lazy_static! {
 
     pub(super) static ref MS_DATA_COL_NAME_HELP: String =
         format!("If reading from a measurement set, this specifies the column to use in the main table containing visibilities. Default: {DEFAULT_MS_DATA_COL_NAME}");
+
+    pub(super) static ref TELESCOPE_HELP: String =
+        "Select an explicit telescope-specific processing route. Supported values: standard, mwa, 21cma. Default: standard. Use '21cma' to activate the isolated 21CMA time-handling route without changing the legacy path.".to_string();
 
     static ref SUPPORTED_INPUT_FILE_TYPES: String = format!(r#"
     metafits:         .metafits, _metafits.fits
@@ -119,6 +123,9 @@ pub(crate) struct InputVisArgs {
 
     #[clap(long, help = MS_DATA_COL_NAME_HELP.as_str(), help_heading = "INPUT DATA (MS)")]
     pub(crate) ms_data_column_name: Option<String>,
+
+    #[clap(long, help = TELESCOPE_HELP.as_str(), help_heading = "INPUT DATA")]
+    pub(crate) telescope: Option<String>,
 
     #[clap(long, help = PFB_FLAVOUR_HELP.as_str(), help_heading = "INPUT DATA (RAW)")]
     pub(crate) pfb_flavour: Option<String>,
@@ -212,6 +219,7 @@ impl InputVisArgs {
             ignore_weights: self.ignore_weights || other.ignore_weights,
             ignore_dut1: self.ignore_dut1 || other.ignore_dut1,
             ms_data_column_name: self.ms_data_column_name.or(other.ms_data_column_name),
+            telescope: self.telescope.or(other.telescope),
             pfb_flavour: self.pfb_flavour.or(other.pfb_flavour),
             no_digital_gains: self.no_digital_gains || other.no_digital_gains,
             no_cable_length_correction: self.no_cable_length_correction
@@ -242,6 +250,7 @@ impl InputVisArgs {
             ignore_weights,
             ignore_dut1,
             ms_data_column_name,
+            telescope,
             pfb_flavour,
             no_digital_gains,
             no_cable_length_correction,
@@ -254,6 +263,15 @@ impl InputVisArgs {
             time_average,
             freq_average,
         } = self;
+
+        let processing_telescope = telescope
+            .as_deref()
+            .map(|s| {
+                Telescope::parse_cli(s)
+                    .ok_or_else(|| InputVisArgsError::BadTelescopeRoute(s.to_string()))
+            })
+            .transpose()?
+            .unwrap_or_default();
 
         // If the user supplied the array position, unpack it here.
         let array_position = match array_position {
@@ -810,6 +828,8 @@ impl InputVisArgs {
         };
 
         let mut time_printer = InfoPrinter::new("Time info".into());
+        time_printer
+            .push_line(format!("Processing route: {}", processing_telescope.label()).into());
         let time_res = match (obs_context.time_res, time_average_factor.get()) {
             (_, 0) => unreachable!("cannot be 0"),
             (None, _) => {
@@ -975,7 +995,9 @@ impl InputVisArgs {
             // We can't do anything without the number of fine channels per
             // coarse channel.
             (_, None) => {
-                "Flags per coarse channel were specified, but no information on how many fine channels per coarse channel is available; flags are being ignored.".warn();
+                if !fine_chan_flags_per_coarse_chan.is_empty() {
+                    "Flags per coarse channel were specified, but no information on how many fine channels per coarse channel is available; flags are being ignored.".warn();
+                }
             }
 
             // If we don't have MWA coarse channel numbers but we do have
@@ -989,7 +1011,7 @@ impl InputVisArgs {
         let mut unflagged_fine_chan_freqs = vec![];
         for (i_chan, &freq) in (0..).zip(obs_context.fine_chan_freqs.iter()) {
             if !flagged_fine_chans.contains(&i_chan) {
-                unflagged_fine_chan_freqs.push(freq as f64);
+                unflagged_fine_chan_freqs.push(freq);
             }
         }
 
@@ -1058,7 +1080,7 @@ impl InputVisArgs {
         // Set up the chanblocks.
         let mut spws = channels_to_chanblocks(
             &obs_context.fine_chan_freqs,
-            freq_res.round() as u64,
+            freq_res,
             freq_average_factor,
             &flagged_fine_chans,
         );
@@ -1130,6 +1152,7 @@ impl InputVisArgs {
         chan_printer.display();
 
         Ok(InputVisParams {
+            processing_telescope,
             vis_reader,
             solutions,
             timeblocks,
@@ -1150,6 +1173,9 @@ pub(crate) enum InputVisArgsError {
 
     #[error("Could not read specified file: {0}")]
     CouldNotRead(String),
+
+    #[error("Unsupported telescope route '{0}'. Supported values: standard, mwa, 21cma")]
+    BadTelescopeRoute(String),
 
     #[error("The specified file '{0}' is a \"PPDs metafits\" and is not supported. Please use a newer metafits file.")]
     PpdMetafitsUnsupported(String),

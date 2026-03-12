@@ -6,12 +6,14 @@ use std::path::PathBuf;
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use crossbeam_utils::atomic::AtomicCell;
+use hifitime::{Duration, Epoch};
 use marlu::{
     constants::{MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     Jones, LatLngHeight,
 };
 use ndarray::prelude::*;
 use tempfile::TempDir;
+use vec1::vec1;
 
 use super::{
     InputVisArgs,
@@ -25,6 +27,7 @@ use crate::{
         common::{BeamArgs, ModellingArgs, OutputVisArgs, SkyModelWithVetoArgs},
         vis_simulate::{VisSimulateArgs, VisSimulateCliArgs},
     },
+    context::Telescope,
     tests::{
         get_reduced_1090008640_ms, get_reduced_1090008640_raw, get_reduced_1090008640_uvfits,
         DataAsStrings,
@@ -38,6 +41,19 @@ fn test_handle_no_input() {
 
     assert!(result.is_err());
     assert!(matches!(result, Err(NoInputData)));
+}
+
+#[test]
+fn test_explicit_21cma_route() {
+    let DataAsStrings { mut vis, .. } = get_reduced_1090008640_ms();
+    let ms = vis.swap_remove(0);
+    let args = InputVisArgs {
+        files: Some(vec![ms]),
+        telescope: Some("21cma".to_string()),
+        ..Default::default()
+    };
+    let params = args.parse("").unwrap();
+    assert_eq!(params.processing_telescope, Telescope::Cma21);
 }
 
 #[test]
@@ -660,11 +676,79 @@ fn sparse_timeblocks_with_averaging() {
     .parse(
         params.time_res,
         params.spw.freq_res,
-        &params.timeblocks.mapped_ref(|tb| tb.median),
+        &params.get_output_timeblock_timestamps(),
+        params.processing_telescope,
         false,
         "adsf.uvfits",
         None,
     )
     .unwrap();
     assert_eq!(output_params.output_timeblocks.len(), 3);
+}
+
+#[test]
+fn output_timeblocks_preserve_irregular_21cma_timestamps() {
+    let tmp_dir = TempDir::new().unwrap();
+    let timestamps = vec1![
+        Epoch::from_gpst_seconds(100.4),
+        Epoch::from_gpst_seconds(103.5),
+        Epoch::from_gpst_seconds(107.5),
+        Epoch::from_gpst_seconds(110.5),
+    ];
+
+    let output_params = OutputVisArgs {
+        outputs: Some(vec![tmp_dir.path().join("output.ms")]),
+        output_vis_time_average: Some("2".to_string()),
+        output_vis_freq_average: None,
+        output_autos: false,
+    }
+    .parse(
+        Duration::from_seconds(3.5),
+        24_414.0625,
+        &timestamps,
+        Telescope::Cma21,
+        false,
+        "output.ms",
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(output_params.output_timeblocks.len(), 2);
+    assert_abs_diff_eq!(
+        output_params.output_timeblocks[0].median.to_gpst_seconds(),
+        (100.4 + 103.5) / 2.0
+    );
+    assert_abs_diff_eq!(
+        output_params.output_timeblocks[1].median.to_gpst_seconds(),
+        (107.5 + 110.5) / 2.0
+    );
+}
+
+#[test]
+fn output_timeblocks_reject_21cma_uvfits_outputs() {
+    let tmp_dir = TempDir::new().unwrap();
+    let timestamps = vec1![Epoch::from_gpst_seconds(100.4)];
+
+    let result = OutputVisArgs {
+        outputs: Some(vec![tmp_dir.path().join("output.uvfits")]),
+        output_vis_time_average: None,
+        output_vis_freq_average: None,
+        output_autos: false,
+    }
+    .parse(
+        Duration::from_seconds(3.5),
+        24_414.0625,
+        &timestamps,
+        Telescope::Cma21,
+        false,
+        "output.uvfits",
+        None,
+    );
+
+    assert!(result.is_err());
+    assert!(result
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("MeasurementSet outputs"));
 }

@@ -122,7 +122,6 @@ pub(crate) struct PeelCliArgs {
     #[clap(long, help = OUTPUT_FREQ_AVERAGE_FACTOR_HELP.as_str(), help_heading = "OUTPUT FILES")]
     pub(super) output_vis_freq_average: Option<String>,
 
-
     /// When writing out visibilities, rather than writing out the entire input
     /// bandwidth, write out only the smallest contiguous band. e.g. Typical 40
     /// kHz MWA data has 768 channels, but the first 2 and last 2 channels are
@@ -253,7 +252,7 @@ impl PeelArgs {
                 longitude_rad,
                 latitude_rad,
                 obs_context.phase_centre,
-                input_vis_params.timeblocks.first().median,
+                input_vis_params.get_primary_model_timestamp(),
                 input_vis_params.dut1,
             );
             let (lst_rad, lat_rad) = if apply_precession {
@@ -333,7 +332,7 @@ impl PeelArgs {
             }
         };
         let iono_timeblocks = timesteps_to_timeblocks(
-            &input_vis_params.timeblocks.mapped_ref(|tb| tb.median),
+            &input_vis_params.get_output_timeblock_timestamps(),
             input_vis_params.time_res,
             iono_time_average_factor,
             None,
@@ -382,17 +381,15 @@ impl PeelArgs {
             let all_freqs = {
                 let n = spw.chanblocks.len() + spw.flagged_chanblock_indices.len();
                 let mut freqs = Vec::with_capacity(n);
-                let first_freq = spw.first_freq.round() as u64;
-                let freq_res = spw.freq_res.round() as u64;
-                for i in 0..n as u64 {
-                    freqs.push(first_freq + freq_res * i);
+                for i in 0..n {
+                    freqs.push(spw.first_freq + spw.freq_res * i as f64);
                 }
                 freqs
             };
 
             channels_to_chanblocks(
                 &all_freqs,
-                spw.freq_res.round() as u64,
+                spw.freq_res,
                 iono_freq_average_factor,
                 &HashSet::new(),
             )
@@ -470,7 +467,8 @@ impl PeelArgs {
             .parse(
                 input_vis_params.time_res,
                 input_vis_params.spw.freq_res,
-                &input_vis_params.timeblocks.mapped_ref(|tb| tb.median),
+                &input_vis_params.get_output_timeblock_timestamps(),
+                input_vis_params.processing_telescope,
                 output_smallest_contiguous_band,
                 DEFAULT_OUTPUT_PEEL_FILENAME,
                 Some("peeled"),

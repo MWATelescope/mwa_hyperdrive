@@ -18,7 +18,10 @@ use marlu::Jones;
 use ndarray::prelude::*;
 use vec1::Vec1;
 
-use crate::unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat};
+use crate::{
+    math::average_epoch,
+    unit_parsing::{parse_freq, parse_time, FreqFormat, TimeFormat},
+};
 
 /// A collection of timesteps.
 #[derive(Debug, Clone)]
@@ -194,6 +197,7 @@ pub(super) fn timesteps_to_timeblocks(
         (time_average_factor.get() - 1) as i128 * time_resolution.total_nanoseconds(),
     );
     let half_a_timeblock = timeblock_length / 2;
+    let half_a_timestep = time_resolution / 2;
     let first_timestamp = *timestamps_to_use.first();
     let last_timestamp = *timestamps_to_use.last();
     let time_res = time_resolution.total_nanoseconds() as u128;
@@ -213,8 +217,12 @@ pub(super) fn timesteps_to_timeblocks(
             );
         let timeblock_end = timeblock_start + timeblock_length;
         let timeblock_median = timeblock_start + half_a_timeblock;
+        // Allow up to half a timestep of jitter when mapping timestamps onto
+        // the ideal regular cadence used to define timeblocks.
+        let window_start = timeblock_start - half_a_timestep;
+        let window_end = timeblock_end + half_a_timestep;
 
-        if timeblock_start > last_timestamp {
+        if window_start > last_timestamp {
             break;
         }
 
@@ -223,7 +231,7 @@ pub(super) fn timesteps_to_timeblocks(
                 .iter()
                 .zip(timesteps_to_use.iter())
                 .filter_map(|(timestamp, timestep)| {
-                    if (timeblock_start..=timeblock_end).contains(timestamp) {
+                    if *timestamp >= window_start && *timestamp < window_end {
                         Some((*timestamp, *timestep))
                     } else {
                         None
@@ -247,15 +255,52 @@ pub(super) fn timesteps_to_timeblocks(
     Vec1::try_from_vec(timeblocks).expect("cannot be empty")
 }
 
+/// Group already-selected timestamps into sequential timeblocks while
+/// preserving the centroid of the actual timestamps in each block.
+///
+/// Unlike [`timesteps_to_timeblocks`], this helper does not construct an ideal
+/// regular cadence and then map timestamps onto it. It is intended for explicit
+/// irregular-time output routes, where we want the output timeblock centroids
+/// to reflect the real timestamps that were selected.
+pub(crate) fn chunked_timestamps_to_timeblocks(
+    timestamps: &Vec1<Epoch>,
+    time_average_factor: NonZeroUsize,
+) -> Vec1<Timeblock> {
+    let factor = time_average_factor.get();
+    let mut timeblocks = Vec::with_capacity(timestamps.len().div_ceil(factor));
+    let mut i_timeblock = 0;
+    let mut start = 0;
+    while start < timestamps.len() {
+        let end = usize::min(start + factor, timestamps.len());
+        let timeblock_timestamps =
+            Vec1::try_from_vec(timestamps.as_slice()[start..end].to_vec()).expect("not empty");
+        let timeblock_timesteps =
+            Vec1::try_from_vec((start..end).collect::<Vec<_>>()).expect("not empty");
+        timeblocks.push(Timeblock {
+            index: i_timeblock,
+            range: start..end,
+            median: average_epoch(timeblock_timestamps.iter().copied()),
+            timestamps: timeblock_timestamps,
+            timesteps: timeblock_timesteps,
+        });
+        i_timeblock += 1;
+        start = end;
+    }
+
+    Vec1::try_from_vec(timeblocks).expect("cannot be empty")
+}
+
 /// Returns a vector of [`Spw`]s (potentially multiple contiguous-bands of fine
 /// channels). If there's more than one [`Spw`], then this is a "picket fence"
 /// observation.
 pub(super) fn channels_to_chanblocks(
-    all_channel_freqs: &[u64],
-    freq_resolution: u64,
+    all_channel_freqs: &[f64],
+    freq_resolution: f64,
     freq_average_factor: NonZeroUsize,
     flagged_chan_indices: &HashSet<u16>,
 ) -> Vec<Spw> {
+    let gap_epsilon = freq_resolution.abs().max(1.0) * 1e-6;
+
     // Handle 0 or 1 provided frequencies here.
     match all_channel_freqs {
         [] => return vec![],
@@ -266,21 +311,21 @@ pub(super) fn channels_to_chanblocks(
                     flagged_chan_indices: HashSet::from([0]),
                     flagged_chanblock_indices: HashSet::from([0]),
                     chans_per_chanblock: freq_average_factor,
-                    freq_res: freq_resolution as f64,
-                    first_freq: *f as f64,
+                    freq_res: freq_resolution,
+                    first_freq: *f,
                 }
             } else {
                 Spw {
                     chanblocks: vec![Chanblock {
                         chanblock_index: 0,
                         unflagged_index: 0,
-                        freq: *f as f64,
+                        freq: *f,
                     }],
                     flagged_chan_indices: HashSet::new(),
                     flagged_chanblock_indices: HashSet::new(),
                     chans_per_chanblock: freq_average_factor,
-                    freq_res: freq_resolution as f64,
-                    first_freq: *f as f64,
+                    freq_res: freq_resolution,
+                    first_freq: *f,
                 }
             };
             return vec![spw];
@@ -293,18 +338,17 @@ pub(super) fn channels_to_chanblocks(
     (0..)
         .zip(all_channel_freqs.windows(2))
         .for_each(|(i, window)| {
-            if window[1] - window[0] > freq_resolution {
+            if window[1] - window[0] > freq_resolution + gap_epsilon {
                 spw_index_ends.push(i + 1);
             }
         });
 
     let mut spws = Vec::with_capacity(spw_index_ends.len() + 1);
-    let biggest_freq_diff = freq_resolution * freq_average_factor.get() as u64;
+    let biggest_freq_diff = freq_resolution * freq_average_factor.get() as f64;
     let mut chanblocks = vec![];
     let mut flagged_chanblock_indices = HashSet::new();
     let mut i_chanblock = 0;
     let mut i_unflagged_chanblock = 0;
-    let mut current_freqs = vec![];
     let mut first_spw_freq = None;
     let mut first_freq = None;
     let mut all_flagged = true;
@@ -320,26 +364,24 @@ pub(super) fn channels_to_chanblocks(
             None => first_freq = Some(freq),
         }
 
-        if freq - first_freq.unwrap() >= biggest_freq_diff {
+        if freq - first_freq.unwrap() >= biggest_freq_diff - gap_epsilon {
             if all_flagged {
                 flagged_chanblock_indices.insert(i_chanblock);
             } else {
                 let centroid_freq = first_freq.unwrap()
-                    + freq_resolution / 2 * (freq_average_factor.get() - 1) as u64;
+                    + freq_resolution / 2.0 * (freq_average_factor.get() - 1) as f64;
                 chanblocks.push(Chanblock {
                     chanblock_index: i_chanblock,
                     unflagged_index: i_unflagged_chanblock,
-                    freq: centroid_freq as f64,
+                    freq: centroid_freq,
                 });
                 i_unflagged_chanblock += 1;
             }
-            current_freqs.clear();
             first_freq = Some(freq);
             all_flagged = true;
             i_chanblock += 1;
         }
 
-        current_freqs.push(freq as f64);
         if flagged_chan_indices.contains(&i_chan) {
             this_spw_flagged_chans.insert(i_chan);
         } else {
@@ -352,10 +394,9 @@ pub(super) fn channels_to_chanblocks(
                 flagged_chan_indices: this_spw_flagged_chans.clone(),
                 flagged_chanblock_indices: flagged_chanblock_indices.clone(),
                 chans_per_chanblock: freq_average_factor,
-                freq_res: biggest_freq_diff as f64,
-                first_freq: (first_spw_freq.unwrap()
-                    + freq_resolution / 2 * (freq_average_factor.get() - 1) as u64)
-                    as f64,
+                freq_res: biggest_freq_diff,
+                first_freq: first_spw_freq.unwrap()
+                    + freq_resolution / 2.0 * (freq_average_factor.get() - 1) as f64,
             });
             first_spw_freq = Some(freq);
             chanblocks.clear();
@@ -369,11 +410,11 @@ pub(super) fn channels_to_chanblocks(
             flagged_chanblock_indices.insert(i_chanblock);
         } else {
             let centroid_freq =
-                first_freq + freq_resolution / 2 * (freq_average_factor.get() - 1) as u64;
+                first_freq + freq_resolution / 2.0 * (freq_average_factor.get() - 1) as f64;
             chanblocks.push(Chanblock {
                 chanblock_index: i_chanblock,
                 unflagged_index: i_unflagged_chanblock,
-                freq: centroid_freq as f64,
+                freq: centroid_freq,
             });
         }
         spws.push(Spw {
@@ -381,10 +422,9 @@ pub(super) fn channels_to_chanblocks(
             flagged_chan_indices: this_spw_flagged_chans,
             flagged_chanblock_indices,
             chans_per_chanblock: freq_average_factor,
-            freq_res: biggest_freq_diff as f64,
-            first_freq: (first_spw_freq.unwrap()
-                + freq_resolution / 2 * (freq_average_factor.get() - 1) as u64)
-                as f64,
+            freq_res: biggest_freq_diff,
+            first_freq: first_spw_freq.unwrap()
+                + freq_resolution / 2.0 * (freq_average_factor.get() - 1) as f64,
         });
     }
 
@@ -393,10 +433,10 @@ pub(super) fn channels_to_chanblocks(
 
 /// nasty hack because peel doesn't work with flagged channels
 pub(super) fn unflag_spw(spw: Spw) -> Spw {
-    let all_freqs: Vec<u64> = spw.get_all_freqs().iter().map(|&f| f as u64).collect_vec();
+    let all_freqs = spw.get_all_freqs();
     channels_to_chanblocks(
-        &all_freqs,
-        spw.freq_res as u64,
+        all_freqs.as_slice(),
+        spw.freq_res,
         NonZeroUsize::new(1).unwrap(),
         &HashSet::new(),
     )

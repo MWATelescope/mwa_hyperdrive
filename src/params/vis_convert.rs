@@ -101,6 +101,8 @@ impl VisConvertParams {
                         (input_vis_params.spw.chanblocks.len(), num_unflagged_tiles);
 
                     for timeblock in &input_vis_params.timeblocks {
+                        let (timestamp, output_timestamp) =
+                            input_vis_params.get_timeblock_emission_timestamps(timeblock);
                         let mut cross_data_fb = Array2::zeros(cross_vis_shape);
                         let mut cross_weights_fb = Array2::zeros(cross_vis_shape);
                         let mut autos_fb = if using_autos {
@@ -129,7 +131,8 @@ impl VisConvertParams {
                             cross_data_fb: cross_data_fb.into_shared(),
                             cross_weights_fb: cross_weights_fb.into_shared(),
                             autos: autos_fb.map(|(d, w)| (d.into_shared(), w.into_shared())),
-                            timestamp: timeblock.median,
+                            timestamp,
+                            output_timestamp,
                         }) {
                             Ok(()) => (),
                             // If we can't send the message, it's because the
@@ -186,6 +189,7 @@ impl VisConvertParams {
                         output_vis_params.output_freq_average_factor,
                         input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                         output_vis_params.write_smallest_contiguous_band,
+                        input_vis_params.processing_telescope,
                         rx_data,
                         &error,
                         Some(write_progress),

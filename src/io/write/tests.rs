@@ -14,7 +14,10 @@ use vec1::{vec1, Vec1};
 
 use super::*;
 use crate::{
-    averaging::{channels_to_chanblocks, timesteps_to_timeblocks},
+    averaging::{
+        channels_to_chanblocks, chunked_timestamps_to_timeblocks, timesteps_to_timeblocks,
+    },
+    context::Telescope,
     io::read::{MsReader, UvfitsReader, VisRead},
     math::TileBaselineFlags,
 };
@@ -71,10 +74,10 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         Some(&timesteps),
     );
 
-    let freq_res = 10e3 as u64;
+    let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels as u64)
-            .map(|i| 150_000_000 + freq_res * i)
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
             .collect(),
     )
     .unwrap();
@@ -92,17 +95,14 @@ fn test_vis_output_no_time_averaging_no_gaps() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res as f64,
+        freq_resolution_hz: freq_res,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
         num_vis_pols: 4,
     };
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let out_vis_paths = vec1![
-        (tmp_dir.path().join("vis.uvfits"), VisOutputType::Uvfits),
-        (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
-    ];
+    let out_vis_paths = vec1![(tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)];
 
     let array_pos = LatLngHeight::mwa();
     let phase_centre = RADec::from_degrees(0., -27.);
@@ -130,6 +130,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                     cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
                     autos: None,
                     timestamp,
+                    output_timestamp: timestamp,
                 }) {
                     Ok(()) => (),
                     // If we can't send the message, it's because the channel
@@ -165,6 +166,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
                 vis_freq_average_factor,
                 marlu_mwa_obs_context,
                 false,
+                Telescope::Standard,
                 rx,
                 &error,
                 None,
@@ -190,7 +192,7 @@ fn test_vis_output_no_time_averaging_no_gaps() {
     // Read the visibilities in and check everything is fine.
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
-            VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),
+            VisOutputType::Uvfits => unreachable!("21CMA irregular-time output is MS-only"),
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new(path, None, None, None).unwrap())
             }
@@ -273,10 +275,10 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         Some(&timesteps),
     );
 
-    let freq_res = 10e3 as u64;
+    let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels as u64)
-            .map(|i| 150_000_000 + freq_res * i)
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
             .collect(),
     )
     .unwrap();
@@ -294,17 +296,14 @@ fn test_vis_output_no_time_averaging_with_gaps() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res as f64,
+        freq_resolution_hz: freq_res,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
         num_vis_pols: 4,
     };
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
-    let out_vis_paths = vec1![
-        (tmp_dir.path().join("vis.uvfits"), VisOutputType::Uvfits),
-        (tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)
-    ];
+    let out_vis_paths = vec1![(tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)];
 
     let array_pos = LatLngHeight::mwa();
     let phase_centre = RADec::from_degrees(0., -27.);
@@ -332,6 +331,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                     cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
                     autos: None,
                     timestamp,
+                    output_timestamp: timestamp,
                 }) {
                     Ok(()) => (),
                     // If we can't send the message, it's because the channel
@@ -367,6 +367,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
                 vis_freq_average_factor,
                 marlu_mwa_obs_context,
                 false,
+                Telescope::Standard,
                 rx,
                 &error,
                 None,
@@ -394,7 +395,7 @@ fn test_vis_output_no_time_averaging_with_gaps() {
     let timesteps = [0, 1, 2];
     for (path, vis_type) in out_vis_paths {
         let reader: Box<dyn VisRead> = match vis_type {
-            VisOutputType::Uvfits => Box::new(UvfitsReader::new(path, None, None).unwrap()),
+            VisOutputType::Uvfits => unreachable!("21CMA irregular-time output is MS-only"),
             VisOutputType::MeasurementSet => {
                 Box::new(MsReader::new(path, None, None, None).unwrap())
             }
@@ -448,6 +449,161 @@ fn test_vis_output_no_time_averaging_with_gaps() {
 
 #[test]
 #[serial]
+fn test_vis_output_preserves_irregular_21cma_timestamps() {
+    let vis_time_average_factor = NonZeroUsize::new(1).unwrap();
+    let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
+
+    let num_channels = 4;
+    let ant_pairs = vec![(0, 1), (0, 2), (1, 2)];
+    let time_res = Duration::from_seconds(3.5);
+    let timestamps = Vec1::try_from_vec(
+        [1090000000.4, 1090000003.5, 1090000007.5]
+            .into_iter()
+            .map(Epoch::from_gpst_seconds)
+            .collect(),
+    )
+    .unwrap();
+    let timeblocks = chunked_timestamps_to_timeblocks(&timestamps, vis_time_average_factor);
+
+    let freq_res = 10e3;
+    let fine_chan_freqs = Vec1::try_from_vec(
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
+            .collect(),
+    )
+    .unwrap();
+    let spw = &channels_to_chanblocks(
+        &fine_chan_freqs,
+        freq_res,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    )[0];
+
+    let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
+    let out_vis_paths = vec1![(tmp_dir.path().join("vis.ms"), VisOutputType::MeasurementSet)];
+
+    let array_pos = LatLngHeight::mwa();
+    let phase_centre = RADec::from_degrees(0., -27.);
+    #[rustfmt::skip]
+    let tile_xyzs = [
+        XyzGeodetic { x: 0., y: 0., z: 0., },
+        XyzGeodetic { x: 1., y: 0., z: 0., },
+        XyzGeodetic { x: 0., y: 1., z: 0., },
+    ];
+    let tile_names = ["tile_0_0".into(), "tile_1_0".into(), "tile_0_1".into()];
+
+    let shape = (timestamps.len(), num_channels, ant_pairs.len());
+    let (vis_data, vis_weights) = synthesize_test_data(shape);
+    let tile_baseline_flags = TileBaselineFlags::new(3, HashSet::new());
+
+    let (tx, rx) = bounded(1);
+    let error = AtomicCell::new(false);
+    let scoped_threads_result = thread::scope(|scope| {
+        let data_handle = scope.spawn(|_| {
+            for (i_timestep, &timestamp) in timestamps.iter().enumerate() {
+                match tx.send(VisTimestep {
+                    cross_data_fb: vis_data.slice(s![i_timestep, .., ..]).to_shared(),
+                    cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
+                    autos: None,
+                    timestamp,
+                    output_timestamp: timestamp,
+                }) {
+                    Ok(()) => (),
+                    Err(_) => return Ok(()),
+                }
+            }
+
+            Ok(())
+        });
+
+        let write_handle = scope.spawn(|_| {
+            defer_on_unwind! { error.store(true); }
+
+            let result = write_vis(
+                &out_vis_paths,
+                array_pos,
+                phase_centre,
+                None,
+                &tile_xyzs,
+                &tile_names,
+                None,
+                &timeblocks,
+                time_res,
+                Duration::default(),
+                spw,
+                &ant_pairs,
+                vis_time_average_factor,
+                vis_freq_average_factor,
+                None,
+                false,
+                Telescope::Cma21,
+                rx,
+                &error,
+                None,
+            );
+            if result.is_err() {
+                error.store(true);
+            }
+            result
+        });
+
+        let result: Result<Result<(), VisWriteError>, _> = data_handle.join();
+        match result {
+            Err(_) | Ok(Err(_)) => result.map(|_| Ok(String::new())),
+            Ok(Ok(())) => write_handle.join(),
+        }
+    });
+
+    match scoped_threads_result {
+        Ok(Ok(r)) => r.unwrap(),
+        Err(_) | Ok(Err(_)) => panic!("A panic occurred in the async threads"),
+    };
+
+    for (path, vis_type) in out_vis_paths {
+        let reader: Box<dyn VisRead> = match vis_type {
+            VisOutputType::Uvfits => unreachable!("21CMA irregular-time output is MS-only"),
+            VisOutputType::MeasurementSet => {
+                Box::new(MsReader::new(path, None, None, None).unwrap())
+            }
+        };
+        let obs_context = reader.get_obs_context();
+        for (got, expected) in obs_context.timestamps.iter().zip(timestamps.iter()) {
+            assert_abs_diff_eq!(
+                got.to_gpst_seconds(),
+                expected.to_gpst_seconds(),
+                epsilon = 1e-6
+            );
+        }
+        assert!(obs_context.time_res.is_some());
+
+        let avg_shape = (obs_context.fine_chan_freqs.len(), ant_pairs.len());
+        let mut avg_data = Array2::zeros(avg_shape);
+        let mut avg_weights = Array2::zeros(avg_shape);
+        let flagged_fine_chans: HashSet<u16> =
+            obs_context.flagged_fine_chans.iter().copied().collect();
+
+        for i_timestep in 0..timestamps.len() {
+            reader
+                .read_crosses(
+                    avg_data.view_mut(),
+                    avg_weights.view_mut(),
+                    i_timestep,
+                    &tile_baseline_flags,
+                    &flagged_fine_chans,
+                )
+                .unwrap();
+
+            assert_abs_diff_eq!(vis_data.slice(s![i_timestep, .., ..]), avg_data);
+            assert_abs_diff_eq!(
+                vis_weights.slice(s![i_timestep, .., ..]),
+                avg_weights.view()
+            );
+        }
+    }
+}
+
+#[test]
+#[serial]
 fn test_vis_output_time_averaging() {
     let vis_time_average_factor = NonZeroUsize::new(3).unwrap();
     let vis_freq_average_factor = NonZeroUsize::new(1).unwrap();
@@ -476,10 +632,10 @@ fn test_vis_output_time_averaging() {
         Some(&timesteps),
     );
 
-    let freq_res = 10e3 as u64;
+    let freq_res = 10e3;
     let fine_chan_freqs = Vec1::try_from_vec(
-        (0..num_channels as u64)
-            .map(|i| 150_000_000 + freq_res * i)
+        (0..num_channels)
+            .map(|i| 150_000_000.0 + freq_res * i as f64)
             .collect(),
     )
     .unwrap();
@@ -497,7 +653,7 @@ fn test_vis_output_time_averaging() {
         int_time: time_res,
         num_sel_chans: num_channels,
         start_freq_hz: 128_000_000.,
-        freq_resolution_hz: freq_res as f64,
+        freq_resolution_hz: freq_res,
         sel_baselines: ant_pairs.clone(),
         avg_time: 1,
         avg_freq: 1,
@@ -538,6 +694,7 @@ fn test_vis_output_time_averaging() {
                     cross_weights_fb: vis_weights.slice(s![i_timestep, .., ..]).to_shared(),
                     autos: None,
                     timestamp,
+                    output_timestamp: timestamp,
                 }) {
                     Ok(()) => (),
                     // If we can't send the message, it's because the channel
@@ -573,6 +730,7 @@ fn test_vis_output_time_averaging() {
                 vis_freq_average_factor,
                 marlu_mwa_obs_context,
                 false,
+                Telescope::Standard,
                 rx,
                 &error,
                 None,

@@ -130,7 +130,7 @@ fn get_simple_obs_context(s: f64) -> ObsContext {
 
     let (tile_names, tile_xyzs) = get_simple_tiles(s);
     let lambdas_m = vec1![2., 1.];
-    let fine_chan_freqs: Vec1<u64> = lambdas_m.mapped(|l| (VEL_C / l) as u64);
+    let fine_chan_freqs: Vec1<f64> = lambdas_m.mapped(|l| VEL_C / l);
 
     ObsContext {
         input_data_type: VisInputType::Raw,
@@ -225,8 +225,8 @@ fn get_phase1_obs_context(tile_limit: usize) -> ObsContext {
     let timestamps: Vec<Epoch> = (0..4).map(|i| obs_time + i * time_res).collect();
     let freq_res = meta_ctx.corr_fine_chan_width_hz as f64;
     let num_freqs = 32;
-    let fine_chan_freqs: Vec<u64> = (0..num_freqs)
-        .map(|i| meta_ctx.centre_freq_hz as u64 + i as u64 * freq_res as u64)
+    let fine_chan_freqs: Vec<f64> = (0..num_freqs)
+        .map(|i| meta_ctx.centre_freq_hz as f64 + i as f64 * freq_res)
         .collect();
 
     ObsContext {
@@ -1581,7 +1581,7 @@ fn test_peel_single_source(peel_type: PeelType) {
         .as_slice()
         .chunks(avg_freq)
         .map(|chunk| {
-            let f = chunk.iter().sum::<u64>() as f64 / chunk.len() as f64;
+            let f = chunk.iter().sum::<f64>() / chunk.len() as f64;
             VEL_C / f
         })
         .collect_vec();
@@ -1866,7 +1866,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
         .as_slice()
         .chunks(avg_freq)
         .map(|chunk| {
-            let f = chunk.iter().sum::<u64>() as f64 / chunk.len() as f64;
+            let f = chunk.iter().sum::<f64>() / chunk.len() as f64;
             VEL_C / f
         })
         .collect_vec();
@@ -2963,7 +2963,7 @@ fn test_peel_weight_preservation() {
         .as_slice()
         .chunks(avg_freq)
         .map(|chunk| {
-            let f = chunk.iter().sum::<u64>() as f64 / chunk.len() as f64;
+            let f = chunk.iter().sum::<f64>() / chunk.len() as f64;
             VEL_C / f
         })
         .collect_vec();

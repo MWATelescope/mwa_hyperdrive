@@ -18,7 +18,7 @@ pub use raw::{RawDataCorrections, RawDataReader};
 pub(crate) use uvfits::UvfitsReadError;
 pub use uvfits::UvfitsReader;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, num::NonZeroU16};
 
 use hifitime::{Duration, Epoch};
 use marlu::{
@@ -30,6 +30,44 @@ use ndarray::prelude::*;
 use vec1::Vec1;
 
 use crate::{context::ObsContext, flagging::MwafFlags, math::TileBaselineFlags};
+
+const MWA_COARSE_CHAN_WIDTH_HZ: f64 = 1.28e6;
+
+fn infer_mwa_coarse_chan_info(
+    fine_chan_freqs: &[f64],
+    freq_res_hz: f64,
+) -> Option<(Vec1<u32>, NonZeroU16)> {
+    if fine_chan_freqs.is_empty() || !freq_res_hz.is_finite() || freq_res_hz <= 0.0 {
+        return None;
+    }
+
+    let num_fine = MWA_COARSE_CHAN_WIDTH_HZ / freq_res_hz;
+    let rounded_num_fine = num_fine.round();
+    if (num_fine - rounded_num_fine).abs() > 1e-6 {
+        return None;
+    }
+    let num_fine = NonZeroU16::new(rounded_num_fine as u16)?;
+    let offset_tolerance = 1e-3;
+    let max_index = f64::from(num_fine.get() - 1);
+
+    let mut cc_nums = Vec::new();
+    for &freq_hz in fine_chan_freqs {
+        let cc_num = (freq_hz / MWA_COARSE_CHAN_WIDTH_HZ).round();
+        let offset_in_fine_chans = (freq_hz - cc_num * MWA_COARSE_CHAN_WIDTH_HZ) / freq_res_hz;
+        let fine_chan_index = offset_in_fine_chans + f64::from(num_fine.get()) / 2.0 - 0.5;
+        if (fine_chan_index - fine_chan_index.round()).abs() > offset_tolerance {
+            return None;
+        }
+        if fine_chan_index < -offset_tolerance || fine_chan_index > max_index + offset_tolerance {
+            return None;
+        }
+        cc_nums.push(cc_num as u32);
+    }
+
+    cc_nums.sort_unstable();
+    cc_nums.dedup();
+    Some((Vec1::try_from_vec(cc_nums).ok()?, num_fine))
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum VisInputType {
@@ -218,4 +256,33 @@ fn baseline_convention_is_different(
     // used; the tile XYZs need to be negated and the visibility data need to be
     // complex conjugated.
     diff2 < diff1
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU16;
+
+    use vec1::vec1;
+
+    use super::infer_mwa_coarse_chan_info;
+
+    #[test]
+    fn infer_mwa_coarse_chan_info_accepts_half_bin_centres() {
+        let cc_num = 154.0;
+        let freq_res_hz = 40_000.0;
+        let fine_chan_freqs = (0..32)
+            .map(|i| cc_num * 1.28e6 + (i as f64 - 16.0 + 0.5) * freq_res_hz)
+            .collect::<Vec<_>>();
+
+        let (cc_nums, num_fine) =
+            infer_mwa_coarse_chan_info(&fine_chan_freqs, freq_res_hz).unwrap();
+        assert_eq!(cc_nums, vec1![154]);
+        assert_eq!(num_fine, NonZeroU16::new(32).unwrap());
+    }
+
+    #[test]
+    fn infer_mwa_coarse_chan_info_rejects_non_mwa_grid() {
+        let fine_chan_freqs = [121_887_207.03125, 121_911_621.09375, 121_936_035.15625];
+        assert!(infer_mwa_coarse_chan_info(&fine_chan_freqs, 24_414.0625).is_none());
+    }
 }

@@ -516,9 +516,21 @@ fn model_timestep_autos_sum_of_flux_densities_no_beam() {
             radec: pos,
             comp_type: ComponentType::Point,
             flux_type: FluxDensityType::List(vec1::vec1![
-                FluxDensity { freq: 150e6, i: vals[0], ..Default::default() },
-                FluxDensity { freq: 175e6, i: vals[1], ..Default::default() },
-                FluxDensity { freq: 200e6, i: vals[2], ..Default::default() },
+                FluxDensity {
+                    freq: 150e6,
+                    i: vals[0],
+                    ..Default::default()
+                },
+                FluxDensity {
+                    freq: 175e6,
+                    i: vals[1],
+                    ..Default::default()
+                },
+                FluxDensity {
+                    freq: 200e6,
+                    i: vals[2],
+                    ..Default::default()
+                },
             ]),
         }
     };
@@ -526,11 +538,23 @@ fn model_timestep_autos_sum_of_flux_densities_no_beam() {
     let mut srclist = SourceList::new();
     srclist.insert(
         "s1".to_string(),
-        Source { components: vec![make_point_with_list(RADec::from_degrees(1.0, -27.0), [1.0, 3.0, 2.0])].into_boxed_slice() },
+        Source {
+            components: vec![make_point_with_list(
+                RADec::from_degrees(1.0, -27.0),
+                [1.0, 3.0, 2.0],
+            )]
+            .into_boxed_slice(),
+        },
     );
     srclist.insert(
         "s2".to_string(),
-        Source { components: vec![make_point_with_list(RADec::from_degrees(1.1, -27.0), [0.5, 0.25, 1.5])].into_boxed_slice() },
+        Source {
+            components: vec![make_point_with_list(
+                RADec::from_degrees(1.1, -27.0),
+                [0.5, 0.25, 1.5],
+            )]
+            .into_boxed_slice(),
+        },
     );
 
     let modeller = obs.get_cpu_modeller(&srclist);

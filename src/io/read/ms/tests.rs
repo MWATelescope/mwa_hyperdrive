@@ -17,6 +17,65 @@ use super::*;
 use crate::tests::{deflate_gz_into_tempfile, get_reduced_1090008640_ms_pbs, DataAsPathBufs};
 
 #[test]
+fn timestamp_diff_multiples_detect_sparse_gaps() {
+    let timestamps = [
+        Epoch::from_gpst_seconds(1.0),
+        Epoch::from_gpst_seconds(3.0),
+        Epoch::from_gpst_seconds(9.0),
+    ];
+
+    assert_eq!(
+        get_time_resolution_from_timestamps(&timestamps),
+        Some(Duration::from_seconds(2.0))
+    );
+    assert!(timestamp_diffs_are_multiples_of_resolution(
+        &timestamps,
+        Duration::from_seconds(1.0)
+    ));
+    assert!(!timestamp_diffs_are_multiples_of_resolution(
+        &timestamps,
+        Duration::from_seconds(4.0)
+    ));
+}
+
+#[test]
+fn timestamp_diff_multiples_reject_non_integer_cadence_mismatch() {
+    let timestamps = [
+        Epoch::from_gpst_seconds(0.0),
+        Epoch::from_gpst_seconds(3.5),
+        Epoch::from_gpst_seconds(7.0),
+        Epoch::from_gpst_seconds(11.0),
+    ];
+
+    assert_eq!(
+        get_time_resolution_from_timestamps(&timestamps),
+        Some(Duration::from_seconds(3.5))
+    );
+    assert!(!timestamp_diffs_are_multiples_of_resolution(
+        &timestamps,
+        Duration::from_seconds(3.2)
+    ));
+}
+
+#[test]
+fn expand_row_weights_repeats_single_pol_weight_across_channels() {
+    let weights = MsReader::expand_row_weights::<1>(vec![8.0], 4);
+    assert_eq!(weights, vec![8.0, 8.0, 8.0, 8.0]);
+}
+
+#[test]
+fn expand_row_weights_collapses_pol_weights_and_repeats_across_channels() {
+    let weights = MsReader::expand_row_weights::<4>(vec![8.0, 7.0, 9.0, 6.0], 3);
+    assert_eq!(weights, vec![6.0, 6.0, 6.0]);
+}
+
+#[test]
+fn expand_row_weights_preserves_per_channel_weights() {
+    let weights = MsReader::expand_row_weights::<1>(vec![1.0, 2.0, 3.0], 3);
+    assert_eq!(weights, vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
 #[serial]
 fn test_1090008640_cross_vis() {
     let DataAsPathBufs {

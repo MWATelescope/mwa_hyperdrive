@@ -114,6 +114,8 @@ impl VisSubtractParams {
                         read_progress.tick();
 
                         for timeblock in &input_vis_params.timeblocks {
+                            let (timestamp, output_timestamp) =
+                                input_vis_params.get_timeblock_emission_timestamps(timeblock);
                             // Read data to fill the buffer, pausing when the buffer is
                             // full to write it all out.
                             let mut cross_data_fb = Array2::zeros(cross_vis_shape);
@@ -153,7 +155,8 @@ impl VisSubtractParams {
                                 cross_data_fb: cross_data_fb.into_shared(),
                                 cross_weights_fb: cross_weights_fb.into_shared(),
                                 autos: autos_fb,
-                                timestamp: timeblock.median,
+                                timestamp,
+                                output_timestamp,
                             }) {
                                 Ok(()) => (),
                                 // If we can't send the message, it's because the channel
@@ -236,6 +239,7 @@ impl VisSubtractParams {
                         output_vis_params.output_freq_average_factor,
                         input_vis_params.vis_reader.get_marlu_mwa_info().as_ref(),
                         output_vis_params.write_smallest_contiguous_band,
+                        input_vis_params.processing_telescope,
                         rx_write,
                         &error,
                         Some(write_progress),
@@ -321,6 +325,7 @@ fn model_thread(
         cross_weights_fb,
         mut autos,
         timestamp,
+        output_timestamp,
     } in rx.iter()
     {
         debug!("Modelling timestamp {}", timestamp.to_gpst_seconds());
@@ -356,6 +361,7 @@ fn model_thread(
             cross_weights_fb,
             autos,
             timestamp,
+            output_timestamp,
         }) {
             Ok(()) => (),
             Err(_) => return Ok(()),

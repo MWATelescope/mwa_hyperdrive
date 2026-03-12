@@ -20,13 +20,16 @@ use vec1::Vec1;
 
 use crate::{
     averaging::{vis_average, Spw, Timeblock},
-    context::ObsContext,
+    context::{ObsContext, Telescope},
     io::read::{VisRead, VisReadError},
-    math::TileBaselineFlags,
+    math::{average_epoch, TileBaselineFlags},
     CalibrationSolutions,
 };
 
 pub(crate) struct InputVisParams {
+    /// Which telescope-specific processing route should be used?
+    pub(crate) processing_telescope: Telescope,
+
     /// The object to read visibility data.
     pub(crate) vis_reader: Box<dyn VisRead>,
 
@@ -78,6 +81,43 @@ impl InputVisParams {
         self.tile_baseline_flags
             .unflagged_auto_index_to_tile_map
             .len()
+    }
+
+    pub(crate) fn get_timeblock_average_timestamp(&self, timeblock: &Timeblock) -> Epoch {
+        average_epoch(timeblock.timestamps.iter().copied())
+    }
+
+    pub(crate) fn get_timeblock_model_timestamp(&self, timeblock: &Timeblock) -> Epoch {
+        match self.processing_telescope {
+            Telescope::Standard => timeblock.median,
+            Telescope::Cma21 => self.get_timeblock_average_timestamp(timeblock),
+        }
+    }
+
+    pub(crate) fn get_timeblock_output_timestamp(&self, timeblock: &Timeblock) -> Epoch {
+        match self.processing_telescope {
+            Telescope::Standard => timeblock.median,
+            Telescope::Cma21 => self.get_timeblock_average_timestamp(timeblock),
+        }
+    }
+
+    pub(crate) fn get_timeblock_emission_timestamps(
+        &self,
+        timeblock: &Timeblock,
+    ) -> (Epoch, Epoch) {
+        (
+            self.get_timeblock_model_timestamp(timeblock),
+            self.get_timeblock_output_timestamp(timeblock),
+        )
+    }
+
+    pub(crate) fn get_primary_model_timestamp(&self) -> Epoch {
+        self.get_timeblock_model_timestamp(self.timeblocks.first())
+    }
+
+    pub(crate) fn get_output_timeblock_timestamps(&self) -> Vec1<Epoch> {
+        self.timeblocks
+            .mapped_ref(|tb| self.get_timeblock_output_timestamp(tb))
     }
 
     /// Read the cross-correlation visibilities out of the input data, averaged
@@ -217,7 +257,7 @@ impl InputVisParams {
                     timeblock.index
                 );
 
-                let chan_freqs = obs_context.fine_chan_freqs.mapped_ref(|f| *f as f64);
+                let chan_freqs = obs_context.fine_chan_freqs.clone();
                 if let Some((unaveraged_auto_data_tfb, unaveraged_auto_weights_tfb)) =
                     unaveraged_autos.as_mut()
                 {

@@ -14,13 +14,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{InfoPrinter, Warn};
 use crate::{
-    beam::{Beam, BeamError, BeamType, Delays, FEEBeam, NoBeam, BEAM_TYPES_COMMA_SEPARATED},
+    beam::{
+        Beam, BeamError, BeamType, Cma21GaussianBeam, Cma21StubBeam, Delays, FEEBeam, NoBeam,
+        BEAM_TYPES_COMMA_SEPARATED,
+    },
     io::read::VisInputType,
 };
 
 lazy_static::lazy_static! {
     static ref BEAM_TYPE_HELP: String =
-        format!("The beam model to use. Supported models: {}. Default: {}", *BEAM_TYPES_COMMA_SEPARATED, BeamType::default());
+        format!("The beam model to use. Supported models: {}. Default: {}. For 21CMA inputs, choose a 21CMA-specific beam explicitly.", *BEAM_TYPES_COMMA_SEPARATED, BeamType::default());
 
     static ref NO_BEAM_HELP: String =
         format!("Don't apply a beam response when generating a sky model. The default is to use the {} beam.", BeamType::default());
@@ -98,6 +101,30 @@ impl BeamArgs {
         };
 
         let beam: Box<dyn Beam> = match beam_type {
+            BeamType::Cma21Stub => {
+                debug!("Setting up a 21CMA stub beam object");
+                printer.push_line("Type: 21CMA stub".into());
+                printer.push_line("Using identity Jones matrices as a beam placeholder".into());
+                Box::new(Cma21StubBeam {
+                    num_tiles: total_num_tiles,
+                })
+            }
+
+            BeamType::Cma21Gaussian => {
+                debug!("Setting up a 21CMA Gaussian beam object");
+                printer.push_line("Type: 21CMA Gaussian".into());
+                printer.push_line(
+                    "Using an NCP-centred Gaussian main lobe as a provisional 21CMA beam".into(),
+                );
+                printer.push_line(
+                    "Assumption: 24h-averaged power beam sigma = 3.33 deg * (nu / 100 MHz)^-1.14"
+                        .into(),
+                );
+                Box::new(Cma21GaussianBeam {
+                    num_tiles: total_num_tiles,
+                })
+            }
+
             BeamType::None => {
                 debug!("Setting up a \"NoBeam\" object");
                 printer.push_line("Not using any beam responses".into());

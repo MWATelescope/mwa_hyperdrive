@@ -34,6 +34,7 @@ use vec1::{vec1, Vec1};
 use crate::{
     averaging::{Spw, Timeblock},
     cli::Warn,
+    context::Telescope,
 };
 
 #[derive(Debug, Display, EnumIter, EnumString, Clone, Copy)]
@@ -60,8 +61,12 @@ pub(crate) struct VisTimestep {
     /// Visibilities followed by weights ([channel][tile]).
     pub(crate) autos: Option<(ArcArray2<Jones<f32>>, ArcArray2<f32>)>,
 
-    /// The timestamp corresponding to these visibilities.
+    /// The physical timestamp corresponding to these visibilities.
     pub(crate) timestamp: Epoch,
+
+    /// The timestamp used to place these visibilities onto the writer's output
+    /// timeblock grid.
+    pub(crate) output_timestamp: Epoch,
 }
 
 /// Create the specified visibility outputs and receive visibilities to write to
@@ -127,19 +132,22 @@ pub(crate) fn write_vis(
     freq_average_factor: NonZeroUsize,
     marlu_mwa_obs_context: Option<&MarluMwaObsContext>,
     write_smallest_contiguous_band: bool,
+    processing_telescope: Telescope,
     rx: Receiver<VisTimestep>,
     error: &AtomicCell<bool>,
     progress_bar: Option<ProgressBar>,
 ) -> Result<String, VisWriteError> {
-    // Ensure our timestamps are regularly spaced in terms of `time_res`.
-    for t in timeblocks {
-        let diff = (t.median - timeblocks.first().median).total_nanoseconds();
-        if diff % time_res.total_nanoseconds() > 0 {
-            return Err(VisWriteError::IrregularTimestamps {
-                first: timeblocks.first().median.to_gpst_seconds(),
-                bad: t.median.to_gpst_seconds(),
-                time_res: time_res.to_seconds(),
-            });
+    if processing_telescope != Telescope::Cma21 {
+        // Ensure our timestamps are regularly spaced in terms of `time_res`.
+        for t in timeblocks {
+            let diff = (t.median - timeblocks.first().median).total_nanoseconds();
+            if diff % time_res.total_nanoseconds() > 0 {
+                return Err(VisWriteError::IrregularTimestamps {
+                    first: timeblocks.first().median.to_gpst_seconds(),
+                    bad: t.median.to_gpst_seconds(),
+                    time_res: time_res.to_seconds(),
+                });
+            }
         }
     }
 
@@ -166,14 +174,13 @@ pub(crate) fn write_vis(
     };
     let missing_chanblocks = {
         let mut missing = HashSet::new();
-        let incoming_chanblock_freqs = spw
-            .chanblocks
-            .iter()
-            .map(|c| c.freq as u64)
-            .collect::<HashSet<_>>();
+        let incoming_chanblock_freqs = spw.chanblocks.iter().map(|c| c.freq).collect::<Vec<_>>();
+        let freq_epsilon = spw.freq_res.abs().max(1.0) * 1e-6;
         for (i_chanblock, chanblock_freq) in (0..).zip(chanblock_freqs.iter()) {
-            let chanblock_freq = *chanblock_freq as u64;
-            if !incoming_chanblock_freqs.contains(&chanblock_freq) {
+            if !incoming_chanblock_freqs
+                .iter()
+                .any(|incoming| (*incoming - *chanblock_freq).abs() <= freq_epsilon)
+            {
                 missing.insert(i_chanblock);
             }
         }
@@ -307,6 +314,7 @@ pub(crate) fn write_vis(
             cross_weights_fb,
             autos,
             timestamp,
+            output_timestamp: _,
         },
     ) in rx.iter().enumerate()
     {
@@ -315,13 +323,7 @@ pub(crate) fn write_vis(
             timestamp.to_gpst_seconds()
         );
         if this_average_timestamp.is_none() {
-            this_average_timestamp = Some(
-                timeblocks
-                    .iter()
-                    .find(|tb| tb.timestamps.contains(&timestamp))
-                    .unwrap()
-                    .median,
-            );
+            this_average_timestamp = Some(this_timeblock.median);
         }
 
         if let Some(autos) = autos.as_ref() {
@@ -424,12 +426,31 @@ pub(crate) fn write_vis(
             || this_timestep + 1 >= time_average_factor.get()
         {
             debug!("Writing timeblock {i_timeblock}");
+            let (chunk_start_timestamp, chunk_time_res) = match processing_telescope {
+                Telescope::Standard => (
+                    this_average_timestamp.unwrap()
+                        - time_res / 2 * time_average_factor.get() as f64,
+                    time_res,
+                ),
+                Telescope::Cma21 => {
+                    let chunk_duration = if this_timeblock.timestamps.len() == 1 {
+                        time_res
+                    } else {
+                        (*this_timeblock.timestamps.last() - *this_timeblock.timestamps.first())
+                            + time_res
+                    };
+                    (
+                        this_average_timestamp.unwrap() - chunk_duration / 2,
+                        chunk_duration / time_average_factor.get() as f64,
+                    )
+                }
+            };
             let chunk_vis_ctx = VisContext {
                 // TODO: Marlu expects "leading edge" timestamps, not centroids.
                 // Fix this in Marlu.
-                start_timestamp: this_average_timestamp.unwrap()
-                    - time_res / 2 * time_average_factor.get() as f64,
+                start_timestamp: chunk_start_timestamp,
                 num_sel_timesteps: this_timeblock.range.len(),
+                int_time: chunk_time_res,
                 ..vis_ctx.clone()
             };
 

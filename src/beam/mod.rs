@@ -12,11 +12,13 @@
 //! implication being that a sky-model source's brightness is always assumed to
 //! be correct when at zenith.
 
+mod cma21;
 mod error;
 mod fee;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use cma21::Cma21GaussianBeam;
 pub(crate) use error::BeamError;
 pub(crate) use fee::FEEBeam;
 
@@ -49,6 +51,17 @@ pub enum BeamType {
     #[strum(serialize = "fee")]
     #[default]
     FEE,
+
+    /// A placeholder beam type for 21CMA integration work. This currently
+    /// returns identity Jones matrices, but provides a stable beam interface
+    /// that can later be replaced by a real 21CMA beam implementation.
+    #[strum(serialize = "cma21-stub")]
+    Cma21Stub,
+
+    /// A provisional analytic 21CMA beam using an NCP-centred Gaussian main
+    /// lobe anchored to the published 24h-averaged primary-beam fit.
+    #[strum(serialize = "cma21-gaussian")]
+    Cma21Gaussian,
 
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
     #[strum(serialize = "none")]
@@ -387,6 +400,144 @@ impl BeamGpu for NoBeamGpu {
     }
 }
 
+/// A placeholder beam implementation for 21CMA integration. This currently
+/// returns identity Jones matrices, but is intentionally distinct from
+/// [`NoBeam`] so a real 21CMA beam can later be swapped in behind the same
+/// interface.
+pub(crate) struct Cma21StubBeam {
+    pub(crate) num_tiles: usize,
+}
+
+impl Beam for Cma21StubBeam {
+    fn get_beam_type(&self) -> BeamType {
+        BeamType::Cma21Stub
+    }
+
+    fn get_num_tiles(&self) -> usize {
+        self.num_tiles
+    }
+
+    fn get_ideal_dipole_delays(&self) -> Option<[u32; 16]> {
+        None
+    }
+
+    fn get_dipole_delays(&self) -> Option<ArcArray<u32, Dim<[usize; 2]>>> {
+        None
+    }
+
+    fn get_dipole_gains(&self) -> Option<ArcArray<f64, Dim<[usize; 2]>>> {
+        None
+    }
+
+    fn get_beam_file(&self) -> Option<&Path> {
+        None
+    }
+
+    fn calc_jones(
+        &self,
+        _azel: AzEl,
+        _freq_hz: f64,
+        _tile_index: Option<usize>,
+        _latitude_rad: f64,
+    ) -> Result<Jones<f64>, BeamError> {
+        Ok(Jones::identity())
+    }
+
+    fn calc_jones_array(
+        &self,
+        azels: &[AzEl],
+        _freq_hz: f64,
+        _tile_index: Option<usize>,
+        _latitude_rad: f64,
+    ) -> Result<Vec<Jones<f64>>, BeamError> {
+        Ok(vec![Jones::identity(); azels.len()])
+    }
+
+    fn calc_jones_array_inner(
+        &self,
+        _azels: &[AzEl],
+        _freq_hz: f64,
+        _tile_index: Option<usize>,
+        _latitude_rad: f64,
+        results: &mut [Jones<f64>],
+    ) -> Result<(), BeamError> {
+        results.fill(Jones::identity());
+        Ok(())
+    }
+
+    fn find_closest_freq(&self, desired_freq_hz: f64) -> f64 {
+        desired_freq_hz
+    }
+
+    fn empty_coeff_cache(&self) {}
+
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    fn prepare_gpu_beam(&self, freqs_hz: &[u32]) -> Result<Box<dyn BeamGpu>, BeamError> {
+        let obj = Cma21StubBeamGpu {
+            tile_map: DevicePointer::copy_to_device(&vec![0; self.num_tiles])?,
+            freq_map: DevicePointer::copy_to_device(&vec![0; freqs_hz.len()])?,
+        };
+        Ok(Box::new(obj))
+    }
+}
+
+/// A placeholder GPU beam implementation for 21CMA integration.
+#[cfg(any(feature = "cuda", feature = "hip"))]
+pub(crate) struct Cma21StubBeamGpu {
+    tile_map: DevicePointer<i32>,
+    freq_map: DevicePointer<i32>,
+}
+
+#[cfg(any(feature = "cuda", feature = "hip"))]
+impl BeamGpu for Cma21StubBeamGpu {
+    unsafe fn calc_jones_pair(
+        &self,
+        az_rad: &[GpuFloat],
+        _za_rad: &[GpuFloat],
+        _latitude_rad: f64,
+        d_jones: *mut std::ffi::c_void,
+    ) -> Result<(), BeamError> {
+        #[cfg(feature = "cuda")]
+        use cuda_runtime_sys::{
+            cudaMemcpy as gpuMemcpy,
+            cudaMemcpyKind::cudaMemcpyHostToDevice as gpuMemcpyHostToDevice,
+        };
+        #[cfg(feature = "hip")]
+        use hip_sys::hiprt::{
+            hipMemcpy as gpuMemcpy, hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
+        };
+
+        let identities: Vec<Jones<GpuFloat>> = vec![Jones::identity(); az_rad.len()];
+        gpuMemcpy(
+            d_jones,
+            identities.as_ptr().cast(),
+            identities.len() * std::mem::size_of::<Jones<GpuFloat>>(),
+            gpuMemcpyHostToDevice,
+        );
+        Ok(())
+    }
+
+    fn get_beam_type(&self) -> BeamType {
+        BeamType::Cma21Stub
+    }
+
+    fn get_tile_map(&self) -> *const i32 {
+        self.tile_map.get()
+    }
+
+    fn get_freq_map(&self) -> *const i32 {
+        self.freq_map.get()
+    }
+
+    fn get_num_unique_tiles(&self) -> i32 {
+        1
+    }
+
+    fn get_num_unique_freqs(&self) -> i32 {
+        1
+    }
+}
+
 pub fn create_beam_object(
     beam_type: Option<&str>,
     num_tiles: usize,
@@ -402,6 +553,14 @@ pub fn create_beam_object(
     };
 
     match beam_type {
+        BeamType::Cma21Stub => {
+            debug!("Setting up a 21CMA stub beam object");
+            Ok(Box::new(Cma21StubBeam { num_tiles }))
+        }
+        BeamType::Cma21Gaussian => {
+            debug!("Setting up a 21CMA Gaussian beam object");
+            Ok(Box::new(Cma21GaussianBeam { num_tiles }))
+        }
         BeamType::None => {
             debug!("Setting up a \"NoBeam\" object");
             Ok(Box::new(NoBeam { num_tiles }))

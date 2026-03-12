@@ -94,6 +94,26 @@ fn test_unity_dipole_gains() {
 }
 
 #[test]
+fn test_explicit_cma21_stub_beam_type() {
+    let args = BeamArgs {
+        beam_type: Some("cma21-stub".to_string()),
+        ..Default::default()
+    };
+    let beam = args.parse(40, None, None, None).unwrap();
+    assert_eq!(beam.get_beam_type(), BeamType::Cma21Stub);
+}
+
+#[test]
+fn test_explicit_cma21_gaussian_beam_type() {
+    let args = BeamArgs {
+        beam_type: Some("cma21-gaussian".to_string()),
+        ..Default::default()
+    };
+    let beam = args.parse(40, None, None, None).unwrap();
+    assert_eq!(beam.get_beam_type(), BeamType::Cma21Gaussian);
+}
+
+#[test]
 fn test_aman_dipole_gains() {
     let f = |metafits| {
         let metafits = mwalib::MetafitsContext::new(metafits, None).unwrap();

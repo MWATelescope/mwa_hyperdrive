@@ -33,11 +33,12 @@ use vec1::Vec1;
 use super::HyperdriveError;
 use crate::{
     averaging::{
-        parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks,
-        AverageFactorError,
+        chunked_timestamps_to_timeblocks, parse_freq_average_factor, parse_time_average_factor,
+        timesteps_to_timeblocks, AverageFactorError,
     },
     beam::Beam,
     constants::{DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
+    context::Telescope,
     io::{
         get_single_match_from_glob,
         write::{can_write_to_file, VisOutputType, VIS_OUTPUT_EXTENSIONS},
@@ -161,6 +162,7 @@ impl OutputVisArgs {
         input_vis_time_res: Duration,
         input_vis_freq_res_hz: f64,
         timestamps: &Vec1<Epoch>,
+        processing_telescope: Telescope,
         write_smallest_contiguous_band: bool,
         default_output_filename: &str,
         vis_description: Option<&str>,
@@ -256,6 +258,17 @@ impl OutputVisArgs {
             Vec1::try_from_vec(valid_outputs).expect("cannot be empty")
         };
 
+        if processing_telescope == Telescope::Cma21
+            && output_files
+                .iter()
+                .any(|(_, output_type)| matches!(output_type, VisOutputType::Uvfits))
+        {
+            return Err(HyperdriveError::VisWrite(
+                "The explicit 21CMA route currently preserves irregular timestamps only for MeasurementSet outputs. Use an .ms output, or use the standard route for uvfits."
+                    .to_string(),
+            ));
+        }
+
         let vis_str = output_files.iter().map(|(pb, _)| pb.display()).join(", ");
         if let Some(vis_description) = vis_description {
             vis_printer
@@ -302,10 +315,17 @@ impl OutputVisArgs {
         } else {
             vis_printer.push_line("Not writing out auto-correlations".into());
         }
+        if processing_telescope == Telescope::Cma21 {
+            vis_printer.push_line("21CMA route: preserving irregular output timestamps".into());
+        }
         vis_printer.display();
 
-        let timeblocks =
-            timesteps_to_timeblocks(timestamps, input_vis_time_res, time_average_factor, None);
+        let timeblocks = match processing_telescope {
+            Telescope::Standard => {
+                timesteps_to_timeblocks(timestamps, input_vis_time_res, time_average_factor, None)
+            }
+            Telescope::Cma21 => chunked_timestamps_to_timeblocks(timestamps, time_average_factor),
+        };
 
         Ok(OutputVisParams {
             output_files,

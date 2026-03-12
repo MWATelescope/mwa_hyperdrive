@@ -28,7 +28,7 @@ use vec1::Vec1;
 use crate::{
     averaging::channels_to_chanblocks,
     beam::Beam,
-    context::Polarisations,
+    context::{Polarisations, Telescope},
     io::write::{write_vis, VisTimestep, VisWriteError},
     math::TileBaselineFlags,
     model::{self, ModelError},
@@ -194,8 +194,8 @@ impl VisSimulateParams {
                         };
 
                         let spw = &channels_to_chanblocks(
-                            &fine_chan_freqs.mapped_ref(|f| *f as u64),
-                            freq_res_hz.round() as u64,
+                            fine_chan_freqs.as_slice(),
+                            *freq_res_hz,
                             NonZeroUsize::new(1).unwrap(),
                             &HashSet::new(),
                         )[0];
@@ -216,6 +216,7 @@ impl VisSimulateParams {
                             *output_freq_average_factor,
                             Some(&MwaObsContext::from_mwalib(metafits)),
                             *write_smallest_contiguous_band,
+                            Telescope::Standard,
                             rx_model,
                             &error,
                             Some(write_progress),
@@ -295,6 +296,7 @@ fn model_thread(
                     )
                 }),
                 timestamp,
+                output_timestamp: timestamp,
             })
             .is_err()
         {

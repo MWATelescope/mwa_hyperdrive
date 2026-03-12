@@ -336,6 +336,7 @@ impl From<InputVisArgsError> for HyperdriveError {
             | InputVisArgsError::MultipleUvfits(_)
             | InputVisArgsError::MultipleSolutions(_)
             | InputVisArgsError::InvalidDataInput(_)
+            | InputVisArgsError::BadTelescopeRoute(_)
             | InputVisArgsError::BadArrayPosition { .. }
             | InputVisArgsError::NoTimesteps
             | InputVisArgsError::DuplicateTimesteps
