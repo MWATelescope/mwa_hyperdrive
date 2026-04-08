@@ -1,12 +1,13 @@
 [package]
 name = "mwa_hyperdrive"
-version = "0.7.0"
+version = "0.8.0"
 authors = [
     "Christopher H. Jordan <christopherjordan87@gmail.com>",
     "Dev Null <dev.null@curtin.edu.au>",
+    "Greg Sleap <greg.sleap@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -58,31 +59,31 @@ cuda-static = ["mwa_hyperbeam/cuda-static"]
 all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
 [dependencies]
-birli = { version = "0.18.0", default-features = false }
+birli = { version = "0.19.0", default-features = false }
 bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
 chrono = "0.4.0"
-clap = { version = "3.1.0", features = ["derive", "wrap_help"] }
-console = "0.15.0"
+clap = { version = "<4.0.0", features = ["derive", "wrap_help"] }
+console = "0.16.0"
 crossbeam-channel = "0.5.8"
 crossbeam-utils = "0.8.15"
-env_logger = "0.10.0"
+env_logger = "0.11.0"
 fitsio = "~0.21"
 fitsio-sys = "~0.5"
 flate2 = "1.0.13"
 glob = "0.3.0"
 hifitime = "3.8.2"
-indexmap = { version = "1.8.0", features = ["rayon", "serde"] }
+indexmap = { version = "<2", features = ["rayon", "serde"] }
 is-terminal = "0.4.0"
-itertools = "0.10.0"
-indicatif = { version = "0.17.5", features = ["rayon"] }
+itertools = "<0.13.0"
+indicatif = { version = "0.18", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
-marlu = { version = "0.16.1", features = ["serde"] }
-mwa_hyperbeam = "0.10.2"
-mwalib = "1.8.7"
-ndarray = { version = "0.16.0", features = ["rayon"] }
+marlu = { version = "0.17.0", features = ["serde"] }
+mwa_hyperbeam = "0.11.0"
+mwalib = "2.0.3"
+ndarray = { version = "0.16.1", features = ["rayon"] }
 num-complex = "0.4.1"
 num-traits = "0.2.15"
 rayon = "1.5.0"
@@ -92,12 +93,11 @@ serde = { version = "1.0.103", features = ["derive"] }
 serde_json = "1.0.0"
 serde_yaml = "0.9.21"
 static_assertions = "1.1.0"
-strum = "0.24.0"
-strum_macros = "0.24.0"
-thiserror = "1.0.7"
-toml = "0.7.2"
-# TODO: bump vec1 after msrv update
-vec1 = { version = "~1.10.0", features = ["serde"] }
+strum = "0.28.0"
+strum_macros = "0.28.0"
+thiserror = "<2.0.0"
+toml = "1.1.2"
+vec1 = { version = "~1.12.0", features = ["serde"] }
 
 # "cuda" feature
 cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
@@ -115,12 +115,12 @@ plotters = { version = "0.3.5", default-features = false, features = [
 
 [dev-dependencies]
 approx = "0.5.1"
-assert_cmd = "<2.0.13"                                      # requires Rust 1.70.0
-criterion = { version = "0.4.0", default-features = false }
+assert_cmd = "2.2.0"
+criterion = { version = "0.7.0", default-features = false }
 indoc = "2.0.1"
-marlu = { version = "0.16.1", features = ["approx"] }
-ndarray = { version = "0.16.0", features = ["approx"] }
-serial_test = "2.0.0"
+marlu = { version = "0.17.0", features = ["approx"] }
+ndarray = { version = "0.16.1", features = ["approx"] }
+serial_test = "3.4.0"
 tar = "0.4.38"
 tempfile = "3.6.0"
 
@@ -137,13 +137,13 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
-url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
-half = { git = "https://github.com/VoidStarKat/half-rs", tag="v2.2.1" }
+#url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
+#half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
 # birli = { path = "../Birli" }
-# birli = { git = "https://github.com/MWATelescope/Birli" }
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "mwalib2" }
 # marlu = { path = "../Marlu" }
-# marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "v0.9.0" }
+marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "mwalib2" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
 # mwa_hyperbeam = { path = "../mwa_hyperbeam" }
-# mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "DUT1" }
+mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }

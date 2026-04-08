@@ -21,6 +21,9 @@ pub enum RawReadError {
     #[error("Attempted to read in MWA VCS data; this is unsupported")]
     Vcs,
 
+    #[error("Attempted to read in MWA Beamformer data; this is unsupported")]
+    Beamformer,
+
     #[error("The supplied mwaf files don't have flags for timestep {timestep} (GPS time {gps})")]
     MwafFlagsMissingForTimestep { timestep: usize, gps: f64 },
 

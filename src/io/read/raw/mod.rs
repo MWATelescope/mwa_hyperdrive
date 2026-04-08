@@ -160,11 +160,12 @@ impl RawDataReader {
         let metafits_context = &mwalib_context.metafits_context;
 
         let is_mwax = match mwalib_context.mwa_version {
-            MWAVersion::CorrMWAXv2 => true,
+            MWAVersion::CorrMWAXv2 | MWAVersion::CorrBeamformerMWAXv2 => true,
             MWAVersion::CorrLegacy | MWAVersion::CorrOldLegacy => false,
             MWAVersion::VCSLegacyRecombined | MWAVersion::VCSMWAXv2 => {
                 return Err(RawReadError::Vcs)
             }
+            MWAVersion::BeamformerMWAXv2 => return Err(RawReadError::Beamformer),
         };
 
         let total_num_tiles = metafits_context.num_ants;

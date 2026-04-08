@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-08
+
+### Changed
+
+- Bumped MSRV to 1.85.0.
+- Updated mwalib, Marlu, hyperbeam and Birli dependencies.
+- Minor refactor in `solutions::hyperdrive::read()` to make more readable.
+
+### Added
+
+- Added tile_names test to `test_write_and_read_hyperdrive_solutions`.
+- Added condition path for Beamformer and Correlator+Beamformer observation types.
+
 ## [0.7.0] - 2026-02-09
 
 ### Fixed
