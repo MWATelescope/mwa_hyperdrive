@@ -3,7 +3,7 @@ name: clippy
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   clippy:
@@ -12,10 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.80.0", "stable"]
+        toolchain: ["1.85.0", "stable"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system deps
         run: |

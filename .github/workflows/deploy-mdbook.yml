@@ -2,14 +2,14 @@ name: Deploy mdBook
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   build:
     name: Build, Test and Deploy
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable

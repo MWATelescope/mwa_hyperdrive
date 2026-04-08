@@ -13,6 +13,7 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Bumped MSRV to 1.85.0.
 - Updated mwalib, Marlu, hyperbeam and Birli dependencies.
 - Minor refactor in `solutions::hyperdrive::read()` to make more readable.
+- Updated CI action versions.
 
 ### Added
 
