@@ -34,6 +34,7 @@ fn test_srclist_by_beam() {
         number: n,
         source_dist_cutoff: None,
         veto_threshold: None,
+        elevation_limit: None,
         filter_points: false,
         filter_gaussians: false,
         filter_shapelets: false,
