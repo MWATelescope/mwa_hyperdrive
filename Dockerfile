@@ -52,6 +52,16 @@ RUN apt-get update -y && \
     libfontconfig-dev \
     libfreetype-dev \
     libhdf5-dev \
+    libfftw3-dev \
+    libboost-date-time-dev \
+    libboost-filesystem-dev \
+    libboost-program-options-dev \
+    libboost-system-dev \
+    libboost-test-dev \
+    liblua5.3-dev \
+    libpng-dev \
+    libxml2-dev \
+    libgtkmm-3.0-dev \
     pkg-config \
     tzdata \
     && \
@@ -82,6 +92,24 @@ ARG HIP_ARCH=""
 ARG FEATURES=""
 # optional, example: "-C target-cpu=native"
 ARG RUSTFLAGS=""
+
+# Install aoflagger if FEATURES includes bmetrics
+ARG CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release"
+ARG AOFLAGGER_BRANCH=v3.4.0
+RUN if echo "$FEATURES" | grep -q "bmetrics"; then \
+        git clone --depth 1 --branch=${AOFLAGGER_BRANCH} --recurse-submodules https://gitlab.com/aroffringa/aoflagger.git /aoflagger && \
+        cd /aoflagger && \
+        mkdir build && \
+        cd build && \
+        cmake $CMAKE_ARGS \
+        -DENABLE_GUI=OFF \
+        -DPORTABLE=True \
+        .. && \
+        make install -j && \
+        ldconfig && \
+        cd / && \
+        rm -rf /aoflagger; \
+    fi
 
 ADD . /mwa_hyperdrive
 WORKDIR /mwa_hyperdrive
