@@ -37,7 +37,7 @@ use crate::{
         AverageFactorError,
     },
     beam::Beam,
-    constants::{DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
+    constants::{DEFAULT_ELEVATION_LIMIT, DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
     io::{
         get_single_match_from_glob,
         write::{can_write_to_file, VisOutputType, VIS_OUTPUT_EXTENSIONS},
@@ -340,6 +340,12 @@ pub(super) struct SkyModelWithVetoArgs {
 
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY MODEL")]
     pub(super) veto_threshold: Option<f64>,
+
+    /// Minimum elevation for a source to be included in the sky model [degrees].
+    /// Sources with any component below this elevation are discarded. Default: 0.
+    #[clap(long, help_heading = "SKY MODEL")]
+    pub(super) elevation_limit: Option<f64>,
+
     /// Optional source names to include (or exclude if --invert).
     /// Skips vetoing if provided, unless --invert is enabled.
     #[clap(long, multiple_values(true), help_heading = "SKY MODEL SOURCES")]
@@ -364,6 +370,7 @@ impl SkyModelWithVetoArgs {
             num_sources: self.num_sources.or(other.num_sources),
             source_dist_cutoff: self.source_dist_cutoff.or(other.source_dist_cutoff),
             veto_threshold: self.veto_threshold.or(other.veto_threshold),
+            elevation_limit: self.elevation_limit.or(other.elevation_limit),
             named_sources: self.named_sources.or(other.named_sources),
             invert: self.invert.or(other.invert),
         }
@@ -387,6 +394,7 @@ impl SkyModelWithVetoArgs {
             num_sources,
             source_dist_cutoff,
             veto_threshold,
+            elevation_limit,
             named_sources,
             invert,
         } = self;
@@ -506,6 +514,7 @@ impl SkyModelWithVetoArgs {
                 num_sources,
                 source_dist_cutoff.unwrap_or(f64::MAX),
                 veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
+                elevation_limit.unwrap_or(DEFAULT_ELEVATION_LIMIT),
             )?;
             if sl.is_empty() {
                 return Err(ReadSourceListError::NoSourcesAfterVeto);

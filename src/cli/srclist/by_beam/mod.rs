@@ -24,7 +24,7 @@ use crate::{
         display_warnings, BeamArgs, Warn, ARRAY_POSITION_HELP, SOURCE_LIST_INPUT_TYPE_HELP,
         SOURCE_LIST_OUTPUT_TYPE_HELP, VETO_THRESHOLD_HELP,
     },
-    constants::DEFAULT_VETO_THRESHOLD,
+    constants::{DEFAULT_ELEVATION_LIMIT, DEFAULT_VETO_THRESHOLD},
     metafits::get_dipole_delays,
     srclist::{
         read::read_source_list_file, veto_sources, write_source_list, ReadSourceListError,
@@ -121,6 +121,11 @@ pub struct SrclistByBeamArgs {
     #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SOURCE FILTERING")]
     veto_threshold: Option<f64>,
 
+    /// Minimum elevation for a source to be included in the sky model [degrees].
+    /// Sources with any component below this elevation are discarded. Default: 0.
+    #[clap(long, help_heading = "SOURCE FILTERING")]
+    elevation_limit: Option<f64>,
+
     /// Don't include point components from the input sky model.
     #[clap(long, help_heading = "SOURCE FILTERING")]
     filter_points: bool,
@@ -171,6 +176,7 @@ impl SrclistByBeamArgs {
             self.freqs_hz.as_deref(),
             self.source_dist_cutoff,
             self.veto_threshold,
+            self.elevation_limit,
             self.filter_points,
             self.filter_gaussians,
             self.filter_shapelets,
@@ -204,6 +210,7 @@ fn by_beam(
     freqs_hz: Option<&[f64]>,
     source_dist_cutoff: Option<f64>,
     veto_threshold: Option<f64>,
+    elevation_limit: Option<f64>,
     filter_points: bool,
     filter_gaussians: bool,
     filter_shapelets: bool,
@@ -359,6 +366,7 @@ fn by_beam(
         None,
         source_dist_cutoff.unwrap_or(f64::MAX),
         veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
+        elevation_limit.unwrap_or(DEFAULT_ELEVATION_LIMIT),
     )?;
     // Were any sources left after vetoing?
     if sl.is_empty() {

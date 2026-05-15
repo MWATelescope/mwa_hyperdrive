@@ -17,7 +17,7 @@ pub(crate) const DEFAULT_VETO_THRESHOLD: f64 = 0.01;
 
 /// Sources with elevations less than this value are discarded from sky-model
 /// source lists \[degrees\].
-pub(crate) const ELEVATION_LIMIT: f64 = 0.0;
+pub(crate) const DEFAULT_ELEVATION_LIMIT: f64 = 0.0;
 
 // sqrt(pi^2 / (2 ln(2)))
 pub(crate) const SQRT_FRAC_PI_SQ_2_LN_2: f64 = 2.6682231283184983;
