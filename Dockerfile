@@ -7,12 +7,13 @@
 
 # -> cuda, V100 or A100
 # export CUDA_VER=12.5.1
+# export HYP_VER=0.7.0-bmetrics
 # docker build . \
 #   --build-arg=BASE_IMAGE=nvidia/cuda:${CUDA_VER}-devel-ubuntu24.04 \
-#   --build-arg=FEATURES=cuda \
+#   --build-arg=FEATURES=cuda,bmetrics \
 #   --build-arg=CUDA_COMPUTE=70,80 \
 #   --tag=mwatelescope/hyperdrive:${HYP_VER}-cuda${CUDA_VER}-ubuntu24.04 --push
-# module load singularity/default; singularity pull -F /data/curtin_mwaeor/singularity/hyperdrive_autos-dev_cuda12.5.1-ubuntu24.04.sif docker://mwatelescope/hyperdrive:cuda12.5.1-ubuntu24.04
+# module load singularity/default; singularity pull -F /data/curtin_mwaeor/singularity/hyperdrive_0.7.0-bmetrics_cuda12.5.1-ubuntu24.04.sif docker://mwatelescope/hyperdrive:cuda12.5.1-ubuntu24.04
 # note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu20.04, python3.8 is too old for pyuvdata>6
 # note: don't use nvidia/cuda:${CUDA_VER}-devel-ubuntu22.04, python3.10 is too old for mwax_mover
 
@@ -41,12 +42,15 @@ ENV DEBIAN_FRONTEND="noninteractive"
 RUN apt-get update -y && \
     apt-get -y install \
     build-essential \
+    casacore-dev \
     clang \
     cmake \
     curl \
     fontconfig \
+    gfortran \
     git \
     lcov \
+    libblas-dev \
     libcfitsio-dev \
     libexpat1-dev \
     libfontconfig-dev \
@@ -58,11 +62,14 @@ RUN apt-get update -y && \
     libboost-program-options-dev \
     libboost-system-dev \
     libboost-test-dev \
+    liblapack-dev \
     liblua5.3-dev \
     libpng-dev \
     libxml2-dev \
     libgtkmm-3.0-dev \
     pkg-config \
+    python3 \
+    python3-dev \
     tzdata \
     && \
     apt-get clean all && \
@@ -127,5 +134,6 @@ RUN [ -z "$CUDA_COMPUTE" ] || export "HYPERDRIVE_CUDA_COMPUTE=${CUDA_COMPUTE}"; 
     [ -z "$HIP_ARCH" ] || export "HYPERDRIVE_HIP_ARCH=${HIP_ARCH}"; \
     [ -z "$RUSTFLAGS" ] || export "CARGO_BUILD_RUSTFLAGS=${RUSTFLAGS}"; \
     [ -z "$TEST_SHIM" ] || eval ${TEST_SHIM} && \
+    RUSTFLAGS="${RUSTFLAGS} -C link-args=-Wl,-rpath,/usr/local/lib -L/usr/local/lib" \
     cargo install --path . --features=${FEATURES} --locked \
     && cargo clean
