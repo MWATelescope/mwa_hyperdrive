@@ -115,7 +115,7 @@ dependencies = [
 [[package]]
 name = "birli"
 version = "0.18.1"
-source = "git+https://github.com/MWATelescope/Birli?branch=bmetrics#5f2f0010ba9941cf07a18d979ae32311258581e8"
+source = "git+https://github.com/MWATelescope/Birli?branch=bmetrics#35d602f7cb458e4605099f584c7790209869ed86"
 dependencies = [
  "aoflagger_sys",
  "built",
@@ -128,6 +128,7 @@ dependencies = [
  "lazy_static",
  "log",
  "marlu",
+ "rayon",
  "regex",
  "rustfft",
  "serde-pickle",
@@ -1478,7 +1479,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -2851,7 +2852,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
