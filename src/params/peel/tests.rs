@@ -625,9 +625,10 @@ fn test_vis_rotation() {
         model_timesteps(&modeller, &obs_context.timestamps, vis_tfb.view_mut()).unwrap();
 
         // iterate over time, rotating visibilities
+        let mut vis_rot_tfb_view = vis_rot_tfb.view_mut();
         for (vis_fb, mut vis_rot_fb, tile_ws_obs, tile_ws_src) in izip!(
             vis_tfb.outer_iter(),
-            vis_rot_tfb.view_mut().outer_iter_mut(),
+            vis_rot_tfb_view.outer_iter_mut(),
             tile_ws_obs.outer_iter(),
             tile_ws_src.outer_iter(),
         ) {

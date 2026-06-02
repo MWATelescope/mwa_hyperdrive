@@ -504,7 +504,7 @@ fn test_1090008640_calibrate_model_uvfits() {
     let tile_names_m: Vec<String> = fits_get_col(&mut uvfits_m, &hdu_m, "ANNAME").unwrap();
     let hdu_c = fits_open_hdu(&mut uvfits_c, 1).unwrap();
     let tile_names_c: Vec<String> = fits_get_col(&mut uvfits_c, &hdu_c, "ANNAME").unwrap();
-    for (tile_m, tile_c) in tile_names_m.into_iter().zip(tile_names_c.into_iter()) {
+    for (tile_m, tile_c) in tile_names_m.into_iter().zip(tile_names_c) {
         assert_eq!(tile_m, tile_c);
     }
 

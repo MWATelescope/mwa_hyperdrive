@@ -1154,7 +1154,7 @@ pub(crate) enum InputVisArgsError {
     #[error("The specified file '{0}' is a \"PPDs metafits\" and is not supported. Please use a newer metafits file.")]
     PpdMetafitsUnsupported(String),
 
-    #[error("The specified file '{0}' was not a recognised file type.\n\nSupported file formats:{}", *SUPPORTED_INPUT_FILE_TYPES)]
+    #[error("The specified file '{_0}' was not a recognised file type.\n\nSupported file formats:{}", *SUPPORTED_INPUT_FILE_TYPES)]
     NotRecognised(String),
 
     #[error("No input data was given!")]
@@ -1172,7 +1172,7 @@ pub(crate) enum InputVisArgsError {
     #[error("Multiple calibration solutions files were specified: {0:?}\nThis is unsupported.")]
     MultipleSolutions(Vec1<PathBuf>),
 
-    #[error("{0}\n\nSupported file formats:{}", *SUPPORTED_INPUT_FILE_TYPES)]
+    #[error("{_0}\n\nSupported file formats:{}", *SUPPORTED_INPUT_FILE_TYPES)]
     InvalidDataInput(&'static str),
 
     #[error("Array position specified as {pos:?}, not [<Longitude>, <Latitude>, <Height>]")]
