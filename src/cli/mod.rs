@@ -30,7 +30,7 @@ pub use error::HyperdriveError;
 
 use std::path::PathBuf;
 
-use clap::{AppSettings, Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use log::info;
 
 use crate::PROGRESS_BARS;
@@ -39,95 +39,94 @@ use crate::PROGRESS_BARS;
 include!(concat!(env!("OUT_DIR"), "/built.rs"));
 
 #[derive(Debug, Parser)]
-#[clap(
+#[command(
     version,
     author,
     about = r#"Calibration software for the Murchison Widefield Array (MWA) radio telescope
 Documentation: https://mwatelescope.github.io/mwa_hyperdrive
 Source:        https://github.com/MWATelescope/mwa_hyperdrive"#
 )]
-#[clap(global_setting(AppSettings::DeriveDisplayOrder))]
-#[clap(disable_help_subcommand = true)]
-#[clap(infer_subcommands = true)]
-#[clap(propagate_version = true)]
-#[clap(infer_long_args = true)]
+#[command(disable_help_subcommand = true)]
+#[command(infer_subcommands = true)]
+#[command(propagate_version = true)]
+#[command(infer_long_args = true)]
+#[command(arg_required_else_help = true)]
 pub struct Hyperdrive {
-    #[clap(flatten)]
+    #[command(flatten)]
     global_opts: GlobalArgs,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Debug, Args)]
 struct GlobalArgs {
     /// Don't draw progress bars.
-    #[clap(long)]
-    #[clap(global = true)]
+    #[arg(long)]
+    #[arg(global = true)]
     no_progress_bars: bool,
 
     /// The verbosity of the program. Increase by specifying multiple times
     /// (e.g. -vv). The default is to print only high-level information.
-    #[clap(short, long, parse(from_occurrences))]
-    #[clap(global = true)]
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(global = true)]
     verbosity: u8,
 
     /// Only verify that arguments were correctly ingested and print out
     /// high-level information.
-    #[clap(long)]
-    #[clap(global = true)]
+    #[arg(long)]
+    #[arg(global = true)]
     dry_run: bool,
 
     /// Save the input arguments into a new TOML file that can be used to
     /// reproduce this run.
-    #[clap(long)]
-    #[clap(global = true)]
+    #[arg(long)]
+    #[arg(global = true)]
     save_toml: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
-#[clap(arg_required_else_help = true)]
 enum Command {
-    #[clap(alias = "calibrate")]
-    #[clap(
+    #[command(alias = "calibrate")]
+    #[command(
         about = r#"Perform direction-independent calibration on the input MWA data.
 https://mwatelescope.github.io/mwa_hyperdrive/user/di_cal/intro.html"#
     )]
     DiCalibrate(di_calibrate::DiCalArgs),
 
-    #[clap(about = r#"Solve for and subtract ionospheric sky-model.
+    #[command(about = r#"Solve for and subtract ionospheric sky-model.
 https://mwatelescope.github.io/mwa_hyperdrive/user/peel/intro.html"#)]
     Peel(peel::PeelArgs),
 
-    #[clap(alias = "convert-vis")]
-    #[clap(about = r#"Convert visibilities from one type to another.
+    #[command(alias = "convert-vis")]
+    #[command(about = r#"Convert visibilities from one type to another.
 https://mwatelescope.github.io/mwa_hyperdrive/user/vis_convert/intro.html"#)]
     VisConvert(vis_convert::VisConvertArgs),
 
-    #[clap(alias = "simulate-vis")]
-    #[clap(about = r#"Simulate visibilities of a sky-model source list.
+    #[command(alias = "simulate-vis")]
+    #[command(about = r#"Simulate visibilities of a sky-model source list.
 https://mwatelescope.github.io/mwa_hyperdrive/user/vis_simulate/intro.html"#)]
     VisSimulate(vis_simulate::VisSimulateArgs),
 
-    #[clap(alias = "subtract-vis")]
-    #[clap(about = "Subtract sky-model sources from supplied visibilities.
+    #[command(alias = "subtract-vis")]
+    #[command(about = "Subtract sky-model sources from supplied visibilities.
 https://mwatelescope.github.io/mwa_hyperdrive/user/vis_subtract/intro.html")]
     VisSubtract(vis_subtract::VisSubtractArgs),
 
-    #[clap(alias = "apply-solutions")]
-    #[clap(about = r#"Apply calibration solutions to input data.
+    #[command(alias = "apply-solutions")]
+    #[command(about = r#"Apply calibration solutions to input data.
 https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)]
     SolutionsApply(solutions::SolutionsApplyArgs),
 
-    #[clap(alias = "plot-solutions")]
-    #[clap(
+    #[command(alias = "plot-solutions")]
+    #[command(
         about = r#"Plot calibration solutions. Only available if compiled with the "plotting" feature.
 https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
     )]
     SolutionsPlot(solutions::SolutionsPlotArgs),
 
-    #[clap(alias = "convert-solutions")]
-    #[clap(about = "Convert between calibration solution file formats.")]
+    #[command(alias = "convert-solutions")]
+    #[command(about = "Convert between calibration solution file formats.")]
     SolutionsConvert(solutions::SolutionsConvertArgs),
 
     SrclistByBeam(srclist::SrclistByBeamArgs),
@@ -140,7 +139,7 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
 
     DipoleGains(dipole_gains::DipoleGainsArgs),
 
-    #[clap(about = "Generate beam-response values.
+    #[command(about = "Generate beam-response values.
 https://mwatelescope.github.io/mwa_hyperdrive/user/beam.html")]
     Beam(beam::BeamArgs),
 }

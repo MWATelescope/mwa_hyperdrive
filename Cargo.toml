@@ -65,7 +65,7 @@ bytemuck = "1.13.1"
 byteorder = "1.4.3"
 cfg-if = "1.0.0"
 chrono = "0.4.0"
-clap = { version = "<4.0.0", features = ["derive", "wrap_help"] }
+clap = { version = "4.6", features = ["derive", "wrap_help"] }
 console = "0.16.0"
 crossbeam-channel = "0.5.8"
 crossbeam-utils = "0.8.15"
@@ -141,7 +141,7 @@ harness = false
 #url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
 #half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
 # birli = { path = "../Birli" }
-birli = { git = "https://github.com/MWATelescope/Birli", branch = "mwalib2" }
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "main" }
 # marlu = { path = "../Marlu" }
 marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "mwalib2" }
 # mwalib = { path = "../mwalib" }

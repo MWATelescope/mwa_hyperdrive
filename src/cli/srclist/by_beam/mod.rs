@@ -41,43 +41,35 @@ use crate::{
 #[derive(Parser, Debug)]
 pub struct SrclistByBeamArgs {
     /// Path to the source list to be converted.
-    #[clap(
-        name = "INPUT_SOURCE_LIST",
-        parse(from_os_str),
-        help_heading = "INPUT FILES"
-    )]
+    #[arg(value_name = "INPUT_SOURCE_LIST", help_heading = "INPUT FILES")]
     input_source_list: PathBuf,
 
     /// Path to the output source list. If not specified, then then "_N" is
     /// appended to the filename.
-    #[clap(
-        name = "OUTPUT_SOURCE_LIST",
-        parse(from_os_str),
-        help_heading = "OUTPUT FILES"
-    )]
+    #[arg(value_name = "OUTPUT_SOURCE_LIST", help_heading = "OUTPUT FILES")]
     output_source_list: Option<PathBuf>,
 
-    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
+    #[arg(short = 'i', long, help = SOURCE_LIST_INPUT_TYPE_HELP.as_str(), help_heading = "INPUT FILES")]
     input_type: Option<String>,
 
-    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str(), help_heading = "OUTPUT FILES")]
+    #[arg(short = 'o', long, help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str(), help_heading = "OUTPUT FILES")]
     output_type: Option<String>,
 
     /// Path to the metafits file, which contains the metadata needed to veto
     /// sources.
-    #[clap(short = 'm', long, parse(from_str), help_heading = "METADATA")]
+    #[arg(short = 'm', long, help_heading = "METADATA")]
     metafits: Option<PathBuf>,
 
-    #[clap(
+    #[arg(
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "METADATA",
-        number_of_values = 3,
+        num_args(3),
         allow_hyphen_values = true,
-        value_names = &["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
+        value_names = ["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
     )]
     array_position: Option<Vec<f64>>,
 
     /// The LST in radians. Overrides the value in the metafits.
-    #[clap(
+    #[arg(
         long = "lst",
         help_heading = "METADATA",
         allow_hyphen_values = true,
@@ -87,12 +79,12 @@ pub struct SrclistByBeamArgs {
 
     /// The RA and Dec. phase centre of the observation in degrees. Overrides
     /// the value in metafits.
-    #[clap(
+    #[arg(
         long,
         help_heading = "METADATA",
-        number_of_values = 2,
+        num_args(2),
         allow_hyphen_values = true,
-        value_names = &["RA", "DEC"],
+        value_names = ["RA", "DEC"],
         required_unless_present = "metafits"
     )]
     phase_centre: Option<Vec<f64>>,
@@ -100,10 +92,10 @@ pub struct SrclistByBeamArgs {
     /// A representative sample of frequencies in the observation [Hz]; it's
     /// typical to use the centre frequencies of each MWA coarse channel.
     /// Overrides the coarse channels in the metafits.
-    #[clap(
+    #[arg(
         long = "freqs",
         help_heading = "METADATA",
-        multiple_values(true),
+        num_args(1..),
         required_unless_present = "metafits"
     )]
     freqs_hz: Option<Vec<f64>>,
@@ -111,46 +103,46 @@ pub struct SrclistByBeamArgs {
     /// Reduce the input source list to the brightest N sources and write them
     /// to the output source list. If the input source list has less than N
     /// sources, then all sources are used.
-    #[clap(short = 'n', long, help_heading = "SOURCE FILTERING")]
+    #[arg(short = 'n', long, help_heading = "SOURCE FILTERING")]
     number: usize,
 
     /// The maximum distance from the phase centre a source can be [degrees].
-    #[clap(long, help_heading = "SOURCE FILTERING")]
+    #[arg(long, help_heading = "SOURCE FILTERING")]
     source_dist_cutoff: Option<f64>,
 
-    #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SOURCE FILTERING")]
+    #[arg(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SOURCE FILTERING")]
     veto_threshold: Option<f64>,
 
     /// Minimum elevation for a source to be included in the sky model [degrees].
     /// Sources with any component below this elevation are discarded. Default: 0.
-    #[clap(long, help_heading = "SOURCE FILTERING")]
+    #[arg(long, help_heading = "SOURCE FILTERING")]
     elevation_limit: Option<f64>,
 
     /// Don't include point components from the input sky model.
-    #[clap(long, help_heading = "SOURCE FILTERING")]
+    #[arg(long, help_heading = "SOURCE FILTERING")]
     filter_points: bool,
 
     /// Don't include Gaussian components from the input sky model.
-    #[clap(long, help_heading = "SOURCE FILTERING")]
+    #[arg(long, help_heading = "SOURCE FILTERING")]
     filter_gaussians: bool,
 
     /// Don't include shapelet components from the input sky model.
-    #[clap(long, help_heading = "SOURCE FILTERING")]
+    #[arg(long, help_heading = "SOURCE FILTERING")]
     filter_shapelets: bool,
 
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source (unless overriden
     /// below). This is suitable for an "RTS patch source list" in DI
     /// calibration.
-    #[clap(long, help_heading = "RTS-ONLY ARGUMENTS")]
+    #[arg(long, help_heading = "RTS-ONLY ARGUMENTS")]
     collapse_into_single_source: bool,
 
     /// If collapsing the source list into a single source, use this source as
     /// the base source; this is very important for RTS DI calibration.
-    #[clap(long, help_heading = "RTS-ONLY ARGUMENTS")]
+    #[arg(long, help_heading = "RTS-ONLY ARGUMENTS")]
     rts_base_source: Option<String>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     beam_args: BeamArgs,
 }
 

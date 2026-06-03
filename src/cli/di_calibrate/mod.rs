@@ -76,7 +76,7 @@ lazy_static::lazy_static! {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 struct DiCalCliArgs {
-    #[clap(short='o', long="outputs", multiple_values(true), help = DI_SOLS_OUTPUTS_HELP.as_str(), help_heading = "OUTPUT FILES")]
+    #[arg(short='o', long="outputs", num_args(1..), help = DI_SOLS_OUTPUTS_HELP.as_str(), help_heading = "OUTPUT FILES")]
     solutions: Option<Vec<PathBuf>>,
 
     /// The number of timesteps to average together during calibration. Also
@@ -85,25 +85,25 @@ struct DiCalCliArgs {
     /// produce calibration solutions in timeblocks with up to 4 timesteps each.
     /// If the variable is instead 4s, then each timeblock contains up to 4s
     /// worth of data.
-    #[clap(short, long, help_heading = "CALIBRATION")]
+    #[arg(short, long, help_heading = "CALIBRATION")]
     timesteps_per_timeblock: Option<String>,
 
-    #[clap(long, help = UVW_MIN_HELP.as_str(), help_heading = "CALIBRATION")]
+    #[arg(long, help = UVW_MIN_HELP.as_str(), help_heading = "CALIBRATION")]
     uvw_min: Option<String>,
 
-    #[clap(long, help = UVW_MAX_HELP.as_str(), help_heading = "CALIBRATION")]
+    #[arg(long, help = UVW_MAX_HELP.as_str(), help_heading = "CALIBRATION")]
     uvw_max: Option<String>,
 
-    #[clap(long, help = MAX_ITERATIONS_HELP.as_str(), help_heading = "CALIBRATION")]
+    #[arg(long, help = MAX_ITERATIONS_HELP.as_str(), help_heading = "CALIBRATION")]
     max_iterations: Option<u32>,
 
-    #[clap(long, help = STOP_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
+    #[arg(long, help = STOP_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     stop_threshold: Option<f64>,
 
-    #[clap(long, help = MIN_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
+    #[arg(long, help = MIN_THRESHOLD_HELP.as_str(), help_heading = "CALIBRATION")]
     min_threshold: Option<f64>,
 
-    #[clap(long, multiple_values(true), help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
+    #[arg(long, num_args(1..), help = MODEL_FILENAME_HELP.as_str(), help_heading = "OUTPUT FILES")]
     model_filenames: Option<Vec<PathBuf>>,
 
     /// When writing out model visibilities, average this many timesteps
@@ -114,7 +114,7 @@ struct DiCalCliArgs {
     /// model data together before writing the data out. If the variable is
     /// instead 4s, then 8 model timesteps are averaged together before writing
     /// the data out.
-    #[clap(long, help_heading = "OUTPUT FILES")]
+    #[arg(long, help_heading = "OUTPUT FILES")]
     output_model_time_average: Option<String>,
 
     /// When writing out model visibilities, average this many fine freq.
@@ -126,7 +126,7 @@ struct DiCalCliArgs {
     /// then we average 320kHz worth of model data together before writing the
     /// data out. If the variable is instead 80kHz, then 4 model fine freq.
     /// channels are averaged together before writing the data out.
-    #[clap(long, help_heading = "OUTPUT FILES")]
+    #[arg(long, help_heading = "OUTPUT FILES")]
     output_model_freq_average: Option<String>,
 
     /// When writing out model visibilities, rather than writing out the entire
@@ -136,37 +136,37 @@ struct DiCalCliArgs {
     /// channels would be written out instead of 768. Note that other flagged
     /// channels in the band are unaffected, because the data written out must
     /// be contiguous.
-    #[clap(long, help_heading = "OUTPUT FILES")]
+    #[arg(long, help_heading = "OUTPUT FILES")]
     #[serde(default)]
     output_smallest_contiguous_band: bool,
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct DiCalArgs {
-    #[clap(name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str(), parse(from_os_str))]
+    #[arg(value_name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str())]
     args_file: Option<PathBuf>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     #[serde(rename = "data")]
     #[serde(default)]
     data_args: InputVisArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     #[serde(rename = "sky-model")]
     #[serde(default)]
     srclist_args: SkyModelWithVetoArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     #[serde(rename = "model")]
     #[serde(default)]
     model_args: ModellingArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     #[serde(rename = "beam")]
     #[serde(default)]
     beam_args: BeamArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     #[serde(rename = "di-calibration")]
     #[serde(default)]
     calibration_args: DiCalCliArgs,

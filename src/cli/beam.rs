@@ -25,31 +25,31 @@ lazy_static::lazy_static! {
 /// Generate beam response values.
 #[derive(Parser, Debug)]
 pub struct BeamArgs {
-    #[clap(help = BEAM_TYPE_HELP.as_str())]
+    #[arg(help = BEAM_TYPE_HELP.as_str())]
     beam_type: String,
 
     /// The frequency to use for the beam model [MHz].
-    #[clap(short, long, default_value = "150")]
+    #[arg(short, long, default_value = "150")]
     freq_mhz: f64,
 
     /// If specified, use these dipole delays for the MWA pointing. e.g. 0 1 2 3 0 1 2 3 0 1 2 3 0 1 2 3
-    #[clap(short, long, multiple_values(true))]
+    #[arg(short, long, num_args(1..))]
     delays: Option<Vec<u32>>,
 
     /// The array latitude to use. This only affects the parallactic-angle
     /// correction.
-    #[clap(short, long, allow_hyphen_values = true, default_value = "-27.0")]
+    #[arg(short, long, allow_hyphen_values = true, default_value = "-27.0")]
     latitude_deg: f64,
 
     /// Get beam responses from zenith down to this zenith angle [degrees]. e.g.
     /// If this is 20 degrees, then beam responses from zenith angles 0 to 20
     /// degrees are generated (corresponds to elevations 70 to 90 degrees).
-    #[clap(long, default_value = "90.0")]
+    #[arg(long, default_value = "90.0")]
     max_za: f64,
 
     /// The step in azimuth and elevation to use [degrees]. Larger steps produce
     /// fewer values, but will give coarser resolution.
-    #[clap(short, long, default_value = "1.0")]
+    #[arg(short, long, default_value = "1.0")]
     step: f64,
 
     /// The file to write the results to. The files are formatted as
@@ -57,12 +57,12 @@ pub struct BeamArgs {
     /// elevation in radians, and (3) the "proxy Stokes I" value of the beam
     /// response (i.e. if the beam response is a Jones matrix j, then |j[0]| +
     /// |j[3]| is returned).
-    #[clap(short, long, default_value = "beam_responses.tsv")]
+    #[arg(short, long, default_value = "beam_responses.tsv")]
     output: PathBuf,
 
     /// Use a GPU (i.e. CUDA or HIP) to generate the beam responses.
     #[cfg(any(feature = "cuda", feature = "hip"))]
-    #[clap(short, long)]
+    #[arg(short, long)]
     gpu: bool,
 }
 

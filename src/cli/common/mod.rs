@@ -37,7 +37,9 @@ use crate::{
         AverageFactorError,
     },
     beam::Beam,
-    constants::{DEFAULT_ELEVATION_LIMIT, DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG},
+    constants::{
+        DEFAULT_ELEVATION_LIMIT, DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG,
+    },
     io::{
         get_single_match_from_glob,
         write::{can_write_to_file, VisOutputType, VIS_OUTPUT_EXTENSIONS},
@@ -321,43 +323,43 @@ impl OutputVisArgs {
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct SkyModelWithVetoArgs {
     /// Path to the sky-model source list file.
-    #[clap(short, long, help_heading = "SKY MODEL")]
+    #[arg(short, long, help_heading = "SKY MODEL")]
     pub(super) source_list: Option<String>,
 
-    #[clap(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "SKY MODEL")]
+    #[arg(long, help = SOURCE_LIST_TYPE_HELP.as_str(), help_heading = "SKY MODEL")]
     pub(super) source_list_type: Option<String>,
 
     /// The number of sources to use in the source list. The default is to use
     /// them all. Example: If 1000 sources are specified here, then the top 1000
     /// sources are used (based on their flux densities after the beam
     /// attenuation) within the specified source distance cutoff.
-    #[clap(short, long, help_heading = "SKY MODEL")]
+    #[arg(short, long, help_heading = "SKY MODEL")]
     pub(super) num_sources: Option<usize>,
 
     /// Specifies the maximum distance from the phase centre a source can be [degrees].
-    #[clap(long, help_heading = "SKY MODEL")]
+    #[arg(long, help_heading = "SKY MODEL")]
     pub(super) source_dist_cutoff: Option<f64>,
 
-    #[clap(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY MODEL")]
+    #[arg(long, help = VETO_THRESHOLD_HELP.as_str(), help_heading = "SKY MODEL")]
     pub(super) veto_threshold: Option<f64>,
 
     /// Minimum elevation for a source to be included in the sky model [degrees].
     /// Sources with any component below this elevation are discarded. Default: 0.
-    #[clap(long, help_heading = "SKY MODEL")]
+    #[arg(long, help_heading = "SKY MODEL")]
     pub(super) elevation_limit: Option<f64>,
 
     /// Optional source names to include (or exclude if --invert).
     /// Skips vetoing if provided, unless --invert is enabled.
-    #[clap(long, multiple_values(true), help_heading = "SKY MODEL SOURCES")]
+    #[arg(long, num_args(1..), help_heading = "SKY MODEL SOURCES")]
     pub(super) named_sources: Option<Vec<String>>,
 
     /// Exclude the named sources from the source list.
     /// Only used if named-sources is specified.
-    #[clap(
+    #[arg(
         short,
         long,
         help_heading = "SKY MODEL SOURCES",
-        requires = "named-sources"
+        requires = "named_sources"
     )]
     pub(super) invert: Option<bool>,
 }
@@ -571,14 +573,14 @@ impl SkyModelWithVetoArgs {
 pub(super) struct ModellingArgs {
     /// If specified, don't precess the array to J2000. We assume that sky-model
     /// sources are specified in the J2000 epoch.
-    #[clap(long, help_heading = "MODELLING")]
+    #[arg(long, help_heading = "MODELLING")]
     #[serde(default)]
     pub(super) no_precession: bool,
 
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
     #[cfg(any(feature = "cuda", feature = "hip"))]
-    #[clap(long, help_heading = "MODELLING")]
+    #[arg(long, help_heading = "MODELLING")]
     #[serde(default)]
     pub(super) cpu: bool,
 }

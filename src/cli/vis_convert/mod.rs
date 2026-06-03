@@ -24,18 +24,18 @@ lazy_static::lazy_static! {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct VisConvertArgs {
-    #[clap(name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str(), parse(from_os_str))]
+    #[arg(value_name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str())]
     pub(super) args_file: Option<PathBuf>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     #[serde(rename = "data")]
     #[serde(default)]
     pub(super) data_args: InputVisArgs,
 
-    #[clap(
+    #[arg(
         short = 'o',
         long,
-        multiple_values(true),
+        num_args(1..),
         help = OUTPUTS_HELP.as_str(),
         help_heading = "OUTPUT FILES"
     )]
@@ -48,7 +48,7 @@ pub(super) struct VisConvertArgs {
     /// resolution and this variable is 4, then we average 2s worth of data
     /// together before writing the data out. If the variable is instead 4s,
     /// then 8 timesteps are averaged together before writing the data out.
-    #[clap(long, help_heading = "OUTPUT FILES")]
+    #[arg(long, help_heading = "OUTPUT FILES")]
     pub(super) output_vis_time_average: Option<String>,
 
     /// When writing out visibilities, average this many fine freq. channels
@@ -59,7 +59,7 @@ pub(super) struct VisConvertArgs {
     /// worth of data together before writing the data out. If the variable is
     /// instead 80kHz, then 2 fine freq. channels are averaged together before
     /// writing the data out.
-    #[clap(long, help_heading = "OUTPUT FILES")]
+    #[arg(long, help_heading = "OUTPUT FILES")]
     pub(super) output_vis_freq_average: Option<String>,
 
     /// Rather than writing out the entire input bandwidth, write out only the
@@ -68,7 +68,7 @@ pub(super) struct VisConvertArgs {
     /// option on means that 764 channels would be written out instead of 768.
     /// Note that other flagged channels in the band are unaffected, because the
     /// data written out must be contiguous.
-    #[clap(long, help_heading = "OUTPUT FILES")]
+    #[arg(long, help_heading = "OUTPUT FILES")]
     #[serde(default)]
     pub(super) output_smallest_contiguous_band: bool,
 }

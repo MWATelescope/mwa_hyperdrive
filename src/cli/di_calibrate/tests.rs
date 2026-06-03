@@ -416,7 +416,7 @@ fn test_1090008640_di_calibrate_array_pos_requires_3_args() {
     assert!(result.is_err());
     assert!(matches!(
         result.err().unwrap().kind(),
-        clap::ErrorKind::WrongNumberOfValues
+        clap::error::ErrorKind::WrongNumberOfValues
     ));
 }
 

@@ -150,7 +150,7 @@ fn test_vis_simulate_and_vis_subtract_no_stderr() {
             "vis-subtract",
             "--data", &metafits, &format!("{}", model_path.display()),
             "--source-list", &srclist,
-            "--output", &format!("{}", sub_path.display()),
+            "--outputs", &format!("{}", sub_path.display()),
             "--no-progress-bars",
         ])
         .ok();

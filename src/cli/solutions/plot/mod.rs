@@ -16,7 +16,7 @@ use crate::HyperdriveError;
 
 #[derive(Parser, Debug, Default)]
 pub(crate) struct SolutionsPlotArgs {
-    #[clap(name = "SOLUTIONS_FILES", parse(from_os_str))]
+    #[clap(value_name = "SOLUTIONS_FILES")]
     files: Vec<PathBuf>,
 
     /// The reference tile to use. If this isn't specified, the best one
@@ -59,7 +59,7 @@ pub(crate) struct SolutionsPlotArgs {
 
     /// The metafits file associated with the solutions. This provides
     /// additional information on the plots, like the tile names.
-    #[clap(short, long, parse(from_str))]
+    #[clap(short, long)]
     metafits: Option<PathBuf>,
 }
 

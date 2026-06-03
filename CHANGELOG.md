@@ -6,12 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - 2026-04-08
+## [0.8.0] - 2026-06-03
 
 ### Changed
 
 - Bumped MSRV to 1.85.0.
 - Updated mwalib, Marlu, hyperbeam and Birli dependencies.
+- Updated thiserror, clap from 3 to 4.
 - Minor refactor in `solutions::hyperdrive::read()` to make more readable.
 - Updated CI action versions.
 
