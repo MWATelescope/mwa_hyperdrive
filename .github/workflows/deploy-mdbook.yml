@@ -7,7 +7,7 @@ on:
 jobs:
   build:
     name: Build, Test and Deploy
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1

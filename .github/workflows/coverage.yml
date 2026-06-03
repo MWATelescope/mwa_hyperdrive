@@ -33,6 +33,7 @@ jobs:
             cmake \
             curl \
             git \
+            gpg \
             lcov \
             libcfitsio-dev \
             libhdf5-dev \
