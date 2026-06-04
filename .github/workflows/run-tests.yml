@@ -1,11 +1,12 @@
 ---
 name: Tests
 
-# Do this on every push, but don't double up on tags
 on:
   push:
+    branches:
+      - "**" # run on every branch push...
     tags-ignore:
-      - "**"
+      - "**" # ...but don't double up on tags
   pull_request:
     branches:
       - "**"
