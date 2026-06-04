@@ -82,16 +82,12 @@ jobs:
           cd ..
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.23
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          cuda: "12.4.1"
+          cuda: "12.9.2"
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build and Tar
         run: |

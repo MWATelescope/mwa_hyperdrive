@@ -45,12 +45,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: llvm-tools-preview
+        uses: dtolnay/rust-toolchain@stable
 
       # https://lib.rs/crates/cargo-llvm-cov#readme-continuous-integration
       - name: Install cargo-llvm-cov
