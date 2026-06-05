@@ -7,7 +7,7 @@ authors = [
     "Greg Sleap <greg.sleap@curtin.edu.au>",
 ]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.85.0"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Calibration software for the Murchison Widefield Array (MWA) radio telescope"
@@ -81,9 +81,9 @@ itertools = "0.14.0"
 indicatif = { version = "0.18", features = ["rayon"] }
 lazy_static = "1.4.0"
 log = "0.4.0"
-marlu = { version = "0.17.0", features = ["serde"] }
+marlu = { version = "0.17.1", features = ["serde"] }
 mwa_hyperbeam = "0.11.0"
-mwalib = "2.0.3"
+mwalib = "2.0.5"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 num-complex = "0.4.1"
 num-traits = "0.2.15"
@@ -119,7 +119,7 @@ approx = "0.5.1"
 assert_cmd = "2.2.0"
 criterion = { version = "0.7.0", default-features = false }
 indoc = "2.0.1"
-marlu = { version = "0.17.0", features = ["approx"] }
+marlu = { version = "0.17.1", features = ["approx"] }
 ndarray = { version = "0.16.1", features = ["approx"] }
 serial_test = "3.4.0"
 tar = "0.4.38"
@@ -138,13 +138,16 @@ name = "bench"
 harness = false
 
 [patch.crates-io]
+# Temp soft links here while testing
+birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
+mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }
+#marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "mwalib2" }
+
+
 #url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
 #half = { git = "https://github.com/VoidStarKat/half-rs", tag = "v2.2.1" }
-# birli = { path = "../Birli" }
-birli = { git = "https://github.com/MWATelescope/Birli", branch = "main" }
+#birli = { path = "../Birli" }
 # marlu = { path = "../Marlu" }
-marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "mwalib2" }
 # mwalib = { path = "../mwalib" }
 # mwalib = { git = "https://github.com/MWATelescope/mwalib", branch = "main" }
-# mwa_hyperbeam = { path = "../mwa_hyperbeam" }
-mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }
+#mwa_hyperbeam = { path = "../mwa_hyperbeam" }

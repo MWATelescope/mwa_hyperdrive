@@ -137,9 +137,9 @@ dependencies = [
 [[package]]
 name = "birli"
 version = "0.19.0"
-source = "git+https://github.com/MWATelescope/Birli?branch=main#9ee49f74a99ba56ad95cb7c15a8d47d079b353e5"
+source = "git+https://github.com/MWATelescope/Birli?branch=issue-190#c72e0a1216e24a8107f74cb49e6994e48081a128"
 dependencies = [
- "built 0.8.0",
+ "built",
  "byteorder",
  "cfg-if",
  "derive_builder",
@@ -179,23 +179,13 @@ dependencies = [
 
 [[package]]
 name = "built"
-version = "0.7.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56ed6191a7e78c36abdb16ab65341eefd73d64d303fffccdbb00d51e4205967b"
-dependencies = [
- "chrono",
- "git2",
- "semver",
-]
-
-[[package]]
-name = "built"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4ad8f11f288f48ca24471bbd51ac257aaeaaa07adae295591266b792902ae64"
 dependencies = [
  "chrono",
  "git2",
+ "semver",
 ]
 
 [[package]]
@@ -260,9 +250,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chrono"
-version = "0.4.44"
+version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -1534,17 +1524,18 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.31"
+version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "113b30b4cd05f7c06868fdb2854f66a7b9fece9a48425351cd532e810d74024f"
+checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
 name = "marlu"
-version = "0.17.0"
-source = "git+https://github.com/MWATelescope/Marlu?branch=mwalib2#810fc08ea9a2dffdabc420ebf8b86486bd433d9b"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a44f089b345c757217d3ec88068a4bdb57c0f0045124c25fe6f194f06bdc101f"
 dependencies = [
  "approx",
- "built 0.7.7",
+ "built",
  "cfg-if",
  "erfa",
  "fitsio",
@@ -1598,7 +1589,7 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.11.0"
-source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=mwalib2#ff7f9a1c84f35b3a6c145091c2c6e7f328df86b5"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=mwalib2#054b4b4d763cb6b001898960664bd6adc116bcd3"
 dependencies = [
  "cbindgen",
  "cc",
@@ -1623,7 +1614,7 @@ dependencies = [
  "approx",
  "assert_cmd",
  "birli",
- "built 0.8.0",
+ "built",
  "bytemuck",
  "byteorder",
  "cc",
@@ -1675,11 +1666,11 @@ dependencies = [
 
 [[package]]
 name = "mwalib"
-version = "2.0.4"
+version = "2.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39c3d7ed36fb84fc15ce7aff1fcf880e064c35b53ded0e95c972d1a2f23878fd"
+checksum = "80ea65cea2c4992b738a41b73e02f9470c5f78fcdbfbc5c20be468a2a6f965b9"
 dependencies = [
- "built 0.8.0",
+ "built",
  "bytemuck",
  "cbindgen",
  "chrono",
@@ -3163,9 +3154,9 @@ dependencies = [
 
 [[package]]
 name = "yoke"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abe8c5fda708d9ca3df187cae8bfb9ceda00dd96231bed36e445a1a48e66f9ca"
+checksum = "709fe23a0424b6a435d82152b1bd3fdfb0833487d5fa90d05d42762a9891fef5"
 dependencies = [
  "stable_deref_trait",
  "yoke-derive",

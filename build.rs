@@ -43,21 +43,65 @@ mod gpu {
         }
     }
 
+    /// Returns the minimum (major, minor) nvcc version required to compile for
+    /// a given SM/arch target. Used to filter the default arch/SM lists so that
+    /// targets unsupported by the installed toolkit are skipped gracefully
+    /// rather than producing a cryptic nvcc error or a silent runtime failure.
+    #[cfg(feature = "cuda")]
+    fn min_nvcc_version_for_sm(sm: u16) -> (u32, u32) {
+        match sm {
+            0..=61 => (8, 0),   // Kepler / Maxwell / Pascal (sm_60, sm_61)
+            62..=75 => (10, 0), // Volta (sm_70, sm_72), Turing (sm_75)
+            76..=85 => (11, 0), // Ampere A100 (sm_80)
+            86 => (11, 1),      // Ampere RTX 30-series (sm_86)
+            87 => (11, 4),      // Ampere Jetson Orin (sm_87)
+            88..=90 => (11, 8), // Ada Lovelace (sm_89), Hopper (sm_90)
+            _ => (12, 8),       // Blackwell (sm_100, sm_110, sm_120) and beyond
+        }
+    }
+
+    /// Queries the installed nvcc for its (major, minor) version, or returns
+    /// None if nvcc is not found or the output cannot be parsed.
+    #[cfg(feature = "cuda")]
+    fn get_nvcc_version() -> Option<(u32, u32)> {
+        let output = std::process::Command::new("nvcc")
+            .arg("--version")
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        // Version line: "Cuda compilation tools, release 12.9, V12.9.86"
+        for line in text.lines() {
+            if let Some(idx) = line.find("release ") {
+                let rest = &line[idx + 8..];
+                let ver = rest.split(',').next()?.trim();
+                let mut parts = ver.splitn(2, '.');
+                let major: u32 = parts.next()?.parse().ok()?;
+                let minor: u32 = parts.next()?.parse().ok()?;
+                return Some((major, minor));
+            }
+        }
+        None
+    }
+
     pub(super) fn build_and_link() {
         let mut gpu_files = vec![];
         get_gpu_files("src/gpu", &mut gpu_files);
 
         #[cfg(feature = "cuda")]
         let mut gpu_target = {
-            const DEFAULT_CUDA_ARCHES: &[u16] = &[60, 70, 80];
-            const DEFAULT_CUDA_SMS: &[u16] = &[60, 70, 75, 80, 86];
+            // sm_89 = Ada Lovelace (RTX 4000), sm_90 = Hopper, sm_100 = Blackwell HPC,
+            // sm_110 = future Blackwell, sm_120 = Blackwell GeForce (RTX 5000).
+            // Entries requiring a newer nvcc than is installed are filtered out below.
+            const DEFAULT_CUDA_ARCHES: &[u16] = &[60, 70, 80, 86, 87, 89, 90, 100, 110, 120];
+            const DEFAULT_CUDA_SMS: &[u16] = &[60, 61, 70, 75, 80, 86, 87, 89, 90, 100, 110, 120];
 
             fn parse_and_validate_compute(c: &str, var: &str) -> Vec<u16> {
                 let mut out = vec![];
                 for compute in c.trim().split(',') {
-                    // Check that there's only two numeric characters.
-                    if compute.len() != 2 {
-                        panic!("When parsing {var}, found '{compute}', which is not a two-digit number!")
+                    // Check that there are only two or three numeric characters
+                    // (e.g. 86 for Ampere, 120 for Blackwell).
+                    if compute.len() < 2 || compute.len() > 3 {
+                        panic!("When parsing {var}, found '{compute}', which is not a two- or three-digit number!")
                     }
 
                     match compute.parse() {
@@ -93,6 +137,50 @@ mod gpu {
                 }
             };
 
+            // Gate arches and SMs against the installed nvcc version, skipping
+            // any that require a newer toolkit than is present. Panics if
+            // nothing survives — a clear message here is better than a cryptic
+            // nvcc error or a silent "named symbol not found" at runtime.
+            let nvcc_ver = get_nvcc_version().unwrap_or_else(|| {
+                println!("cargo:warning=Could not determine nvcc version; skipping SM compatibility gating");
+                (u32::MAX, u32::MAX)
+            });
+            println!(
+                "cargo:warning=Detected nvcc version {}.{}",
+                nvcc_ver.0, nvcc_ver.1
+            );
+
+            let filter_by_nvcc = |targets: Vec<u16>, label: &str| -> Vec<u16> {
+                targets
+                    .into_iter()
+                    .filter(|&sm| {
+                        let min = min_nvcc_version_for_sm(sm);
+                        if nvcc_ver < min {
+                            println!(
+                                "cargo:warning=Skipping {label}={sm}: requires nvcc >= {}.{} \
+                                 (have {}.{})",
+                                min.0, min.1, nvcc_ver.0, nvcc_ver.1
+                            );
+                            false
+                        } else {
+                            true
+                        }
+                    })
+                    .collect()
+            };
+
+            let arches = filter_by_nvcc(arches, "arch");
+            let sms = filter_by_nvcc(sms, "sm");
+
+            if arches.is_empty() {
+                panic!(
+                    "No CUDA arches remain after nvcc version gating (nvcc {}.{}). \
+                     Either set HYPERDRIVE_CUDA_COMPUTE to a supported value or \
+                     upgrade your CUDA toolkit.",
+                    nvcc_ver.0, nvcc_ver.1
+                );
+            }
+
             let mut cuda_target = cc::Build::new();
             cuda_target.cuda(true).cudart("shared"); // We handle linking cudart statically
 
@@ -110,6 +198,10 @@ mod gpu {
                 }
             }
 
+            // Capture the highest arch before the loop consumes the vec;
+            // needed for the PTX fallback below.
+            let max_arch = arches.iter().copied().max();
+
             // Loop over each arch and sm
             for arch in arches {
                 for &sm in &sms {
@@ -120,6 +212,14 @@ mod gpu {
                     cuda_target.flag("-gencode");
                     cuda_target.flag(format!("arch=compute_{arch},code=sm_{sm}"));
                 }
+            }
+
+            // PTX fallback for the highest arch: allows JIT compilation on GPUs
+            // newer than any explicitly targeted SM, avoiding another "named
+            // symbol not found" when the next architecture generation arrives.
+            if let Some(max) = max_arch {
+                cuda_target.flag("-gencode");
+                cuda_target.flag(format!("arch=compute_{max},code=compute_{max}"));
             }
 
             match env::var("DEBUG").as_deref() {

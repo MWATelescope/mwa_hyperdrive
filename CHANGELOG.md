@@ -6,11 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - 2026-06-03
+## [0.8.0] - 2026-06-05
 
 ### Changed
 
 - Bumped MSRV to 1.85.0.
+- When building with CUDA, hyperdrive will now limit the compute capabilities and sm's based on the version of nvcc detected. Also implemented fallback for newer sm's and compute capabilities.
 - Updated mwalib, Marlu, hyperbeam and Birli dependencies.
 - Updated thiserror, clap from 3 to 4.
 - Minor refactor in `solutions::hyperdrive::read()` to make more readable.

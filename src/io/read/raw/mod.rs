@@ -702,6 +702,10 @@ impl RawDataReader {
                 coarse_chan_range,
                 baseline_idxs: (0..self.all_baseline_tile_pairs.len()).collect(),
             };
+
+            // Pass in the flagged tiles from mwalib
+            let flagged = birli::FlagContext::from_mwalib(&self.mwalib_context).antenna_flags;
+
             prep_ctx
                 .preprocess(
                     &self.mwalib_context,
@@ -709,6 +713,7 @@ impl RawDataReader {
                     weight_array_tfb.view_mut(),
                     flag_array_tfb.view_mut(),
                     &vis_sel,
+                    &flagged,
                 )
                 .map_err(Box::new)?;
         }
