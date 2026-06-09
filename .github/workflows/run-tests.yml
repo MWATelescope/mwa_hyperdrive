@@ -71,8 +71,24 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Get the beam HDF5 file
-        run: wget -O$MWA_BEAM_FILE http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5
+      - name: Cache MWA beam file
+        id: cache-beam
+        uses: actions/cache@v5
+        with:
+          path: mwa_full_embedded_element_pattern.h5
+          key: mwa-beam-file-v1
+
+      - name: Download MWA beam file if cache was a miss
+        if: steps.cache-beam.outputs.cache-hit != 'true'
+        run: |
+          curl -fL \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            --retry-max-time 120 \
+            https://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 \
+            -o mwa_full_embedded_element_pattern.h5
 
       # Test that building works before running tests. Build statically first so
       # less compiling is needed when running tests.
