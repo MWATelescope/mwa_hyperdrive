@@ -59,7 +59,7 @@ jobs:
 
       - name: Install cfitsio 3.49
         run: |
-          curl "https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-3.49.tar.gz" -o cfitsio.tar.gz
+          curl "https://ftp.eso.org/pub/dfs/pipelines/libraries/cfitsio/cfitsio-3.49.tar.gz" -o cfitsio.tar.gz
           tar -xf cfitsio.tar.gz
           rm cfitsio.tar.gz
           cd cfitsio-3.49
@@ -198,7 +198,7 @@ jobs:
       # to crates.io
       - name: Install cfitsio 3.49
         run: |
-          curl "https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/cfitsio-3.49.tar.gz" -o cfitsio.tar.gz
+          curl "https://ftp.eso.org/pub/dfs/pipelines/libraries/cfitsio/cfitsio-3.49.tar.gz" -o cfitsio.tar.gz
           tar -xf cfitsio.tar.gz
           rm cfitsio.tar.gz
           cd cfitsio-3.49
