@@ -21,6 +21,11 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Added tile_names test to `test_write_and_read_hyperdrive_solutions`.
 - Added condition path for Beamformer and Correlator+Beamformer observation types.
+- Optional CLI flag `--elevation-limit` - for sky model filtering.
+
+### Fixed
+
+- #[66](https://github.com/MWATelescope/mwa_hyperdrive/issues/66) three digit CUDA compute (RTX 5090).
 
 ## [0.7.0] - 2026-02-09
 
