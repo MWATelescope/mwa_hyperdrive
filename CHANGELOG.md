@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-09
+
+### Changed
+
+- Bumped MSRV to 1.85.0.
+- When building with CUDA, hyperdrive will now limit the compute capabilities and sm's based on the version of nvcc detected. Also implemented fallback for newer sm's and compute capabilities.
+- Updated mwalib, Marlu, hyperbeam and Birli dependencies.
+- Updated thiserror, clap from 3 to 4.
+- Minor refactor in `solutions::hyperdrive::read()` to make more readable.
+- Updated CI action versions.
+
+### Added
+
+- Added tile_names test to `test_write_and_read_hyperdrive_solutions`.
+- Added condition path for Beamformer and Correlator+Beamformer observation types.
+- Optional CLI flag `--elevation-limit` - for sky model filtering.
+
+### Fixed
+
+- #[66](https://github.com/MWATelescope/mwa_hyperdrive/issues/66) three digit CUDA compute (RTX 5090).
+
 ## [0.7.0] - 2026-02-09
 
 ### Fixed

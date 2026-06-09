@@ -10,3 +10,4 @@ GGSM_updated.fits
 *.metafits
 *.uvfits
 *.profraw
+.vscode/

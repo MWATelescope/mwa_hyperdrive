@@ -16,11 +16,11 @@ env:
 jobs:
   build-linux-release:
     name: Build release for Linux
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Free up disk space
@@ -82,16 +82,12 @@ jobs:
           cd ..
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.23
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          cuda: "12.4.1"
+          cuda: "12.9.1"
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build and Tar
         run: |
@@ -137,7 +133,7 @@ jobs:
           done
 
       - name: Upload tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux.tar.gz
           path: "*.tar.gz"
@@ -149,7 +145,7 @@ jobs:
     needs: build-linux-release
     steps:
       - name: Download Linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: linux.tar.gz
 
@@ -169,7 +165,7 @@ jobs:
     environment: CI
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install stable, minimal toolchain
         uses: dtolnay/rust-toolchain@v1

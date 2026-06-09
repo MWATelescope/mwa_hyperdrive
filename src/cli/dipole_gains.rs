@@ -16,7 +16,7 @@ use super::common::display_warnings;
 /// Print information on the dipole gains listed by a metafits file.
 #[derive(Parser, Debug)]
 pub struct DipoleGainsArgs {
-    #[clap(name = "METAFITS_FILE", parse(from_os_str))]
+    #[arg(value_name = "METAFITS_FILE")]
     metafits: PathBuf,
 }
 

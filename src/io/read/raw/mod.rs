@@ -160,11 +160,12 @@ impl RawDataReader {
         let metafits_context = &mwalib_context.metafits_context;
 
         let is_mwax = match mwalib_context.mwa_version {
-            MWAVersion::CorrMWAXv2 => true,
+            MWAVersion::CorrMWAXv2 | MWAVersion::CorrBeamformerMWAXv2 => true,
             MWAVersion::CorrLegacy | MWAVersion::CorrOldLegacy => false,
             MWAVersion::VCSLegacyRecombined | MWAVersion::VCSMWAXv2 => {
                 return Err(RawReadError::Vcs)
             }
+            MWAVersion::BeamformerMWAXv2 => return Err(RawReadError::Beamformer),
         };
 
         let total_num_tiles = metafits_context.num_ants;
@@ -701,6 +702,10 @@ impl RawDataReader {
                 coarse_chan_range,
                 baseline_idxs: (0..self.all_baseline_tile_pairs.len()).collect(),
             };
+
+            // Pass in the flagged tiles from mwalib
+            let flagged = birli::FlagContext::from_mwalib(&self.mwalib_context).antenna_flags;
+
             prep_ctx
                 .preprocess(
                     &self.mwalib_context,
@@ -708,6 +713,7 @@ impl RawDataReader {
                     weight_array_tfb.view_mut(),
                     flag_array_tfb.view_mut(),
                     &vis_sel,
+                    &flagged,
                 )
                 .map_err(Box::new)?;
         }

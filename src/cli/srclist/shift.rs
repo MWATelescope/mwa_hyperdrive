@@ -36,37 +36,37 @@ use crate::{
 #[derive(Parser, Debug)]
 pub struct SrclistShiftArgs {
     /// Path to the source list to be shifted.
-    #[clap(name = "SOURCE_LIST", parse(from_os_str))]
+    #[arg(value_name = "SOURCE_LIST")]
     source_list: PathBuf,
 
     /// Path to the .json shifts file.
-    #[clap(name = "SOURCE_SHIFTS", parse(from_os_str))]
+    #[arg(value_name = "SOURCE_SHIFTS")]
     source_shifts: PathBuf,
 
     /// Path to the output source list. If not specified, then then "_shifted"
     /// is appended to the filename.
-    #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+    #[arg(value_name = "OUTPUT_SOURCE_LIST")]
     output_source_list: Option<PathBuf>,
 
-    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
+    #[arg(short = 'i', long, help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
     input_type: Option<String>,
 
-    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
+    #[arg(short = 'o', long, help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
     output_type: Option<String>,
 
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source. This is suitable
     /// for an "RTS patch source list".
-    #[clap(long)]
+    #[arg(long)]
     collapse_into_single_source: bool,
 
     /// Don't throw away sources that have no shifts specified in the JSON file.
-    #[clap(long)]
+    #[arg(long)]
     include_unshifted_sources: bool,
 
     /// Path to the metafits file. Only needed if collapse-into-single-source is
     /// used.
-    #[clap(short, long, parse(from_str))]
+    #[arg(short, long)]
     metafits: Option<PathBuf>,
 }
 

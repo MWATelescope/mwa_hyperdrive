@@ -16,7 +16,6 @@ use rayon::{iter::Either, prelude::*};
 
 use crate::{
     beam::Beam,
-    constants::*,
     srclist::{FluxDensity, ReadSourceListError, SourceList},
 };
 
@@ -51,6 +50,7 @@ pub(crate) fn veto_sources(
     num_sources: Option<usize>,
     source_dist_cutoff_deg: f64,
     veto_threshold: f64,
+    min_elevation_deg: f64,
 ) -> Result<(), ReadSourceListError> {
     let dist_cutoff = source_dist_cutoff_deg.to_radians();
 
@@ -70,9 +70,9 @@ pub(crate) fn veto_sources(
             let mut azels = vec![];
             for comp in source.components.iter() {
                 let azel = comp.radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                if azel.el.to_degrees() < ELEVATION_LIMIT {
+                if azel.el.to_degrees() < min_elevation_deg {
                     if log_enabled!(Trace) {
-                        trace!("A component's elevation ({}°, source {source_name}) was below the limit ({ELEVATION_LIMIT}°)", azel.el.to_degrees());
+                        trace!("A component's elevation ({}°, source {source_name}) was below the limit ({min_elevation_deg}°)", azel.el.to_degrees());
                     }
                     return Either::Left(Ok(source_name));
                 }
@@ -216,6 +216,7 @@ mod tests {
     use super::*;
     use crate::{
         beam::{Delays, FEEBeam, NoBeam},
+        constants::DEFAULT_ELEVATION_LIMIT,
         srclist::{
             read::read_source_list_file, ComponentType, FluxDensityType, Source, SourceComponent,
         },
@@ -362,6 +363,7 @@ mod tests {
             None,
             180.0,
             0.1,
+            DEFAULT_ELEVATION_LIMIT,
         );
         assert!(result.is_ok());
         result.unwrap();
@@ -407,6 +409,7 @@ mod tests {
             Some(3),
             180.0,
             0.1,
+            DEFAULT_ELEVATION_LIMIT,
         );
         assert!(result.is_ok(), "{:?}", result.unwrap_err());
         result.unwrap();
@@ -434,6 +437,7 @@ mod tests {
             None,
             180.0,
             0.1,
+            DEFAULT_ELEVATION_LIMIT,
         );
         assert!(result.is_ok(), "{:?}", result.unwrap_err());
         result.unwrap();
@@ -441,5 +445,122 @@ mod tests {
         assert_eq!(source_list.len(), 100);
         assert_eq!(source_list.get_index(0).unwrap().0, "J004616-420739");
         assert_eq!(source_list.get_index(99).unwrap().0, "J000217-253912");
+    }
+
+    /// Sources whose components are below `elevation_limit` must be rejected,
+    /// and a higher elevation limit must reject more sources than a lower one.
+    #[test]
+    fn elevation_limit_rejects_sources() {
+        let beam = NoBeam { num_tiles: 1 };
+
+        // Build a tiny source list with three point sources:
+        //   "above"  – always well above the horizon (zenith)
+        //   "horizon" – sitting right at the horizon (el ≈ 0°)
+        //   "below"  – well below the horizon
+        //
+        // With LST = 0 and the MWA latitude, a source at RA = LST and
+        // Dec = latitude is at the zenith, while Dec = -(90° - lat) puts it
+        // on the celestial equator and Dec < -(90° + lat) takes it below the
+        // horizon.
+        let lat_deg = MWA_LAT_RAD.to_degrees(); // ≈ -26.7°
+
+        let make_point = |ra_deg: f64, dec_deg: f64| Source {
+            components: vec![SourceComponent {
+                radec: RADec::from_degrees(ra_deg, dec_deg),
+                comp_type: ComponentType::Point,
+                flux_type: FluxDensityType::PowerLaw {
+                    si: -0.8,
+                    fd: FluxDensity {
+                        freq: 180e6,
+                        i: 100.0,
+                        q: 0.0,
+                        u: 0.0,
+                        v: 0.0,
+                    },
+                },
+            }]
+            .into_boxed_slice(),
+        };
+
+        // At LST=0:
+        //   zenith source  → dec = lat_deg, RA = 0  → el = 90°
+        //   below-horizon  → dec = -(90.0 - lat_deg).abs() - 10.0 → el < 0°
+        let zenith_dec = lat_deg;
+        let below_dec = -(90.0 + lat_deg.abs()) - 10.0; // deeply below the horizon
+
+        let mut sl = SourceList::new();
+        sl.insert("zenith".into(), make_point(0.0, zenith_dec));
+        sl.insert("below_horizon".into(), make_point(0.0, below_dec));
+
+        // With DEFAULT_ELEVATION_LIMIT (0°), only the below-horizon source is vetoed.
+        let mut sl_default = sl.clone();
+        veto_sources(
+            &mut sl_default,
+            RADec::from_degrees(0.0, zenith_dec),
+            0.0,
+            MWA_LAT_RAD,
+            &[180e6],
+            &beam,
+            None,
+            f64::MAX,
+            0.0,
+            DEFAULT_ELEVATION_LIMIT,
+        )
+        .unwrap();
+        assert!(
+            sl_default.contains_key("zenith"),
+            "zenith source should survive the default elevation limit"
+        );
+        assert!(
+            !sl_default.contains_key("below_horizon"),
+            "below-horizon source should be rejected by the default elevation limit"
+        );
+
+        // With a high elevation limit (45°), even the zenith source survives
+        // only if its elevation exceeds 45°. The below-horizon source must
+        // still be rejected.
+        let mut sl_high = sl.clone();
+        veto_sources(
+            &mut sl_high,
+            RADec::from_degrees(0.0, zenith_dec),
+            0.0,
+            MWA_LAT_RAD,
+            &[180e6],
+            &beam,
+            None,
+            f64::MAX,
+            0.0,
+            45.0,
+        )
+        .unwrap();
+        assert!(
+            sl_high.contains_key("zenith"),
+            "zenith source (el=90°) should survive a 45° elevation limit"
+        );
+        assert!(
+            !sl_high.contains_key("below_horizon"),
+            "below-horizon source should be rejected by a 45° elevation limit"
+        );
+
+        // With an elevation limit above 90°, every source is rejected and
+        // veto_sources should return an error (no sources remain).
+        let mut sl_all = sl;
+        let result = veto_sources(
+            &mut sl_all,
+            RADec::from_degrees(0.0, zenith_dec),
+            0.0,
+            MWA_LAT_RAD,
+            &[180e6],
+            &beam,
+            None,
+            f64::MAX,
+            0.0,
+            91.0,
+        );
+        assert!(result.is_ok(), "veto_sources itself should not error");
+        assert!(
+            sl_all.is_empty(),
+            "all sources should be rejected when elevation limit > 90°"
+        );
     }
 }

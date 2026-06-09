@@ -29,10 +29,10 @@ use crate::{
 #[derive(Parser, Debug)]
 pub struct SrclistVerifyArgs {
     /// Path to the source list(s) to be verified.
-    #[clap(name = "SOURCE_LISTS", parse(from_os_str))]
+    #[arg(value_name = "SOURCE_LISTS")]
     source_lists: Vec<PathBuf>,
 
-    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
+    #[arg(short = 'i', long, help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
     input_type: Option<String>,
 }
 

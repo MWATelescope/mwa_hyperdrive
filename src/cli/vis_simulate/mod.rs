@@ -66,7 +66,7 @@ lazy_static::lazy_static! {
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct VisSimulateCliArgs {
     /// Path to the metafits file.
-    #[clap(short, long, parse(from_str), help_heading = "INPUT FILES")]
+    #[clap(short, long, help_heading = "INPUT FILES")]
     pub(super) metafits: Option<PathBuf>,
 
     /// Use this value as the DUT1 [seconds].
@@ -127,16 +127,16 @@ pub(super) struct VisSimulateCliArgs {
 
     #[clap(
         long, help = ARRAY_POSITION_HELP.as_str(), help_heading = "OBSERVATION PARAMETERS",
-        number_of_values = 3,
+        num_args(3),
         allow_hyphen_values = true,
-        value_names = &["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
+        value_names = ["LONG_DEG", "LAT_DEG", "HEIGHT_M"]
     )]
     pub(super) array_position: Option<Vec<f64>>,
 
     #[clap(
         short = 'o',
         long,
-        multiple_values(true),
+        num_args(1..),
         help = OUTPUTS_HELP.as_str(),
         help_heading = "OUTPUT FILES"
     )]
@@ -183,7 +183,7 @@ pub(super) struct VisSimulateCliArgs {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct VisSimulateArgs {
-    #[clap(name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str(), parse(from_os_str))]
+    #[clap(value_name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str())]
     pub(super) args_file: Option<PathBuf>,
 
     #[clap(flatten)]

@@ -3,11 +3,13 @@ name: Generate Coverage report
 
 on:
   push:
-    tags-ignore:
-      - '**'
-    pull_request:
     branches:
-      - '**'
+      - "**" # run on every branch push...
+    tags-ignore:
+      - "**" # ...but don't double up on tags
+  pull_request:
+    branches:
+      - "**"
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -33,6 +35,7 @@ jobs:
             cmake \
             curl \
             git \
+            gpg \
             lcov \
             libcfitsio-dev \
             libhdf5-dev \
@@ -44,19 +47,30 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: llvm-tools-preview
+        uses: dtolnay/rust-toolchain@stable
 
       # https://lib.rs/crates/cargo-llvm-cov#readme-continuous-integration
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Get the beam HDF5 file
-        run: wget -Omwa_full_embedded_element_pattern.h5 http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5
+      - name: Cache MWA beam file
+        id: cache-beam
+        uses: actions/cache@v5
+        with:
+          path: mwa_full_embedded_element_pattern.h5
+          key: mwa-beam-file-v1
+
+      - name: Download MWA beam file if cache was a miss
+        if: steps.cache-beam.outputs.cache-hit != 'true'
+        run: |
+          curl -fL \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            --retry-max-time 120 \
+            https://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5 \
+            -o mwa_full_embedded_element_pattern.h5
 
       - name: Generate test lcov coverage into coverage/ dir
         run: |
@@ -64,7 +78,7 @@ jobs:
           cargo llvm-cov --workspace --release --lcov --output-path lcov.info
 
       - name: Upload reports to codecov.io
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v6
         with:
           files: lcov.info
           fail_ci_if_error: true

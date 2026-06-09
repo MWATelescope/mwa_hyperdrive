@@ -32,44 +32,44 @@ use crate::{
 /// <https://mwatelescope.github.io/mwa_hyperdrive/defs/source_lists.html>
 #[derive(Parser, Debug)]
 pub struct SrclistConvertArgs {
-    #[clap(short = 'i', long, parse(from_str), help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
+    #[arg(short = 'i', long, help = SOURCE_LIST_INPUT_TYPE_HELP.as_str())]
     input_type: Option<String>,
 
     /// Path to the source list to be converted.
-    #[clap(name = "INPUT_SOURCE_LIST", parse(from_os_str))]
+    #[arg(value_name = "INPUT_SOURCE_LIST")]
     input_source_list: PathBuf,
 
-    #[clap(short = 'o', long, parse(from_str), help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
+    #[arg(short = 'o', long, help = SOURCE_LIST_OUTPUT_TYPE_HELP.as_str())]
     output_type: Option<String>,
 
     /// Path to the output source list. If the file extension is .json or .yaml,
     /// then it will written in the hyperdrive source list format. If it is
     /// .txt, then the --output-type flag should be used to specify the type of
     /// source list to be written.
-    #[clap(name = "OUTPUT_SOURCE_LIST", parse(from_os_str))]
+    #[arg(value_name = "OUTPUT_SOURCE_LIST")]
     output_source_list: PathBuf,
 
     /// Collapse all of the sky-model components into a single source; the
     /// apparently brightest source is used as the base source. This is suitable
     /// for an "RTS patch source list".
-    #[clap(long)]
+    #[arg(long)]
     collapse_into_single_source: bool,
 
     /// Path to the metafits file. Only needed if collapse-into-single-source is
     /// used.
-    #[clap(short = 'm', long, parse(from_str))]
+    #[arg(short = 'm', long)]
     metafits: Option<PathBuf>,
 
     /// Don't include point components from the input sky model.
-    #[clap(long)]
+    #[arg(long)]
     filter_points: bool,
 
     /// Don't include Gaussian components from the input sky model.
-    #[clap(long)]
+    #[arg(long)]
     filter_gaussians: bool,
 
     /// Don't include shapelet components from the input sky model.
-    #[clap(long)]
+    #[arg(long)]
     filter_shapelets: bool,
 }
 

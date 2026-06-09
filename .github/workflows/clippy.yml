@@ -3,7 +3,7 @@ name: clippy
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   clippy:
@@ -12,10 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.80.0", "stable"]
+        toolchain: ["1.85.0", "stable"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system deps
         run: |
@@ -23,15 +23,13 @@ jobs:
           sudo apt-get install -y pkg-config libcfitsio-dev libhdf5-dev libxkbcommon-dev libfontconfig1-dev libfreetype6-dev
 
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.toolchain }}
-          profile: minimal
-          components: clippy
-          override: true
+          toolchain: ${{matrix.toolchain}}
+          components: rustfmt, clippy
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry

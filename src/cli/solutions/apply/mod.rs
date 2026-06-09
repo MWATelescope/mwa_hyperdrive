@@ -34,7 +34,7 @@ lazy_static::lazy_static! {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct SolutionsApplyArgs {
-    #[clap(name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str(), parse(from_os_str))]
+    #[clap(value_name = "ARGUMENTS_FILE", help = ARG_FILE_HELP.as_str())]
     args_file: Option<PathBuf>,
 
     #[clap(flatten)]
@@ -49,7 +49,7 @@ pub(crate) struct SolutionsApplyArgs {
     #[clap(
         short = 'o',
         long,
-        multiple_values(true),
+        num_args(1..),
         help = OUTPUTS_HELP.as_str(),
         help_heading = "OUTPUT FILES"
     )]
@@ -75,7 +75,6 @@ pub(crate) struct SolutionsApplyArgs {
     /// writing the data out.
     #[clap(long, help_heading = "OUTPUT FILES")]
     output_vis_freq_average: Option<String>,
-
 
     /// Rather than writing out the entire input bandwidth, write out only the
     /// smallest contiguous band. e.g. Typical 40 kHz MWA data has 768 channels,

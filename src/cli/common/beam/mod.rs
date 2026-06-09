@@ -31,27 +31,27 @@ lazy_static::lazy_static! {
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct BeamArgs {
-    #[clap(short, long, help_heading = "BEAM", help = BEAM_TYPE_HELP.as_str())]
+    #[arg(short, long, help_heading = "BEAM", help = BEAM_TYPE_HELP.as_str())]
     pub(crate) beam_type: Option<String>,
 
-    #[clap(long, conflicts_with("beam-type"), help_heading = "BEAM", help = NO_BEAM_HELP.as_str())]
+    #[arg(long, conflicts_with("beam_type"), help_heading = "BEAM", help = NO_BEAM_HELP.as_str())]
     #[serde(default)]
     pub(crate) no_beam: bool,
 
     /// If specified, use these dipole delays for the MWA pointing. e.g. 0 1 2 3
     /// 0 1 2 3 0 1 2 3 0 1 2 3
-    #[clap(long, multiple_values(true), help_heading = "BEAM")]
+    #[arg(long, num_args(1..), help_heading = "BEAM")]
     pub(crate) delays: Option<Vec<u32>>,
 
     /// Pretend that all MWA dipoles are alive and well, ignoring whatever is in
     /// the metafits file.
-    #[clap(long, help_heading = "BEAM")]
+    #[arg(long, help_heading = "BEAM")]
     #[serde(default)]
     pub(crate) unity_dipole_gains: bool,
 
     /// The path to the HDF5 MWA FEE beam file. If not specified, this must be
     /// provided by the MWA_BEAM_FILE environment variable.
-    #[clap(long, help_heading = "BEAM", help = BEAM_FILE_HELP.as_str())]
+    #[arg(long, help_heading = "BEAM", help = BEAM_FILE_HELP.as_str())]
     pub(crate) beam_file: Option<PathBuf>,
 }
 

@@ -121,7 +121,9 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                     let cluster_with_quotes: String = items.collect::<Vec<_>>().join(" ");
                     match cluster_with_quotes.split('\"').nth(1) {
                         // Use a specific error for cluster not quoted
-                        None => return Err(ReadSourceListAOError::ClusterNotQuoted(line_num).into()),
+                        None => {
+                            return Err(ReadSourceListAOError::ClusterNotQuoted(line_num).into())
+                        }
                         Some(name) => cluster_name.push_str(name),
                     }
                 }
@@ -680,9 +682,8 @@ pub(crate) fn parse_source_list<T: std::io::BufRead>(
                         source_name.clone()
                     };
                     if let Some(existing) = source_list.get_mut(&key) {
-                        let mut merged: Vec<SourceComponent> = Vec::with_capacity(
-                            existing.components.len() + source.components.len()
-                        );
+                        let mut merged: Vec<SourceComponent> =
+                            Vec::with_capacity(existing.components.len() + source.components.len());
                         merged.extend_from_slice(&existing.components);
                         merged.extend_from_slice(&source.components);
                         existing.components = merged.into_boxed_slice();
@@ -1197,7 +1198,10 @@ source {
         let s = sl.get("C").expect("cluster key exists");
         assert_eq!(s.components.len(), 2);
         assert!(matches!(s.components[0].comp_type, ComponentType::Point));
-        assert!(matches!(s.components[1].comp_type, ComponentType::Gaussian { .. }));
+        assert!(matches!(
+            s.components[1].comp_type,
+            ComponentType::Gaussian { .. }
+        ));
     }
 
     #[test]
@@ -1233,7 +1237,10 @@ source {
         let mut sl = Cursor::new("cluster \"C\"\n");
         let err = parse_source_list(&mut sl).unwrap_err();
         match err {
-            ReadSourceListError::Common(ReadSourceListCommonError::OutsideSource { keyword, .. }) => {
+            ReadSourceListError::Common(ReadSourceListCommonError::OutsideSource {
+                keyword,
+                ..
+            }) => {
                 assert_eq!(keyword, "cluster");
             }
             other => panic!("unexpected error: {other:?}"),

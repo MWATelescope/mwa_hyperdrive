@@ -485,7 +485,7 @@ impl InputVisParams {
                 let sols_tile1 = sols.slice(s![tile1, ..]);
                 let sols_tile2 = sols.slice(s![tile2, ..]);
                 izip!(
-                    (0..),
+                    0..,
                     cross_data_f.iter_mut(),
                     cross_weights_f.iter_mut(),
                     sols_tile1.iter(),
@@ -549,7 +549,7 @@ impl InputVisParams {
                     // Get the solutions for the tile and apply it twice.
                     let sols = sols.slice(s![i_tile, ..]);
                     izip!(
-                        (0..),
+                        0..,
                         auto_data_f.iter_mut(),
                         auto_weights_f.iter_mut(),
                         sols.iter()
