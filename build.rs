@@ -48,15 +48,14 @@ mod gpu {
     #[cfg(feature = "cuda")]
     fn get_nvcc_supported_sms() -> Option<std::collections::HashSet<u16>> {
         let output = std::process::Command::new("nvcc")
-            .arg("--help")
+            .arg("--list-gpu-code")
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&output.stdout);
         let mut sms = std::collections::HashSet::new();
-        for word in text.split_whitespace() {
-            // Strip surrounding punctuation: 'sm_86', -> sm_86
-            let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
-            if let Some(num) = word.strip_prefix("sm_") {
+        for line in text.lines() {
+            let line = line.trim();
+            if let Some(num) = line.strip_prefix("sm_") {
                 if let Ok(sm) = num.parse::<u16>() {
                     sms.insert(sm);
                 }
