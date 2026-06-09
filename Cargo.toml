@@ -139,8 +139,8 @@ harness = false
 
 [patch.crates-io]
 # Temp soft links here while testing
-birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
-mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }
+#birli = { git = "https://github.com/MWATelescope/Birli", branch = "issue-190" }
+#mwa_hyperbeam = { git = "https://github.com/MWATelescope/mwa_hyperbeam", branch = "mwalib2" }
 #marlu = { git = "https://github.com/MWATelescope/Marlu", branch = "mwalib2" }
 
 

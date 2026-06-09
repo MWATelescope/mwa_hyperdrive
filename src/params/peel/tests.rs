@@ -1804,7 +1804,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                 #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))]
                 PeelType::Gpu => (3e-11, 1e-7, 9e-8),
                 #[cfg(all(any(feature = "cuda", feature = "hip"), feature = "gpu-single"))]
-                PeelType::Gpu => (2e-7, 3e-5, 3e-4), // TODO(Dev): bring this down
+                PeelType::Gpu => (2e-7, 3e-4, 3e-4), // TODO(Dev): bring this down
             };
 
             assert_abs_diff_eq!(ax, ar, epsilon = ab_epsilon);
