@@ -3,12 +3,78 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use approx::assert_abs_diff_eq;
+use hdf5_metno::File as Hdf5File;
 use marlu::{constants::MWA_LAT_RAD, AzEl, Jones};
 use mwa_hyperbeam::fee::FEEBeam;
 use ndarray::prelude::*;
 use serial_test::serial;
+use tempfile::tempdir;
 
 use super::*;
+
+fn make_test_cma21_feko_cube() -> std::path::PathBuf {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cma21_feko_test.h5");
+    let file = Hdf5File::create(&path).unwrap();
+
+    file.new_dataset_builder()
+        .with_data(&[120e6_f64])
+        .create("freq_hz")
+        .unwrap();
+    file.new_dataset_builder()
+        .with_data(&[46.0_f64, 47.0, 48.0])
+        .create("theta_deg")
+        .unwrap();
+    file.new_dataset_builder()
+        .with_data(&[89.0_f64, 90.0, 91.0])
+        .create("phi_deg")
+        .unwrap();
+
+    let beam = Array3::from_shape_vec((1, 3, 3), vec![1.0, 1.0, 1.0, 1.0, 4.0, 1.0, 1.0, 9.0, 1.0])
+        .unwrap();
+    file.new_dataset_builder()
+        .with_data(beam.view())
+        .create("beam_xx")
+        .unwrap();
+
+    let persisted = dir.into_path();
+    persisted.join("cma21_feko_test.h5")
+}
+
+fn make_test_cma21_feko_freq_cube() -> std::path::PathBuf {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cma21_feko_freq_test.h5");
+    let file = Hdf5File::create(&path).unwrap();
+
+    file.new_dataset_builder()
+        .with_data(&[120e6_f64, 121e6_f64])
+        .create("freq_hz")
+        .unwrap();
+    file.new_dataset_builder()
+        .with_data(&[46.0_f64, 47.0, 48.0])
+        .create("theta_deg")
+        .unwrap();
+    file.new_dataset_builder()
+        .with_data(&[89.0_f64, 90.0, 91.0])
+        .create("phi_deg")
+        .unwrap();
+
+    let beam = Array3::from_shape_vec(
+        (2, 3, 3),
+        vec![
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0,
+            9.0,
+        ],
+    )
+    .unwrap();
+    file.new_dataset_builder()
+        .with_data(beam.view())
+        .create("beam_xx")
+        .unwrap();
+
+    let persisted = dir.into_path();
+    persisted.join("cma21_feko_freq_test.h5")
+}
 
 #[test]
 fn no_beam_means_no_beam() {
@@ -24,6 +90,56 @@ fn no_beam_means_no_beam() {
         let expected = Jones::identity();
         assert_abs_diff_eq!(j, expected);
     }
+}
+
+#[test]
+fn cma21_feko_cube_maps_ncp_centre_to_patch_centre() {
+    let path = make_test_cma21_feko_cube();
+    let beam = super::cma21::Cma21FekoCubeBeam::new(1, &path).unwrap();
+    let azel = AzEl::from_radians(0.0, 43_f64.to_radians());
+    let j = beam.calc_jones(azel, 120e6, None, MWA_LAT_RAD).unwrap();
+    assert_abs_diff_eq!(j[0].re, 2.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(j[3].re, 2.0, epsilon = 1e-12);
+}
+
+#[test]
+fn cma21_feko_cube_bilinear_interpolation_is_sensible() {
+    let path = make_test_cma21_feko_cube();
+    let beam = super::cma21::Cma21FekoCubeBeam::new(1, &path).unwrap();
+    let azel = AzEl::from_radians(0.5_f64.to_radians(), 42.5_f64.to_radians());
+    let j = beam.calc_jones(azel, 120e6, None, MWA_LAT_RAD).unwrap();
+    let expected_amp = 3.75_f64.sqrt();
+    assert_abs_diff_eq!(j[0].re, expected_amp, epsilon = 1e-12);
+    assert_abs_diff_eq!(j[3].re, expected_amp, epsilon = 1e-12);
+}
+
+#[test]
+fn cma21_feko_cube_linearly_interpolates_in_frequency() {
+    let path = make_test_cma21_feko_freq_cube();
+    let beam = super::cma21::Cma21FekoCubeBeam::new(1, &path).unwrap();
+    let azel = AzEl::from_radians(0.0, 43_f64.to_radians());
+    let j = beam.calc_jones(azel, 120.5e6, None, MWA_LAT_RAD).unwrap();
+    let expected_amp = 5_f64.sqrt();
+    assert_abs_diff_eq!(j[0].re, expected_amp, epsilon = 1e-12);
+    assert_abs_diff_eq!(j[3].re, expected_amp, epsilon = 1e-12);
+}
+
+#[test]
+fn cma21_feko_cube_clamps_out_of_band_frequencies() {
+    let path = make_test_cma21_feko_freq_cube();
+    let beam = super::cma21::Cma21FekoCubeBeam::new(1, &path).unwrap();
+    let azel = AzEl::from_radians(0.0, 43_f64.to_radians());
+
+    let low = beam.calc_jones(azel, 119e6, None, MWA_LAT_RAD).unwrap();
+    let high = beam.calc_jones(azel, 122e6, None, MWA_LAT_RAD).unwrap();
+
+    assert_abs_diff_eq!(low[0].re, 1.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(low[3].re, 1.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(high[0].re, 3.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(high[3].re, 3.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(beam.find_closest_freq(120.5e6), 120.5e6, epsilon = 1e-12);
+    assert_abs_diff_eq!(beam.find_closest_freq(119e6), 120e6, epsilon = 1e-12);
+    assert_abs_diff_eq!(beam.find_closest_freq(122e6), 121e6, epsilon = 1e-12);
 }
 
 #[test]

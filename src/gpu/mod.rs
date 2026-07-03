@@ -50,6 +50,7 @@ use cuda_runtime_sys::{
     cudaDeviceSynchronize as gpuDeviceSynchronize, cudaError::cudaSuccess as gpuSuccess,
     cudaFree as gpuFree, cudaGetErrorString as gpuGetErrorString,
     cudaGetLastError as gpuGetLastError, cudaMalloc as gpuMalloc, cudaMemcpy as gpuMemcpy,
+    cudaMemcpy2D as gpuMemcpy2D,
     cudaMemcpyKind::cudaMemcpyDeviceToDevice as gpuMemcpyDeviceToDevice,
     cudaMemcpyKind::cudaMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
     cudaMemcpyKind::cudaMemcpyHostToDevice as gpuMemcpyHostToDevice,
@@ -58,7 +59,7 @@ use cuda_runtime_sys::{
 use hip_sys::hiprt::{
     hipDeviceSynchronize as gpuDeviceSynchronize, hipError_t::hipSuccess as gpuSuccess,
     hipFree as gpuFree, hipGetErrorString as gpuGetErrorString, hipGetLastError as gpuGetLastError,
-    hipMalloc as gpuMalloc, hipMemcpy as gpuMemcpy,
+    hipMalloc as gpuMalloc, hipMemcpy as gpuMemcpy, hipMemcpy2D as gpuMemcpy2D,
     hipMemcpyKind::hipMemcpyDeviceToDevice as gpuMemcpyDeviceToDevice,
     hipMemcpyKind::hipMemcpyDeviceToHost as gpuMemcpyDeviceToHost,
     hipMemcpyKind::hipMemcpyHostToDevice as gpuMemcpyHostToDevice,
@@ -114,7 +115,7 @@ pub(crate) enum GpuCall {
 /// This function interfaces directly with the CUDA/HIP API. Rust errors attempt
 /// to catch problems but there are no guarantees.
 #[track_caller]
-unsafe fn check_for_errors(gpu_call: GpuCall) -> Result<(), GpuError> {
+pub(crate) unsafe fn check_for_errors(gpu_call: GpuCall) -> Result<(), GpuError> {
     // Only do a device sync if we're in debug mode, for performance.
     let debug_mode = matches!(std::env::var("DEBUG").as_deref(), Ok("true"));
     if debug_mode {
@@ -343,6 +344,46 @@ impl<T> DevicePointer<T> {
                 other.get_mut().cast(),
                 self.get().cast(),
                 self.size,
+                gpuMemcpyDeviceToDevice,
+            );
+            check_for_errors(GpuCall::CopyToDevice)
+        }
+    }
+
+    /// Copy a row-major submatrix out of another device buffer.
+    ///
+    /// Both buffers are interpreted as 2D matrices with `num_rows` rows.
+    /// Each source row has `src_row_len` elements, and we copy `row_len`
+    /// elements starting at `src_col_offset` from every row into this buffer.
+    #[track_caller]
+    pub(crate) fn copy_rows_from_device_2d(
+        &mut self,
+        src: &DevicePointer<T>,
+        src_col_offset: usize,
+        row_len: usize,
+        num_rows: usize,
+        src_row_len: usize,
+    ) -> Result<(), GpuError> {
+        if row_len == 0 || num_rows == 0 {
+            return Ok(());
+        }
+
+        let elem_size = std::mem::size_of::<T>();
+        let width_bytes = row_len * elem_size;
+        let src_pitch = src_row_len * elem_size;
+        let dst_pitch = width_bytes;
+        let src_offset_bytes = src_col_offset * elem_size;
+
+        self.realloc(width_bytes * num_rows)?;
+
+        unsafe {
+            gpuMemcpy2D(
+                self.get_mut().cast(),
+                dst_pitch,
+                src.get().cast::<u8>().add(src_offset_bytes).cast(),
+                src_pitch,
+                width_bytes,
+                num_rows,
                 gpuMemcpyDeviceToDevice,
             );
             check_for_errors(GpuCall::CopyToDevice)

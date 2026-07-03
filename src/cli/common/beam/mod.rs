@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use super::{InfoPrinter, Warn};
 use crate::{
     beam::{
-        Beam, BeamError, BeamType, Cma21GaussianBeam, Cma21StubBeam, Delays, FEEBeam, NoBeam,
-        BEAM_TYPES_COMMA_SEPARATED,
+        Beam, BeamError, BeamType, Cma21FekoCubeBeam, Cma21GaussianBeam, Cma21StubBeam, Delays,
+        FEEBeam, NoBeam, BEAM_TYPES_COMMA_SEPARATED,
     },
     io::read::VisInputType,
 };
@@ -29,7 +29,7 @@ lazy_static::lazy_static! {
         format!("Don't apply a beam response when generating a sky model. The default is to use the {} beam.", BeamType::default());
 
     static ref BEAM_FILE_HELP: String =
-        format!("The path to the HDF5 MWA FEE beam file. Only useful if the beam type is 'fee'. If not specified, this must be provided by the MWA_BEAM_FILE environment variable.");
+        format!("The path to a beam file. For 'fee', this is the HDF5 MWA FEE beam file; if not specified, it must be provided by the MWA_BEAM_FILE environment variable. For 'cma21-feko-cube', this is the FEKO-derived HDF5 beam cube.");
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]
@@ -123,6 +123,17 @@ impl BeamArgs {
                 Box::new(Cma21GaussianBeam {
                     num_tiles: total_num_tiles,
                 })
+            }
+
+            BeamType::Cma21FekoCube => {
+                debug!("Setting up a 21CMA FEKO cube beam object");
+                let beam_file = beam_file.ok_or(BeamError::NoBeamFile("cma21-feko-cube"))?;
+                printer.push_line("Type: 21CMA FEKO cube".into());
+                printer.push_line(format!("Beam file: {}", beam_file.display()).into());
+                printer.push_line(
+                    "Using a FEKO-derived HDF5 beam patch/cube centred on the NCP".into(),
+                );
+                Box::new(Cma21FekoCubeBeam::new(total_num_tiles, &beam_file)?)
             }
 
             BeamType::None => {

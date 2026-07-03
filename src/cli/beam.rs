@@ -28,6 +28,11 @@ pub struct BeamArgs {
     #[clap(help = BEAM_TYPE_HELP.as_str())]
     beam_type: String,
 
+    /// The path to the beam file. For 'fee', this is the HDF5 MWA FEE beam
+    /// file. For 'cma21-feko-cube', this is the FEKO-derived HDF5 beam cube.
+    #[clap(long)]
+    beam_file: Option<PathBuf>,
+
     /// The frequency to use for the beam model [MHz].
     #[clap(short, long, default_value = "150")]
     freq_mhz: f64,
@@ -103,6 +108,7 @@ fn gen_azzas<F: Float + FromPrimitive>(
 fn calc_cpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
     let BeamArgs {
         beam_type,
+        beam_file,
         delays,
         freq_mhz,
         latitude_deg,
@@ -117,6 +123,7 @@ fn calc_cpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
         Some(beam_type.as_str()),
         1,
         Delays::Partial(delays.clone().unwrap_or(vec![0; 16])),
+        beam_file.as_deref(),
     )?;
     let mut out = BufWriter::new(File::create(output)?);
 
@@ -146,6 +153,7 @@ fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
 
     let BeamArgs {
         beam_type,
+        beam_file,
         delays,
         freq_mhz,
         latitude_deg,
@@ -159,6 +167,7 @@ fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
         Some(beam_type.as_str()),
         1,
         Delays::Partial(delays.clone().unwrap_or(vec![0; 16])),
+        beam_file.as_deref(),
     )?;
     let gpu_beam = beam.prepare_gpu_beam(&[(freq_mhz * 1e6) as u32])?;
     let mut out = BufWriter::new(File::create(output)?);

@@ -18,7 +18,7 @@ mod fee;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use cma21::Cma21GaussianBeam;
+pub(crate) use cma21::{Cma21FekoCubeBeam, Cma21GaussianBeam};
 pub(crate) use error::BeamError;
 pub(crate) use fee::FEEBeam;
 
@@ -62,6 +62,10 @@ pub enum BeamType {
     /// lobe anchored to the published 24h-averaged primary-beam fit.
     #[strum(serialize = "cma21-gaussian")]
     Cma21Gaussian,
+
+    /// A 21CMA beam read from an offline FEKO-derived HDF5 cube.
+    #[strum(serialize = "cma21-feko-cube")]
+    Cma21FekoCube,
 
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
     #[strum(serialize = "none")]
@@ -542,6 +546,7 @@ pub fn create_beam_object(
     beam_type: Option<&str>,
     num_tiles: usize,
     dipole_delays: Delays,
+    beam_file: Option<&Path>,
 ) -> Result<Box<dyn Beam>, BeamError> {
     let beam_type = match (
         beam_type,
@@ -560,6 +565,11 @@ pub fn create_beam_object(
         BeamType::Cma21Gaussian => {
             debug!("Setting up a 21CMA Gaussian beam object");
             Ok(Box::new(Cma21GaussianBeam { num_tiles }))
+        }
+        BeamType::Cma21FekoCube => {
+            debug!("Setting up a 21CMA FEKO cube beam object");
+            let beam_file = beam_file.ok_or(BeamError::NoBeamFile("cma21-feko-cube"))?;
+            Ok(Box::new(Cma21FekoCubeBeam::new(num_tiles, beam_file)?))
         }
         BeamType::None => {
             debug!("Setting up a \"NoBeam\" object");

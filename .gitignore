@@ -1,4 +1,5 @@
 /target
+/target-cuda-release/
 /mdbook/book/
 *.DS_Store
 mwa_full_embedded_element_pattern.h5

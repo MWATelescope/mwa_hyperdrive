@@ -3,10 +3,44 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use approx::assert_abs_diff_eq;
+use hdf5_metno::File as Hdf5File;
 use ndarray::array;
+use tempfile::tempdir;
 
 use super::BeamArgs;
-use crate::beam::{BeamError::BadDelays, BeamType};
+use crate::beam::{
+    BeamError::{BadDelays, NoBeamFile},
+    BeamType,
+};
+
+fn make_test_cma21_feko_cube() -> std::path::PathBuf {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cma21_feko_test.h5");
+    let file = Hdf5File::create(&path).unwrap();
+    file.new_dataset_builder()
+        .with_data(&[120e6_f64])
+        .create("freq_hz")
+        .unwrap();
+    file.new_dataset_builder()
+        .with_data(&[46.0_f64, 47.0, 48.0])
+        .create("theta_deg")
+        .unwrap();
+    file.new_dataset_builder()
+        .with_data(&[89.0_f64, 90.0, 91.0])
+        .create("phi_deg")
+        .unwrap();
+    let beam = ndarray::Array3::from_shape_vec(
+        (1, 3, 3),
+        vec![1.0, 1.0, 1.0, 1.0, 4.0, 1.0, 1.0, 9.0, 1.0],
+    )
+    .unwrap();
+    file.new_dataset_builder()
+        .with_data(beam.view())
+        .create("beam_xx")
+        .unwrap();
+    let persisted = dir.into_path();
+    persisted.join("cma21_feko_test.h5")
+}
 
 #[test]
 fn test_handle_delays() {
@@ -111,6 +145,27 @@ fn test_explicit_cma21_gaussian_beam_type() {
     };
     let beam = args.parse(40, None, None, None).unwrap();
     assert_eq!(beam.get_beam_type(), BeamType::Cma21Gaussian);
+}
+
+#[test]
+fn test_explicit_cma21_feko_cube_requires_file() {
+    let args = BeamArgs {
+        beam_type: Some("cma21-feko-cube".to_string()),
+        ..Default::default()
+    };
+    let result = args.parse(40, None, None, None);
+    assert!(matches!(result, Err(NoBeamFile("cma21-feko-cube"))));
+}
+
+#[test]
+fn test_explicit_cma21_feko_cube_beam_type() {
+    let args = BeamArgs {
+        beam_type: Some("cma21-feko-cube".to_string()),
+        beam_file: Some(make_test_cma21_feko_cube()),
+        ..Default::default()
+    };
+    let beam = args.parse(40, None, None, None).unwrap();
+    assert_eq!(beam.get_beam_type(), BeamType::Cma21FekoCube);
 }
 
 #[test]

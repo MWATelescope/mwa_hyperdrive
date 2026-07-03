@@ -5,6 +5,7 @@
 use std::{
     path::PathBuf,
     thread::{self, ScopedJoinHandle},
+    time::Instant,
 };
 
 use crossbeam_channel::{unbounded, Sender};
@@ -473,6 +474,8 @@ fn model_thread(
     error: &AtomicCell<bool>,
     progress_bar: ProgressBar,
 ) -> Result<(), ModelError> {
+    const MODEL_HEARTBEAT_EVERY: usize = 50;
+
     let obs_context = input_vis_params.get_obs_context();
     let unflagged_tile_xyzs = obs_context
         .tile_xyzs
@@ -511,9 +514,17 @@ fn model_thread(
     let weight_factor = ((input_vis_params.spw.freq_res / FREQ_WEIGHT_FACTOR)
         * (input_vis_params.time_res.to_seconds() / TIME_WEIGHT_FACTOR))
         as f32;
+    let total_timeblocks = input_vis_params.timeblocks.len();
+    let modelling_start = Instant::now();
 
     // Iterate over all calibration timesteps and write to the model slices.
-    for (timeblock, mut vis_model_fb) in input_vis_params.timeblocks.iter().zip(vis_model_slices) {
+    for (i_timeblock, (timeblock, mut vis_model_fb)) in input_vis_params
+        .timeblocks
+        .iter()
+        .zip(vis_model_slices)
+        .enumerate()
+    {
+        let timeblock_start = Instant::now();
         let timestamp = input_vis_params.get_timeblock_model_timestamp(timeblock);
         let output_timestamp = input_vis_params.get_timeblock_output_timestamp(timeblock);
         debug!("Modelling timestamp {}", timestamp.to_gpst_seconds());
@@ -546,6 +557,21 @@ fn model_thread(
             Err(_) => return Ok(()),
         }
         progress_bar.inc(1);
+
+        let completed = i_timeblock + 1;
+        if completed == 1 || completed == total_timeblocks || completed % MODEL_HEARTBEAT_EVERY == 0
+        {
+            let elapsed_s = modelling_start.elapsed().as_secs_f64();
+            let avg_s_per_tb = elapsed_s / completed as f64;
+            let eta_min = avg_s_per_tb * (total_timeblocks.saturating_sub(completed)) as f64 / 60.0;
+            info!(
+                "Sky modelling progress: {completed}/{total_timeblocks} timeblocks ({:.1}%), avg {:.2}s/timeblock, last {:.2}s, ETA {:.1} min",
+                100.0 * completed as f64 / total_timeblocks as f64,
+                avg_s_per_tb,
+                timeblock_start.elapsed().as_secs_f64(),
+                eta_min,
+            );
+        }
     }
 
     debug!("Finished modelling");

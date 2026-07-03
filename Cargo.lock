@@ -1521,6 +1521,7 @@ dependencies = [
  "fitsio-sys",
  "flate2",
  "glob",
+ "hdf5-metno",
  "hifitime",
  "hip-sys",
  "indexmap 1.9.3",

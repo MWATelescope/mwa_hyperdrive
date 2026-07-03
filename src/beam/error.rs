@@ -41,6 +41,15 @@ pub enum BeamError {
     #[error("hyperbeam init error: {0}")]
     HyperbeamInit(#[from] mwa_hyperbeam::fee::InitFEEBeamError),
 
+    #[error("Tried to set up a '{0}' beam, but no beam file was provided")]
+    NoBeamFile(&'static str),
+
+    #[error("hdf5 error: {0}")]
+    Hdf5(#[from] hdf5_metno::Error),
+
+    #[error("bad 21CMA beam file: {0}")]
+    BadCma21BeamFile(String),
+
     #[cfg(any(feature = "cuda", feature = "hip"))]
     #[error(transparent)]
     Gpu(#[from] crate::gpu::GpuError),

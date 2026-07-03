@@ -139,6 +139,19 @@ pub struct SkyModellerGpu<'a> {
 // right?
 unsafe impl Send for SkyModellerGpu<'_> {}
 
+#[derive(Clone, Copy, Debug, Default)]
+struct BeamDirectionLayout {
+    point: usize,
+    gaussian: usize,
+    shapelet: usize,
+}
+
+impl BeamDirectionLayout {
+    fn total(self) -> usize {
+        self.point + self.gaussian + self.shapelet
+    }
+}
+
 impl<'a> SkyModellerGpu<'a> {
     /// Given a source list, split the components into each component type (e.g.
     /// points, shapelets) and by each flux density type (e.g. list, power law),
@@ -860,381 +873,84 @@ impl<'a> SkyModellerGpu<'a> {
         Ok(())
     }
 
-    /// This function is mostly used for testing. For a single timestep, over
-    /// the already-provided baselines and frequencies, generate visibilities
-    /// for each specified sky-model point-source component. The
-    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
-    /// [`SkyModellerGpu::set_uvws`].
-    ///
-    /// `lst_rad`: The local sidereal time in \[radians\].
-    ///
-    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
-    /// in \[radians\].
-    pub(super) unsafe fn model_points(
-        &self,
-        lst_rad: f64,
-        array_latitude_rad: f64,
-        d_uvws: &DevicePointer<gpu::UVW>,
-        d_beam_jones: &mut DevicePointer<GpuJones>,
-        d_vis_fb: &mut DevicePointer<Jones<f32>>,
-    ) -> Result<(), ModelError> {
-        if self.point_power_law_radecs.is_empty()
-            && self.point_curved_power_law_radecs.is_empty()
-            && self.point_list_radecs.is_empty()
-        {
-            return Ok(());
-        }
-
-        {
-            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
-                .point_power_law_radecs
-                .iter()
-                .chain(self.point_curved_power_law_radecs.iter())
-                .chain(self.point_list_radecs.iter())
-                .map(|radec| {
-                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as GpuFloat, azel.za() as GpuFloat)
-                })
-                .unzip();
-            d_beam_jones.realloc(
-                self.gpu_beam.get_num_unique_tiles() as usize
-                    * self.gpu_beam.get_num_unique_freqs() as usize
-                    * azs.len()
-                    * std::mem::size_of::<GpuJones>(),
-            )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
-        }
-
-        gpu_kernel_call!(
-            gpu::model_points,
-            &gpu::Points {
-                num_power_laws: self
-                    .point_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                power_law_lmns: self.point_power_law_lmns.get(),
-                power_law_fds: self.point_power_law_fds.get(),
-                power_law_sis: self.point_power_law_sis.get(),
-                num_curved_power_laws: self
-                    .point_curved_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                curved_power_law_lmns: self.point_curved_power_law_lmns.get(),
-                curved_power_law_fds: self.point_curved_power_law_fds.get(),
-                curved_power_law_sis: self.point_curved_power_law_sis.get(),
-                curved_power_law_qs: self.point_curved_power_law_qs.get(),
-                num_lists: self
-                    .point_list_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                list_lmns: self.point_list_lmns.get(),
-                list_fds: self.point_list_fds.get(),
-            },
-            &self.get_addresses(),
-            d_uvws.get(),
-            d_beam_jones.get(),
-            d_vis_fb.get_mut().cast(),
-        )?;
-
-        Ok(())
+    fn point_direction_count(&self) -> usize {
+        self.point_power_law_radecs.len()
+            + self.point_curved_power_law_radecs.len()
+            + self.point_list_radecs.len()
     }
 
-    /// This function is mostly used for testing. For a single timestep, over
-    /// the already-provided baselines and frequencies, generate visibilities
-    /// for each specified sky-model Gaussian-source component. The
-    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
-    /// [`SkyModellerGpu::set_uvws`].
-    ///
-    /// `lst_rad`: The local sidereal time in \[radians\].
-    ///
-    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
-    /// in \[radians\].
-    pub(super) unsafe fn model_gaussians(
-        &self,
-        lst_rad: f64,
-        array_latitude_rad: f64,
-        d_uvws: &DevicePointer<gpu::UVW>,
-        d_beam_jones: &mut DevicePointer<GpuJones>,
-        d_vis_fb: &mut DevicePointer<Jones<f32>>,
-    ) -> Result<(), ModelError> {
-        if self.gaussian_power_law_radecs.is_empty()
-            && self.gaussian_curved_power_law_radecs.is_empty()
-            && self.gaussian_list_radecs.is_empty()
-        {
-            return Ok(());
-        }
-
-        {
-            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
-                .gaussian_power_law_radecs
-                .iter()
-                .chain(self.gaussian_curved_power_law_radecs.iter())
-                .chain(self.gaussian_list_radecs.iter())
-                .map(|radec| {
-                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as GpuFloat, azel.za() as GpuFloat)
-                })
-                .unzip();
-            d_beam_jones.realloc(
-                self.gpu_beam.get_num_unique_tiles() as usize
-                    * self.gpu_beam.get_num_unique_freqs() as usize
-                    * azs.len()
-                    * std::mem::size_of::<GpuJones>(),
-            )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
-        }
-
-        gpu_kernel_call!(
-            gpu::model_gaussians,
-            &gpu::Gaussians {
-                num_power_laws: self
-                    .gaussian_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                power_law_lmns: self.gaussian_power_law_lmns.get(),
-                power_law_fds: self.gaussian_power_law_fds.get(),
-                power_law_sis: self.gaussian_power_law_sis.get(),
-                power_law_gps: self.gaussian_power_law_gps.get(),
-                num_curved_power_laws: self
-                    .gaussian_curved_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                curved_power_law_lmns: self.gaussian_curved_power_law_lmns.get(),
-                curved_power_law_fds: self.gaussian_curved_power_law_fds.get(),
-                curved_power_law_sis: self.gaussian_curved_power_law_sis.get(),
-                curved_power_law_qs: self.gaussian_curved_power_law_qs.get(),
-                curved_power_law_gps: self.gaussian_curved_power_law_gps.get(),
-                num_lists: self
-                    .gaussian_list_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                list_lmns: self.gaussian_list_lmns.get(),
-                list_fds: self.gaussian_list_fds.get(),
-                list_gps: self.gaussian_list_gps.get(),
-            },
-            &self.get_addresses(),
-            d_uvws.get(),
-            d_beam_jones.get(),
-            d_vis_fb.get_mut().cast(),
-        )?;
-
-        Ok(())
+    fn gaussian_direction_count(&self) -> usize {
+        self.gaussian_power_law_radecs.len()
+            + self.gaussian_curved_power_law_radecs.len()
+            + self.gaussian_list_radecs.len()
     }
 
-    /// This function is mostly used for testing. For a single timestep, over
-    /// the already-provided baselines and frequencies, generate visibilities
-    /// for each specified sky-model Gaussian-source component. The
-    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
-    /// [`SkyModellerGpu::set_uvws`].
-    ///
-    /// `lst_rad`: The local sidereal time in \[radians\].
-    ///
-    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
-    /// in \[radians\].
-    pub(super) unsafe fn model_shapelets(
+    fn shapelet_direction_count(&self) -> usize {
+        self.shapelet_power_law_radecs.len()
+            + self.shapelet_curved_power_law_radecs.len()
+            + self.shapelet_list_radecs.len()
+    }
+
+    fn beam_direction_layout(&self) -> BeamDirectionLayout {
+        BeamDirectionLayout {
+            point: self.point_direction_count(),
+            gaussian: self.gaussian_direction_count(),
+            shapelet: self.shapelet_direction_count(),
+        }
+    }
+
+    fn beam_row_count(&self) -> usize {
+        self.gpu_beam.get_num_unique_tiles() as usize
+            * self.gpu_beam.get_num_unique_freqs() as usize
+    }
+
+    unsafe fn calculate_all_beam_responses(
         &self,
         lst_rad: f64,
         array_latitude_rad: f64,
-        d_uvws: &DevicePointer<gpu::UVW>,
         d_beam_jones: &mut DevicePointer<GpuJones>,
-        d_vis_fb: &mut DevicePointer<Jones<f32>>,
-    ) -> Result<(), ModelError> {
-        if self.shapelet_power_law_radecs.is_empty()
-            && self.shapelet_curved_power_law_radecs.is_empty()
-            && self.shapelet_list_radecs.is_empty()
-        {
-            return Ok(());
+    ) -> Result<BeamDirectionLayout, ModelError> {
+        let layout = self.beam_direction_layout();
+        let total_dirs = layout.total();
+        if total_dirs == 0 {
+            return Ok(layout);
         }
 
-        {
-            let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = self
-                .shapelet_power_law_radecs
-                .iter()
-                .chain(self.shapelet_curved_power_law_radecs.iter())
-                .chain(self.shapelet_list_radecs.iter())
-                .map(|radec| {
-                    let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
-                    (azel.az as GpuFloat, azel.za() as GpuFloat)
-                })
-                .unzip();
-            d_beam_jones.realloc(
-                self.gpu_beam.get_num_unique_tiles() as usize
-                    * self.gpu_beam.get_num_unique_freqs() as usize
-                    * azs.len()
-                    * std::mem::size_of::<GpuJones>(),
-            )?;
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?
+        let mut azs = Vec::with_capacity(total_dirs);
+        let mut zas = Vec::with_capacity(total_dirs);
+
+        let mut push_radecs = |radecs: &[RADec]| {
+            radecs.iter().for_each(|radec| {
+                let azel = radec.to_hadec(lst_rad).to_azel(array_latitude_rad);
+                azs.push(azel.az as GpuFloat);
+                zas.push(azel.za() as GpuFloat);
+            });
         };
 
-        let uvs = self.get_shapelet_uvs(lst_rad);
-        let power_law_uvs =
-            DevicePointer::copy_to_device(uvs.power_law.as_slice().expect("is contiguous"))?;
-        let curved_power_law_uvs =
-            DevicePointer::copy_to_device(uvs.curved_power_law.as_slice().expect("is contiguous"))?;
-        let list_uvs = DevicePointer::copy_to_device(uvs.list.as_slice().expect("is contiguous"))?;
+        push_radecs(&self.point_power_law_radecs);
+        push_radecs(&self.point_curved_power_law_radecs);
+        push_radecs(&self.point_list_radecs);
+        push_radecs(&self.gaussian_power_law_radecs);
+        push_radecs(&self.gaussian_curved_power_law_radecs);
+        push_radecs(&self.gaussian_list_radecs);
+        push_radecs(&self.shapelet_power_law_radecs);
+        push_radecs(&self.shapelet_curved_power_law_radecs);
+        push_radecs(&self.shapelet_list_radecs);
 
-        gpu_kernel_call!(
-            gpu::model_shapelets,
-            &gpu::Shapelets {
-                num_power_laws: self
-                    .shapelet_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                power_law_lmns: self.shapelet_power_law_lmns.get(),
-                power_law_fds: self.shapelet_power_law_fds.get(),
-                power_law_sis: self.shapelet_power_law_sis.get(),
-                power_law_gps: self.shapelet_power_law_gps.get(),
-                power_law_shapelet_uvs: power_law_uvs.get(),
-                power_law_shapelet_coeffs: self.shapelet_power_law_coeffs.get(),
-                power_law_num_shapelet_coeffs: self.shapelet_power_law_coeff_lens.get(),
-                num_curved_power_laws: self
-                    .shapelet_curved_power_law_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                curved_power_law_lmns: self.shapelet_curved_power_law_lmns.get(),
-                curved_power_law_fds: self.shapelet_curved_power_law_fds.get(),
-                curved_power_law_sis: self.shapelet_curved_power_law_sis.get(),
-                curved_power_law_qs: self.shapelet_curved_power_law_qs.get(),
-                curved_power_law_gps: self.shapelet_curved_power_law_gps.get(),
-                curved_power_law_shapelet_uvs: curved_power_law_uvs.get(),
-                curved_power_law_shapelet_coeffs: self.shapelet_curved_power_law_coeffs.get(),
-                curved_power_law_num_shapelet_coeffs: self
-                    .shapelet_curved_power_law_coeff_lens
-                    .get(),
-                num_lists: self
-                    .shapelet_list_radecs
-                    .len()
-                    .try_into()
-                    .expect("not bigger than i32::MAX"),
-                list_lmns: self.shapelet_list_lmns.get(),
-                list_fds: self.shapelet_list_fds.get(),
-                list_gps: self.shapelet_list_gps.get(),
-                list_shapelet_uvs: list_uvs.get(),
-                list_shapelet_coeffs: self.shapelet_list_coeffs.get(),
-                list_num_shapelet_coeffs: self.shapelet_list_coeff_lens.get(),
-            },
-            &self.get_addresses(),
-            d_uvws.get(),
-            d_beam_jones.get(),
-            d_vis_fb.get_mut().cast(),
+        d_beam_jones
+            .realloc(self.beam_row_count() * total_dirs * std::mem::size_of::<GpuJones>())?;
+        self.gpu_beam.calc_jones_pair(
+            &azs,
+            &zas,
+            array_latitude_rad,
+            d_beam_jones.get_mut().cast(),
         )?;
 
-        Ok(())
+        Ok(layout)
     }
 
-    /// This is a "specialised" version of [`SkyModeller::model_timestep_with`];
-    /// it accepts GPU buffers directly, saving some allocations. Unlike the
-    /// aforementioned function, the incoming visibilities *are not* cleared;
-    /// visibilities are accumulated.
-    pub(crate) fn model_timestep_with(
-        &self,
-        lst_rad: f64,
-        array_latitude_rad: f64,
-        d_uvws: &DevicePointer<gpu::UVW>,
-        d_beam_jones: &mut DevicePointer<GpuJones>,
-        d_vis_fb: &mut DevicePointer<Jones<f32>>,
-    ) -> Result<(), ModelError> {
-        unsafe {
-            self.model_points(lst_rad, array_latitude_rad, d_uvws, d_beam_jones, d_vis_fb)?;
-            self.model_gaussians(lst_rad, array_latitude_rad, d_uvws, d_beam_jones, d_vis_fb)?;
-            self.model_shapelets(lst_rad, array_latitude_rad, d_uvws, d_beam_jones, d_vis_fb)?;
-        }
-        Ok(())
-    }
-
-    /// This is a "specialised" version of [`SkyModeller::model_timestep_autos_with`];
-    /// it accepts GPU buffers directly, saving some allocations. Unlike the
-    /// aforementioned function, the incoming visibilities *are not* cleared;
-    /// visibilities are accumulated.
-    pub(crate) fn model_timestep_autos_with_inner(
-        &self,
-        lst_rad: f64,
-        array_latitude_rad: f64,
-        d_beam_jones: &mut DevicePointer<GpuJones>,
-        d_vis_fb: &mut DevicePointer<Jones<f32>>,
-    ) -> Result<(), ModelError> {
-        // Number of tiles and freqs
-        let num_tiles = self.unflagged_tile_xyzs.len();
-        let num_freqs = self.freqs.len();
-
-        // Get the beam responses for all components
-        let mut all_azels = Vec::new();
-
-        // Add point source components
-        all_azels.extend(
-            self.point_power_law_radecs
-                .iter()
-                .chain(self.point_curved_power_law_radecs.iter())
-                .chain(self.point_list_radecs.iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad)),
-        );
-
-        // Add gaussian components
-        all_azels.extend(
-            self.gaussian_power_law_radecs
-                .iter()
-                .chain(self.gaussian_curved_power_law_radecs.iter())
-                .chain(self.gaussian_list_radecs.iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad)),
-        );
-
-        // Add shapelet components
-        all_azels.extend(
-            self.shapelet_power_law_radecs
-                .iter()
-                .chain(self.shapelet_curved_power_law_radecs.iter())
-                .chain(self.shapelet_list_radecs.iter())
-                .map(|radec| radec.to_hadec(lst_rad).to_azel(array_latitude_rad)),
-        );
-
-        // Convert azimuths and elevations to vectors
-        let (azs, zas): (Vec<GpuFloat>, Vec<GpuFloat>) = all_azels
-            .iter()
-            .map(|azel| (azel.az as GpuFloat, azel.za() as GpuFloat))
-            .unzip();
-
-        // Calculate beam responses for all components
-        d_beam_jones.realloc(
-            self.gpu_beam.get_num_unique_tiles() as usize
-                * self.gpu_beam.get_num_unique_freqs() as usize
-                * azs.len()
-                * std::mem::size_of::<GpuJones>(),
-        )?;
-
-        unsafe {
-            self.gpu_beam.calc_jones_pair(
-                &azs,
-                &zas,
-                array_latitude_rad,
-                d_beam_jones.get_mut().cast(),
-            )?;
-        }
-
-        // Create component structs for the GPU
-        let points = gpu::Points {
+    fn gpu_points(&self) -> gpu::Points {
+        gpu::Points {
             num_power_laws: self
                 .point_power_law_radecs
                 .len()
@@ -1259,9 +975,11 @@ impl<'a> SkyModellerGpu<'a> {
                 .expect("not bigger than i32::MAX"),
             list_lmns: self.point_list_lmns.get(),
             list_fds: self.point_list_fds.get(),
-        };
+        }
+    }
 
-        let gaussians = gpu::Gaussians {
+    fn gpu_gaussians(&self) -> gpu::Gaussians {
+        gpu::Gaussians {
             num_power_laws: self
                 .gaussian_power_law_radecs
                 .len()
@@ -1289,7 +1007,288 @@ impl<'a> SkyModellerGpu<'a> {
             list_lmns: self.gaussian_list_lmns.get(),
             list_fds: self.gaussian_list_fds.get(),
             list_gps: self.gaussian_list_gps.get(),
-        };
+        }
+    }
+
+    fn gpu_shapelets(
+        &self,
+        power_law_uvs: &DevicePointer<gpu::ShapeletUV>,
+        curved_power_law_uvs: &DevicePointer<gpu::ShapeletUV>,
+        list_uvs: &DevicePointer<gpu::ShapeletUV>,
+    ) -> gpu::Shapelets {
+        gpu::Shapelets {
+            num_power_laws: self
+                .shapelet_power_law_radecs
+                .len()
+                .try_into()
+                .expect("not bigger than i32::MAX"),
+            power_law_lmns: self.shapelet_power_law_lmns.get(),
+            power_law_fds: self.shapelet_power_law_fds.get(),
+            power_law_sis: self.shapelet_power_law_sis.get(),
+            power_law_gps: self.shapelet_power_law_gps.get(),
+            power_law_shapelet_uvs: power_law_uvs.get(),
+            power_law_shapelet_coeffs: self.shapelet_power_law_coeffs.get(),
+            power_law_num_shapelet_coeffs: self.shapelet_power_law_coeff_lens.get(),
+            num_curved_power_laws: self
+                .shapelet_curved_power_law_radecs
+                .len()
+                .try_into()
+                .expect("not bigger than i32::MAX"),
+            curved_power_law_lmns: self.shapelet_curved_power_law_lmns.get(),
+            curved_power_law_fds: self.shapelet_curved_power_law_fds.get(),
+            curved_power_law_sis: self.shapelet_curved_power_law_sis.get(),
+            curved_power_law_qs: self.shapelet_curved_power_law_qs.get(),
+            curved_power_law_gps: self.shapelet_curved_power_law_gps.get(),
+            curved_power_law_shapelet_uvs: curved_power_law_uvs.get(),
+            curved_power_law_shapelet_coeffs: self.shapelet_curved_power_law_coeffs.get(),
+            curved_power_law_num_shapelet_coeffs: self.shapelet_curved_power_law_coeff_lens.get(),
+            num_lists: self
+                .shapelet_list_radecs
+                .len()
+                .try_into()
+                .expect("not bigger than i32::MAX"),
+            list_lmns: self.shapelet_list_lmns.get(),
+            list_fds: self.shapelet_list_fds.get(),
+            list_gps: self.shapelet_list_gps.get(),
+            list_shapelet_uvs: list_uvs.get(),
+            list_shapelet_coeffs: self.shapelet_list_coeffs.get(),
+            list_num_shapelet_coeffs: self.shapelet_list_coeff_lens.get(),
+        }
+    }
+
+    fn model_points_with_beam(
+        &self,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        if self.point_direction_count() == 0 {
+            return Ok(());
+        }
+
+        gpu_kernel_call!(
+            gpu::model_points,
+            &self.gpu_points(),
+            &self.get_addresses(),
+            d_uvws.get(),
+            d_beam_jones.get(),
+            d_vis_fb.get_mut().cast(),
+        )?;
+
+        Ok(())
+    }
+
+    fn model_gaussians_with_beam(
+        &self,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        if self.gaussian_direction_count() == 0 {
+            return Ok(());
+        }
+
+        gpu_kernel_call!(
+            gpu::model_gaussians,
+            &self.gpu_gaussians(),
+            &self.get_addresses(),
+            d_uvws.get(),
+            d_beam_jones.get(),
+            d_vis_fb.get_mut().cast(),
+        )?;
+
+        Ok(())
+    }
+
+    fn model_shapelets_with_beam(
+        &self,
+        lst_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        if self.shapelet_direction_count() == 0 {
+            return Ok(());
+        }
+
+        let uvs = self.get_shapelet_uvs(lst_rad);
+        let power_law_uvs =
+            DevicePointer::copy_to_device(uvs.power_law.as_slice().expect("is contiguous"))?;
+        let curved_power_law_uvs =
+            DevicePointer::copy_to_device(uvs.curved_power_law.as_slice().expect("is contiguous"))?;
+        let list_uvs = DevicePointer::copy_to_device(uvs.list.as_slice().expect("is contiguous"))?;
+
+        gpu_kernel_call!(
+            gpu::model_shapelets,
+            &self.gpu_shapelets(&power_law_uvs, &curved_power_law_uvs, &list_uvs),
+            &self.get_addresses(),
+            d_uvws.get(),
+            d_beam_jones.get(),
+            d_vis_fb.get_mut().cast(),
+        )?;
+
+        Ok(())
+    }
+
+    /// This function is mostly used for testing. For a single timestep, over
+    /// the already-provided baselines and frequencies, generate visibilities
+    /// for each specified sky-model point-source component. The
+    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
+    /// [`SkyModellerGpu::set_uvws`].
+    ///
+    /// `lst_rad`: The local sidereal time in \[radians\].
+    ///
+    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
+    /// in \[radians\].
+    pub(super) unsafe fn model_points(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        if self.point_direction_count() == 0 {
+            return Ok(());
+        }
+
+        self.calculate_all_beam_responses(lst_rad, array_latitude_rad, d_beam_jones)?;
+        self.model_points_with_beam(d_uvws, d_beam_jones, d_vis_fb)
+    }
+
+    /// This function is mostly used for testing. For a single timestep, over
+    /// the already-provided baselines and frequencies, generate visibilities
+    /// for each specified sky-model Gaussian-source component. The
+    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
+    /// [`SkyModellerGpu::set_uvws`].
+    ///
+    /// `lst_rad`: The local sidereal time in \[radians\].
+    ///
+    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
+    /// in \[radians\].
+    pub(super) unsafe fn model_gaussians(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        if self.gaussian_direction_count() == 0 {
+            return Ok(());
+        }
+
+        self.calculate_all_beam_responses(lst_rad, array_latitude_rad, d_beam_jones)?;
+        self.model_gaussians_with_beam(d_uvws, d_beam_jones, d_vis_fb)
+    }
+
+    /// This function is mostly used for testing. For a single timestep, over
+    /// the already-provided baselines and frequencies, generate visibilities
+    /// for each specified sky-model Gaussian-source component. The
+    /// `SkyModellerGpu` object *must* already have its UVW coordinates set; see
+    /// [`SkyModellerGpu::set_uvws`].
+    ///
+    /// `lst_rad`: The local sidereal time in \[radians\].
+    ///
+    /// `array_latitude_rad`: The latitude of the array/telescope/interferometer
+    /// in \[radians\].
+    pub(super) unsafe fn model_shapelets(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        if self.shapelet_direction_count() == 0 {
+            return Ok(());
+        }
+
+        self.calculate_all_beam_responses(lst_rad, array_latitude_rad, d_beam_jones)?;
+        self.model_shapelets_with_beam(lst_rad, d_uvws, d_beam_jones, d_vis_fb)
+    }
+
+    /// This is a "specialised" version of [`SkyModeller::model_timestep_with`];
+    /// it accepts GPU buffers directly, saving some allocations. Unlike the
+    /// aforementioned function, the incoming visibilities *are not* cleared;
+    /// visibilities are accumulated.
+    pub(crate) fn model_timestep_with(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_uvws: &DevicePointer<gpu::UVW>,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        unsafe {
+            let layout =
+                self.calculate_all_beam_responses(lst_rad, array_latitude_rad, d_beam_jones)?;
+            if layout.total() == 0 {
+                return Ok(());
+            }
+
+            let mut d_beam_subset = DevicePointer::default();
+            let num_rows = self.beam_row_count();
+            let total_dirs = layout.total();
+
+            if layout.point > 0 {
+                d_beam_subset.copy_rows_from_device_2d(
+                    d_beam_jones,
+                    0,
+                    layout.point,
+                    num_rows,
+                    total_dirs,
+                )?;
+                self.model_points_with_beam(d_uvws, &d_beam_subset, d_vis_fb)?;
+            }
+
+            if layout.gaussian > 0 {
+                d_beam_subset.copy_rows_from_device_2d(
+                    d_beam_jones,
+                    layout.point,
+                    layout.gaussian,
+                    num_rows,
+                    total_dirs,
+                )?;
+                self.model_gaussians_with_beam(d_uvws, &d_beam_subset, d_vis_fb)?;
+            }
+
+            if layout.shapelet > 0 {
+                d_beam_subset.copy_rows_from_device_2d(
+                    d_beam_jones,
+                    layout.point + layout.gaussian,
+                    layout.shapelet,
+                    num_rows,
+                    total_dirs,
+                )?;
+                self.model_shapelets_with_beam(lst_rad, d_uvws, &d_beam_subset, d_vis_fb)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// This is a "specialised" version of [`SkyModeller::model_timestep_autos_with`];
+    /// it accepts GPU buffers directly, saving some allocations. Unlike the
+    /// aforementioned function, the incoming visibilities *are not* cleared;
+    /// visibilities are accumulated.
+    pub(crate) fn model_timestep_autos_with_inner(
+        &self,
+        lst_rad: f64,
+        array_latitude_rad: f64,
+        d_beam_jones: &mut DevicePointer<GpuJones>,
+        d_vis_fb: &mut DevicePointer<Jones<f32>>,
+    ) -> Result<(), ModelError> {
+        unsafe {
+            self.calculate_all_beam_responses(lst_rad, array_latitude_rad, d_beam_jones)?;
+        }
+
+        // Number of tiles and freqs
+        let num_tiles = self.unflagged_tile_xyzs.len();
+        let num_freqs = self.freqs.len();
+
+        // Create component structs for the GPU
+        let points = self.gpu_points();
+        let gaussians = self.gpu_gaussians();
 
         let shapelets = gpu::Shapelets {
             num_power_laws: self
