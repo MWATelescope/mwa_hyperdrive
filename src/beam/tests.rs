@@ -30,14 +30,15 @@ fn make_test_cma21_feko_cube() -> std::path::PathBuf {
         .create("phi_deg")
         .unwrap();
 
-    let beam = Array3::from_shape_vec((1, 3, 3), vec![1.0, 1.0, 1.0, 1.0, 4.0, 1.0, 1.0, 9.0, 1.0])
-        .unwrap();
-    file.new_dataset_builder()
-        .with_data(beam.view())
+    let beam = vec![1.0, 1.0, 1.0, 1.0, 4.0, 1.0, 1.0, 9.0, 1.0];
+    file.new_dataset::<f64>()
+        .shape((1, 3, 3))
         .create("beam_xx")
+        .unwrap()
+        .write_raw(&beam)
         .unwrap();
 
-    let persisted = dir.into_path();
+    let persisted = dir.keep();
     persisted.join("cma21_feko_test.h5")
 }
 
@@ -59,20 +60,17 @@ fn make_test_cma21_feko_freq_cube() -> std::path::PathBuf {
         .create("phi_deg")
         .unwrap();
 
-    let beam = Array3::from_shape_vec(
-        (2, 3, 3),
-        vec![
-            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0,
-            9.0,
-        ],
-    )
-    .unwrap();
-    file.new_dataset_builder()
-        .with_data(beam.view())
+    let beam = vec![
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0,
+    ];
+    file.new_dataset::<f64>()
+        .shape((2, 3, 3))
         .create("beam_xx")
+        .unwrap()
+        .write_raw(&beam)
         .unwrap();
 
-    let persisted = dir.into_path();
+    let persisted = dir.keep();
     persisted.join("cma21_feko_freq_test.h5")
 }
 

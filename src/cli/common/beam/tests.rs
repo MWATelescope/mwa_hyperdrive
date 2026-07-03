@@ -29,16 +29,14 @@ fn make_test_cma21_feko_cube() -> std::path::PathBuf {
         .with_data(&[89.0_f64, 90.0, 91.0])
         .create("phi_deg")
         .unwrap();
-    let beam = ndarray::Array3::from_shape_vec(
-        (1, 3, 3),
-        vec![1.0, 1.0, 1.0, 1.0, 4.0, 1.0, 1.0, 9.0, 1.0],
-    )
-    .unwrap();
-    file.new_dataset_builder()
-        .with_data(beam.view())
+    let beam = vec![1.0, 1.0, 1.0, 1.0, 4.0, 1.0, 1.0, 9.0, 1.0];
+    file.new_dataset::<f64>()
+        .shape((1, 3, 3))
         .create("beam_xx")
+        .unwrap()
+        .write_raw(&beam)
         .unwrap();
-    let persisted = dir.into_path();
+    let persisted = dir.keep();
     persisted.join("cma21_feko_test.h5")
 }
 

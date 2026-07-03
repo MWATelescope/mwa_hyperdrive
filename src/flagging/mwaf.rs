@@ -177,7 +177,7 @@ impl MwafFlags {
         // Sort by the gpubox number. Because this function is private and only
         // called by `Self::new_from_mwafs`, we can be sure that each of these
         // gpubox_num vectors contains only a single number.
-        flags.sort_unstable_by(|a, b| a.gpubox_num.cmp(&b.gpubox_num));
+        flags.sort_unstable_by_key(|a| a.gpubox_num);
 
         // Take the last struct from the flags, and use it to compare with
         // everything else. If anything is inconsistent, we blow up.

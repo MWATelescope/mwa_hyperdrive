@@ -159,6 +159,10 @@ fn test_write_and_read_hyperdrive_solutions() {
     assert!(sols_from_disk.baseline_weights.is_some());
     let disk_baseline_weights = sols_from_disk.baseline_weights.unwrap();
     assert_abs_diff_eq!(disk_baseline_weights[..], sols.baseline_weights.unwrap());
+
+    assert!(sols_from_disk.tile_names.is_some());
+    let disk_tile_names = sols_from_disk.tile_names.unwrap();
+    assert_eq!(disk_tile_names[..], sols.tile_names.unwrap());
 }
 
 #[test]

@@ -43,23 +43,45 @@ mod gpu {
         }
     }
 
+    /// Queries nvcc for its supported SM targets by parsing `nvcc --help`.
+    /// Returns None if nvcc is not found or produces no recognisable output.
+    #[cfg(feature = "cuda")]
+    fn get_nvcc_supported_sms() -> Option<std::collections::HashSet<u16>> {
+        let output = std::process::Command::new("nvcc")
+            .arg("--list-gpu-code")
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut sms = std::collections::HashSet::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if let Some(num) = line.strip_prefix("sm_") {
+                if let Ok(sm) = num.parse::<u16>() {
+                    sms.insert(sm);
+                }
+            }
+        }
+        if sms.is_empty() {
+            None
+        } else {
+            Some(sms)
+        }
+    }
+
     pub(super) fn build_and_link() {
         let mut gpu_files = vec![];
         get_gpu_files("src/gpu", &mut gpu_files);
 
         #[cfg(feature = "cuda")]
         let mut gpu_target = {
-            const DEFAULT_CUDA_ARCHES: &[u16] = &[60, 70, 80];
-            const DEFAULT_CUDA_SMS: &[u16] = &[60, 70, 75, 80, 86];
-
             fn parse_and_validate_compute(c: &str, var: &str) -> Vec<u16> {
                 let mut out = vec![];
                 for compute in c.trim().split(',') {
-                    // Check that there's only two numeric characters.
-                    if compute.len() != 2 {
-                        panic!("When parsing {var}, found '{compute}', which is not a two-digit number!")
+                    // Check that there are only two or three numeric characters
+                    // (e.g. 86 for Ampere, 120 for Blackwell).
+                    if compute.len() < 2 || compute.len() > 3 {
+                        panic!("When parsing {var}, found '{compute}', which is not a two- or three-digit number!")
                     }
-
                     match compute.parse() {
                         Ok(p) => out.push(p),
                         Err(_) => {
@@ -70,28 +92,58 @@ mod gpu {
                 out
             }
 
-            // Attempt to read HYPERDRIVE_CUDA_COMPUTE. HYPERBEAM_CUDA_COMPUTE can be
-            // used instead, too.
+            // Attempt to read HYPERDRIVE_CUDA_COMPUTE. HYPERBEAM_CUDA_COMPUTE
+            // can be used instead, too.
             println!("cargo:rerun-if-env-changed=HYPERDRIVE_CUDA_COMPUTE");
             println!("cargo:rerun-if-env-changed=HYPERBEAM_CUDA_COMPUTE");
-            let (arches, sms) = match (
+
+            let nvcc_sms = get_nvcc_supported_sms();
+
+            let targets: Vec<u16> = match (
                 env::var("HYPERDRIVE_CUDA_COMPUTE"),
                 env::var("HYPERBEAM_CUDA_COMPUTE"),
             ) {
-                // When a user-supplied variable exists, use it as the CUDA arch and
-                // compute level.
+                // When a user-supplied variable exists, validate its values
+                // against what the installed nvcc actually supports.
                 (Ok(c), _) | (Err(_), Ok(c)) => {
-                    let compute = parse_and_validate_compute(&c, "HYPERDRIVE_CUDA_COMPUTE");
-                    let sms = compute.clone();
-                    (compute, sms)
+                    let requested = parse_and_validate_compute(&c, "HYPERDRIVE_CUDA_COMPUTE");
+                    if let Some(ref supported) = nvcc_sms {
+                        requested
+                            .into_iter()
+                            .filter(|&sm| {
+                                if supported.contains(&sm) {
+                                    true
+                                } else {
+                                    println!("cargo:warning=Skipping sm={sm}: not supported by installed nvcc");
+                                    false
+                                }
+                            })
+                            .collect()
+                    } else {
+                        requested
+                    }
                 }
+                // By default, target everything the installed nvcc supports.
                 (Err(_), Err(_)) => {
-                    // Print out all of the default arches and computes as a
-                    // warning.
-                    println!("cargo:warning=No HYPERDRIVE_CUDA_COMPUTE; Passing arch=compute_{DEFAULT_CUDA_ARCHES:?} and code=sm_{DEFAULT_CUDA_SMS:?} to nvcc");
-                    (DEFAULT_CUDA_ARCHES.to_vec(), DEFAULT_CUDA_SMS.to_vec())
+                    let mut sms = nvcc_sms
+                        .expect(
+                            "Could not query nvcc for supported SMs; \
+                         install nvcc or set HYPERDRIVE_CUDA_COMPUTE",
+                        )
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    sms.sort_unstable();
+                    println!("cargo:warning=No HYPERDRIVE_CUDA_COMPUTE; targeting nvcc-supported sm_{sms:?}");
+                    sms
                 }
             };
+
+            if targets.is_empty() {
+                panic!(
+                    "No CUDA targets remain. \
+                     Check HYPERDRIVE_CUDA_COMPUTE or your nvcc installation."
+                );
+            }
 
             let mut cuda_target = cc::Build::new();
             cuda_target.cuda(true).cudart("shared"); // We handle linking cudart statically
@@ -110,16 +162,16 @@ mod gpu {
                 }
             }
 
-            // Loop over each arch and sm
-            for arch in arches {
-                for &sm in &sms {
-                    if sm < arch {
-                        continue;
-                    }
+            // One matching-pair cubin per target SM.
+            for &sm in &targets {
+                cuda_target.flag("-gencode");
+                cuda_target.flag(format!("arch=compute_{sm},code=sm_{sm}"));
+            }
 
-                    cuda_target.flag("-gencode");
-                    cuda_target.flag(format!("arch=compute_{arch},code=sm_{sm}"));
-                }
+            // PTX fallback for the highest target: JIT-compilable on future GPUs.
+            if let Some(&max) = targets.iter().max() {
+                cuda_target.flag("-gencode");
+                cuda_target.flag(format!("arch=compute_{max},code=compute_{max}"));
             }
 
             match env::var("DEBUG").as_deref() {
@@ -193,14 +245,10 @@ mod gpu {
                 env::var("HYPERBEAM_HIP_ARCH"),
                 env::var("HYPERDRIVE_HIP_ARCH"),
             ) {
-                // When a user-supplied variable exists, use it as the CUDA arch and
-                // compute level.
                 (Ok(c), _) | (Err(_), Ok(c)) => {
                     vec![c]
                 }
                 _ => {
-                    // Print out all of the default arches and computes as a
-                    // warning.
                     println!("cargo:warning=No offload arch found, try HYPERBEAM_HIP_ARCH");
                     vec![]
                 }

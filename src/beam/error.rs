@@ -11,7 +11,7 @@ use super::BEAM_TYPES_COMMA_SEPARATED;
 #[derive(Error, Debug)]
 pub enum BeamError {
     #[error(
-        "Unrecognised beam model '{0}'; supported beam models are: {}",
+        "Unrecognised beam model '{_0}'; supported beam models are: {}",
         *BEAM_TYPES_COMMA_SEPARATED
     )]
     Unrecognised(String),

@@ -806,22 +806,19 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         let average_col = ColumnDescription::new("Average")
             .with_type(ColumnDataType::Double)
             .create()?;
-        let hdu = match (
-            start_timestamps.is_some(),
-            end_timestamps.is_some(),
-            average_timestamps.is_some(),
-        ) {
-            (true, true, true) => {
-                fptr.create_table("TIMEBLOCKS", &[start_col, end_col, average_col])
-            }
-            (true, true, false) => fptr.create_table("TIMEBLOCKS", &[start_col, end_col]),
-            (true, false, true) => fptr.create_table("TIMEBLOCKS", &[start_col, average_col]),
-            (false, true, true) => fptr.create_table("TIMEBLOCKS", &[end_col, average_col]),
-            (true, false, false) => fptr.create_table("TIMEBLOCKS", &[start_col]),
-            (false, true, false) => fptr.create_table("TIMEBLOCKS", &[end_col]),
-            (false, false, true) => fptr.create_table("TIMEBLOCKS", &[average_col]),
-            (false, false, false) => unreachable!(),
-        }?;
+
+        let mut time_cols = vec![];
+        if start_timestamps.is_some() {
+            time_cols.push(start_col);
+        }
+        if end_timestamps.is_some() {
+            time_cols.push(end_col);
+        }
+        if average_timestamps.is_some() {
+            time_cols.push(average_col);
+        }
+
+        let hdu = fptr.create_table("TIMEBLOCKS", &time_cols)?;
 
         for (key_name, timestamps) in [
             ("Start", start_timestamps),
@@ -858,49 +855,20 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
             .with_type(ColumnDataType::Int)
             .that_repeats(16)
             .create()?;
-        let hdu = match (
-            tile_names.is_some(),
-            dipole_gains.is_some(),
-            dipole_delays.is_some(),
-        ) {
-            (true, true, true) => fptr.create_table(
-                "TILES",
-                &[
-                    antenna_num_col,
-                    flag_col,
-                    tile_name_col,
-                    dipole_gains_col,
-                    dipole_delays_col,
-                ],
-            )?,
-            (true, true, false) => fptr.create_table(
-                "TILES",
-                &[antenna_num_col, flag_col, tile_name_col, dipole_gains_col],
-            )?,
-            (true, false, true) => fptr.create_table(
-                "TILES",
-                &[antenna_num_col, flag_col, tile_name_col, dipole_delays_col],
-            )?,
-            (false, true, true) => fptr.create_table(
-                "TILES",
-                &[
-                    antenna_num_col,
-                    flag_col,
-                    dipole_gains_col,
-                    dipole_delays_col,
-                ],
-            )?,
-            (true, false, false) => {
-                fptr.create_table("TILES", &[antenna_num_col, flag_col, tile_name_col])?
-            }
-            (false, true, false) => {
-                fptr.create_table("TILES", &[antenna_num_col, flag_col, dipole_gains_col])?
-            }
-            (false, false, true) => {
-                fptr.create_table("TILES", &[antenna_num_col, flag_col, dipole_delays_col])?
-            }
-            (false, false, false) => fptr.create_table("TILES", &[antenna_num_col, flag_col])?,
-        };
+
+        let mut tile_cols = vec![antenna_num_col, flag_col];
+
+        if tile_names.is_some() {
+            tile_cols.push(tile_name_col);
+        }
+        if dipole_gains.is_some() {
+            tile_cols.push(dipole_gains_col);
+        }
+        if dipole_delays.is_some() {
+            tile_cols.push(dipole_delays_col);
+        }
+
+        let hdu = fptr.create_table("TILES", &tile_cols)?;
 
         hdu.write_col(
             &mut fptr,

@@ -97,7 +97,7 @@ pub(crate) fn get_reduced_1090008640_raw_pbs() -> DataAsPathBufs {
         .into_iter()
         .chain(pbs.vis.iter())
         .chain(pbs.mwafs.iter())
-        .chain([&pbs.srclist].into_iter())
+        .chain([&pbs.srclist])
     {
         assert!(
             file.exists(),

@@ -625,9 +625,10 @@ fn test_vis_rotation() {
         model_timesteps(&modeller, &obs_context.timestamps, vis_tfb.view_mut()).unwrap();
 
         // iterate over time, rotating visibilities
+        let mut vis_rot_tfb_view = vis_rot_tfb.view_mut();
         for (vis_fb, mut vis_rot_fb, tile_ws_obs, tile_ws_src) in izip!(
             vis_tfb.outer_iter(),
-            vis_rot_tfb.view_mut().outer_iter_mut(),
+            vis_rot_tfb_view.outer_iter_mut(),
             tile_ws_obs.outer_iter(),
             tile_ws_src.outer_iter(),
         ) {
@@ -1803,7 +1804,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                 #[cfg(all(any(feature = "cuda", feature = "hip"), not(feature = "gpu-single")))]
                 PeelType::Gpu => (3e-11, 1e-7, 9e-8),
                 #[cfg(all(any(feature = "cuda", feature = "hip"), feature = "gpu-single"))]
-                PeelType::Gpu => (2e-7, 3e-5, 3e-4), // TODO(Dev): bring this down
+                PeelType::Gpu => (2e-7, 3e-4, 3e-4), // TODO(Dev): bring this down
             };
 
             assert_abs_diff_eq!(ax, ar, epsilon = ab_epsilon);

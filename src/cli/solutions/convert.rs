@@ -15,16 +15,16 @@ use crate::{cli::common::display_warnings, solutions::CalibrationSolutions, Hype
 pub(crate) struct SolutionsConvertArgs {
     /// The path to the input file. If this is a directory instead, then we
     /// attempt to read RTS calibration files in the directory.
-    #[clap(name = "INPUT_SOLUTIONS_FILE", parse(from_os_str))]
+    #[arg(value_name = "INPUT_SOLUTIONS_FILE")]
     input: PathBuf,
 
     /// The path to the output file. If this is a directory instead, then we
     /// attempt to write RTS calibration files to the directory.
-    #[clap(name = "OUTPUT_SOLUTIONS_FILE", parse(from_os_str))]
+    #[arg(value_name = "OUTPUT_SOLUTIONS_FILE")]
     output: PathBuf,
 
     /// The metafits file associated with the solutions. This may be required.
-    #[clap(short, long, parse(from_str))]
+    #[arg(short, long)]
     metafits: Option<PathBuf>,
 }
 

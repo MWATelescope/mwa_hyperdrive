@@ -2,18 +2,18 @@ name: Deploy mdBook
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   build:
     name: Build, Test and Deploy
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
+      - uses: actions/checkout@v6
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install mdBook
         run: |
           (test -x $HOME/.cargo/bin/mdbook || cargo install mdbook --version 0.4.43)

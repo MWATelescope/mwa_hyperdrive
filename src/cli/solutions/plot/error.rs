@@ -18,7 +18,7 @@ pub(crate) enum SolutionsPlotError {
 
     #[cfg(feature = "plotting")]
     #[error(
-        "An invalid calibration solutions file format was specified ({0}).\nSupported formats: {}",
+        "An invalid calibration solutions file format was specified ({_0:?}).\nSupported formats: {}",
         *crate::solutions::CAL_SOLUTION_EXTENSIONS,
     )]
     InvalidSolsFormat(std::path::PathBuf),

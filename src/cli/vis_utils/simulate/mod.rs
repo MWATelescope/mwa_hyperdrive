@@ -30,7 +30,7 @@ use vec1::Vec1;
 use crate::{
     averaging::{parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks},
     beam::{create_fee_beam_object, create_no_beam_object, Beam, Delays},
-    constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_VETO_THRESHOLD},
+    constants::{DEFAULT_CUTOFF_DISTANCE, DEFAULT_ELEVATION_LIMIT, DEFAULT_VETO_THRESHOLD},
     context::Polarisations,
     help_texts::{
         ARRAY_POSITION_HELP, DIPOLE_DELAYS_HELP, SOURCE_DIST_CUTOFF_HELP, VETO_THRESHOLD_HELP,
@@ -651,6 +651,7 @@ impl VisSimParams {
             *num_sources,
             source_dist_cutoff.unwrap_or(DEFAULT_CUTOFF_DISTANCE),
             veto_threshold.unwrap_or(DEFAULT_VETO_THRESHOLD),
+            DEFAULT_ELEVATION_LIMIT,
         )?;
         if source_list.is_empty() {
             return Err(VisSimulateError::NoSourcesAfterVeto);
