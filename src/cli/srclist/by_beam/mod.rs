@@ -371,7 +371,7 @@ fn by_beam(
             .unwrap_or(sl.get_index(0).unwrap().0)
             .to_owned();
         let mut collapsed = SourceList::new();
-        let base = sl.swap_remove_entry(&base).unwrap();
+        let base = sl.shift_remove_entry(&base).unwrap();
         let mut num_collapsed_components = base.1.components.len() - 1;
         collapsed.insert(base.0, base.1);
         let base_src = collapsed.get_index_mut(0).unwrap().1;
