@@ -135,7 +135,7 @@ pub(crate) fn veto_sources(
 
     // Remove vetoed sources from the source list.
     for name in vetoed_sources.iter() {
-        source_list.remove_entry(name);
+        source_list.swap_remove_entry(name);
     }
 
     // Now that only not-vetoed sources are left in the source list, sort the
@@ -285,7 +285,7 @@ mod tests {
         let keys: Vec<String> = source_list.keys().cloned().collect();
         for source_name in keys {
             if !sources.contains(&source_name.as_str()) {
-                source_list.remove(source_name.as_str());
+                source_list.swap_remove(source_name.as_str());
             }
         }
 
@@ -394,7 +394,7 @@ mod tests {
         let keys: Vec<String> = source_list.keys().cloned().collect();
         for source_name in keys {
             if !sources.contains(&source_name.as_str()) {
-                source_list.remove(source_name.as_str());
+                source_list.swap_remove(source_name.as_str());
             }
         }
 

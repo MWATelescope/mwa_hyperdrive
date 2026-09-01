@@ -531,7 +531,7 @@ impl MsReader {
         // The values can be slightly off of their intended values; round them.
         // Also, casacore stores the times as UTC seconds with an offset.
         let timestamps = ms_timestamps.mapped_ref(|utc_time| {
-            let e = hifitime::J1900_OFFSET.mul_add(-hifitime::SECONDS_PER_DAY, *utc_time);
+            let e = hifitime::MJD_J1900.mul_add(-hifitime::SECONDS_PER_DAY, *utc_time);
             Epoch::from_utc_seconds(e).round(*ROUND_TO)
         });
         match timestamps.as_slice() {

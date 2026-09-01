@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-09-01
+
+### Changed
+
+- Bumped mwalib to 2.1.0, Marlu to, Birli to, Hyperbeam to
+- Bumped indexmap to 2.14. In this version, `remove` and `remove_entry` are deprecated, so switched to the new equivalents `swap_remove` and `swap_remove_entry` in 8 places which preserves the behaviour of `remove` and `remove_entry` in that upon removal of an entry it will moves the last element into the removed slot, an O(1) operation, rather than reordering everything which is O(N).
+- Migrated hifitime from 3.8.2 to 4.3. Breaking in 4.x was that the const J1900_OFFSET was renamed to MJD_J1900.
+
 ## [0.8.0] - 2026-06-09
 
 ### Changed
