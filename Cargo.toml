@@ -83,7 +83,7 @@ lazy_static = "1.4.0"
 log = "0.4.0"
 marlu = { version = "0.18.1", features = ["serde"] }
 mwa_hyperbeam = "0.11.1"
-mwalib = "3.0.0"
+mwalib = "~3.0.0"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 num-complex = "0.4.1"
 num-traits = "0.2.15"

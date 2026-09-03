@@ -688,7 +688,8 @@ impl RawDataReader {
                             false
                         }
                     },
-                correct_digital_gains: self.corrections.digital_gains && !metafits_context.digital_gains_applied,
+                correct_digital_gains: self.corrections.digital_gains
+                    && !metafits_context.digital_gains_applied,
                 passband_gains: self.pfb_gains,
                 correct_geometry: self.corrections.geometric
                     && matches!(
