@@ -10,7 +10,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Bumped mwalib to 2.1.0, Marlu to 0.18.1, Birli to 0.20.1, Hyperbeam to 0.11.1.
+- Updated MSRV to 1.88.0
+- Bumped mwalib to 3.0.0, Marlu to 0.18.1, Birli to 0.20.1, Hyperbeam to 0.11.1.
 - Bumped indexmap to 2.14. In this version, `remove` and `remove_entry` are deprecated, so switched to the new equivalents `swap_remove` and `swap_remove_entry` in 7 places which preserves the behaviour of `remove` and `remove_entry` in that upon removal of an entry it will moves the last element into the removed slot, an O(1) operation, rather than reordering everything which is O(N). However in `by_beam/mod.rs`, `swap_remove_entry` creates a bug since the sources are ordered so order matters when we remove one. So in this one case we use `switch_remove_entry()` instead.
 - Migrated hifitime from 3.8.2 to 4.3. Breaking in 4.x was that the const J1900_OFFSET was renamed to MJD_J1900.
 
