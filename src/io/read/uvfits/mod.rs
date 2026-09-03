@@ -809,6 +809,11 @@ impl UvfitsReader {
                     let mut out_weights = crosses.weights_fb.slice_mut(s![.., i_baseline]);
 
                     let mut i_unflagged_chan = 0;
+
+                    // `as_chunks` can't be used here: NUM_POLS * NUM_FLOATS_PER_POL is arithmetic
+                    // on const generic parameters, which requires the unstable `generic_const_exprs`
+                    // feature. Tracking: https://github.com/rust-lang/rust/issues/76560
+                    #[allow(clippy::chunks_exact_to_as_chunks)]
                     uvfits_vis
                         .chunks_exact(NUM_POLS * NUM_FLOATS_PER_POL)
                         .zip(flags.iter())
@@ -914,6 +919,11 @@ impl UvfitsReader {
                         // cross-correlations. This means that unpacking the
                         // autos is slower. At least there are many fewer of
                         // them!
+                        //
+                        // `as_chunks` can't be used here: NUM_POLS * NUM_FLOATS_PER_POL is arithmetic
+                        // on const generic parameters, which requires the unstable `generic_const_exprs`
+                        // feature. Tracking: https://github.com/rust-lang/rust/issues/76560
+                        #[allow(clippy::chunks_exact_to_as_chunks)]
                         uvfits_vis
                             .chunks_exact(NUM_POLS * NUM_FLOATS_PER_POL)
                             .enumerate()
@@ -925,7 +935,9 @@ impl UvfitsReader {
                                 let mut out_weight_tmp = f32::MAX;
 
                                 in_data
-                                    .chunks_exact(NUM_FLOATS_PER_POL)
+                                    .as_chunks::<NUM_FLOATS_PER_POL>()
+                                    .0
+                                    .iter()
                                     .zip(out_vis_tmp.chunks_exact_mut(2))
                                     .for_each(|(in_data, out_data)| {
                                         out_data[0] = in_data[0];
@@ -1441,7 +1453,7 @@ impl UvfitsMetadata {
         // Now get the timestamps out of all the other timesteps.
         let mut i_row = num_cross_and_auto_baselines;
         assert!(
-            num_rows % num_cross_and_auto_baselines == 0,
+            num_rows.is_multiple_of(num_cross_and_auto_baselines),
             "There are a variable number of baselines per timestep, which is not supported"
         );
         while i_row < num_rows {

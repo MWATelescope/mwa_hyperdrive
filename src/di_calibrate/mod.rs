@@ -856,7 +856,9 @@ pub(super) fn calibrate(
     let max_precision: f64 = precisions
         .as_slice()
         .unwrap()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .zip(failed.iter())
         .filter(|(_, &failed)| !failed)
         .fold(f64::MIN, |acc, (antenna_precision, _)| {

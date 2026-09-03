@@ -1278,7 +1278,7 @@ fn test_iono_fit() {
 
             println!(
                 "prec: {:?}, expected: {:?}, got: {:?}",
-                apply_precession, iono_consts, &results
+                apply_precession, iono_consts, results
             );
 
             assert_abs_diff_eq!(results[0], iono_consts.alpha, epsilon = 1e-7);

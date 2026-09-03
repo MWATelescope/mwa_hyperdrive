@@ -26,7 +26,7 @@ lazy_static::lazy_static! {
         format!("Don't apply a beam response when generating a sky model. The default is to use the {} beam.", BeamType::default());
 
     static ref BEAM_FILE_HELP: String =
-        format!("The path to the HDF5 MWA FEE beam file. Only useful if the beam type is 'fee'. If not specified, this must be provided by the MWA_BEAM_FILE environment variable.");
+        "The path to the HDF5 MWA FEE beam file. Only useful if the beam type is 'fee'. If not specified, this must be provided by the MWA_BEAM_FILE environment variable.".to_string();
 }
 
 #[derive(Parser, Debug, Clone, Default, Serialize, Deserialize)]

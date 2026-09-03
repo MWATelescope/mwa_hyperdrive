@@ -140,7 +140,7 @@ dependencies = [
 [[package]]
 name = "birli"
 version = "0.20.1"
-source = "git+https://github.com/MWATelescope/Birli?branch=20260901_deps#6ad1599ede2745799a401203f67c61933b1a01dd"
+source = "git+https://github.com/MWATelescope/Birli?branch=20260901_deps#68014bbbc7f31de7dabcf2340a3607de28d3c922"
 dependencies = [
  "built",
  "byteorder",
@@ -1402,7 +1402,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "marlu"
 version = "0.18.1"
-source = "git+https://github.com/MWATelescope/marlu?branch=20260901_deps#0ff2a242ad57a3fa38c4fa4c9b5070d9118009e1"
+source = "git+https://github.com/MWATelescope/marlu?branch=20260901_deps#67e46714f05da7c4446c3902320e190126d7499b"
 dependencies = [
  "approx",
  "built",
@@ -1465,7 +1465,7 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.11.1"
-source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=20260901_deps#6dce5f9c3ecd1c9d766c783a9ad4619bb2168041"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=20260901_deps#18cc2519f3078635ba46bc342888359d1d04f81a"
 dependencies = [
  "cbindgen",
  "cc",

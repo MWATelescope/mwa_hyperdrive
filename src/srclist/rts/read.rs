@@ -989,7 +989,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1000,7 +1000,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1011,7 +1011,7 @@ mod tests {
         # ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1022,7 +1022,7 @@ mod tests {
          ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1035,7 +1035,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1050,7 +1050,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1069,7 +1069,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_ok(), "{:?}", &result);
+        assert!(&result.is_ok(), "{:?}", result);
         let sl = result.unwrap();
         assert_eq!(sl.len(), 1);
         let comps = &sl.get("VLA_ForA").unwrap().components;
@@ -1088,7 +1088,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1105,7 +1105,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1119,7 +1119,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1133,7 +1133,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]
@@ -1221,7 +1221,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
 
         let mut sl = Cursor::new(indoc! {"
         SOURCE J235959-180236 23.999841465546492 -18.047459423190038
@@ -1234,7 +1234,7 @@ mod tests {
         ENDSOURCE
         "});
         let result = parse_source_list(&mut sl);
-        assert!(&result.is_err(), "{:?}", &result);
+        assert!(&result.is_err(), "{:?}", result);
     }
 
     #[test]

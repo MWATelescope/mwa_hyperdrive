@@ -75,8 +75,8 @@ pub(super) fn read<P: AsRef<Path>, P2: AsRef<Path>>(
         }
 
         debug!("Found RTS DI calibration files:");
-        debug!("{:?}", &di_jm);
-        debug!("{:?}", &bp_cal);
+        debug!("{:?}", di_jm);
+        debug!("{:?}", bp_cal);
 
         // There should be an equal number of files for each type.
         if bp_cal.len() != di_jm.len() {

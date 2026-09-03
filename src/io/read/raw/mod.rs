@@ -177,7 +177,7 @@ impl RawDataReader {
             .filter(|rf| rf.pol == Pol::X && rf.flagged)
             .map(|rf_input| rf_input.ant as usize)
             .collect();
-        debug!("Found metafits tile flags: {:?}", &tile_flags_set);
+        debug!("Found metafits tile flags: {:?}", tile_flags_set);
 
         // Are there any unflagged tiles?
         let num_unflagged_tiles = total_num_tiles - tile_flags_set.len();
@@ -688,7 +688,7 @@ impl RawDataReader {
                             false
                         }
                     },
-                correct_digital_gains: self.corrections.digital_gains,
+                correct_digital_gains: self.corrections.digital_gains && !metafits_context.digital_gains_applied,
                 passband_gains: self.pfb_gains,
                 correct_geometry: self.corrections.geometric
                     && matches!(
