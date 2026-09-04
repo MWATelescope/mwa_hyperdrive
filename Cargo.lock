@@ -1402,7 +1402,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "marlu"
 version = "0.18.1"
-source = "git+https://github.com/MWATelescope/marlu?branch=20260901_deps#a4d0b689723ed9b24c3adddb45f0f8b23f597afe"
+source = "git+https://github.com/MWATelescope/marlu?branch=20260901_deps#ab05e9f4c09979c50d62a1039e10cd16b197bda1"
 dependencies = [
  "approx",
  "built",
@@ -1465,7 +1465,7 @@ dependencies = [
 [[package]]
 name = "mwa_hyperbeam"
 version = "0.11.1"
-source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=20260901_deps#18cc2519f3078635ba46bc342888359d1d04f81a"
+source = "git+https://github.com/MWATelescope/mwa_hyperbeam?branch=20260901_deps#f4c8d8b15eabf0701d1d8f3601cc7dce296f0352"
 dependencies = [
  "cbindgen",
  "cc",
@@ -1543,7 +1543,7 @@ dependencies = [
 [[package]]
 name = "mwalib"
 version = "3.0.0"
-source = "git+https://github.com/MWATelescope/mwalib?branch=hifitime#31f22865280abcbf0b7d4170a5c38ace05689b01"
+source = "git+https://github.com/MWATelescope/mwalib?branch=hifitime#7f8b586210f59a1aa4484596ef33c4fa8331e147"
 dependencies = [
  "built",
  "bytemuck",

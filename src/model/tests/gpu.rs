@@ -561,6 +561,12 @@ fn shapelet_multiple_components() {
 /// use a curved-power-law source with a reference freq of 150 MHz, which
 /// matches the target freq. Using a different ref freq tests the conversion
 /// logic.
+/// 
+/// The excess_precision clippy warning was triggered for
+/// assert_abs_diff_eq!(modeller_fds[0].j00_re, 1.261912575563708);    
+/// and assert_abs_diff_eq!(modeller_sis[0], -0.8172609243471072); 
+/// But I think we need that level of precision when not using gpu-single
+#[allow(clippy::excessive_precision)]
 fn test_curved_power_law_changing_ref_freq() {
     let mut srclist = POINT_ZENITH_CURVED_POWER_LAW.clone();
     {
@@ -594,8 +600,8 @@ fn test_curved_power_law_changing_ref_freq() {
         .point_curved_power_law_sis
         .copy_from_device(&mut modeller_sis)
         .unwrap();
-
-    assert_abs_diff_eq!(modeller_fds[0].j00_re, 1.261912575563708);
+    
+    assert_abs_diff_eq!(modeller_fds[0].j00_re, 1.261912575563708);     
     // The SI has changed from -0.8, which was what we started with.
     assert_abs_diff_eq!(modeller_sis[0], -0.8172609243471072);
 }
