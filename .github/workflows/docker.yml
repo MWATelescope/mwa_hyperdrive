@@ -1,7 +1,10 @@
 # this tests that the latest docker image works, and does linter checks
 # linter checks happen here because docker images are faster than waiting for
 # dependencies to install on GitHub Actions VMs
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 name: Docker Multiplatform
 
