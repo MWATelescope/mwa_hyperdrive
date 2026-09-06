@@ -13,31 +13,20 @@ use clap::Parser;
 use marlu::AzEl;
 use num_traits::{Float, FromPrimitive};
 
-use crate::{
-    beam::{create_beam_object, Delays, BEAM_TYPES_COMMA_SEPARATED},
-    HyperdriveError,
-};
-
-lazy_static::lazy_static! {
-    static ref BEAM_TYPE_HELP: String = format!("The type of beam to use. Supported types: {}", *BEAM_TYPES_COMMA_SEPARATED);
-}
+use crate::{beam::Delays, HyperdriveError};
 
 /// Generate beam response values.
 #[derive(Parser, Debug)]
 pub struct BeamArgs {
-    #[arg(help = BEAM_TYPE_HELP.as_str())]
-    beam_type: String,
+    #[command(flatten)]
+    beam_args: super::common::BeamArgs,
 
     /// The frequency to use for the beam model [MHz].
     #[arg(short, long, default_value = "150")]
     freq_mhz: f64,
 
-    /// If specified, use these dipole delays for the MWA pointing. e.g. 0 1 2 3 0 1 2 3 0 1 2 3 0 1 2 3
-    #[arg(short, long, num_args(1..))]
-    delays: Option<Vec<u32>>,
-
     /// The array latitude to use. This only affects the parallactic-angle
-    /// correction.
+    /// correction for the FEE beam, but is required for the analytic beam.
     #[arg(short, long, allow_hyphen_values = true, default_value = "-27.0")]
     latitude_deg: f64,
 
@@ -102,8 +91,7 @@ fn gen_azzas<F: Float + FromPrimitive>(
 
 fn calc_cpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
     let BeamArgs {
-        beam_type,
-        delays,
+        beam_args,
         freq_mhz,
         latitude_deg,
         max_za,
@@ -113,11 +101,9 @@ fn calc_cpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
             gpu: _,
     } = args;
 
-    let beam = create_beam_object(
-        Some(beam_type.as_str()),
-        1,
-        Delays::Partial(delays.clone().unwrap_or(vec![0; 16])),
-    )?;
+    let beam = beam_args
+        .clone()
+        .parse(1, Some(Delays::Partial(vec![0; 16])), None, None)?;
     let mut out = BufWriter::new(File::create(output)?);
 
     let azels: Vec<_> = gen_azzas(max_za.to_radians(), step.to_radians())
@@ -145,8 +131,7 @@ fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
     use crate::gpu::{DevicePointer, GpuFloat, GpuJones};
 
     let BeamArgs {
-        beam_type,
-        delays,
+        beam_args,
         freq_mhz,
         latitude_deg,
         max_za,
@@ -155,11 +140,9 @@ fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
         gpu: _,
     } = args;
 
-    let beam = create_beam_object(
-        Some(beam_type.as_str()),
-        1,
-        Delays::Partial(delays.clone().unwrap_or(vec![0; 16])),
-    )?;
+    let beam = beam_args
+        .clone()
+        .parse(1, Some(Delays::Partial(vec![0; 16])), None, None)?;
     let gpu_beam = beam.prepare_gpu_beam(&[(freq_mhz * 1e6) as u32])?;
     let mut out = BufWriter::new(File::create(output)?);
 
@@ -189,4 +172,68 @@ fn calc_gpu(args: &BeamArgs) -> Result<(), HyperdriveError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+    use tempfile::NamedTempFile;
+
+    use super::*;
+
+    #[test]
+    fn analytic_beam_cli_writes_responses() {
+        let out = NamedTempFile::new().unwrap();
+        let path = out.path().to_str().unwrap();
+        let args = BeamArgs::parse_from([
+            "beam",
+            "--beam-type",
+            "analytic-mwa_pb",
+            "--delays",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "--step",
+            "45",
+            "--max-za",
+            "45",
+            "-o",
+            path,
+        ]);
+        args.run().unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains('\t'), "expected TSV output, got: {text:?}");
+    }
+
+    #[test]
+    fn rts_beam_cli_writes_responses() {
+        let out = NamedTempFile::new().unwrap();
+        let path = out.path().to_str().unwrap();
+        let args = BeamArgs::parse_from([
+            "beam",
+            "--beam-type",
+            "analytic-rts",
+            "--step",
+            "90",
+            "--max-za",
+            "90",
+            "-o",
+            path,
+        ]);
+        args.run().unwrap();
+        assert!(!std::fs::read_to_string(path).unwrap().is_empty());
+    }
 }

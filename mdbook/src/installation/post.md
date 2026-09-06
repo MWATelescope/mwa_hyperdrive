@@ -16,6 +16,9 @@ Move the `h5` file anywhere you like, and put the file path in the
 export MWA_BEAM_FILE=/path/to/mwa_full_embedded_element_pattern.h5
 ```
 
+It is possible to use the analytic beam instead of the FEE beam, meaning you
+don't need the HDF5 file, but the FEE beam is probably better.
+
 See the README for [`hyperbeam`](https://github.com/MWATelescope/mwa_hyperbeam)
 for more info.
 ~~~

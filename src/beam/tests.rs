@@ -70,6 +70,16 @@ fn fee_beam_values_are_sensible() {
         .collect();
 
     assert_abs_diff_eq!(&hyperdrive_values[..], &hyperbeam_values[..]);
+
+    // Exercise the array path (rewritten to call calc_jones_array_inner).
+    let hyperdrive_array = hyperdrive
+        .calc_jones_array(&azels, freq, None, MWA_LAT_RAD)
+        .unwrap();
+    assert_abs_diff_eq!(&hyperdrive_array[..], &hyperbeam_values[..]);
+    let hyperdrive_tile0 = hyperdrive
+        .calc_jones_array(&azels, freq, Some(0), MWA_LAT_RAD)
+        .unwrap();
+    assert_eq!(hyperdrive_tile0.len(), azels.len());
 }
 
 #[test]
@@ -182,4 +192,65 @@ fn set_delays_to_ideal() {
         }
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn create_analytic_beam_objects() {
+    let delays = Delays::Partial(vec![0; 16]);
+    let mwa_pb = create_beam_object(Some("analytic-mwa_pb"), 3, delays.clone()).unwrap();
+    assert_eq!(mwa_pb.get_beam_type(), BeamType::AnalyticMwaPb);
+    assert_eq!(mwa_pb.get_num_tiles(), 3);
+
+    let rts = create_beam_object(Some("analytic-rts"), 1, delays).unwrap();
+    assert_eq!(rts.get_beam_type(), BeamType::AnalyticRts);
+
+    assert!(matches!(
+        create_beam_object(Some("not-a-beam"), 1, Delays::Partial(vec![0; 16])),
+        Err(BeamError::Unrecognised(_))
+    ));
+}
+
+#[test]
+fn analytic_beam_values_match_hyperbeam() {
+    use mwa_hyperbeam::analytic::{AnalyticBeam as HbAnalytic, AnalyticType};
+
+    let delays = [0u32, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6];
+    let amps = [1.0; 16];
+    let freq = 180e6;
+    let azels = [
+        AzEl { az: 0.0, el: 1.2 },
+        AzEl { az: 1.0, el: 0.8 },
+        AzEl { az: -0.5, el: 0.5 },
+    ];
+
+    let hyperbeam = HbAnalytic::new_custom(
+        AnalyticType::MwaPb,
+        AnalyticType::MwaPb.get_default_dipole_height(),
+        4,
+    );
+    let hyperbeam_values = hyperbeam
+        .calc_jones_array(&azels, freq as _, &delays, &amps, MWA_LAT_RAD, true)
+        .unwrap();
+
+    let hyperdrive =
+        super::analytic::AnalyticBeam::new_mwa_pb(1, Delays::Partial(delays.to_vec()), None)
+            .unwrap();
+    let hyperdrive_values = hyperdrive
+        .calc_jones_array(&azels, freq, None, MWA_LAT_RAD)
+        .unwrap();
+    assert_abs_diff_eq!(&hyperdrive_values[..], &hyperbeam_values[..]);
+}
+
+#[test]
+fn hyperbeam_analytic_error_maps_to_beam() {
+    let err = BeamError::HyperbeamAnalytic(
+        mwa_hyperbeam::analytic::AnalyticBeamError::IncorrectAmpsLength {
+            got: 1,
+            expected1: 16,
+            expected2: 32,
+        },
+    );
+    let mapped = crate::HyperdriveError::from(err);
+    let s = mapped.to_string();
+    assert!(s.contains("hyperbeam analytic"), "{s}");
 }
