@@ -18,7 +18,8 @@ getting that set up.
 It is possible to use the "analytic" MWA beam, and this does not require an
 additional file (but the FEE beam is the default selection). There are two
 "flavours": `mwa_pb` and `RTS`, and these can be used by specifying `--beam-type
-analytic-mwa_pb` and `--beam-type analytic-rts`, respectively. The differences
+analytic-mwa_pb` (alias `mwa_pb`) and `--beam-type analytic-rts` (alias `rts`),
+respectively. The differences
 between the flavours is not huge, but I (CHJ) suggest the `RTS` flavour if in
 doubt, as it seems to look a little better.
 

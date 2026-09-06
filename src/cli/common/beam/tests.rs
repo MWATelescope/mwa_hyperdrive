@@ -115,8 +115,8 @@ fn test_aman_dipole_gains() {
 
 #[test]
 fn test_parse_analytic_beams() {
-    for beam_type in ["analytic-mwa_pb", "analytic-rts"] {
-        let expected = if beam_type == "analytic-mwa_pb" {
+    for beam_type in ["analytic-mwa_pb", "mwa_pb", "analytic-rts", "rts", "RTS"] {
+        let expected = if beam_type.contains("mwa_pb") {
             BeamType::AnalyticMwaPb
         } else {
             BeamType::AnalyticRts

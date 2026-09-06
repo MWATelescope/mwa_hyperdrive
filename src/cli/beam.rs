@@ -25,8 +25,8 @@ pub struct BeamArgs {
     #[arg(short, long, default_value = "150")]
     freq_mhz: f64,
 
-    /// The array latitude to use. This only affects the parallactic-angle
-    /// correction for the FEE beam, but is required for the analytic beam.
+    /// The array latitude to use. This affects the parallactic-angle correction
+    /// for the FEE beam and the analytic beam pointing.
     #[arg(short, long, allow_hyphen_values = true, default_value = "-27.0")]
     latitude_deg: f64,
 
@@ -216,6 +216,26 @@ mod tests {
         args.run().unwrap();
         let text = std::fs::read_to_string(path).unwrap();
         assert!(text.contains('\t'), "expected TSV output, got: {text:?}");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn fee_beam_cli_writes_responses() {
+        let out = NamedTempFile::new().unwrap();
+        let path = out.path().to_str().unwrap();
+        let args = BeamArgs::parse_from([
+            "beam",
+            "--beam-type",
+            "fee",
+            "--step",
+            "90",
+            "--max-za",
+            "90",
+            "-o",
+            path,
+        ]);
+        args.run().unwrap();
+        assert!(!std::fs::read_to_string(path).unwrap().is_empty());
     }
 
     #[test]

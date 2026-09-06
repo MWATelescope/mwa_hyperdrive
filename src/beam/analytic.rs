@@ -112,24 +112,6 @@ impl AnalyticBeam {
         )
     }
 
-    fn _calc_jones_array(
-        &self,
-        azels: &[AzEl],
-        freq_hz: f64,
-        delays: &[u32],
-        amps: &[f64],
-        latitude_rad: f64,
-    ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::analytic::AnalyticBeamError> {
-        self.hyperbeam_object.calc_jones_array(
-            azels,
-            freq_hz as _,
-            delays,
-            amps,
-            latitude_rad,
-            true,
-        )
-    }
-
     fn calc_jones_array_inner(
         &self,
         azels: &[AzEl],
@@ -187,7 +169,7 @@ impl Beam for AnalyticBeam {
         latitude_rad: f64,
     ) -> Result<Jones<f64>, BeamError> {
         if let Some(tile_index) = tile_index {
-            if tile_index > self.delays.len_of(Axis(0)) {
+            if tile_index >= self.delays.len_of(Axis(0)) {
                 return Err(BeamError::BadTileIndex {
                     got: tile_index,
                     max: self.delays.len_of(Axis(0)),
@@ -232,7 +214,7 @@ impl Beam for AnalyticBeam {
         results: &mut [marlu::Jones<f64>],
     ) -> Result<(), BeamError> {
         if let Some(tile_index) = tile_index {
-            if tile_index > self.delays.len_of(Axis(0)) {
+            if tile_index >= self.delays.len_of(Axis(0)) {
                 return Err(BeamError::BadTileIndex {
                     got: tile_index,
                     max: self.delays.len_of(Axis(0)),
@@ -268,10 +250,13 @@ impl Beam for AnalyticBeam {
             self.hyperbeam_object
                 .gpu_prepare(self.delays.view(), self.gains.view())?
         };
+        // Analytic beams are defined at any frequency, so every supplied freq
+        // is unique (unlike FEE, which de-duplicates to nearby beam freqs).
         let freq_map = (0..freqs_hz.len()).map(|i| i as i32).collect::<Vec<_>>();
         let d_freq_map = DevicePointer::copy_to_device(&freq_map)?;
         Ok(Box::new(AnalyticBeamGpu {
             hyperbeam_object: gpu_beam,
+            beam_type: self.get_beam_type(),
             d_freqs_hz: DevicePointer::copy_to_device(freqs_hz)?,
             d_freq_map,
         }))
@@ -281,6 +266,7 @@ impl Beam for AnalyticBeam {
 #[cfg(any(feature = "cuda", feature = "hip"))]
 struct AnalyticBeamGpu {
     hyperbeam_object: mwa_hyperbeam::analytic::AnalyticBeamGpu,
+    beam_type: BeamType,
     d_freqs_hz: DevicePointer<u32>,
     d_freq_map: DevicePointer<i32>,
 }
@@ -313,7 +299,7 @@ impl BeamGpu for AnalyticBeamGpu {
     }
 
     fn get_beam_type(&self) -> BeamType {
-        BeamType::FEE
+        self.beam_type
     }
 
     fn get_tile_map(&self) -> *const i32 {
@@ -359,10 +345,8 @@ mod tests {
         beam.empty_coeff_cache();
 
         let azels = [AzEl { az: 0.0, el: 1.2 }];
-        let delays = [0u32; 16];
-        let amps = [1.0; 32];
         let jones = beam
-            ._calc_jones_array(&azels, 150e6, &delays, &amps, MWA_LAT_RAD)
+            .calc_jones_array(&azels, 150e6, None, MWA_LAT_RAD)
             .unwrap();
         assert_eq!(jones.len(), 1);
         assert!(jones[0][0].norm().is_finite());
@@ -376,6 +360,10 @@ mod tests {
         let azel = AzEl { az: 0.1, el: 1.0 };
         beam.calc_jones(azel, 180e6, None, MWA_LAT_RAD).unwrap();
         beam.calc_jones(azel, 180e6, Some(0), MWA_LAT_RAD).unwrap();
+        assert!(matches!(
+            beam.calc_jones(azel, 180e6, Some(1), MWA_LAT_RAD),
+            Err(BeamError::BadTileIndex { got: 1, max: 1 })
+        ));
         assert!(matches!(
             beam.calc_jones(azel, 180e6, Some(2), MWA_LAT_RAD),
             Err(BeamError::BadTileIndex { got: 2, max: 1 })
