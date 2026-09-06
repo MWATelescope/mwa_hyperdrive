@@ -299,8 +299,8 @@ impl InputVisArgs {
                     meta.to_vec().swap_remove(0)
                 };
 
-                debug!("gpubox files: {:?}", &gpuboxes);
-                debug!("mwaf files: {:?}", &mwafs);
+                debug!("gpubox files: {:?}", gpuboxes);
+                debug!("mwaf files: {:?}", mwafs);
 
                 let corrections = RawDataCorrections::new(
                     pfb_flavour.as_deref(),
