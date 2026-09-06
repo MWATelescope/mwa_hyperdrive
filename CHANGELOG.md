@@ -12,7 +12,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - Support for the "mwa_pb" and "RTS" analytic beams.
 
 ### Changed
-- The beam subcommand now takes a beam type with the -b or --beam-type flag.
+- The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
+  a positional argument, and dipole delays with `--delays` instead of `-d`.
+  `--beam-type` accepts `analytic-mwa_pb` / `mwa_pb` and `analytic-rts` / `rts`.
 
 ### Fixed
 - Using the beam subcommand would fail to set up an FEE beam if MWA_BEAM_FILE

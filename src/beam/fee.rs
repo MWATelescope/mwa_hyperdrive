@@ -116,25 +116,6 @@ impl FEEBeam {
         )
     }
 
-    fn _calc_jones_array(
-        &self,
-        azels: &[AzEl],
-        freq_hz: f64,
-        delays: &[u32],
-        amps: &[f64],
-        latitude_rad: f64,
-    ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::fee::FEEBeamError> {
-        self.hyperbeam_object.calc_jones_array(
-            azels,
-            freq_hz as _,
-            delays,
-            amps,
-            true,
-            Some(latitude_rad),
-            false,
-        )
-    }
-
     fn calc_jones_array_inner(
         &self,
         azels: &[AzEl],
@@ -196,7 +177,7 @@ impl Beam for FEEBeam {
         let beam_freq = self.find_closest_freq(freq_hz);
 
         let jones = if let Some(tile_index) = tile_index {
-            if tile_index > self.delays.len_of(Axis(0)) {
+            if tile_index >= self.delays.len_of(Axis(0)) {
                 return Err(BeamError::BadTileIndex {
                     got: tile_index,
                     max: self.delays.len_of(Axis(0)),
@@ -246,7 +227,7 @@ impl Beam for FEEBeam {
         let beam_freq = self.find_closest_freq(freq_hz);
 
         if let Some(tile_index) = tile_index {
-            if tile_index > self.delays.len_of(Axis(0)) {
+            if tile_index >= self.delays.len_of(Axis(0)) {
                 return Err(BeamError::BadTileIndex {
                     got: tile_index,
                     max: self.delays.len_of(Axis(0)),
