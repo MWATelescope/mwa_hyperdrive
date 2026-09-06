@@ -53,11 +53,11 @@ pub enum BeamType {
     FEE,
 
     /// The mwa_pb flavour of the analytic beam.
-    #[strum(serialize = "analytic-mwa_pb")]
+    #[strum(serialize = "analytic-mwa_pb", serialize = "mwa_pb")]
     AnalyticMwaPb,
 
     /// The RTS flavour of the analytic beam.
-    #[strum(serialize = "analytic-rts")]
+    #[strum(serialize = "analytic-rts", serialize = "rts", serialize = "RTS")]
     AnalyticRts,
 
     /// a.k.a. [`NoBeam`]. Only returns identity matrices.
