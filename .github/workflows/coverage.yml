@@ -3,13 +3,8 @@ name: Generate Coverage report
 
 on:
   push:
-    branches:
-      - "**" # run on every branch push...
-    tags-ignore:
-      - "**" # ...but don't double up on tags
+    branches: [main]
   pull_request:
-    branches:
-      - "**"
 
 env:
   CARGO_TERM_COLOR: always

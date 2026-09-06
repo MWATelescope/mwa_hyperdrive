@@ -3,13 +3,8 @@ name: Tests
 
 on:
   push:
-    branches:
-      - "**" # run on every branch push...
-    tags-ignore:
-      - "**" # ...but don't double up on tags
+    branches: [main]
   pull_request:
-    branches:
-      - "**"
 
 # The CI jobs can use a lot of disk space; we take tips from this site to run
 # the jobs faster and use less space.
