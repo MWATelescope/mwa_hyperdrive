@@ -112,3 +112,144 @@ fn test_aman_dipole_gains() {
     // First Y dipole for Tile011
     assert_abs_diff_eq!(dipamps_gains[(0, 16)] as f32, 0.8930142);
 }
+
+#[test]
+fn test_parse_analytic_beams() {
+    for beam_type in ["analytic-mwa_pb", "mwa_pb", "analytic-rts", "rts", "RTS"] {
+        let expected = if beam_type.contains("mwa_pb") {
+            BeamType::AnalyticMwaPb
+        } else {
+            BeamType::AnalyticRts
+        };
+
+        let beam = BeamArgs {
+            delays: Some(vec![0; 16]),
+            beam_type: Some(beam_type.to_string()),
+            ..Default::default()
+        }
+        .parse(1, None, None, None)
+        .unwrap();
+        assert_eq!(beam.get_beam_type(), expected);
+        assert!(beam.get_beam_file().is_none());
+    }
+
+    // A beam file is only used by the FEE beam; supplying one to an analytic
+    // beam warns, but is otherwise ignored.
+    let beam = BeamArgs {
+        delays: Some(vec![0; 16]),
+        beam_type: Some("analytic-rts".to_string()),
+        beam_file: Some("/does/not/exist.h5".into()),
+        ..Default::default()
+    }
+    .parse(1, None, None, None)
+    .unwrap();
+    assert_eq!(beam.get_beam_type(), BeamType::AnalyticRts);
+    assert!(beam.get_beam_file().is_none());
+
+    let no_delays = BeamArgs {
+        beam_type: Some("analytic-mwa_pb".to_string()),
+        ..Default::default()
+    }
+    .parse(1, None, None, None);
+    assert!(matches!(
+        no_delays,
+        Err(crate::beam::BeamError::NoDelays(_))
+    ));
+
+    let bad = BeamArgs {
+        delays: Some(vec![0; 3]),
+        beam_type: Some("analytic-rts".to_string()),
+        ..Default::default()
+    }
+    .parse(1, None, None, None);
+    assert!(matches!(bad, Err(BadDelays)));
+
+    let unrecognised = BeamArgs {
+        beam_type: Some("banana".to_string()),
+        delays: Some(vec![0; 16]),
+        ..Default::default()
+    }
+    .parse(1, None, None, None);
+    assert!(matches!(
+        unrecognised,
+        Err(crate::beam::BeamError::Unrecognised(_))
+    ));
+}
+
+#[test]
+fn test_analytic_gains_and_warnings() {
+    use crate::io::read::VisInputType;
+    use ndarray::Array2;
+
+    let dead = array![
+        [1.0; 16],
+        [1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    ];
+    let beam = BeamArgs {
+        delays: Some(vec![0; 16]),
+        beam_type: Some("analytic-mwa_pb".to_string()),
+        ..Default::default()
+    }
+    .parse(2, None, Some(dead.clone()), None)
+    .unwrap();
+    assert_eq!(beam.get_beam_type(), BeamType::AnalyticMwaPb);
+    assert!(!beam
+        .get_dipole_gains()
+        .unwrap()
+        .iter()
+        .all(|g| (*g - 1.0).abs() < f64::EPSILON));
+
+    let unity = BeamArgs {
+        delays: Some(vec![0; 16]),
+        beam_type: Some("analytic-rts".to_string()),
+        unity_dipole_gains: true,
+        ..Default::default()
+    }
+    .parse(2, None, Some(dead), None)
+    .unwrap();
+    assert!(unity
+        .get_dipole_gains()
+        .unwrap()
+        .iter()
+        .all(|g| (*g - 1.0).abs() < f64::EPSILON));
+
+    let dipamps = Array2::from_elem((1, 32), 0.9);
+    BeamArgs {
+        delays: Some(vec![0; 16]),
+        beam_type: Some("analytic-mwa_pb".to_string()),
+        ..Default::default()
+    }
+    .parse(1, None, Some(dipamps), None)
+    .unwrap();
+
+    let delays_with_32 = {
+        let mut d = vec![0; 16];
+        d[15] = 32;
+        d
+    };
+    BeamArgs {
+        delays: Some(delays_with_32),
+        beam_type: Some("analytic-rts".to_string()),
+        unity_dipole_gains: true,
+        ..Default::default()
+    }
+    .parse(1, None, None, None)
+    .unwrap();
+
+    let full = crate::beam::Delays::Full(array![
+        [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3],
+        [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+    ]);
+    for input in [
+        None,
+        Some(VisInputType::MeasurementSet),
+        Some(VisInputType::Uvfits),
+    ] {
+        BeamArgs {
+            beam_type: Some("analytic-mwa_pb".to_string()),
+            ..Default::default()
+        }
+        .parse(2, Some(full.clone()), None, input)
+        .unwrap();
+    }
+}
