@@ -297,6 +297,16 @@ impl ObsParams {
         }
     }
 
+    /// The same as [`ObsParams::new`], but with a caller-supplied beam. The
+    /// beam must be set up for [`ObsParams::xyzs`]'s number of tiles.
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    fn new_with_beam(beam: Box<dyn Beam>) -> ObsParams {
+        let mut obs = ObsParams::new(true);
+        assert_eq!(beam.get_num_tiles(), obs.xyzs.len());
+        obs.beam = beam;
+        obs
+    }
+
     fn get_cpu_modeller(&self, srclist: &SourceList) -> SkyModellerCpu<'_> {
         SkyModellerCpu::new(
             &*self.beam,

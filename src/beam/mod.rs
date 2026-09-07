@@ -469,7 +469,7 @@ fn partial_to_full(delays: Vec<u32>, num_tiles: usize) -> Array2<u32> {
     out
 }
 
-fn validate_delays(delays: &Delays, num_tiles: usize) -> Result<(), BeamError> {
+pub(crate) fn validate_delays(delays: &Delays, num_tiles: usize) -> Result<(), BeamError> {
     match delays {
         Delays::Partial(v) => {
             if v.len() != 16 || v.iter().any(|&v| v > 32) {
