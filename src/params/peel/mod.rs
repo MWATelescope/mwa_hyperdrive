@@ -2010,3 +2010,159 @@ pub(crate) enum PeelError {
     #[error(transparent)]
     Gpu(#[from] crate::gpu::GpuError),
 }
+
+// ---------------------------------------------------------------------------
+// C FFI: expose hyperdrive's per-source ionospheric peel kernels so they can be
+// driven per-patch from an external orchestrator (e.g. a DP3 python step).
+// Visibilities are Jones<f32> == [Complex<f32>;4] == 8 contiguous f32
+// (XXre,XXim,XYre,XYim,YXre,YXim,YYre,YYim). tile_uvs are (u,v) f64 pairs.
+// Arrays are C-contiguous with the documented shapes.
+// ---------------------------------------------------------------------------
+
+/// Fit ionospheric constants (alpha, beta, gain) for one direction.
+/// residual/model: (ntime*nfreq*nbl*8) f32; weights: (ntime*nfreq*nbl) f32;
+/// lambdas: nfreq f64; tile_uvs: (ntime*ntile*2) f64; out: 3 f64 [alpha,beta,gain].
+#[no_mangle]
+pub unsafe extern "C" fn hyperdrive_iono_fit(
+    residual: *const f32,
+    weights: *const f32,
+    model: *const f32,
+    ntime: usize,
+    nfreq: usize,
+    nbl: usize,
+    ntile: usize,
+    lambdas: *const f64,
+    tile_uvs: *const f64,
+    out: *mut f64,
+) -> i32 {
+    if residual.is_null() || model.is_null() || weights.is_null()
+        || lambdas.is_null() || tile_uvs.is_null() || out.is_null() {
+        return 1;
+    }
+    let res = ArrayView3::<Jones<f32>>::from_shape_ptr((ntime, nfreq, nbl), residual as *const Jones<f32>);
+    let mdl = ArrayView3::<Jones<f32>>::from_shape_ptr((ntime, nfreq, nbl), model as *const Jones<f32>);
+    let wts = ArrayView3::<f32>::from_shape_ptr((ntime, nfreq, nbl), weights);
+    let lam = std::slice::from_raw_parts(lambdas, nfreq);
+    let uv_raw = std::slice::from_raw_parts(tile_uvs, ntime * ntile * 2);
+    let uvs = Array2::<UV>::from_shape_fn((ntime, ntile), |(t, a)| {
+        let i = (t * ntile + a) * 2;
+        UV { u: uv_raw[i], v: uv_raw[i + 1] }
+    });
+    let r = iono_fit(res, wts, mdl, lam, uvs.view());
+    let gain = if r[3] != 0.0 { r[2] / r[3] } else { 1.0 };
+    *out.add(0) = r[0];
+    *out.add(1) = r[1];
+    *out.add(2) = gain;
+    0
+}
+
+/// Apply iono rotation exp(-2πi(αu+βv)λ)*gain to `model`, writing into `out`
+/// (same shape). Used to form the peeled model to subtract from the residual.
+#[no_mangle]
+pub unsafe extern "C" fn hyperdrive_apply_iono(
+    model: *const f32,
+    out: *mut f32,
+    ntime: usize,
+    nfreq: usize,
+    nbl: usize,
+    ntile: usize,
+    alpha: f64,
+    beta: f64,
+    gain: f64,
+    lambdas: *const f64,
+    tile_uvs: *const f64,
+) -> i32 {
+    if model.is_null() || out.is_null() || lambdas.is_null() || tile_uvs.is_null() {
+        return 1;
+    }
+    let mdl = ArrayView3::<Jones<f32>>::from_shape_ptr((ntime, nfreq, nbl), model as *const Jones<f32>);
+    let mut outv = ArrayViewMut3::<Jones<f32>>::from_shape_ptr((ntime, nfreq, nbl), out as *mut Jones<f32>);
+    let lam = std::slice::from_raw_parts(lambdas, nfreq);
+    let uv_raw = std::slice::from_raw_parts(tile_uvs, ntime * ntile * 2);
+    let uvs = Array2::<UV>::from_shape_fn((ntime, ntile), |(t, a)| {
+        let i = (t * ntile + a) * 2;
+        UV { u: uv_raw[i], v: uv_raw[i + 1] }
+    });
+    let consts = IonoConsts { alpha, beta, gain };
+    apply_iono_tfb(mdl, outv.view_mut(), uvs.view(), consts, lam);
+    0
+}
+
+/// Full convergent per-direction peel (replicates peel_cpu's inner loop using
+/// hyperdrive's own kernels): rotate residual+model to the source phase centre,
+/// iterate iono_fit/apply_iono with a convergence step, then unpeel_model back
+/// in the obs frame (modifies `resid_hi_obs` in place). Fitting is done at the
+/// input resolution (no low-res averaging). old iono consts assumed {0,0,1}.
+/// Arrays: vis (nt*nf*nbl*8) f32; lambdas (nf) f64; tile_uvs (nt*ntile*2) f64;
+/// tile_ws (nt*ntile) f64. out_consts: 3 f64 [alpha,beta,gain].
+#[no_mangle]
+pub unsafe extern "C" fn hyperdrive_peel_source(
+    resid_hi_obs: *mut f32,
+    weights: *const f32,
+    model_hi_obs: *const f32,
+    nt: usize, nf: usize, nbl: usize, ntile: usize,
+    lambdas: *const f64,
+    tile_uvs_obs: *const f64,
+    tile_ws_obs: *const f64,
+    tile_uvs_src: *const f64,
+    tile_ws_src: *const f64,
+    num_loops: usize,
+    convergence: f64,
+    out_consts: *mut f64,
+) -> i32 {
+    if resid_hi_obs.is_null() || weights.is_null() || model_hi_obs.is_null()
+        || lambdas.is_null() || tile_uvs_obs.is_null() || tile_ws_obs.is_null()
+        || tile_uvs_src.is_null() || tile_ws_src.is_null() || out_consts.is_null() {
+        return 1;
+    }
+    let lam = std::slice::from_raw_parts(lambdas, nf);
+    let mk_uv = |p: *const f64| {
+        let raw = std::slice::from_raw_parts(p, nt * ntile * 2);
+        Array2::<UV>::from_shape_fn((nt, ntile), |(t, a)| {
+            let i = (t * ntile + a) * 2; UV { u: raw[i], v: raw[i + 1] }
+        })
+    };
+    let mk_w = |p: *const f64| {
+        let raw = std::slice::from_raw_parts(p, nt * ntile);
+        Array2::<W>::from_shape_fn((nt, ntile), |(t, a)| W(raw[t * ntile + a]))
+    };
+    let uvs_obs = mk_uv(tile_uvs_obs);
+    let uvs_src = mk_uv(tile_uvs_src);
+    let ws_obs = mk_w(tile_ws_obs);
+    let ws_src = mk_w(tile_ws_src);
+    let wts = ArrayView3::<f32>::from_shape_ptr((nt, nf, nbl), weights);
+    let model_obs = ArrayView3::<Jones<f32>>::from_shape_ptr((nt, nf, nbl), model_hi_obs as *const Jones<f32>);
+    let mut resid_obs = ArrayViewMut3::<Jones<f32>>::from_shape_ptr((nt, nf, nbl), resid_hi_obs as *mut Jones<f32>);
+
+    // rotate residual + model to source phase centre
+    let mut resid_src = Array3::<Jones<f32>>::zeros((nt, nf, nbl));
+    let mut model_src = Array3::<Jones<f32>>::zeros((nt, nf, nbl));
+    vis_rotate_tfb(resid_obs.view(), resid_src.view_mut(), ws_obs.view(), ws_src.view(), lam);
+    vis_rotate_tfb(model_obs.view(), model_src.view_mut(), ws_obs.view(), ws_src.view(), lam);
+
+    let mut consts = IonoConsts { alpha: 0.0, beta: 0.0, gain: 1.0 };
+    let old = consts;
+    // add the source's (old-iono) model back into the src-frame residual for fitting
+    let mut model_iono = Array3::<Jones<f32>>::zeros((nt, nf, nbl));
+    apply_iono_tfb(model_src.view(), model_iono.view_mut(), uvs_src.view(), consts, lam);
+    Zip::from(&mut resid_src).and(&model_iono).for_each(|r, m| *r += *m);
+
+    let mut it = 0;
+    while it != num_loops {
+        it += 1;
+        apply_iono_tfb(model_src.view(), model_iono.view_mut(), uvs_src.view(), consts, lam);
+        let fits = iono_fit(resid_src.view(), wts, model_iono.view(), lam, uvs_src.view());
+        let da = fits[0]; let db = fits[1]; let dg = if fits[3] != 0.0 { fits[2] / fits[3] } else { 1.0 };
+        consts.alpha += convergence * da;
+        consts.beta += convergence * db;
+        consts.gain *= 1.0 + convergence * (dg - 1.0);
+        if (da * da + db * db + (dg - 1.0) * (dg - 1.0)).sqrt() < 1e-10 { break; }
+    }
+    // unpeel in obs frame: resid += model*old_iono - model*new_iono
+    unpeel_model(model_obs.view(), resid_obs.view_mut(), uvs_src.view(), consts, old, lam);
+
+    *out_consts.add(0) = consts.alpha;
+    *out_consts.add(1) = consts.beta;
+    *out_consts.add(2) = consts.gain;
+    0
+}

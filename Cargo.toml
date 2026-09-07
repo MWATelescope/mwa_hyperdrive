@@ -16,6 +16,9 @@ homepage = "https://mwatelescope.github.io/mwa_hyperdrive"
 exclude = [".github/*", "test_files/*", "examples/*", "mdbook/*"]
 resolver = "3"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [profile.release]
 panic = "abort"
 codegen-units = 256
