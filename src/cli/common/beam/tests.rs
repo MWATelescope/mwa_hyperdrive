@@ -133,6 +133,19 @@ fn test_parse_analytic_beams() {
         assert!(beam.get_beam_file().is_none());
     }
 
+    // A beam file is only used by the FEE beam; supplying one to an analytic
+    // beam warns, but is otherwise ignored.
+    let beam = BeamArgs {
+        delays: Some(vec![0; 16]),
+        beam_type: Some("analytic-rts".to_string()),
+        beam_file: Some("/does/not/exist.h5".into()),
+        ..Default::default()
+    }
+    .parse(1, None, None, None)
+    .unwrap();
+    assert_eq!(beam.get_beam_type(), BeamType::AnalyticRts);
+    assert!(beam.get_beam_file().is_none());
+
     let no_delays = BeamArgs {
         beam_type: Some("analytic-mwa_pb".to_string()),
         ..Default::default()
