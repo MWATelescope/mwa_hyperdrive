@@ -15,6 +15,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
   a positional argument, and dipole delays with `--delays` instead of `-d`.
   `--beam-type` accepts `analytic-mwa_pb` / `mwa_pb` and `analytic-rts` / `rts`.
+- A warning is issued when `--beam-file` is supplied alongside an analytic beam;
+  only the FEE beam uses a beam file.
 
 ### Fixed
 - Using the beam subcommand would fail to set up an FEE beam if MWA_BEAM_FILE

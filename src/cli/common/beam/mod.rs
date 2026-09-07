@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::{InfoPrinter, Warn};
 use crate::{
     beam::{
-        AnalyticBeam, Beam, BeamError, BeamType, Delays, FEEBeam, NoBeam,
+        validate_delays, AnalyticBeam, Beam, BeamError, BeamType, Delays, FEEBeam, NoBeam,
         BEAM_TYPES_COMMA_SEPARATED,
     },
     io::read::VisInputType,
@@ -113,127 +113,16 @@ impl BeamArgs {
                 debug!("Setting up a FEE beam object");
                 printer.push_line("Type: FEE".into());
 
-                let mut dipole_delays = match user_dipole_delays {
-                    Some(d) => Some(Delays::parse(d)?),
-                    None => data_dipole_delays,
-                }
-                .ok_or(BeamError::NoDelays("FEE"))?;
-                trace!("Attempting to use delays:");
-                match &dipole_delays {
-                    Delays::Full(d) => {
-                        let mut last_row = None;
-                        for (i, row) in d.outer_iter().enumerate() {
-                            if let Some(last_row) = last_row {
-                                if row == last_row {
-                                    continue;
-                                }
-                            }
-                            trace!("{i:03} {row}");
-                            last_row = Some(row);
-                        }
-                    }
-                    Delays::Partial(d) => trace!("{d:?}"),
-                }
-
-                // Check that the delays are sensible.
-                match &dipole_delays {
-                    Delays::Partial(v) => {
-                        if v.len() != 16 || v.iter().any(|&v| v > 32) {
-                            return Err(BeamError::BadDelays);
-                        }
-                    }
-
-                    Delays::Full(a) => {
-                        if a.len_of(Axis(1)) != 16 || a.iter().any(|&v| v > 32) {
-                            return Err(BeamError::BadDelays);
-                        }
-                        if a.len_of(Axis(0)) != total_num_tiles {
-                            return Err(BeamError::InconsistentDelays {
-                                num_rows: a.len_of(Axis(0)),
-                                num_tiles: total_num_tiles,
-                            });
-                        }
-                    }
-                }
-
-                let dipole_gains = if unity_dipole_gains {
-                    printer.push_line("Assuming all dipoles are \"alive\"".into());
-                    None
-                } else {
-                    // If we don't have dipole gains from the input data, then
-                    // we issue a warning that we must assume no dead dipoles.
-                    if dipole_gains.is_none() {
-                        match input_data_type {
-                            Some(VisInputType::MeasurementSet) => [
-                                "Measurement sets cannot supply dead dipole information.".into(),
-                                "Without a metafits file, we must assume all dipoles are alive.".into(),
-                                "This will make beam Jones matrices inaccurate in sky-model generation."
-                                    .into(),
-                            ]
-                            .warn(),
-                            Some(VisInputType::Uvfits) => [
-                                "uvfits files cannot supply dead dipole information.".into(),
-                                "Without a metafits file, we must assume all dipoles are alive.".into(),
-                                "This will make beam Jones matrices inaccurate in sky-model generation."
-                                    .into(),
-                            ]
-                            .warn(),
-                            Some(VisInputType::Raw) => {
-                                unreachable!("Raw data inputs always specify dipole gains")
-                            }
-                            None => (),
-                        }
-                    }
-                    dipole_gains
-                };
-                if let Some(dipole_gains) = dipole_gains.as_ref() {
-                    trace!("Attempting to use dipole gains:");
-                    let mut last_row = None;
-                    for (i, row) in dipole_gains.outer_iter().enumerate() {
-                        if let Some(last_row) = last_row {
-                            if row == last_row {
-                                continue;
-                            }
-                        }
-                        trace!("{i:03} {row}");
-                        last_row = Some(row);
-                    }
-
-                    // Currently, the only way to have dipole gains other than
-                    // zero or one is by using Aman's "DipAmps" metafits column.
-                    if dipole_gains.iter().any(|&g| g != 0.0 && g != 1.0) {
-                        printer.push_line(
-                            "Using Aman's 'DipAmps' dipole gains from the metafits".into(),
-                        );
-                    } else {
-                        let num_tiles_with_dead_dipoles = dipole_gains
-                            .outer_iter()
-                            .filter(|tile_dipole_gains| {
-                                tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
-                            })
-                            .count();
-                        printer.push_line(
-                            format!(
-                                "Using dead dipole information ({num_tiles_with_dead_dipoles} tiles affected)"
-                            )
-                            .into(),
-                        );
-                    }
-                } else {
-                    // If we don't have dipole gains, we must assume all dipoles
-                    // are "alive". But, if any dipole delays are 32, then the
-                    // beam code will still ignore those dipoles. So use ideal
-                    // dipole delays for all tiles.
-                    dipole_delays.set_to_ideal_delays();
-                    let ideal_delays = dipole_delays.get_ideal_delays();
-
-                    // Warn the user if they wanted unity dipole gains but the
-                    // ideal dipole delays contain 32.
-                    if unity_dipole_gains && ideal_delays.contains(&32) {
-                        "Some ideal dipole delays are 32; these dipoles will not have unity gains"
-                            .warn()
-                    }
-                }
+                let (dipole_delays, dipole_gains) = parse_delays_and_gains(
+                    "FEE",
+                    total_num_tiles,
+                    user_dipole_delays,
+                    data_dipole_delays,
+                    dipole_gains,
+                    unity_dipole_gains,
+                    input_data_type,
+                    &mut printer,
+                )?;
 
                 let beam = if let Some(bf) = beam_file {
                     // Set up the FEE beam struct from the specified beam file.
@@ -247,113 +136,34 @@ impl BeamArgs {
             }
 
             BeamType::AnalyticMwaPb | BeamType::AnalyticRts => {
-                match beam_type {
-                    BeamType::AnalyticMwaPb => {
-                        debug!("Setting up an mwa_pb-flavoured analytic beam object");
-                        printer.push_line("Type: Analytic (mwa_pb)".into());
-                    }
-                    BeamType::AnalyticRts => {
-                        debug!("Setting up an RTS-flavoured analytic beam object");
-                        printer.push_line("Type: Analytic (RTS)".into());
-                    }
-                    BeamType::FEE => unreachable!(),
-                    BeamType::None => unreachable!(),
-                }
-
-                let mut dipole_delays = match user_dipole_delays {
-                    Some(d) => Some(Delays::parse(d)?),
-                    None => data_dipole_delays,
-                }
-                .ok_or(BeamError::NoDelays("Analytic"))?;
-                trace!("Attempting to use delays:");
-                match &dipole_delays {
-                    Delays::Full(d) => {
-                        for row in d.outer_iter() {
-                            trace!("{row}");
-                        }
-                    }
-                    Delays::Partial(d) => trace!("{d:?}"),
-                }
-                let dipole_gains = if unity_dipole_gains {
-                    printer.push_line("Assuming all dipoles are \"alive\"".into());
-                    None
+                if matches!(beam_type, BeamType::AnalyticMwaPb) {
+                    debug!("Setting up an mwa_pb-flavoured analytic beam object");
+                    printer.push_line("Type: Analytic (mwa_pb)".into());
                 } else {
-                    // If we don't have dipole gains from the input data, then
-                    // we issue a warning that we must assume no dead dipoles.
-                    if dipole_gains.is_none() {
-                        match input_data_type {
-                            Some(VisInputType::MeasurementSet) => [
-                                "Measurement sets cannot supply dead dipole information.".into(),
-                                "Without a metafits file, we must assume all dipoles are alive.".into(),
-                                "This will make beam Jones matrices inaccurate in sky-model generation."
-                                    .into(),
-                            ]
-                            .warn(),
-                            Some(VisInputType::Uvfits) => [
-                                "uvfits files cannot supply dead dipole information.".into(),
-                                "Without a metafits file, we must assume all dipoles are alive.".into(),
-                                "This will make beam Jones matrices inaccurate in sky-model generation."
-                                    .into(),
-                            ]
-                            .warn(),
-                            Some(VisInputType::Raw) => {
-                                unreachable!("Raw data inputs always specify dipole gains")
-                            }
-                            None => (),
-                        }
-                    }
-                    dipole_gains
-                };
-                if let Some(dipole_gains) = dipole_gains.as_ref() {
-                    trace!("Attempting to use dipole gains:");
-                    for row in dipole_gains.outer_iter() {
-                        trace!("{row}");
-                    }
-
-                    // Currently, the only way to have dipole gains other than
-                    // zero or one is by using Aman's "DipAmps" metafits column.
-                    if dipole_gains.iter().any(|&g| g != 0.0 && g != 1.0) {
-                        printer.push_line(
-                            "Using Aman's 'DipAmps' dipole gains from the metafits".into(),
-                        );
-                    } else {
-                        let num_tiles_with_dead_dipoles = dipole_gains
-                            .outer_iter()
-                            .filter(|tile_dipole_gains| {
-                                tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
-                            })
-                            .count();
-                        printer.push_line(
-                            format!(
-                                "Using dead dipole information ({num_tiles_with_dead_dipoles} tiles affected)"
-                            )
-                            .into(),
-                        );
-                    }
-                } else {
-                    // If we don't have dipole gains, we must assume all dipoles
-                    // are "alive". But, if any dipole delays are 32, then the
-                    // beam code will still ignore those dipoles. So use ideal
-                    // dipole delays for all tiles.
-                    dipole_delays.set_to_ideal_delays();
-                    let ideal_delays = dipole_delays.get_ideal_delays();
-
-                    // Warn the user if they wanted unity dipole gains but the
-                    // ideal dipole delays contain 32.
-                    if unity_dipole_gains && ideal_delays.contains(&32) {
-                        "Some ideal dipole delays are 32; these dipoles will not have unity gains"
-                            .warn()
-                    }
+                    debug!("Setting up an RTS-flavoured analytic beam object");
+                    printer.push_line("Type: Analytic (RTS)".into());
                 }
 
-                let beam = match beam_type {
-                    BeamType::AnalyticMwaPb => {
-                        AnalyticBeam::new_mwa_pb(total_num_tiles, dipole_delays, dipole_gains)?
-                    }
-                    BeamType::AnalyticRts => {
-                        AnalyticBeam::new_rts(total_num_tiles, dipole_delays, dipole_gains)?
-                    }
-                    _ => unreachable!("only analytic beams should be here"),
+                // Only the FEE beam reads a beam file.
+                if beam_file.is_some() {
+                    "Ignoring the supplied beam file; it is only used by the FEE beam".warn()
+                }
+
+                let (dipole_delays, dipole_gains) = parse_delays_and_gains(
+                    "Analytic",
+                    total_num_tiles,
+                    user_dipole_delays,
+                    data_dipole_delays,
+                    dipole_gains,
+                    unity_dipole_gains,
+                    input_data_type,
+                    &mut printer,
+                )?;
+
+                let beam = if matches!(beam_type, BeamType::AnalyticMwaPb) {
+                    AnalyticBeam::new_mwa_pb(total_num_tiles, dipole_delays, dipole_gains)?
+                } else {
+                    AnalyticBeam::new_rts(total_num_tiles, dipole_delays, dipole_gains)?
                 };
                 Box::new(beam)
             }
@@ -391,4 +201,122 @@ impl BeamArgs {
         printer.display();
         Ok(beam)
     }
+}
+
+/// Work out the dipole delays and dipole gains that a beam object should be
+/// created with. All of the beam types that model the MWA tile beam need this;
+/// only [`BeamType::None`] doesn't.
+///
+/// `beam_name` is used to describe the beam if no delays are available.
+#[allow(clippy::too_many_arguments)]
+fn parse_delays_and_gains(
+    beam_name: &'static str,
+    total_num_tiles: usize,
+    user_dipole_delays: Option<Vec<u32>>,
+    data_dipole_delays: Option<Delays>,
+    dipole_gains: Option<Array2<f64>>,
+    unity_dipole_gains: bool,
+    input_data_type: Option<VisInputType>,
+    printer: &mut InfoPrinter,
+) -> Result<(Delays, Option<Array2<f64>>), BeamError> {
+    let mut dipole_delays = match user_dipole_delays {
+        Some(d) => Some(Delays::parse(d)?),
+        None => data_dipole_delays,
+    }
+    .ok_or(BeamError::NoDelays(beam_name))?;
+    trace!("Attempting to use delays:");
+    match &dipole_delays {
+        Delays::Full(d) => {
+            let mut last_row = None;
+            for (i, row) in d.outer_iter().enumerate() {
+                if let Some(last_row) = last_row {
+                    if row == last_row {
+                        continue;
+                    }
+                }
+                trace!("{i:03} {row}");
+                last_row = Some(row);
+            }
+        }
+        Delays::Partial(d) => trace!("{d:?}"),
+    }
+
+    // Check that the delays are sensible. The beam objects do this too, but
+    // doing it here means we don't print anything else before complaining.
+    validate_delays(&dipole_delays, total_num_tiles)?;
+
+    let dipole_gains = if unity_dipole_gains {
+        printer.push_line("Assuming all dipoles are \"alive\"".into());
+        None
+    } else {
+        // If we don't have dipole gains from the input data, then we issue a
+        // warning that we must assume no dead dipoles.
+        if dipole_gains.is_none() {
+            match input_data_type {
+                Some(VisInputType::MeasurementSet) => [
+                    "Measurement sets cannot supply dead dipole information.".into(),
+                    "Without a metafits file, we must assume all dipoles are alive.".into(),
+                    "This will make beam Jones matrices inaccurate in sky-model generation.".into(),
+                ]
+                .warn(),
+                Some(VisInputType::Uvfits) => [
+                    "uvfits files cannot supply dead dipole information.".into(),
+                    "Without a metafits file, we must assume all dipoles are alive.".into(),
+                    "This will make beam Jones matrices inaccurate in sky-model generation.".into(),
+                ]
+                .warn(),
+                Some(VisInputType::Raw) => {
+                    unreachable!("Raw data inputs always specify dipole gains")
+                }
+                None => (),
+            }
+        }
+        dipole_gains
+    };
+    if let Some(dipole_gains) = dipole_gains.as_ref() {
+        trace!("Attempting to use dipole gains:");
+        let mut last_row = None;
+        for (i, row) in dipole_gains.outer_iter().enumerate() {
+            if let Some(last_row) = last_row {
+                if row == last_row {
+                    continue;
+                }
+            }
+            trace!("{i:03} {row}");
+            last_row = Some(row);
+        }
+
+        // Currently, the only way to have dipole gains other than zero or one
+        // is by using Aman's "DipAmps" metafits column.
+        if dipole_gains.iter().any(|&g| g != 0.0 && g != 1.0) {
+            printer.push_line("Using Aman's 'DipAmps' dipole gains from the metafits".into());
+        } else {
+            let num_tiles_with_dead_dipoles = dipole_gains
+                .outer_iter()
+                .filter(|tile_dipole_gains| {
+                    tile_dipole_gains.iter().any(|g| g.abs() < f64::EPSILON)
+                })
+                .count();
+            printer.push_line(
+                format!(
+                    "Using dead dipole information ({num_tiles_with_dead_dipoles} tiles affected)"
+                )
+                .into(),
+            );
+        }
+    } else {
+        // If we don't have dipole gains, we must assume all dipoles are
+        // "alive". But, if any dipole delays are 32, then the beam code will
+        // still ignore those dipoles. So use ideal dipole delays for all tiles.
+        dipole_delays.set_to_ideal_delays();
+        let ideal_delays = dipole_delays.get_ideal_delays();
+
+        // Warn the user if they wanted unity dipole gains but the ideal dipole
+        // delays contain 32.
+        if unity_dipole_gains && ideal_delays.contains(&32) {
+            "Some ideal dipole delays are 32; these dipoles will not have unity gains".warn()
+        }
+    }
+
+    Ok((dipole_delays, dipole_gains))
 }

@@ -17,6 +17,9 @@ use crate::{beam::Delays, HyperdriveError};
 
 /// Generate beam response values.
 #[derive(Parser, Debug)]
+// The flattened `BeamArgs` below would otherwise clash with the clap arg group
+// that this struct implicitly creates (they have the same name).
+#[group(skip)]
 pub struct BeamArgs {
     #[command(flatten)]
     beam_args: super::common::BeamArgs,
@@ -236,6 +239,67 @@ mod tests {
         ]);
         args.run().unwrap();
         assert!(!std::fs::read_to_string(path).unwrap().is_empty());
+    }
+
+    /// Read the "proxy Stokes I" column out of the TSV that the `beam`
+    /// subcommand writes.
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    fn read_responses(path: &str) -> Vec<f64> {
+        std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| line.split('\t').nth(2).unwrap().parse().unwrap())
+            .collect()
+    }
+
+    /// The GPU code should give the same beam responses as the CPU code.
+    #[test]
+    #[cfg(any(feature = "cuda", feature = "hip"))]
+    fn analytic_beam_cli_gpu_matches_cpu() {
+        #[cfg(not(feature = "gpu-single"))]
+        let epsilon = 1e-9;
+        #[cfg(feature = "gpu-single")]
+        let epsilon = 1e-4;
+
+        for beam_type in ["analytic-mwa_pb", "analytic-rts"] {
+            let cpu_out = NamedTempFile::new().unwrap();
+            let cpu_path = cpu_out.path().to_str().unwrap();
+            let gpu_out = NamedTempFile::new().unwrap();
+            let gpu_path = gpu_out.path().to_str().unwrap();
+
+            let base = [
+                "beam",
+                "--beam-type",
+                beam_type,
+                "--step",
+                "10",
+                "--max-za",
+                "80",
+            ];
+            let cpu_args: Vec<&str> = base.iter().copied().chain(["-o", cpu_path]).collect();
+            BeamArgs::parse_from(cpu_args).run().unwrap();
+            let gpu_args: Vec<&str> = base
+                .iter()
+                .copied()
+                .chain(["--gpu", "-o", gpu_path])
+                .collect();
+            BeamArgs::parse_from(gpu_args).run().unwrap();
+
+            let cpu = read_responses(cpu_path);
+            let gpu = read_responses(gpu_path);
+            assert!(!cpu.is_empty());
+            assert_eq!(cpu.len(), gpu.len());
+            assert!(
+                cpu.iter().any(|&v| v > 0.1),
+                "all {beam_type} responses were ~zero"
+            );
+            for (i, (c, g)) in cpu.iter().zip(gpu.iter()).enumerate() {
+                assert!(
+                    (c - g).abs() < epsilon,
+                    "{beam_type} response {i} differs: CPU {c}, GPU {g}"
+                );
+            }
+        }
     }
 
     #[test]
