@@ -1135,7 +1135,7 @@ fn peel_cpu(
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     // TODO: Do we allow multiple timesteps in the low-res data?
-    let (num_loops, num_passes, convergence) = peel_loop_params.get();
+    let (num_passes, num_loops, convergence) = peel_loop_params.get();
 
     let all_fine_chan_lambdas_m = chanblocks
         .iter()

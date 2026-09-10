@@ -57,8 +57,11 @@ macro_rules! point_src_i {
 }
 
 const TILE_SPACING: f64 = 100.;
-const NUM_PASSES: usize = 3;
-const NUM_LOOPS: usize = 10;
+// These tests were tuned against 10 passes of 3 loops (peel_cpu/peel_gpu used
+// to swap the two values when unpacking PeelLoopParams). Multi-source
+// convergence depends mostly on the number of passes, so keep that schedule.
+const NUM_PASSES: usize = 10;
+const NUM_LOOPS: usize = 3;
 const SHORT_BASELINE_SIGMA: f64 = 50.0;
 const CONVERGENCE: f64 = 0.5;
 

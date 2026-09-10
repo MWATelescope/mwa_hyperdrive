@@ -38,7 +38,7 @@ pub(crate) fn peel_gpu(
     no_precession: bool,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
-    let (num_loops, num_passes, convergence) = peel_loop_params.get();
+    let (num_passes, num_loops, convergence) = peel_loop_params.get();
 
     let array_position = obs_context.array_position;
     let dut1 = obs_context.dut1.unwrap_or_default();
