@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic
 Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `solutions-plot` draws with [rizzma](https://github.com/OrbitalCommons/rizzma)
+  instead of plotters. It is pure Rust with a bundled font, so plotting no
+  longer needs freetype or fontconfig, is always built, and works in the
+  GitHub-built release binaries. The `plotting` and `fontconfig-dlopen`
+  features are removed.
+- Bumped MSRV to 1.96.0.
+
 ## [0.8.1] - 2026-09-10
 
 ### Fixed

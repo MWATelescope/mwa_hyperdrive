@@ -48,7 +48,7 @@ hyperdrive solutions-plot --help
 
 ```plaintext
 hyperdrive-solutions-plot 0.2.0-alpha.11
-Plot calibration solutions. Only available if compiled with the "plotting" feature.
+Plot calibration solutions.
 
 USAGE:
     hyperdrive solutions-plot [OPTIONS] [SOLUTIONS_FILES]...

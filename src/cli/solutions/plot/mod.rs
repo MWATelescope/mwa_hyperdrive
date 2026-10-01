@@ -64,55 +64,53 @@ pub(crate) struct SolutionsPlotArgs {
 }
 
 impl SolutionsPlotArgs {
-    #[cfg(not(feature = "plotting"))]
-    pub(crate) fn run(self) -> Result<(), HyperdriveError> {
-        // Plotting is an optional feature. This is because it doesn't look
-        // possible to statically compile the C dependencies needed for
-        // plotting. If the "plotting" feature isn't available, warn the user
-        // that they'll need to compile hyperdrive from source.
-        Err(HyperdriveError::from(SolutionsPlotError::NoPlottingFeature))
-    }
-
-    #[cfg(feature = "plotting")]
     pub(crate) fn run(self) -> Result<(), HyperdriveError> {
         plotting::plot_all_sol_files(self)?;
         Ok(())
     }
 }
 
-#[cfg(feature = "plotting")]
 mod plotting {
     use std::str::FromStr;
 
     use log::{debug, info, warn};
     use marlu::Jones;
     use ndarray::prelude::*;
-    use plotters::{
-        coord::Shift,
-        prelude::*,
-        style::{Color, RGBAColor},
-    };
-    use thiserror::Error;
+    use rizzma::{artist::Rgba, Axes, Figure, GridSpec, RcParams};
     use vec1::Vec1;
 
     use super::*;
     use crate::solutions::{ao, hyperdrive, CalSolutionType, CalibrationSolutions};
 
-    /// The number of X pixels on the plots.
-    const X_PIXELS: u32 = 3200;
-    /// The number of Y pixels on the plots.
-    const Y_PIXELS: u32 = 1800;
+    /// The plots are 3200x1800 pixels.
+    const WIDTH_INCHES: f64 = 16.0;
+    const HEIGHT_INCHES: f64 = 9.0;
+    const DPI: f64 = 200.0;
 
-    lazy_static::lazy_static! {
-        static ref CLEAR: RGBAColor = WHITE.mix(0.0);
-
-        static ref POLS: [(&'static str, &'static str, RGBAColor); 4] = [
-            ("g", "X", BLUE.mix(1.0)),
-            ("D", "X", BLUE.mix(0.2)),
-            ("D", "Y", RED.mix(0.2)),
-            ("g", "Y", RED.mix(1.0)),
-        ];
-    }
+    const POLS: [(&str, Rgba); 4] = [
+        ("$g_X$", Rgba::BLUE),
+        (
+            "$D_X$",
+            Rgba {
+                a: 0.2,
+                ..Rgba::BLUE
+            },
+        ),
+        (
+            "$D_Y$",
+            Rgba {
+                a: 0.2,
+                ..Rgba::RED
+            },
+        ),
+        ("$g_Y$", Rgba::RED),
+    ];
+    const FLAGGED: Rgba = Rgba {
+        r: 220.0 / 255.0,
+        g: 220.0 / 255.0,
+        b: 220.0 / 255.0,
+        a: 1.0,
+    };
 
     pub(crate) fn plot_all_sol_files(args: SolutionsPlotArgs) -> Result<(), SolutionsPlotError> {
         let SolutionsPlotArgs {
@@ -259,7 +257,7 @@ mod plotting {
         num_rows: usize,
         num_cols: usize,
         tile_name_font_size: i32,
-    ) -> Result<Vec<String>, DrawError> {
+    ) -> Result<Vec<String>, rizzma::skia::PngError> {
         let (num_timeblocks, total_num_tiles, _) = sols.di_jones.dim();
 
         let mut amps = Array2::from_elem(
@@ -306,62 +304,21 @@ mod plotting {
             }
         };
 
-        let title_style = ("sans-serif", 60).into_font();
-
         let mut output_filenames = vec![];
         for timeblock in 0..num_timeblocks {
-            let mut output_amps = PathBuf::new();
-            let mut output_phases = PathBuf::new();
-
-            if num_timeblocks > 1 {
-                let filename = format!("{filename_base}_amps_{timeblock:03}.png");
-                output_amps.set_file_name(&filename);
-                output_filenames.push(filename);
-
-                let filename = format!("{filename_base}_phases_{timeblock:03}.png");
-                output_phases.set_file_name(&filename);
-                output_filenames.push(filename);
+            let (output_amps, output_phases) = if num_timeblocks > 1 {
+                (
+                    format!("{filename_base}_amps_{timeblock:03}.png"),
+                    format!("{filename_base}_phases_{timeblock:03}.png"),
+                )
             } else {
-                let filename = format!("{filename_base}_amps.png");
-                output_amps.set_file_name(&filename);
-                output_filenames.push(filename);
+                (
+                    format!("{filename_base}_amps.png"),
+                    format!("{filename_base}_phases.png"),
+                )
+            };
 
-                let filename = format!("{filename_base}_phases.png");
-                output_phases.set_file_name(&filename);
-                output_filenames.push(filename);
-            }
-
-            let amps_root_area =
-                BitMapBackend::new(&output_amps, (X_PIXELS, Y_PIXELS)).into_drawing_area();
-            let phases_root_area =
-                BitMapBackend::new(&output_phases, (X_PIXELS, Y_PIXELS)).into_drawing_area();
-            amps_root_area
-                .fill(&WHITE)
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            phases_root_area
-                .fill(&WHITE)
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            // Draw the coloured text for each polarisation.
-            for (i, (first_char, second_char, colour)) in POLS.iter().enumerate() {
-                if ignore_cross_pols && [1, 2].contains(&i) {
-                    continue;
-                }
-                for area in [&amps_root_area, &phases_root_area] {
-                    area.draw_text(
-                        first_char,
-                        &("sans-serif", 50).into_font().color(&colour),
-                        (X_PIXELS as i32 - 500 + 80 * i as i32, 10),
-                    )
-                    .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-                    area.draw_text(
-                        second_char,
-                        &("sans-serif", 35).into_font().color(&colour),
-                        (X_PIXELS as i32 - 470 + 80 * i as i32, 30),
-                    )
-                    .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-                }
-            }
-            // Also draw the reference tile number and the GPS times for this
+            // Draw the reference tile number and the GPS times for this
             // timeblock.
             let mut meta_str = match ref_tile {
                 Some(ref_tile) => format!("Ref. tile {ref_tile}"),
@@ -411,31 +368,6 @@ mod plotting {
                 meta_str.push_str(", ");
             }
             meta_str.push_str(&time_str);
-            amps_root_area
-                .draw_text(
-                    &meta_str,
-                    &("sans-serif", 38).into_font().color(&BLACK),
-                    (10, 10),
-                )
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            phases_root_area
-                .draw_text(
-                    &meta_str,
-                    &("sans-serif", 38).into_font().color(&BLACK),
-                    (10, 10),
-                )
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-
-            let amps_root_area = amps_root_area
-                .shrink((15, 0), (X_PIXELS - 15, Y_PIXELS))
-                .titled(&format!("Amps for {obs_name}"), title_style.clone())
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            let amps_tile_plots = amps_root_area.split_evenly((num_rows, num_cols));
-
-            let phases_root_area = phases_root_area
-                .titled(&format!("Phases for {obs_name}"), title_style.clone())
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            let phase_tile_plots = phases_root_area.split_evenly((num_rows, num_cols));
 
             let ones = Array1::from_elem(sols.di_jones.dim().2, Jones::identity());
             let ref_jones = if let Some(ref_tile) = ref_tile {
@@ -457,10 +389,10 @@ mod plotting {
                             a[1] = div[1].norm();
                             a[2] = div[2].norm();
                             a[3] = div[3].norm();
-                            p[0] = div[0].arg();
-                            p[1] = div[1].arg();
-                            p[2] = div[2].arg();
-                            p[3] = div[3].arg();
+                            p[0] = div[0].arg().to_degrees();
+                            p[1] = div[1].arg().to_degrees();
+                            p[2] = div[2].arg().to_degrees();
+                            p[3] = div[3].arg().to_degrees();
                         });
                 });
 
@@ -514,184 +446,153 @@ mod plotting {
                 }
             };
 
-            for (i_tile, (amps, amp_tile_plot)) in
-                amps.outer_iter().zip(amps_tile_plots).enumerate()
+            let mut amps_fig = new_figure(
+                &format!("Amps for {obs_name}"),
+                &meta_str,
+                tile_name_font_size,
+                ignore_cross_pols,
+            );
+            let mut phases_fig = new_figure(
+                &format!("Phases for {obs_name}"),
+                &meta_str,
+                tile_name_font_size,
+                ignore_cross_pols,
+            );
+            let grid = GridSpec::new(num_rows, num_cols)
+                .with_margins(0.025, 0.995, 0.025, 0.93)
+                .with_spacing(0.1, 0.45);
+            let num_plotted = total_num_tiles.min(num_rows * num_cols);
+            for (i_tile, (amps, phases)) in amps
+                .outer_iter()
+                .zip(phases.outer_iter())
+                .take(num_plotted)
+                .enumerate()
             {
                 let tile_name = match tile_names {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile]),
                     None => format!("{i_tile}"),
                 };
-                plot_amps(
-                    &amp_tile_plot,
-                    amps.view(),
-                    min_amp,
-                    max_amp,
+                // Label the x axis where no tile sits below, and the y axis in
+                // the first column.
+                let labels = (i_tile + num_cols >= num_plotted, i_tile % num_cols == 0);
+                let cell = grid
+                    .subplot(i_tile / num_cols, i_tile % num_cols)
+                    .get_position(&grid);
+                let rect = (cell.x0, cell.y0, cell.width(), cell.height());
+                plot_tile(
+                    amps_fig.add_axes(rect.0, rect.1, rect.2, rect.3),
+                    amps,
+                    (min_amp, max_amp),
                     &tile_name,
-                    tile_name_font_size,
-                    (i_tile / num_rows, i_tile % num_cols),
+                    labels,
                     ignore_cross_pols,
-                )?;
-            }
-            for (i_tile, (phases, phase_tile_plot)) in
-                phases.outer_iter().zip(phase_tile_plots).enumerate()
-            {
-                let tile_name = match tile_names {
-                    Some(names) => format!("{}: {}", i_tile, names[i_tile]),
-                    None => format!("{i_tile}"),
-                };
-                plot_phases(
-                    &phase_tile_plot,
-                    phases.view(),
+                );
+                plot_tile(
+                    phases_fig.add_axes(rect.0, rect.1, rect.2, rect.3),
+                    phases,
+                    (-180.0, 180.0),
                     &tile_name,
-                    tile_name_font_size,
-                    (i_tile / num_rows, i_tile % num_cols),
+                    labels,
                     ignore_cross_pols,
-                )?;
+                );
             }
-
-            // Finalise the plots.
-            amps_root_area
-                .present()
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
-            phases_root_area
-                .present()
-                .map_err(|e| DrawError::Plotters(Box::new(e)))?;
+            amps_fig.save_png(&output_amps)?;
+            phases_fig.save_png(&output_phases)?;
+            output_filenames.push(output_amps);
+            output_filenames.push(output_phases);
         }
 
         Ok(output_filenames)
     }
 
-    /// For a single drawing area, plot gains.
-    #[allow(clippy::too_many_arguments)]
-    fn plot_amps<DB: DrawingBackend>(
-        drawing_area: &DrawingArea<DB, Shift>,
-        amps: ArrayView1<[f64; 4]>,
-        min_amp: f64,
-        max_amp: f64,
-        tile_name: &str,
+    /// A blank figure with the title, the timeblock metadata in the top left
+    /// and the polarisation colour key in the top right.
+    fn new_figure(
+        title: &str,
+        meta: &str,
         tile_name_font_size: i32,
-        tile_plot_indices: (usize, usize),
         ignore_cross_pols: bool,
-    ) -> Result<(), DrawError> {
-        let x_axis = (0..amps.len()).step(1);
-        let y_label_area_size = if tile_plot_indices.1 == 0 { 20 } else { 0 };
-        let mut cc = ChartBuilder::on(drawing_area)
-            .caption(tile_name, ("sans-serif", tile_name_font_size))
-            .top_x_label_area_size(15)
-            .y_label_area_size(y_label_area_size)
-            .build_cartesian_2d(0..amps.len(), min_amp..max_amp)
-            .map_err(|e| DrawError::Amps(e.to_string()))?;
-
-        cc.configure_mesh()
-            .light_line_style(WHITE)
-            .draw()
-            .map_err(|e| DrawError::Amps(e.to_string()))?;
-
-        if amps
-            .iter()
-            .all(|f| f[0].is_nan() || f[1].is_nan() || f[2].is_nan() || f[3].is_nan())
-        {
-            cc.plotting_area()
-                .fill(&RGBColor(220, 220, 220))
-                .map_err(|e| DrawError::Amps(e.to_string()))?;
-            return Ok(());
+    ) -> Figure {
+        // Font sizes are in points; convert from the pixel sizes used above.
+        let tick_size = 18.0 * 72.0 / DPI;
+        let mut fig = Figure::new(WIDTH_INCHES, HEIGHT_INCHES)
+            .with_dpi(DPI)
+            .with_rcparams(RcParams {
+                axes_titlesize: f64::from(tile_name_font_size) * 72.0 / DPI,
+                axes_titlepad: 2.0,
+                xtick_labelsize: tick_size,
+                ytick_labelsize: tick_size,
+                ..RcParams::default()
+            });
+        fig.suptitle(title);
+        let header = fig.add_axes(0.0, 0.0, 1.0, 1.0);
+        header.set_axis_off().set_xlim(0.0, 1.0).set_ylim(0.0, 1.0);
+        header.text(0.005, 0.975, meta);
+        for (i, (label, colour)) in POLS.iter().enumerate() {
+            if ignore_cross_pols && [1, 2].contains(&i) {
+                continue;
+            }
+            header.text_with_color(0.86 + 0.03 * i as f64, 0.975, *label, *colour);
         }
-
-        for (pol_index, (_, _, colour)) in POLS.iter().enumerate() {
-            cc.draw_series(PointSeries::of_element(
-                x_axis
-                    .values()
-                    .zip(amps.iter().map(|g| g[pol_index]))
-                    .filter(|(_, y)| !y.is_nan()),
-                1,
-                if [0, 3].contains(&pol_index) {
-                    ShapeStyle::from(&colour).filled()
-                } else if ignore_cross_pols {
-                    ShapeStyle::from(*CLEAR)
-                } else {
-                    ShapeStyle::from(&colour)
-                },
-                &|coord, size, style| EmptyElement::at(coord) + Circle::new((0, 0), size, style),
-            ))
-            .map_err(|e| DrawError::Amps(e.to_string()))?;
-        }
-
-        Ok(())
+        fig
     }
 
-    /// For a single drawing area, plot phases.
-    fn plot_phases<DB: DrawingBackend>(
-        drawing_area: &DrawingArea<DB, Shift>,
-        phases: ArrayView1<[f64; 4]>,
+    /// Scatter one tile's four polarisations against channel, or grey the
+    /// tile out if every channel is flagged.
+    fn plot_tile(
+        ax: &mut Axes,
+        values: ArrayView1<[f64; 4]>,
+        (y_min, y_max): (f64, f64),
         tile_name: &str,
-        tile_name_font_size: i32,
-        tile_plot_indices: (usize, usize),
+        (x_labels, y_labels): (bool, bool),
         ignore_cross_pols: bool,
-    ) -> Result<(), DrawError> {
-        let x_axis = (0..phases.len()).step(1);
-        let y_label_area_size = if tile_plot_indices.1 == 0 { 45 } else { 0 };
-        let mut cc = ChartBuilder::on(drawing_area)
-            .caption(tile_name, ("sans-serif", tile_name_font_size))
-            .top_x_label_area_size(15)
-            .y_label_area_size(y_label_area_size)
-            .build_cartesian_2d(0..phases.len(), -180.0..180.0)
-            .map_err(|e| DrawError::Phases(e.to_string()))?;
-
-        cc.configure_mesh()
-            .light_line_style(WHITE)
-            .draw()
-            .map_err(|e| DrawError::Phases(e.to_string()))?;
-
-        if phases
+    ) {
+        // A few ticks per axis keep the small panels legible.
+        let num_chans = values.len();
+        // The smallest 1, 2 or 5 times a power of ten giving at most 4 ticks.
+        let magnitude = 10_usize.pow((num_chans.max(1) as f64 / 4.0).log10().max(0.0) as u32);
+        let x_step = [1, 2, 5, 10]
             .iter()
-            .all(|f| f[0].is_nan() || f[1].is_nan() || f[2].is_nan() || f[3].is_nan())
-        {
-            cc.plotting_area()
-                .fill(&RGBColor(220, 220, 220))
-                .map_err(|e| DrawError::Phases(e.to_string()))?;
-            return Ok(());
+            .map(|m| m * magnitude)
+            .find(|step| step * 4 >= num_chans)
+            .unwrap_or(10 * magnitude);
+        let x_ticks: Vec<f64> = (0..=num_chans).step_by(x_step).map(|c| c as f64).collect();
+        ax.set_title(tile_name)
+            .set_xlim(0.0, num_chans as f64)
+            .set_ylim(y_min, y_max)
+            .set_xticks(&x_ticks)
+            .set_yticks(&[y_min, (y_min + y_max) / 2.0, y_max]);
+        ax.xaxis_mut().set_tick_labels_visible(x_labels);
+        ax.yaxis_mut().set_tick_labels_visible(y_labels);
+
+        if values.iter().all(|v| v.iter().any(|f| f.is_nan())) {
+            ax.set_facecolor(FLAGGED);
+            return;
         }
 
-        for (pol_index, (_, _, colour)) in POLS.iter().enumerate() {
-            cc.draw_series(PointSeries::of_element(
-                x_axis
-                    .values()
-                    .zip(phases.iter().map(|g| g[pol_index]))
-                    .filter(|(_, y)| !y.is_nan())
-                    .map(|(x, y)| {
-                        let mut y_val = y.to_degrees();
-                        if y_val < -180.0 {
-                            y_val += 360.0
-                        } else if y_val > 180.0 {
-                            y_val -= 360.0
-                        }
-                        (x, y_val)
-                    }),
-                1,
-                if [0, 3].contains(&pol_index) {
-                    ShapeStyle::from(&colour).filled()
-                } else if ignore_cross_pols {
-                    ShapeStyle::from(*CLEAR)
-                } else {
-                    ShapeStyle::from(&colour)
-                },
-                &|coord, size, style| EmptyElement::at(coord) + Circle::new((0, 0), size, style),
-            ))
-            .map_err(|e| DrawError::Phases(e.to_string()))?;
+        for (pol_index, (_, colour)) in POLS.iter().enumerate() {
+            let cross_pol = [1, 2].contains(&pol_index);
+            if cross_pol && ignore_cross_pols {
+                continue;
+            }
+            let (x, y): (Vec<f64>, Vec<f64>) = values
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (i as f64, v[pol_index]))
+                .filter(|(_, y)| !y.is_nan())
+                .unzip();
+            // Gains are filled dots, leakages hollow rings.
+            let points = ax.scatter(&x, &y);
+            *points = if cross_pol {
+                points
+                    .clone()
+                    .with_facecolors(vec![Rgba { a: 0.0, ..*colour }])
+                    .with_edgecolors(vec![*colour])
+                    .linewidth(0.5)
+            } else {
+                points.clone().with_facecolors(vec![*colour])
+            }
+            .with_sizes(vec![2.0]);
         }
-
-        Ok(())
-    }
-
-    #[derive(Error, Debug)]
-    pub(crate) enum DrawError {
-        #[error("While plotting amps: {0}")]
-        Amps(String),
-
-        #[error("While plotting phases: {0}")]
-        Phases(String),
-
-        #[error("Error from the plotters library: {0}")]
-        Plotters(Box<dyn std::error::Error>),
     }
 }

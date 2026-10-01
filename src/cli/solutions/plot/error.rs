@@ -8,28 +8,20 @@ use crate::solutions::SolutionsReadError;
 
 #[derive(Error, Debug)]
 pub(crate) enum SolutionsPlotError {
-    #[cfg(not(feature = "plotting"))]
-    #[error("hyperdrive was not compiled with the \"plotting\" feature.\nYou need to compile hyperdrive from source with this feature to plot solutions.\nSee this page for instructions: https://MWATelescope.github.io/mwa_hyperdrive/installation/from_source.html")]
-    NoPlottingFeature,
-
-    #[cfg(feature = "plotting")]
     #[error("No solutions files supplied!")]
     NoInputs,
 
-    #[cfg(feature = "plotting")]
     #[error(
         "An invalid calibration solutions file format was specified ({_0:?}).\nSupported formats: {}",
         *crate::solutions::CAL_SOLUTION_EXTENSIONS,
     )]
     InvalidSolsFormat(std::path::PathBuf),
 
-    #[cfg(feature = "plotting")]
     #[error("Your metafits file had no antenna names!")]
     MetafitsNoAntennaNames,
 
-    #[cfg(feature = "plotting")]
-    #[error("Error from the plotters library: {0}")]
-    Draw(#[from] super::plotting::DrawError),
+    #[error("While writing a plot: {0}")]
+    Png(#[from] rizzma::skia::PngError),
 
     #[error(transparent)]
     SolutionsRead(#[from] SolutionsReadError),
