@@ -34,9 +34,6 @@ jobs:
             lcov \
             libcfitsio-dev \
             libhdf5-dev \
-            libfreetype-dev \
-            libexpat1-dev \
-            libfontconfig-dev \
             ;
         env:
           DEBIAN_FRONTEND: noninteractive

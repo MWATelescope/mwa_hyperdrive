@@ -25,16 +25,6 @@
 
 ### Optional dependencies
 
-```admonish tip title="freetype2 (for calibration solutions plotting)"
-- Only required if the `plotting` feature is enabled (which it is by default)
-- Version must be `>=2.11.1`
-- Arch: `pkg-config` `make` `cmake` `freetype2`
-- Ubuntu: `libfreetype-dev` `libexpat1-dev`
-- Installation may be eased by using the `fontconfig-dlopen` feature. This means
-  that `libfontconfig` is used at runtime, and not found and linked at link
-  time.
-```
-
 ```admonish tip title="CUDA (for accelerated sky modelling with NVIDIA GPUs)"
 - Only required if the `cuda` feature is enabled
 - Requires a [CUDA-capable device](https://developer.nvidia.com/cuda-gpus)

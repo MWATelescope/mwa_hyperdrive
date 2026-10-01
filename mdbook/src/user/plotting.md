@@ -1,12 +1,5 @@
 # Plot solutions
 
-~~~admonish danger title="Availability"
-Plotting calibration solutions is *not* available for GitHub-built releases of
-`hyperdrive`. `hyperdrive` must be built with the `plotting` `cargo` feature;
-see the [installation from source instructions
-here](../installation/from_source.md).
-~~~
-
 `hyperdrive` is capable of producing plots of calibration solutions for any of
 its [supported file formats](../defs/cal_sols.md). Note that only
 `hyperdrive`-formatted calibration solutions can contain tile names; when tile

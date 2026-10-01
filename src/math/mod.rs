@@ -22,7 +22,7 @@ pub(crate) fn is_prime(n: usize) -> bool {
     }
 
     for i in 2..=limit {
-        if n % i == 0 {
+        if n.is_multiple_of(i) {
             return false;
         }
     }
