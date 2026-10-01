@@ -1441,7 +1441,7 @@ impl UvfitsMetadata {
         // Now get the timestamps out of all the other timesteps.
         let mut i_row = num_cross_and_auto_baselines;
         assert!(
-            num_rows.is_multiple_of(num_cross_and_auto_baselines),
+            num_rows % num_cross_and_auto_baselines == 0,
             "There are a variable number of baselines per timestep, which is not supported"
         );
         while i_row < num_rows {

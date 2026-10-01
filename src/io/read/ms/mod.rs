@@ -769,7 +769,7 @@ impl MsReader {
                 // then we assume its because there's a flag specified for each
                 // polarisation. Which is dumb. If any of the 4 flags for a
                 // channel are flagged, we consider the channel flagged.
-                if (flagged_fine_chans.len() / fine_chan_freqs.len()).is_multiple_of(4) {
+                if (flagged_fine_chans.len() / fine_chan_freqs.len()) % 4 == 0 {
                     flagged_fine_chans
                         .chunks_exact(4)
                         .map(|pol_flags| pol_flags.iter().any(|f| *f))

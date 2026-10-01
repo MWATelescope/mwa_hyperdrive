@@ -29,7 +29,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   longer needs freetype or fontconfig, is always built, and works in the
   GitHub-built release binaries. The `plotting` and `fontconfig-dlopen`
   features are removed.
-- Bumped MSRV to 1.96.0.
 - Updated to Marlu 0.18, Birli 0.20 and hyperbeam 0.12, which all share one
   Marlu.
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
