@@ -1888,9 +1888,9 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "rizzma"
-version = "1.13.1"
+version = "1.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87e041778bbd49eaf57a169f8f49fc62aab60bb02a6bb327eeb18947ddd32bfd"
+checksum = "8a8461b4d909f0288e51cd2db6caf7bd9314ce6b098020e55caa031ce2bfd147"
 dependencies = [
  "base64",
  "chrono",
