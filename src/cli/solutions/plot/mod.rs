@@ -76,7 +76,11 @@ mod plotting {
     use log::{debug, info, warn};
     use marlu::Jones;
     use ndarray::prelude::*;
-    use rizzma::{artist::Rgba, Axes, Figure, GridSpec, RcParams};
+    use rizzma::{
+        artist::Rgba,
+        axis::ticker::{FormatStrFormatter, MaxNLocator, NBins},
+        Axes, Figure, GridSpec, RcParams,
+    };
     use vec1::Vec1;
 
     use super::*;
@@ -111,6 +115,20 @@ mod plotting {
         b: 220.0 / 255.0,
         a: 1.0,
     };
+    /// The grid plotters drew at each tick: black at 50/255.
+    const GRID: Rgba = Rgba {
+        a: 50.0 / 255.0,
+        ..Rgba::BLACK
+    };
+
+    /// rizzma sizes text, ticks and pads in units that scale with the DPI
+    /// (one unit per pixel at 100 DPI); this converts output pixels to them.
+    const PX: f64 = 100.0 / DPI;
+    /// One output pixel as a line width, which rizzma takes in points.
+    const LINE: f64 = 72.0 / DPI;
+    /// The plotters layout, in output pixels.
+    const TICK_LENGTH: f64 = 5.0;
+    const TICK_LABEL_SIZE: f64 = 9.6;
 
     pub(crate) fn plot_all_sol_files(args: SolutionsPlotArgs) -> Result<(), SolutionsPlotError> {
         let SolutionsPlotArgs {
@@ -459,8 +477,8 @@ mod plotting {
                 ignore_cross_pols,
             );
             let grid = GridSpec::new(num_rows, num_cols)
-                .with_margins(0.025, 0.995, 0.025, 0.93)
-                .with_spacing(0.1, 0.45);
+                .with_margins(0.025, 0.995, 0.005, 0.93)
+                .with_spacing(0.03, 0.4);
             let num_plotted = total_num_tiles.min(num_rows * num_cols);
             for (i_tile, (amps, phases)) in amps
                 .outer_iter()
@@ -472,9 +490,9 @@ mod plotting {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile]),
                     None => format!("{i_tile}"),
                 };
-                // Label the x axis where no tile sits below, and the y axis in
-                // the first column.
-                let labels = (i_tile + num_cols >= num_plotted, i_tile % num_cols == 0);
+                // Every tile labels its channels along the top; only the first
+                // column labels the y axis.
+                let labels = (true, i_tile % num_cols == 0);
                 let cell = grid
                     .subplot(i_tile / num_cols, i_tile % num_cols)
                     .get_position(&grid);
@@ -513,15 +531,18 @@ mod plotting {
         tile_name_font_size: i32,
         ignore_cross_pols: bool,
     ) -> Figure {
-        // Font sizes are in points; convert from the pixel sizes used above.
-        let tick_size = 18.0 * 72.0 / DPI;
+        // plotters drew a caption of font size N at 0.8 N pixels.
         let mut fig = Figure::new(WIDTH_INCHES, HEIGHT_INCHES)
             .with_dpi(DPI)
             .with_rcparams(RcParams {
-                axes_titlesize: f64::from(tile_name_font_size) * 72.0 / DPI,
-                axes_titlepad: 2.0,
-                xtick_labelsize: tick_size,
-                ytick_labelsize: tick_size,
+                axes_titlesize: 0.8 * f64::from(tile_name_font_size) * PX,
+                axes_titlepad: 2.0 * PX,
+                xtick_labelsize: TICK_LABEL_SIZE * PX,
+                ytick_labelsize: TICK_LABEL_SIZE * PX,
+                xtick_major_size: TICK_LENGTH * PX,
+                ytick_major_size: TICK_LENGTH * PX,
+                xtick_major_pad: 5.0 * PX,
+                ytick_major_pad: 3.0 * PX,
                 ..RcParams::default()
             });
         fig.suptitle(title);
@@ -547,23 +568,33 @@ mod plotting {
         (x_labels, y_labels): (bool, bool),
         ignore_cross_pols: bool,
     ) {
-        // A few ticks per axis keep the small panels legible.
+        // As plotters did: up to 10 round ticks per axis, labelled along the
+        // top and left with a thin grid through each, and no frame box.
         let num_chans = values.len();
-        // The smallest 1, 2 or 5 times a power of ten giving at most 4 ticks.
-        let magnitude = 10_usize.pow((num_chans.max(1) as f64 / 4.0).log10().max(0.0) as u32);
-        let x_step = [1, 2, 5, 10]
-            .iter()
-            .map(|m| m * magnitude)
-            .find(|step| step * 4 >= num_chans)
-            .unwrap_or(10 * magnitude);
-        let x_ticks: Vec<f64> = (0..=num_chans).step_by(x_step).map(|c| c as f64).collect();
+        let key_points = |integer| {
+            Box::new(MaxNLocator::with_steps(
+                NBins::Fixed(10),
+                &[1.0, 2.0, 5.0, 10.0],
+                integer,
+                false,
+                2,
+            ))
+        };
         ax.set_title(tile_name)
             .set_xlim(0.0, num_chans as f64)
             .set_ylim(y_min, y_max)
-            .set_xticks(&x_ticks)
-            .set_yticks(&[y_min, (y_min + y_max) / 2.0, y_max]);
-        ax.xaxis_mut().set_tick_labels_visible(x_labels);
-        ax.yaxis_mut().set_tick_labels_visible(y_labels);
+            .set_frame_on(false)
+            .grid_with(GRID, LINE, 1.0);
+        ax.xaxis_mut()
+            .tick_top()
+            .set_locator(key_points(true))
+            .set_tick_width(LINE)
+            .set_tick_labels_visible(x_labels);
+        ax.yaxis_mut()
+            .set_locator(key_points(false))
+            .set_formatter(Box::new(FormatStrFormatter::new("%.1f")))
+            .set_tick_width(LINE)
+            .set_tick_labels_visible(y_labels);
 
         if values.iter().all(|v| v.iter().any(|f| f.is_nan())) {
             ax.set_facecolor(FLAGGED);
@@ -581,18 +612,19 @@ mod plotting {
                 .map(|(i, v)| (i as f64, v[pol_index]))
                 .filter(|(_, y)| !y.is_nan())
                 .unzip();
-            // Gains are filled dots, leakages hollow rings.
+            // Gains are filled dots, leakages hollow rings, both 3 pixels
+            // across as plotters drew them (marker sizes are points squared).
             let points = ax.scatter(&x, &y);
             *points = if cross_pol {
                 points
                     .clone()
                     .with_facecolors(vec![Rgba { a: 0.0, ..*colour }])
                     .with_edgecolors(vec![*colour])
-                    .linewidth(0.5)
+                    .linewidth(LINE)
             } else {
                 points.clone().with_facecolors(vec![*colour])
             }
-            .with_sizes(vec![2.0]);
+            .with_sizes(vec![(3.0 * LINE).powi(2)]);
         }
     }
 }
