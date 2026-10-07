@@ -78,7 +78,7 @@ mod plotting {
     use ndarray::prelude::*;
     use rizzma::{
         artist::Rgba,
-        axis::ticker::{FormatStrFormatter, MaxNLocator, NBins},
+        axis::ticker::{FuncFormatter, Locator, MaxNLocator, NBins},
         Axes, Figure, GridSpec, RcParams,
     };
     use vec1::Vec1;
@@ -478,7 +478,7 @@ mod plotting {
             );
             let grid = GridSpec::new(num_rows, num_cols)
                 .with_margins(0.025, 0.995, 0.005, 0.93)
-                .with_spacing(0.03, 0.4);
+                .with_spacing(0.0, 0.4);
             let num_plotted = total_num_tiles.min(num_rows * num_cols);
             for (i_tile, (amps, phases)) in amps
                 .outer_iter()
@@ -545,15 +545,23 @@ mod plotting {
                 ytick_major_pad: 3.0 * PX,
                 ..RcParams::default()
             });
-        fig.suptitle(title);
+        fig.suptitle(title).set_suptitle_size(48.4 * PX);
+        // The header is drawn in output pixels from the top left, with text
+        // anchored at its baseline, as plotters laid it out.
+        let (width, height) = (WIDTH_INCHES * DPI, HEIGHT_INCHES * DPI);
         let header = fig.add_axes(0.0, 0.0, 1.0, 1.0);
-        header.set_axis_off().set_xlim(0.0, 1.0).set_ylim(0.0, 1.0);
-        header.text(0.005, 0.975, meta);
+        header
+            .set_axis_off()
+            .set_xlim(0.0, width)
+            .set_ylim(height, 0.0);
+        header.set_text_size(30.66 * PX).text(10.0, 34.0, meta);
+        // Subscripts render at about 0.7 of this size, plotters' 28 px.
+        header.set_text_size(40.0 * PX);
         for (i, (label, colour)) in POLS.iter().enumerate() {
             if ignore_cross_pols && [1, 2].contains(&i) {
                 continue;
             }
-            header.text_with_color(0.86 + 0.03 * i as f64, 0.975, *label, *colour);
+            header.text_with_color(width - 500.0 + 80.0 * i as f64, 42.0, *label, *colour);
         }
         fig
     }
@@ -590,14 +598,28 @@ mod plotting {
             .set_locator(key_points(true))
             .set_tick_width(LINE)
             .set_tick_labels_visible(x_labels);
+        // Labels print the tick rounded to the step's decimals, as Rust prints
+        // an f64: `150.0`, `0.5`, and `8e17` for pathologically large gains.
+        let y_locator = key_points(false);
+        let step = y_locator
+            .tick_values(y_min, y_max)
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).abs())
+            .find(|step| *step > 0.0 && step.is_finite())
+            .unwrap_or(1.0);
+        let factor = 10_f64.powi((-step.log10()).ceil().max(1.0) as i32);
+        let y_label = move |value: f64, _| format!("{:?}", (value * factor).round() / factor);
+        // Only the first column has y labels; the other tiles keep a bare
+        // y axis line, without tick marks, so the tiles can sit edge to edge.
         ax.yaxis_mut()
-            .set_locator(key_points(false))
-            .set_formatter(Box::new(FormatStrFormatter::new("%.1f")))
+            .set_locator(y_locator)
+            .set_formatter(Box::new(FuncFormatter::from_fn(y_label)))
             .set_tick_width(LINE)
+            .set_tick_length(if y_labels { TICK_LENGTH * PX } else { 0.0 })
             .set_tick_labels_visible(y_labels);
 
         if values.iter().all(|v| v.iter().any(|f| f.is_nan())) {
-            ax.set_facecolor(FLAGGED);
+            ax.set_facecolor(FLAGGED).grid(false);
             return;
         }
 
