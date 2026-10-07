@@ -22,9 +22,8 @@ instructions on [the next page](from_source.md#gpu).
 ~~~admonish
 The pre-compiled binaries are made by GitHub actions using:
 ```shell
-cargo build --release --locked --no-default-features --features=hdf5-static,cfitsio-static
+cargo build --release --locked --features=hdf5-static,cfitsio-static
 ```
-This means they cannot plot calibration solutions.
 "CUDA-double" binaries have the `cuda` feature and "CUDA-single" binaries have
 the `cuda` and `gpu-single` features. CUDA cannot legally be statically linked
 so a local installation of CUDA is required.

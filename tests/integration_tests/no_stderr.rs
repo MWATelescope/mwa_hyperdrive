@@ -187,7 +187,6 @@ fn test_solutions_convert_no_stderr() {
 }
 
 #[test]
-#[cfg(feature = "plotting")]
 fn test_solutions_plot_no_stderr() {
     let tmp_dir = TempDir::new().expect("couldn't make tmp dir");
     let sols = get_identity_solutions_file(tmp_dir.path());

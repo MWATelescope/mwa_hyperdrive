@@ -226,17 +226,13 @@ impl From<SolutionsPlotError> for HyperdriveError {
     fn from(e: SolutionsPlotError) -> Self {
         let s = e.to_string();
         match e {
-            #[cfg(not(feature = "plotting"))]
-            SolutionsPlotError::NoPlottingFeature => Self::SolutionsPlot(s),
             SolutionsPlotError::SolutionsRead(_) => Self::Solutions(s),
             SolutionsPlotError::Mwalib(_) => Self::Mwalib(s),
             SolutionsPlotError::IO(_) => Self::Generic(s),
-            #[cfg(feature = "plotting")]
             SolutionsPlotError::MetafitsNoAntennaNames => Self::Metafits(s),
-            #[cfg(feature = "plotting")]
-            SolutionsPlotError::Draw(_)
+            SolutionsPlotError::Png(_)
             | SolutionsPlotError::NoInputs
-            | SolutionsPlotError::InvalidSolsFormat(_) => Self::Generic(s),
+            | SolutionsPlotError::InvalidSolsFormat(_) => Self::SolutionsPlot(s),
         }
     }
 }

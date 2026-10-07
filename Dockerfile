@@ -44,13 +44,9 @@ RUN apt-get update -y && \
     clang \
     cmake \
     curl \
-    fontconfig \
     git \
     lcov \
     libcfitsio-dev \
-    libexpat1-dev \
-    libfontconfig-dev \
-    libfreetype-dev \
     libhdf5-dev \
     pkg-config \
     tzdata \
@@ -78,7 +74,7 @@ RUN if [ ! -f $RUSTUP_HOME/settings.toml ]; then \
 ARG CUDA_COMPUTE=""
 # optional, example: gfx90a for MI250
 ARG HIP_ARCH=""
-# optional, example: "hip" for ROCm, plotting is included by default, use " --"
+# optional, example: "hip" for ROCm
 ARG FEATURES=""
 # optional, example: "-C target-cpu=native"
 ARG RUSTFLAGS=""

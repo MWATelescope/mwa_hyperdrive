@@ -119,10 +119,8 @@ https://mwatelescope.github.io/mwa_hyperdrive/user/solutions_apply/intro.html"#)
     SolutionsApply(solutions::SolutionsApplyArgs),
 
     #[command(alias = "plot-solutions")]
-    #[command(
-        about = r#"Plot calibration solutions. Only available if compiled with the "plotting" feature.
-https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#
-    )]
+    #[command(about = r#"Plot calibration solutions.
+https://mwatelescope.github.io/mwa_hyperdrive/user/plotting.html"#)]
     SolutionsPlot(solutions::SolutionsPlotArgs),
 
     #[command(alias = "convert-solutions")]
