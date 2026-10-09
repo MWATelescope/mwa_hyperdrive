@@ -40,23 +40,7 @@ pub(crate) struct AnalyticBeam {
 }
 
 impl AnalyticBeam {
-    pub(crate) fn new_mwa_pb(
-        num_tiles: usize,
-        delays: Delays,
-        gains: Option<Array2<f64>>,
-    ) -> Result<AnalyticBeam, BeamError> {
-        Self::new_inner(AnalyticType::MwaPb, num_tiles, delays, gains)
-    }
-
-    pub(crate) fn new_rts(
-        num_tiles: usize,
-        delays: Delays,
-        gains: Option<Array2<f64>>,
-    ) -> Result<AnalyticBeam, BeamError> {
-        Self::new_inner(AnalyticType::Rts, num_tiles, delays, gains)
-    }
-
-    fn new_inner(
+    pub(crate) fn new(
         at: AnalyticType,
         num_tiles: usize,
         delays: Delays,
@@ -192,10 +176,7 @@ impl AnalyticBeam {
 
 impl Beam for AnalyticBeam {
     fn get_beam_type(&self) -> BeamType {
-        match self.analytic_type {
-            AnalyticType::MwaPb => BeamType::AnalyticMwaPb,
-            AnalyticType::Rts => BeamType::AnalyticRts,
-        }
+        BeamType::from(self.analytic_type)
     }
 
     fn get_num_tiles(&self) -> usize {
@@ -351,7 +332,7 @@ mod tests {
     #[test]
     fn calc_jones_array_helper_and_getters() {
         let delays = Delays::Partial(vec![0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6]);
-        let beam = AnalyticBeam::new_mwa_pb(2, delays, None).unwrap();
+        let beam = AnalyticBeam::new(AnalyticType::MwaPb, 2, delays, None).unwrap();
         assert_eq!(beam.get_beam_type(), BeamType::AnalyticMwaPb);
         assert_eq!(beam.get_num_tiles(), 2);
         assert_eq!(
@@ -373,7 +354,8 @@ mod tests {
 
     #[test]
     fn rts_beam_and_error_paths() {
-        let beam = AnalyticBeam::new_rts(1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam =
+            AnalyticBeam::new(AnalyticType::Rts, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         assert_eq!(beam.get_beam_type(), BeamType::AnalyticRts);
 
         let azel = AzEl { az: 0.1, el: 1.0 };
@@ -407,7 +389,7 @@ mod tests {
         let full = Delays::Full(Array2::zeros((2, 16)));
         let gains = Array2::ones((1, 32));
         assert!(matches!(
-            AnalyticBeam::new_mwa_pb(2, full, Some(gains)),
+            AnalyticBeam::new(AnalyticType::MwaPb, 2, full, Some(gains)),
             Err(BeamError::DelayGainsDimensionMismatch {
                 delays: 2,
                 gains: 1
@@ -415,11 +397,16 @@ mod tests {
         ));
 
         assert!(matches!(
-            AnalyticBeam::new_mwa_pb(1, Delays::Partial(vec![0; 3]), None),
+            AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 3]), None),
             Err(BeamError::BadDelays)
         ));
         assert!(matches!(
-            AnalyticBeam::new_rts(1, Delays::Full(Array2::zeros((2, 16))), None),
+            AnalyticBeam::new(
+                AnalyticType::Rts,
+                1,
+                Delays::Full(Array2::zeros((2, 16))),
+                None
+            ),
             Err(BeamError::InconsistentDelays {
                 num_rows: 2,
                 num_tiles: 1
@@ -427,13 +414,20 @@ mod tests {
         ));
 
         let supplied = Array2::ones((1, 32));
-        AnalyticBeam::new_mwa_pb(1, Delays::Partial(vec![0; 16]), Some(supplied)).unwrap();
+        AnalyticBeam::new(
+            AnalyticType::MwaPb,
+            1,
+            Delays::Partial(vec![0; 16]),
+            Some(supplied),
+        )
+        .unwrap();
     }
 
     /// The modellers evaluate the analytic beam on the coarse-channel grid.
     #[test]
     fn closest_freq_is_on_the_coarse_channel_grid() {
-        let beam = AnalyticBeam::new_mwa_pb(1, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam =
+            AnalyticBeam::new(AnalyticType::MwaPb, 1, Delays::Partial(vec![0; 16]), None).unwrap();
         assert_abs_diff_eq!(beam.find_closest_freq(122.88e6), 122.88e6);
         assert_abs_diff_eq!(beam.find_closest_freq(123e6), 122.88e6);
         assert_abs_diff_eq!(beam.find_closest_freq(123.6e6), 124.16e6);
@@ -449,7 +443,8 @@ mod tests {
     /// they don't disturb the responses of the other directions.
     #[test]
     fn below_horizon_is_zero() {
-        let beam = AnalyticBeam::new_rts(2, Delays::Partial(vec![0; 16]), None).unwrap();
+        let beam =
+            AnalyticBeam::new(AnalyticType::Rts, 2, Delays::Partial(vec![0; 16]), None).unwrap();
         let below = AzEl { az: 0.5, el: -0.1 };
         let above = [AzEl { az: 0.1, el: 1.0 }, AzEl { az: -0.2, el: 0.8 }];
 
