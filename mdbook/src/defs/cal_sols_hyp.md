@@ -46,8 +46,10 @@ during calibration (meaning they effectively aren't used in calibration).
 `UVW_MIN_L` and `UVW_MAX_L` correspond to `UVW_MIN` and `UVW_MAX`, but are in
 wavelength units (the `L` stands for lambda).
 
-Some MWA beam codes require a file for their calculations. `BEAMFILE` is the
-path to this file.
+`BEAMTYPE` is the [beam model](beam.md) used to generate the sky model that
+the data was calibrated against (e.g. "fee", "analytic-rts" or "none"). Some
+MWA beam codes require a file for their calculations. `BEAMFILE` is the path
+to this file.
 
 ### Raw MWA data corrections
 

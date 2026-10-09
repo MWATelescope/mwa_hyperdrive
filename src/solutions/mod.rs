@@ -30,7 +30,7 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString};
 use vec1::Vec1;
 
-use crate::{io::read::RawDataCorrections, HyperdriveError};
+use crate::{beam::BeamType, io::read::RawDataCorrections, HyperdriveError};
 
 lazy_static::lazy_static! {
     pub(crate) static ref CAL_SOLUTION_EXTENSIONS: String = CalSolutionType::iter().join(", ");
@@ -112,7 +112,10 @@ pub struct CalibrationSolutions {
     /// tiles and there are 16 columns (one per bowtie).
     pub dipole_delays: Option<ArcArray<u32, Dim<[usize; 2]>>>,
 
-    /// The beam file used for beam calculations.
+    /// The beam model used for beam calculations.
+    pub beam_type: Option<BeamType>,
+
+    /// The beam file used for beam calculations, if the beam model needs one.
     pub beam_file: Option<PathBuf>,
 
     /// The precision of the calibration for these results. The first dimension

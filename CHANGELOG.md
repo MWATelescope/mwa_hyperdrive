@@ -10,6 +10,9 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - Support for the "mwa_pb" and "RTS" analytic beams.
+- hyperdrive calibration solutions record the beam model used (`BEAMTYPE`), so
+  that solutions made with an analytic beam, the FEE beam or no beam can be
+  told apart.
 
 ### Changed
 - The beam subcommand now takes a beam type with `-b` / `--beam-type` instead of
