@@ -26,6 +26,7 @@ use mwalib::MetafitsContext;
 use ndarray::ArcArray2;
 use scopeguard::defer_on_unwind;
 use vec1::Vec1;
+use marlu::PolConvention;
 
 use crate::{
     averaging::{parse_freq_average_factor, parse_time_average_factor, timesteps_to_timeblocks},
@@ -209,6 +210,25 @@ pub struct VisSimulateArgs {
     #[clap(long, help_heading = "MODEL PARAMETERS")]
     no_precession: bool,
 
+    /// How the sky model's Stokes I, Q, U, V map onto XX, XY, YX, YY: "mwa"
+    /// (default, X east-west; alias "oskar"), "iau" (X north-south; aliases
+    /// "lofar", "casacore", "wsclean"), "askap" (I = XX+YY), or
+    /// "east|north[/avg|sum]".
+    #[clap(long, value_name = "NAME", help_heading = "MODEL PARAMETERS")]
+    pol_convention: Option<PolConvention>,
+
+    /// The frame of the modelled UVWs: "hyperdrive" (default), "casacore"
+    /// (aliases "lofar", "casa", "wsclean", "askap", "uvh5"; apparent
+    /// sidereal time, phase-centre aberration rotation, antenna2 - antenna1
+    /// baselines) or "oskar" (unprecessed, apparent sidereal time).
+    #[clap(long, value_name = "NAME", help_heading = "MODEL PARAMETERS")]
+    uvw_frame: Option<UvwFrame>,
+
+    /// A preset for both --pol-convention and --uvw-frame: "mwa" (default),
+    /// "iau", "lofar", "casacore", "askap" or "oskar".
+    #[clap(long, value_name = "NAME", help_heading = "MODEL PARAMETERS")]
+    convention: Option<Convention>,
+
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
     #[cfg(feature = "cuda")]
@@ -280,6 +300,12 @@ struct VisSimParams {
 
     /// Should we be precessing?
     apply_precession: bool,
+
+    /// How sky-model Stokes parameters map onto XX, XY, YX, YY.
+    pol_convention: PolConvention,
+
+    /// The J2000 frame (and baseline sign) of the modelled visibilities.
+    uvw_frame: UvwFrame,
 }
 
 impl VisSimParams {
@@ -315,6 +341,9 @@ impl VisSimParams {
             array_position,
             ignore_dut1,
             no_precession,
+            pol_convention,
+            uvw_frame,
+            convention,
             no_progress_bars: _,
             #[cfg(feature = "cuda")]
             cpu,
@@ -682,6 +711,8 @@ impl VisSimParams {
             array_position,
             dut1: dut1.unwrap_or_else(|| Duration::from_seconds(0.0)),
             apply_precession: !no_precession,
+            pol_convention: pol_convention.unwrap_or(convention.unwrap_or_default().pol_convention()),
+            uvw_frame: uvw_frame.unwrap_or(convention.unwrap_or_default().uvw_frame()),
         })
     }
 }
@@ -706,6 +737,8 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
         array_position,
         dut1,
         apply_precession,
+        pol_convention,
+        uvw_frame,
     } = VisSimParams::new(args)?;
 
     let timesteps = {
@@ -773,6 +806,8 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 array_position.latitude_rad,
                 dut1,
                 apply_precession,
+                pol_convention,
+                uvw_frame,
             )?;
 
             let cross_vis_shape = (
@@ -825,6 +860,8 @@ fn vis_simulate(args: &VisSimulateArgs, dry_run: bool) -> Result<(), VisSimulate
                 &timeblocks,
                 time_res,
                 dut1,
+                pol_convention,
+                uvw_frame,
                 freq_res_hz,
                 &fine_chan_freqs,
                 &unflagged_baseline_tile_pairs,
