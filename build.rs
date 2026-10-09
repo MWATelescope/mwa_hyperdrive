@@ -255,7 +255,7 @@ mod gpu {
             };
 
             for arch in arches {
-                hip_target.flag(&format!("--offload-arch={arch}"));
+                hip_target.flag(format!("--offload-arch={arch}"));
             }
 
             match env::var("DEBUG").as_deref() {
