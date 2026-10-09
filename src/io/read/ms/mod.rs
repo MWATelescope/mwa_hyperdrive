@@ -35,8 +35,10 @@ use crate::{
     cli::Warn,
     constants::DEFAULT_MS_DATA_COL_NAME,
     context::{ObsContext, Polarisations},
+    io::read::FileConventions,
     metafits,
 };
+use marlu::{StokesConvention, UvwFrame};
 
 const SUPPORTED_WEIGHT_COL_NAMES: [&str; 2] = ["WEIGHT_SPECTRUM", "WEIGHT"];
 lazy_static::lazy_static! {
@@ -127,10 +129,6 @@ pub struct MsReader {
     /// Is the weight column two-dimensional? We track this here because it
     /// could be 1D or 2D.
     weight_col_is_2d: bool,
-
-    /// If the incoming data uses ant2-ant1 UVWs instead of ant1-ant2 UVWs, we
-    /// need to conjugate the visibilities to match what will be modelled.
-    conjugate_vis: bool,
 }
 
 impl MsReader {
@@ -884,7 +882,7 @@ impl MsReader {
         // Compare the first cross-correlation row's UVWs against UVWs that we
         // would make with the existing tiles. If they're negative of one
         // another, we need to negate our XYZs to match the UVWs the data use.
-        let conjugate_vis = {
+        let uvw_sign_differs = {
             let mut data_uvw = None;
             let mut tile1_xyz = None;
             let mut tile2_xyz = None;
@@ -920,16 +918,71 @@ impl MsReader {
                 *timestamps.first(),
                 dut1,
             ) {
-                "MS UVWs use the other baseline convention; will conjugate incoming visibilities"
-                    .warn();
+                debug!("The MS UVW column has the antenna2 - antenna1 baseline sign");
                 true
             } else {
                 false
             }
         };
 
+        // The conventions the MS records or implies.
+        let conventions = {
+            let mut main_table = read_table(&ms, None)?;
+            let mut keywords = main_table.get_keyword_record()?;
+            let names = keywords.keyword_names()?;
+            let mut kw = |name: &str| -> Option<String> {
+                if names.iter().any(|n| n == name) {
+                    keywords.get_field::<String>(name).ok()
+                } else {
+                    None
+                }
+            };
+            let stokes: Option<StokesConvention> =
+                kw("pyuvdata_polconv").and_then(|s| s.parse().ok());
+            let uvw_frame: Option<UvwFrame> = kw("marlu_uvw_frame").and_then(|s| s.parse().ok());
+            let mut pyuvdata_has_feed = false;
+            let feed_angles = read_table(&ms, Some("FEED")).ok().and_then(|mut feed| {
+                pyuvdata_has_feed = feed
+                    .get_keyword_record()
+                    .ok()
+                    .and_then(|mut k| k.get_field::<bool>("pyuvdata_has_feed").ok())
+                    .unwrap_or(false);
+                let has_col = feed
+                    .column_names()
+                    .map(|c| c.iter().any(|c| c == "RECEPTOR_ANGLE"))
+                    .unwrap_or(false);
+                if !has_col {
+                    return None;
+                }
+                (0..feed.n_rows())
+                    .map(|row| feed.get_cell_as_vec::<f64>("RECEPTOR_ANGLE", row).ok())
+                    .collect::<Option<Vec<Vec<f64>>>>()
+            });
+            // Only writers that record conventions (Marlu with conventions,
+            // pyuvdata) write feed angles that mean what they say for MWA
+            // data; cotter, Birli and older hyperdrive wrote the IAU angles.
+            let feed_angles_trusted = stokes.is_some() || uvw_frame.is_some() || pyuvdata_has_feed;
+            let is_mwa =
+                mwalib_context.is_some() || read_table(&ms, Some("MWA_TILE_POINTING")).is_ok();
+            let is_oskar = read_table(&ms, Some("PHASED_ARRAY")).is_ok();
+            FileConventions::infer(
+                "Measurement Set",
+                stokes,
+                uvw_frame,
+                feed_angles,
+                feed_angles_trusted,
+                is_mwa,
+                is_oskar,
+                Some(uvw_sign_differs),
+                UvwFrame::Casacore,
+            )
+        };
+
         let obs_context = ObsContext {
             input_data_type: VisInputType::MeasurementSet,
+            pol_convention: conventions.pol_convention,
+            uvw_frame: conventions.uvw_frame,
+            feed_angles: conventions.feed_angles,
             obsid,
             timestamps,
             all_timesteps,
@@ -966,7 +1019,6 @@ impl MsReader {
             data_col_name,
             weight_col_name,
             weight_col_is_2d,
-            conjugate_vis,
         };
         Ok(ms)
     }
@@ -1220,80 +1272,50 @@ impl MsReader {
         // Transform the data, depending on what the actual polarisations are.
         if let Some(crosses) = crosses.as_mut() {
             let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.obs_context.polarisations) {
+            match self.obs_context.polarisations {
                 // These pols are all handled correctly.
-                (false, Polarisations::XX_XY_YX_YY) => (),
-                (false, Polarisations::XX) => (),
-                // Just conjugate.
-                (true, Polarisations::XX_XY_YX_YY | Polarisations::XX) => {
-                    crosses.vis_fb.mapv_inplace(|j| {
-                        Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
-                    })
-                }
+                Polarisations::XX_XY_YX_YY => (),
+                Polarisations::XX => (),
 
                 // Because we read in one polarisation, it was treated as XX,
                 // but this is actually YY.
-                (false, Polarisations::YY) => crosses
+                Polarisations::YY => crosses
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
-                (true, Polarisations::YY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
 
                 // What looks like XY is YY.
-                (false, Polarisations::XX_YY) => crosses
+                Polarisations::XX_YY => crosses
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([j[0], c0, c0, j[1]])),
-                (true, Polarisations::XX_YY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), c0, c0, j[1].conj()])),
 
                 // What looks like YX is YY.
-                (false, Polarisations::XX_YY_XY) => crosses
+                Polarisations::XX_YY_XY => crosses
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([j[0], j[1], c0, j[2]])),
-                (true, Polarisations::XX_YY_XY) => crosses
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), j[1].conj(), c0, j[2].conj()])),
             }
         }
         if let Some(autos) = autos.as_mut() {
             let c0 = num_complex::Complex32::default();
-            match (self.conjugate_vis, self.obs_context.polarisations) {
+            match self.obs_context.polarisations {
                 // These pols are all handled correctly.
-                (false, Polarisations::XX_XY_YX_YY) => (),
-                (false, Polarisations::XX) => (),
-                // Just conjugate.
-                (true, Polarisations::XX_XY_YX_YY | Polarisations::XX) => {
-                    autos.vis_fb.mapv_inplace(|j| {
-                        Jones::from([j[0].conj(), j[1].conj(), j[2].conj(), j[3].conj()])
-                    })
-                }
+                Polarisations::XX_XY_YX_YY => (),
+                Polarisations::XX => (),
 
                 // Because we read in one polarisation, it was treated as XX,
                 // but this is actually YY.
-                (false, Polarisations::YY) => autos
+                Polarisations::YY => autos
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0]])),
-                (true, Polarisations::YY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([c0, c0, c0, j[0].conj()])),
 
                 // What looks like XY is YY.
-                (false, Polarisations::XX_YY) => autos
+                Polarisations::XX_YY => autos
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([j[0], c0, c0, j[1]])),
-                (true, Polarisations::XX_YY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), c0, c0, j[1].conj()])),
 
                 // What looks like YX is YY.
-                (false, Polarisations::XX_YY_XY) => autos
+                Polarisations::XX_YY_XY => autos
                     .vis_fb
                     .mapv_inplace(|j| Jones::from([j[0], j[1], c0, j[2]])),
-                (true, Polarisations::XX_YY_XY) => autos
-                    .vis_fb
-                    .mapv_inplace(|j| Jones::from([j[0].conj(), j[1].conj(), c0, j[2].conj()])),
             }
         }
 

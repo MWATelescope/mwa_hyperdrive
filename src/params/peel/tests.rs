@@ -32,6 +32,7 @@ use crate::{
     model::{new_sky_modeller, SkyModellerCpu},
     srclist::{ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList},
 };
+use marlu::{PolConvention, UvwFrame};
 
 // a single-component point source, stokes I.
 macro_rules! point_src_i {
@@ -146,6 +147,9 @@ fn get_simple_obs_context(s: f64) -> ObsContext {
         array_position,
         supplied_array_position: array_position,
         dut1: Some(dut1),
+        pol_convention: PolConvention::MWA,
+        uvw_frame: UvwFrame::Hyperdrive,
+        feed_angles: None,
         tile_names,
         tile_xyzs,
         flagged_tiles: vec![],
@@ -243,6 +247,9 @@ fn get_phase1_obs_context(tile_limit: usize) -> ObsContext {
         array_position,
         supplied_array_position: array_position,
         dut1: Some(dut1),
+        pol_convention: PolConvention::MWA,
+        uvw_frame: UvwFrame::Hyperdrive,
+        feed_angles: None,
         tile_names,
         tile_xyzs,
         flagged_tiles: vec![],
@@ -375,8 +382,8 @@ fn display_vis_tfb(
             );
             let hadec = phase_centre.to_hadec(precession_info.lmst_j2000);
             let precessed_xyzs = precession_info.precess_xyz(&obs_context.tile_xyzs);
-            setup_uvs(&mut tile_uvs_tmp, &precessed_xyzs, hadec);
-            setup_ws(&mut tile_ws_tmp, &precessed_xyzs, hadec);
+            setup_uvs(&mut tile_uvs_tmp, &precessed_xyzs, hadec, 1.0);
+            setup_ws(&mut tile_ws_tmp, &precessed_xyzs, hadec, 1.0);
         } else {
             let lmst = get_lmst(
                 array_pos.longitude_rad,
@@ -384,8 +391,8 @@ fn display_vis_tfb(
                 obs_context.dut1.unwrap_or_default(),
             );
             let hadec = phase_centre.to_hadec(lmst);
-            setup_uvs(&mut tile_uvs_tmp, &obs_context.tile_xyzs, hadec);
-            setup_ws(&mut tile_ws_tmp, &obs_context.tile_xyzs, hadec);
+            setup_uvs(&mut tile_uvs_tmp, &obs_context.tile_xyzs, hadec, 1.0);
+            setup_ws(&mut tile_ws_tmp, &obs_context.tile_xyzs, hadec, 1.0);
         }
         let seconds = time.to_gpst_seconds() - start_seconds;
         display_vis_fb(
@@ -432,8 +439,13 @@ fn setup_tile_uv_w_arrays(
             *lmst = precession_info.lmst_j2000;
             let hadec = phase_centre.to_hadec(*lmst);
             let precessed_xyzs = precession_info.precess_xyz(&obs_context.tile_xyzs);
-            setup_uvs(tile_uvs.as_slice_mut().unwrap(), &precessed_xyzs, hadec);
-            setup_ws(tile_ws.as_slice_mut().unwrap(), &precessed_xyzs, hadec);
+            setup_uvs(
+                tile_uvs.as_slice_mut().unwrap(),
+                &precessed_xyzs,
+                hadec,
+                1.0,
+            );
+            setup_ws(tile_ws.as_slice_mut().unwrap(), &precessed_xyzs, hadec, 1.0);
             xyzs.assign(&ArrayView1::from(&precessed_xyzs));
         } else {
             *lmst = get_lmst(
@@ -446,11 +458,13 @@ fn setup_tile_uv_w_arrays(
                 tile_uvs.as_slice_mut().unwrap(),
                 &obs_context.tile_xyzs,
                 hadec,
+                1.0,
             );
             setup_ws(
                 tile_ws.as_slice_mut().unwrap(),
                 &obs_context.tile_xyzs,
                 hadec,
+                1.0,
             );
             xyzs.assign(&ArrayView1::from(&obs_context.tile_xyzs));
         }
@@ -622,6 +636,8 @@ fn test_vis_rotation() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_tfb.fill(Jones::zero());
@@ -1045,6 +1061,8 @@ fn test_apply_iono_tfb() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_tfb.fill(Jones::zero());
@@ -1212,6 +1230,8 @@ fn test_iono_fit() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_tfb.fill(Jones::zero());
@@ -1356,6 +1376,8 @@ fn test_unpeel_model() {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         );
 
         vis_model_obs_tfb.fill(Jones::zero());
@@ -1498,6 +1520,7 @@ fn test_peel_weight_params() {
             &obs_context,
             &timeblock,
             false, // no precession
+            UvwFrame::Hyperdrive,
             &chanblocks,
             &tile_baseline_flags,
         );
@@ -1650,6 +1673,7 @@ fn test_peel_single_source(peel_type: PeelType) {
             &obs_context,
             &timeblock,
             apply_precession,
+            UvwFrame::Hyperdrive,
             &chanblocks,
             &tile_baseline_flags,
         );
@@ -1666,6 +1690,8 @@ fn test_peel_single_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         )
         .unwrap();
 
@@ -1738,6 +1764,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                     &tile_baseline_flags,
                     &mut *high_res_modeller,
                     !apply_precession,
+                    UvwFrame::Hyperdrive,
                     &multi_progress,
                 )
                 .unwrap(),
@@ -1756,6 +1783,8 @@ fn test_peel_single_source(peel_type: PeelType) {
                         array_pos.latitude_rad,
                         obs_context.dut1.unwrap_or_default(),
                         apply_precession,
+                        PolConvention::MWA,
+                        UvwFrame::Hyperdrive,
                     )
                     .unwrap();
 
@@ -1773,6 +1802,7 @@ fn test_peel_single_source(peel_type: PeelType) {
                         &tile_baseline_flags,
                         &mut high_res_modeller,
                         !apply_precession,
+                        UvwFrame::Hyperdrive,
                         &multi_progress,
                     )
                     .unwrap()
@@ -1959,6 +1989,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
             &obs_context,
             &timeblock,
             apply_precession,
+            UvwFrame::Hyperdrive,
             &chanblocks,
             &tile_baseline_flags,
         );
@@ -2000,6 +2031,8 @@ fn test_peel_multi_source(peel_type: PeelType) {
             array_pos.latitude_rad,
             obs_context.dut1.unwrap_or_default(),
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
         )
         .unwrap();
 
@@ -2079,6 +2112,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                 &tile_baseline_flags,
                 &mut *high_res_modeller,
                 !apply_precession,
+                UvwFrame::Hyperdrive,
                 &multi_progress,
             )
             .unwrap(),
@@ -2097,6 +2131,8 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     array_pos.latitude_rad,
                     obs_context.dut1.unwrap_or_default(),
                     apply_precession,
+                    PolConvention::MWA,
+                    UvwFrame::Hyperdrive,
                 )
                 .unwrap();
 
@@ -2114,6 +2150,7 @@ fn test_peel_multi_source(peel_type: PeelType) {
                     &tile_baseline_flags,
                     &mut high_res_modeller,
                     !apply_precession,
+                    UvwFrame::Hyperdrive,
                     &multi_progress,
                 )
                 .unwrap()
@@ -2666,6 +2703,8 @@ mod gpu_tests {
                 array_pos.latitude_rad,
                 obs_context.dut1.unwrap_or_default(),
                 apply_precession,
+                PolConvention::MWA,
+                UvwFrame::Hyperdrive,
             )
             .unwrap();
 
@@ -3037,6 +3076,7 @@ fn test_peel_weight_preservation() {
         &obs_context,
         &timeblock,
         apply_precession,
+        UvwFrame::Hyperdrive,
         &chanblocks,
         &tile_baseline_flags,
     );
@@ -3103,6 +3143,8 @@ fn test_peel_weight_preservation() {
             &chanblocks,
             &low_res_lambdas_m,
             apply_precession,
+            PolConvention::MWA,
+            UvwFrame::Hyperdrive,
             Some(&output_vis_params), // pass output_vis_params
             rx_ref,
             tx_write,

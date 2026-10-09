@@ -19,6 +19,7 @@ use marlu::{
     constants::{FREQ_WEIGHT_FACTOR, TIME_WEIGHT_FACTOR},
     LatLngHeight, MwaObsContext, RADec, XyzGeodetic,
 };
+use marlu::{PolConvention, UvwFrame};
 use mwalib::MetafitsContext;
 use ndarray::ArcArray2;
 use scopeguard::defer_on_unwind;
@@ -109,7 +110,12 @@ impl VisSimulateParams {
             beam,
             array_position,
             dut1,
-            modelling_params: ModellingParams { apply_precession },
+            modelling_params:
+                ModellingParams {
+                    apply_precession,
+                    pol_convention,
+                    uvw_frame,
+                },
         } = self;
 
         // Channel for writing simulated visibilities.
@@ -165,6 +171,8 @@ impl VisSimulateParams {
                         *array_position,
                         *dut1,
                         *apply_precession,
+                        *pol_convention,
+                        *uvw_frame,
                         *output_autos,
                         weight_factor,
                         tx_model,
@@ -210,6 +218,8 @@ impl VisSimulateParams {
                             output_timeblocks,
                             *time_res,
                             *dut1,
+                            *pol_convention,
+                            *uvw_frame,
                             spw,
                             &unflagged_baseline_tile_pairs,
                             *output_time_average_factor,
@@ -249,6 +259,8 @@ fn model_thread(
     array_position: LatLngHeight,
     dut1: Duration,
     apply_precession: bool,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
     model_autos: bool,
     weight_factor: f64,
     tx: Sender<VisTimestep>,
@@ -266,6 +278,8 @@ fn model_thread(
         array_position.latitude_rad,
         dut1,
         apply_precession,
+        pol_convention,
+        uvw_frame,
     )?;
 
     let num_tiles = unflagged_tile_xyzs.len();

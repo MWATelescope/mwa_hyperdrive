@@ -31,6 +31,7 @@ use std::{num::NonZeroUsize, path::PathBuf};
 use vec1::Vec1;
 
 use crate::{averaging::Timeblock, io::write::VisOutputType};
+use marlu::{PolConvention, UvwFrame};
 
 pub(crate) struct OutputVisParams {
     pub(crate) output_files: Vec1<(PathBuf, VisOutputType)>,
@@ -48,6 +49,11 @@ pub(crate) struct OutputVisParams {
     pub(crate) write_smallest_contiguous_band: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct ModellingParams {
     pub(crate) apply_precession: bool,
+    /// How sky-model Stokes parameters map onto XX, XY, YX, YY.
+    pub(crate) pol_convention: PolConvention,
+    /// The J2000 frame (and baseline sign) of the modelled visibilities.
+    pub(crate) uvw_frame: UvwFrame,
 }

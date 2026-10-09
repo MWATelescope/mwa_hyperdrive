@@ -136,9 +136,9 @@ dependencies = [
 
 [[package]]
 name = "birli"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fb8ae672f05b6c4eefa932dd99c6ce888cc9fca4172b6a610476b44f03abdd3"
+checksum = "6c31367863b7d3e68c7b44a713d7969589fa346b562525e2bf16d7e1f455ce1a"
 dependencies = [
  "built",
  "byteorder",
@@ -149,7 +149,7 @@ dependencies = [
  "itertools 0.14.0",
  "lazy_static",
  "log",
- "marlu",
+ "marlu 0.18.0",
  "regex",
  "serde-pickle",
  "thiserror 2.0.18",
@@ -1534,6 +1534,30 @@ version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a44f089b345c757217d3ec88068a4bdb57c0f0045124c25fe6f194f06bdc101f"
 dependencies = [
+ "built",
+ "cfg-if",
+ "erfa",
+ "hifitime",
+ "icu_locale_core",
+ "icu_normalizer",
+ "icu_properties",
+ "icu_provider",
+ "itertools 0.14.0",
+ "lazy_static",
+ "log",
+ "ndarray 0.16.1",
+ "num-complex",
+ "num-traits",
+ "rayon",
+ "tar",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "marlu"
+version = "0.18.0"
+source = "git+https://github.com/MWATelescope/Marlu.git?branch=feat%2Fconventions#732caba2a5b755fc61723579ac8fc1f6cacbb976"
+dependencies = [
  "approx",
  "built",
  "cfg-if",
@@ -1599,7 +1623,7 @@ dependencies = [
  "hdf5-metno",
  "hdf5-metno-sys",
  "hip-sys",
- "marlu",
+ "marlu 0.17.1",
  "ndarray 0.16.1",
  "num-complex",
  "panic-message",
@@ -1641,7 +1665,7 @@ dependencies = [
  "itertools 0.14.0",
  "lazy_static",
  "log",
- "marlu",
+ "marlu 0.18.0",
  "mwa_hyperbeam",
  "mwalib",
  "ndarray 0.16.1",

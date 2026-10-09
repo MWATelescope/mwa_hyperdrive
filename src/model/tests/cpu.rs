@@ -9,6 +9,7 @@ use ndarray::prelude::*;
 
 use super::*;
 use crate::srclist::{Source, SourceList};
+use marlu::{PolConvention, UvwFrame};
 
 macro_rules! test_modelling {
     ($no_beam:expr, $model_fn:expr,
@@ -347,6 +348,8 @@ fn precession_off_paths_and_autos() {
         obs.array_latitude_rad,
         hifitime::Duration::default(),
         false, // apply_precession off
+        PolConvention::MWA,
+        UvwFrame::Hyperdrive,
     );
 
     // model_timestep should succeed and return UVWs
@@ -623,10 +626,87 @@ fn get_beam_responses_empty_azels() {
         array_latitude_rad,
         dut1,
         apply_precession,
+        PolConvention::MWA,
+        UvwFrame::Hyperdrive,
     );
 
     let mut vis_model_fb = Array2::zeros((1, 1));
     let result = modeller.model_timestep_autos_with(timestamp, vis_model_fb.view_mut());
 
     assert!(result.is_ok());
+}
+
+#[test]
+fn pol_convention_reorders_instrumental_pols() {
+    use crate::{
+        context::Polarisations,
+        srclist::{
+            ComponentType, FluxDensity, FluxDensityType, Source, SourceComponent, SourceList,
+        },
+    };
+    use hifitime::Epoch;
+
+    // A polarised point source off the phase centre, modelled without a beam.
+    let obs = ObsParams::new(true);
+    let mut srclist = SourceList::new();
+    srclist.insert(
+        "polarised".to_string(),
+        Source {
+            components: vec![SourceComponent {
+                radec: *OFF_PHASE_CENTRE,
+                comp_type: ComponentType::Point,
+                flux_type: FluxDensityType::PowerLaw {
+                    si: -0.7,
+                    fd: FluxDensity {
+                        freq: 150e6,
+                        i: 1.0,
+                        q: 0.2,
+                        u: 0.3,
+                        v: 0.4,
+                    },
+                },
+            }]
+            .into_boxed_slice(),
+        },
+    );
+    let model = |convention: PolConvention| {
+        let modeller = SkyModellerCpu::new(
+            &*obs.beam,
+            &srclist,
+            Polarisations::default(),
+            &obs.xyzs,
+            &obs.freqs,
+            &obs.flagged_tiles,
+            obs.phase_centre,
+            obs.array_longitude_rad,
+            obs.array_latitude_rad,
+            hifitime::Duration::default(),
+            true,
+            convention,
+            UvwFrame::Hyperdrive,
+        );
+        modeller
+            .model_timestep(Epoch::from_gpst_seconds(1090008640.0))
+            .expect("model timestep")
+            .0
+    };
+    let mwa = model(PolConvention::MWA);
+    let iau = model(PolConvention::IAU);
+    let askap = model(PolConvention::ASKAP);
+    assert_eq!(mwa.dim(), iau.dim());
+    assert!(
+        mwa.iter().any(|j| j[1].norm() > 0.0),
+        "XY should be non-zero"
+    );
+    for (m, (i, a)) in mwa.iter().zip(iau.iter().zip(askap.iter())) {
+        // IAU is MWA with XX <-> YY and XY <-> YX swapped ...
+        assert_abs_diff_eq!(i[0], m[3], epsilon = 1e-6);
+        assert_abs_diff_eq!(i[1], m[2], epsilon = 1e-6);
+        assert_abs_diff_eq!(i[2], m[1], epsilon = 1e-6);
+        assert_abs_diff_eq!(i[3], m[0], epsilon = 1e-6);
+        // ... and ASKAP is half of IAU.
+        for p in 0..4 {
+            assert_abs_diff_eq!(a[p], i[p] * 0.5, epsilon = 1e-6);
+        }
+    }
 }

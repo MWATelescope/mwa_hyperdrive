@@ -528,7 +528,7 @@ impl VisSimulateArgs {
             Some(get_dipole_gains(&metafits)),
             None,
         )?;
-        let modelling_params = modelling_args.parse();
+        let modelling_params = modelling_args.parse(None);
 
         let source_list = srclist_args.parse(
             phase_centre,

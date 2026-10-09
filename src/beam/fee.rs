@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use log::debug;
 use marlu::{AzEl, Jones};
+use mwa_hyperbeam::{AzEl as HbAzEl, Jones as HbJones};
 use ndarray::prelude::*;
 
 use super::{partial_to_full, validate_delays, Beam, BeamError, BeamType, Delays};
@@ -103,16 +104,18 @@ impl FEEBeam {
         amps: &[f64],
         latitude_rad: f64,
     ) -> Result<Jones<f64>, mwa_hyperbeam::fee::FEEBeamError> {
-        self.hyperbeam_object.calc_jones_pair(
-            azel.az,
-            azel.za(),
-            freq_hz as _,
-            delays,
-            amps,
-            true,
-            Some(latitude_rad),
-            false,
-        )
+        self.hyperbeam_object
+            .calc_jones_pair(
+                azel.az,
+                azel.za(),
+                freq_hz as _,
+                delays,
+                amps,
+                true,
+                Some(latitude_rad),
+                false,
+            )
+            .map(from_hb_jones)
     }
 
     fn calc_jones_array(
@@ -123,15 +126,18 @@ impl FEEBeam {
         amps: &[f64],
         latitude_rad: f64,
     ) -> Result<Vec<Jones<f64>>, mwa_hyperbeam::fee::FEEBeamError> {
-        self.hyperbeam_object.calc_jones_array(
-            azels,
-            freq_hz as _,
-            delays,
-            amps,
-            true,
-            Some(latitude_rad),
-            false,
-        )
+        let azels: Vec<HbAzEl> = azels.iter().map(|a| to_hb_azel(*a)).collect();
+        self.hyperbeam_object
+            .calc_jones_array(
+                &azels,
+                freq_hz as _,
+                delays,
+                amps,
+                true,
+                Some(latitude_rad),
+                false,
+            )
+            .map(|jones| jones.into_iter().map(from_hb_jones).collect())
     }
 
     fn calc_jones_array_inner(
@@ -143,17 +149,39 @@ impl FEEBeam {
         latitude_rad: f64,
         results: &mut [Jones<f64>],
     ) -> Result<(), mwa_hyperbeam::fee::FEEBeamError> {
+        let azels: Vec<HbAzEl> = azels.iter().map(|a| to_hb_azel(*a)).collect();
+        let mut hb_results = vec![HbJones::default(); results.len()];
         self.hyperbeam_object.calc_jones_array_inner(
-            azels,
+            &azels,
             freq_hz as _,
             delays,
             amps,
             true,
             Some(latitude_rad),
             false,
-            results,
-        )
+            &mut hb_results,
+        )?;
+        for (result, hb_result) in results.iter_mut().zip(hb_results) {
+            *result = from_hb_jones(hb_result);
+        }
+        Ok(())
     }
+}
+
+// hyperbeam re-exports its own Marlu's `AzEl` and `Jones` so that callers can
+// be built against a different Marlu version (as hyperdrive is until
+// hyperbeam catches up with the Marlu release carrying the conventions
+// module). Both types are plain data, so convert at the boundary.
+
+fn to_hb_azel(azel: AzEl) -> HbAzEl {
+    HbAzEl {
+        az: azel.az,
+        el: azel.el,
+    }
+}
+
+fn from_hb_jones(jones: HbJones<f64>) -> Jones<f64> {
+    Jones::from(*jones)
 }
 
 impl Beam for FEEBeam {

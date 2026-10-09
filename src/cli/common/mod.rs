@@ -40,6 +40,7 @@ use crate::{
     constants::{
         DEFAULT_ELEVATION_LIMIT, DEFAULT_VETO_THRESHOLD, MWA_HEIGHT_M, MWA_LAT_DEG, MWA_LONG_DEG,
     },
+    context::ObsContext,
     io::{
         get_single_match_from_glob,
         write::{can_write_to_file, VisOutputType, VIS_OUTPUT_EXTENSIONS},
@@ -52,6 +53,7 @@ use crate::{
     },
     MODEL_DEVICE,
 };
+use marlu::{Convention, PolConvention, UvwFrame};
 
 lazy_static::lazy_static! {
     pub(super) static ref ARG_FILE_TYPES_COMMA_SEPARATED: String = ArgFileTypes::iter().join(", ");
@@ -577,6 +579,46 @@ pub(super) struct ModellingArgs {
     #[serde(default)]
     pub(super) no_precession: bool,
 
+    /// How the sky model's Stokes I, Q, U, V map onto the instrumental XX,
+    /// XY, YX, YY visibilities. "mwa": X east-west (XX = I-Q, XY = U-iV, YX
+    /// = U+iV, YY = I+Q), also OSKAR's ("oskar"); "iau": X north-south (XX =
+    /// I+Q, XY = U+iV, YX = U-iV, YY = I-Q), what casacore/CASA, DP3
+    /// (LOFAR) and WSClean use ("lofar", "casacore" and "wsclean" are
+    /// aliases); "askap": the IAU mapping halved (I = XX+YY, alias
+    /// "askapsoft"). The parts can also be given UVH5-style as
+    /// "east|north[/avg|sum]". When not given, the convention recorded in or
+    /// implied by the input data is used (vis-simulate: "mwa"). The MWA FEE
+    /// beam is defined in the MWA convention.
+    #[arg(long, value_name = "NAME", help_heading = "MODELLING")]
+    #[serde(default)]
+    pub(super) pol_convention: Option<PolConvention>,
+
+    /// The frame of the modelled UVWs. "hyperdrive" (aliases "marlu",
+    /// "mwa", "aips"): the array is precessed to J2000 and rotated with the
+    /// mean sidereal time, and a baseline is antenna1 - antenna2.
+    /// "casacore" (aliases "lofar", "casa", "wsclean", "askap", "uvh5",
+    /// "pyuvdata"): what casacore writes into the UVW column of a
+    /// Measurement Set and what DP3, WSClean, CASA and ASKAPsoft use -
+    /// apparent sidereal time, the annual aberration of the phase centre
+    /// taken out with a rigid rotation, and a baseline is antenna2 -
+    /// antenna1 (so the visibilities are the complex conjugates of the
+    /// hyperdrive frame's); needs precession. "oskar": no precession (sky
+    /// coordinates are taken as apparent coordinates of date), apparent
+    /// sidereal time, antenna1 - antenna2. When not given, the frame
+    /// recorded in or implied by the input data is used (vis-simulate:
+    /// "hyperdrive").
+    #[arg(long, value_name = "NAME", help_heading = "MODELLING")]
+    #[serde(default)]
+    pub(super) uvw_frame: Option<UvwFrame>,
+
+    /// A preset for both --pol-convention and --uvw-frame: "mwa", "iau",
+    /// "lofar", "casacore" (aliases "casa", "wsclean", "uvh5", "pyuvdata"),
+    /// "askap" (alias "askapsoft") or "oskar". --pol-convention and
+    /// --uvw-frame override the preset's parts.
+    #[arg(long, value_name = "NAME", help_heading = "MODELLING")]
+    #[serde(default)]
+    pub(super) convention: Option<Convention>,
+
     /// Use the CPU for visibility generation. This is deliberately made
     /// non-default because using a GPU is much faster.
     #[cfg(any(feature = "cuda", feature = "hip"))]
@@ -589,17 +631,41 @@ impl ModellingArgs {
     pub(super) fn merge(self, other: Self) -> Self {
         Self {
             no_precession: self.no_precession || other.no_precession,
+            pol_convention: self.pol_convention.or(other.pol_convention),
+            uvw_frame: self.uvw_frame.or(other.uvw_frame),
+            convention: self.convention.or(other.convention),
             #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu: self.cpu || other.cpu,
         }
     }
 
-    pub(super) fn parse(self) -> ModellingParams {
+    /// Convert the arguments into parameters. When no convention arguments
+    /// are given, the conventions of the input data (`data`) are used, else
+    /// the MWA's.
+    pub(super) fn parse(self, data: Option<&ObsContext>) -> ModellingParams {
         let ModellingArgs {
             no_precession,
+            pol_convention,
+            uvw_frame,
+            convention,
             #[cfg(any(feature = "cuda", feature = "hip"))]
             cpu,
         } = self;
+        let (pol_convention, pol_src) = match (pol_convention, convention, data) {
+            (Some(p), _, _) => (p, "--pol-convention"),
+            (None, Some(c), _) => (c.pol_convention(), "--convention"),
+            (None, None, Some(d)) => (d.pol_convention, "the input data"),
+            (None, None, None) => (PolConvention::default(), "the default"),
+        };
+        let (uvw_frame, frame_src) = match (uvw_frame, convention, data) {
+            (Some(f), _, _) => (f, "--uvw-frame"),
+            (None, Some(c), _) => (c.uvw_frame(), "--convention"),
+            (None, None, Some(d)) => (d.uvw_frame, "the input data"),
+            (None, None, None) => (UvwFrame::default(), "the default"),
+        };
+        if no_precession && uvw_frame == UvwFrame::Casacore {
+            "--uvw-frame casacore needs precession, but --no-precession was given; the modelled UVWs will be in hyperdrive's frame".warn();
+        }
 
         #[cfg(any(feature = "cuda", feature = "hip"))]
         if cpu {
@@ -658,11 +724,22 @@ impl ModellingArgs {
                 );
             }
         }
+        block.push(
+            format!(
+                "Polarisation convention: {} ({}; from {pol_src})",
+                pol_convention,
+                pol_convention.describe()
+            )
+            .into(),
+        );
+        block.push(format!("UVW frame: {} (from {frame_src})", uvw_frame.describe()).into());
         printer.push_block(block);
         printer.display();
 
         ModellingParams {
             apply_precession: !no_precession,
+            pol_convention,
+            uvw_frame,
         }
     }
 }

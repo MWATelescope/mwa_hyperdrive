@@ -6,7 +6,6 @@
 mod tests;
 
 use std::{
-    borrow::Cow,
     f64::consts::TAU,
     io::Write,
     num::NonZeroUsize,
@@ -23,10 +22,8 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use itertools::{izip, Itertools};
 use log::{debug, info, trace, warn};
 use marlu::{
-    constants::VEL_C,
-    pos::xyz::xyzs_to_cross_uvws,
-    precession::{get_lmst, precess_time},
-    HADec, Jones, LatLngHeight, RADec, XyzGeodetic, UVW,
+    constants::VEL_C, pos::xyz::xyzs_to_cross_uvws, HADec, Jones, LatLngHeight, RADec, UvwFrame,
+    XyzGeodetic, UVW,
 };
 use ndarray::{prelude::*, Zip};
 use num_complex::Complex;
@@ -45,7 +42,7 @@ use crate::{
         write::{write_vis, VisTimestep},
     },
     math::div_ceil,
-    model::{ModelDevice, ModelError, SkyModeller, SkyModellerCpu},
+    model::{frame::geometry_at, ModelDevice, ModelError, SkyModeller, SkyModellerCpu},
     srclist::SourceList,
     Chanblock, TileBaselineFlags, MODEL_DEVICE, PROGRESS_BARS,
 };
@@ -90,12 +87,14 @@ pub(crate) struct PeelWeightParams {
 
 impl PeelWeightParams {
     /// Applies the baseline weights to the visibilities.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_tfb(
         &self,
         mut vis_weights_tfb: ArrayViewMut3<f32>,
         obs_context: &ObsContext,
         timeblock: &Timeblock,
         apply_precession: bool,
+        uvw_frame: UvwFrame,
         chanblocks: &[Chanblock],
         tile_baseline_flags: &TileBaselineFlags,
     ) {
@@ -129,23 +128,22 @@ impl PeelWeightParams {
 
         let average_timestamp = timeblock.median;
 
-        let (tile_xyzs, lmst) = if apply_precession {
-            let precession_info = precess_time(
-                array_position.longitude_rad,
-                array_position.latitude_rad,
-                obs_context.phase_centre,
-                average_timestamp,
-                dut1,
-            );
-            let precessed_tile_xyzs = precession_info.precess_xyz(&unflagged_tile_xyzs);
-            (precessed_tile_xyzs, precession_info.lmst_j2000)
-        } else {
-            (
-                unflagged_tile_xyzs.clone(),
-                get_lmst(array_position.longitude_rad, average_timestamp, dut1),
-            )
-        };
-        let uvws = xyzs_to_cross_uvws(&tile_xyzs, obs_context.phase_centre.to_hadec(lmst));
+        // The baseline sign of the frame doesn't matter for the lengths and
+        // taper below, but the geometry (sidereal time, precession) does.
+        let geometry = geometry_at(
+            uvw_frame,
+            apply_precession,
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+            obs_context.phase_centre,
+            average_timestamp,
+            dut1,
+            &unflagged_tile_xyzs,
+        );
+        let uvws = xyzs_to_cross_uvws(
+            &geometry.xyzs,
+            obs_context.phase_centre.to_hadec(geometry.lst),
+        );
 
         assert_eq!(baseline_weights.len(), uvws.len());
         for (UVW { u, v, w }, baseline_weight) in uvws.into_iter().zip(baseline_weights.iter_mut())
@@ -162,29 +160,22 @@ impl PeelWeightParams {
         for (&time, mut tile_uvs_high_res) in
             izip!(timestamps.iter(), tile_uvs_high_res.outer_iter_mut(),)
         {
-            let (tile_xyzs, lmst) = if apply_precession {
-                let precession_info = precess_time(
-                    array_position.longitude_rad,
-                    array_position.latitude_rad,
-                    obs_context.phase_centre,
-                    time,
-                    dut1,
-                );
-                let precessed_tile_xyzs = precession_info.precess_xyz(&unflagged_tile_xyzs);
-                (precessed_tile_xyzs, precession_info.lmst_j2000)
-            } else {
-                (
-                    unflagged_tile_xyzs.to_owned(),
-                    get_lmst(array_position.longitude_rad, time, dut1),
-                )
-            };
-            let hadec_phase = obs_context.phase_centre.to_hadec(lmst);
-            let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
-            let (s_dec, c_dec) = hadec_phase.dec.sin_cos();
-            for (tile_uv, &tile_xyz) in izip!(tile_uvs_high_res.iter_mut(), tile_xyzs.iter(),) {
-                let uvw = UVW::from_xyz_inner(tile_xyz, s_ha, c_ha, s_dec, c_dec);
-                *tile_uv = UV { u: uvw.u, v: uvw.v };
-            }
+            let geometry = geometry_at(
+                uvw_frame,
+                apply_precession,
+                array_position.longitude_rad,
+                array_position.latitude_rad,
+                obs_context.phase_centre,
+                time,
+                dut1,
+                &unflagged_tile_xyzs,
+            );
+            setup_uvs(
+                tile_uvs_high_res.as_slice_mut().unwrap(),
+                &geometry.xyzs,
+                obs_context.phase_centre.to_hadec(geometry.lst),
+                uvw_frame.baseline_sign(),
+            );
         }
 
         // use the baseline taper from the RTS, 1-exp(-(u*u+v*v)/(2*sig^2));
@@ -253,7 +244,12 @@ impl PeelParams {
             iono_outputs,
             beam,
             source_list,
-            modelling_params: ModellingParams { apply_precession },
+            modelling_params:
+                ModellingParams {
+                    apply_precession,
+                    pol_convention,
+                    uvw_frame,
+                },
             iono_timeblocks,
             iono_time_average_factor,
             low_res_spw,
@@ -426,6 +422,8 @@ impl PeelParams {
                         input_vis_params.dut1,
                         &all_fine_chan_freqs_hz,
                         *apply_precession,
+                        *pol_convention,
+                        *uvw_frame,
                         rx_data,
                         tx_residual,
                         &error,
@@ -478,6 +476,8 @@ impl PeelParams {
                         &spw.chanblocks,
                         &low_res_lambdas_m,
                         *apply_precession,
+                        *pol_convention,
+                        *uvw_frame,
                         output_vis_params.as_ref(),
                         rx_full_residual,
                         tx_write,
@@ -516,6 +516,8 @@ impl PeelParams {
                             &output_vis_params.output_timeblocks,
                             input_vis_params.time_res,
                             input_vis_params.dut1,
+                            *pol_convention,
+                            *uvw_frame,
                             spw,
                             &tile_baseline_flags
                                 .unflagged_cross_baseline_to_tile_map
@@ -1075,8 +1077,10 @@ fn iono_fit(
     [alpha, beta, s_vm, s_mm]
 }
 
-#[cfg(test)]
-fn setup_ws(tile_ws: &mut [W], tile_xyzs: &[XyzGeodetic], phase_centre: HADec) {
+/// Per-tile Ws towards `phase_centre`. `sign` is the UVW frame's baseline
+/// sign ([`UvwFrame::baseline_sign`]): the Ws are scaled by it so that
+/// `tile1 - tile2` is the frame's baseline.
+fn setup_ws(tile_ws: &mut [W], tile_xyzs: &[XyzGeodetic], phase_centre: HADec, sign: f64) {
     // assert_eq!(tile_ws.len(), tile_xyzs.len());
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
@@ -1084,11 +1088,12 @@ fn setup_ws(tile_ws: &mut [W], tile_xyzs: &[XyzGeodetic], phase_centre: HADec) {
         .iter_mut()
         .zip_eq(tile_xyzs.iter().copied())
         .for_each(|(tile_w, tile_xyz)| {
-            *tile_w = W::_from_xyz(tile_xyz, s_ha, c_ha, s_dec, c_dec);
+            *tile_w = W(W::_from_xyz(tile_xyz, s_ha, c_ha, s_dec, c_dec).0 * sign);
         });
 }
 
-fn setup_uvs(tile_uvs: &mut [UV], tile_xyzs: &[XyzGeodetic], phase_centre: HADec) {
+/// Per-tile UVs towards `phase_centre`; see [`setup_ws`] for `sign`.
+fn setup_uvs(tile_uvs: &mut [UV], tile_xyzs: &[XyzGeodetic], phase_centre: HADec, sign: f64) {
     // assert_eq!(tile_uvs.len(), tile_xyzs.len());
     let (s_ha, c_ha) = phase_centre.ha.sin_cos();
     let (s_dec, c_dec) = phase_centre.dec.sin_cos();
@@ -1096,7 +1101,11 @@ fn setup_uvs(tile_uvs: &mut [UV], tile_xyzs: &[XyzGeodetic], phase_centre: HADec
         .iter_mut()
         .zip_eq(tile_xyzs.iter().copied())
         .for_each(|(tile_uv, tile_xyz)| {
-            *tile_uv = UV::from_xyz(tile_xyz, s_ha, c_ha, s_dec, c_dec);
+            let uv = UV::from_xyz(tile_xyz, s_ha, c_ha, s_dec, c_dec);
+            *tile_uv = UV {
+                u: uv.u * sign,
+                v: uv.v * sign,
+            };
         });
 }
 
@@ -1132,10 +1141,14 @@ fn peel_cpu(
     tile_baseline_flags: &TileBaselineFlags,
     high_res_modeller: &mut dyn SkyModeller,
     no_precession: bool,
+    uvw_frame: UvwFrame,
     multi_progress_bar: &MultiProgress,
 ) -> Result<(), PeelError> {
     // TODO: Do we allow multiple timesteps in the low-res data?
     let (num_passes, num_loops, convergence) = peel_loop_params.get();
+    // Per-tile UVWs are scaled by this so that tile1 - tile2 is the frame's
+    // baseline (the data's), as the modelled visibilities are.
+    let sign = uvw_frame.baseline_sign();
 
     let all_fine_chan_lambdas_m = chanblocks
         .iter()
@@ -1205,63 +1218,43 @@ fn peel_cpu(
         tile_uvs_hi_obs.outer_iter_mut(),
         tile_ws_hi_obs.outer_iter_mut(),
     ) {
-        let (lmst, precessed_xyzs) = if !no_precession {
-            let precession_info = precess_time(
-                array_position.longitude_rad,
-                array_position.latitude_rad,
-                obs_context.phase_centre,
-                time,
-                dut1,
-            );
-            let precessed_xyzs = precession_info.precess_xyz(&unflagged_tile_xyzs);
-            (precession_info.lmst_j2000, precessed_xyzs)
-        } else {
-            let lmst = get_lmst(array_position.longitude_rad, time, dut1);
-            (lmst, unflagged_tile_xyzs.clone())
-        };
-        let hadec_phase = obs_context.phase_centre.to_hadec(lmst);
-        let (s_ha, c_ha) = hadec_phase.ha.sin_cos();
-        let (s_dec, c_dec) = hadec_phase.dec.sin_cos();
-        for (tile_uv, tile_w, &precessed_xyzs) in izip!(
-            tile_uvs.iter_mut(),
-            tile_ws.iter_mut(),
-            precessed_xyzs.iter(),
-        ) {
-            let uvw = UVW::from_xyz_inner(precessed_xyzs, s_ha, c_ha, s_dec, c_dec);
-            *tile_uv = UV { u: uvw.u, v: uvw.v };
-            *tile_w = W(uvw.w);
-        }
-    }
-
-    let (average_lmst, _average_latitude, average_tile_xyzs) = if no_precession {
-        let average_timestamp = timeblock.median;
-        let average_tile_xyzs =
-            ArrayView2::from_shape((1, num_tiles), &unflagged_tile_xyzs).expect("correct shape");
-        (
-            get_lmst(array_position.longitude_rad, average_timestamp, dut1),
-            array_position.latitude_rad,
-            CowArray::from(average_tile_xyzs),
-        )
-    } else {
-        let average_timestamp = timeblock.median;
-        let average_precession_info = precess_time(
+        let geometry = geometry_at(
+            uvw_frame,
+            !no_precession,
             array_position.longitude_rad,
             array_position.latitude_rad,
             obs_context.phase_centre,
-            average_timestamp,
+            time,
             dut1,
+            &unflagged_tile_xyzs,
         );
-        let average_precessed_tile_xyzs = Array2::from_shape_vec(
-            (1, num_tiles),
-            average_precession_info.precess_xyz(&unflagged_tile_xyzs),
-        )
-        .expect("correct shape");
+        let hadec_phase = obs_context.phase_centre.to_hadec(geometry.lst);
+        setup_uvs(
+            tile_uvs.as_slice_mut().unwrap(),
+            &geometry.xyzs,
+            hadec_phase,
+            sign,
+        );
+        setup_ws(
+            tile_ws.as_slice_mut().unwrap(),
+            &geometry.xyzs,
+            hadec_phase,
+            sign,
+        );
+    }
 
-        (
-            average_precession_info.lmst_j2000,
-            average_precession_info.array_latitude_j2000,
-            CowArray::from(average_precessed_tile_xyzs),
-        )
+    let (average_lmst, average_tile_xyzs) = {
+        let geometry = geometry_at(
+            uvw_frame,
+            !no_precession,
+            array_position.longitude_rad,
+            array_position.latitude_rad,
+            obs_context.phase_centre,
+            timeblock.median,
+            dut1,
+            &unflagged_tile_xyzs,
+        );
+        (geometry.lst, geometry.xyzs.into_owned())
     };
 
     // Temporary visibility array, re-used for each timestep
@@ -1313,33 +1306,29 @@ fn peel_cpu(
                 tile_uvs_hi_src.outer_iter_mut(),
                 tile_ws_hi_src.outer_iter_mut(),
             ) {
-                let (lmst, precessed_xyzs) = if !no_precession {
-                    let precession_info = precess_time(
-                        array_position.longitude_rad,
-                        array_position.latitude_rad,
-                        obs_context.phase_centre,
-                        time,
-                        dut1,
-                    );
-                    let precessed_xyzs = precession_info.precess_xyz(&unflagged_tile_xyzs);
-                    (precession_info.lmst_j2000, precessed_xyzs)
-                } else {
-                    let lmst = get_lmst(array_position.longitude_rad, time, dut1);
-                    (lmst, unflagged_tile_xyzs.clone())
-                };
-                let hadec_source = source_pos.to_hadec(lmst);
-                let (s_ha, c_ha) = hadec_source.ha.sin_cos();
-                let (s_dec, c_dec) = hadec_source.dec.sin_cos();
-                for (tile_uv, tile_w, &precessed_xyz) in izip!(
-                    tile_uvs_src.iter_mut(),
-                    tile_ws_src.iter_mut(),
-                    precessed_xyzs.iter(),
-                ) {
-                    let UVW { u, v, w } =
-                        UVW::from_xyz_inner(precessed_xyz, s_ha, c_ha, s_dec, c_dec);
-                    *tile_uv = UV { u, v };
-                    *tile_w = W(w);
-                }
+                let geometry = geometry_at(
+                    uvw_frame,
+                    !no_precession,
+                    array_position.longitude_rad,
+                    array_position.latitude_rad,
+                    obs_context.phase_centre,
+                    time,
+                    dut1,
+                    &unflagged_tile_xyzs,
+                );
+                let hadec_source = source_pos.to_hadec(geometry.lst);
+                setup_uvs(
+                    tile_uvs_src.as_slice_mut().unwrap(),
+                    &geometry.xyzs,
+                    hadec_source,
+                    sign,
+                );
+                setup_ws(
+                    tile_ws_src.as_slice_mut().unwrap(),
+                    &geometry.xyzs,
+                    hadec_source,
+                    sign,
+                );
 
                 multi_progress_bar.suspend(|| trace!("{:?}: high res model", start.elapsed()));
                 high_res_modeller.model_timestep_with(time, model_hi_obs_fb.view_mut())?;
@@ -1349,8 +1338,9 @@ fn peel_cpu(
             let hadec_source = source_pos.to_hadec(average_lmst);
             setup_uvs(
                 tile_uvs_lo_src.as_slice_mut().unwrap(),
-                average_tile_xyzs.as_slice().unwrap(),
+                &average_tile_xyzs,
                 hadec_source,
+                sign,
             );
 
             // rotate residuals to source phase centre
@@ -1625,6 +1615,8 @@ fn subtract_thread(
     dut1: Duration,
     all_fine_chan_freqs_hz: &[f64],
     apply_precession: bool,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
     rx_data: Receiver<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
     tx_residual: Sender<(Array2<Jones<f32>>, Array2<f32>, Epoch)>,
     error: &AtomicCell<bool>,
@@ -1645,6 +1637,8 @@ fn subtract_thread(
             array_position.latitude_rad,
             dut1,
             apply_precession,
+            pol_convention,
+            uvw_frame,
         ))
     } else {
         None
@@ -1665,6 +1659,8 @@ fn subtract_thread(
             array_position.latitude_rad,
             dut1,
             apply_precession,
+            pol_convention,
+            uvw_frame,
         )?;
         Some(modeller)
     } else {
@@ -1684,42 +1680,6 @@ fn subtract_thread(
         // we'll turn negate this array and then we have
         // residuals.
         vis_data_fb.iter_mut().for_each(|j| *j *= -1.0);
-
-        // let (lst, xyzs, latitude) =
-        if apply_precession {
-            let precession_info = precess_time(
-                array_position.longitude_rad,
-                array_position.latitude_rad,
-                obs_context.phase_centre,
-                timestamp,
-                dut1,
-            );
-            // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs = precession_info.precess_xyz(unflagged_tile_xyzs);
-            debug!(
-                "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
-                timestamp.to_gpst_seconds(),
-                precession_info.lmst.to_degrees(),
-                precession_info.lmst_j2000.to_degrees()
-            );
-            (
-                precession_info.lmst_j2000,
-                Cow::from(precessed_tile_xyzs),
-                precession_info.array_latitude_j2000,
-            )
-        } else {
-            let lst = get_lmst(array_position.longitude_rad, timestamp, dut1);
-            debug!(
-                "Modelling GPS timestamp {}, LMST {}°",
-                timestamp.to_gpst_seconds(),
-                lst.to_degrees()
-            );
-            (
-                lst,
-                Cow::from(unflagged_tile_xyzs),
-                array_position.latitude_rad,
-            )
-        };
 
         sub_progress.tick();
 
@@ -1813,6 +1773,7 @@ fn joiner_thread<'a>(
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use crate::model::SkyModellerGpu;
+use marlu::PolConvention;
 // use SkyModellerGpu
 
 #[allow(clippy::too_many_arguments)]
@@ -1829,6 +1790,8 @@ fn peel_thread(
     chanblocks: &[Chanblock],
     low_res_lambdas_m: &[f64],
     apply_precession: bool,
+    pol_convention: PolConvention,
+    uvw_frame: UvwFrame,
     output_vis_params: Option<&OutputVisParams>,
     rx_full_residual: Receiver<FullResidual>,
     tx_write: Sender<VisTimestep>,
@@ -1859,6 +1822,7 @@ fn peel_thread(
             obs_context,
             timeblock,
             apply_precession,
+            uvw_frame,
             chanblocks,
             tile_baseline_flags,
         );
@@ -1879,6 +1843,8 @@ fn peel_thread(
                     array_position.latitude_rad,
                     dut1,
                     apply_precession,
+                    pol_convention,
+                    uvw_frame,
                 );
 
                 peel_cpu(
@@ -1895,6 +1861,7 @@ fn peel_thread(
                     tile_baseline_flags,
                     &mut high_res_modeller,
                     !apply_precession,
+                    uvw_frame,
                     multi_progress,
                 )?;
             }
@@ -1913,6 +1880,8 @@ fn peel_thread(
                     array_position.latitude_rad,
                     dut1,
                     apply_precession,
+                    pol_convention,
+                    uvw_frame,
                 )?;
                 peel_gpu(
                     vis_residual_tfb.view_mut(),
@@ -1928,6 +1897,7 @@ fn peel_thread(
                     tile_baseline_flags,
                     &mut high_res_modeller,
                     !apply_precession,
+                    uvw_frame,
                     multi_progress,
                 )?;
             }

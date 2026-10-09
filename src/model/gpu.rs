@@ -4,18 +4,14 @@
 
 //! Code to generate sky-model visibilities with CUDA/HIP.
 
-use std::{borrow::Cow, collections::HashSet};
+use std::collections::HashSet;
 
 use hifitime::{Duration, Epoch};
-use log::debug;
-use marlu::{
-    pos::xyz::xyzs_to_cross_uvws,
-    precession::{get_lmst, precess_time},
-    Jones, LmnRime, RADec, XyzGeodetic, UVW,
-};
+use marlu::{pos::xyz::xyzs_to_cross_uvws, Jones, LmnRime, RADec, XyzGeodetic, UVW};
 use ndarray::prelude::*;
 
 use super::{mask_pols, shapelets, ModelError, SkyModeller};
+use crate::model::frame::{geometry_at, Geometry};
 use crate::{
     beam::{Beam, BeamGpu},
     context::Polarisations,
@@ -25,6 +21,7 @@ use crate::{
         SourceComponent, SourceList,
     },
 };
+use marlu::{PolConvention, UvwFrame};
 
 /// The first axis of `*_list_fds` is unflagged fine channel frequency, the
 /// second is the source component. The length of `hadecs`, `lmns`,
@@ -46,6 +43,10 @@ pub struct SkyModellerGpu<'a> {
     dut1: Duration,
     /// Shift baselines, LSTs and array latitudes back to J2000.
     precess: bool,
+    /// How sky-model Stokes parameters map onto XX, XY, YX, YY.
+    pol_convention: PolConvention,
+    /// The J2000 frame (and baseline sign) of the modelled visibilities.
+    uvw_frame: UvwFrame,
 
     /// The *unprecessed* [`XyzGeodetic`] positions of each of the unflagged
     /// tiles.
@@ -159,6 +160,8 @@ impl<'a> SkyModellerGpu<'a> {
         array_latitude_rad: f64,
         dut1: Duration,
         apply_precession: bool,
+        pol_convention: PolConvention,
+        uvw_frame: UvwFrame,
     ) -> Result<SkyModellerGpu<'a>, ModelError> {
         let mut point_power_law_radecs: Vec<RADec> = vec![];
         let mut point_power_law_lmns: Vec<gpu::LmnRime> = vec![];
@@ -252,7 +255,7 @@ impl<'a> SkyModellerGpu<'a> {
                     // defined one, so the the GPU code doesn't need to keep
                     // track of all reference freqs.
                     let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
-                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes(pol_convention);
                     let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
 
                     match &comp.comp_type {
@@ -299,7 +302,7 @@ impl<'a> SkyModellerGpu<'a> {
 
                 FluxDensityType::CurvedPowerLaw { si, fd, q } => {
                     let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
-                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes(pol_convention);
                     let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
 
                     // A new SI is needed when changing the reference freq.
@@ -438,6 +441,8 @@ impl<'a> SkyModellerGpu<'a> {
             array_latitude: array_latitude_rad,
             dut1,
             precess: apply_precession,
+            pol_convention,
+            uvw_frame,
 
             unflagged_tile_xyzs,
             num_baselines: num_baselines.try_into().expect("not bigger than i32::MAX"),
@@ -616,7 +621,7 @@ impl<'a> SkyModellerGpu<'a> {
                     // defined one, so the the GPU code doesn't need to keep
                     // track of all reference freqs.
                     let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
-                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes(self.pol_convention);
                     let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
 
                     match &comp.comp_type {
@@ -663,7 +668,7 @@ impl<'a> SkyModellerGpu<'a> {
 
                 FluxDensityType::CurvedPowerLaw { si, fd, q } => {
                     let fd_at_150mhz = comp.estimate_at_freq(gpu::POWER_LAW_FD_REF_FREQ as _);
-                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes();
+                    let inst_fd: Jones<f64> = fd_at_150mhz.to_inst_stokes(self.pol_convention);
                     let gpu_inst_fd = jones_to_gpu_jones(inst_fd);
 
                     // A new SI is needed when changing the reference freq.
@@ -765,11 +770,14 @@ impl<'a> SkyModellerGpu<'a> {
         }
 
         let point_list_fds =
-            get_instrumental_flux_densities(&point_list_fds, self.freqs).mapv(jones_to_gpu_jones);
-        let gaussian_list_fds = get_instrumental_flux_densities(&gaussian_list_fds, self.freqs)
-            .mapv(jones_to_gpu_jones);
-        let shapelet_list_fds = get_instrumental_flux_densities(&shapelet_list_fds, self.freqs)
-            .mapv(jones_to_gpu_jones);
+            get_instrumental_flux_densities(&point_list_fds, self.freqs, self.pol_convention)
+                .mapv(jones_to_gpu_jones);
+        let gaussian_list_fds =
+            get_instrumental_flux_densities(&gaussian_list_fds, self.freqs, self.pol_convention)
+                .mapv(jones_to_gpu_jones);
+        let shapelet_list_fds =
+            get_instrumental_flux_densities(&shapelet_list_fds, self.freqs, self.pol_convention)
+                .mapv(jones_to_gpu_jones);
 
         let (shapelet_power_law_coeffs, shapelet_power_law_coeff_lens) =
             get_flattened_coeffs(shapelet_power_law_coeffs);
@@ -1359,41 +1367,20 @@ impl<'a> SkyModellerGpu<'a> {
         timestamp: Epoch,
         d_uvws: &mut DevicePointer<gpu::UVW>,
     ) -> Result<(f64, Vec<UVW>, f64), GpuError> {
-        let (lst, xyzs, latitude) = if self.precess {
-            let precession_info = precess_time(
-                self.array_longitude,
-                self.array_latitude,
-                self.phase_centre,
-                timestamp,
-                self.dut1,
-            );
-            // Apply precession to the tile XYZ positions.
-            let precessed_tile_xyzs = precession_info.precess_xyz(self.unflagged_tile_xyzs);
-            debug!(
-                "Modelling GPS timestamp {}, LMST {}°, J2000 LMST {}°",
-                timestamp.to_gpst_seconds(),
-                precession_info.lmst.to_degrees(),
-                precession_info.lmst_j2000.to_degrees()
-            );
-            (
-                precession_info.lmst_j2000,
-                Cow::from(precessed_tile_xyzs),
-                precession_info.array_latitude_j2000,
-            )
-        } else {
-            let lst = get_lmst(self.array_longitude, timestamp, self.dut1);
-            debug!(
-                "Modelling GPS timestamp {}, LMST {}°",
-                timestamp.to_gpst_seconds(),
-                lst.to_degrees()
-            );
-            (
-                lst,
-                Cow::from(self.unflagged_tile_xyzs),
-                self.array_latitude,
-            )
-        };
-
+        let Geometry {
+            lst,
+            xyzs,
+            latitude,
+        } = geometry_at(
+            self.uvw_frame,
+            self.precess,
+            self.array_longitude,
+            self.array_latitude,
+            self.phase_centre,
+            timestamp,
+            self.dut1,
+            self.unflagged_tile_xyzs,
+        );
         let uvws = xyzs_to_cross_uvws(&xyzs, self.phase_centre.to_hadec(lst));
         let gpu_uvws: Vec<gpu::UVW> = uvws
             .iter()
