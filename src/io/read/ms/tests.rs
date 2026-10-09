@@ -8,7 +8,8 @@ use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
 use hifitime::Duration;
 use marlu::{
-    Jones, MeasurementSetWriter, ObsContext as MarluObsContext, VisContext, VisWrite, XyzGeodetic,
+    Jones, MeasurementSetWriter, ObsContext as MarluObsContext, UvwFrame, VisContext, VisWrite,
+    XyzGeodetic,
 };
 use serial_test::serial; // Need to test serially because casacore is a steaming pile.
 use tempfile::tempdir;
@@ -825,17 +826,20 @@ fn test_sdc3() {
     )
     .unwrap();
 
+    // The SDC3 data use ant2-ant1 (casacore) UVWs. The reader no longer
+    // conjugates the visibilities to compensate; instead the UVW frame is
+    // inferred from the file and the modeller is expected to honour it.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
     assert_abs_diff_eq!(
         cross_vis[(0, 0)],
-        // N.B. This is conjugated from what's in the data, because the SDC3
-        // data uses ant2-ant1 UVWs, whereas we expect ant1-ant2.
-        Jones::from([-8.517027, -7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }
 
 /// Write a small, non-MWA measurement set (ASKAP-like 1 MHz channels starting
-/// at 744 MHz) and then scale its UVW column by `uvw_factor`.
+/// at 744 MHz) without a recorded UVW frame, and then scale its UVW column by
+/// `uvw_factor`.
 fn write_non_mwa_ms(vis_path: &Path, uvw_factor: f64) {
     let num_timesteps = 2;
     let num_channels = 10;
@@ -905,6 +909,11 @@ fn write_non_mwa_ms(vis_path: &Path, uvw_factor: f64) {
         let uvw: Vec<f64> = uvw.into_iter().map(|x| x * uvw_factor).collect();
         main_table.put_cell("UVW", i_row, &uvw).unwrap();
     }
+    // Don't record the UVW frame, like MSs that weren't written by Marlu, so
+    // the reader has to infer it.
+    main_table
+        .put_keyword("marlu_uvw_frame", &String::new())
+        .unwrap();
 }
 
 #[test]
@@ -922,9 +931,9 @@ fn test_non_mwa_ms_with_zero_uvws() {
     assert!(obs_context.num_fine_chans_per_coarse_chan.is_none());
     assert!(obs_context.flagged_fine_chans_per_coarse_chan.is_none());
     assert_eq!(obs_context.fine_chan_freqs.len(), 10);
-    // The UVWs are all zero, so the baseline convention couldn't be checked;
-    // the default is to not conjugate.
-    assert!(!ms_reader.conjugate_vis);
+    // The UVWs are all zero, so their baseline sign couldn't be checked; the
+    // MS default is used.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
 }
 
 #[test]
@@ -935,12 +944,12 @@ fn test_ms_baseline_convention_detection() {
     let vis_path = temp_dir.path().join("same.ms");
     write_non_mwa_ms(&vis_path, 1.0);
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
-    assert!(!ms_reader.conjugate_vis);
+    assert_eq!(ms_reader.get_obs_context().uvw_frame, UvwFrame::Hyperdrive);
 
     let vis_path = temp_dir.path().join("other.ms");
     write_non_mwa_ms(&vis_path, -1.0);
     let ms_reader = MsReader::new(vis_path, None, None, None).unwrap();
-    assert!(ms_reader.conjugate_vis);
+    assert_eq!(ms_reader.get_obs_context().uvw_frame, UvwFrame::Casacore);
 }
 
 /// A small synthetic non-MWA measurement set whose channel width (5425.35 Hz)
@@ -1081,39 +1090,23 @@ fn test_flagged_timestep_in_the_middle() {
 }
 
 /// The visibilities read from a measurement set with fewer than 4
-/// polarisations are put in the right place of the Jones matrix, and are
-/// conjugated when needed.
+/// polarisations are put in the right place of the Jones matrix.
 #[test]
 fn test_pol_transform() {
     let c = |re: f32, im: f32| num_complex::Complex32::new(re, im);
     let c0 = c(0.0, 0.0);
     // The read visibilities are packed into the first elements.
     let j = Jones::from([c(1.0, 1.0), c(2.0, 2.0), c(3.0, 3.0), c(4.0, 4.0)]);
-    let jc = Jones::from([c(1.0, -1.0), c(2.0, -2.0), c(3.0, -3.0), c(4.0, -4.0)]);
-    for (pols, expected, expected_conj) in [
-        (Polarisations::XX_XY_YX_YY, j, jc),
+    for (pols, expected) in [
+        (Polarisations::XX_XY_YX_YY, j),
         (
             Polarisations::XX,
-            j,
-            jc, // only the first element is meaningful
+            j, // only the first element is meaningful
         ),
-        (
-            Polarisations::YY,
-            Jones::from([c0, c0, c0, j[0]]),
-            Jones::from([c0, c0, c0, jc[0]]),
-        ),
-        (
-            Polarisations::XX_YY,
-            Jones::from([j[0], c0, c0, j[1]]),
-            Jones::from([jc[0], c0, c0, jc[1]]),
-        ),
-        (
-            Polarisations::XX_YY_XY,
-            Jones::from([j[0], j[1], c0, j[2]]),
-            Jones::from([jc[0], jc[1], c0, jc[2]]),
-        ),
+        (Polarisations::YY, Jones::from([c0, c0, c0, j[0]])),
+        (Polarisations::XX_YY, Jones::from([j[0], c0, c0, j[1]])),
+        (Polarisations::XX_YY_XY, Jones::from([j[0], j[1], c0, j[2]])),
     ] {
-        assert_eq!(PolTransform::new(false, pols).apply(j), expected);
-        assert_eq!(PolTransform::new(true, pols).apply(j), expected_conj);
+        assert_eq!(PolTransform::new(pols).apply(j), expected);
     }
 }

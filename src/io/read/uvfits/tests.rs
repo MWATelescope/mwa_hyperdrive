@@ -8,7 +8,7 @@ use approx::{assert_abs_diff_eq, assert_abs_diff_ne};
 use fitsio::errors::check_status as fits_check_status;
 use hifitime::Duration;
 use itertools::Itertools;
-use marlu::{Jones, UvfitsWriter, VisContext, VisWrite, XyzGeodetic};
+use marlu::{Jones, UvfitsWriter, UvwFrame, VisContext, VisWrite, XyzGeodetic};
 use num_complex::Complex32 as c32;
 use tempfile::{tempdir, NamedTempFile};
 
@@ -948,11 +948,13 @@ fn test_sdc3() {
         )
         .unwrap();
 
+    // The SDC3 data use ant2-ant1 (casacore) UVWs. The reader no longer
+    // conjugates the visibilities to compensate; instead the UVW frame is
+    // inferred from the file and the modeller is expected to honour it.
+    assert_eq!(obs_context.uvw_frame, UvwFrame::Casacore);
     assert_abs_diff_eq!(
         cross_vis[(0, 0)],
-        // N.B. This is conjugated from what's in the data, because the SDC3
-        // data uses ant2-ant1 UVWs, whereas we expect ant1-ant2.
-        Jones::from([-8.517027, -7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        Jones::from([-8.517027, 7.5777674, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     );
     assert_abs_diff_eq!(cross_vis_weights[(0, 0)], 1.0);
 }

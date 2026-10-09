@@ -38,6 +38,42 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `solutions-plot --gains` plots the instrumental gains, i.e. the inverses of
   the stored solutions (which are corrections), with a `_gains` filename
   suffix. The default is unchanged. (From Alec Thomson's fork.)
+- Instrument and software conventions, with the types living in Marlu
+  (`marlu::convention`; see the new "Instrument and software conventions"
+  book page):
+  - `--pol-convention` on every subcommand that models sky-model
+    visibilities (`vis-simulate`, `di-calibrate`, `vis-subtract`, `peel`,
+    `vis-utils simulate`) selects how Stokes I, Q, U, V map onto XX, XY, YX,
+    YY: `mwa` (X east-west; alias `oskar`), `iau` (X north-south; aliases
+    `lofar`, `casacore`, `wsclean`), `askap` (IAU halved, I = XX+YY; alias
+    `askapsoft`), or the UVH5-style parts `east|north[/avg|sum]`. Closes #40.
+  - `--uvw-frame` selects the geometry of the modelled UVWs: `hyperdrive`
+    (J2000, mean sidereal time, antenna1 - antenna2), `casacore` (what
+    casacore writes into Measurement Sets and DP3, WSClean, CASA, ASKAPsoft
+    and pyuvdata use: apparent sidereal time, the phase centre's annual
+    aberration taken out with a rigid rotation, antenna2 - antenna1; aliases
+    `lofar`, `casa`, `wsclean`, `askap`, `uvh5`, `pyuvdata`) or `oskar`
+    (unprecessed, apparent sidereal time, antenna1 - antenna2). With
+    `--convention lofar`, `vis-simulate` matches a DP3 predict of the same sky
+    model to 1e-4.
+  - `--convention` is a preset for both: `mwa`, `iau`, `lofar`, `casacore`,
+    `askap` or `oskar`.
+  - When none of these is given, the conventions recorded in or implied by
+    the input data are used (`vis-simulate`: the MWA's). The chosen
+    conventions and their sources are printed.
+- Input files' conventions are read and printed, from the same metadata
+  pyuvdata uses: the FEED table's `RECEPTOR_ANGLE` or the AIPS AN table's
+  `POLAA`/`POLAB` for the X orientation, the `pyuvdata_polconv` (MS) or
+  `POLCONV` (uvfits) keyword for the Stokes sum/avg convention, plus the
+  `marlu_uvw_frame` keyword, whether the file is MWA data (cotter's IAU feed
+  angles are ignored), the UVW column's baseline sign, and OSKAR's
+  `PHASED_ARRAY` table.
+- Output Measurement Sets and uvfits files record the conventions their
+  visibilities were made in the same way (`RECEPTOR_ANGLE` with X east-west
+  as `[π/2, 0]`, `POLAA`/`POLAB`, `pyuvdata_polconv`/`POLCONV`, the UVW
+  column's `MEASINFO` reference, `marlu_uvw_frame`), and their UVWs are
+  computed in the chosen frame. `vis-convert` carries the input's conventions
+  through to its outputs.
 
 ### Changed
 - `solutions-plot` draws with [rizzma](https://github.com/OrbitalCommons/rizzma)
@@ -82,6 +118,16 @@ Versioning](https://semver.org/spec/v2.0.0.html).
     open between timesteps.
   - When averaging over time, timesteps are averaged as they're read (while
     the next one is read), rather than all being held in memory first.
+- Input visibilities with antenna2 - antenna1 UVWs (e.g. Measurement Sets
+  from casacore-based software) are no longer conjugated on read. The file is
+  instead reported as being in the `casacore` UVW frame and is modelled (and
+  peeled) in that frame, so the model also includes the frame's ~20 arcsec
+  sidereal-time and aberration differences. Results on such data change at
+  the 1e-3 level on long baselines.
+- `peel`'s own tile UVWs (phase rotation, ionospheric fits, baseline taper)
+  follow the UVW frame.
+- Until a Marlu release includes the convention module, `[patch.crates-io]`
+  points `marlu` at Marlu's `feat/conventions` branch.
 
 ### Fixed
 - Raw MWAX data with oversampled coarse channels (`OVERSAMP = 1`, e.g. Phase
