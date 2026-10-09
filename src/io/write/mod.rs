@@ -5,6 +5,24 @@
 //! Code to handle writing out visibilities.
 
 mod error;
+/// Which of the output channel grid's frequencies (`grid_freqs`, in Hz) have
+/// no incoming chanblock. Frequencies are matched to within half the channel
+/// width (and at least 1 Hz), so grids whose channel width is not a whole
+/// number of hertz are handled.
+fn missing_chanblocks(grid_freqs: &[f64], chanblock_freqs: &[f64], freq_res: f64) -> HashSet<u16> {
+    let tol = (freq_res.abs() / 2.0).max(1.0);
+    let mut sorted = chanblock_freqs.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    (0..)
+        .zip(grid_freqs.iter())
+        .filter(|(_, &f)| {
+            let i = sorted.partition_point(|&c| c < f - tol);
+            !matches!(sorted.get(i), Some(&c) if (c - f).abs() <= tol)
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;
 pub(crate) use error::{FileWriteError, VisWriteError};
@@ -164,21 +182,11 @@ pub(crate) fn write_vis(
     } else {
         spw.get_all_freqs()
     };
-    let missing_chanblocks = {
-        let mut missing = HashSet::new();
-        let incoming_chanblock_freqs = spw
-            .chanblocks
-            .iter()
-            .map(|c| c.freq as u64)
-            .collect::<HashSet<_>>();
-        for (i_chanblock, chanblock_freq) in (0..).zip(chanblock_freqs.iter()) {
-            let chanblock_freq = *chanblock_freq as u64;
-            if !incoming_chanblock_freqs.contains(&chanblock_freq) {
-                missing.insert(i_chanblock);
-            }
-        }
-        missing
-    };
+    let missing_chanblocks = missing_chanblocks(
+        &chanblock_freqs,
+        &spw.chanblocks.iter().map(|c| c.freq).collect::<Vec<_>>(),
+        spw.freq_res,
+    );
 
     let start_timestamp = timeblocks.first().median;
     let num_baselines = unflagged_baseline_tile_pairs.len();

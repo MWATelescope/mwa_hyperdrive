@@ -677,8 +677,8 @@ fn test_multiple_timeblocks_behave() {
         None,
     );
     let spws = channels_to_chanblocks(
-        &[150000000],
-        40e3 as u64,
+        &[150000000.0],
+        40e3,
         NonZeroUsize::new(1).unwrap(),
         &HashSet::new(),
     );
@@ -713,7 +713,7 @@ fn test_chanblocks_without_data_have_nan_solutions() {
     let num_timesteps = timestamps.len();
     let num_tiles = 5;
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
-    let freqs = [150000000];
+    let freqs = [150000000.0];
     let num_chanblocks = freqs.len();
 
     let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
@@ -726,12 +726,8 @@ fn test_chanblocks_without_data_have_nan_solutions() {
         NonZeroUsize::new(1).unwrap(),
         None,
     );
-    let fences = channels_to_chanblocks(
-        &freqs,
-        40e3 as u64,
-        NonZeroUsize::new(1).unwrap(),
-        &HashSet::new(),
-    );
+    let fences =
+        channels_to_chanblocks(&freqs, 40e3, NonZeroUsize::new(1).unwrap(), &HashSet::new());
 
     let (incomplete_sols, results) = calibrate_timeblocks(
         vis_data.view(),
@@ -775,7 +771,7 @@ fn test_recalibrating_failed_chanblocks() {
     let num_timesteps = timestamps.len();
     let num_tiles = 5;
     let num_baselines = num_tiles * (num_tiles - 1) / 2;
-    let freqs = [150000000, 150040000, 150080000];
+    let freqs = [150000000.0, 150040000.0, 150080000.0];
     let num_chanblocks = freqs.len();
 
     let vis_shape = (num_timesteps, num_chanblocks, num_baselines);
@@ -788,12 +784,8 @@ fn test_recalibrating_failed_chanblocks() {
         NonZeroUsize::new(1).unwrap(),
         None,
     );
-    let fences = channels_to_chanblocks(
-        &freqs,
-        40000,
-        NonZeroUsize::new(1).unwrap(),
-        &HashSet::new(),
-    );
+    let fences =
+        channels_to_chanblocks(&freqs, 40e3, NonZeroUsize::new(1).unwrap(), &HashSet::new());
 
     // Unlike `calibrate_timeblocks`, `calibrate_timeblock` takes in calibration
     // solutions. These are initially set to identity by `calibrate_timeblocks`;
