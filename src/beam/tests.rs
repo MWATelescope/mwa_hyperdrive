@@ -204,7 +204,8 @@ fn create_analytic_beam_objects() {
     let rts = create_beam_object(Some("analytic-rts"), 1, delays.clone()).unwrap();
     assert_eq!(rts.get_beam_type(), BeamType::AnalyticRts);
 
-    for alias in ["mwa_pb", "analytic-mwa_pb"] {
+    // Beam type names are case-insensitive.
+    for alias in ["mwa_pb", "MWA_PB", "analytic-mwa_pb", "Analytic-MWA_pb"] {
         assert_eq!(
             create_beam_object(Some(alias), 1, delays.clone())
                 .unwrap()
@@ -212,7 +213,7 @@ fn create_analytic_beam_objects() {
             BeamType::AnalyticMwaPb
         );
     }
-    for alias in ["rts", "RTS", "analytic-rts"] {
+    for alias in ["rts", "RTS", "analytic-rts", "Analytic-RTS"] {
         assert_eq!(
             create_beam_object(Some(alias), 1, delays.clone())
                 .unwrap()
@@ -220,6 +221,15 @@ fn create_analytic_beam_objects() {
             BeamType::AnalyticRts
         );
     }
+    for alias in ["none", "None", "NONE"] {
+        assert_eq!(
+            create_beam_object(Some(alias), 1, delays.clone())
+                .unwrap()
+                .get_beam_type(),
+            BeamType::None
+        );
+    }
+    assert_eq!(BeamType::from_str("FEE").unwrap(), BeamType::FEE);
 
     assert!(matches!(
         create_beam_object(Some("not-a-beam"), 1, Delays::Partial(vec![0; 16])),
