@@ -11,7 +11,9 @@ use marlu::{AzEl, Jones};
 use mwa_hyperbeam::analytic::AnalyticType;
 use ndarray::prelude::*;
 
-use super::{partial_to_full, validate_delays, Beam, BeamError, BeamType, Delays};
+use super::{
+    partial_to_full, tile_delays_and_gains, validate_delays, Beam, BeamError, BeamType, Delays,
+};
 
 #[cfg(any(feature = "cuda", feature = "hip"))]
 use super::{BeamGpu, DevicePointer, GpuFloat};
@@ -223,29 +225,10 @@ impl Beam for AnalyticBeam {
         tile_index: Option<usize>,
         latitude_rad: f64,
     ) -> Result<Jones<f64>, BeamError> {
-        if let Some(tile_index) = tile_index {
-            if tile_index >= self.delays.len_of(Axis(0)) {
-                return Err(BeamError::BadTileIndex {
-                    got: tile_index,
-                    max: self.delays.len_of(Axis(0)),
-                });
-            }
-            let delays = self.delays.slice(s![tile_index, ..]);
-            let amps = self.gains.slice(s![tile_index, ..]);
-            let j = self.calc_jones_inner(
-                azel,
-                freq_hz,
-                delays.as_slice().unwrap(),
-                amps.as_slice().unwrap(),
-                latitude_rad,
-            )?;
-            Ok(j)
-        } else {
-            let delays = &self.ideal_delays;
-            let amps = [1.0; 32];
-            let j = self.calc_jones_inner(azel, freq_hz, delays, &amps, latitude_rad)?;
-            Ok(j)
-        }
+        let (delays, amps) =
+            tile_delays_and_gains(&self.delays, &self.gains, &self.ideal_delays, tile_index)?;
+        let jones = self.calc_jones_inner(azel, freq_hz, delays, amps, latitude_rad)?;
+        Ok(jones)
     }
 
     fn calc_jones_array(
@@ -268,28 +251,9 @@ impl Beam for AnalyticBeam {
         latitude_rad: f64,
         results: &mut [marlu::Jones<f64>],
     ) -> Result<(), BeamError> {
-        if let Some(tile_index) = tile_index {
-            if tile_index >= self.delays.len_of(Axis(0)) {
-                return Err(BeamError::BadTileIndex {
-                    got: tile_index,
-                    max: self.delays.len_of(Axis(0)),
-                });
-            }
-            let delays = self.delays.slice(s![tile_index, ..]);
-            let amps = self.gains.slice(s![tile_index, ..]);
-            self.calc_jones_array_inner(
-                azels,
-                freq_hz,
-                delays.as_slice().unwrap(),
-                amps.as_slice().unwrap(),
-                latitude_rad,
-                results,
-            )?;
-        } else {
-            let delays = &self.ideal_delays;
-            let amps = [1.0; 32];
-            self.calc_jones_array_inner(azels, freq_hz, delays, &amps, latitude_rad, results)?;
-        }
+        let (delays, amps) =
+            tile_delays_and_gains(&self.delays, &self.gains, &self.ideal_delays, tile_index)?;
+        self.calc_jones_array_inner(azels, freq_hz, delays, amps, latitude_rad, results)?;
         Ok(())
     }
 
@@ -417,11 +381,17 @@ mod tests {
         beam.calc_jones(azel, 180e6, Some(0), MWA_LAT_RAD).unwrap();
         assert!(matches!(
             beam.calc_jones(azel, 180e6, Some(1), MWA_LAT_RAD),
-            Err(BeamError::BadTileIndex { got: 1, max: 1 })
+            Err(BeamError::BadTileIndex {
+                got: 1,
+                num_tiles: 1
+            })
         ));
         assert!(matches!(
             beam.calc_jones(azel, 180e6, Some(2), MWA_LAT_RAD),
-            Err(BeamError::BadTileIndex { got: 2, max: 1 })
+            Err(BeamError::BadTileIndex {
+                got: 2,
+                num_tiles: 1
+            })
         ));
 
         let azels = [azel, AzEl { az: -0.2, el: 0.8 }];

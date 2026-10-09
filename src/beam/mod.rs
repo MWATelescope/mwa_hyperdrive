@@ -461,6 +461,38 @@ pub fn create_beam_object(
     }
 }
 
+/// The dipole gains used when a beam response is requested without a tile
+/// index: all dipoles are assumed to be alive.
+const UNITY_GAINS: [f64; 32] = [1.0; 32];
+
+/// Select the dipole delays and gains to use for a beam calculation. With a
+/// tile index, these are that tile's rows of `delays` and `gains`; without
+/// one, they are the ideal delays with unity gains.
+fn tile_delays_and_gains<'a>(
+    delays: &'a Array2<u32>,
+    gains: &'a Array2<f64>,
+    ideal_delays: &'a [u32; 16],
+    tile_index: Option<usize>,
+) -> Result<(&'a [u32], &'a [f64]), BeamError> {
+    match tile_index {
+        Some(tile_index) => {
+            let num_tiles = delays.len_of(Axis(0));
+            if tile_index >= num_tiles {
+                return Err(BeamError::BadTileIndex {
+                    got: tile_index,
+                    num_tiles,
+                });
+            }
+            let contiguous = "rows of a standard-layout array are contiguous";
+            Ok((
+                delays.row(tile_index).to_slice().expect(contiguous),
+                gains.row(tile_index).to_slice().expect(contiguous),
+            ))
+        }
+        None => Ok((ideal_delays, &UNITY_GAINS)),
+    }
+}
+
 /// Assume that the dipole delays for all tiles is the same as the delays for
 /// one tile.
 fn partial_to_full(delays: Vec<u32>, num_tiles: usize) -> Array2<u32> {
