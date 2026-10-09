@@ -17,6 +17,10 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `--beam-type` accepts `analytic-mwa_pb` / `mwa_pb` and `analytic-rts` / `rts`.
 - A warning is issued when `--beam-file` is supplied alongside an analytic beam;
   only the FEE beam uses a beam file.
+- The sky modellers evaluate the analytic beams on the 1.28 MHz coarse-channel
+  grid (the resolution of the FEE beam file) rather than at every fine channel,
+  which keeps the memory needed for beam responses the same as for the FEE
+  beam. The `beam` subcommand still evaluates at exactly the requested frequency.
 
 ### Fixed
 - Using the beam subcommand would fail to set up an FEE beam if MWA_BEAM_FILE

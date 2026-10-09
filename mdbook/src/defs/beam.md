@@ -23,6 +23,13 @@ respectively. The differences
 between the flavours is not huge, but I (CHJ) suggest the `RTS` flavour if in
 doubt, as it seems to look a little better.
 
+When modelling visibilities, the analytic beams are evaluated at the nearest
+multiple of 1.28 MHz (the MWA coarse-channel width) to each fine channel's
+frequency, which is the same frequency resolution as the FEE beam file. The
+beam changes slowly enough with frequency that this makes no meaningful
+difference, and it keeps the number of beam responses to calculate and store
+proportional to the number of coarse channels rather than fine channels.
+
 ## Errors
 
 Beam code usually does not error, but if it does it's likely because:
