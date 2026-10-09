@@ -378,20 +378,11 @@ impl PeelArgs {
 
         let mut low_res_spws = {
             let spw = &input_vis_params.spw;
-            let all_freqs = {
-                let n = spw.chanblocks.len() + spw.flagged_chanblock_indices.len();
-                let mut freqs = Vec::with_capacity(n);
-                let first_freq = spw.first_freq.round() as u64;
-                let freq_res = spw.freq_res.round() as u64;
-                for i in 0..n as u64 {
-                    freqs.push(first_freq + freq_res * i);
-                }
-                freqs
-            };
+            let all_freqs: Vec<f64> = spw.get_all_freqs().to_vec();
 
             channels_to_chanblocks(
                 &all_freqs,
-                spw.freq_res.round() as u64,
+                spw.freq_res,
                 iono_freq_average_factor,
                 &HashSet::new(),
             )

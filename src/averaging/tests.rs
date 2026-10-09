@@ -137,10 +137,10 @@ fn test_timesteps_to_timeblocks() {
 
 #[test]
 fn test_channels_to_chanblocks() {
-    let all_channel_freqs = [12000];
+    let all_channel_freqs = [12000.0];
     let freq_average_factor = NonZeroUsize::new(1).unwrap();
     let mut flagged_channels = HashSet::new();
-    let freq_res = 1000;
+    let freq_res = 1000.0;
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
         freq_res,
@@ -151,10 +151,10 @@ fn test_channels_to_chanblocks() {
     assert_eq!(spws[0].chanblocks.len(), 1);
     assert!(spws[0].flagged_chanblock_indices.is_empty());
     assert_abs_diff_eq!(spws[0].chanblocks[0].freq, 12000.0);
-    assert_abs_diff_eq!(spws[0].freq_res, freq_res as f64);
+    assert_abs_diff_eq!(spws[0].freq_res, freq_res);
     assert_abs_diff_eq!(spws[0].first_freq, 12000.0);
 
-    let all_channel_freqs = [10000, 11000, 12000, 13000, 14000];
+    let all_channel_freqs = [10000.0, 11000.0, 12000.0, 13000.0, 14000.0];
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
         freq_res,
@@ -172,7 +172,7 @@ fn test_channels_to_chanblocks() {
     assert_abs_diff_eq!(spws[0].freq_res, 1000.0);
     assert_abs_diff_eq!(spws[0].first_freq, 10000.0);
 
-    let all_channel_freqs = [10000, 11000, 12000, 13000, 14000, 20000];
+    let all_channel_freqs = [10000.0, 11000.0, 12000.0, 13000.0, 14000.0, 20000.0];
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
         freq_res,
@@ -268,13 +268,70 @@ fn test_channels_to_chanblocks() {
 
 // No frequencies, no spws.
 #[test]
+fn test_channels_to_chanblocks_fractional_resolution() {
+    // LOFAR-style 48828.125 Hz channels: neither the widths nor the channel
+    // frequencies are whole numbers of hertz. Before the tolerance was added
+    // these were split into a new spectral window every eight channels.
+    let freq_res = 48828.125;
+    let all_channel_freqs: Vec<f64> = (0..64).map(|i| 150e6 + freq_res * i as f64).collect();
+    let spws = channels_to_chanblocks(
+        &all_channel_freqs,
+        freq_res,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    );
+    assert_eq!(spws.len(), 1);
+    assert_eq!(spws[0].chanblocks.len(), 64);
+    assert_abs_diff_eq!(spws[0].freq_res, freq_res);
+    for (chanblock, freq) in spws[0].chanblocks.iter().zip(all_channel_freqs.iter()) {
+        assert_abs_diff_eq!(chanblock.freq, *freq);
+    }
+    let all_freqs = spws[0].get_all_freqs();
+    for (f1, f2) in all_freqs.iter().zip(all_channel_freqs.iter()) {
+        assert_abs_diff_eq!(f1, f2, epsilon = 1e-6);
+    }
+
+    // The same grid after the frequencies were stored to the nearest hertz
+    // (as `ObsContext::fine_chan_freqs` does); successive differences are
+    // then 48828 or 48829 Hz.
+    let truncated: Vec<f64> = all_channel_freqs.iter().map(|f| f.trunc()).collect();
+    let spws = channels_to_chanblocks(
+        &truncated,
+        freq_res,
+        NonZeroUsize::new(4).unwrap(),
+        &HashSet::new(),
+    );
+    assert_eq!(spws.len(), 1);
+    assert_eq!(spws[0].chanblocks.len(), 16);
+    assert_abs_diff_eq!(spws[0].freq_res, 4.0 * freq_res);
+    assert_abs_diff_eq!(
+        spws[0].chanblocks[0].freq,
+        150e6 + 1.5 * freq_res,
+        epsilon = 1.0
+    );
+
+    // A real gap of one channel still splits the spectral windows.
+    let mut with_gap = all_channel_freqs.clone();
+    with_gap.drain(32..33);
+    let spws = channels_to_chanblocks(
+        &with_gap,
+        freq_res,
+        NonZeroUsize::new(1).unwrap(),
+        &HashSet::new(),
+    );
+    assert_eq!(spws.len(), 2);
+    assert_eq!(spws[0].chanblocks.len(), 32);
+    assert_eq!(spws[1].chanblocks.len(), 31);
+}
+
+#[test]
 fn test_no_channels_to_chanblocks() {
-    let all_channel_freqs = [];
+    let all_channel_freqs: [f64; 0] = [];
     let freq_average_factor = NonZeroUsize::new(2).unwrap();
     let flagged_channels = HashSet::new();
     let spws = channels_to_chanblocks(
         &all_channel_freqs,
-        10e3 as u64,
+        10e3,
         freq_average_factor,
         &flagged_channels,
     );
